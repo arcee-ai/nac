@@ -105,6 +105,9 @@ zero-backlog async guard last.
 - `trivially_copy_pass_by_ref`: complete. The sole zero-sized `Copy`
   `SandboxBackendType` string projection now takes `self` by value; callers are
   source-compatible and copy the enum implicitly.
+- `missing_assert_message`: complete. All eight production assertions now name
+  the violated invariant without interpolating credentials, paths, or other
+  sensitive runtime values.
 
 ## Verification and next action
 
@@ -149,5 +152,9 @@ The `trivially_copy_pass_by_ref` slice passes `make format-check`, `make lint`,
 `git diff --check`, nine focused sandbox tests, and 29 focused persisted-session
 compatibility tests.
 
-Next: commit this exact lint boundary, then add `missing_assert_message` and run
-autofix before any manual repair.
+The `missing_assert_message` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite with the same green test
+inventory recorded above.
+
+Next: commit this exact lint boundary, then add `undocumented_unsafe_blocks`
+and run autofix before any manual repair.

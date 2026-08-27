@@ -58,8 +58,14 @@ struct ConnectionCapacity {
 
 impl ConnectionCapacity {
     fn new(process_limit: usize, store_limit: usize) -> Arc<Self> {
-        assert!(process_limit > 0);
-        assert!(store_limit > 0);
+        assert!(
+            process_limit > 0,
+            "SQLite process connection limit must be positive"
+        );
+        assert!(
+            store_limit > 0,
+            "SQLite store connection limit must be positive"
+        );
         Arc::new(Self {
             process_limit,
             store_limit,

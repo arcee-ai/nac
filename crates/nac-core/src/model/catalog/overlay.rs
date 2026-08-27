@@ -742,7 +742,10 @@ fn map_model(
     id: &str,
     model: &ModelsDevModel,
 ) -> Result<GeneratedModel, String> {
-    debug_assert!(is_agent_compatible(model));
+    debug_assert!(
+        is_agent_compatible(model),
+        "catalog overlay mapping requires an agent-compatible model"
+    );
     // For known models (exact match or dated-snapshot family), inherit all
     // fields from the baseline — the generator's overrides.toml is
     // authoritative over models.dev for context_window, max_tokens, cost,

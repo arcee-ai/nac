@@ -1145,7 +1145,10 @@ impl PodmanSession {
                 .lock()
                 .expect("Podman creation record lock poisoned")
                 .replace(record);
-            debug_assert!(replaced.is_none());
+            debug_assert!(
+                replaced.is_none(),
+                "a sandbox session may own only one pending Podman creation record"
+            );
         } else {
             pending.disarm();
         }

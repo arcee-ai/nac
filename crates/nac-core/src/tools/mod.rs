@@ -258,9 +258,12 @@ pub fn direct_with_orchestrator_tool_definitions(image_read: bool) -> Vec<ToolDe
         .expect("built-in direct tool registration must be collision-free")
         .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
         .expect("direct-with-orchestrator capability selection must be complete");
-    debug_assert!(ORCHESTRATOR_CONTROL_TOOL_NAMES
-        .iter()
-        .all(|name| snapshot.contains(name)));
+    debug_assert!(
+        ORCHESTRATOR_CONTROL_TOOL_NAMES
+            .iter()
+            .all(|name| snapshot.contains(name)),
+        "orchestrator runtime must expose every orchestrator control capability"
+    );
     snapshot.definitions()
 }
 
