@@ -590,6 +590,12 @@ Rules:
   ownership step. Empty-patch, both submission/patch race directions, invalid-
   patch rollback, the full test build, and warning-denied Clippy pass. Server
   `lib.rs` is now 4,927 lines.
+- The remaining session resource endpoints—create, delete, skill projection,
+  and configuration get/update—now live in a 92-line delivery adapter. HTTP
+  handlers contain only extraction, one manager/application operation, and
+  response mapping. OpenAPI/router parity, attached skill projection, the full
+  test build, and warning-denied Clippy pass. Server `lib.rs` is now 4,768
+  lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -605,8 +611,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the session-configuration
-coordinator without protected files. Then move its pure validation helpers and
-transport-independent command contract, followed by attachment/recovery,
-session creation, and remaining HTTP delivery. Keep lifecycle gates, operation
+Inspect exact worktree/staged diffs and commit the remaining session delivery
+slice without protected files. Then move the session-configuration pure
+validation helpers and transport-independent command contract, followed by
+attachment/recovery and session creation. Keep lifecycle gates, operation
 leases, and exact settlement ordering in their coordinator.
