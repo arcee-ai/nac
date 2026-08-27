@@ -295,21 +295,22 @@ Rules:
   for unaffected consumers while managed implementations live with the
   feature. All feature production files are below 500 lines.
 - Frontend typecheck, lint, format check, and all 178 Vitest cases pass. The
-  production build is green; the first `make test-assets` run failed only at
-  its intentional checked-in bundle drift assertion after producing the new
-  hashed assets. The source and synchronized bundle are staged together, after
-  which the complete asset gate must be rerun from a clean candidate.
+  production build is green, and `make test-assets` passes from the committed
+  source and synchronized production bundle at `8b86c97`.
 
-### M7 — Durable agent navigation (in progress)
+### M7 — Durable agent navigation (complete)
 
-- Replace root `AGENTS.md` with a stable topology/dependency/placement/invariant
-  guide and exact commands/generated-file/reference policies.
-- Add substantive nested guides for `nac-core`, tools plus permission/execution,
-  sessions/store/recovery, `nac-managed`, `nac-server`, web, and
-  `docker/managed` only at true ownership boundaries.
-- Add focused tracked ADRs for durable decisions introduced by this refactor;
-  do not commit local historical notebooks.
-- Verification: guide placement/link/read-back audit and `git diff --check`.
+- Root `AGENTS.md` is now a stable topology/dependency/placement/invariant
+  guide with exact commands, generated-file ownership, and reference policy.
+- Substantive nested guides cover `nac-core`, tools, permission/execution,
+  sessions/store/recovery, process supervision, catalog generation,
+  `nac-managed`, `nac-server`, web, and `docker/managed` at real ownership
+  boundaries. Every cohesive production module above 800 lines is named in
+  its nearest guide with its reason and placement restriction.
+- Focused tracked ADRs record dependency direction and the generated API
+  contract; the absent local decision notebook was not recreated.
+- Guide placement/read-back and local Markdown-link audits pass; the remaining
+  guide and measurement refinements are the task-owned M8 documentation slice.
 
 ### M8 — Integration and finite acceptance (in progress)
 
@@ -877,7 +878,8 @@ Rules:
   this deliberate exception must be recorded in the nested tool guide. All
   eight tests pass with authorized loopback fixtures and the warning-denied
   core check is green.
-- The assembled Rust/OpenAPI router now exposes one state-free document seam
+- `bb06530 refactor(web): generate API types from OpenAPI` — the assembled
+  Rust/OpenAPI router now exposes one state-free document seam
   shared by the live `/openapi.json` route and an offline exporter. The checked-
   in 3.1 document drives a dependency-free, fail-closed TypeScript schema
   generator; `make test-api-contract` verifies both artifacts without mutation,
@@ -891,24 +893,25 @@ Rules:
   tests, and warning-denied core/server checks pass. The process-cleanup
   frontend cases require authorized process-table access; their confined
   `EPERM` run was non-authoritative and the authorized rerun was green.
-- Managed frontend behavior now lives under
+- `19a4235 refactor(web): organize managed host feature` — managed frontend
+  behavior now lives under
   `src/app/features/managed/{model,queries,controller,presentation}`. The former
   456-line host modal is a 50-line layout shell over status, GitHub, and secret
   panels; the 322-line repository workflow retains polling, abort, invalidation,
   toast, cancellation, and navigation semantics. All 178 frontend tests,
   typecheck, lint, and format check pass. `make test-assets` passes from commit
   `19a4235` with the OpenAPI/type drift checks and production build clean.
-- The remaining 1,507-line frontend query service bag is now a 20-line stable
+- `8b86c97 refactor(web): split query owners by feature` — the remaining
+  1,507-line frontend query service bag is now a 20-line stable
   compatibility barrel over focused host (120), direct/delegation (286),
-  configuration (352), session (397), workspace (139), project (143), key
+  configuration (352), session (393), workspace (139), project (143), key
   (80), and invalidation (18) owners. Existing imports and query-key bytes are
   unchanged; snapshot generation fencing, cancellation signals, polling,
   optimistic prompt state, ordering, and invalidation logic moved intact. Web
-  typecheck/format/lint and all 178 tests pass. The production build is green;
-  the first `make test-assets` run failed only at the expected committed-bundle
-  drift assertion after writing the new hashed chunks, which must be committed
-  with this source slice and rechecked cleanly.
-- The integration public-surface audit makes all `nac-managed` implementation
+  typecheck/format/lint and all 178 tests pass. `make test-assets` passes clean
+  with the source and generated bundle committed together.
+- `407014c refactor(managed): narrow facade and internal adapters` — the
+  integration public-surface audit makes all `nac-managed` implementation
   modules private and exports one explicit supported facade. Clone domain/
   workflow coordination is now a 625-line owner over a 177-line durable
   operation/destination/staging adapter and a 266-line supervised Git/process
@@ -919,12 +922,50 @@ Rules:
   managed suite passes 18 tests, the complete server suite passes 148 library
   plus 23 binary tests, the three focused core secret/redaction/worker
   propagation regressions pass, and managed/server checks compile cleanly.
-- The M7 candidate replaces the untracked branch research brief with a stable
+- `9d8fcb9 docs: add durable repository navigation` — replaces the untracked
+  branch research brief with a stable
   root ownership/dependency guide, adds substantive guides at the core, tool,
   permission, session lifecycle, session snapshot, store, managed, server, web,
   and managed-image boundaries, and records accepted dependency-direction and
-  generated-contract decisions under `docs/architecture/`. Guide read-back,
-  link/placement audit, and commit remain pending.
+  generated-contract decisions under `docs/architecture/`.
+
+## Candidate dependency, public-surface, and hotspot audit
+
+- Cargo resolves an acyclic workspace graph. `nac-managed` depends inward on
+  `nac-contracts`, `nac-credential-store`, and `nac-process`; it has no normal
+  dependency on `nac-core` or `nac-server`. Only `nac-server` composes the
+  managed facade in normal production code; `nac-core` references it only in
+  tests.
+- `nac-managed` has no public implementation modules and exposes one explicit
+  facade. No obsolete `nac_managed::{configuration,github,...}` paths remain.
+- The checked-in OpenAPI document currently contains 205 schemas. The stable
+  frontend API surface has 164 unique generated `ApiSchema<...>` aliases and
+  only four intentional manual refinements (`SessionOverviewRecord`,
+  `ThreadEventBoundary`, `SshTarget`, and `SteeringRequest`); none duplicates
+  an OpenAPI schema or wire request/response DTO.
+- No `LegacyDirectTool` or migrated-tool central name dispatch remains. Native
+  and dynamic tools cross the explicit capability/preparation/authorization
+  boundary; model visibility is not treated as execution authority.
+- Quantitative production hotspot delta (baseline to candidate):
+
+  | Owner | Baseline | Candidate owner(s) |
+  | --- | ---: | ---: |
+  | `nac-server/src/lib.rs` | 17,351 | 1,728 |
+  | `session_service.rs` | 9,831 | 1,297 |
+  | `permissions.rs` | 4,925 | 198 |
+  | `runtime.rs` | 4,716 | 100 |
+  | `tools/mod.rs` | 2,361 | 455 |
+  | terminal manager | 2,963 | 229 |
+  | mutation family | 3,167 | 1,529 local owner plus remote/tests |
+  | managed clone | 1,345 core-owned | 625 workflow plus 177/266 adapters |
+  | managed GitHub | 1,197 core-owned | 851 provider plus 94 credential store |
+  | frontend queries | 1,605 | 20 barrel; largest owner 393 |
+  | frontend API types | 1,592 | 458 generated aliases/refinements |
+
+- Remaining production modules above 800 lines are cohesive safety, provider,
+  lifecycle, composition, UI, or generated-output owners. Their nearest
+  `AGENTS.md` guide states why they remain intact and rejects unrelated growth;
+  arbitrary fragmentation was not used to game the size target.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -940,8 +981,6 @@ Rules:
 
 ## Exact next action
 
-Commit the green focused frontend query owners and synchronized production
-bundle with exact-path staging, then rerun `make test-assets` cleanly. Finish the
-remaining hotspot/dependency/DTO/public-surface guide audit, then run the
-required final gate set, optional container prerequisite check, production-
+Commit the completed guide/measurement audit with exact-path staging, then run
+the required final gate set, optional container prerequisite check, production-
 embedded browser smoke, and single authorized independent final review.

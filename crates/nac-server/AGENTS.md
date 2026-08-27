@@ -39,9 +39,21 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
 - `examples/export-openapi.rs` — deterministic offline contract export.
 - `web/AGENTS.md` — frontend ownership and generation.
 
-The router composition in `delivery/server.rs` is allowed to exceed 800 lines
-while it remains the single auditable list of routes, OpenAPI schemas, layers,
-and state binding. Do not add use-case implementations there.
+## Cohesive size exceptions
+
+- `delivery/server.rs` remains the single auditable list of routes, OpenAPI
+  schemas, middleware/layers, and state binding. Do not add use-case
+  implementations there.
+- `lib.rs` is the server composition/lifecycle root: supported re-exports,
+  `SessionManager` shared gates/caches, service-facade construction, attachment,
+  delegation monitor settlement, and complete shutdown. Product CRUD and HTTP
+  handlers already live in focused modules and must not return to this root.
+- `main.rs` owns CLI parsing, auth/upgrade/server/worker action dispatch, and
+  outermost runtime composition. Library use cases and provider algorithms do
+  not belong in the binary.
+- `managed_github.rs` is the HTTP/device-login/clone transport adapter plus the
+  Git credential-helper wiring required by that flow. Provider, credential
+  persistence, and clone process behavior stay in `nac-managed`.
 
 ## Verification
 

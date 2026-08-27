@@ -30,6 +30,12 @@ recovery, cancellation, and settlement over these contracts.
 - `../store/schema.rs` — database migration owner.
 - `../session_service/recovery.rs` — live recovery coordinator.
 
+`db.rs` is a deliberate exception above 800 lines because it is the single
+transactional session-snapshot database facade: creation/load/update, behavior
+compatibility, revisions, and lease-aware writes share one connection/error
+contract. Broader project, relationship, transcript, and recovery records stay
+in `../store/`; do not add them to this facade.
+
 ## Verification
 
 ```sh

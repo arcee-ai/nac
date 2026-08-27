@@ -35,6 +35,13 @@ durable records; runtime/tool modules own execution internals.
 - `manual_compaction.rs` — explicit compaction lifecycle.
 - `session_service_tests.rs` and local sibling test modules — behavior ledger.
 
+`session_service.rs` is a deliberate composition-root exception above 800
+lines: it owns the public lifecycle facade/types, shared active-operation state,
+frontend message/thread projection helpers, and delegates attachment,
+admission, cancellation, recovery, settlement, and direct interaction to the
+submodules above. New use-case logic belongs in a focused submodule; do not grow
+the root with another lifecycle implementation.
+
 ## Verification
 
 ```sh

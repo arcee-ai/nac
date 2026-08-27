@@ -54,7 +54,9 @@ and [generated API contract](docs/architecture/0002-generated-api-contract.md).
 | Product use cases and HTTP/OpenAPI/MCP delivery | `nac-server` | `crates/nac-server/AGENTS.md` |
 | React features, queries, presentation | web client | `crates/nac-server/web/AGENTS.md` |
 | Managed image/runtime contract | managed container | `docker/managed/AGENTS.md` |
-| Shared command environment, credentials, process control | small inward crates | `crates/nac-contracts/`, `crates/nac-credential-store/`, `crates/nac-process/` |
+| Shared command environment and credentials | small inward crates | `crates/nac-contracts/`, `crates/nac-credential-store/` |
+| Descendant-aware process supervision | `nac-process` | `crates/nac-process/AGENTS.md` |
+| Checked-in model catalog generation | `nac-catalog-gen` | `crates/nac-catalog-gen/AGENTS.md` |
 
 ## Product and compatibility invariants
 
@@ -131,6 +133,9 @@ container infrastructure as an explicit coverage gap, not a passing result.
   `crates/nac-server/assets/dist/`. Commit source and rebuilt assets together;
   `make test-assets` fails on drift.
 - Keep `Cargo.lock` consistent with workspace manifests. Do not hand-edit it.
+- `nac-catalog-gen` is the sole writer for
+  `crates/nac-core/src/model/catalog/data/catalog.json` and
+  `catalog.manifest.json`; see its nested guide before regeneration.
 
 ## Change discipline
 

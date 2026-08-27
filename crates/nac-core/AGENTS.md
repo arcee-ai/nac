@@ -34,6 +34,34 @@ It must not own HTTP/React delivery or managed-host product onboarding.
 - `src/terminal/`, `src/process.rs`, `src/sandbox/` — execution and cleanup.
 - `src/workspace/` — revision and Git workspace ownership.
 
+## Cohesive size exceptions
+
+The following production owners deliberately exceed 800 lines. Keep their
+listed responsibility closed; a new concern requires a real submodule/port:
+
+- `agent/mod.rs` owns the model/tool turn state machine, prompt commit boundary,
+  failure-loop control, usage/event settlement, and compaction handoff.
+  Compaction algorithms, prompt text, previews, and tests already live beside
+  it; do not add session persistence or delivery mapping to the loop.
+- `events.rs` owns the typed agent/session event vocabulary plus the bounded
+  replay/stream bus and durable thread-event bridge. Do not add React/SSE
+  formatting; delivery serializes these contracts.
+- `model/chatgpt_codex.rs`, `model/arcee.rs`, `model/client/mod.rs`, and
+  `model/catalog/overlay.rs` each keep one provider/protocol or catalog-overlay
+  policy auditable with its exact authentication, streaming, redaction, retry,
+  validation, and response decoding. New providers get their own owner.
+- `sandbox/podman.rs` keeps container creation authority, cidfile/token records,
+  reconciliation, command wrappers, cleanup retries, and backend lifecycle in
+  one safety owner. Do not put authorization policy or generic process control
+  there.
+- `mcp/file_config.rs` keeps revision-checked TOML editing, publication journal,
+  locking, recovery, validation, and probe-facing records together. MCP
+  transport invocation belongs elsewhere.
+- `view.rs` is the typed read-projection facade over session/thread/workset and
+  workspace owners; `terminal/output.rs` is the bounded output registry,
+  paging/UTF-8 boundary, preview, eviction, and lease owner. Neither may acquire
+  new mutation/lifecycle responsibilities.
+
 ## Verification
 
 ```sh
@@ -50,7 +78,8 @@ infrastructure is present.
 
 This crate owns no checked-in generated source. Keep workspace `Cargo.lock`
 changes tied to manifest changes and use root generation targets for OpenAPI or
-web assets.
+web assets. The model catalog JSON included by core is generated only by
+`nac-catalog-gen` under its nested guide.
 
 - Do not add Axum DTOs, React concerns, managed GitHub/clone policy, or image
   readiness here.
