@@ -591,9 +591,7 @@ impl Agent {
                 allowed_tools: Some(allowed_tools),
                 permission_broker: None,
                 goal_runtime,
-                host_secret_store: None,
-                managed_github: None,
-                managed_home_root: None,
+                command_environment: None,
                 web_credential: None,
                 command_redactions: Arc::new(StdMutex::new(HashMap::new())),
             },
@@ -621,9 +619,9 @@ impl Agent {
         github: Option<crate::managed_github::ManagedGitHubAuth>,
         home_root: Option<PathBuf>,
     ) {
-        self.tool_runtime.host_secret_store = store;
-        self.tool_runtime.managed_github = github;
-        self.tool_runtime.managed_home_root = home_root;
+        self.tool_runtime.command_environment = Some(Arc::new(
+            crate::managed::ManagedCommandEnvironmentProvider::new(store, github, home_root),
+        ));
     }
 
     /// Build one immutable model-request capability view. The Exa credential

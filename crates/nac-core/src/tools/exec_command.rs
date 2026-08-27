@@ -267,6 +267,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::process::Command;
+    use std::sync::Arc;
 
     #[cfg(unix)]
     use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -791,7 +792,9 @@ mod tests {
         store.put("DEMO_TOKEN", old_secret).unwrap();
 
         let mut runtime = test_runtime();
-        runtime.host_secret_store = Some(store.clone());
+        runtime.command_environment = Some(Arc::new(
+            crate::managed::ManagedCommandEnvironmentProvider::new(Some(store.clone()), None, None),
+        ));
 
         let one_shot = execute_exec_command(
             &json!({
@@ -886,8 +889,13 @@ mod tests {
         let inherited = std::env::var_os("GH_TOKEN");
 
         let mut runtime = test_runtime();
-        runtime.managed_github = Some(auth);
-        runtime.managed_home_root = Some(home_root.clone());
+        runtime.command_environment = Some(Arc::new(
+            crate::managed::ManagedCommandEnvironmentProvider::new(
+                None,
+                Some(auth),
+                Some(home_root.clone()),
+            ),
+        ));
         let result = execute_exec_command(
             &json!({
                 "cmd": "case \"$GH_TOKEN\" in github-access-*) printf 'matched|' ;; *) printf 'missing|' ;; esac; printf '%s|%s' \"$GH_TOKEN\" \"$HOME\""

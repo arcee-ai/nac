@@ -3,6 +3,9 @@
 //! runtime construction so those outer layers can depend on it without cycles.
 
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::path::PathBuf;
+use std::pin::Pin;
 
 /// Immutable command environment plus the exact secret values that must be
 /// redacted from output produced under that environment.
@@ -70,6 +73,27 @@ impl CommandEnvironmentSnapshot {
         }
         redacted
     }
+}
+
+pub type CommandEnvironmentFuture<'a> =
+    Pin<Box<dyn Future<Output = anyhow::Result<CommandEnvironmentSnapshot>> + Send + 'a>>;
+
+/// Process-launch metadata needed when a worker must reconstruct the same
+/// environment provider in its own process.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkerEnvironment {
+    pub secret_root: Option<PathBuf>,
+    pub github_client_id: Option<String>,
+    pub home_root: Option<PathBuf>,
+}
+
+/// Injected command-environment capability. Implementations may read mutable
+/// credential stores at spawn time, but consumers see only immutable snapshots
+/// and never provider-specific credential types.
+pub trait CommandEnvironmentProvider: Send + Sync {
+    fn snapshot(&self) -> CommandEnvironmentFuture<'_>;
+    fn redaction_snapshot(&self) -> anyhow::Result<CommandEnvironmentSnapshot>;
+    fn worker_environment(&self) -> WorkerEnvironment;
 }
 
 #[cfg(test)]

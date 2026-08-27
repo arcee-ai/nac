@@ -216,16 +216,17 @@ pub(super) async fn run_worker(
     for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
         command.env_remove(name);
     }
-    if let Some(store) = runtime.host_secret_store.as_ref() {
-        command.arg("--managed-secret-root").arg(store.state_root());
-    }
-    if let Some(github) = runtime.managed_github.as_ref() {
-        command
-            .arg("--managed-github-client-id")
-            .arg(github.client_id());
-    }
-    if let Some(home_root) = runtime.managed_home_root.as_ref() {
-        command.arg("--managed-home-root").arg(home_root);
+    if let Some(provider) = runtime.command_environment.as_ref() {
+        let environment = provider.worker_environment();
+        if let Some(secret_root) = environment.secret_root {
+            command.arg("--managed-secret-root").arg(secret_root);
+        }
+        if let Some(client_id) = environment.github_client_id {
+            command.arg("--managed-github-client-id").arg(client_id);
+        }
+        if let Some(home_root) = environment.home_root {
+            command.arg("--managed-home-root").arg(home_root);
+        }
     }
     if runtime.backend.workspace_cwd_is_local() {
         command.current_dir(&runtime.workspace_cwd);
@@ -616,10 +617,15 @@ done
         runtime.workspace_cwd = root.clone();
         runtime.config_cwd = root.clone();
         runtime.worker_executable = Some(executable);
-        runtime.host_secret_store = Some(store);
-        runtime.managed_github =
-            Some(crate::managed_github::ManagedGitHubAuth::new(&state_root, "Iv1.test").unwrap());
-        runtime.managed_home_root = Some(root.join("managed-home"));
+        runtime.command_environment = Some(Arc::new(
+            crate::managed::ManagedCommandEnvironmentProvider::new(
+                Some(store),
+                Some(
+                    crate::managed_github::ManagedGitHubAuth::new(&state_root, "Iv1.test").unwrap(),
+                ),
+                Some(root.join("managed-home")),
+            ),
+        ));
         let no_sources = Vec::<String>::new();
         let no_skills = Vec::<String>::new();
         let run = run_worker(
