@@ -355,6 +355,10 @@ Rules:
 - `bed766e refactor(server): isolate model provider resolution` — moves saved/
   file model resolution and its fatal/nonfatal provider error contract out of
   HTTP delivery.
+- `00cf276 refactor: introduce shared command environment contract` — adds the
+  inward `nac-contracts` ownership boundary for immutable per-spawn process
+  environments and exact-value output redaction without coupling tool/runtime
+  consumers to managed credential stores.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -420,13 +424,21 @@ Rules:
   library and 23 binary tests with warning-denied Clippy; `lib.rs` is now 6,945
   lines. The cohesive application module is 518 lines because it owns the full
   credential/row/provider transaction rather than fragmenting that ordering.
-- A new dependency-free `nac-contracts` inward boundary now owns immutable
+- A new lightweight `nac-contracts` inward boundary now owns immutable
   command-environment snapshots and exact-value output redaction. `nac-core`
   consumes the shared contract while the existing managed secret store retains
   its public compatibility re-export. Contract tests, all seven managed config/
   secret tests, and warning-denied core Clippy pass; the lockfile change is
   path-only and was generated offline. This boundary exists to prevent the
   forthcoming managed-product extraction from creating a core/managed cycle.
+- `ToolRuntime` now consumes one injected `CommandEnvironmentProvider` rather
+  than carrying managed secret, GitHub, and home-root objects as unrelated
+  fields. The provider owns snapshot timing, fallback redaction, and the
+  nonsecret metadata required to reconstruct a worker process. Focused secret,
+  GitHub, worker-argument, and noninheritance tests pass; `make crate-check
+  CRATE=nac-core` is green. The complete core suite passed 1,181 tests before
+  one independent Podman process fixture returned `ENOENT`; that exact fixture
+  passed immediately when rerun, confirming the slice's affected contracts.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -442,6 +454,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the shared command-environment
-contract without protected files. Then replace core runtime references to
-managed stores/providers with a narrow provider port based on this contract.
+Inspect exact worktree/staged diffs and commit the provider-neutral runtime
+slice without protected files. Then replace the remaining concrete managed
+construction signature with provider injection at the server/runtime boundary
+so the substantive `nac-managed` crate can own the adapter and workflows.

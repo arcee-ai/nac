@@ -17,6 +17,7 @@ use crate::model::auth_store::{
 };
 
 pub use nac_contracts::CommandEnvironmentSnapshot;
+use nac_contracts::{CommandEnvironmentFuture, CommandEnvironmentProvider, WorkerEnvironment};
 
 pub const MANAGED_CONFIG_VERSION: u32 = 1;
 const SECRET_STORE_VERSION: u32 = 1;
@@ -272,6 +273,85 @@ impl HostSecretStore {
         let raw = serde_json::to_string_pretty(stored)
             .context("failed to encode managed host secrets")?;
         write_auth_string_to_path(&self.path, &raw)
+    }
+}
+
+/// Transitional managed-product adapter for the provider-neutral command
+/// environment port. It moves with the managed bounded context; tool/runtime
+/// consumers depend only on `CommandEnvironmentProvider`.
+#[derive(Clone)]
+pub struct ManagedCommandEnvironmentProvider {
+    store: Option<HostSecretStore>,
+    github: Option<crate::managed_github::ManagedGitHubAuth>,
+    home_root: Option<PathBuf>,
+}
+
+impl ManagedCommandEnvironmentProvider {
+    pub fn new(
+        store: Option<HostSecretStore>,
+        github: Option<crate::managed_github::ManagedGitHubAuth>,
+        home_root: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            store,
+            github,
+            home_root,
+        }
+    }
+}
+
+impl CommandEnvironmentProvider for ManagedCommandEnvironmentProvider {
+    fn snapshot(&self) -> CommandEnvironmentFuture<'_> {
+        Box::pin(async move {
+            let mut snapshot = self
+                .store
+                .as_ref()
+                .map(HostSecretStore::snapshot)
+                .transpose()?
+                .unwrap_or_else(CommandEnvironmentSnapshot::empty);
+            if let Some(home_root) = self.home_root.as_ref() {
+                snapshot.insert_dedicated("HOME", home_root.to_string_lossy(), false);
+            }
+            if let Some(auth) = self.github.as_ref() {
+                if let Some(token) = auth.current_token().await? {
+                    snapshot.insert_dedicated("GH_TOKEN", token.secret(), true);
+                }
+            }
+            Ok(snapshot)
+        })
+    }
+
+    fn redaction_snapshot(&self) -> Result<CommandEnvironmentSnapshot> {
+        let mut snapshot = self
+            .store
+            .as_ref()
+            .map(HostSecretStore::snapshot)
+            .transpose()?
+            .unwrap_or_else(CommandEnvironmentSnapshot::empty);
+        if let Some(token) = self
+            .github
+            .as_ref()
+            .map(crate::managed_github::ManagedGitHubAuth::stored_token_for_redaction)
+            .transpose()?
+            .flatten()
+        {
+            snapshot.insert_dedicated("GH_TOKEN", token.secret(), true);
+        }
+        Ok(snapshot)
+    }
+
+    fn worker_environment(&self) -> WorkerEnvironment {
+        WorkerEnvironment {
+            secret_root: self
+                .store
+                .as_ref()
+                .map(|store| store.state_root().to_path_buf()),
+            github_client_id: self
+                .github
+                .as_ref()
+                .map(|github| github.client_id().to_string()),
+            home_root: self.home_root.clone(),
+        }
     }
 }
 

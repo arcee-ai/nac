@@ -487,17 +487,15 @@ pub struct ToolRuntime {
     pub permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
     /// Direct-only bridge for exact mid-run durable-goal baselines.
     pub(crate) goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
-    /// Present only for an explicitly configured Managed NAC host. The store
-    /// is read immediately before each command spawn so replacement/deletion
-    /// affects new processes while existing processes keep their snapshot.
-    pub host_secret_store: Option<crate::managed::HostSecretStore>,
-    pub managed_github: Option<crate::managed_github::ManagedGitHubAuth>,
-    pub managed_home_root: Option<PathBuf>,
+    /// Optional process-environment capability, read immediately before each
+    /// command spawn so replacements affect new processes while existing
+    /// processes keep their immutable snapshot.
+    pub command_environment: Option<Arc<dyn nac_contracts::CommandEnvironmentProvider>>,
     /// Exa key captured by the exact model-request capability snapshot that
     /// admitted `web_search`/`web_fetch` for the following tool round.
     pub(crate) web_credential: Option<Arc<web::ExaCredential>>,
     pub command_redactions:
-        Arc<StdMutex<HashMap<String, crate::managed::CommandEnvironmentSnapshot>>>,
+        Arc<StdMutex<HashMap<String, nac_contracts::CommandEnvironmentSnapshot>>>,
 }
 
 impl ToolRuntime {
@@ -509,30 +507,17 @@ impl ToolRuntime {
 
     pub(crate) async fn command_environment_snapshot(
         &self,
-    ) -> anyhow::Result<crate::managed::CommandEnvironmentSnapshot> {
-        let mut snapshot = self
-            .host_secret_store
-            .as_ref()
-            .map(crate::managed::HostSecretStore::snapshot)
-            .transpose()
-            .map(|snapshot| {
-                snapshot.unwrap_or_else(crate::managed::CommandEnvironmentSnapshot::empty)
-            })?;
-        if let Some(home_root) = self.managed_home_root.as_ref() {
-            snapshot.insert_dedicated("HOME", home_root.to_string_lossy(), false);
+    ) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
+        match self.command_environment.as_ref() {
+            Some(provider) => provider.snapshot().await,
+            None => Ok(nac_contracts::CommandEnvironmentSnapshot::empty()),
         }
-        if let Some(auth) = self.managed_github.as_ref() {
-            if let Some(token) = auth.current_token().await? {
-                snapshot.insert_dedicated("GH_TOKEN", token.secret(), true);
-            }
-        }
-        Ok(snapshot)
     }
 
     pub(crate) fn remember_output_environment(
         &self,
         output_id: impl Into<String>,
-        snapshot: crate::managed::CommandEnvironmentSnapshot,
+        snapshot: nac_contracts::CommandEnvironmentSnapshot,
     ) {
         self.command_redactions
             .lock()
@@ -550,21 +535,10 @@ impl ToolRuntime {
         match snapshot {
             Some(snapshot) => Ok(snapshot.redact(text)),
             None => {
-                let mut snapshot = self
-                    .host_secret_store
-                    .as_ref()
-                    .map(crate::managed::HostSecretStore::snapshot)
-                    .transpose()?
-                    .unwrap_or_else(crate::managed::CommandEnvironmentSnapshot::empty);
-                if let Some(token) = self
-                    .managed_github
-                    .as_ref()
-                    .map(crate::managed_github::ManagedGitHubAuth::stored_token_for_redaction)
-                    .transpose()?
-                    .flatten()
-                {
-                    snapshot.insert_dedicated("GH_TOKEN", token.secret(), true);
-                }
+                let snapshot = match self.command_environment.as_ref() {
+                    Some(provider) => provider.redaction_snapshot()?,
+                    None => nac_contracts::CommandEnvironmentSnapshot::empty(),
+                };
                 Ok(snapshot.redact(text))
             }
         }
@@ -2352,9 +2326,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         allowed_tools: None,
         permission_broker: None,
         goal_runtime: None,
-        host_secret_store: None,
-        managed_github: None,
-        managed_home_root: None,
+        command_environment: None,
         web_credential: None,
         command_redactions: Arc::new(StdMutex::new(HashMap::new())),
     }
