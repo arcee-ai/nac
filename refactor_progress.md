@@ -208,7 +208,7 @@ Rules:
 - Acceptance: this ledger names owners, dependency direction, protected state,
   slices, and verification; no production behavior changed.
 
-### M1 — Separate tests and expose internal seams (in progress)
+### M1 — Separate tests and expose internal seams (complete)
 
 - Move inline test modules from server `lib.rs`, `session_service.rs`,
   `permissions.rs`, and `runtime.rs` into descriptive sibling test files using
@@ -220,7 +220,7 @@ Rules:
 - Verification: exact before/after test inventory, focused crate tests,
   `make check`, format, and lint before the coherent milestone commit.
 
-### M2 — Thin server and focused application services (pending)
+### M2 — Thin server and focused application services (in progress)
 
 - Extract transport DTOs/OpenAPI, error mapping, router composition, server
   lifecycle/frontend serving, and thin handler modules.
@@ -333,7 +333,9 @@ Rules:
 
 ## Commits and verification
 
-- No refactor commit yet.
+- `3df2b65 refactor: separate core and server test modules` — records the M0
+  architecture handoff and moves the four priority inline test modules into
+  sibling files with unchanged test inventories and green crate suites/checks.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -354,6 +356,13 @@ Rules:
   tests using the same loopback permission.
 - `make crate-check CRATE=nac-core` and `make crate-check CRATE=nac-server`
   pass (package formatting plus warning-denied Clippy).
+- The first M2 vertical seam moves project list/create/update/delete,
+  membership, and ordering into `application::projects::ProjectApplication`.
+  HTTP handlers now only decode transport fields, invoke one project use case,
+  and encode its outcome; session teardown retains its original ordering by
+  delegating to the existing lifecycle owner. The project-focused filter passes
+  4 tests, and the complete server suite remains green at 149 library plus 23
+  binary tests.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -369,6 +378,6 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the coherent M0 architecture-map/
-M1 test-separation slice without protected files. Then expose the first
-substantive server application-service seam.
+Inspect exact worktree/staged diffs and commit the project application-service
+slice without protected files. Then extract the next focused server use-case
+family, using the project seam as the dependency-direction template.

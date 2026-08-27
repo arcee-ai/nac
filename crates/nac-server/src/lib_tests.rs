@@ -3869,7 +3869,8 @@ async fn deleting_project_skips_descendants_already_removed_by_parent_cascade() 
     );
     let manager = test_manager(&root);
     let project = manager
-        .create_project(CreateProjectRequest {
+        .projects()
+        .create(application::projects::CreateProject {
             name: Some("Cascade delete".to_string()),
             description: None,
             cwd: root.clone(),
@@ -3881,7 +3882,8 @@ async fn deleting_project_skips_descendants_already_removed_by_parent_cascade() 
         .await
         .unwrap();
     manager
-        .assign_session_to_project(&project.project_id, "delegating")
+        .projects()
+        .assign_session(&project.project_id, "delegating")
         .unwrap();
     let child_session_id = manager
         .create_managed_orchestrator_session("delegating", "cascade with project")
@@ -3893,11 +3895,17 @@ async fn deleting_project_skips_descendants_already_removed_by_parent_cascade() 
         .unwrap();
 
     let deleted = manager
-        .delete_project_with_sessions(&project.project_id)
+        .projects()
+        .delete(
+            &project.project_id,
+            application::projects::ProjectSessionDisposition::Delete,
+        )
         .await
         .unwrap();
-    assert!(deleted.contains(&"delegating".to_string()));
-    assert!(deleted.contains(&child_session_id));
+    assert!(deleted
+        .deleted_session_ids
+        .contains(&"delegating".to_string()));
+    assert!(deleted.deleted_session_ids.contains(&child_session_id));
     let store_path = root.join("store.db");
     assert!(sessions::load_session(&store_path, "delegating").is_err());
     assert!(sessions::load_session(&store_path, &child_session_id).is_err());
@@ -8664,7 +8672,8 @@ async fn project_session_materializes_defaults_and_filters_membership() {
     )
     .unwrap();
     let project = manager
-        .create_project(CreateProjectRequest {
+        .projects()
+        .create(application::projects::CreateProject {
             name: Some("Backend".to_string()),
             description: None,
             cwd: workspace.clone(),
@@ -8759,11 +8768,14 @@ async fn project_session_materializes_defaults_and_filters_membership() {
     assert_eq!(deletion.status, StatusCode::CONFLICT);
     assert!(model_configurations::load_model_configuration(&store_path, "project-default").is_ok());
     manager
-        .update_project(
+        .projects()
+        .update(
             &project.project_id,
-            UpdateProjectRequest {
-                default_model_config_id: RequestField::Null,
-                ..UpdateProjectRequest::default()
+            application::projects::UpdateProject {
+                name: application::projects::ProjectField::Unchanged,
+                description: application::projects::ProjectField::Unchanged,
+                default_model_config_id: application::projects::ProjectField::Clear,
+                pinned: application::projects::ProjectField::Unchanged,
             },
         )
         .unwrap();
