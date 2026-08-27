@@ -1,3 +1,4 @@
+mod application;
 mod compaction;
 mod filesystem;
 mod light_model;
@@ -509,6 +510,14 @@ fn request_field_patch<T>(field: RequestField<T>) -> Option<Option<T>> {
         RequestField::Omitted => None,
         RequestField::Null => Some(None),
         RequestField::Value(value) => Some(Some(value)),
+    }
+}
+
+fn project_field<T>(field: RequestField<T>) -> application::projects::ProjectField<T> {
+    match field {
+        RequestField::Omitted => application::projects::ProjectField::Unchanged,
+        RequestField::Null => application::projects::ProjectField::Clear,
+        RequestField::Value(value) => application::projects::ProjectField::Set(value),
     }
 }
 
@@ -1579,190 +1588,9 @@ impl SessionManager {
         })
     }
 
-    /// Lists a directory on an SSH host, in the same shape as a local listing so
-    /// the picker navigates both the same way.
-    ///
-    /// Succeeding is also the evidence the launch form needs that the host, the
-    /// port and the key work together, and the connection it opens is reused by
-    /// the session created next.
-    pub async fn create_project(
-        &self,
-        request: CreateProjectRequest,
-    ) -> std::result::Result<ProjectRecord, ApiError> {
-        let requested_cwd = request.cwd.as_os_str().to_string_lossy().trim().to_string();
-        if requested_cwd.is_empty() {
-            return Err(ApiError::bad_request(
-                "project cwd must not be empty or whitespace-only".to_string(),
-            ));
-        }
-
-        let ssh = SshRequest {
-            host: request.ssh_host,
-            port: request.ssh_port,
-            identity_file: request.ssh_identity_file,
-        }
-        .into_options();
-        let host = ssh.host();
-        let (cwd, ssh_host, ssh_port, ssh_identity_file) = if host.is_some() {
-            let listing = runtime::browse_ssh_directory(
-                &ssh,
-                Some(&requested_cwd),
-                false,
-                &self.inner.root_cwd,
-            )
-            .await?;
-            let connection = ssh
-                .resolved_connection(&self.inner.root_cwd)
-                .expect("normalized SSH host must produce a connection");
-            (
-                PathBuf::from(listing.path),
-                Some(connection.host),
-                connection.port,
-                connection
-                    .identity_file
-                    .map(|path| path.to_string_lossy().into_owned()),
-            )
-        } else {
-            if ssh.port.is_some() || ssh.identity_file.is_some() {
-                return Err(ApiError::bad_request(
-                    "an ssh port or private key needs an ssh host as well".to_string(),
-                ));
-            }
-            let listing = filesystem::browse(
-                &BrowseQuery {
-                    path: Some(requested_cwd),
-                    kind: BrowseKind::Directory,
-                    hidden: false,
-                },
-                &self.inner.root_cwd,
-            )?;
-            (PathBuf::from(listing.path), None, None, None)
-        };
-
-        // A local checkout is named after its origin remote (`owner/repo`),
-        // which reads better than the bare folder the store would fall back to.
-        let name = request.name.or_else(|| {
-            ssh_host
-                .is_none()
-                .then(|| view::local_repo_label(&cwd))
-                .flatten()
-        });
-
-        Ok(projects::insert_project(
-            &self.inner.store_path,
-            projects::NewProject {
-                project_id: uuid::Uuid::new_v4().to_string(),
-                name,
-                description: request.description,
-                cwd,
-                ssh_host,
-                ssh_port,
-                ssh_identity_file,
-                default_model_config_id: request.default_model_config_id,
-            },
-        )?)
+    pub(crate) fn projects(&self) -> application::projects::ProjectApplication<'_> {
+        application::projects::ProjectApplication::new(self)
     }
-
-    pub fn update_project(
-        &self,
-        project_id: &str,
-        request: UpdateProjectRequest,
-    ) -> std::result::Result<ProjectRecord, ProjectStoreError> {
-        let name = match request.name {
-            RequestField::Omitted => None,
-            RequestField::Null => {
-                return Err(ProjectStoreError::InvalidInput(
-                    "project name cannot be null".to_string(),
-                ))
-            }
-            RequestField::Value(name) => Some(name),
-        };
-        let pinned = match request.pinned {
-            RequestField::Omitted => None,
-            RequestField::Null => {
-                return Err(ProjectStoreError::InvalidInput(
-                    "project pinned cannot be null".to_string(),
-                ))
-            }
-            RequestField::Value(pinned) => Some(pinned),
-        };
-        projects::update_project(
-            &self.inner.store_path,
-            project_id,
-            projects::ProjectPatch {
-                name,
-                description: request_field_patch(request.description),
-                default_model_config_id: request_field_patch(request.default_model_config_id),
-                pinned,
-            },
-        )
-    }
-
-    /// Drops the project and hands its sessions back as unassigned.
-    pub fn delete_project(
-        &self,
-        project_id: &str,
-    ) -> std::result::Result<Vec<String>, ProjectStoreError> {
-        projects::delete_project(&self.inner.store_path, project_id)
-    }
-
-    /// Drops the project along with every chat in it.
-    ///
-    /// The chats go first: membership is recorded against the project row, so
-    /// once that is gone there is nothing left saying which sessions were its.
-    /// A chat that refuses to be deleted — one mid-run that will not cancel —
-    /// leaves the project standing rather than orphaning the rest.
-    pub async fn delete_project_with_sessions(&self, project_id: &str) -> Result<Vec<String>> {
-        let session_ids: Vec<String> = sessions::list_sessions(&self.inner.store_path)?
-            .into_iter()
-            .filter(|summary| summary.project_id.as_deref() == Some(project_id))
-            .map(|summary| summary.session_id)
-            .collect();
-        for session_id in &session_ids {
-            let still_exists = sessions::list_sessions(&self.inner.store_path)?
-                .into_iter()
-                .any(|summary| summary.session_id == *session_id);
-            if !still_exists {
-                // Deleting an earlier parent recursively deletes its delegated
-                // sessions. The original project snapshot still contains those
-                // ids, so treat their absence as successful cascade settlement.
-                continue;
-            }
-            if let Err(error) = self.delete_session(session_id).await {
-                let still_exists = sessions::list_sessions(&self.inner.store_path)?
-                    .into_iter()
-                    .any(|summary| summary.session_id == *session_id);
-                if still_exists {
-                    return Err(error);
-                }
-            }
-        }
-        self.delete_project(project_id)?;
-        Ok(session_ids)
-    }
-
-    pub fn assign_session_to_project(
-        &self,
-        project_id: &str,
-        session_id: &str,
-    ) -> std::result::Result<ProjectRecord, ProjectStoreError> {
-        projects::assign_session_to_project(&self.inner.store_path, project_id, session_id)
-    }
-
-    pub fn reorder_projects(
-        &self,
-        pinned: bool,
-        project_ids: &[String],
-        expected_versions: &BTreeMap<String, i64>,
-    ) -> std::result::Result<Vec<ProjectRecord>, ProjectStoreError> {
-        projects::reorder_projects(
-            &self.inner.store_path,
-            pinned,
-            project_ids,
-            expected_versions,
-        )
-    }
-
     async fn browse_ssh(
         &self,
         request: SshBrowseRequest,
@@ -5504,7 +5332,7 @@ async fn list_projects_handler(
     State(manager): State<SessionManager>,
 ) -> std::result::Result<Json<ProjectList>, ApiError> {
     Ok(Json(ProjectList {
-        projects: projects::list_projects(&manager.inner.store_path)?,
+        projects: manager.projects().list()?,
     }))
 }
 
@@ -5521,9 +5349,18 @@ async fn create_project_handler(
     payload: std::result::Result<Json<CreateProjectRequest>, JsonRejection>,
 ) -> std::result::Result<(StatusCode, Json<ProjectRecord>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
+    let command = application::projects::CreateProject {
+        name: request.name,
+        description: request.description,
+        cwd: request.cwd,
+        ssh_host: request.ssh_host,
+        ssh_port: request.ssh_port,
+        ssh_identity_file: request.ssh_identity_file,
+        default_model_config_id: request.default_model_config_id,
+    };
     Ok((
         StatusCode::CREATED,
-        Json(manager.create_project(request).await?),
+        Json(manager.projects().create(command).await?),
     ))
 }
 
@@ -5542,7 +5379,15 @@ async fn update_project_handler(
     payload: std::result::Result<Json<UpdateProjectRequest>, JsonRejection>,
 ) -> std::result::Result<Json<ProjectRecord>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    Ok(Json(manager.update_project(&project_id, request)?))
+    Ok(Json(manager.projects().update(
+        &project_id,
+        application::projects::UpdateProject {
+            name: project_field(request.name),
+            description: project_field(request.description),
+            default_model_config_id: project_field(request.default_model_config_id),
+            pinned: project_field(request.pinned),
+        },
+    )?))
 }
 
 /// Remove a project, by default without touching the work done inside it.
@@ -5563,15 +5408,14 @@ async fn delete_project_handler(
     AxumPath(project_id): AxumPath<String>,
     Query(query): Query<DeleteProjectQuery>,
 ) -> std::result::Result<Json<DeleteProjectResponse>, ApiError> {
-    Ok(Json(match query.sessions {
-        DeleteProjectSessions::Keep => DeleteProjectResponse {
-            released_session_ids: manager.delete_project(&project_id)?,
-            deleted_session_ids: Vec::new(),
-        },
-        DeleteProjectSessions::Delete => DeleteProjectResponse {
-            released_session_ids: Vec::new(),
-            deleted_session_ids: manager.delete_project_with_sessions(&project_id).await?,
-        },
+    let sessions = match query.sessions {
+        DeleteProjectSessions::Keep => application::projects::ProjectSessionDisposition::Keep,
+        DeleteProjectSessions::Delete => application::projects::ProjectSessionDisposition::Delete,
+    };
+    let outcome = manager.projects().delete(&project_id, sessions).await?;
+    Ok(Json(DeleteProjectResponse {
+        released_session_ids: outcome.released_session_ids,
+        deleted_session_ids: outcome.deleted_session_ids,
     }))
 }
 
@@ -5594,10 +5438,11 @@ async fn assign_session_handler(
     payload: std::result::Result<Json<AssignSessionRequest>, JsonRejection>,
 ) -> std::result::Result<Json<ProjectRecord>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    Ok(Json(manager.assign_session_to_project(
-        &project_id,
-        &request.session_id,
-    )?))
+    Ok(Json(
+        manager
+            .projects()
+            .assign_session(&project_id, &request.session_id)?,
+    ))
 }
 
 /// Rewrite the order of one pin group.
@@ -5614,7 +5459,7 @@ async fn reorder_projects_handler(
     payload: std::result::Result<Json<ReorderProjectsRequest>, JsonRejection>,
 ) -> std::result::Result<Json<ReorderProjectsResponse>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    let projects = manager.reorder_projects(
+    let projects = manager.projects().reorder(
         request.pinned,
         &request.project_ids,
         &request.expected_versions,
@@ -7956,6 +7801,20 @@ impl From<ProjectStoreError> for ApiError {
         Self {
             status,
             message: error.to_string(),
+        }
+    }
+}
+
+impl From<application::projects::ProjectApplicationError> for ApiError {
+    fn from(error: application::projects::ProjectApplicationError) -> Self {
+        match error {
+            application::projects::ProjectApplicationError::InvalidInput(message) => {
+                Self::bad_request(message)
+            }
+            application::projects::ProjectApplicationError::Project(error) => error.into(),
+            application::projects::ProjectApplicationError::LocalBrowse(error) => error.into(),
+            application::projects::ProjectApplicationError::RemoteBrowse(error) => error.into(),
+            application::projects::ProjectApplicationError::Session(error) => error.into(),
         }
     }
 }
