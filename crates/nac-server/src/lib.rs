@@ -1329,6 +1329,10 @@ impl SessionManager {
         application::sessions::SessionCatalogApplication::new(self)
     }
 
+    pub(crate) fn session_state(&self) -> application::sessions::SessionStateApplication<'_> {
+        application::sessions::SessionStateApplication::new(self)
+    }
+
     async fn browse_ssh(
         &self,
         request: SshBrowseRequest,
@@ -1990,14 +1994,11 @@ impl SessionManager {
     }
 
     pub fn session_config(&self, session_id: &str) -> Result<sessions::RawSessionConfig> {
-        sessions::load_session_config(&self.inner.store_path, session_id)
+        self.session_state().config(session_id)
     }
 
     pub async fn snapshot(&self, session_id: &str) -> Result<SessionFrontendSnapshot> {
-        self.attach_session(session_id)
-            .await?
-            .frontend_snapshot()
-            .await
+        self.session_state().snapshot(session_id).await
     }
 
     pub async fn snapshot_with_options(
@@ -2005,34 +2006,13 @@ impl SessionManager {
         session_id: &str,
         options: FrontendSnapshotLoadOptions,
     ) -> Result<SessionFrontendSnapshotLoad> {
-        self.attach_session(session_id)
-            .await?
-            .frontend_snapshot_with_options(options)
+        self.session_state()
+            .snapshot_with_options(session_id, options)
             .await
     }
 
     pub fn session_lineage(&self, session_id: &str) -> Result<Option<SessionLineageSnapshot>> {
-        if let Some(child) =
-            nac_core::store::load_traditional_child(&self.inner.store_path, session_id)?
-        {
-            return Ok(Some(SessionLineageSnapshot {
-                kind: SessionLineageKind::TraditionalChild,
-                parent_session_id: child.parent_session_id,
-                root_session_id: child.root_session_id,
-                description: child.description,
-            }));
-        }
-        if let Some(orchestrator) =
-            nac_core::store::load_managed_orchestrator(&self.inner.store_path, session_id)?
-        {
-            return Ok(Some(SessionLineageSnapshot {
-                kind: SessionLineageKind::ManagedOrchestrator,
-                parent_session_id: orchestrator.parent_session_id,
-                root_session_id: orchestrator.root_session_id,
-                description: orchestrator.description,
-            }));
-        }
-        Ok(None)
+        self.session_state().lineage(session_id)
     }
 
     pub async fn messages_page(
@@ -2040,15 +2020,13 @@ impl SessionManager {
         session_id: &str,
         request: MessagePageRequest,
     ) -> Result<MessagesPageSnapshot> {
-        self.attach_session(session_id)
-            .await?
-            .messages_page(request)
+        self.session_state()
+            .messages_page(session_id, request)
             .await
     }
 
     pub async fn list_direct_inbox(&self, session_id: &str) -> Result<Vec<SessionInboxRecord>> {
-        self.require_primary_direct_session(session_id)?;
-        self.attach_session(session_id).await?.list_direct_inbox()
+        self.session_state().direct_inbox(session_id).await
     }
 
     pub async fn create_direct_inbox_item(
@@ -2100,15 +2078,15 @@ impl SessionManager {
     }
 
     pub async fn permission_state(&self, session_id: &str) -> Result<PermissionStateResponse> {
-        let service = self.attach_session(session_id).await?;
+        let state = self.session_state().permission_state(session_id).await?;
         Ok(PermissionStateResponse {
-            requests: service.list_permission_requests()?,
-            grants: service.list_permission_grants()?,
+            requests: state.requests,
+            grants: state.grants,
         })
     }
 
     pub async fn direct_goal(&self, session_id: &str) -> Result<Option<SessionGoalRecord>> {
-        self.attach_session(session_id).await?.direct_goal()
+        self.session_state().direct_goal(session_id).await
     }
 
     pub async fn create_direct_goal(
@@ -2177,19 +2155,16 @@ impl SessionManager {
         before_id: Option<i64>,
         limit: usize,
     ) -> Result<ThreadEventPage> {
-        self.attach_session(session_id)
-            .await?
-            .thread_events_page(thread_name, before_id, limit)
+        self.session_state()
+            .thread_events(session_id, thread_name, before_id, limit)
+            .await
     }
 
     pub async fn session_skills(
         &self,
         session_id: &str,
     ) -> Result<Vec<nac_core::skill_catalog::SkillCatalogEntry>> {
-        Ok(self
-            .attach_session(session_id)
-            .await?
-            .skill_catalog_entries())
+        self.session_state().skills(session_id).await
     }
 
     pub async fn submit_prompt(
