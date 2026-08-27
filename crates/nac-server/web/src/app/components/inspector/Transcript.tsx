@@ -65,6 +65,7 @@ import {
   pushLocalEvent,
   setOptimisticUserPrompt,
   useActivity,
+  useCancelArmed,
   useFinishedToolCalls,
   useLiveThreads,
   useOptimisticUserPrompt,
@@ -137,6 +138,7 @@ export function Transcript({
   errorNotice = null,
 }: TranscriptProps) {
   const running = useRunning();
+  const stopping = useCancelArmed();
   const activity = useActivity();
   const error = useRunError();
   const liveThreads = useLiveThreads();
@@ -244,7 +246,7 @@ export function Transcript({
 
   const refreshIndex = useMemo(() => resendTargetIndex(turns), [turns]);
   const actionsBusy =
-    running || submitRun.isPending || regenerateRun.isPending || forkSession.isPending;
+    running || stopping || submitRun.isPending || regenerateRun.isPending || forkSession.isPending;
   const [revertTarget, setRevertTarget] = useState<{
     messageIdx: number;
     prompt: string;

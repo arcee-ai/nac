@@ -4,7 +4,8 @@ use serde_json::{json, Value};
 
 use crate::sandbox::{FileIoMode, HostPathResolution};
 use crate::tools::mutation::{
-    argument_error, execute_remote, permission_error, required_string, write_local, write_mounted,
+    argument_error, execute_remote, permission_error, required_string, write_local_cancellable,
+    write_mounted_cancellable,
 };
 use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
 
@@ -37,12 +38,13 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
                         "atomic write is not supported for a single-file sandbox mount: {path}"
                     ));
                 }
-                return write_mounted(
+                return write_mounted_cancellable(
                     host_path.root,
                     host_path.relative,
                     path,
                     content,
                     expected_revision,
+                    &runtime.command_cancellation,
                 )
                 .await;
             }
@@ -69,11 +71,12 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         .await;
     }
 
-    write_local(
+    write_local_cancellable(
         resolve_workspace_path(runtime, PathBuf::from(&path)),
         path,
         content,
         expected_revision,
+        &runtime.command_cancellation,
     )
     .await
 }

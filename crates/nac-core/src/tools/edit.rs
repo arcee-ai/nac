@@ -4,8 +4,8 @@ use serde_json::{json, Value};
 
 use crate::sandbox::{FileIoMode, HostPathResolution};
 use crate::tools::mutation::{
-    argument_error, edit_local, edit_mounted, execute_remote, permission_error, required_string,
-    EditSpec,
+    argument_error, edit_local_cancellable, edit_mounted_cancellable, execute_remote,
+    permission_error, required_string, EditSpec,
 };
 use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
 
@@ -38,12 +38,13 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
                         "atomic edit is not supported for a single-file sandbox mount: {path}"
                     ));
                 }
-                return edit_mounted(
+                return edit_mounted_cancellable(
                     host_path.root,
                     host_path.relative,
                     path,
                     expected_revision,
                     edits,
+                    &runtime.command_cancellation,
                 )
                 .await;
             }
@@ -70,11 +71,12 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         .await;
     }
 
-    edit_local(
+    edit_local_cancellable(
         resolve_workspace_path(runtime, PathBuf::from(&path)),
         path,
         expected_revision,
         edits,
+        &runtime.command_cancellation,
     )
     .await
 }

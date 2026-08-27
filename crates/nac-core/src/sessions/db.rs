@@ -898,8 +898,19 @@ impl SessionSummaryRow {
         // a truncation rebuilds them, and the migration backfills blob ++ log.
         let visible_message_count = usize::try_from(self.visible_message_count)
             .context("session visible message count overflowed")?;
-        let (response_usages, _) = deserialize_token_accounting(self.token_usages_json.as_deref())?;
-        let aggregated = crate::model::TokenUsage::aggregate(&response_usages);
+        let (response_usages, unattributed) =
+            deserialize_token_accounting(self.token_usages_json.as_deref())?;
+        let aggregated = match (
+            crate::model::TokenUsage::aggregate(&response_usages),
+            unattributed,
+        ) {
+            (Some(mut usage), Some(extra)) => {
+                usage.add_cost_saturating(&extra);
+                Some(usage)
+            }
+            (None, extra) => extra,
+            (usage, None) => usage,
+        };
         let total_tokens = aggregated.as_ref().map(|usage| usage.billable_tokens());
         let total_cost_micros = aggregated.as_ref().map(|usage| usage.cost.total);
         Ok(SessionSummary {

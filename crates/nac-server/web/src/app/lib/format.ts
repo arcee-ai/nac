@@ -382,6 +382,49 @@ export function addTokenUsage(
   };
 }
 
+export function tokenUsageHasSpend(usage: TokenUsage | null | undefined): boolean {
+  if (!usage) return false;
+  return (
+    usage.input_tokens +
+      usage.output_tokens +
+      usage.cache_read_tokens +
+      usage.cache_write_tokens +
+      (usage.cost?.total ?? 0) >
+    0
+  );
+}
+
+/**
+ * Session spend must never drop: take the higher billable reading of two
+ * totals. Context-window `total_tokens` is a gauge, so the first argument
+ * (live/persisted) wins when it is non-zero.
+ */
+export function maxBillableUsage(
+  a: TokenUsage | null | undefined,
+  b: TokenUsage | null | undefined,
+): TokenUsage | null {
+  if (!tokenUsageHasSpend(a)) return tokenUsageHasSpend(b) ? (b ?? null) : null;
+  if (!a || !tokenUsageHasSpend(b) || !b) return a ?? null;
+  return {
+    input_tokens: Math.max(a.input_tokens, b.input_tokens),
+    output_tokens: Math.max(a.output_tokens, b.output_tokens),
+    cache_read_tokens: Math.max(a.cache_read_tokens, b.cache_read_tokens),
+    cache_write_tokens: Math.max(a.cache_write_tokens, b.cache_write_tokens),
+    reasoning_tokens: Math.max(a.reasoning_tokens ?? 0, b.reasoning_tokens ?? 0),
+    total_tokens: a.total_tokens || b.total_tokens,
+    cost:
+      a.cost || b.cost
+        ? {
+            input: Math.max(a.cost?.input ?? 0, b.cost?.input ?? 0),
+            output: Math.max(a.cost?.output ?? 0, b.cost?.output ?? 0),
+            cache_read: Math.max(a.cost?.cache_read ?? 0, b.cost?.cache_read ?? 0),
+            cache_write: Math.max(a.cost?.cache_write ?? 0, b.cost?.cache_write ?? 0),
+            total: Math.max(a.cost?.total ?? 0, b.cost?.total ?? 0),
+          }
+        : undefined,
+  };
+}
+
 export interface SessionRunMetrics {
   model: string;
   /** Where the run executes, shown as the small uppercase label. */
@@ -395,20 +438,24 @@ export interface SessionRunMetrics {
 /**
  * The values the chat input bar reports underneath the message field.
  *
- * `runUsage` is what the live stream has reported for a run the snapshot does
- * not account for yet; folding it in is what keeps the counters moving during
- * a long run instead of freezing until it ends.
+ * `runUsage` is the live delta the snapshot does not account for yet.
+ * `sessionSpend` is a high-water total for this tab, so Stop cannot drop the
+ * bar back to a zero snapshot before persist lands.
  */
 export function runMetrics(
   snapshot: SessionSnapshotResponse | null | undefined,
   entry: ManagedSessionSummary | null | undefined,
   runUsage?: TokenUsage | null,
+  sessionSpend?: TokenUsage | null,
 ): SessionRunMetrics {
   const meta = snapshot?.metadata;
   const summary = entry?.summary;
   const activeRun = snapshot?.active_run ?? entry?.active_run ?? null;
   const active = isActiveRun(activeRun);
   const persisted = tokenUsage(snapshot);
+  const folded = runUsage
+    ? addTokenUsage(persisted, runUsage, runUsage.total_tokens || (persisted?.total_tokens ?? 0))
+    : persisted;
 
   return {
     model: meta?.model ?? summary?.model ?? "--",
@@ -416,8 +463,6 @@ export function runMetrics(
     active,
     startedAt: active && activeRun ? activeRun.started_at_epoch_ms : null,
     lastResponseMs: snapshot?.response_timing.last_response_duration_ms ?? null,
-    usage: runUsage
-      ? addTokenUsage(persisted, runUsage, runUsage.total_tokens || (persisted?.total_tokens ?? 0))
-      : persisted,
+    usage: maxBillableUsage(folded, sessionSpend),
   };
 }

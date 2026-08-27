@@ -35,6 +35,10 @@ pub struct TerminalSession {
     /// Remote process-tree cleanup: backends that return a pidfile from
     /// `terminal_pty_command` get a backend-side kill on session teardown.
     backend_cleanup: Option<(Arc<ExecutionBackend>, String)>,
+    /// Guest PID the host observed after the PTY wrapper published a numeric
+    /// pidfile. Kill uses this pin so a later missing/`cancelled` pidfile
+    /// cannot fake a pre-start tombstone.
+    published_pid: Option<String>,
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
@@ -140,6 +144,7 @@ impl TerminalSession {
             alive,
             exit_code: None,
             backend_cleanup,
+            published_pid: None,
             cwd: resolved_cwd,
             cols,
             rows,
@@ -200,10 +205,35 @@ impl TerminalSession {
         self.child.process_id()
     }
 
-    pub async fn kill(&mut self) -> Result<()> {
-        if let Some((backend, pidfile)) = &self.backend_cleanup {
-            let _ = backend.terminal_pipe_kill(pidfile).await;
+    /// Remember the guest PID once the PTY wrapper publishes it, so later
+    /// pidfile tampering cannot fake a successful cancel.
+    pub async fn observe_published_pid(&mut self) {
+        let Some((backend, pidfile)) = &self.backend_cleanup else {
+            return;
+        };
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match backend.read_published_pid(pidfile).await {
+                Ok(Some(pid)) => {
+                    self.published_pid = Some(pid);
+                    return;
+                }
+                _ => tokio::time::sleep(Duration::from_millis(20)).await,
+            }
         }
+    }
+
+    pub async fn kill(&mut self) -> Result<()> {
+        let backend_result = if let Some((backend, pidfile)) = &self.backend_cleanup {
+            // Only a PID observed while the wrapper was publishing is a pin.
+            // A kill-time cat of the guest-writable pidfile can be `cancelled`
+            // or another number and must not retarget the kill.
+            backend
+                .terminal_pipe_kill(pidfile, self.published_pid.as_deref())
+                .await
+        } else {
+            Ok(())
+        };
 
         self.refresh_status();
         #[cfg(unix)]
@@ -219,6 +249,7 @@ impl TerminalSession {
         self.alive.store(false, Ordering::SeqCst);
         #[cfg(unix)]
         descendant_result?;
+        backend_result?;
         Ok(())
     }
 

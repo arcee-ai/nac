@@ -37,7 +37,12 @@ import {
   fenceSessionSnapshot,
   isCurrentSessionGeneration,
 } from "@/app/services/sessionRefresh";
-import { setOptimisticUserPrompt } from "@/app/store/runtimeStore";
+import {
+  finishRunCancel,
+  requestRunCancel,
+  restoreRunCancel,
+  setOptimisticUserPrompt,
+} from "@/app/store/runtimeStore";
 import type {
   BackendKind,
   BranchList,
@@ -955,6 +960,24 @@ function useInvalidators() {
   };
 }
 
+function idleSessionEntry(entry: ManagedSessionSummary, sessionId: string): ManagedSessionSummary {
+  if (entry.summary.session_id !== sessionId) return entry;
+  if (!entry.active && entry.active_run === undefined) return entry;
+  return { ...entry, active: false, active_run: undefined };
+}
+
+/** Drop a live run from every cache the tab strip and breadcrumbs read. */
+function clearCachedActiveRun(client: QueryClient, sessionId: string): void {
+  client.setQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(sessionId), (current) =>
+    current?.active_run ? { ...current, active_run: undefined } : current,
+  );
+  for (const workspaceStats of [false, true] as const) {
+    client.setQueryData<ManagedSessionSummary[]>(queryKeys.sessions(workspaceStats), (list) =>
+      list?.map((entry) => idleSessionEntry(entry, sessionId)),
+    );
+  }
+}
+
 /**
  * Projects have no event stream, so this refetches on the same cadence as the
  * session list rather than polling: every project mutation invalidates it.
@@ -1244,9 +1267,37 @@ export function useSubmitRun() {
 
 export function useCancelRun() {
   const invalidate = useInvalidators();
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.cancelActiveRun(id),
-    onSuccess: (_data, id) => invalidate.session(id),
+    onMutate: (id) => {
+      const runtime = requestRunCancel();
+      const snapshot = client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id));
+      const sessions = client.getQueryData<ManagedSessionSummary[]>(queryKeys.sessions(false));
+      const sessionsWithStats = client.getQueryData<ManagedSessionSummary[]>(
+        queryKeys.sessions(true),
+      );
+      clearCachedActiveRun(client, id);
+      return { runtime, snapshot, sessions, sessionsWithStats };
+    },
+    onError: (_error, id, previous) => {
+      if (!previous) return;
+      restoreRunCancel(previous.runtime);
+      if (previous.snapshot !== undefined) {
+        client.setQueryData(queryKeys.sessionSnapshot(id), previous.snapshot);
+      }
+      if (previous.sessions !== undefined) {
+        client.setQueryData(queryKeys.sessions(false), previous.sessions);
+      }
+      if (previous.sessionsWithStats !== undefined) {
+        client.setQueryData(queryKeys.sessions(true), previous.sessionsWithStats);
+      }
+    },
+    onSuccess: (_data, id) => {
+      finishRunCancel();
+      void invalidate.session(id);
+      void invalidate.sessions();
+    },
   });
 }
 
