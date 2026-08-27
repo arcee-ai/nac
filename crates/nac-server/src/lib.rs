@@ -15,6 +15,7 @@ pub use compaction::{CompactSessionError, CompactSessionResponse};
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
 };
+pub use delivery::delegation::{StartManagedOrchestratorRequest, StartTraditionalChildRequest};
 pub use delivery::managed_secrets::{
     ManagedSecretList, ManagedSecretSummary, PutManagedSecretRequest,
 };
@@ -73,6 +74,8 @@ use axum::{
 };
 use include_dir::{include_dir, Dir};
 #[cfg(test)]
+use nac_core::store::{TraditionalChildExecutionMode, TraditionalChildRecord};
+#[cfg(test)]
 use nac_core::test_support::store::TranscriptLogWriter;
 use nac_core::{
     commands::{
@@ -108,7 +111,7 @@ use nac_core::{
     store::{
         GoalStatus, InboxDelivery, ManagedOrchestratorExecutionMode, ManagedOrchestratorRecord,
         ManagedOrchestratorStatus, PermissionGrantRecord, SessionGoalRecord, SessionInboxRecord,
-        TraditionalChildExecutionMode, TraditionalChildRecord, UserGoalUpdate,
+        UserGoalUpdate,
     },
     types::Message,
     view::{self, SessionSummarySnapshot},
@@ -973,25 +976,6 @@ pub struct ClearGoalRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct StartTraditionalChildRequest {
-    pub profile: String,
-    pub description: String,
-    pub prompt: String,
-    pub child_session_id: Option<String>,
-    #[serde(default)]
-    pub background: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct StartManagedOrchestratorRequest {
-    pub description: String,
-    pub prompt: String,
-    pub orchestrator_session_id: Option<String>,
-    #[serde(default)]
-    pub background: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ReplyPermissionRequest {
     pub reply: PermissionReply,
 }
@@ -1359,6 +1343,10 @@ impl SessionManager {
 
     pub(crate) fn workspace(&self) -> application::workspace::WorkspaceApplication<'_> {
         application::workspace::WorkspaceApplication::new(self)
+    }
+
+    pub(crate) fn delegation(&self) -> application::delegation::DelegationApplication<'_> {
+        application::delegation::DelegationApplication::new(self)
     }
 
     async fn browse_ssh(
@@ -1950,7 +1938,7 @@ impl SessionManager {
         gate
     }
 
-    async fn attach_session(&self, session_id: &str) -> Result<Arc<SessionService>> {
+    pub(crate) async fn attach_session(&self, session_id: &str) -> Result<Arc<SessionService>> {
         const MAX_ATTEMPTS: usize = 2;
 
         self.sweep_idle_sessions(Some(session_id)).await;
@@ -2393,154 +2381,6 @@ impl SessionManager {
         self.attach_session(session_id)
             .await?
             .clear_direct_goal(goal_id, expected_version)
-    }
-
-    pub async fn list_traditional_children(
-        &self,
-        parent_session_id: &str,
-    ) -> Result<Vec<TraditionalChildRecord>> {
-        let service = self.attach_session(parent_session_id).await?;
-        if service.metadata().behavior == sessions::SessionBehavior::Orchestrator {
-            return Err(anyhow!(
-                "traditional children are available only for direct behaviors"
-            ));
-        }
-        if nac_core::store::load_traditional_child(&self.inner.store_path, parent_session_id)?
-            .is_some()
-        {
-            return Err(anyhow!(
-                "traditional child nesting limit reached (1): child sessions cannot launch children"
-            ));
-        }
-        nac_core::store::list_traditional_children(&self.inner.store_path, parent_session_id)
-    }
-
-    pub async fn start_traditional_child(
-        &self,
-        parent_session_id: &str,
-        request: StartTraditionalChildRequest,
-    ) -> Result<TraditionalChildRecord> {
-        self.attach_session(parent_session_id).await?;
-        let controller = nac_core::traditional_children::controller_for(&self.inner.store_path)?;
-        let background = request.background;
-        let child = controller
-            .start(
-                nac_core::traditional_children::TraditionalChildStartRequest {
-                    parent_session_id: parent_session_id.to_string(),
-                    child_session_id: request.child_session_id,
-                    profile: request.profile,
-                    description: request.description,
-                    prompt: request.prompt,
-                    execution_mode: if background {
-                        TraditionalChildExecutionMode::Background
-                    } else {
-                        TraditionalChildExecutionMode::Foreground
-                    },
-                },
-            )
-            .await?;
-        if background {
-            Ok(child)
-        } else {
-            controller
-                .wait(&child.child_session_id, child.generation)
-                .await
-        }
-    }
-
-    pub fn traditional_child(
-        &self,
-        parent_session_id: &str,
-        child_session_id: &str,
-    ) -> Result<TraditionalChildRecord> {
-        nac_core::store::load_traditional_child_for_parent(
-            &self.inner.store_path,
-            parent_session_id,
-            child_session_id,
-        )?
-        .ok_or_else(|| anyhow!("traditional child was not found"))
-    }
-
-    pub async fn cancel_traditional_child(
-        &self,
-        parent_session_id: &str,
-        child_session_id: &str,
-    ) -> Result<TraditionalChildRecord> {
-        self.traditional_child(parent_session_id, child_session_id)?;
-        let controller = nac_core::traditional_children::controller_for(&self.inner.store_path)?;
-        controller.cancel(parent_session_id, child_session_id).await
-    }
-
-    pub async fn list_managed_orchestrators(
-        &self,
-        parent_session_id: &str,
-    ) -> Result<Vec<ManagedOrchestratorRecord>> {
-        let service = self.attach_session(parent_session_id).await?;
-        if service.metadata().behavior != sessions::SessionBehavior::DirectWithOrchestrator {
-            return Err(anyhow!(
-                "managed orchestrators require direct-with-orchestrator behavior"
-            ));
-        }
-        nac_core::store::list_managed_orchestrators(&self.inner.store_path, parent_session_id)
-    }
-
-    pub fn managed_orchestrator(
-        &self,
-        parent_session_id: &str,
-        orchestrator_session_id: &str,
-    ) -> Result<ManagedOrchestratorRecord> {
-        nac_core::store::load_managed_orchestrator_for_parent(
-            &self.inner.store_path,
-            parent_session_id,
-            orchestrator_session_id,
-        )?
-        .ok_or_else(|| anyhow!("managed orchestrator was not found"))
-    }
-
-    pub async fn start_managed_orchestrator(
-        &self,
-        parent_session_id: &str,
-        request: StartManagedOrchestratorRequest,
-    ) -> Result<ManagedOrchestratorRecord> {
-        self.attach_session(parent_session_id).await?;
-        let controller = nac_core::orchestration_control::controller_for(&self.inner.store_path)?;
-        let background = request.background;
-        let orchestrator = controller
-            .start(
-                nac_core::orchestration_control::ManagedOrchestratorStartRequest {
-                    parent_session_id: parent_session_id.to_string(),
-                    orchestrator_session_id: request.orchestrator_session_id,
-                    description: request.description,
-                    prompt: request.prompt,
-                    execution_mode: if background {
-                        ManagedOrchestratorExecutionMode::Background
-                    } else {
-                        ManagedOrchestratorExecutionMode::Foreground
-                    },
-                },
-            )
-            .await?;
-        if background {
-            Ok(orchestrator)
-        } else {
-            controller
-                .wait(
-                    &orchestrator.orchestrator_session_id,
-                    orchestrator.generation,
-                )
-                .await
-        }
-    }
-
-    pub async fn cancel_managed_orchestrator(
-        &self,
-        parent_session_id: &str,
-        orchestrator_session_id: &str,
-    ) -> Result<ManagedOrchestratorRecord> {
-        self.managed_orchestrator(parent_session_id, orchestrator_session_id)?;
-        nac_core::orchestration_control::controller_for(&self.inner.store_path)?
-            .cancel(parent_session_id, orchestrator_session_id)
-            .await
     }
 
     pub async fn reply_permission_request(
@@ -3798,6 +3638,7 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                 }
             };
             let mut relation = manager
+                .delegation()
                 .managed_orchestrator(&request.parent_session_id, &orchestrator_session_id)?;
             if relation.description != request.description.trim() {
                 return Err(anyhow!(
@@ -3884,8 +3725,9 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
     ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
         Box::pin(async move {
             let manager = self.manager()?;
-            let relation =
-                manager.managed_orchestrator(parent_session_id, orchestrator_session_id)?;
+            let relation = manager
+                .delegation()
+                .managed_orchestrator(parent_session_id, orchestrator_session_id)?;
             if relation.status != ManagedOrchestratorStatus::Running {
                 return Err(anyhow!("managed orchestrator is not running"));
             }
@@ -3910,7 +3752,9 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                     instruction,
                 )?;
             }
-            manager.managed_orchestrator(parent_session_id, orchestrator_session_id)
+            manager
+                .delegation()
+                .managed_orchestrator(parent_session_id, orchestrator_session_id)
         })
     }
 
@@ -3924,7 +3768,9 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
         Box::pin(async move {
             let manager = self.manager()?;
             let operations = orchestration::OrchestrationOperations::new(manager.clone());
-            manager.managed_orchestrator(parent_session_id, orchestrator_session_id)?;
+            manager
+                .delegation()
+                .managed_orchestrator(parent_session_id, orchestrator_session_id)?;
             match kind {
                 nac_core::orchestration_control::ManagedOrchestratorReadKind::Messages => {
                     let page = operations
@@ -3960,8 +3806,9 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
     ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
         Box::pin(async move {
             let manager = self.manager()?;
-            let relation =
-                manager.managed_orchestrator(parent_session_id, orchestrator_session_id)?;
+            let relation = manager
+                .delegation()
+                .managed_orchestrator(parent_session_id, orchestrator_session_id)?;
             if relation.status != ManagedOrchestratorStatus::Running {
                 return Ok(relation);
             }
@@ -4336,15 +4183,18 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(update_direct_inbox_item, cancel_direct_inbox_item))
         .routes(routes!(get_direct_goal, create_direct_goal))
         .routes(routes!(update_direct_goal, clear_direct_goal))
-        .routes(routes!(list_traditional_children, start_traditional_child))
-        .routes(routes!(get_traditional_child))
-        .routes(routes!(cancel_traditional_child))
         .routes(routes!(
-            list_managed_orchestrators,
-            start_managed_orchestrator
+            delivery::delegation::list_traditional_children,
+            delivery::delegation::start_traditional_child
         ))
-        .routes(routes!(get_managed_orchestrator))
-        .routes(routes!(cancel_managed_orchestrator))
+        .routes(routes!(delivery::delegation::get_traditional_child))
+        .routes(routes!(delivery::delegation::cancel_traditional_child))
+        .routes(routes!(
+            delivery::delegation::list_managed_orchestrators,
+            delivery::delegation::start_managed_orchestrator
+        ))
+        .routes(routes!(delivery::delegation::get_managed_orchestrator))
+        .routes(routes!(delivery::delegation::cancel_managed_orchestrator))
         .routes(routes!(permission_state))
         .routes(routes!(reply_permission_request))
         .routes(routes!(delete_permission_grant))
@@ -5179,159 +5029,6 @@ async fn clear_direct_goal(
         .clear_direct_goal(&session_id, &goal_id, request.expected_version)
         .await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/children",
-    operation_id = "get_sessions_session_id_children",
-    tag = "conversation",
-    params(("session_id" = String, Path)),
-    responses((status = 200, description = "Traditional children", body = Vec<TraditionalChildRecord>, content_type = "application/json"), (status = 400, description = "Direct behavior required", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Session not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn list_traditional_children(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<Vec<TraditionalChildRecord>>, ApiError> {
-    Ok(Json(manager.list_traditional_children(&session_id).await?))
-}
-
-#[utoipa::path(
-    post,
-    path = "/sessions/{session_id}/children",
-    operation_id = "post_sessions_session_id_children",
-    tag = "conversation",
-    params(("session_id" = String, Path)),
-    request_body(content = StartTraditionalChildRequest, content_type = "application/json"),
-    responses((status = 201, description = "Child created, continued, or steered", body = TraditionalChildRecord, content_type = "application/json"), (status = 400, description = "Invalid child request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Session not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Child concurrency or run conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn start_traditional_child(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-    payload: std::result::Result<Json<StartTraditionalChildRequest>, JsonRejection>,
-) -> std::result::Result<(StatusCode, Json<TraditionalChildRecord>), ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    Ok((
-        StatusCode::CREATED,
-        Json(
-            manager
-                .start_traditional_child(&session_id, request)
-                .await?,
-        ),
-    ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/children/{child_session_id}",
-    operation_id = "get_sessions_session_id_children_child_session_id",
-    tag = "conversation",
-    params(("session_id" = String, Path), ("child_session_id" = String, Path)),
-    responses((status = 200, description = "Traditional child status", body = TraditionalChildRecord, content_type = "application/json"), (status = 404, description = "Child not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn get_traditional_child(
-    State(manager): State<SessionManager>,
-    AxumPath((session_id, child_session_id)): AxumPath<(String, String)>,
-) -> std::result::Result<Json<TraditionalChildRecord>, ApiError> {
-    Ok(Json(
-        manager.traditional_child(&session_id, &child_session_id)?,
-    ))
-}
-
-#[utoipa::path(
-    post,
-    path = "/sessions/{session_id}/children/{child_session_id}/cancel",
-    operation_id = "post_sessions_session_id_children_child_session_id_cancel",
-    tag = "conversation",
-    params(("session_id" = String, Path), ("child_session_id" = String, Path)),
-    responses((status = 200, description = "Traditional child cancelled", body = TraditionalChildRecord, content_type = "application/json"), (status = 404, description = "Child not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Child run is remote or unavailable", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn cancel_traditional_child(
-    State(manager): State<SessionManager>,
-    AxumPath((session_id, child_session_id)): AxumPath<(String, String)>,
-) -> std::result::Result<Json<TraditionalChildRecord>, ApiError> {
-    Ok(Json(
-        manager
-            .cancel_traditional_child(&session_id, &child_session_id)
-            .await?,
-    ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/orchestrators",
-    operation_id = "get_sessions_session_id_orchestrators",
-    tag = "conversation",
-    params(("session_id" = String, Path)),
-    responses((status = 200, description = "Managed orchestrators", body = Vec<ManagedOrchestratorRecord>, content_type = "application/json"), (status = 400, description = "Direct-with-orchestrator behavior required", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Session not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn list_managed_orchestrators(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<Vec<ManagedOrchestratorRecord>>, ApiError> {
-    Ok(Json(manager.list_managed_orchestrators(&session_id).await?))
-}
-
-#[utoipa::path(
-    post,
-    path = "/sessions/{session_id}/orchestrators",
-    operation_id = "post_sessions_session_id_orchestrators",
-    tag = "conversation",
-    params(("session_id" = String, Path)),
-    request_body(content = StartManagedOrchestratorRequest, content_type = "application/json"),
-    responses((status = 201, description = "Orchestrator created, continued, or steered", body = ManagedOrchestratorRecord, content_type = "application/json"), (status = 400, description = "Invalid orchestrator request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Session not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Orchestrator concurrency or run conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn start_managed_orchestrator(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-    payload: std::result::Result<Json<StartManagedOrchestratorRequest>, JsonRejection>,
-) -> std::result::Result<(StatusCode, Json<ManagedOrchestratorRecord>), ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    Ok((
-        StatusCode::CREATED,
-        Json(
-            manager
-                .start_managed_orchestrator(&session_id, request)
-                .await?,
-        ),
-    ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/orchestrators/{orchestrator_session_id}",
-    operation_id = "get_sessions_session_id_orchestrators_orchestrator_session_id",
-    tag = "conversation",
-    params(("session_id" = String, Path), ("orchestrator_session_id" = String, Path)),
-    responses((status = 200, description = "Managed orchestrator status", body = ManagedOrchestratorRecord, content_type = "application/json"), (status = 404, description = "Orchestrator not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn get_managed_orchestrator(
-    State(manager): State<SessionManager>,
-    AxumPath((session_id, orchestrator_session_id)): AxumPath<(String, String)>,
-) -> std::result::Result<Json<ManagedOrchestratorRecord>, ApiError> {
-    Ok(Json(manager.managed_orchestrator(
-        &session_id,
-        &orchestrator_session_id,
-    )?))
-}
-
-#[utoipa::path(
-    post,
-    path = "/sessions/{session_id}/orchestrators/{orchestrator_session_id}/cancel",
-    operation_id = "post_sessions_session_id_orchestrators_orchestrator_session_id_cancel",
-    tag = "conversation",
-    params(("session_id" = String, Path), ("orchestrator_session_id" = String, Path)),
-    responses((status = 200, description = "Managed orchestrator cancelled", body = ManagedOrchestratorRecord, content_type = "application/json"), (status = 404, description = "Orchestrator not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Orchestrator run unavailable", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn cancel_managed_orchestrator(
-    State(manager): State<SessionManager>,
-    AxumPath((session_id, orchestrator_session_id)): AxumPath<(String, String)>,
-) -> std::result::Result<Json<ManagedOrchestratorRecord>, ApiError> {
-    Ok(Json(
-        manager
-            .cancel_managed_orchestrator(&session_id, &orchestrator_session_id)
-            .await?,
-    ))
 }
 
 #[utoipa::path(
