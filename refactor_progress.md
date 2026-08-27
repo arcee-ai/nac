@@ -274,7 +274,7 @@ Rules:
   topology, permission denial, mutation/retention/cancellation, MCP, and web
   family suites.
 
-### M6 — Generated API contract and frontend features (in progress)
+### M6 — Generated API contract and frontend features (implementation complete; final E2E gate in M8)
 
 - Make the Rust/OpenAPI document generate a deterministic checked-in TypeScript
   contract (or an equivalently strict generated compile-time contract) with a
@@ -300,7 +300,7 @@ Rules:
   hashed assets. The source and synchronized bundle are staged together, after
   which the complete asset gate must be rerun from a clean candidate.
 
-### M7 — Durable agent navigation (pending)
+### M7 — Durable agent navigation (in progress)
 
 - Replace root `AGENTS.md` with a stable topology/dependency/placement/invariant
   guide and exact commands/generated-file/reference policies.
@@ -394,6 +394,10 @@ Rules:
 - `c6fe667 refactor(managed): own readiness and secret use cases` — completes
   managed readiness facts and application/delivery ownership for generic
   secret administration.
+- `19a4235 refactor(web): organize managed host feature` — moves managed host
+  model/query/controller/presentation ownership under one feature boundary,
+  splits the host modal into focused panels, preserves compatibility exports,
+  adds pure model regressions, and commits the synchronized production bundle.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -887,6 +891,19 @@ Rules:
   tests, and warning-denied core/server checks pass. The process-cleanup
   frontend cases require authorized process-table access; their confined
   `EPERM` run was non-authoritative and the authorized rerun was green.
+- Managed frontend behavior now lives under
+  `src/app/features/managed/{model,queries,controller,presentation}`. The former
+  456-line host modal is a 50-line layout shell over status, GitHub, and secret
+  panels; the 322-line repository workflow retains polling, abort, invalidation,
+  toast, cancellation, and navigation semantics. All 178 frontend tests,
+  typecheck, lint, and format check pass. `make test-assets` passes from commit
+  `19a4235` with the OpenAPI/type drift checks and production build clean.
+- The M7 candidate replaces the untracked branch research brief with a stable
+  root ownership/dependency guide, adds substantive guides at the core, tool,
+  permission, session lifecycle, session snapshot, store, managed, server, web,
+  and managed-image boundaries, and records accepted dependency-direction and
+  generated-contract decisions under `docs/architecture/`. Guide read-back,
+  link/placement audit, and commit remain pending.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -902,7 +919,8 @@ Rules:
 
 ## Exact next action
 
-Stage only the managed feature extraction, its import updates, the synchronized
-production bundle, and this handoff; inspect the staged diff and commit the M6
-feature slice. Rerun `make test-assets` from that clean candidate, then begin
-the M7 root/nested repository guides and focused architecture decisions.
+Audit every M7 guide against its nearest implementation and required purpose,
+invariant, dependency, starting-file, command, generated-artifact, and placement
+contract. Run Markdown/link and diff checks, stage only the guides, architecture
+records, documentation index, and this handoff, then commit the navigation
+milestone before starting the final integration audit.
