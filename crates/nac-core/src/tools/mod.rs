@@ -31,6 +31,7 @@ pub mod glob;
 pub(crate) mod goal;
 pub mod grep;
 pub mod kernel;
+mod mcp_adapter;
 pub(crate) mod mutation;
 pub(crate) mod orchestrator;
 pub mod read;
@@ -896,9 +897,14 @@ pub async fn execute_tool_with_context(
                 is_error: true,
             };
         };
-        return registry
-            .call_tool(name, args, client.supports_image_tool_results())
-            .await;
+        return mcp_adapter::invoke(
+            Arc::clone(registry),
+            name,
+            args,
+            kernel::ToolServices { runtime, client },
+            context,
+        )
+        .await;
     }
 
     let direct = worker_tool_registry(client.supports_image_tool_results())

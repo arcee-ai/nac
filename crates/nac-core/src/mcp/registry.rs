@@ -99,6 +99,13 @@ fn file_servers_for_policy(
 }
 
 impl McpRegistry {
+    #[cfg(test)]
+    pub(crate) fn empty_for_test() -> Self {
+        Self {
+            tools: Arc::new(HashMap::new()),
+        }
+    }
+
     /// Loads the configured MCP servers and reports every server that was
     /// skipped and why — including a broken `config.toml`, which is reported
     /// as a single skip named after the config path — so the caller can
@@ -251,6 +258,12 @@ impl McpRegistry {
             .collect();
         definitions.sort_by(|left, right| left.function.name.cmp(&right.function.name));
         definitions
+    }
+
+    pub(crate) fn tool_definition(&self, name: &str) -> Option<ToolDefinition> {
+        self.tools
+            .get(name)
+            .map(|binding| binding.definition.clone())
     }
 
     pub async fn call_tool(&self, name: &str, args: Value, image_results: bool) -> ToolResult {
