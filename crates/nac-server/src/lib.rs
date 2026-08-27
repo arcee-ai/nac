@@ -12,6 +12,7 @@ mod orchestration;
 mod revert;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
+pub use delivery::model_configurations::ModelConfigurationList;
 pub use delivery::projects::{
     AssignSessionRequest, CreateProjectRequest, DeleteProjectQuery, DeleteProjectResponse,
     DeleteProjectSessions, ProjectList, ReorderProjectsRequest, ReorderProjectsResponse,
@@ -920,11 +921,6 @@ pub struct UpdateModelConfigurationRequest {
     pub light_model: RequestField<LightModelSettings>,
 }
 
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct ModelConfigurationList {
-    pub configurations: Vec<ModelConfigurationRecord>,
-}
-
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ModelConfigFromFileRequest {
     pub path: String,
@@ -1486,6 +1482,14 @@ impl SessionManager {
 
     pub(crate) fn projects(&self) -> application::projects::ProjectApplication<'_> {
         application::projects::ProjectApplication::new(self)
+    }
+
+    pub(crate) fn model_configurations(
+        &self,
+    ) -> application::model_configurations::ModelConfigurationApplication<'_> {
+        application::model_configurations::ModelConfigurationApplication::new(
+            &self.inner.store_path,
+        )
     }
 
     pub(crate) fn ssh_configurations(
@@ -4677,7 +4681,7 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(browse_ssh_handler))
         .routes(routes!(provider_models_handler))
         .routes(routes!(
-            list_model_configs_handler,
+            delivery::model_configurations::list_handler,
             create_model_config_handler
         ))
         .routes(routes!(
@@ -4693,7 +4697,7 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(model_config_from_file_handler))
         .routes(routes!(
             update_model_config_handler,
-            delete_model_config_handler
+            delivery::model_configurations::delete_handler
         ))
         .routes(routes!(saved_model_config_models_handler))
         .routes(routes!(
@@ -5232,21 +5236,6 @@ async fn provider_models_handler(
     Ok(Json(ProviderModelList { base_url, models }))
 }
 
-#[utoipa::path(
-    get,
-    path = "/model-configs",
-    operation_id = "get_model_configs",
-    tag = "model-configs",
-    responses((status = 200, description = "Success", body = ModelConfigurationList, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn list_model_configs_handler(
-    State(manager): State<SessionManager>,
-) -> std::result::Result<Json<ModelConfigurationList>, ApiError> {
-    let configurations =
-        model_configurations::list_model_configurations(&manager.inner.store_path)?;
-    Ok(Json(ModelConfigurationList { configurations }))
-}
-
 /// Save a validated provider setup under a name.
 ///
 /// The key is filed in the credential store under a generated name that the
@@ -5738,44 +5727,6 @@ async fn resolve_configuration(
         models,
         models_error,
     }))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/model-configs/{config_id}",
-    operation_id = "delete_model_configs_config_id",
-    tag = "model-configs",
-    params(("config_id" = String, Path)),
-    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Configuration is a project default", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn delete_model_config_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(config_id): AxumPath<String>,
-) -> std::result::Result<StatusCode, ApiError> {
-    let record =
-        model_configurations::load_model_configuration(&manager.inner.store_path, &config_id)?;
-    model_configurations::delete_model_configuration(&manager.inner.store_path, &config_id)?;
-
-    // Only a key this server filed away is ours to drop; a hand-configured
-    // environment variable name belongs to the operator. The light model can
-    // hold a generated key the top level already rotated off, so both are
-    // swept.
-    let generated: std::collections::BTreeSet<&str> = record
-        .api_key_env
-        .as_deref()
-        .into_iter()
-        .chain(
-            record
-                .light_model
-                .as_ref()
-                .and_then(|light| light.api_key_env.as_deref()),
-        )
-        .filter(|name| name.starts_with(GENERATED_CREDENTIAL_PREFIX))
-        .collect();
-    for name in generated {
-        let _ = remove_api_key(name);
-    }
-    Ok(StatusCode::NO_CONTENT)
 }
 
 fn managed_secret_store(
