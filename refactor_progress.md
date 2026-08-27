@@ -605,6 +605,13 @@ Rules:
   consumers. Cached/uncached recovery, event-epoch rotation, ordinary no-
   sidecar attachment, resource-lease ordering, the full test build, and
   warning-denied Clippy pass. Server `lib.rs` is now 4,483 lines.
+- Session creation and first-chat admission now belong to a focused 220-line
+  application owner. Project location/default inheritance, SSH/sandbox
+  exclusion, model/light-model/credential destination preflight, runtime
+  construction, resource-lease acquisition, and cache publication remain one
+  transaction. SSH/sandbox rejection, inheritance/null behavior, managed
+  credential preflight, invalid backend/effort rejection, the full test build,
+  and warning-denied Clippy pass. Server `lib.rs` is now 4,314 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -620,7 +627,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the attachment/recovery slice
-without protected files. Then move session creation and configuration's pure
-validation/transport-independent command contract. Keep lifecycle gates,
-operation leases, and exact settlement ordering in their coordinator.
+Inspect exact worktree/staged diffs and commit the session-creation slice
+without protected files. Then move creation/configuration pure validation and
+their transport-independent command contracts. Keep lifecycle gates, operation
+leases, and exact settlement ordering in their coordinator.
