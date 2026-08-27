@@ -94,6 +94,8 @@ pub fn is_sqlite_busy(error: &anyhow::Error) -> bool {
 /// kinds exist so the panel can still show what a thread was asked to do and
 /// how it died, which is otherwise lost the moment the worker is killed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(rename_all = "snake_case"))]
 pub enum EpisodeStatus {
     Ok,
     Error,

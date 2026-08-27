@@ -2,6 +2,7 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "sortPackageJson": false,
   "ignorePatterns": [
+    "openapi.json",
     "src/app/atoms/file-icon/manifest.generated.ts",
     "src/app/atoms/file-icon/icons/**"
   ]

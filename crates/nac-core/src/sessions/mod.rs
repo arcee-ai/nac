@@ -102,13 +102,18 @@ pub struct RawSessionConfig {
     pub session_id: String,
     pub model: String,
     pub base_url: String,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub backend: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub reasoning_effort: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub api_key_env: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub extra_headers_json: Option<String>,
     /// Light worker model; `None` keeps single-model dispatch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light_model: Option<LightModelSettings>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub orchestrator_compaction_threshold: Option<u64>,
     pub config_version: i64,
     /// Structural parse failures in the persisted values. These are diagnostics,

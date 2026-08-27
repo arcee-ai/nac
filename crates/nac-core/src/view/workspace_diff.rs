@@ -15,8 +15,10 @@ const WORKSPACE_DIFF_MAX_LINE_CHARS: usize = 20_000;
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceFileDiff {
     pub path: String,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub old_path: Option<String>,
     pub sections: Vec<WorkspaceDiffSection>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub error: Option<String>,
 }
 
@@ -31,6 +33,7 @@ pub struct WorkspaceDiffSection {
     pub additions: u64,
     pub deletions: u64,
     pub hunks: Vec<WorkspaceDiffHunk>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub error: Option<String>,
 }
 
@@ -41,6 +44,7 @@ pub struct WorkspaceDiffHunk {
     pub old_lines: usize,
     pub new_start: usize,
     pub new_lines: usize,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub function_context: Option<String>,
     pub lines: Vec<WorkspaceDiffLine>,
 }
@@ -49,7 +53,9 @@ pub struct WorkspaceDiffHunk {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceDiffLine {
     pub kind: String,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub old_lineno: Option<usize>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub new_lineno: Option<usize>,
     pub content: String,
     pub has_trailing_newline: bool,

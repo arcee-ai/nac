@@ -274,7 +274,7 @@ Rules:
   topology, permission denial, mutation/retention/cancellation, MCP, and web
   family suites.
 
-### M6 — Generated API contract and frontend features (pending)
+### M6 — Generated API contract and frontend features (in progress)
 
 - Make the Rust/OpenAPI document generate a deterministic checked-in TypeScript
   contract (or an equivalently strict generated compile-time contract) with a
@@ -860,6 +860,20 @@ Rules:
   this deliberate exception must be recorded in the nested tool guide. All
   eight tests pass with authorized loopback fixtures and the warning-denied
   core check is green.
+- The assembled Rust/OpenAPI router now exposes one state-free document seam
+  shared by the live `/openapi.json` route and an offline exporter. The checked-
+  in 3.1 document drives a dependency-free, fail-closed TypeScript schema
+  generator; `make test-api-contract` verifies both artifacts without mutation,
+  and `test-assets` now depends on that drift gate. The stable `api.ts` surface
+  fell from 1,592 handwritten lines to 458 lines of generated aliases and
+  intentional frontend refinements; 142 same-name DTO declarations plus the
+  managed/GitHub/catalog aliases now derive from 202 generated schemas.
+  Required-nullable and constrained-enum OpenAPI corrections were added at the
+  Rust owners without changing serialization. Contract generation, frontend
+  typecheck/format/lint, all 175 frontend tests, both OpenAPI router/schema
+  tests, and warning-denied core/server checks pass. The process-cleanup
+  frontend cases require authorized process-table access; their confined
+  `EPERM` run was non-authoritative and the authorized rerun was green.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -875,7 +889,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M4/M5 discovery/web ownership slice with exact-path staging. Then
-begin M6 by inventorying the OpenAPI generation path, handwritten frontend API
-types, managed feature/query ownership, frontend checks, and committed asset
-writer before choosing the smallest deterministic contract-generation seam.
+Commit the first M6 generated-contract slice with exact-path staging. Then move
+managed frontend state, queries, controller hooks, and presentation under a
+real feature boundary, split the two managed workflow modals by responsibility,
+run the frontend/asset gates, and commit the synchronized production bundle.

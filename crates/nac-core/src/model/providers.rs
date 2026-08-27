@@ -51,6 +51,7 @@ pub fn provider_uses_api_key(backend: BackendKind) -> bool {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ProviderModel {
     pub id: String,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub display_name: Option<String>,
 }
 

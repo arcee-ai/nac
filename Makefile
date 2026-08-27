@@ -1,4 +1,4 @@
-.PHONY: all build dev demo release install ci test test-rust test-web test-assets test-e2e test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all build dev demo release install ci test test-rust test-web generate-api-contract test-api-contract test-assets test-e2e test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -82,9 +82,19 @@ test-rust:
 test-web:
 	npm --prefix $(WEB_DIR) test
 
+## Regenerate the checked-in OpenAPI document and frontend schema types
+generate-api-contract:
+	$(CARGO) run --locked -p nac-server --example export-openapi -- $(WEB_DIR)/openapi.json
+	npm --prefix $(WEB_DIR) run generate:api
+
+## Fail when Rust routes/schemas and checked-in frontend contract types drift
+test-api-contract:
+	$(CARGO) run --locked -p nac-server --example export-openapi -- --check $(WEB_DIR)/openapi.json
+	npm --prefix $(WEB_DIR) run check:api
+
 # Mirrors the release workflow: the bundle under assets/dist is committed, so a
 # stale one has to fail here rather than in CI.
-test-assets:
+test-assets: test-api-contract
 	npm --prefix $(WEB_DIR) run lint
 	npm --prefix $(WEB_DIR) run typecheck
 	npm --prefix $(WEB_DIR) run build

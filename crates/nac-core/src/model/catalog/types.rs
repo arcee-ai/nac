@@ -120,12 +120,16 @@ impl ThinkingLevelMap {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ModelCostRates {
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub input: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub output: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub cache_read: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub cache_write: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tiers: Option<Vec<CostTier>>,
@@ -140,14 +144,19 @@ pub struct ModelCostRates {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CostTier {
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub input_tokens_above: u64,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub input: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub output: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub cache_read: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub cache_write: f64,
 }
 
@@ -307,6 +316,7 @@ pub struct DefaultLimits {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ModelEntry {
     pub id: String,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub display_name: Option<String>,
     pub context_window: u64,
     pub max_tokens: u64,
@@ -329,12 +339,15 @@ pub struct ProviderListing {
     /// login command (managed providers) when `auth_status` is
     /// `no_credential`; `None` when ready or when no conventional name is
     /// known.
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub auth_hint: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub managed_base_url: Option<String>,
     /// The provider's catalog endpoint default (models.dev `api` or the
     /// curated SDK-default URL; hand-seeded for arcee-api); `None` for the
     /// managed providers. An absent request `base_url` materializes to it
     /// at settings resolution.
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub default_base_url: Option<String>,
     pub default_limits: DefaultLimits,
     pub models: Vec<ModelEntry>,

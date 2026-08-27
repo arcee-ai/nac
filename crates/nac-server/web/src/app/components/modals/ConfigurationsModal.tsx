@@ -47,6 +47,7 @@ import {
 import type {
   BackendKind,
   ModelConfigurationRecord,
+  ReasoningEffort,
   UpdateModelConfigurationRequest,
 } from "@/app/types/api";
 
@@ -293,6 +294,9 @@ function ConfigurationForm({
     }
 
     const threshold = compaction.trim() ? Number(compaction.trim()) : 0;
+    // SAFETY: this value comes exclusively from REASONING_ITEMS, whose ids are
+    // the generated ReasoningEffort values plus the empty "not set" sentinel.
+    const selectedReasoning = reasoning ? (reasoning as ReasoningEffort) : null;
     if (!Number.isSafeInteger(threshold) || threshold < 0) {
       setError("The compaction threshold must be a whole number, or 0 to disable it.");
       return;
@@ -310,7 +314,7 @@ function ConfigurationForm({
           name: name.trim(),
           backend,
           model: chosenModel.trim(),
-          reasoning_effort: reasoning || null,
+          reasoning_effort: selectedReasoning,
           extra_headers: extraHeaders,
           orchestrator_compaction_threshold: threshold,
           initial_prompt: prompt.trim() || null,
@@ -333,7 +337,7 @@ function ConfigurationForm({
           model: chosenModel.trim(),
           base_url: baseUrl.trim() || null,
           api_key: needsKey ? apiKey.trim() : null,
-          reasoning_effort: reasoning || null,
+          reasoning_effort: selectedReasoning,
           extra_headers: extraHeaders,
           orchestrator_compaction_threshold: threshold,
           initial_prompt: prompt.trim() || null,

@@ -239,7 +239,7 @@ let logSequence = 0;
  * Append what an event says about a thread to that thread's log, dropping
  * whatever has scrolled out of reach.
  */
-function pushThreadLog(name: string | undefined, event: AgentEvent) {
+function pushThreadLog(name: string | null | undefined, event: AgentEvent) {
   if (!name) return;
   logSequence += 1;
   const line = threadLogLine(event, logSequence);

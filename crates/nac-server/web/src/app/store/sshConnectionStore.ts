@@ -44,8 +44,8 @@ export function sshTargetFromSummary(
   summary:
     | {
         ssh_host: string | null;
-        ssh_port?: number;
-        ssh_identity_file?: string;
+        ssh_port?: number | null;
+        ssh_identity_file?: string | null;
       }
     | null
     | undefined,
