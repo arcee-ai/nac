@@ -220,7 +220,7 @@ Rules:
 - Verification: exact before/after test inventory, focused crate tests,
   `make check`, format, and lint before the coherent milestone commit.
 
-### M2 — Thin server and focused application services (in progress)
+### M2 — Thin server and focused application services (complete)
 
 - Extract transport DTOs/OpenAPI, error mapping, router composition, server
   lifecycle/frontend serving, and thin handler modules.
@@ -652,6 +652,16 @@ Rules:
   Create inheritance/null handling, invalid required fields, SSH/sandbox
   exclusion, OpenAPI parity, the complete test build, and warning-denied
   server check pass.
+- Creation defaults and sibling inheritance now live with the session-creation
+  application service. A separate 249-line request-validation owner holds
+  model tuple parsing, destination policy, compaction thresholds, sandbox
+  conversion, and steering validation shared by creation/configuration.
+  `delivery::error` owns all HTTP status and body mapping. The crate root is
+  now 1,726 lines of server state/composition, lifecycle gates, internal
+  orchestration monitors, and compatibility facades rather than handlers,
+  routers, DTO definitions, validation, or error mapping. The complete server
+  suite passes 148 library and 23 CLI tests in addition to warning-denied
+  Clippy, so M2 acceptance is complete.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -667,7 +677,7 @@ Rules:
 
 ## Exact next action
 
-Commit the transport-neutral creation command with exact-path staging. Move the
-remaining shared creation/configuration validators to an application owner,
-extract error mapping from composition, and then run the full server suite to
-close M2 before starting M4.
+Commit the final M2 request-validation/error-mapping slice with exact-path
+staging, then begin M4 at `nac-core::session_service`: inventory its remaining
+production responsibilities and extract one characterization-backed owner at a
+time without changing durable admission, settlement, or recovery ordering.

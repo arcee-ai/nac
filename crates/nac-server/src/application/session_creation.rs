@@ -1,23 +1,144 @@
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{anyhow, Result};
 use nac_core::{
     light_model::{LightModelError, LightModelSettings},
     model::provider_for_model,
+    model_configurations::ModelConfigurationRecord,
     projects,
     runtime::{self, NacConfig, OptionalModelOption, RunOptions, StoreOptions},
     session_service::{SessionFrontendSnapshot, SessionService},
-    sessions::SessionBehavior,
+    sessions::{self, SessionBehavior},
 };
 
 use crate::{
-    apply_project_model_defaults, apply_sibling_model_defaults,
     create_compaction_threshold_override, enforce_trusted_base_url, light_model, model_options,
-    newest_project_session, project_location_conflicts, request_configuration_error_from,
-    sandbox_options, sandbox_requested, ResolvedLaunchLocation, SessionManager, SshRequest,
+    nonblank, request_configuration_error_from, sandbox_options, sandbox_requested,
+    ResolvedLaunchLocation, SessionManager, SshRequest,
 };
 
 use super::Field;
+
+fn project_location_conflicts(request: &SessionCreationCommand) -> bool {
+    request
+        .cwd
+        .as_ref()
+        .is_some_and(|cwd| !cwd.as_os_str().to_string_lossy().trim().is_empty())
+        || nonblank(request.ssh_host.clone()).is_some()
+        || request.ssh_port.is_some()
+        || nonblank(request.ssh_identity_file.clone()).is_some()
+}
+
+fn inherit_project_field<T>(field: &mut Field<T>, inherited: Field<T>) {
+    if matches!(field, Field::Unchanged) {
+        *field = inherited;
+    }
+}
+
+fn apply_project_model_defaults(
+    request: &mut SessionCreationCommand,
+    defaults: ModelConfigurationRecord,
+) {
+    inherit_project_field(&mut request.model, Field::Set(defaults.model));
+    inherit_project_field(&mut request.base_url, Field::Set(defaults.base_url));
+    inherit_project_field(&mut request.backend, Field::Set(defaults.backend));
+    inherit_project_field(
+        &mut request.reasoning_effort,
+        defaults
+            .reasoning_effort
+            .map(Field::Set)
+            .unwrap_or(Field::Clear),
+    );
+    inherit_project_field(
+        &mut request.api_key_env,
+        defaults.api_key_env.map(Field::Set).unwrap_or(Field::Clear),
+    );
+    inherit_project_field(
+        &mut request.extra_headers,
+        Field::Set(defaults.extra_headers),
+    );
+    if let Some(threshold) = defaults.orchestrator_compaction_threshold {
+        inherit_project_field(
+            &mut request.orchestrator_compaction_threshold,
+            Field::Set(threshold),
+        );
+    }
+    inherit_project_field(
+        &mut request.light_model,
+        defaults.light_model.map(Field::Set).unwrap_or(Field::Clear),
+    );
+}
+
+/// The chat a project's model settings are read off when the project names no
+/// default configuration of its own.
+///
+/// A project set up from a one-off model pick has no saved configuration to
+/// point at, which used to leave its every later chat unlaunchable: nothing said
+/// what to run it on. Its existing chats do say, so the newest one stands in —
+/// and being the newest, it also tracks the project as its chats are retuned,
+/// rather than pinning it to whatever was chosen the day it was created.
+///
+/// A chat whose own stored configuration no longer parses has nothing to lend,
+/// and is passed over so one broken row cannot make the project unusable.
+fn newest_project_session(
+    store_path: &Path,
+    project_id: &str,
+) -> Option<sessions::SessionSnapshot> {
+    let mut candidates: Vec<_> = sessions::list_sessions(store_path)
+        .ok()?
+        .into_iter()
+        .filter(|summary| summary.project_id.as_deref() == Some(project_id))
+        .collect();
+    candidates.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    candidates
+        .into_iter()
+        .find_map(|summary| sessions::load_session(store_path, &summary.session_id).ok())
+}
+
+/// Same inheritance as `apply_project_model_defaults`, sourced from a sibling
+/// chat instead of a saved configuration.
+fn apply_sibling_model_defaults(
+    request: &mut SessionCreationCommand,
+    sibling: sessions::SessionSnapshot,
+) {
+    inherit_project_field(&mut request.model, Field::Set(sibling.model));
+    inherit_project_field(&mut request.base_url, Field::Set(sibling.base_url));
+    inherit_project_field(
+        &mut request.backend,
+        Field::Set(sibling.backend.as_str().to_string()),
+    );
+    inherit_project_field(
+        &mut request.reasoning_effort,
+        sibling
+            .reasoning_effort
+            .map(|effort| Field::Set(effort.as_str().to_string()))
+            .unwrap_or(Field::Clear),
+    );
+    inherit_project_field(
+        &mut request.api_key_env,
+        sibling.api_key_env.map(Field::Set).unwrap_or(Field::Clear),
+    );
+    inherit_project_field(
+        &mut request.extra_headers,
+        Field::Set(sibling.extra_headers),
+    );
+    if let Some(threshold) = sibling.orchestrator_compaction_threshold {
+        inherit_project_field(
+            &mut request.orchestrator_compaction_threshold,
+            Field::Set(threshold),
+        );
+    }
+    inherit_project_field(
+        &mut request.light_model,
+        sibling.light_model.map(Field::Set).unwrap_or(Field::Clear),
+    );
+}
+
+/// Marks credential names this server generated for a saved configuration, so
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SessionCreationCommand {
