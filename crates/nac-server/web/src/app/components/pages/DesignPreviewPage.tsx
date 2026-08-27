@@ -18,6 +18,7 @@ import {
   type DateStringRange,
   EditableHeader,
   EditableHeaderSize,
+  ForkSessionItem,
   Icon,
   IconName,
   Input,
@@ -319,11 +320,19 @@ export default function DesignPreviewPage() {
               <ChatSessionTab title="Fix the parser" active />
               <ChatSessionTab title="Rewrite the store layer" />
               <ChatSessionTab title="Investigating" running />
+              <ChatSessionTab title="Fork: Fix the parser" forkedFromTitle="Fix the parser" />
+              <ChatSessionTab title="Fork running" forkedFromTitle="Fix the parser" running />
             </div>
             <div className="flex flex-col gap-1 max-w-[320px]">
               <ChatSessionButton title="Fix the parser" active />
               <ChatSessionButton title="Rewrite the store layer" />
               <ChatSessionButton title="Investigating" running />
+              <ChatSessionButton title="Fork: Fix the parser" forkedFromTitle="Fix the parser" />
+              <ChatSessionButton title="Fork running" forkedFromTitle="Fix the parser" running />
+            </div>
+            <div className="flex flex-col gap-2 max-w-[320px]">
+              <ForkSessionItem sessionId="14231vsd7897-aaaa" title="Fork: Session title" />
+              <ForkSessionItem sessionId="14231vsd7897-aaaa" title="Fork: Session title" deleted />
             </div>
             <div className="flex flex-col gap-1 max-w-[320px]">
               <ProjectButton entityId={SAMPLE_IDS[3]} name="arcee-ai/nac" trailing="4" active />

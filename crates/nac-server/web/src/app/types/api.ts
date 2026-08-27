@@ -252,6 +252,23 @@ export interface SessionSummarySnapshot {
   /** Micro-USD spend for the session; zero means unknown catalog rates. */
   total_cost_micros?: number;
   run_count: number;
+  /** Present when this chat was forked from another session. */
+  forked_from?: SessionForkOrigin;
+}
+
+/** The chat a session was forked from. */
+export interface SessionForkOrigin {
+  session_id: string;
+  title: string;
+  deleted?: boolean;
+}
+
+/** A conversation fork created from a model turn in this session. */
+export interface SessionForkLink {
+  session_id: string;
+  source_message_idx: number;
+  deleted: boolean;
+  title?: string;
 }
 
 export interface SubmittedUserMessageSnapshot {
@@ -940,6 +957,8 @@ export interface SessionFrontendSnapshot {
   thread_event_boundary: ThreadEventBoundary;
   thread_event_diagnostics?: ThreadEventDecodeDiagnostic[];
   thread_steering: ThreadSteeringRecord[];
+  /** Conversation forks created from a model turn in this session. */
+  forks?: SessionForkLink[];
   overview?: SessionOverviewRecord;
   worksets: WorksetsSnapshot;
   workspace: WorkspaceSnapshot;
@@ -1573,6 +1592,15 @@ export interface RevertSessionResponse {
 export interface RegenerateSessionRequest {
   /** Snapshot index of the user message to answer again. */
   message_idx: number;
+}
+
+export interface ForkSessionRequest {
+  /** Snapshot index of the assistant message to fork from. */
+  message_idx: number;
+}
+
+export interface ForkSessionResponse {
+  session_id: string;
 }
 
 export interface SteeringRequest {

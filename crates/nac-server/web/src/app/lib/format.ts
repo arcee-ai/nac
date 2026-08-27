@@ -185,8 +185,8 @@ export function formatSeconds(ms: number | null | undefined): string {
   return `${(Math.round(ms / 10) / 100).toFixed(2)}s`;
 }
 
-/** What a chat is called until something in it can name it. */
-export const NEW_CHAT_TITLE = "New Chat";
+/** What a session is called until something in it can name it. */
+export const NEW_CHAT_TITLE = "New Session";
 
 /** A chat nobody has named and nobody has said anything in yet. */
 export function isUntitledSession(summary: SessionSummarySnapshot | null | undefined): boolean {
@@ -219,8 +219,8 @@ export function sessionTitle(
 
 /**
  * Tells the untitled chats apart, since they would otherwise all answer to the
- * same name: the oldest keeps the plain "New Chat" and each later one takes the
- * next number.
+ * same name: the oldest keeps the plain "New Session" and each later one takes
+ * the next number.
  *
  * Counting restarts per project — and once more over the chats that belong to
  * none — so a project's tab strip reads 1, 2, 3 instead of skipping the numbers

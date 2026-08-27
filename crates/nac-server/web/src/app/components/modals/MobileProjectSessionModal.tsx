@@ -167,7 +167,7 @@ export function MobileProjectSessionModal({
             <StickyButton
               variant={ButtonVariant.Secondary}
               content={ButtonContent.Icon}
-              aria-label="New chat"
+              aria-label="New Session"
               onClick={() => closeAnd(() => void actions.newChat(projectId))}
             >
               <Icon iconName={IconName.Add} />

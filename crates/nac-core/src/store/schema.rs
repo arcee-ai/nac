@@ -3,7 +3,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-// 22 adds durable direct-parent managed orchestrator relationships. 21 adds
+// 24 adds session_forks (conversation clones plus deleted tombstones). 22 adds
+// durable direct-parent managed orchestrator relationships. 21 adds
 // durable traditional child sessions. 20 added durable direct-session
 // goals. 19 added revision/backend-bound direct permission grants. 18 added the durable
 // direct-session inbox. 17 added the immutable session
@@ -17,7 +18,7 @@ use std::time::{Duration, Instant};
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 23;
+const STORE_SCHEMA_VERSION: i64 = 24;
 
 /// Current durable-store schema version for credential-free readiness and
 /// operational status reporting.
@@ -381,7 +382,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -491,6 +492,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
         "completion_suppressed",
         "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
     )?;
+    create_session_forks_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -997,6 +999,71 @@ fn create_ssh_configurations_table(conn: &Connection) -> Result<()> {
     )?;
     Ok(())
 }
+/// Conversation forks of a session. Neither session id is a foreign key:
+/// deleting the fork leaves a tombstone on the original, and deleting the
+/// original still lets the fork tab name where it came from (`source_title`).
+fn create_session_forks_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_forks (
+             source_session_id TEXT NOT NULL,
+             fork_session_id TEXT NOT NULL,
+             source_message_idx INTEGER NOT NULL
+                 CHECK (source_message_idx >= 0),
+             created_at TEXT NOT NULL,
+             source_title TEXT,
+             PRIMARY KEY (source_session_id, fork_session_id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_forks_source
+             ON session_forks(source_session_id, source_message_idx);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_session_forks_fork
+             ON session_forks(fork_session_id);",
+    )?;
+    ensure_column(conn, "session_forks", "source_title", "TEXT")?;
+    rebuild_session_forks_without_source_fk(conn)?;
+    Ok(())
+}
+
+/// An earlier draft of schema 17 cascaded the origin row away with the source
+/// chat. Rebuild so a fork still knows it is a fork after that chat is gone.
+fn rebuild_session_forks_without_source_fk(conn: &Connection) -> Result<()> {
+    let sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'session_forks'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(sql) = sql else {
+        return Ok(());
+    };
+    if !sql.to_ascii_uppercase().contains("REFERENCES") {
+        return Ok(());
+    }
+    conn.execute_batch(
+        "CREATE TABLE session_forks_new (
+             source_session_id TEXT NOT NULL,
+             fork_session_id TEXT NOT NULL,
+             source_message_idx INTEGER NOT NULL
+                 CHECK (source_message_idx >= 0),
+             created_at TEXT NOT NULL,
+             source_title TEXT,
+             PRIMARY KEY (source_session_id, fork_session_id)
+         );
+         INSERT INTO session_forks_new (
+             source_session_id, fork_session_id, source_message_idx, created_at, source_title
+         )
+         SELECT source_session_id, fork_session_id, source_message_idx, created_at, source_title
+         FROM session_forks;
+         DROP TABLE session_forks;
+         ALTER TABLE session_forks_new RENAME TO session_forks;
+         CREATE INDEX IF NOT EXISTS idx_session_forks_source
+             ON session_forks(source_session_id, source_message_idx);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_session_forks_fork
+             ON session_forks(fork_session_id);",
+    )?;
+    Ok(())
+}
+
 /// One content-free recovery obligation per session. The submitted transcript
 /// row remains the unique source for the prompt; this table only says which
 /// run owns it and whether that run is active, interrupted, failed, or has a
@@ -1344,6 +1411,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "permission_grants",
         "traditional_children",
         "managed_orchestrators",
+        "session_forks",
         "projects",
         "session_projects",
     ] {
