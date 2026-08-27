@@ -1,6 +1,7 @@
 use super::*;
-use std::io::Read;
+use std::{collections::BTreeMap, io::Read};
 
+use crate::application::{request_validation::RequestConfigurationError, Field};
 use crate::delivery::server::{
     asset_cache_control, bare_host, host_is_allowed, is_non_rebindable_host,
     response_compression_layer, serve_listener_with_shutdown, ALLOWED_HOSTS_ENV, ASSETS,
@@ -12,8 +13,10 @@ use axum::{
 };
 use flate2::read::GzDecoder;
 use nac_core::light_model::LightModelSettings;
+use nac_core::model::{BackendKind, ModelConfigurationError, ReasoningEffort};
 use nac_core::model_configurations;
 use nac_core::projects::ProjectRecord;
+use nac_core::runtime::OptionalModelOption;
 use nac_core::store::{GoalStatus, InboxDelivery};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
