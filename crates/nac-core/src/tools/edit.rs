@@ -7,8 +7,83 @@ use crate::tools::mutation::{
     argument_error, edit_local, edit_local_bound, edit_mounted, execute_remote, permission_error,
     required_string, EditSpec,
 };
-use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
+use crate::tools::{
+    kernel, resolve_workspace_path, shared_workspace_gate, ToolResult, ToolRuntime,
+};
 use crate::types::{FunctionDef, ToolDefinition};
+
+pub(crate) struct EditTool;
+
+impl kernel::NativeTool for EditTool {
+    type Input = Value;
+
+    fn definition(&self) -> ToolDefinition {
+        definition()
+    }
+
+    fn admission(&self) -> kernel::ToolAdmission {
+        kernel::ToolAdmission::Exclusive
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        validate_input(&input)?;
+        Ok(input)
+    }
+
+    fn permission_resources(
+        &self,
+        input: &Self::Input,
+        services: kernel::ToolServices<'_>,
+    ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+        let path = input
+            .get("path")
+            .and_then(Value::as_str)
+            .expect("edit input is decoded before resource projection");
+        let path = services
+            .runtime
+            .backend
+            .resolve_path(path)
+            .map_err(|error| argument_error(format!("invalid edit path: {error}")))?;
+        Ok(crate::permissions::file_resources(
+            "edit",
+            path,
+            services.runtime.backend.as_ref(),
+            &services.runtime.store_path,
+            true,
+        ))
+    }
+
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        resources: &[kernel::PermissionResource],
+        _services: kernel::ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        let path = resources
+            .iter()
+            .find(|resource| resource.action == "edit")
+            .ok_or_else(|| argument_error("authorized mutation target is missing"))?;
+        let object = input
+            .as_object_mut()
+            .expect("edit input is decoded as an object");
+        object.insert("path".to_string(), Value::String(path.resource.clone()));
+        object.insert("_nac_authorized_path_bound".to_string(), Value::Bool(true));
+        Ok(())
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        services: kernel::ToolServices<'a>,
+        _context: &'a kernel::ToolCallContext,
+    ) -> futures_util::future::BoxFuture<'a, ToolResult> {
+        Box::pin(async move {
+            let gate = shared_workspace_gate(services.runtime);
+            let _write = gate.write().await;
+            execute(input, services.runtime).await
+        })
+    }
+}
 
 pub fn definition() -> ToolDefinition {
     ToolDefinition {
@@ -125,6 +200,50 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         )
         .await
     }
+}
+
+fn validate_input(input: &Value) -> Result<(), ToolResult> {
+    let object = input
+        .as_object()
+        .ok_or_else(|| argument_error("tool arguments must be an object"))?;
+    if let Some(key) = object
+        .keys()
+        .find(|key| !["path", "expected_revision", "edits"].contains(&key.as_str()))
+    {
+        return Err(argument_error(format!("unknown '{key}' argument")));
+    }
+    for key in ["path", "expected_revision"] {
+        if !object.get(key).is_some_and(Value::is_string) {
+            return Err(argument_error(format!("'{key}' argument must be a string")));
+        }
+    }
+    let edits = object
+        .get("edits")
+        .and_then(Value::as_array)
+        .filter(|edits| !edits.is_empty())
+        .ok_or_else(|| argument_error("'edits' must contain at least one replacement"))?;
+    for edit in edits {
+        let edit = edit
+            .as_object()
+            .ok_or_else(|| argument_error("each edit must be an object"))?;
+        if let Some(key) = edit
+            .keys()
+            .find(|key| !["old_text", "new_text"].contains(&key.as_str()))
+        {
+            return Err(argument_error(format!("unknown '{key}' argument")));
+        }
+        if edit
+            .get("old_text")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
+            return Err(argument_error("'old_text' must be a non-empty string"));
+        }
+        if !edit.get("new_text").is_some_and(Value::is_string) {
+            return Err(argument_error("'new_text' argument must be a string"));
+        }
+    }
+    Ok(())
 }
 
 fn parse_edits(args: &Value) -> Result<Vec<EditSpec>, ToolResult> {

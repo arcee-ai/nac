@@ -767,6 +767,13 @@ Rules:
   hard-denial, terminal approval, and ancestor-swap regressions pass; the
   complete core test build and warning-denied Clippy are green. Tool production
   code is now 1,524 lines before responsibility extraction.
+- `write` and `edit` are now explicit native prepared-invocation types owned by
+  their mutation families. Each owns full decode-before-authorization,
+  canonical file-resource projection/binding, exclusive workspace admission,
+  and the same atomic backend execution; numeric legacy dispatch cases 1 and 2
+  are retired. All 14 write/edit family tests and all 14 kernel/capability/
+  authorization characterizations pass; the complete core test build and
+  warning-denied Clippy are green.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -782,7 +789,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 tool characterization-test separation with exact-path staging.
-Then replace the remaining central legacy direct-tool kind dispatch with
-family-owned native prepared invocations while preserving definitions,
-validation, binding, admission, execution, and capability ordering.
+Commit the M5 native write/edit convergence with exact-path staging. Then
+migrate glob/grep and terminal command tools out of the remaining numeric
+legacy dispatcher while preserving definitions, validation, binding,
+admission, execution, and capability ordering.
