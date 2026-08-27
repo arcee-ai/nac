@@ -246,7 +246,7 @@ Rules:
 - Verification: managed unit tests without HTTP, server adapter tests, native
   web/credential isolation tests, complete managed E2E and image contract.
 
-### M4 — Decompose durable harness gravity wells (in progress)
+### M4 — Decompose durable harness gravity wells (implementation complete; final durability gate in M8)
 
 - Session service owners: attachment/submission, admission/settlement,
   cancellation, recovery, frontend projection, inbox/goals, delegated
@@ -261,15 +261,15 @@ Rules:
 - Verification: focused owner tests plus complete core and durability suites;
   no topology, safety, prompt, persistence, or backend change.
 
-### M5 — Tool-kernel convergence (pending)
+### M5 — Tool-kernel convergence (complete)
 
-- Replace remaining `LegacyDirectTool` kind dispatch with registered native
-  implementations and prepared calls, one cohesive family at a time.
+- Remaining first-party direct tools are registered native implementations with
+  prepared calls; the numeric `LegacyDirectTool` dispatcher is retired.
 - Keep definitions/runtime-dependent exposure, validation, authorization,
   observability, admission, execution, rendering, cancellation, and protocol
   adapters separate.
-- Route imported MCP through an explicit common capability/invocation boundary;
-  preserve its dynamic nature and authorization.
+- Imported MCP traverses an explicit one-capability kernel snapshot while
+  preserving dynamic schema/transport behavior and authorization.
 - Verification: kernel collision/order/native-vs-model parity, direct/worker
   topology, permission denial, mutation/retention/cancellation, MCP, and web
   family suites.
@@ -838,6 +838,28 @@ Rules:
   byte/text projection, revision checking, directory-descriptor traversal,
   atomic publication, metadata preservation, and cross-process file locks; its
   size and placement restriction must be documented in the nested tool guide.
+- The complete core suite passes 1,156 tests with nine explicit optional or
+  environment-dependent ignores after the runtime, permission, session,
+  terminal, mutation, and tool-kernel decompositions. This establishes one
+  integrated M4/M5 candidate before the final durability gate.
+- Discovery now has explicit owners for backend-safe filesystem traversal (956
+  lines), ignore-rule parsing (202), pattern compilation/matching (284), and
+  stable bounded pagination (445); the 739-line family root owns tool schemas,
+  decoded search orchestration, and native prepared invocation. The 1,609-line
+  regression suite remains a sibling module. All 34 runnable discovery tests
+  pass with the same three documented Podman/SSH/PATH cases ignored, and the
+  warning-denied core check is green. The filesystem adapter deliberately
+  exceeds 800 lines because it keeps local, mounted-sandbox, and SSH no-follow
+  traversal parity in one auditable safety owner; the nested tool guide must
+  document this restriction.
+- The Exa web family now keeps its eight bounded-result, URL/network-policy,
+  redirect, cancellation, and exact-credential-redaction regressions in a
+  280-line sibling test module. The 841-line production module is one cohesive
+  provider family covering schema, prepared authorization, target validation,
+  retry/redirect policy, transport injection, bounded decoding, and masking;
+  this deliberate exception must be recorded in the nested tool guide. All
+  eight tests pass with authorized loopback fixtures and the warning-denied
+  core check is green.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -853,6 +875,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M4/M5 mutation test/remote extraction with exact-path staging. Then
-separate discovery tests/provider mechanics, audit the remaining tool surfaces,
-and mark M4/M5 structurally complete with the already-green full core suite.
+Commit the M4/M5 discovery/web ownership slice with exact-path staging. Then
+begin M6 by inventorying the OpenAPI generation path, handwritten frontend API
+types, managed feature/query ownership, frontend checks, and committed asset
+writer before choosing the smallest deterministic contract-generation seam.
