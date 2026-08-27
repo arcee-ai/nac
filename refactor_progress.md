@@ -564,6 +564,12 @@ Rules:
   shapes, status/error mapping, pagination clamps, and application-owner calls.
   OpenAPI/router parity, goal HTTP lifecycle, snapshot recovery, the full
   server test build, and warning-denied Clippy pass.
+- Run submission, steering, replay/SSE, and cancellation HTTP adapters now live
+  in a focused 191-line delivery module. Event-cursor validation stays beside
+  the transport that consumes it; response compression exclusions and SSE
+  rendering behavior remain unchanged. OpenAPI/router parity, active steering,
+  idempotent cancellation, bounded shutdown with an open stream, the full test
+  build, and warning-denied Clippy pass. Server `lib.rs` is now 5,191 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -579,8 +585,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the attached-session delivery
-slice without protected files. Then continue M2 with run/event delivery,
-attachment/recovery, configuration, deletion, and session creation, keeping
-lifecycle gates, operation leases, and exact settlement/cleanup ordering in
-their coordinator.
+Inspect exact worktree/staged diffs and commit the run/event delivery slice
+without protected files. Then continue M2 with attachment/recovery,
+configuration, deletion, and session creation, keeping lifecycle gates,
+operation leases, and exact settlement/cleanup ordering in their coordinator.

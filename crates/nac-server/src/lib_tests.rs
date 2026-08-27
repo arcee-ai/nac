@@ -144,14 +144,14 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
 
 #[test]
 fn event_cursor_requires_both_epoch_and_sequence() {
-    assert!(event_cursor(&EventsQuery {
+    assert!(delivery::session_runs::event_cursor(&EventsQuery {
         after_epoch_id: None,
         after_sequence_id: None,
         limit: None,
     })
     .unwrap()
     .is_none());
-    assert!(event_cursor(&EventsQuery {
+    assert!(delivery::session_runs::event_cursor(&EventsQuery {
         after_epoch_id: Some("epoch".to_string()),
         after_sequence_id: Some(7),
         limit: None,
@@ -170,7 +170,7 @@ fn event_cursor_requires_both_epoch_and_sequence() {
             limit: None,
         },
     ] {
-        let error = event_cursor(&query).unwrap_err();
+        let error = delivery::session_runs::event_cursor(&query).unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
     }
 }
