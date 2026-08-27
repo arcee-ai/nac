@@ -957,7 +957,11 @@ fn servers_table(document: &mut DocumentMut) -> ConfigurationResult<&mut Table> 
             })?;
         *item = Item::Table(inline.into_table());
     }
-    let table = item.as_table_mut().expect("just ensured a table");
+    let table = item.as_table_mut().ok_or_else(|| {
+        McpServerConfigurationStoreError::InvalidInput(
+            "'mcp_servers' in config.toml could not be normalized as a table".to_string(),
+        )
+    })?;
     table.set_implicit(true);
     Ok(table)
 }

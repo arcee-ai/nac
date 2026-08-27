@@ -223,6 +223,10 @@ fn worker_tool_registry(
     Ok(registry)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the static first-party tool registry and worker capability list are collision-checked"
+)]
 pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     worker_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
@@ -233,6 +237,10 @@ pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
         .definitions()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the static first-party tool registry and direct capability list are collision-checked"
+)]
 pub fn direct_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     worker_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
@@ -253,6 +261,10 @@ pub(crate) fn direct_tool_definitions_with_web(
     definitions
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the static direct-with-orchestrator capability list is covered by registry tests"
+)]
 pub fn direct_with_orchestrator_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     let snapshot = worker_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
@@ -283,6 +295,10 @@ fn is_complete_direct_capability(name: &str) -> bool {
     DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name) || WEB_TOOL_NAMES.contains(&name)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the static first-party tool registry is collision-checked during construction"
+)]
 pub(crate) fn direct_tool_admission(name: &str) -> Option<kernel::ToolAdmission> {
     worker_tool_registry(false)
         .expect("built-in direct tool registration must be collision-free")
@@ -358,6 +374,10 @@ pub async fn execute_tool(
     .await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the static first-party tool registry is collision-checked during construction"
+)]
 pub async fn execute_tool_with_context(
     name: &str,
     args: Value,

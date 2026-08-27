@@ -34,6 +34,10 @@ const MAX_ERROR_CHARS: usize = 500;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(35);
 const MAX_RETRIES: usize = 2;
+#[expect(
+    clippy::expect_used,
+    reason = "the URL redaction regex is a compile-time literal covered by web-tool tests"
+)]
 static HTTP_URL_PATTERN: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r#"https?://[^\s<>\"']+"#).expect("fixed web URL redaction regex")
 });
@@ -413,7 +417,7 @@ async fn execute_search(
         let url = result_url(&parsed);
         let domain = parsed
             .host_str()
-            .expect("validated URL has a host")
+            .ok_or_else(|| anyhow!("validated Exa result URL has no host"))?
             .to_string();
         let snippet = result
             .highlights
@@ -451,7 +455,8 @@ async fn execute_fetch(
     cancellation: &ThreadCancellation,
 ) -> Result<WebFetchOutput> {
     let requested_url = input.target.to_string();
-    let provider_char_limit = u32::try_from(input.max_chars).expect("fetch bound fits u32");
+    let provider_char_limit = u32::try_from(input.max_chars)
+        .context("validated web fetch character bound does not fit u32")?;
     let body = json!({
         "urls": [requested_url],
         "contents": { "text": { "maxCharacters": provider_char_limit } },
@@ -637,6 +642,10 @@ fn redact_exa_credential(text: &str, credential: &ExaCredential) -> String {
     crate::model::redact_credentials(&exact, &[secret])
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the private caller supplies fixed paths joined to a compile-time Exa base URL"
+)]
 fn official_endpoint(path: &str) -> Url {
     Url::parse(EXA_API_BASE)
         .expect("fixed Exa base URL")
@@ -764,6 +773,10 @@ fn display_url(url: &Url) -> String {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "callers pass URLs accepted by the HTTP(S)-only public URL validator"
+)]
 fn target_origin(url: &Url) -> String {
     format!(
         "{}://{}:{}",
@@ -781,6 +794,10 @@ fn result_url(url: &Url) -> String {
     result.to_string()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "regex replacement always provides capture group zero for the whole match"
+)]
 fn redact_url_queries(text: &str) -> String {
     HTTP_URL_PATTERN
         .replace_all(text, |captures: &regex::Captures<'_>| {

@@ -936,6 +936,10 @@ impl ModelClient {
         .map_err(|error| anyhow!(error.message))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the fixed ten-attempt SSE loop always records a retryable failure before exhaustion"
+    )]
     async fn try_post_sse_with_retry_headers<F, MakeFold, Fold>(
         &self,
         url: &str,

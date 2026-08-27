@@ -91,8 +91,14 @@ impl GitCloneProcess {
             .kill_on_drop(true);
         let (mut child, mut process_tree) = ProcessTreeGuard::spawn_supervised(&mut command)
             .context("failed to spawn managed Git clone")?;
-        let stdout = child.stdout.take().expect("piped Git stdout");
-        let stderr = child.stderr.take().expect("piped Git stderr");
+        let stdout = child
+            .stdout
+            .take()
+            .context("managed Git clone did not expose piped stdout")?;
+        let stderr = child
+            .stderr
+            .take()
+            .context("managed Git clone did not expose piped stderr")?;
         let stdout_reader = tokio::spawn(read_progress(stdout, Arc::clone(&progress)));
         let stderr_reader = tokio::spawn(read_progress(stderr, progress));
         let (status, was_cancelled) = tokio::select! {

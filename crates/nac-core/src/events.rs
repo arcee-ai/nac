@@ -652,6 +652,10 @@ impl SessionEventBus {
         self.emit_with_context(event, None, None)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the public session event bus rejects internal-only agent event variants"
+    )]
     pub fn emit_with_context(
         &self,
         event: SessionEvent,
@@ -663,6 +667,10 @@ impl SessionEventBus {
         self.emit_sanitized(event, run_id, client_id)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "overflowing the durable u64 event sequence would violate event identity"
+    )]
     fn emit_sanitized(
         &self,
         event: SessionEvent,

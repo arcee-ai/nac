@@ -119,6 +119,14 @@ zero-backlog async guard last.
   through `allow-unwrap-in-tests = true`; production code remains subject to
   the hard gate. All three worker unwraps now tolerate an empty trace or
   propagate a missing supervised pipe as `io::Error` for guarded cleanup.
+- `expect_used`: complete. The initial 125 production findings were not hidden
+  behind a blanket exception. Recoverable process, decoded-input, managed-state,
+  database-reload, URL, and configuration failures now propagate typed errors;
+  simple stream/login coordination locks recover poisoned guards. The remaining
+  static prompt/URL/regex, closed registry, serialization, counter, and lifecycle
+  invariants retain their explicit panic semantics behind narrow `#[expect]`
+  attributes whose reasons state the proof. Tests use the reference-repository
+  convention `allow-expect-in-tests = true`.
 
 ## Verification and next action
 
@@ -178,5 +186,14 @@ inventory recorded above.
 The `unwrap_used` slice passes `make format-check`, `make lint`,
 `git diff --check`, and all ten focused worker lifecycle/cancellation tests.
 
-Next: commit this exact lint boundary, then add `expect_used` with the matching
-narrow test-only allowance and run autofix before manual repair.
+The `expect_used` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite, including 1,157 core
+tests (nine ignored), 148 server library tests, and every managed, process,
+credential-store, catalog, contracts, and documentation test. A sandboxed run
+initially reported 254 failures because loopback test-server binds were denied;
+the same suite passed with the required loopback permission, and a second quiet
+workspace run confirmed exit status 0.
+
+Next: commit this exact lint boundary, then add
+`allow_attributes_without_reason`, run autofix, and document or remove each
+remaining suppression before its own green commit.

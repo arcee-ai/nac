@@ -654,9 +654,9 @@ pub(super) fn supported_shell_word_spans(command: &str) -> Option<Vec<Vec<ShellW
                 start: &mut Option<usize>,
                 value: &mut String,
                 end: usize| {
-        if start.is_some() {
+        if let Some(start) = start.take() {
             segment.push(ShellWordSpan {
-                start: start.take().expect("started shell word has a start"),
+                start,
                 end,
                 value: std::mem::take(value),
             });

@@ -444,6 +444,10 @@ pub(crate) async fn write_mounted(
     .await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "one reserved and validated image part remains within ToolContent limits"
+)]
 pub(crate) fn read_opened_file(
     mut file: File,
     path_display: String,

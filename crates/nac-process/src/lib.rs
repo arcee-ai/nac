@@ -71,10 +71,9 @@ impl ProcessTreeGuard {
                 .kill_on_drop(true);
             isolate_process_group(&mut leader_command);
             let mut group_leader = leader_command.spawn()?;
-            let pgid = group_leader
-                .id()
-                .expect("newly spawned process group leader has no pid")
-                as libc::pid_t;
+            let pgid = group_leader.id().ok_or_else(|| {
+                std::io::Error::other("newly spawned process group leader has no pid")
+            })? as libc::pid_t;
             command.process_group(pgid);
             let child = match command.spawn() {
                 Ok(child) => child,

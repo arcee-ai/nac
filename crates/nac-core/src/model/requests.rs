@@ -21,6 +21,10 @@ pub(super) fn validated_wire_effort(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "image tool history is rejected before completions text-only result mapping"
+)]
 pub(super) fn completions_message_to_value(
     message: &Message,
     default_reasoning_field: &str,
@@ -373,6 +377,10 @@ pub(super) fn responses_input_items(messages: &[Message]) -> Vec<Value> {
     items
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "non-text tool content has validated structured parts by construction"
+)]
 fn responses_tool_output(content: &ToolContent) -> Value {
     if let Some(text) = content.as_text() {
         return Value::String(text.to_string());

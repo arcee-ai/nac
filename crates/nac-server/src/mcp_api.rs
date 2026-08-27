@@ -507,7 +507,11 @@ pub async fn test_server_handler(
             // Borrowed secrets end up in the spawned process's environment,
             // so they may only run the command they were stored for.
             if borrowed {
-                let record = stored.as_ref().expect("borrowing requires a stored record");
+                let record = stored.as_ref().ok_or_else(|| {
+                    ApiError::bad_request(
+                        "borrowed environment values require a stored server".to_string(),
+                    )
+                })?;
                 if record.transport != MCP_TRANSPORT_STDIO
                     || record.command.as_deref() != Some(command.as_str())
                     || record.args != args
@@ -546,7 +550,11 @@ pub async fn test_server_handler(
             // Borrowed secrets are sent with the request, so they may only
             // travel to the URL they were stored for.
             if borrowed {
-                let record = stored.as_ref().expect("borrowing requires a stored record");
+                let record = stored.as_ref().ok_or_else(|| {
+                    ApiError::bad_request(
+                        "borrowed header values require a stored server".to_string(),
+                    )
+                })?;
                 if record.transport != MCP_TRANSPORT_STREAMABLE_HTTP
                     || record.url.as_deref() != Some(url.as_str())
                 {

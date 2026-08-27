@@ -53,7 +53,7 @@ impl kernel::NativeTool for GlobTool {
             .ok_or_else(|| invalid("authorized glob root is missing"))?;
         input
             .as_object_mut()
-            .expect("glob input is decoded as an object")
+            .ok_or_else(|| invalid("decoded glob input is not an object"))?
             .insert("root".to_string(), Value::String(root.resource.clone()));
         Ok(())
     }

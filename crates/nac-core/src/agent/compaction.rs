@@ -214,6 +214,10 @@ impl super::Agent {
         result
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "this path is selected only when the agent owns compaction state"
+    )]
     pub(super) async fn prepare_provider_view(
         &mut self,
         accumulated_usage: &mut TokenUsage,
@@ -249,6 +253,10 @@ impl super::Agent {
         prepared
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a triggered compaction retains the state that produced its candidate through activation"
+    )]
     async fn execute_triggered_compaction(
         &mut self,
         compaction_id: Uuid,

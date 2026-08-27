@@ -148,12 +148,18 @@ pub(crate) struct ManagedGitHubLoginRegistry {
 
 impl ManagedGitHubLoginRegistry {
     fn insert(&self, id: String, login: PendingLogin) {
-        let mut entries = self.entries.lock().expect("managed GitHub login registry");
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         entries.insert(id, login);
         let now = Instant::now();
         entries.retain(|_, entry| {
             let finished = !matches!(
-                *entry.outcome.lock().expect("managed GitHub login outcome"),
+                *entry
+                    .outcome
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
                 LoginOutcome::Pending
             );
             let budget = if finished {
@@ -170,12 +176,19 @@ impl ManagedGitHubLoginRegistry {
     }
 
     fn take(&self, id: &str) -> Result<GitHubLoginStateResponse, ApiError> {
-        let mut entries = self.entries.lock().expect("managed GitHub login registry");
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = entries.get(id).ok_or_else(|| ApiError {
             status: StatusCode::NOT_FOUND,
             message: format!("no GitHub login in progress with id '{id}'"),
         })?;
-        let state = match &*entry.outcome.lock().expect("managed GitHub login outcome") {
+        let state = match &*entry
+            .outcome
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
             LoginOutcome::Pending => None,
             LoginOutcome::Complete(status) => Some(GitHubLoginStateResponse::Complete {
                 auth: status.clone().into(),
@@ -193,7 +206,7 @@ impl ManagedGitHubLoginRegistry {
     fn cancel(&self, id: &str) -> bool {
         self.entries
             .lock()
-            .expect("managed GitHub login registry")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(id)
             .map(|entry| entry.task.abort())
             .is_some()
@@ -275,7 +288,9 @@ impl SessionManager {
             let manager = self.clone();
             async move {
                 let result = pending.complete().await;
-                *outcome.lock().expect("managed GitHub login outcome") = match result {
+                *outcome
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = match result {
                     Ok(status) => match manager.ensure_managed_git_config(&status).await {
                         Ok(_) => LoginOutcome::Complete(status),
                         Err(error) => LoginOutcome::Failed(error.message),
@@ -750,7 +765,10 @@ pub(crate) async fn cancel_clone_handler(
     let operation = service
         .operation(&operation_id)
         .map_err(map_clone_operation_error)?
-        .expect("managed clone operation disappeared after cancellation");
+        .ok_or_else(|| ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "managed clone operation disappeared after cancellation".to_string(),
+        })?;
     Ok((StatusCode::ACCEPTED, Json(operation)))
 }
 
@@ -794,7 +812,10 @@ pub(crate) async fn update_git_identity_handler(
     }
     let config_path = manager
         .managed_host()
-        .expect("managed auth requires managed config")
+        .ok_or_else(|| ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: "Managed NAC is not configured".to_string(),
+        })?
         .home_root
         .join(".gitconfig");
     let identity = tokio::task::spawn_blocking(move || update_git_identity(config_path, request))

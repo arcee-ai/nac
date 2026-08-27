@@ -95,6 +95,10 @@ impl NativeTool for SubagentTool {
         ])
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the background acknowledgement is constructed entirely from JSON values"
+    )]
     fn execute<'a>(
         &'a self,
         input: Self::Input,
@@ -316,6 +320,10 @@ fn owned_child(
     .ok_or_else(|| anyhow::anyhow!("traditional child was not found"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "traditional child records contain only JSON-representable fields"
+)]
 fn outcome_result(child: TraditionalChildRecord) -> ToolResult {
     let is_error = matches!(
         child.status,

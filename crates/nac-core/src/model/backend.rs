@@ -226,7 +226,11 @@ pub(super) fn api_key_for_backend(
         return Ok(String::new());
     }
 
-    let env_name = configured_env.expect("validated API-key backend selector");
+    let env_name = configured_env.ok_or_else(|| {
+        model_configuration_error(format!(
+            "invalid model configuration: backend '{backend}' requires api_key_env"
+        ))
+    })?;
     // The environment wins so that servers, CI, and managed workers keep the
     // credential they were started with; storage is the desktop fallback.
     let value = match std::env::var_os(env_name) {

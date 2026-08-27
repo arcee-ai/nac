@@ -359,7 +359,7 @@ impl<'a> SessionCreationApplication<'a> {
             }
         })?;
         self.manager
-            .attach_managed_command_environment(&mut run_config);
+            .attach_managed_command_environment(&mut run_config)?;
         let parts = SessionService::from_orchestrator_run_config(run_config);
         let service = parts.service;
         service.acquire_sandbox_resource_lease()?;

@@ -145,6 +145,10 @@ fn add_cache_control_to_last_block(message: &mut Value, ttl: Option<&str>) {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "image tool history is rejected before Anthropic text-only result mapping"
+)]
 fn anthropic_messages_from_internal(messages: &[Message]) -> Result<(Option<String>, Vec<Value>)> {
     let mut system_parts = Vec::new();
     let mut anthropic_messages = Vec::new();

@@ -203,6 +203,10 @@ impl SessionService {
     }
 
     #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::expect_used,
+        reason = "successful run admission installs the prompt-commit channel before returning"
+    )]
     pub(super) fn try_submit_prompt_inner(
         &self,
         client_id: Option<SessionClientId>,

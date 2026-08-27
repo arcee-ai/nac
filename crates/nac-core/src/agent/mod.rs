@@ -48,6 +48,10 @@ pub(crate) const RUN_CANCELLED_MARKER: &str = "[run cancelled by user]";
 pub(crate) const RUN_FAILED_PARTIAL_MARKER: &str =
     "[run failed after this partial assistant response]";
 
+#[expect(
+    clippy::expect_used,
+    reason = "the checked-in worker prompt must retain its working-directory placeholder"
+)]
 fn render_worker_system_prompt(working_directory: &str) -> String {
     let (prefix, suffix) = WORKER_SYSTEM_PROMPT
         .split_once("{working_directory}")
@@ -55,6 +59,10 @@ fn render_worker_system_prompt(working_directory: &str) -> String {
     format!("{prefix}{working_directory}{suffix}")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the checked-in direct prompt must retain its working-directory placeholder"
+)]
 pub(crate) fn render_direct_system_prompt(working_directory: &str) -> String {
     let (prefix, suffix) = DIRECT_SYSTEM_PROMPT
         .split_once("{working_directory}")
@@ -78,6 +86,10 @@ pub(crate) fn render_general_child_system_prompt(
         .replace("{description}", description)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the checked-in orchestrator prompt must retain both formatting placeholders"
+)]
 fn render_orchestrator_system_prompt(working_directory: &str, thread_timeout_secs: u64) -> String {
     let (prefix, remainder) = ORCHESTRATOR_SYSTEM_PROMPT
         .split_once("{working_directory}")
@@ -842,7 +854,7 @@ impl Agent {
                     let mut partial = self
                         .partial_stream
                         .lock()
-                        .expect("partial model stream state");
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     partial.text.push_str(&delta.text);
                     partial.reasoning.push_str(&delta.reasoning);
                 }
@@ -1728,7 +1740,7 @@ impl Agent {
         *self
             .partial_stream
             .lock()
-            .expect("partial model stream state") = ModelStreamDelta::default();
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ModelStreamDelta::default();
     }
 
     fn take_partial_stream(&self) -> ModelStreamDelta {
@@ -1736,7 +1748,7 @@ impl Agent {
             &mut *self
                 .partial_stream
                 .lock()
-                .expect("partial model stream state"),
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
         )
     }
 

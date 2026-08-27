@@ -90,11 +90,19 @@ impl Drop for RemoteTransportOwnership {
 }
 
 impl TerminalManager {
+    #[expect(
+        clippy::expect_used,
+        reason = "the compile-time default command output limits are validated by construction"
+    )]
     pub fn new() -> Self {
         Self::with_process_group_isolation(true, false, CommandOutputLimits::default())
             .expect("default command output limits are valid")
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the compile-time direct command output limits are validated by construction"
+    )]
     pub(crate) fn for_direct() -> Self {
         Self::with_process_group_isolation(true, true, CommandOutputLimits::default())
             .expect("default command output limits are valid")

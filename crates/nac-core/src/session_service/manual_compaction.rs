@@ -162,6 +162,10 @@ struct ManualCompactionTaskGuard {
 }
 
 impl ManualCompactionTaskGuard {
+    #[expect(
+        clippy::expect_used,
+        reason = "the guard owns a lifecycle until its single completion path consumes it"
+    )]
     fn complete(mut self, result: SessionCompactionCompletion) {
         self.lifecycle
             .as_mut()
@@ -247,6 +251,10 @@ impl SessionService {
     }
 
     #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::expect_used,
+        reason = "persisted sessions acquire a lease during successful compaction admission"
+    )]
     fn try_compact_inner(
         &self,
         client_id: Option<SessionClientId>,

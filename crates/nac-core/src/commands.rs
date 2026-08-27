@@ -61,6 +61,10 @@ pub fn slash_command_definitions() -> &'static [SlashCommandDefinition] {
 }
 
 impl SlashCommand {
+    #[expect(
+        clippy::expect_used,
+        reason = "the static slash-command table exhaustively defines this closed enum"
+    )]
     pub fn definition(self) -> &'static SlashCommandDefinition {
         SLASH_COMMANDS
             .iter()
@@ -138,6 +142,10 @@ pub fn parse_slash_command(prompt: &str) -> Option<Result<SlashCommand, String>>
 /// are referenceable; unregistered dollar syntax stays ordinary text.
 /// Recognized skills are deduplicated and appended in first-reference order,
 /// while the literal `$skillname` stays in the original sentence.
+#[expect(
+    clippy::expect_used,
+    reason = "a skill name returned by the same immutable registry remains renderable"
+)]
 pub(crate) fn expand_user_prompt(prompt: &str, skills: Option<&SkillRegistry>) -> String {
     let Some(skills) = skills else {
         return prompt.to_string();

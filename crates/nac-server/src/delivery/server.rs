@@ -472,6 +472,10 @@ pub async fn serve_with_policy(
     .await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the single forced-shutdown callback is moved only after graceful shutdown starts"
+)]
 pub(crate) async fn serve_listener_with_shutdown<F, X>(
     listener: TcpListener,
     manager: SessionManager,

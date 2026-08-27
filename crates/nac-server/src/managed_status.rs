@@ -174,7 +174,7 @@ fn readiness_snapshot(manager: &SessionManager) -> ReadinessResponse {
 fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHostStatusResponse> {
     let managed = manager
         .managed_host()
-        .expect("managed status preflight requires managed configuration");
+        .ok_or_else(|| anyhow::anyhow!("Managed NAC is not configured"))?;
     let checks = readiness_checks(
         manager,
         MANAGED_RUNTIME_UID,

@@ -193,6 +193,10 @@ pub fn parse_dispatch_args(
 /// Select the model client a dispatch runs with. A weight is only parsed
 /// when a light model is configured, so `light` routes to it and everything
 /// else runs the orchestrator's own model.
+#[expect(
+    clippy::expect_used,
+    reason = "dispatch parsing accepts light weight only when a light client is configured"
+)]
 pub(crate) fn select_dispatch_client(
     params: &ParsedDispatchParams,
     runtime: &ToolRuntime,

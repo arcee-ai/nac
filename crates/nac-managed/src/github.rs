@@ -28,6 +28,10 @@ pub struct GitHubEndpoints {
 }
 
 impl GitHubEndpoints {
+    #[expect(
+        clippy::expect_used,
+        reason = "official GitHub endpoint literals are compile-time invariants"
+    )]
     pub fn official() -> Self {
         Self {
             device_code_url: Url::parse("https://github.com/login/device/code")
