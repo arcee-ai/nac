@@ -246,7 +246,7 @@ Rules:
 - Verification: managed unit tests without HTTP, server adapter tests, native
   web/credential isolation tests, complete managed E2E and image contract.
 
-### M4 — Decompose durable harness gravity wells (pending)
+### M4 — Decompose durable harness gravity wells (in progress)
 
 - Session service owners: attachment/submission, admission/settlement,
   cancellation, recovery, frontend projection, inbox/goals, delegated
@@ -662,6 +662,14 @@ Rules:
   routers, DTO definitions, validation, or error mapping. The complete server
   suite passes 148 library and 23 CLI tests in addition to warning-denied
   Clippy, so M2 acceptance is complete.
+- Durable direct-session interaction now has a focused
+  `session_service::direct_interaction` owner for behavior gates, permission
+  requests/grants, inbox enqueue/edit/cancel/promotion, and autonomous goal
+  lifecycle. The move preserves methods on `SessionService` and leaves run
+  admission/settlement in the coordinator. Inbox serialization, versioned
+  mutation, peer-owned goal admission, budget-limited continuation, and
+  orchestrator rejection regressions pass; the complete core test build is
+  green. `session_service.rs` is now 4,006 lines, with the new owner at 395.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -677,7 +685,7 @@ Rules:
 
 ## Exact next action
 
-Commit the final M2 request-validation/error-mapping slice with exact-path
-staging, then begin M4 at `nac-core::session_service`: inventory its remaining
-production responsibilities and extract one characterization-backed owner at a
-time without changing durable admission, settlement, or recovery ordering.
+Commit the first M4 direct-interaction owner with exact-path staging. Next
+extract frontend projection/transcript paging from `session_service`, followed
+by recovery/delegated completion; keep run admission, cancellation, and
+settlement ordering untouched until those read/recovery seams are green.
