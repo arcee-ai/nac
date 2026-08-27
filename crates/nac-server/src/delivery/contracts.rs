@@ -312,6 +312,57 @@ pub struct SandboxRequest {
     pub activity_key: Option<String>,
 }
 
+impl CreateSessionRequest {
+    pub(crate) fn into_application(self) -> application::session_creation::SessionCreationCommand {
+        application::session_creation::SessionCreationCommand {
+            behavior: self.behavior,
+            first_chat: self.first_chat,
+            project_id: self.project_id,
+            cwd: self.cwd,
+            model: application_field(self.model),
+            base_url: application_field(self.base_url),
+            backend: application_field(self.backend),
+            reasoning_effort: application_field(self.reasoning_effort),
+            api_key_env: application_field(self.api_key_env),
+            extra_headers: match application_field(self.extra_headers) {
+                application::Field::Unchanged => application::Field::Unchanged,
+                application::Field::Clear => application::Field::Clear,
+                application::Field::Set(HeadersRequest(headers)) => {
+                    application::Field::Set(headers)
+                }
+            },
+            orchestrator_compaction_threshold: application_field(
+                self.orchestrator_compaction_threshold,
+            ),
+            light_model: application_field(self.light_model),
+            ssh_host: self.ssh_host,
+            ssh_port: self.ssh_port,
+            ssh_identity_file: self.ssh_identity_file,
+            sandbox: self.sandbox.into_application(),
+        }
+    }
+}
+
+impl SandboxRequest {
+    fn into_application(self) -> application::session_creation::SessionSandboxCommand {
+        application::session_creation::SessionSandboxCommand {
+            enabled: self.enabled,
+            no_mount_cwd: self.no_mount_cwd,
+            mounts: self.mounts,
+            mounts_ro: self.mounts_ro,
+            image: self.image,
+            gpus: self.gpus,
+            shm_size: self.shm_size,
+            session_key: self.session_key,
+            workdir: self.workdir,
+            backend: self.backend,
+            cpus: self.cpus,
+            memory_mib: self.memory_mib,
+            activity_key: self.activity_key,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ProviderModelsRequest {
     pub backend: BackendKind,

@@ -1,21 +1,60 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use nac_core::{
-    light_model::LightModelError,
+    light_model::{LightModelError, LightModelSettings},
     model::provider_for_model,
     projects,
     runtime::{self, NacConfig, OptionalModelOption, RunOptions, StoreOptions},
     session_service::{SessionFrontendSnapshot, SessionService},
+    sessions::SessionBehavior,
 };
 
 use crate::{
     apply_project_model_defaults, apply_sibling_model_defaults,
     create_compaction_threshold_override, enforce_trusted_base_url, light_model, model_options,
     newest_project_session, project_location_conflicts, request_configuration_error_from,
-    sandbox_options, sandbox_requested, CreateSessionRequest, RequestField, ResolvedLaunchLocation,
-    SessionManager, SshRequest,
+    sandbox_options, sandbox_requested, ResolvedLaunchLocation, SessionManager, SshRequest,
 };
+
+use super::Field;
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionCreationCommand {
+    pub(crate) behavior: SessionBehavior,
+    pub(crate) first_chat: bool,
+    pub(crate) project_id: Option<String>,
+    pub(crate) cwd: Option<PathBuf>,
+    pub(crate) model: Field<String>,
+    pub(crate) base_url: Field<String>,
+    pub(crate) backend: Field<String>,
+    pub(crate) reasoning_effort: Field<String>,
+    pub(crate) api_key_env: Field<String>,
+    pub(crate) extra_headers: Field<BTreeMap<String, String>>,
+    pub(crate) orchestrator_compaction_threshold: Field<u64>,
+    pub(crate) light_model: Field<LightModelSettings>,
+    pub(crate) ssh_host: Option<String>,
+    pub(crate) ssh_port: Option<u16>,
+    pub(crate) ssh_identity_file: Option<String>,
+    pub(crate) sandbox: SessionSandboxCommand,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionSandboxCommand {
+    pub(crate) enabled: bool,
+    pub(crate) no_mount_cwd: bool,
+    pub(crate) mounts: Vec<String>,
+    pub(crate) mounts_ro: Vec<String>,
+    pub(crate) image: Option<String>,
+    pub(crate) gpus: Vec<String>,
+    pub(crate) shm_size: Option<String>,
+    pub(crate) session_key: Option<String>,
+    pub(crate) workdir: Option<String>,
+    pub(crate) backend: Option<String>,
+    pub(crate) cpus: Option<u8>,
+    pub(crate) memory_mib: Option<u32>,
+    pub(crate) activity_key: Option<String>,
+}
 
 /// Session creation and first-chat admission.
 ///
@@ -33,7 +72,7 @@ impl<'a> SessionCreationApplication<'a> {
 
     pub async fn create_session(
         &self,
-        mut request: CreateSessionRequest,
+        mut request: SessionCreationCommand,
     ) -> Result<SessionFrontendSnapshot> {
         let first_chat_project_id = if request.first_chat {
             Some(
@@ -130,8 +169,8 @@ impl<'a> SessionCreationApplication<'a> {
             request.extra_headers,
         )?;
         model.light_model = match request.light_model {
-            RequestField::Omitted | RequestField::Null => None,
-            RequestField::Value(light) => {
+            Field::Unchanged | Field::Clear => None,
+            Field::Set(light) => {
                 // A same-backend light model with no explicit selector
                 // inherits the session's primary one.
                 let primary_key = match &model.api_key_env {

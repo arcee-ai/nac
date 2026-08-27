@@ -668,12 +668,12 @@ fn model_request_fields_distinguish_omitted_null_and_values() {
 #[test]
 fn create_resolution_inherits_overrides_and_explicitly_clears_optional_config() {
     let inherited = model_options(
-        RequestField::Omitted,
-        RequestField::Omitted,
-        RequestField::Omitted,
-        RequestField::Omitted,
-        RequestField::Omitted,
-        RequestField::Omitted,
+        Field::Unchanged,
+        Field::Unchanged,
+        Field::Unchanged,
+        Field::Unchanged,
+        Field::Unchanged,
+        Field::Unchanged,
     )
     .unwrap();
     assert_eq!(inherited.reasoning_effort, OptionalModelOption::Inherit);
@@ -681,12 +681,12 @@ fn create_resolution_inherits_overrides_and_explicitly_clears_optional_config() 
     assert_eq!(inherited.extra_headers, None);
 
     let explicit = model_options(
-        RequestField::Value(" model-a ".to_string()),
-        RequestField::Value(" https://example.com/v1 ".to_string()),
-        RequestField::Value("openai-responses".to_string()),
-        RequestField::Value("xhigh".to_string()),
-        RequestField::Null,
-        RequestField::Null,
+        Field::Set(" model-a ".to_string()),
+        Field::Set(" https://example.com/v1 ".to_string()),
+        Field::Set("openai-responses".to_string()),
+        Field::Set("xhigh".to_string()),
+        Field::Clear,
+        Field::Clear,
     )
     .unwrap();
     assert_eq!(explicit.api_model.as_deref(), Some("model-a"));
@@ -704,12 +704,12 @@ fn create_resolution_inherits_overrides_and_explicitly_clears_optional_config() 
 
     let raw_selector = " SELECTED_KEY ";
     let selected = model_options(
-        RequestField::Omitted,
-        RequestField::Omitted,
-        RequestField::Omitted,
-        RequestField::Omitted,
-        RequestField::Value(raw_selector.to_string()),
-        RequestField::Omitted,
+        Field::Unchanged,
+        Field::Unchanged,
+        Field::Unchanged,
+        Field::Unchanged,
+        Field::Set(raw_selector.to_string()),
+        Field::Unchanged,
     )
     .unwrap();
     assert_eq!(
@@ -723,6 +723,7 @@ fn null_required_and_blank_concrete_create_fields_are_bad_requests() {
     for field in ["model", "base_url", "backend"] {
         let json = format!(r#"{{"{field}":null}}"#);
         let request: CreateSessionRequest = serde_json::from_str(&json).unwrap();
+        let request = request.into_application();
         let error = model_options(
             request.model,
             request.base_url,

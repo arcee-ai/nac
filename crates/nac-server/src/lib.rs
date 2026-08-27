@@ -146,6 +146,11 @@ use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::{Config as SwaggerConfig, SwaggerUi};
 
+use application::{
+    session_creation::{SessionCreationCommand, SessionSandboxCommand},
+    Field,
+};
+
 const DEFAULT_REPLAY_LIMIT: usize = 256;
 const DEFAULT_MESSAGE_PAGE_LIMIT: usize = 24;
 const MAX_MESSAGE_PAGE_LIMIT: usize = 100;
@@ -439,7 +444,7 @@ impl GitProbeCacheEntry {
     }
 }
 
-fn project_location_conflicts(request: &CreateSessionRequest) -> bool {
+fn project_location_conflicts(request: &SessionCreationCommand) -> bool {
     request
         .cwd
         .as_ref()
@@ -449,52 +454,43 @@ fn project_location_conflicts(request: &CreateSessionRequest) -> bool {
         || nonblank(request.ssh_identity_file.clone()).is_some()
 }
 
-fn inherit_project_field<T>(field: &mut RequestField<T>, inherited: RequestField<T>) {
-    if matches!(field, RequestField::Omitted) {
+fn inherit_project_field<T>(field: &mut Field<T>, inherited: Field<T>) {
+    if matches!(field, Field::Unchanged) {
         *field = inherited;
     }
 }
 
 fn apply_project_model_defaults(
-    request: &mut CreateSessionRequest,
+    request: &mut SessionCreationCommand,
     defaults: ModelConfigurationRecord,
 ) {
-    inherit_project_field(&mut request.model, RequestField::Value(defaults.model));
-    inherit_project_field(
-        &mut request.base_url,
-        RequestField::Value(defaults.base_url),
-    );
-    inherit_project_field(&mut request.backend, RequestField::Value(defaults.backend));
+    inherit_project_field(&mut request.model, Field::Set(defaults.model));
+    inherit_project_field(&mut request.base_url, Field::Set(defaults.base_url));
+    inherit_project_field(&mut request.backend, Field::Set(defaults.backend));
     inherit_project_field(
         &mut request.reasoning_effort,
         defaults
             .reasoning_effort
-            .map(RequestField::Value)
-            .unwrap_or(RequestField::Null),
+            .map(Field::Set)
+            .unwrap_or(Field::Clear),
     );
     inherit_project_field(
         &mut request.api_key_env,
-        defaults
-            .api_key_env
-            .map(RequestField::Value)
-            .unwrap_or(RequestField::Null),
+        defaults.api_key_env.map(Field::Set).unwrap_or(Field::Clear),
     );
     inherit_project_field(
         &mut request.extra_headers,
-        RequestField::Value(HeadersRequest(defaults.extra_headers)),
+        Field::Set(defaults.extra_headers),
     );
     if let Some(threshold) = defaults.orchestrator_compaction_threshold {
         inherit_project_field(
             &mut request.orchestrator_compaction_threshold,
-            RequestField::Value(threshold),
+            Field::Set(threshold),
         );
     }
     inherit_project_field(
         &mut request.light_model,
-        defaults
-            .light_model
-            .map(RequestField::Value)
-            .unwrap_or(RequestField::Null),
+        defaults.light_model.map(Field::Set).unwrap_or(Field::Clear),
     );
 }
 
@@ -527,45 +523,39 @@ fn newest_project_session(
 /// Same inheritance as `apply_project_model_defaults`, sourced from a sibling
 /// chat instead of a saved configuration.
 fn apply_sibling_model_defaults(
-    request: &mut CreateSessionRequest,
+    request: &mut SessionCreationCommand,
     sibling: sessions::SessionSnapshot,
 ) {
-    inherit_project_field(&mut request.model, RequestField::Value(sibling.model));
-    inherit_project_field(&mut request.base_url, RequestField::Value(sibling.base_url));
+    inherit_project_field(&mut request.model, Field::Set(sibling.model));
+    inherit_project_field(&mut request.base_url, Field::Set(sibling.base_url));
     inherit_project_field(
         &mut request.backend,
-        RequestField::Value(sibling.backend.as_str().to_string()),
+        Field::Set(sibling.backend.as_str().to_string()),
     );
     inherit_project_field(
         &mut request.reasoning_effort,
         sibling
             .reasoning_effort
-            .map(|effort| RequestField::Value(effort.as_str().to_string()))
-            .unwrap_or(RequestField::Null),
+            .map(|effort| Field::Set(effort.as_str().to_string()))
+            .unwrap_or(Field::Clear),
     );
     inherit_project_field(
         &mut request.api_key_env,
-        sibling
-            .api_key_env
-            .map(RequestField::Value)
-            .unwrap_or(RequestField::Null),
+        sibling.api_key_env.map(Field::Set).unwrap_or(Field::Clear),
     );
     inherit_project_field(
         &mut request.extra_headers,
-        RequestField::Value(HeadersRequest(sibling.extra_headers)),
+        Field::Set(sibling.extra_headers),
     );
     if let Some(threshold) = sibling.orchestrator_compaction_threshold {
         inherit_project_field(
             &mut request.orchestrator_compaction_threshold,
-            RequestField::Value(threshold),
+            Field::Set(threshold),
         );
     }
     inherit_project_field(
         &mut request.light_model,
-        sibling
-            .light_model
-            .map(RequestField::Value)
-            .unwrap_or(RequestField::Null),
+        sibling.light_model.map(Field::Set).unwrap_or(Field::Clear),
     );
 }
 
@@ -943,7 +933,9 @@ impl SessionManager {
         &self,
         request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
-        self.session_creation().create_session(request).await
+        self.session_creation()
+            .create_session(request.into_application())
+            .await
     }
 
     fn newest_primary_project_session_id(&self, project_id: &str) -> Result<Option<String>> {
@@ -1865,13 +1857,13 @@ fn nonblank_request_string(value: String, field: &str) -> Result<String> {
     Ok(normalized.to_string())
 }
 
-fn required_create_string(field: RequestField<String>, name: &str) -> Result<Option<String>> {
+fn required_create_string(field: Field<String>, name: &str) -> Result<Option<String>> {
     match field {
-        RequestField::Omitted => Ok(None),
-        RequestField::Null => Err(request_configuration_error(format!(
+        Field::Unchanged => Ok(None),
+        Field::Clear => Err(request_configuration_error(format!(
             "invalid model configuration: required field '{name}' cannot be null"
         ))),
-        RequestField::Value(value) => nonblank_request_string(value, name).map(Some),
+        Field::Set(value) => nonblank_request_string(value, name).map(Some),
     }
 }
 
@@ -1885,29 +1877,29 @@ fn validated_compaction_threshold(threshold: u64) -> Result<u64> {
     Ok(threshold)
 }
 
-fn create_compaction_threshold_override(field: RequestField<u64>) -> Result<Option<u64>> {
+fn create_compaction_threshold_override(field: Field<u64>) -> Result<Option<u64>> {
     match field {
-        RequestField::Omitted => Ok(None),
-        RequestField::Null => Ok(Some(0)),
-        RequestField::Value(threshold) => validated_compaction_threshold(threshold).map(Some),
+        Field::Unchanged => Ok(None),
+        Field::Clear => Ok(Some(0)),
+        Field::Set(threshold) => validated_compaction_threshold(threshold).map(Some),
     }
 }
 
 fn model_options(
-    model: RequestField<String>,
-    base_url: RequestField<String>,
-    backend: RequestField<String>,
-    reasoning_effort: RequestField<String>,
-    api_key_env: RequestField<String>,
-    extra_headers: RequestField<HeadersRequest>,
+    model: Field<String>,
+    base_url: Field<String>,
+    backend: Field<String>,
+    reasoning_effort: Field<String>,
+    api_key_env: Field<String>,
+    extra_headers: Field<BTreeMap<String, String>>,
 ) -> Result<ModelOptions> {
     let backend = required_create_string(backend, "backend")?
         .map(|value| parse_request_enum::<BackendKind>(&value, "backend"))
         .transpose()?;
     let reasoning_effort = match reasoning_effort {
-        RequestField::Omitted => OptionalModelOption::Inherit,
-        RequestField::Null => OptionalModelOption::Clear,
-        RequestField::Value(value) => {
+        Field::Unchanged => OptionalModelOption::Inherit,
+        Field::Clear => OptionalModelOption::Clear,
+        Field::Set(value) => {
             let value = nonblank_request_string(value, "reasoning_effort")?;
             OptionalModelOption::Value(parse_request_enum::<ReasoningEffort>(
                 &value,
@@ -1916,14 +1908,14 @@ fn model_options(
         }
     };
     let api_key_env = match api_key_env {
-        RequestField::Omitted => OptionalModelOption::Inherit,
-        RequestField::Null => OptionalModelOption::Clear,
-        RequestField::Value(value) => OptionalModelOption::Value(value),
+        Field::Unchanged => OptionalModelOption::Inherit,
+        Field::Clear => OptionalModelOption::Clear,
+        Field::Set(value) => OptionalModelOption::Value(value),
     };
     let extra_headers = match extra_headers {
-        RequestField::Omitted => None,
-        RequestField::Null => Some(BTreeMap::new()),
-        RequestField::Value(HeadersRequest(headers)) => Some(headers),
+        Field::Unchanged => None,
+        Field::Clear => Some(BTreeMap::new()),
+        Field::Set(headers) => Some(headers),
     };
 
     Ok(ModelOptions {
@@ -2025,7 +2017,7 @@ where
     })
 }
 
-fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
+fn sandbox_options(request: SessionSandboxCommand) -> SandboxOptions {
     SandboxOptions {
         sandbox: request.enabled,
         no_mount_cwd: request.no_mount_cwd,
@@ -2044,7 +2036,7 @@ fn sandbox_options(request: SandboxRequest) -> SandboxOptions {
     }
 }
 
-fn sandbox_requested(request: &SandboxRequest) -> bool {
+fn sandbox_requested(request: &SessionSandboxCommand) -> bool {
     request.enabled
         || request.no_mount_cwd
         || !request.mounts.is_empty()

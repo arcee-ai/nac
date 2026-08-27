@@ -644,6 +644,14 @@ Rules:
   omitted/null/value, and legacy-header compatibility regressions pass; the
   complete server test build and warning-denied crate check are green. Server
   `lib.rs` is now 2,367 lines.
+- Session creation now crosses a transport-neutral `SessionCreationCommand`
+  and `SessionSandboxCommand`. Delivery maps tri-state wire fields and header
+  wrappers once; the application service owns behavior, location, model,
+  sandbox, and first-chat inputs without depending on serde/OpenAPI DTOs. The
+  existing public manager facade and OpenAPI schema remain compatible.
+  Create inheritance/null handling, invalid required fields, SSH/sandbox
+  exclusion, OpenAPI parity, the complete test build, and warning-denied
+  server check pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -659,8 +667,7 @@ Rules:
 
 ## Exact next action
 
-Commit the shared wire-contract extraction with exact-path staging, then make
-session creation accept an application-owned command instead of the transport
-DTO. Move the remaining shared creation/configuration validators to their
-application owner, extract error mapping from composition, and then run the
-full server suite to close M2 before starting M4.
+Commit the transport-neutral creation command with exact-path staging. Move the
+remaining shared creation/configuration validators to an application owner,
+extract error mapping from composition, and then run the full server suite to
+close M2 before starting M4.
