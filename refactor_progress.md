@@ -761,6 +761,12 @@ Rules:
   cwd, remote creation, optional-model, sandbox enablement, the complete core
   test build, and warning-denied Clippy pass. The fake MCP loopback test required
   the authorized unsandboxed run.
+- The 808-line tool capability/kernel characterization suite now lives in a
+  sibling test file rather than obscuring production composition. All 14 moved
+  registry ordering/topology, native/model parity, authorization binding,
+  hard-denial, terminal approval, and ancestor-swap regressions pass; the
+  complete core test build and warning-denied Clippy are green. Tool production
+  code is now 1,524 lines before responsibility extraction.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -776,7 +782,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 runtime contract/remote extraction with exact-path staging. Then
-map and decompose the remaining tool/terminal gravity wells, preserving the
-prepared-invocation, authorization, process-lifecycle, retention, and backend
-cleanup boundaries.
+Commit the M4 tool characterization-test separation with exact-path staging.
+Then replace the remaining central legacy direct-tool kind dispatch with
+family-owned native prepared invocations while preserving definitions,
+validation, binding, admission, execution, and capability ordering.
