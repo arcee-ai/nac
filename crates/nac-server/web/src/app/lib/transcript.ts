@@ -315,7 +315,9 @@ function toolResultsForAssistant(
 
 /**
  * Thread names whose latest dispatch exists only because the user stopped the
- * run. A later successful dispatch of the same name drops off this set.
+ * run. A later dispatch of the same name — finished or still in flight —
+ * drops off this set, so Continue does not keep painting the live card as
+ * cancelled.
  *
  * A stop does not always write a tool result for every dispatch — a name that
  * never started has no `[tool call cancelled by user]` row. Those still belong
@@ -332,11 +334,15 @@ export function cancelledThreadNames(messages: SessionSnapshotResponse["messages
     );
     if (!threadCalls.length) return;
 
+    const turnCancelled = assistantTurnCancelled(messages, index);
     let anyCancelMarker = false;
     for (const call of threadCalls) {
       const result = results.get(call.id);
-      if (result == null) continue;
       const name = dispatchThreadName(call);
+      if (result == null) {
+        if (!turnCancelled) cancelled.delete(name);
+        continue;
+      }
       if (result.startsWith(TOOL_CALL_CANCELLED_MARKER)) {
         cancelled.add(name);
         anyCancelMarker = true;
@@ -345,7 +351,7 @@ export function cancelledThreadNames(messages: SessionSnapshotResponse["messages
       }
     }
 
-    if (!anyCancelMarker && !assistantTurnCancelled(messages, index)) return;
+    if (!anyCancelMarker && !turnCancelled) return;
     for (const call of threadCalls) {
       if (results.get(call.id) != null) continue;
       cancelled.add(dispatchThreadName(call));
@@ -414,12 +420,17 @@ function describeThread(
       ? false
       : episodeEvents?.some((event) => event.type === "thread_finished");
   const finishedLive = live?.status === "finished";
+  // A follow-up that re-dispatches a stopped name is the live episode now.
+  // The previous cancel marker still belongs on the older card; it must not
+  // keep this one on Close while the worker is running.
+  const liveRunning = live?.status === "running" && !live.cancelled;
   const cancelled =
-    result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true ||
-    Boolean(live?.cancelled) ||
-    (result == null &&
-      episode === (ctx.dispatchCounts[name] ?? 1) - 1 &&
-      ctx.cancelledNames.has(name));
+    !liveRunning &&
+    (result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true ||
+      Boolean(live?.cancelled) ||
+      (result == null &&
+        episode === (ctx.dispatchCounts[name] ?? 1) - 1 &&
+        ctx.cancelledNames.has(name)));
   const state: ThreadState = cancelled
     ? "cancelled"
     : live?.isError

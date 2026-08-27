@@ -415,6 +415,10 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         runStartedAt: event.started_at_epoch_ms,
         lastElapsedMs: null,
         cancelArmed: false,
+        // Stop left workers as finished+cancelled. A follow-up that reuses a
+        // name would inherit that flag and keep the new card on Close until
+        // thread_started, so this run starts with an empty live map.
+        threads: {},
       });
       pushEvent({
         seq,
