@@ -372,6 +372,9 @@ Rules:
 - `8edde97 refactor(managed): extract host and GitHub context` — establishes
   the harness-independent managed crate and points server/CLI consumers at its
   configuration, secret, provider, and command-environment owners.
+- `f9969ec refactor: extract process supervision` — moves descendant-aware
+  spawn/cancellation/cleanup into shared infrastructure used by terminals,
+  workers, and managed Git execution.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -481,6 +484,15 @@ Rules:
   core test build, and managed/core/server offline checks pass. This boundary
   lets managed Git execution retain the same descendant cleanup semantics
   without depending on the harness.
+- Managed clone workflow state, owner-marked staging cleanup, durable operation
+  persistence, Git publication, cancellation, and restart reconciliation now
+  live in `nac-managed::clone_workflow`. A narrow `ProjectRegistrar` port uses
+  shared domain `ProjectRecord`/`NewProject` contracts; the server owns the
+  SQLite adapter. The old 1,345-line core clone module and both managed
+  compatibility re-export modules are removed, leaving `nac-core` with no
+  production dependency on `nac-managed`. All 16 managed tests, full server
+  suite (150 library plus 23 CLI), warning-denied managed/core/server checks,
+  core test build, contract test, and OpenAPI parity coverage pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -496,8 +508,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the process-supervision boundary
-without protected files. Then move the durable clone workflow behind an
-explicit project-registration port using the shared Git/process and credential
-infrastructure, remove temporary core managed re-exports, and rerun managed/
-server E2E coverage.
+Inspect exact worktree/staged diffs and commit the managed clone/project-port
+slice without protected files. Then move managed readiness facts and remaining
+secret HTTP use cases behind the managed application facade so M3 can close,
+and continue M2 server decomposition with session/delegation/workspace seams.
