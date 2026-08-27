@@ -51,6 +51,8 @@ impl ProcessTreeGuard {
             // when it actually is one, otherwise fall back to killing the
             // child pid directly.
             #[cfg(unix)]
+            // SAFETY: `getpgid` accepts any process identifier value and does
+            // not dereference memory; failure returns -1 and fails the filter.
             pgid: root_pid.filter(|pid| unsafe { libc::getpgid(*pid) } == *pid),
             #[cfg(unix)]
             group_leader: None,
@@ -132,6 +134,8 @@ impl ProcessTreeGuard {
         #[cfg(unix)]
         {
             if let Some(pgid) = self.pgid {
+                // SAFETY: `pgid` was captured from an owned child process
+                // group; `killpg` accepts the integer id and signal value.
                 unsafe {
                     libc::killpg(pgid, libc::SIGKILL);
                 }
@@ -247,12 +251,16 @@ impl ProcessTreeGuard {
         let Some(pgid) = self.pgid else {
             return;
         };
+        // SAFETY: `pgid` identifies the process group this guard owns;
+        // `killpg` accepts the integer id and signal value.
         unsafe {
             libc::killpg(pgid, libc::SIGTERM);
         }
         let deadline = sleep(TERMINATE_GRACE);
         tokio::pin!(deadline);
         loop {
+            // SAFETY: signal zero only probes the captured process-group id
+            // and has no pointer or memory preconditions.
             if unsafe { libc::killpg(pgid, 0) != 0 } {
                 break;
             }
@@ -261,6 +269,8 @@ impl ProcessTreeGuard {
                 _ = sleep(EXIT_POLL_INTERVAL) => {}
             }
         }
+        // SAFETY: `pgid` is still the owned group id; `killpg` accepts this
+        // integer id and the constant signal value.
         unsafe {
             libc::killpg(pgid, libc::SIGKILL);
         }
@@ -277,6 +287,8 @@ impl Drop for ProcessTreeGuard {
             let owns_group = self.root_pid.is_some() || self.group_leader.is_some();
             if owns_group {
                 if let Some(pgid) = self.pgid.take() {
+                    // SAFETY: the guard still owns this captured process group
+                    // and `killpg` has no pointer preconditions.
                     unsafe {
                         libc::killpg(pgid, libc::SIGKILL);
                     }
@@ -290,6 +302,8 @@ fn descendants_outside_group(root: libc::pid_t, pgid: libc::pid_t) -> Vec<libc::
     descendant_pids(root)
         .into_iter()
         .filter(|pid| {
+            // SAFETY: `getpgid` accepts any integer process id; failure is
+            // represented by a non-positive return and rejected below.
             let child_pgid = unsafe { libc::getpgid(*pid) };
             child_pgid > 0 && child_pgid != pgid
         })
@@ -334,6 +348,8 @@ fn descendant_pids(root: libc::pid_t) -> Vec<libc::pid_t> {
 #[cfg(all(unix, not(target_os = "linux")))]
 fn signal_pids(pids: &[libc::pid_t], signal: libc::c_int) {
     for &pid in pids {
+        // SAFETY: `kill` accepts an integer process id and signal value; these
+        // ids came from the OS process table and errors are intentionally ignored.
         unsafe {
             libc::kill(pid, signal);
         }
@@ -389,6 +405,8 @@ impl ProcessIdentity {
     }
 
     fn send_signal(&self, signal: libc::c_int) -> std::io::Result<()> {
+        // SAFETY: the pidfd is an owned live descriptor; a null siginfo pointer
+        // is permitted for ordinary signal delivery and the flags value is zero.
         let result = unsafe {
             libc::syscall(
                 libc::SYS_pidfd_send_signal,
@@ -664,6 +682,8 @@ fn direct_child_pids_macos(parent: libc::pid_t) -> Vec<libc::pid_t> {
     let mut capacity = 32usize;
     loop {
         let mut pids = vec![0 as libc::pid_t; capacity];
+        // SAFETY: `pids` exposes writable storage for exactly the byte length
+        // supplied to the OS; the result is capped to that allocation below.
         let returned = unsafe {
             libc::proc_listchildpids(
                 parent,
@@ -740,10 +760,14 @@ fn open_pidfd(pid: libc::pid_t) -> std::io::Result<OwnedFd> {
     if PIDFD_OPEN_FAILURE_PID.load(std::sync::atomic::Ordering::SeqCst) == pid {
         return Err(std::io::Error::from_raw_os_error(libc::EPERM));
     }
+    // SAFETY: `pidfd_open` accepts an integer process id and zero flags and
+    // returns either a new descriptor or a negative error code.
     let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as libc::c_int };
     if fd < 0 {
         Err(std::io::Error::last_os_error())
     } else {
+        // SAFETY: a nonnegative `pidfd_open` result is a newly owned descriptor
+        // that has not been wrapped or closed elsewhere.
         Ok(unsafe { OwnedFd::from_raw_fd(fd) })
     }
 }

@@ -441,6 +441,8 @@ fn exchange_paths(left: &Path, right: &Path) -> std::io::Result<()> {
     let left = CString::new(left.as_os_str().as_bytes())?;
     let right = CString::new(right.as_os_str().as_bytes())?;
     #[cfg(target_os = "linux")]
+    // SAFETY: both paths are live NUL-terminated C strings and `AT_FDCWD`
+    // makes them relative to the process cwd; `RENAME_EXCHANGE` is valid here.
     let result = unsafe {
         libc::renameat2(
             libc::AT_FDCWD,
@@ -451,6 +453,8 @@ fn exchange_paths(left: &Path, right: &Path) -> std::io::Result<()> {
         )
     };
     #[cfg(any(target_os = "macos", target_os = "ios"))]
+    // SAFETY: both arguments are live NUL-terminated C strings and
+    // `RENAME_SWAP` is the supported atomic-exchange flag on these targets.
     let result = unsafe { libc::renamex_np(left.as_ptr(), right.as_ptr(), libc::RENAME_SWAP) };
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
     let result = -1;

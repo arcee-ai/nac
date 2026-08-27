@@ -102,6 +102,8 @@ impl TerminalSession {
         #[cfg(unix)]
         let process_group_id = child.process_id().and_then(|pid| {
             let pid = pid as libc::pid_t;
+            // SAFETY: `getpgid` accepts any integer process id; a failed lookup
+            // returns -1 and therefore cannot equal the child id.
             let group = unsafe { libc::getpgid(pid) };
             (group == pid).then_some(group)
         });
@@ -236,7 +238,11 @@ impl TerminalSession {
         let Some(pid) = self.child.process_id().map(|pid| pid as libc::pid_t) else {
             return false;
         };
+        // SAFETY: `siginfo_t` is a C output record for which the all-zero byte
+        // pattern is a valid initialized state before `waitid` fills it.
         let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+        // SAFETY: `info` is writable for one `siginfo_t`, `pid` is an integer
+        // child id, and the flag combination requests a non-reaping status read.
         let result = unsafe {
             libc::waitid(
                 libc::P_PID,
@@ -245,6 +251,8 @@ impl TerminalSession {
                 libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
             )
         };
+        // SAFETY: `info` is initialized above and either remains zeroed or was
+        // populated by `waitid`, so reading its pid field is valid.
         result == 0 && unsafe { info.si_pid() } == pid
     }
 
@@ -350,6 +358,8 @@ impl TerminalSession {
         let Some(pgid) = self.process_group_id else {
             return;
         };
+        // SAFETY: `pgid` was captured for the owned PTY process group;
+        // negative `kill` targets a process group and takes no pointers.
         unsafe {
             libc::kill(-pgid, signal);
         }
@@ -358,6 +368,8 @@ impl TerminalSession {
     #[cfg(all(unix, not(target_os = "linux")))]
     fn signal_process_group(&self, signal: libc::c_int) {
         if let Some(pgid) = self.process_group_id {
+            // SAFETY: `pgid` was captured for the owned PTY process group;
+            // negative `kill` targets that group and takes no pointers.
             unsafe {
                 libc::kill(-pgid, signal);
             }
