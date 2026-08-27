@@ -375,6 +375,12 @@ Rules:
 - `f9969ec refactor: extract process supervision` — moves descendant-aware
   spawn/cancellation/cleanup into shared infrastructure used by terminals,
   workers, and managed Git execution.
+- `a76dc07 refactor(managed): own durable clone workflow` — moves clone state,
+  operation persistence, Git/process behavior, and reconciliation behind a
+  server-implemented project registration port.
+- `c6fe667 refactor(managed): own readiness and secret use cases` — completes
+  managed readiness facts and application/delivery ownership for generic
+  secret administration.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -502,6 +508,15 @@ Rules:
   OpenAPI/router parity tests plus warning-denied managed/server checks pass.
   `lib.rs` is 6,852 lines. Final production E2E and image-contract gates remain
   intentionally scheduled under M8.
+- Workspace inspection and mutation now belong to a focused 343-line
+  `WorkspaceApplication` with a 252-line HTTP/OpenAPI adapter. The application
+  owns diff/files/revisions/open/branch/commit use cases and, critically, keeps
+  the existing process gate plus durable workspace and all same-checkout
+  session leases alive through uncancellable Git operations. DTOs remain
+  crate-root re-exports for compatibility. Mutation admission, request
+  cancellation, invalid-stage mapping, OpenAPI/router parity, full server test
+  compilation, and warning-denied server Clippy pass. Server `lib.rs` is 6,357
+  lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -517,7 +532,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the managed readiness/secrets
-slice without protected files. Then continue M2 with session, delegation, and
-workspace application/delivery seams, keeping lifecycle gates and transaction
-ordering in their existing owner until the matching core decomposition.
+Inspect exact worktree/staged diffs and commit the workspace application/
+delivery slice without protected files. Then continue M2 with session and
+delegation transport/application seams, keeping lifecycle gates and exact
+completion-delivery ordering in their current coordinator.
