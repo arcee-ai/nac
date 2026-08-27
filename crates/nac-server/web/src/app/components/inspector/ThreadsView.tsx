@@ -881,7 +881,9 @@ export function ThreadsView({
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const persisted = threads.map((thread) => thread.name);
-    const extras = ordered.filter((thread) => !persisted.includes(thread.name)).map((thread) => thread.name);
+    const extras = ordered
+      .filter((thread) => !persisted.includes(thread.name))
+      .map((thread) => thread.name);
     const eventKeys = Object.keys(snapshot?.thread_events ?? {});
     const orphanEvents = eventKeys.filter(
       (name) =>

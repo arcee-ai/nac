@@ -236,8 +236,7 @@ export function syncRunFromSnapshot(activeRun: ActiveRunSnapshot | null | undefi
     // or a terminal SSE event.
     return;
   }
-  const runStartedAt =
-    running && activeRun ? activeRun.started_at_epoch_ms : state.runStartedAt;
+  const runStartedAt = running && activeRun ? activeRun.started_at_epoch_ms : state.runStartedAt;
   if (state.running === running && state.runStartedAt === runStartedAt) return;
   setState({
     running,
