@@ -270,8 +270,9 @@ impl SessionService {
         let blocking_task = tokio::task::spawn_blocking(move || {
             blocking_service.load_frontend_snapshot_blocking(options)
         });
-        let (active_threads, blocking) = tokio::join!(self.active_thread_names(), blocking_task);
-        let blocking = blocking
+        let active_threads = self.active_thread_names();
+        let blocking = blocking_task
+            .await
             .map_err(|error| anyhow::anyhow!("frontend snapshot load task failed: {error}"))??;
 
         // Store-backed transcript reads (step 3): the snapshot blob (legacy

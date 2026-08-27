@@ -93,8 +93,7 @@ impl SessionService {
                                 .then(|| terminal_report.clone())
                                 .flatten(),
                             None,
-                        )
-                        .await;
+                        );
                     }
                 }
             }
@@ -111,8 +110,7 @@ impl SessionService {
                     crate::store::TraditionalChildStatus::Failed,
                     None,
                     Some(FAILED_RUN_WARNING.to_string()),
-                )
-                .await;
+                );
             }
             crate::store::ActiveRunReconciliation::Interrupted { run_id } => {
                 self.event_bus.emit_with_context(
@@ -127,8 +125,7 @@ impl SessionService {
                     crate::store::TraditionalChildStatus::Interrupted,
                     None,
                     Some(INTERRUPTED_RUN_WARNING.to_string()),
-                )
-                .await;
+                );
             }
             crate::store::ActiveRunReconciliation::None => {}
         }
@@ -185,8 +182,7 @@ impl SessionService {
                         "child run ended before its prompt and recovery obligation committed"
                             .to_string(),
                     ),
-                )
-                .await;
+                );
                 return crate::store::load_traditional_child(&self.metadata.store_path, session_id);
             }
         };
@@ -233,8 +229,7 @@ impl SessionService {
             status,
             report,
             (!failure.is_empty()).then_some(failure),
-        )
-        .await;
+        );
         crate::store::load_traditional_child(&self.metadata.store_path, session_id)
     }
 }

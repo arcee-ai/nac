@@ -2472,7 +2472,6 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
     let service = parts.service;
     let no_run = service
         .queue_thread_steering("impl/ui", "make the layout denser")
-        .await
         .unwrap_err();
     assert!(no_run.to_string().contains("no active run"));
 
@@ -2501,14 +2500,12 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
         }));
     let inactive = service
         .queue_thread_steering("impl/ui", "make the layout denser")
-        .await
         .unwrap_err();
     assert!(inactive.to_string().contains("not active"));
 
     service.active_threads.mark("impl/ui", "worker-dispatch");
     let queued = service
         .queue_thread_steering("impl/ui", "make the layout denser")
-        .await
         .unwrap();
     assert_eq!(queued.status, "queued");
     assert_eq!(queued.dispatch_id, "worker-dispatch");
@@ -5252,7 +5249,7 @@ async fn request_cancel_persists_marker_and_emits_terminal_event() {
             .is_none(),
         "the cancellation marker and run-state save clear the durable active marker"
     );
-    assert!(parts.service.active_thread_names().await.is_empty());
+    assert!(parts.service.active_thread_names().is_empty());
     assert!(crate::store::list_thread_steering(&store_path, &session_id)
         .unwrap()
         .iter()

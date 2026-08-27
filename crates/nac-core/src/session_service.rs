@@ -738,22 +738,21 @@ impl TranscriptScanCache {
 }
 
 impl SessionService {
-    pub async fn active_thread_names(&self) -> Vec<String> {
+    pub fn active_thread_names(&self) -> Vec<String> {
         let mut names = self.active_threads.names();
         names.sort();
         names
     }
 
-    pub async fn queue_thread_steering(
+    pub fn queue_thread_steering(
         &self,
         thread_name: &str,
         instruction: &str,
     ) -> Result<crate::store::ThreadSteeringRecord> {
         self.queue_thread_steering_for_run(thread_name, instruction, None)
-            .await
     }
 
-    pub async fn queue_thread_steering_for_run(
+    pub fn queue_thread_steering_for_run(
         &self,
         thread_name: &str,
         instruction: &str,

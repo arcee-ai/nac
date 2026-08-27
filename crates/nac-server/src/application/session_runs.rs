@@ -146,8 +146,7 @@ impl<'a> SessionRunApplication<'a> {
             .manager
             .attach_session(session_id)
             .await?
-            .queue_thread_steering_for_run(thread_name, &instruction, expected_run_id)
-            .await?;
+            .queue_thread_steering_for_run(thread_name, &instruction, expected_run_id)?;
         Ok(ThreadSteering {
             steering_id: record.id,
             thread_name: record.thread_name,
