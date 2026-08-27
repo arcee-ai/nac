@@ -830,6 +830,14 @@ Rules:
   All 35 terminal manager regressions pass with the same two optional SSH/
   Podman cases ignored; the complete core test build and warning-denied Clippy
   are green.
+- The mutation family now separates its 1,081-line regression suite and its
+  562-line remote Python protocol/transport from the local revision/atomicity
+  owner. All 31 local, mounted, remote, cross-process lock, symlink-swap,
+  metadata, failure-injection, and backend-parity tests pass; warning-denied
+  Clippy is green. The remaining 1,529-line local owner is cohesive around
+  byte/text projection, revision checking, directory-descriptor traversal,
+  atomic publication, metadata preservation, and cross-process file locks; its
+  size and placement restriction must be documented in the nested tool guide.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -845,6 +853,6 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 terminal ownership extraction with exact-path staging. Then
-audit the remaining tool root/kernel surfaces and run the complete core suite
-before declaring M4/M5 structurally complete.
+Commit the M4/M5 mutation test/remote extraction with exact-path staging. Then
+separate discovery tests/provider mechanics, audit the remaining tool surfaces,
+and mark M4/M5 structurally complete with the already-green full core suite.
