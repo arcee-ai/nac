@@ -800,6 +800,12 @@ Rules:
   explicit rules can deny imported capabilities. A regression proves denial
   occurs before the transport adapter; all 14 kernel characterizations and
   warning-denied Clippy pass.
+- The native-kernel module's 466-line characterization suite now lives in a
+  sibling file. The 613-line production owner exposes registry construction,
+  typed handles, strict capability snapshots, prepared calls, authorization/
+  revalidation, binding, and invocation without inline test weight. All six
+  moved collision, ordering, prepared-call, hard-denial, canonical-binding, and
+  interactive-broker tests pass; warning-denied Clippy is green.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -815,7 +821,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M5 MCP prepared-invocation adapter with exact-path staging. Then
-separate capability/registry composition and common invocation routing from
-tool runtime/thread lifecycle ownership, and decompose terminal process/
-retention ownership where the current manager still mixes responsibilities.
+Commit the M4/M5 kernel test separation with exact-path staging. Then separate
+capability/registry composition and common invocation routing from tool
+runtime/thread lifecycle ownership, and decompose terminal process/retention
+ownership where the current manager still mixes responsibilities.
