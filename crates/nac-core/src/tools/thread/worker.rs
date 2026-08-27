@@ -120,13 +120,14 @@ impl WorkerTimeoutTrace {
             ),
             TimeoutLocation::ToolCall if !self.active_tool_calls.is_empty() => {
                 if self.active_tool_calls.len() == 1 {
-                    let (call_id, call) = self.active_tool_calls.iter().next().unwrap();
-                    return format!(
-                        "The thread timed out at a tool call.\nTool call: {} {}\narguments: {}",
-                        call.name,
-                        call_id,
-                        call.args_detail.as_deref().unwrap_or("<not captured>")
-                    );
+                    if let Some((call_id, call)) = self.active_tool_calls.iter().next() {
+                        return format!(
+                            "The thread timed out at a tool call.\nTool call: {} {}\narguments: {}",
+                            call.name,
+                            call_id,
+                            call.args_detail.as_deref().unwrap_or("<not captured>")
+                        );
+                    }
                 }
 
                 let mut reason = String::from("The thread timed out at tool calls:");
@@ -271,7 +272,10 @@ pub(super) async fn run_worker(
     let mut control_stdin = child.stdin.take();
 
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
-    let stderr = child.stderr.take().unwrap();
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| std::io::Error::other("supervised worker stderr pipe is unavailable"))?;
     let event_sink = runtime.event_sink.clone();
     let thread_name_for_logs = invocation.thread_name.to_string();
     let timeout_trace_for_logs = Arc::clone(&timeout_trace);
@@ -343,7 +347,10 @@ pub(super) async fn run_worker(
 
     let stdout_cancellation = cancellation.clone();
     let stdout_shutdown = reader_shutdown.clone();
-    let stdout = child.stdout.take().unwrap();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| std::io::Error::other("supervised worker stdout pipe is unavailable"))?;
     let stdout_handle = tokio::spawn(async move {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();

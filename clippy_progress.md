@@ -115,6 +115,10 @@ zero-backlog async guard last.
 - `iter_over_hash_type`: complete. One order-independent set transfer uses
   `drain`; the seven observable cleanup, diagnostic, warning, projection,
   coverage, diff, and measurement paths now use sorted keys or ordered maps.
+- `unwrap_used`: complete. Tests retain the reference-repository convention
+  through `allow-unwrap-in-tests = true`; production code remains subject to
+  the hard gate. All three worker unwraps now tolerate an empty trace or
+  propagate a missing supervised pipe as `io::Error` for guarded cleanup.
 
 ## Verification and next action
 
@@ -171,5 +175,8 @@ The `iter_over_hash_type` slice passes `make format-check`, `make lint`,
 `git diff --check`, and the full Rust workspace suite with the same green test
 inventory recorded above.
 
-Next: commit this exact lint boundary, then add `unwrap_used` with the narrow
-test-only allowance and run autofix before any manual repair.
+The `unwrap_used` slice passes `make format-check`, `make lint`,
+`git diff --check`, and all ten focused worker lifecycle/cancellation tests.
+
+Next: commit this exact lint boundary, then add `expect_used` with the matching
+narrow test-only allowance and run autofix before manual repair.
