@@ -2,14 +2,20 @@ use std::{collections::HashMap, time::Instant};
 
 use anyhow::{anyhow, Context, Result};
 use nac_core::{
+    permissions::PermissionRequest,
+    session_service::{
+        FrontendSnapshotLoadOptions, MessagePageRequest, MessagesPageSnapshot,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, ThreadEventPage,
+    },
     sessions,
+    store::{PermissionGrantRecord, SessionGoalRecord, SessionInboxRecord},
     view::{self, SessionSummarySnapshot},
     workspace::GitTarget,
 };
 
 use crate::{
-    git_target_key, GitTargetKey, ManagedSessionSummary, SessionManager, WorkspaceDiffCacheEntry,
-    WORKSPACE_DIFF_MEASURE_BUDGET,
+    git_target_key, GitTargetKey, ManagedSessionSummary, SessionLineageKind,
+    SessionLineageSnapshot, SessionManager, WorkspaceDiffCacheEntry, WORKSPACE_DIFF_MEASURE_BUDGET,
 };
 
 /// Session catalog and presentation use cases.
@@ -18,6 +24,130 @@ use crate::{
 /// bounded workspace measurements. It does not admit or settle agent runs.
 pub(crate) struct SessionCatalogApplication<'a> {
     manager: &'a SessionManager,
+}
+
+pub(crate) struct PermissionState {
+    pub(crate) requests: Vec<PermissionRequest>,
+    pub(crate) grants: Vec<PermissionGrantRecord>,
+}
+
+/// Attached-session projections and read-only durable state.
+///
+/// Lazy attachment may reconcile durable recovery under the existing
+/// lifecycle gate, but these use cases never admit a new run or mutate user
+/// intent.
+pub(crate) struct SessionStateApplication<'a> {
+    manager: &'a SessionManager,
+}
+
+impl<'a> SessionStateApplication<'a> {
+    pub(crate) fn new(manager: &'a SessionManager) -> Self {
+        Self { manager }
+    }
+
+    pub(crate) fn config(&self, session_id: &str) -> Result<sessions::RawSessionConfig> {
+        sessions::load_session_config(&self.manager.inner.store_path, session_id)
+    }
+
+    pub(crate) async fn snapshot(&self, session_id: &str) -> Result<SessionFrontendSnapshot> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .frontend_snapshot()
+            .await
+    }
+
+    pub(crate) async fn snapshot_with_options(
+        &self,
+        session_id: &str,
+        options: FrontendSnapshotLoadOptions,
+    ) -> Result<SessionFrontendSnapshotLoad> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .frontend_snapshot_with_options(options)
+            .await
+    }
+
+    pub(crate) fn lineage(&self, session_id: &str) -> Result<Option<SessionLineageSnapshot>> {
+        if let Some(child) =
+            nac_core::store::load_traditional_child(&self.manager.inner.store_path, session_id)?
+        {
+            return Ok(Some(SessionLineageSnapshot {
+                kind: SessionLineageKind::TraditionalChild,
+                parent_session_id: child.parent_session_id,
+                root_session_id: child.root_session_id,
+                description: child.description,
+            }));
+        }
+        if let Some(orchestrator) =
+            nac_core::store::load_managed_orchestrator(&self.manager.inner.store_path, session_id)?
+        {
+            return Ok(Some(SessionLineageSnapshot {
+                kind: SessionLineageKind::ManagedOrchestrator,
+                parent_session_id: orchestrator.parent_session_id,
+                root_session_id: orchestrator.root_session_id,
+                description: orchestrator.description,
+            }));
+        }
+        Ok(None)
+    }
+
+    pub(crate) async fn messages_page(
+        &self,
+        session_id: &str,
+        request: MessagePageRequest,
+    ) -> Result<MessagesPageSnapshot> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .messages_page(request)
+            .await
+    }
+
+    pub(crate) async fn direct_inbox(&self, session_id: &str) -> Result<Vec<SessionInboxRecord>> {
+        self.manager.require_primary_direct_session(session_id)?;
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .list_direct_inbox()
+    }
+
+    pub(crate) async fn permission_state(&self, session_id: &str) -> Result<PermissionState> {
+        let service = self.manager.attach_session(session_id).await?;
+        Ok(PermissionState {
+            requests: service.list_permission_requests()?,
+            grants: service.list_permission_grants()?,
+        })
+    }
+
+    pub(crate) async fn direct_goal(&self, session_id: &str) -> Result<Option<SessionGoalRecord>> {
+        self.manager.attach_session(session_id).await?.direct_goal()
+    }
+
+    pub(crate) async fn thread_events(
+        &self,
+        session_id: &str,
+        thread_name: &str,
+        before_id: Option<i64>,
+        limit: usize,
+    ) -> Result<ThreadEventPage> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .thread_events_page(thread_name, before_id, limit)
+    }
+
+    pub(crate) async fn skills(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<nac_core::skill_catalog::SkillCatalogEntry>> {
+        Ok(self
+            .manager
+            .attach_session(session_id)
+            .await?
+            .skill_catalog_entries())
+    }
 }
 
 impl<'a> SessionCatalogApplication<'a> {
@@ -56,7 +186,7 @@ impl<'a> SessionCatalogApplication<'a> {
                 .map(|summary| {
                     let active_service = active.get(&summary.session_id);
                     Ok(ManagedSessionSummary {
-                        lineage: self.manager.session_lineage(&summary.session_id)?,
+                        lineage: self.manager.session_state().lineage(&summary.session_id)?,
                         active: active_service.is_some(),
                         active_run: active_service.and_then(|service| service.active_run()),
                         summary,

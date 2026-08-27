@@ -532,6 +532,14 @@ Rules:
   status/error-shape and serialized-order regressions, OpenAPI/router parity,
   the full server test build, and warning-denied Clippy pass. Server `lib.rs`
   is now 5,755 lines.
+- Attached-session projections now have a separate `SessionStateApplication`:
+  configuration, snapshots, lineage, paged messages, direct inbox/goal reads,
+  permission state, thread events, and skill catalogs share the existing lazy
+  attachment/recovery boundary but cannot admit runs or mutate user intent.
+  Existing public manager methods remain small compatibility facades while
+  catalog consumers use the owner directly. Focused snapshot-recovery, inbox,
+  permission, and skill-route regressions plus the full server test build and
+  warning-denied Clippy pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -547,8 +555,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the session catalog/presentation
-slice without protected files. Then continue M2 with session attachment,
-submission, inbox/goals, permissions, events, configuration, cancellation, and
-deletion, keeping lifecycle gates, operation leases, and exact run-admission/
-settlement ordering in the lifecycle coordinator.
+Inspect exact worktree/staged diffs and commit the attached-session query slice
+without protected files. Then continue M2 with session attachment, submission,
+inbox/goals, permissions, events, configuration, cancellation, and deletion,
+keeping lifecycle gates, operation leases, and exact run-admission/settlement
+ordering in the lifecycle coordinator.
