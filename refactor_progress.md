@@ -718,6 +718,12 @@ Rules:
   canonical workdir projection, unlink/rmdir/git mutation policy, and grant vs
   hard-denial precedence regressions pass; warning-denied Clippy and the
   complete core test build are green.
+- Runtime configuration parsing now lives in a focused 275-line owner. It
+  retains the public `runtime` exports while isolating strict non-model loads,
+  explicit-file model identity import, removed-key warnings, credential
+  destination policy, and all storage/model/compaction/sandbox/worker settings.
+  Ambient and explicit config, non-model strictness, removed-key migration,
+  the complete core test build, and warning-denied Clippy pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -733,7 +739,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 permission resource/shell decomposition with exact-path staging.
-Then decompose runtime construction into configuration/model resolution,
-direct/orchestrator/worker builders, resume, sandbox, and execution-context
-owners without changing behavior selection or backend choice.
+Commit the M4 runtime configuration extraction with exact-path staging. Then
+decompose model resolution, direct/orchestrator/worker builders, resume,
+sandbox, and execution-context ownership without changing behavior selection
+or backend choice.
