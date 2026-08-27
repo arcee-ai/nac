@@ -685,6 +685,16 @@ Rules:
   terminal crash-window delivery, shared-store peer recovery, and stale-
   snapshot admission reconciliation regressions pass; the complete core test
   build is green. `session_service.rs` is now 2,910 lines.
+- Run lifecycle coordination now has explicit internal owners: a 552-line
+  admission module for lease preparation, run creation, atomic prompt commit,
+  and task launch; a 180-line cancellation module for owned cancellation and
+  cleanup; and a 577-line settlement module for terminal ownership, durable
+  snapshot ordering, goal/child settlement, revision capture, and active-run
+  teardown. Cross-owner operations are `pub(super)` only. Busy admission,
+  workspace exclusion, atomic-commit cancellation, dropped-caller ownership,
+  completion/cancel races, cleanup retryability, persistence failure, and
+  child terminal recovery regressions pass; the complete core test build is
+  green. `session_service.rs` is now 1,615 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -700,7 +710,6 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 recovery owner with exact-path staging. Next separate run
-admission, cancellation, and settlement into explicit session-service owners,
-moving code with its invariants and running the race/cleanup characterization
-suites after each boundary.
+Commit the M4 admission/cancellation/settlement owners with exact-path staging.
+Then finish the session-service boundary with construction/attachment/resource
+ownership before proceeding to the permissions gravity well.
