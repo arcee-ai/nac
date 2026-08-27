@@ -82,9 +82,7 @@ use nac_core::store::{TraditionalChildExecutionMode, TraditionalChildRecord};
 #[cfg(test)]
 use nac_core::test_support::store::TranscriptLogWriter;
 use nac_core::{
-    commands::{
-        slash_command_definitions, PreparedUserInput, SlashCommand, SlashCommandDefinition,
-    },
+    commands::{slash_command_definitions, SlashCommand, SlashCommandDefinition},
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEvent, SessionEventBoundary,
         SessionEventEnvelope, SessionReplayGap,
@@ -106,9 +104,9 @@ use nac_core::{
     },
     session_service::{
         ActiveRunSnapshot, FrontendSnapshotLoadOptions, FrontendSnapshotMessages,
-        MessagePageRequest, MessagesPageSnapshot, SessionCancelError, SessionCoordinationError,
-        SessionEventReceiver, SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
-        SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
+        MessagePageRequest, MessagesPageSnapshot, SessionCoordinationError, SessionEventReceiver,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, SessionRunHandle, SessionService,
+        SessionSubmitError, ThreadEventPage,
     },
     sessions,
     ssh_configurations::SshConfigurationStoreError,
@@ -1336,6 +1334,10 @@ impl SessionManager {
         application::sessions::SessionIntentApplication::new(self)
     }
 
+    pub(crate) fn session_runs(&self) -> application::session_runs::SessionRunApplication<'_> {
+        application::session_runs::SessionRunApplication::new(self)
+    }
+
     async fn browse_ssh(
         &self,
         request: SshBrowseRequest,
@@ -2177,33 +2179,15 @@ impl SessionManager {
         session_id: &str,
         request: SubmitPromptRequest,
     ) -> Result<SubmitPromptResponse> {
-        self.require_primary_operation_session(session_id)?;
-        let gate = self.lifecycle_gate(session_id);
-        let _lifecycle = gate.lock().await;
-        // The OS lease closes the cross-process gap between checking durable
-        // state and synchronously establishing active-run state.
-        let operation_lease =
-            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
-        self.require_primary_operation_session(session_id)?;
-        let service = self
-            .attach_current_operation_service_locked(session_id, &operation_lease)
+        let submitted = self
+            .session_runs()
+            .submit(session_id, request.prompt)
             .await?;
-        let client = service.connect_client();
-        match client.prepare_user_input(&request.prompt) {
-            PreparedUserInput::Empty => Err(anyhow!("prompt is empty")),
-            PreparedUserInput::InvalidSlashCommand { message } => Err(anyhow!(message)),
-            PreparedUserInput::FrontendCommand(command) => Err(anyhow!(
-                "frontend command '{}' is not supported by the server API",
-                frontend_command_name(command)
-            )),
-            PreparedUserInput::SubmitPrompt(prompt) => {
-                let display_prompt = prompt.display_prompt.clone();
-                let handle = client
-                    .try_submit_prepared_prompt_with_lease(prompt, operation_lease)
-                    .map_err(anyhow::Error::new)?;
-                Ok(submit_response(handle, display_prompt))
-            }
-        }
+        Ok(SubmitPromptResponse {
+            run_id: submitted.run_id,
+            client_id: submitted.client_id,
+            display_prompt: submitted.display_prompt,
+        })
     }
 
     async fn submit_managed_orchestrator_prompt(
@@ -2212,35 +2196,15 @@ impl SessionManager {
         request: SubmitPromptRequest,
         execution_mode: ManagedOrchestratorExecutionMode,
     ) -> Result<SubmitPromptResponse> {
-        self.require_persisted_operation_session(session_id)?;
-        let gate = self.lifecycle_gate(session_id);
-        let _lifecycle = gate.lock().await;
-        let operation_lease =
-            sessions::SessionOperationLease::try_acquire(&self.inner.store_path, session_id)?;
-        self.require_persisted_operation_session(session_id)?;
-        let service = self
-            .attach_current_operation_service_locked(session_id, &operation_lease)
+        let submitted = self
+            .session_runs()
+            .submit_managed_orchestrator(session_id, request.prompt, execution_mode)
             .await?;
-        let client = service.connect_client();
-        match client.prepare_user_input(&request.prompt) {
-            PreparedUserInput::Empty => Err(anyhow!("prompt is empty")),
-            PreparedUserInput::InvalidSlashCommand { message } => Err(anyhow!(message)),
-            PreparedUserInput::FrontendCommand(command) => Err(anyhow!(
-                "frontend command '{}' is not supported by the server API",
-                frontend_command_name(command)
-            )),
-            PreparedUserInput::SubmitPrompt(prompt) => {
-                let display_prompt = prompt.display_prompt.clone();
-                let handle = client
-                    .try_submit_prepared_managed_orchestrator_prompt_with_lease(
-                        prompt,
-                        operation_lease,
-                        execution_mode,
-                    )
-                    .map_err(anyhow::Error::new)?;
-                Ok(submit_response(handle, display_prompt))
-            }
-        }
+        Ok(SubmitPromptResponse {
+            run_id: submitted.run_id,
+            client_id: submitted.client_id,
+            display_prompt: submitted.display_prompt,
+        })
     }
 
     pub async fn queue_thread_steering(
@@ -2249,9 +2213,16 @@ impl SessionManager {
         thread_name: &str,
         request: ThreadSteeringRequest,
     ) -> Result<ThreadSteeringResponse> {
-        self.require_primary_operation_session(session_id)?;
-        self.queue_thread_steering_unchecked(session_id, thread_name, request, None)
-            .await
+        let steering = self
+            .session_runs()
+            .queue_thread_steering(session_id, thread_name, request.instruction)
+            .await?;
+        Ok(ThreadSteeringResponse {
+            steering_id: steering.steering_id,
+            thread_name: steering.thread_name,
+            status: steering.status,
+            instruction_preview: steering.instruction_preview,
+        })
     }
 
     async fn queue_thread_steering_unchecked(
@@ -2261,15 +2232,20 @@ impl SessionManager {
         request: ThreadSteeringRequest,
         expected_run_id: Option<&str>,
     ) -> Result<ThreadSteeringResponse> {
-        let service = self.attach_session(session_id).await?;
-        let record = service
-            .queue_thread_steering_for_run(thread_name, &request.instruction, expected_run_id)
+        let steering = self
+            .session_runs()
+            .queue_thread_steering_for_run(
+                session_id,
+                thread_name,
+                request.instruction,
+                expected_run_id,
+            )
             .await?;
         Ok(ThreadSteeringResponse {
-            steering_id: record.id,
-            thread_name: record.thread_name,
-            status: record.status,
-            instruction_preview: record.instruction.chars().take(160).collect(),
+            steering_id: steering.steering_id,
+            thread_name: steering.thread_name,
+            status: steering.status,
+            instruction_preview: steering.instruction_preview,
         })
     }
 
@@ -2278,22 +2254,14 @@ impl SessionManager {
         session_id: &str,
         request: OrchestratorSteeringRequest,
     ) -> Result<OrchestratorSteeringResponse> {
-        self.require_primary_operation_session(session_id)?;
-        self.queue_orchestrator_steering_unchecked(session_id, request)
-            .await
-    }
-
-    async fn queue_orchestrator_steering_unchecked(
-        &self,
-        session_id: &str,
-        request: OrchestratorSteeringRequest,
-    ) -> Result<OrchestratorSteeringResponse> {
-        let service = self.attach_session(session_id).await?;
-        let record = service.queue_orchestrator_steering(&request.instruction)?;
+        let steering = self
+            .session_runs()
+            .queue_orchestrator_steering(session_id, request.instruction)
+            .await?;
         Ok(OrchestratorSteeringResponse {
-            steering_id: record.id,
-            status: record.status,
-            instruction_preview: record.instruction.chars().take(160).collect(),
+            steering_id: steering.steering_id,
+            status: steering.status,
+            instruction_preview: steering.instruction_preview,
         })
     }
 
@@ -2303,16 +2271,15 @@ impl SessionManager {
         orchestrator_session_id: &str,
         instruction: &str,
     ) -> Result<OrchestratorSteeringResponse> {
-        let record = nac_core::store::queue_managed_orchestrator_steering(
-            &self.inner.store_path,
+        let steering = self.session_runs().queue_managed_orchestrator_steering(
             parent_session_id,
             orchestrator_session_id,
             instruction,
         )?;
         Ok(OrchestratorSteeringResponse {
-            steering_id: record.id,
-            status: record.status,
-            instruction_preview: record.instruction.chars().take(160).collect(),
+            steering_id: steering.steering_id,
+            status: steering.status,
+            instruction_preview: steering.instruction_preview,
         })
     }
 
@@ -2322,10 +2289,9 @@ impl SessionManager {
         cursor: Option<&SessionEventBoundary>,
         limit: usize,
     ) -> Result<(SessionEventBoundary, Vec<SessionEventEnvelope>)> {
-        Ok(self
-            .attach_session(session_id)
-            .await?
-            .recent_events(cursor, limit))
+        self.session_runs()
+            .recent_events(session_id, cursor, limit)
+            .await
     }
     pub async fn subscribe_events(
         &self,
@@ -2340,50 +2306,17 @@ impl SessionManager {
         SessionEventReceiver,
         AssistantStreamDeltaReceiver,
     )> {
-        let service = self.attach_session(session_id).await?;
-        let subscription = service
-            .connect_client()
-            .subscribe_events_with_replay(cursor, limit);
-        Ok((
-            subscription.epoch_id,
-            subscription.replay_boundary_sequence_id,
-            subscription.replay_gap,
-            subscription.replayed_events,
-            subscription.receiver,
-            subscription.assistant_deltas,
-        ))
+        self.session_runs()
+            .subscribe_events(session_id, cursor, limit)
+            .await
     }
 
     pub async fn cancel_active_run(&self, session_id: &str) -> Result<()> {
-        self.require_primary_operation_session(session_id)?;
-        self.cancel_active_run_unchecked(session_id).await
+        self.session_runs().cancel(session_id).await
     }
 
     async fn cancel_active_run_unchecked(&self, session_id: &str) -> Result<()> {
-        let service = self.attach_session(session_id).await?;
-        let Some(active) = service.active_run() else {
-            // An uncached service is also returned when another NAC process
-            // owns the durable operation lease. Never report cancellation as
-            // successful merely because this process has no task handle.
-            return match sessions::SessionOperationLease::try_acquire(
-                &self.inner.store_path,
-                session_id,
-            ) {
-                Ok(_idle) => Ok(()),
-                Err(sessions::SessionOperationLeaseError::Busy(_)) => Err(anyhow!(
-                    "session '{session_id}' is running in another process and cannot be cancelled from this process"
-                )),
-                Err(error) => Err(anyhow::Error::new(error)),
-            };
-        };
-        match service
-            .connect_client()
-            .request_cancel(&active.run_id)
-            .await
-        {
-            Ok(()) | Err(SessionCancelError::NotActive { .. }) => Ok(()),
-            Err(SessionCancelError::Cleanup { message, .. }) => Err(anyhow!(message)),
-        }
+        self.session_runs().cancel_unchecked(session_id).await
     }
 
     /// Cancel every run owned by this process before a graceful server stop.
