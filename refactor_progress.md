@@ -352,6 +352,9 @@ Rules:
 - `567c278 refactor(server): isolate saved model configuration writes` — moves
   create/update, light-model validation, and generated-key transaction ordering
   into the configuration application owner.
+- `bed766e refactor(server): isolate model provider resolution` — moves saved/
+  file model resolution and its fatal/nonfatal provider error contract out of
+  HTTP delivery.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -417,6 +420,13 @@ Rules:
   library and 23 binary tests with warning-denied Clippy; `lib.rs` is now 6,945
   lines. The cohesive application module is 518 lines because it owns the full
   credential/row/provider transaction rather than fragmenting that ordering.
+- A new dependency-free `nac-contracts` inward boundary now owns immutable
+  command-environment snapshots and exact-value output redaction. `nac-core`
+  consumes the shared contract while the existing managed secret store retains
+  its public compatibility re-export. Contract tests, all seven managed config/
+  secret tests, and warning-denied core Clippy pass; the lockfile change is
+  path-only and was generated offline. This boundary exists to prevent the
+  forthcoming managed-product extraction from creating a core/managed cycle.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -432,6 +442,6 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit provider resolution without
-protected files. Then extract the next M2 service family and begin the managed
-bounded-context crate seam.
+Inspect exact worktree/staged diffs and commit the shared command-environment
+contract without protected files. Then replace core runtime references to
+managed stores/providers with a narrow provider port based on this contract.
