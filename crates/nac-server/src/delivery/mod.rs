@@ -3,6 +3,7 @@ pub(crate) mod delegation;
 pub(crate) mod managed_secrets;
 pub(crate) mod model_configurations;
 pub(crate) mod projects;
+pub(crate) mod server;
 pub(crate) mod session_lifecycle;
 pub(crate) mod session_runs;
 pub(crate) mod session_state;

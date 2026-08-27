@@ -627,6 +627,16 @@ Rules:
   unchanged. Empty no-op, invalid rollback, full state round-trip, OpenAPI
   parity, the full test build, and warning-denied Clippy pass. Server `lib.rs`
   is now 3,859 lines.
+- HTTP/network composition now belongs to `delivery::server`: the OpenAPI
+  router, host and cross-origin guards, bind policy, graceful shutdown,
+  readiness/system routes, embedded frontend serving, and the remaining
+  catalog/browser adapters no longer obscure application ownership in the
+  crate root. Root exports preserve `router`, `serve*`, and `BindPolicy`.
+  OpenAPI parity, proxy/host/origin safety, bounded shutdown with an open SSE
+  stream, committed-asset integrity, and compression regressions pass; the
+  complete server test build and warning-denied crate check are green. Server
+  `lib.rs` is now 2,973 lines and the cohesive delivery composition module is
+  888 lines because it is the single route/security/listener assembly owner.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -642,8 +652,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the transport-neutral
-configuration contract without protected files. Then move the remaining shared
-creation/configuration validators and creation command contract, followed by
-the server composition/router split. Keep lifecycle gates, operation leases,
-and exact settlement ordering in their coordinator.
+Commit the HTTP server-composition slice with exact-path staging, then audit
+the remaining 2,973-line crate root by owner. Extract shared model/session
+validation and a transport-neutral session-creation command if that closes a
+real application boundary; otherwise run the full server suite and record M2
+acceptance before starting the durable harness decomposition in M4.
