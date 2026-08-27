@@ -363,6 +363,9 @@ Rules:
   three managed-specific fields in `ToolRuntime` with one provider-neutral
   capability while preserving spawn snapshots, retained-output redaction, and
   worker reconstruction metadata.
+- `76be2ec refactor(core): inject environment at composition boundary` — makes
+  agent/orchestrator/worker construction accept only the shared port and moves
+  managed implementation assembly to server/CLI composition.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -449,6 +452,14 @@ Rules:
   accepts managed store/GitHub/home arguments. Both warning-denied crate checks,
   the full server suite (150 library plus 23 CLI tests), and both focused worker
   propagation/noninheritance tests pass.
+- Hardened private credential-file persistence now has a shared infrastructure
+  owner in `nac-credential-store`. The atomic rename, mode-0600, symlink and
+  nonregular-file rejection, parent syncing, and cross-process lock behavior
+  moved with nine tests; core's 680-line auth-store gravity well is now a
+  94-line model-specific path-policy adapter plus a test-only cross-
+  implementation lock helper. The new crate suite and warning-denied core check
+  pass. The complete core run passed 1,172 tests and again hit only the known
+  unrelated Podman `ENOENT` fixture; its exact isolated rerun passed.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -464,7 +475,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the provider-neutral construction
-slice without protected files. Then introduce the substantive `nac-managed`
-crate, beginning with managed configuration/secrets and the command-environment
-adapter while preserving core compatibility exports during consumer migration.
+Inspect exact worktree/staged diffs and commit the shared hardened credential-
+store slice without protected files. Then introduce the substantive
+`nac-managed` crate, beginning with managed configuration/secrets and the
+command-environment adapter while preserving public transport behavior.
