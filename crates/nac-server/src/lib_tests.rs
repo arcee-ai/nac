@@ -4499,9 +4499,10 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
 
     for delegated in [&child, &orchestrator] {
         let branch_error = manager
+            .workspace()
             .switch_workspace_branch(
                 delegated,
-                SwitchBranchRequest {
+                application::workspace::SwitchBranch {
                     name: "delegated-mutation".to_string(),
                     create: true,
                 },
@@ -4512,9 +4513,10 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
             .to_string()
             .contains("accept work only through their parent"));
         let commit_error = manager
+            .workspace()
             .commit_workspace(
                 delegated,
-                CommitWorkspaceRequest {
+                application::workspace::CommitWorkspace {
                     message: "delegated mutation".to_string(),
                 },
             )
@@ -4940,7 +4942,11 @@ async fn workspace_mutation_admission_holds_every_shared_session_lease() {
     seed_direct_session(&root, "session-b");
     let manager = test_manager(&root);
 
-    let admission = manager.idle_workspace_root("session-a").await.unwrap();
+    let admission = manager
+        .workspace()
+        .idle_workspace_root("session-a")
+        .await
+        .unwrap();
     assert_eq!(
         admission.target.root().canonicalize().unwrap(),
         root.canonicalize().unwrap()
@@ -4980,14 +4986,18 @@ async fn cancelled_workspace_request_keeps_leases_until_blocking_git_settles() {
     assert!(output.status.success());
     seed_direct_session(&root, "session");
     let manager = test_manager(&root);
-    let admission = manager.idle_workspace_root("session").await.unwrap();
+    let admission = manager
+        .workspace()
+        .idle_workspace_root("session")
+        .await
+        .unwrap();
     let workspace_identity = admission.target.lease_identity();
     let store_path = root.join("store.db");
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
     let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
 
     let request = tokio::spawn(async move {
-        SessionManager::execute_workspace_mutation(
+        application::workspace::WorkspaceApplication::execute_workspace_mutation(
             admission,
             "test workspace mutation failed",
             move |_| {

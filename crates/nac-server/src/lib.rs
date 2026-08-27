@@ -30,6 +30,10 @@ pub use delivery::projects::{
 pub use delivery::ssh_configurations::{
     CreateSshConfigurationRequest, SshConfigurationList, UpdateSshConfigurationRequest,
 };
+pub use delivery::workspace::{
+    CommitWorkspaceRequest, OpenWorkspacePathRequest, SwitchBranchRequest, WorkspaceDiffQuery,
+    WorkspaceFileQuery, WorkspaceRevisionQuery,
+};
 pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
 pub use managed_auth::{
     DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
@@ -1035,19 +1039,6 @@ impl From<SessionInboxRecord> for InboxItemResponse {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct SwitchBranchRequest {
-    pub name: String,
-    /// Make the branch first, off the current HEAD.
-    #[serde(default)]
-    pub create: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct CommitWorkspaceRequest {
-    pub message: String,
-}
-
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct SubmitPromptResponse {
     pub run_id: String,
@@ -1196,34 +1187,6 @@ impl From<MessagesPageSnapshot> for MessagesPageResponse {
 pub struct RecentEventsResponse {
     pub boundary: SessionEventBoundary,
     pub events: Vec<SessionEventEnvelope>,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
-#[into_params(parameter_in = Query)]
-pub struct WorkspaceDiffQuery {
-    pub path: String,
-    pub stage: Option<String>,
-    pub context: Option<usize>,
-    /// Look at a captured revision instead of the working tree.
-    pub revision: Option<i64>,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
-#[into_params(parameter_in = Query)]
-pub struct WorkspaceFileQuery {
-    pub path: String,
-    pub revision: Option<i64>,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct OpenWorkspacePathRequest {
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
-#[into_params(parameter_in = Query)]
-pub struct WorkspaceRevisionQuery {
-    pub revision: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -1393,6 +1356,11 @@ impl SessionManager {
     ) -> application::ssh_configurations::SshConfigurationApplication<'_> {
         application::ssh_configurations::SshConfigurationApplication::new(&self.inner.store_path)
     }
+
+    pub(crate) fn workspace(&self) -> application::workspace::WorkspaceApplication<'_> {
+        application::workspace::WorkspaceApplication::new(self)
+    }
+
     async fn browse_ssh(
         &self,
         request: SshBrowseRequest,
@@ -2604,307 +2572,6 @@ impl SessionManager {
             .thread_events_page(thread_name, before_id, limit)
     }
 
-    pub async fn workspace_file_diff(
-        &self,
-        session_id: &str,
-        query: WorkspaceDiffQuery,
-    ) -> Result<view::WorkspaceFileDiff> {
-        let stage = view::WorkspaceDiffStage::parse(query.stage.as_deref().unwrap_or("all"))?;
-        let context = query.context.unwrap_or(3).min(100);
-        let path = query.path;
-        let target = self.workspace_root(session_id).await?;
-
-        let revision = self.resolve_revision(session_id, query.revision)?;
-        tokio::task::spawn_blocking(move || match revision {
-            Some(revision) => view::revision_file_diff(
-                &target,
-                revision.base_sha.as_deref(),
-                &revision.commit_sha,
-                &path,
-                context,
-            ),
-            None => view::workspace_file_diff(&target, &path, stage, context),
-        })
-        .await
-        .context("workspace diff task failed")?
-    }
-
-    /// The checkout of a session, refusing when an agent could be working in
-    /// it. Several sessions may share one checkout, so every one of them has to
-    /// be quiet, not just this one — and "the same checkout" means the same
-    /// directory *on the same machine*, which is what keeps two sessions on one
-    /// remote path from moving each other's branch.
-    async fn idle_workspace_root(&self, session_id: &str) -> Result<WorkspaceMutationAdmission> {
-        let initial_sessions = self.list_sessions(false).await?;
-        let summary = initial_sessions
-            .iter()
-            .find(|entry| entry.summary.session_id == session_id)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
-        let target = self.git_target(&summary.summary)?;
-        let workspace_gate =
-            nac_core::shared_workspace_gate_for(&self.inner.store_path, target.root())
-                .write_owned()
-                .await;
-        let workspace_lease = match sessions::WorkspaceMutationLease::try_acquire(
-            &self.inner.store_path,
-            &target.lease_identity(),
-        ) {
-            Ok(lease) => lease,
-            Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                return Err(anyhow!(
-                    "workspace is busy: a retained terminal may still mutate the checkout"
-                ));
-            }
-            Err(error) => return Err(anyhow::Error::new(error)),
-        };
-
-        // Re-read after taking the same process-wide gate used by native file,
-        // shell, and terminal-input tools. Then acquire every same-checkout
-        // session operation lease in stable order and retain them through Git.
-        // This turns the idle observation into an admission boundary: an
-        // already-running peer makes acquisition fail, and a new run cannot
-        // establish ownership until the branch/commit operation is finished.
-        let sessions = self.list_sessions(false).await?;
-        let current = sessions
-            .iter()
-            .find(|entry| entry.summary.session_id == session_id)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
-        let current_target = self.git_target(&current.summary)?;
-        if git_target_key(&current_target) != git_target_key(&target) {
-            return Err(anyhow!("workspace changed during mutation admission"));
-        }
-        let key = git_target_key(&target);
-        let mut session_ids = sessions
-            .iter()
-            .filter(|entry| {
-                self.git_target(&entry.summary)
-                    .is_ok_and(|other| git_target_key(&other) == key)
-            })
-            .map(|entry| entry.summary.session_id.clone())
-            .collect::<Vec<_>>();
-        session_ids.sort();
-
-        let cached = self.inner.active_sessions.read().await;
-        if let Some(retained) = session_ids.iter().find(|candidate| {
-            cached
-                .get(candidate.as_str())
-                .is_some_and(|service| service.has_retained_terminals())
-        }) {
-            return Err(anyhow!(
-                "workspace is busy: session '{retained}' owns a retained terminal"
-            ));
-        }
-        drop(cached);
-
-        let mut session_leases = Vec::with_capacity(session_ids.len());
-        for candidate in session_ids {
-            match sessions::SessionOperationLease::try_acquire(&self.inner.store_path, &candidate) {
-                Ok(lease) => session_leases.push(lease),
-                Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                    return Err(anyhow!(
-                        "workspace is busy: session '{candidate}' has an operation in flight"
-                    ));
-                }
-                Err(error) => return Err(anyhow::Error::new(error)),
-            }
-        }
-
-        self.ensure_git_ready(&target).await?;
-        Ok(WorkspaceMutationAdmission {
-            target,
-            _workspace_gate: workspace_gate,
-            _workspace_lease: workspace_lease,
-            _session_leases: session_leases,
-        })
-    }
-
-    async fn execute_workspace_mutation<T, F>(
-        admission: WorkspaceMutationAdmission,
-        task_context: &'static str,
-        operation: F,
-    ) -> Result<T>
-    where
-        T: Send + 'static,
-        F: FnOnce(&GitTarget) -> Result<T> + Send + 'static,
-    {
-        tokio::task::spawn_blocking(move || {
-            // The admission owns every process-local and cross-process lease.
-            // Moving it into this uncancellable closure keeps authority alive
-            // even if the request future awaiting the JoinHandle is aborted.
-            let result = operation(&admission.target);
-            drop(admission);
-            result
-        })
-        .await
-        .with_context(|| task_context)?
-    }
-
-    /// The checkout of a session, for read-only inspection.
-    async fn workspace_root(&self, session_id: &str) -> Result<GitTarget> {
-        let summary = self
-            .list_sessions(false)
-            .await?
-            .into_iter()
-            .find(|entry| entry.summary.session_id == session_id)
-            .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
-        let target = self.git_target(&summary)?;
-        self.ensure_git_ready(&target).await?;
-        Ok(target)
-    }
-
-    pub async fn workspace_files(
-        &self,
-        session_id: &str,
-        revision: Option<i64>,
-    ) -> Result<view::WorkspaceFileList> {
-        let target = self.workspace_root(session_id).await?;
-        let revision = self.resolve_revision(session_id, revision)?;
-        tokio::task::spawn_blocking(move || match revision {
-            Some(revision) => view::list_revision_files(&target, &revision.commit_sha),
-            None => view::list_files(&target),
-        })
-        .await
-        .context("workspace file listing task failed")?
-    }
-
-    pub async fn workspace_file(
-        &self,
-        session_id: &str,
-        path: String,
-        revision: Option<i64>,
-    ) -> Result<view::WorkspaceFileContent> {
-        let target = self.workspace_root(session_id).await?;
-        let revision = self.resolve_revision(session_id, revision)?;
-        tokio::task::spawn_blocking(move || match revision {
-            Some(revision) => view::read_revision_file(&target, &revision.commit_sha, &path),
-            None => view::read_file(&target, &path),
-        })
-        .await
-        .context("workspace file read task failed")?
-    }
-
-    /// Open a workspace path in the OS file manager / default app. Local
-    /// sessions only — an ssh checkout is not a path this machine can open.
-    pub async fn open_workspace_path(
-        &self,
-        session_id: &str,
-        path: String,
-    ) -> Result<view::OpenLocalPathResult> {
-        let summary = self
-            .list_sessions(false)
-            .await?
-            .into_iter()
-            .find(|entry| entry.summary.session_id == session_id)
-            .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
-        if summary.ssh_host.is_some() {
-            anyhow::bail!("opening paths is only available for local sessions");
-        }
-        let target = self.git_target(&summary)?;
-        let root = target
-            .local_path()
-            .ok_or_else(|| {
-                anyhow!(
-                    "workspace '{}' lives only inside the sandbox; mount a working directory to open it",
-                    summary.cwd.display()
-                )
-            })?
-            .to_path_buf();
-        tokio::task::spawn_blocking(move || view::open_local_path(&root, &path))
-            .await
-            .context("workspace open task failed")?
-    }
-
-    pub fn workspace_revisions(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<view::WorkspaceRevisionRecord>> {
-        view::list_workspace_revisions(&self.inner.store_path, session_id)
-    }
-
-    /// What the run behind a revision changed, in the shape the live workspace
-    /// reports, so the files panel can render either one the same way.
-    pub async fn workspace_revision_changes(
-        &self,
-        session_id: &str,
-        revision_id: i64,
-    ) -> Result<view::WorkspaceRevisionChanges> {
-        let target = self.workspace_root(session_id).await?;
-        let revision = self
-            .resolve_revision(session_id, Some(revision_id))?
-            .ok_or_else(|| anyhow!("revision '{}' was not found", revision_id))?;
-
-        tokio::task::spawn_blocking(move || {
-            view::revision_changes(&target, revision.base_sha.as_deref(), &revision.commit_sha)
-        })
-        .await
-        .context("workspace revision task failed")
-    }
-
-    /// Revisions are addressed by their store id rather than by commit, so a
-    /// request can only ever reach an object this session actually recorded.
-    fn resolve_revision(
-        &self,
-        session_id: &str,
-        revision: Option<i64>,
-    ) -> Result<Option<view::WorkspaceRevisionRecord>> {
-        let Some(revision) = revision else {
-            return Ok(None);
-        };
-        view::read_workspace_revision(&self.inner.store_path, session_id, revision)?
-            .ok_or_else(|| anyhow!("revision '{}' was not found", revision))
-            .map(Some)
-    }
-
-    pub async fn workspace_branches(&self, session_id: &str) -> Result<workspace::BranchList> {
-        let target = self.workspace_root(session_id).await?;
-        tokio::task::spawn_blocking(move || workspace::list_branches(&target))
-            .await
-            .context("branch listing task failed")?
-    }
-
-    pub async fn switch_workspace_branch(
-        &self,
-        session_id: &str,
-        request: SwitchBranchRequest,
-    ) -> Result<workspace::BranchList> {
-        self.require_primary_operation_session(session_id)?;
-        let admission = self.idle_workspace_root(session_id).await?;
-
-        Self::execute_workspace_mutation(admission, "branch switch task failed", move |target| {
-            if request.create {
-                // A new branch takes the uncommitted work with it, which is
-                // usually the point of making one, so a dirty tree is fine.
-                return workspace::create_branch(target, &request.name);
-            }
-            if workspace::list_branches(target)?.dirty {
-                return Err(anyhow!(
-                    "workspace has uncommitted changes; commit or stash them before switching"
-                ));
-            }
-            workspace::switch_branch(target, &request.name)
-        })
-        .await
-    }
-
-    /// Commit the whole checkout on the user's behalf. Guarded like a branch
-    /// switch: an agent writing files underneath a `git add` would commit a
-    /// half-finished tree.
-    pub async fn commit_workspace(
-        &self,
-        session_id: &str,
-        request: CommitWorkspaceRequest,
-    ) -> Result<workspace::CommitOutcome> {
-        self.require_primary_operation_session(session_id)?;
-        let admission = self.idle_workspace_root(session_id).await?;
-
-        Self::execute_workspace_mutation(admission, "commit task failed", move |target| {
-            workspace::commit_all(target, &request.message)
-        })
-        .await
-    }
-
     pub async fn session_skills(
         &self,
         session_id: &str,
@@ -3269,7 +2936,7 @@ impl SessionManager {
             });
         let revision_target = match revision_target {
             Some(target) => Some(target),
-            None => self.workspace_root(session_id).await.ok(),
+            None => self.workspace().workspace_root(session_id).await.ok(),
         };
         if let Some(service) = service.as_ref() {
             service.destroy_terminals().await?;
@@ -4682,14 +4349,17 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(reply_permission_request))
         .routes(routes!(delete_permission_grant))
         .routes(routes!(thread_events))
-        .routes(routes!(workspace_diff))
-        .routes(routes!(workspace_files))
-        .routes(routes!(workspace_file))
-        .routes(routes!(open_workspace_path))
-        .routes(routes!(workspace_branches, switch_workspace_branch))
-        .routes(routes!(commit_workspace))
-        .routes(routes!(workspace_revisions))
-        .routes(routes!(workspace_revision_changes))
+        .routes(routes!(delivery::workspace::workspace_diff))
+        .routes(routes!(delivery::workspace::workspace_files))
+        .routes(routes!(delivery::workspace::workspace_file))
+        .routes(routes!(delivery::workspace::open_workspace_path))
+        .routes(routes!(
+            delivery::workspace::workspace_branches,
+            delivery::workspace::switch_workspace_branch
+        ))
+        .routes(routes!(delivery::workspace::commit_workspace))
+        .routes(routes!(delivery::workspace::workspace_revisions))
+        .routes(routes!(delivery::workspace::workspace_revision_changes))
         .routes(routes!(session_snapshot, delete_session_handler))
         .routes(routes!(session_config_handler, update_config_handler))
         .routes(routes!(session_skills_handler))
@@ -5744,171 +5414,6 @@ async fn thread_events(
             )
             .await?,
     ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/workspace/diff",
-    operation_id = "get_sessions_session_id_workspace_diff",
-    tag = "workspace",
-    params(WorkspaceDiffQuery, ("session_id" = String, Path)),
-    responses((status = 200, description = "Success", body = view::WorkspaceFileDiff, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn workspace_diff(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-    Query(query): Query<WorkspaceDiffQuery>,
-) -> std::result::Result<Json<view::WorkspaceFileDiff>, ApiError> {
-    Ok(Json(manager.workspace_file_diff(&session_id, query).await?))
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/workspace/files",
-    operation_id = "get_sessions_session_id_workspace_files",
-    tag = "workspace",
-    params(WorkspaceRevisionQuery, ("session_id" = String, Path)),
-    responses((status = 200, description = "Success", body = view::WorkspaceFileList, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn workspace_files(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-    Query(query): Query<WorkspaceRevisionQuery>,
-) -> std::result::Result<Json<view::WorkspaceFileList>, ApiError> {
-    Ok(Json(
-        manager.workspace_files(&session_id, query.revision).await?,
-    ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/workspace/file",
-    operation_id = "get_sessions_session_id_workspace_file",
-    tag = "workspace",
-    params(WorkspaceFileQuery, ("session_id" = String, Path)),
-    responses((status = 200, description = "Success", body = view::WorkspaceFileContent, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn workspace_file(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-    Query(query): Query<WorkspaceFileQuery>,
-) -> std::result::Result<Json<view::WorkspaceFileContent>, ApiError> {
-    Ok(Json(
-        manager
-            .workspace_file(&session_id, query.path, query.revision)
-            .await?,
-    ))
-}
-
-#[utoipa::path(
-    post,
-    path = "/sessions/{session_id}/workspace/open",
-    operation_id = "post_sessions_session_id_workspace_open",
-    tag = "workspace",
-    params(("session_id" = String, Path)),
-    request_body(content = OpenWorkspacePathRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = view::OpenLocalPathResult, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 501, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn open_workspace_path(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-    payload: std::result::Result<Json<OpenWorkspacePathRequest>, JsonRejection>,
-) -> std::result::Result<Json<view::OpenLocalPathResult>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    Ok(Json(
-        manager
-            .open_workspace_path(&session_id, request.path)
-            .await?,
-    ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/workspace/revisions",
-    operation_id = "get_sessions_session_id_workspace_revisions",
-    tag = "workspace",
-    params(("session_id" = String, Path)),
-    responses((status = 200, description = "Success", body = Vec<view::WorkspaceRevisionRecord>, content_type = "application/json"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn workspace_revisions(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<Vec<view::WorkspaceRevisionRecord>>, ApiError> {
-    Ok(Json(manager.workspace_revisions(&session_id)?))
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/workspace/revisions/{revision_id}/changes",
-    operation_id = "get_sessions_session_id_workspace_revisions_revision_id_changes",
-    tag = "workspace",
-    params(("session_id" = String, Path), ("revision_id" = i64, Path)),
-    responses((status = 200, description = "Success", body = view::WorkspaceRevisionChanges, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn workspace_revision_changes(
-    State(manager): State<SessionManager>,
-    AxumPath((session_id, revision_id)): AxumPath<(String, i64)>,
-) -> std::result::Result<Json<view::WorkspaceRevisionChanges>, ApiError> {
-    Ok(Json(
-        manager
-            .workspace_revision_changes(&session_id, revision_id)
-            .await?,
-    ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/workspace/branches",
-    operation_id = "get_sessions_session_id_workspace_branches",
-    tag = "workspace",
-    params(("session_id" = String, Path)),
-    responses((status = 200, description = "Success", body = workspace::BranchList, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn workspace_branches(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-) -> std::result::Result<Json<workspace::BranchList>, ApiError> {
-    Ok(Json(manager.workspace_branches(&session_id).await?))
-}
-
-#[utoipa::path(
-    post,
-    path = "/sessions/{session_id}/workspace/branches",
-    operation_id = "post_sessions_session_id_workspace_branches",
-    tag = "workspace",
-    params(("session_id" = String, Path)),
-    request_body(content = SwitchBranchRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = workspace::BranchList, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn switch_workspace_branch(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-    payload: std::result::Result<Json<SwitchBranchRequest>, JsonRejection>,
-) -> std::result::Result<Json<workspace::BranchList>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    Ok(Json(
-        manager
-            .switch_workspace_branch(&session_id, request)
-            .await?,
-    ))
-}
-
-#[utoipa::path(
-    post,
-    path = "/sessions/{session_id}/workspace/commit",
-    operation_id = "post_sessions_session_id_workspace_commit",
-    tag = "workspace",
-    params(("session_id" = String, Path)),
-    request_body(content = CommitWorkspaceRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = workspace::CommitOutcome, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn commit_workspace(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-    payload: std::result::Result<Json<CommitWorkspaceRequest>, JsonRejection>,
-) -> std::result::Result<Json<workspace::CommitOutcome>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    Ok(Json(manager.commit_workspace(&session_id, request).await?))
 }
 
 #[utoipa::path(
