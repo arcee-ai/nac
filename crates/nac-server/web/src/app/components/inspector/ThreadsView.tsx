@@ -48,7 +48,12 @@ import {
   type ThreadLogLine,
   type ToolCallEntry,
 } from "@/app/lib/threadLog";
-import { dispatchActions, dispatchThreadName, partitionThreadCalls } from "@/app/lib/transcript";
+import {
+  cancelledThreadNames,
+  dispatchActions,
+  dispatchThreadName,
+  partitionThreadCalls,
+} from "@/app/lib/transcript";
 import { useThreadEventPages } from "@/app/services/queries";
 import { useLiveThreads, useStreamStatus } from "@/app/store/runtimeStore";
 import { setSelectedThreadRunning } from "@/app/store/sessionLayoutStore";
@@ -697,6 +702,28 @@ export function ThreadsView({
   const sessionId = snapshot?.metadata.session_id ?? "";
   const waveRank = useMemo(() => waveRankByName(snapshot?.messages), [snapshot?.messages]);
   const actions = useMemo(() => dispatchActions(snapshot?.messages ?? []), [snapshot?.messages]);
+  const cancelledNames = useMemo(
+    () => cancelledThreadNames(snapshot?.messages ?? []),
+    [snapshot?.messages],
+  );
+  // A cancelled dispatch never writes an episode, and `threads` is keyed off
+  // episodes. The transcript still has the cards (and often command events),
+  // so the list has to take names from there or the pane stays empty next to
+  // a chat full of workstreams.
+  const dispatchedNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const message of snapshot?.messages ?? []) {
+      if (message.role !== "assistant") continue;
+      for (const call of message.tool_calls ?? []) {
+        if (call.function?.name !== "thread") continue;
+        names.add(dispatchThreadName(call));
+      }
+    }
+    for (const name of Object.keys(snapshot?.thread_events ?? {})) {
+      names.add(name);
+    }
+    return names;
+  }, [snapshot?.messages, snapshot?.thread_events]);
   // Switching tabs resets live thread state before SSE catches up. Until then
   // every `active_threads` name would look pending and the detail pane would
   // claim nothing is selected even though the list already has rows.
@@ -732,10 +759,13 @@ export function ThreadsView({
 
   const ordered = useMemo(() => {
     const persisted = new Set(threads.map((thread) => thread.name));
-    // Live-only rows fill the gap until the snapshot retains them. Finished
-    // ones stay too — otherwise the row blinks out between `thread_finished`
-    // and the refetch that brings episodes.
+    // Names the snapshot never retained (cancelled before an episode, or still
+    // in-flight) still belong on the list: the chat already named them.
     const extras = new Set<string>();
+    for (const name of dispatchedNames) {
+      if (!persisted.has(name)) extras.add(name);
+    }
+    if (selected && !persisted.has(selected)) extras.add(selected);
     for (const name of runningNames) {
       if (!persisted.has(name)) extras.add(name);
     }
@@ -761,7 +791,7 @@ export function ThreadsView({
       if (rankDiff !== 0) return rankDiff;
       return 0;
     });
-  }, [threads, runningNames, pendingNames, liveThreads, sessionId, waveRank]);
+  }, [threads, dispatchedNames, selected, runningNames, pendingNames, liveThreads, sessionId, waveRank]);
 
   const selectable = useMemo(
     () => ordered.filter((thread) => !pendingNames.has(thread.name)),
@@ -823,7 +853,13 @@ export function ThreadsView({
             {visible.map((thread) => {
               const pending = pendingNames.has(thread.name);
               const running = runningNames.has(thread.name);
-              const errored = liveThreads[thread.name]?.isError;
+              const live = liveThreads[thread.name];
+              const lastEpisode = snapshot.thread_episodes?.[thread.name]?.at(-1);
+              const cancelled =
+                Boolean(live?.cancelled) ||
+                cancelledNames.has(thread.name) ||
+                lastEpisode?.status === "cancelled";
+              const errored = live?.isError;
               // The task is the only description a thread has, so the row hands
               // it over on hover rather than making the name stand for it.
               const task = actions[thread.name] || thread.latest_action || "";
@@ -843,6 +879,12 @@ export function ThreadsView({
                       />
                     ) : running ? (
                       <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
+                    ) : cancelled ? (
+                      <Icon
+                        iconName={IconName.Close}
+                        size={16}
+                        className="shrink-0 [&>path]:!fill-basic-muted"
+                      />
                     ) : (
                       <Icon
                         iconName={errored ? IconName.Danger : IconName.CheckCircle}

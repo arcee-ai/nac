@@ -97,6 +97,12 @@ export interface RuntimeState {
    * standing on whatever the checkout looked like when the panel opened.
    */
   workspaceEpoch: number;
+  /**
+   * Stop was painted; ignore a still-live `active_run` on the snapshot until
+   * the server agrees the run is over, so tabs and breadcrumbs do not snap
+   * back to running while cancel HTTP is in flight.
+   */
+  cancelArmed: boolean;
 }
 
 export const runtimeStore = createStore<RuntimeState>(
@@ -115,6 +121,7 @@ export const runtimeStore = createStore<RuntimeState>(
     optimisticUserPrompt: null,
     runUsage: null,
     workspaceEpoch: 0,
+    cancelArmed: false,
   },
   "runtime",
 );
@@ -139,6 +146,7 @@ export function resetRuntime(sessionId: string | null): void {
     optimisticUserPrompt: null,
     runUsage: null,
     workspaceEpoch: 0,
+    cancelArmed: false,
   });
 }
 
@@ -184,6 +192,11 @@ export function setStreamStatus(streamStatus: StreamStatus): void {
 export function syncRunFromSnapshot(activeRun: ActiveRunSnapshot | null | undefined): void {
   const running = isActiveRun(activeRun);
   const state = getState();
+  if (state.cancelArmed) {
+    if (running) return;
+    setState({ cancelArmed: false, running: false, activity: "" });
+    return;
+  }
   if (state.running === running) return;
   setState({ running, activity: running ? state.activity : "" });
 }
@@ -247,6 +260,7 @@ export function requestRunCancel(): RuntimeState {
     error: null,
     modelError: null,
     streamSettled: true,
+    cancelArmed: true,
     threads: terminalizeThreads(flagCancelledThreads(state.threads)),
   }));
   return previous;
@@ -261,6 +275,7 @@ export function restoreRunCancel(previous: RuntimeState): void {
     modelError: previous.modelError,
     streamSettled: previous.streamSettled,
     threads: previous.threads,
+    cancelArmed: previous.cancelArmed,
   });
 }
 
@@ -319,6 +334,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         // The snapshot this run is measured against is the one about to be
         // refetched, so the tally starts empty here rather than at the end.
         runUsage: null,
+        cancelArmed: false,
       });
       pushEvent({
         seq,
@@ -338,6 +354,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         streamText: event.response,
         streamReasoning: "",
         streamSettled: true,
+        cancelArmed: false,
         threads: terminalizeThreads(state.threads),
       }));
       pushEvent({ seq, kind: "run", text: "Run completed", isError: false });
@@ -351,6 +368,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         activity: "",
         error: message,
         streamSettled: true,
+        cancelArmed: false,
         threads: terminalizeThreads(state.threads),
       }));
       pushEvent({ seq, kind: "error", text: message, isError: true });
@@ -366,6 +384,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         error: null,
         modelError: null,
         streamSettled: true,
+        cancelArmed: false,
         threads: terminalizeThreads(flagCancelledThreads(state.threads)),
       }));
       pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });

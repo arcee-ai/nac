@@ -312,6 +312,29 @@ function toolResultsForAssistant(
 }
 
 /**
+ * Thread names whose latest dispatch exists only because the user stopped the
+ * run. A later successful dispatch of the same name drops off this set.
+ */
+export function cancelledThreadNames(
+  messages: SessionSnapshotResponse["messages"],
+): Set<string> {
+  const cancelled = new Set<string>();
+  messages.forEach((message, index) => {
+    if (message.role !== "assistant") return;
+    const results = toolResultsForAssistant(messages, index);
+    for (const call of message.tool_calls ?? []) {
+      if (call.function?.name !== "thread") continue;
+      const result = results.get(call.id);
+      if (result == null) continue;
+      const name = dispatchThreadName(call);
+      if (result.startsWith(TOOL_CALL_CANCELLED_MARKER)) cancelled.add(name);
+      else cancelled.delete(name);
+    }
+  });
+  return cancelled;
+}
+
+/**
  * @param episode Which dispatch of this name the card stands for, from 0.
  * @param batchNames Thread names in this assistant message (for in-batch deps).
  * @param finishedNames Names in this batch that have finished (tool result or
