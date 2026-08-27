@@ -11,12 +11,13 @@ name = "nac_core"
 
 [features]
 default = []
-test-support = []
+test-support = ["nac-managed/test-support"]
 openapi = ["dep:utoipa"]
 
 [dependencies]
 nac-contracts = { path = "../nac-contracts" }
 nac-credential-store = { path = "../nac-credential-store" }
+nac-managed = { path = "../nac-managed" }
 tokio = { workspace = true, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 reqwest = { workspace = true, features = ["json", "form", "rustls", "stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

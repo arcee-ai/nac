@@ -266,7 +266,7 @@ pub struct ServerOptions {
     pub root_cwd: PathBuf,
     pub store_path: Option<PathBuf>,
     pub worker_executable: Option<PathBuf>,
-    pub managed_host: Option<nac_core::managed::ManagedHostConfig>,
+    pub managed_host: Option<nac_managed::configuration::ManagedHostConfig>,
 }
 
 #[derive(Clone)]
@@ -278,7 +278,7 @@ struct SessionManagerInner {
     root_cwd: PathBuf,
     store_path: PathBuf,
     worker_executable: PathBuf,
-    managed_host: Option<nac_core::managed::ManagedHostConfig>,
+    managed_host: Option<nac_managed::configuration::ManagedHostConfig>,
     managed_clones: Option<nac_core::managed_clone::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
@@ -1336,7 +1336,7 @@ impl SessionManager {
         }
     }
 
-    pub fn managed_host(&self) -> Option<&nac_core::managed::ManagedHostConfig> {
+    pub fn managed_host(&self) -> Option<&nac_managed::configuration::ManagedHostConfig> {
         self.inner.managed_host.as_ref()
     }
 
@@ -1346,7 +1346,7 @@ impl SessionManager {
             return;
         };
         run_config.set_command_environment_provider(Some(Arc::new(
-            nac_core::managed::ManagedCommandEnvironmentProvider::new(
+            nac_managed::configuration::ManagedCommandEnvironmentProvider::new(
                 Some(managed.secret_store()),
                 Some(
                     managed
@@ -5154,10 +5154,10 @@ async fn provider_models_handler(
 
 fn managed_secret_store(
     manager: &SessionManager,
-) -> std::result::Result<nac_core::managed::HostSecretStore, ApiError> {
+) -> std::result::Result<nac_managed::configuration::HostSecretStore, ApiError> {
     manager
         .managed_host()
-        .map(nac_core::managed::ManagedHostConfig::secret_store)
+        .map(nac_managed::configuration::ManagedHostConfig::secret_store)
         .ok_or_else(|| ApiError {
             status: StatusCode::NOT_FOUND,
             message: "Managed NAC is not configured".to_string(),
