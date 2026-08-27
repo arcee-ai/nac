@@ -265,7 +265,11 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                 &orchestrator_session_id,
             )?
             .ok_or_else(|| anyhow!("managed orchestrator disappeared after run admission"))?;
-            debug_assert_eq!(relation.run_id.as_deref(), Some(submitted.run_id.as_str()));
+            debug_assert_eq!(
+                relation.run_id.as_deref(),
+                Some(submitted.run_id.as_str()),
+                "managed child relationship must bind the submitted run generation"
+            );
             manager
                 .spawn_managed_orchestrator_monitor(orchestrator_session_id, relation.generation);
             Ok(relation)

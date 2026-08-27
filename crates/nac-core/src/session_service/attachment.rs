@@ -258,7 +258,10 @@ impl SessionService {
             .sandbox_resource_lease
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        debug_assert!(slot.is_none());
+        debug_assert!(
+            slot.is_none(),
+            "fresh session attachment must not replace an existing service slot"
+        );
         *slot = Some(lease);
     }
 

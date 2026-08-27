@@ -666,10 +666,13 @@ impl ModelClient {
         reasoning_field: &str,
         on_delta: DeltaSink<'_>,
     ) -> Result<Value> {
-        debug_assert!(matches!(
-            self.arcee_credential_source,
-            Some(ArceeCredentialSource::StoredLogin)
-        ));
+        debug_assert!(
+            matches!(
+                self.arcee_credential_source,
+                Some(ArceeCredentialSource::StoredLogin)
+            ),
+            "Arcee token refresh requires stored-login credential provenance"
+        );
         let stream = on_delta.is_some();
         if stream {
             body["stream"] = Value::Bool(true);
