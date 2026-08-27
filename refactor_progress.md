@@ -549,6 +549,15 @@ Rules:
   rejection regressions plus the full test build and warning-denied Clippy
   pass. The cohesive sessions application module is 509 lines because it owns
   the catalog, attached-state, and non-run user-intent seams together.
+- Run admission, managed-orchestrator submission, steering, replay/event
+  subscription, and cancellation now belong to a 268-line
+  `SessionRunApplication`. The service retains the exact lifecycle-gate then
+  durable-operation-lease ordering through synchronous active-run
+  establishment; primary/delegated ownership checks are repeated under the
+  gate, and peer-owned cancellation remains fail-closed. Existing manager
+  methods are compatibility facades. Focused path-safe admission failure,
+  peer cancellation, active steering, and idempotent cancellation regressions,
+  the full server test build, and warning-denied Clippy pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -564,8 +573,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the session-intent slice without
-protected files. Then continue M2 with session attachment, submission,
-steering/events, configuration, cancellation, and deletion, keeping lifecycle
-gates, operation leases, and exact run-admission/settlement ordering in the
-lifecycle coordinator.
+Inspect exact worktree/staged diffs and commit the session-run slice without
+protected files. Then continue M2 with attachment/recovery, configuration,
+deletion, and the remaining session HTTP delivery split, keeping lifecycle
+gates, operation leases, and exact settlement/cleanup ordering in their
+coordinator.
