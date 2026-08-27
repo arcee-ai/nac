@@ -50,7 +50,7 @@ import {
   useSlashCommands,
 } from "@/app/services/queries";
 import { consumePromptRequests } from "@/app/store/composerStore";
-import { pushLocalEvent, useRunUsage, useRunning } from "@/app/store/runtimeStore";
+import { pushLocalEvent, useCancelArmed, useRunUsage, useRunning } from "@/app/store/runtimeStore";
 import {
   markSshConnected,
   markSshDisconnected,
@@ -253,6 +253,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
   const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
   const running = useRunning();
+  const stopping = useCancelArmed();
   const toast = useToast();
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
@@ -288,7 +289,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const connectSsh = useSshConnect();
   const isSsh = sessionEnvLabel(entry?.summary) === ENV_SSH;
 
-  const busy = submitRun.isPending || compactSession.isPending || running;
+  const busy = submitRun.isPending || compactSession.isPending || running || stopping;
   const canSend = Boolean(value.trim()) && !busy;
 
   const resize = useCallback(() => {
@@ -623,11 +624,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     </Tooltip>
   );
 
-  const sendIcon = <Icon iconName={running ? IconName.Stop : IconName.Plane} />;
-  const sendLabel = running ? "Stop run" : "Send";
-  const sendType = running ? "button" : "submit";
-  const sendDisabled = !running && !canSend;
-  const onSend = running ? () => void stop() : undefined;
+  const sendIcon = <Icon iconName={running || stopping ? IconName.Stop : IconName.Plane} />;
+  const sendLabel = stopping ? "Stopping run" : running ? "Stop run" : "Send";
+  const sendType = running || stopping ? "button" : "submit";
+  const sendDisabled = stopping || (!running && !canSend);
+  const onSend = running && !stopping ? () => void stop() : undefined;
 
   const sendButton = isMobile ? (
     <StickyButton
@@ -636,11 +637,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       content={ButtonContent.Icon}
       type={sendType}
       disabled={sendDisabled}
+      loading={stopping}
       aria-label={sendLabel}
       onPointerDown={preserveSuggestionFocus}
       onClick={onSend}
     >
-      {sendIcon}
+      <span className={stopping ? "invisible" : undefined}>{sendIcon}</span>
     </StickyButton>
   ) : (
     <Button
@@ -650,11 +652,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       content={ButtonContent.Icon}
       type={sendType}
       disabled={sendDisabled}
+      loading={stopping}
       aria-label={sendLabel}
       onPointerDown={preserveSuggestionFocus}
       onClick={onSend}
     >
-      {sendIcon}
+      <span className={stopping ? "invisible" : undefined}>{sendIcon}</span>
     </Button>
   );
 

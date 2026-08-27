@@ -98,9 +98,9 @@ export interface RuntimeState {
    */
   workspaceEpoch: number;
   /**
-   * Stop was painted; ignore a still-live `active_run` on the snapshot until
-   * the server agrees the run is over, so tabs and breadcrumbs do not snap
-   * back to running while cancel HTTP is in flight.
+   * Stop was painted; the HTTP cancel is still waiting on worker trees.
+   * Composer Send and transcript Resend stay blocked, and a still-live
+   * `active_run` on the snapshot must not snap the chrome back to running.
    */
   cancelArmed: boolean;
 }
@@ -193,8 +193,9 @@ export function syncRunFromSnapshot(activeRun: ActiveRunSnapshot | null | undefi
   const running = isActiveRun(activeRun);
   const state = getState();
   if (state.cancelArmed) {
-    if (running) return;
-    setState({ cancelArmed: false, running: false, activity: "" });
+    // Optimistic cache already dropped `active_run`, so an idle snapshot here
+    // does not mean cancel HTTP finished. Keep Stopping until finishRunCancel
+    // or a terminal SSE event.
     return;
   }
   if (state.running === running) return;
@@ -246,8 +247,9 @@ function flagCancelledThreads(
 }
 
 /**
- * Paint Stop immediately. The HTTP cancel still waits for worker trees; SSE
- * `run_cancelled` confirms the same terminal state without flipping running back on.
+ * Paint Stopping immediately. The HTTP cancel still waits for worker trees;
+ * `finishRunCancel` and SSE `run_cancelled` clear the arm without flipping
+ * running back on.
  */
 export function requestRunCancel(): RuntimeState {
   const previous = getState();
@@ -277,6 +279,14 @@ export function restoreRunCancel(previous: RuntimeState): void {
     threads: previous.threads,
     cancelArmed: previous.cancelArmed,
   });
+}
+
+/**
+ * Cancel HTTP returned: worker trees are down, so Send/Resend are honest again.
+ * SSE `run_cancelled` does the same; either may win.
+ */
+export function finishRunCancel(): void {
+  setState({ cancelArmed: false, running: false, activity: "" });
 }
 
 /** Identifies the log lines whose events carry no id of their own. */
@@ -587,6 +597,7 @@ function steeringVerb(type: string): string {
 }
 
 export const useRunning = () => useStore((s) => s.running);
+export const useCancelArmed = () => useStore((s) => s.cancelArmed);
 export const useActivity = () => useStore((s) => s.activity);
 export const useRunError = () => useStore((s) => s.error);
 export const useLiveEvents = () => useStore((s) => s.events);

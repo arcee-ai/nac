@@ -37,6 +37,7 @@ import {
   isCurrentSessionGeneration,
 } from "@/app/services/sessionRefresh";
 import {
+  finishRunCancel,
   requestRunCancel,
   restoreRunCancel,
   setOptimisticUserPrompt,
@@ -1258,6 +1259,7 @@ export function useCancelRun() {
       }
     },
     onSuccess: (_data, id) => {
+      finishRunCancel();
       void invalidate.session(id);
       void invalidate.sessions();
     },
