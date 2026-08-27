@@ -359,6 +359,7 @@ fn secure_create_lock_dir(path: &Path) -> anyhow::Result<()> {
                 path.display()
             );
         }
+        // SAFETY: `geteuid` has no arguments or memory preconditions.
         if metadata.uid() != unsafe { libc::geteuid() } {
             anyhow::bail!("session lock directory is not owned by the current user");
         }
@@ -395,8 +396,10 @@ fn secure_open_lock_file(path: &Path) -> anyhow::Result<File> {
             .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
         let file = options.open(path)?;
         let metadata = file.metadata()?;
+        // SAFETY: `geteuid` has no arguments or memory preconditions.
+        let effective_uid = unsafe { libc::geteuid() };
         if !metadata.file_type().is_file()
-            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.uid() != effective_uid
             || metadata.nlink() != 1
         {
             anyhow::bail!(

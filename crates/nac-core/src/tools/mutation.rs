@@ -770,6 +770,8 @@ fn open_parent_beneath(
         match open_directory_at(&directory, &name) {
             Ok(next) => directory = next,
             Err(error) if error.kind() == io::ErrorKind::NotFound && create_parents => {
+                // SAFETY: `directory` is a live directory descriptor and
+                // `name` is a NUL-terminated relative component without `/`.
                 let created = unsafe { libc::mkdirat(directory.as_raw_fd(), name.as_ptr(), 0o777) };
                 if created == -1 {
                     let error = io::Error::last_os_error();
@@ -800,6 +802,8 @@ fn c_string(bytes: &[u8]) -> io::Result<CString> {
 
 #[cfg(unix)]
 fn open_directory_at(directory: &File, name: &CString) -> io::Result<File> {
+    // SAFETY: `directory` is a live descriptor and `name` is a NUL-terminated
+    // relative component; the flags request a no-follow directory descriptor.
     let descriptor = unsafe {
         libc::openat(
             directory.as_raw_fd(),
@@ -810,11 +814,15 @@ fn open_directory_at(directory: &File, name: &CString) -> io::Result<File> {
     if descriptor == -1 {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: the successful `openat` result is a new owned descriptor that
+    // has not been wrapped or closed elsewhere.
     Ok(unsafe { File::from_raw_fd(descriptor) })
 }
 
 #[cfg(unix)]
 fn open_target_at(directory: &File, name: &CString) -> io::Result<Option<File>> {
+    // SAFETY: `directory` is a live descriptor and `name` is a NUL-terminated
+    // relative component; `O_NOFOLLOW` prevents a final symlink traversal.
     let descriptor = unsafe {
         libc::openat(
             directory.as_raw_fd(),
@@ -830,6 +838,8 @@ fn open_target_at(directory: &File, name: &CString) -> io::Result<Option<File>> 
             Err(error)
         };
     }
+    // SAFETY: the successful `openat` result is a new owned descriptor that
+    // has not been wrapped or closed elsewhere.
     Ok(Some(unsafe { File::from_raw_fd(descriptor) }))
 }
 
@@ -845,6 +855,8 @@ fn publish_at(
 ) -> Result<(), MutationError> {
     let temp_name = c_string(format!(".nac-mutation-{}.tmp", Uuid::new_v4()).as_bytes())
         .map_err(|error| MutationError::io(path_display, error))?;
+    // SAFETY: `directory` is a live descriptor and `temp_name` is a
+    // NUL-terminated relative component; exclusive creation yields a new fd.
     let descriptor = unsafe {
         libc::openat(
             directory.as_raw_fd(),
@@ -856,6 +868,8 @@ fn publish_at(
     if descriptor == -1 {
         return Err(MutationError::io(path_display, io::Error::last_os_error()));
     }
+    // SAFETY: the successful exclusive `openat` result is a new owned
+    // descriptor that has not been wrapped or closed elsewhere.
     let mut temp = unsafe { File::from_raw_fd(descriptor) };
     let mut cleanup = AtTempCleanup::new(
         directory
@@ -882,6 +896,8 @@ fn publish_at(
     wait_at_publish_gate(_identity);
 
     if metadata.is_some() {
+        // SAFETY: both names are live NUL-terminated relative components and
+        // both directory arguments are the same live directory descriptor.
         let result = unsafe {
             libc::renameat(
                 directory.as_raw_fd(),
@@ -895,6 +911,8 @@ fn publish_at(
         }
         cleanup.disarm();
     } else {
+        // SAFETY: both names are live NUL-terminated relative components and
+        // both directory arguments are the same live directory descriptor.
         let result = unsafe {
             libc::linkat(
                 directory.as_raw_fd(),
@@ -912,6 +930,8 @@ fn publish_at(
                 Err(MutationError::io(path_display, error))
             };
         }
+        // SAFETY: `directory` remains live and `temp_name` is the
+        // NUL-terminated temporary entry just linked into its final location.
         let removed = unsafe { libc::unlinkat(directory.as_raw_fd(), temp_name.as_ptr(), 0) };
         if removed == -1 {
             return Err(MutationError::committed(
@@ -953,6 +973,8 @@ impl AtTempCleanup {
 impl Drop for AtTempCleanup {
     fn drop(&mut self) {
         if self.armed {
+            // SAFETY: the cleanup object owns a live directory descriptor and
+            // a NUL-terminated relative name; unlink failure is best-effort.
             unsafe {
                 libc::unlinkat(self.directory.as_raw_fd(), self.name.as_ptr(), 0);
             }
@@ -1321,6 +1343,8 @@ const SET_GROUP_ID_MODE_BIT: u32 = libc::S_ISGID as u32;
 
 #[cfg(unix)]
 fn preserve_metadata(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
+    // SAFETY: `file` is a live descriptor and the uid/gid values came directly
+    // from filesystem metadata; `fchown` takes no pointers.
     let result = unsafe { libc::fchown(file.as_raw_fd(), metadata.uid(), metadata.gid()) };
     if result == -1 {
         let error = io::Error::last_os_error();
@@ -1333,6 +1357,8 @@ fn preserve_metadata(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
         // either principal necessarily changes with the inode.
         let current = file.metadata()?;
         if current.gid() != metadata.gid() {
+            // SAFETY: `file` is live, uid::MAX means preserve the current uid,
+            // and the requested gid came from filesystem metadata.
             let result =
                 unsafe { libc::fchown(file.as_raw_fd(), libc::uid_t::MAX, metadata.gid()) };
             if result == -1 {
@@ -1406,6 +1432,7 @@ async fn acquire_path_lock(target: &Path) -> io::Result<File> {
 
 fn lock_path(target: &Path) -> io::Result<PathBuf> {
     #[cfg(unix)]
+    // SAFETY: `geteuid` has no arguments or memory preconditions.
     let suffix = unsafe { libc::geteuid() }.to_string();
     #[cfg(not(unix))]
     let suffix = "user".to_string();
@@ -1434,6 +1461,7 @@ fn secure_lock_directory(path: &Path) -> io::Result<()> {
     }
     #[cfg(unix)]
     {
+        // SAFETY: `geteuid` has no arguments or memory preconditions.
         if metadata.uid() != unsafe { libc::geteuid() } {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -1464,6 +1492,7 @@ fn secure_open_lock(path: &Path) -> io::Result<File> {
     }
     #[cfg(unix)]
     {
+        // SAFETY: `geteuid` has no arguments or memory preconditions.
         if metadata.uid() != unsafe { libc::geteuid() }
             || metadata.nlink() != 1
             || metadata.mode() & 0o077 != 0

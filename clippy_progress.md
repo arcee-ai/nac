@@ -108,6 +108,10 @@ zero-backlog async guard last.
 - `missing_assert_message`: complete. All eight production assertions now name
   the violated invariant without interpolating credentials, paths, or other
   sensitive runtime values.
+- `undocumented_unsafe_blocks`: complete. The audit added 38 local safety
+  proofs: all 33 production blocks compiled on macOS plus dormant Linux pidfd,
+  rename-exchange, and process-group paths. Proofs name concrete descriptor,
+  buffer, C-string, ownership, initialization, or syscall preconditions.
 
 ## Verification and next action
 
@@ -156,5 +160,9 @@ The `missing_assert_message` slice passes `make format-check`, `make lint`,
 `git diff --check`, and the full Rust workspace suite with the same green test
 inventory recorded above.
 
-Next: commit this exact lint boundary, then add `undocumented_unsafe_blocks`
-and run autofix before any manual repair.
+The `undocumented_unsafe_blocks` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite with the same green test
+inventory recorded above.
+
+Next: commit this exact lint boundary, then add `iter_over_hash_type` and run
+autofix before any manual repair.
