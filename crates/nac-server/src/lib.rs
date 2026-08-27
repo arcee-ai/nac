@@ -27,6 +27,7 @@ pub use revert::{
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
+    future::{Future, IntoFuture},
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex as StdMutex, Weak},
@@ -120,6 +121,7 @@ const WORKSPACE_DIFF_ERROR_CACHE_TTL: Duration = Duration::from_secs(30);
 const WORKSPACE_DIFF_MEASURE_BUDGET: Duration = Duration::from_secs(4);
 /// How long a working git target is taken on trust before it is checked again.
 const GIT_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
+const COMPLETE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
 enum SuppressedCompletion {
     Traditional { session_id: String, generation: u64 },
@@ -5099,20 +5101,84 @@ pub async fn serve_with_policy(
         .local_addr()
         .with_context(|| format!("failed to read bound address for {}", addr))?;
     on_listening(bound);
+    serve_listener_with_shutdown(
+        listener,
+        manager,
+        shutdown_signal(),
+        COMPLETE_SHUTDOWN_TIMEOUT,
+        || std::process::exit(0),
+    )
+    .await
+}
+
+async fn serve_listener_with_shutdown<F, X>(
+    listener: TcpListener,
+    manager: SessionManager,
+    shutdown: F,
+    complete_shutdown_timeout: Duration,
+    force_shutdown: X,
+) -> Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+    X: FnOnce() + Send + 'static,
+{
+    let mut force_shutdown = Some(force_shutdown);
     let shutdown_manager = manager.clone();
-    axum::serve(listener, router(manager))
-        .with_graceful_shutdown(async move {
-            shutdown_signal().await;
-            // Bound cleanup so a wedged provider or process tree cannot keep
-            // the container alive forever after Kubernetes sends SIGTERM.
-            let _ = tokio::time::timeout(
-                Duration::from_secs(20),
-                shutdown_manager.cancel_local_active_runs_for_shutdown(),
-            )
-            .await;
-        })
-        .await
-        .context("server stopped unexpectedly")
+    let (graceful_tx, graceful_rx) = tokio::sync::oneshot::channel();
+    let mut server = tokio::spawn(
+        axum::serve(listener, router(manager))
+            .with_graceful_shutdown(async move {
+                let _ = graceful_rx.await;
+            })
+            .into_future(),
+    );
+    tokio::pin!(shutdown);
+
+    let result = tokio::select! {
+        result = &mut server => result
+            .context("server task stopped unexpectedly")?
+            .context("server stopped unexpectedly"),
+        () = &mut shutdown => {
+            // Stop accepting new work before cancellation. The single outer
+            // deadline covers both run cleanup and graceful HTTP/SSE drain.
+            // Its watchdog is independent of the async runtime so a wedged
+            // connection task cannot starve the forced process exit.
+            let _ = graceful_tx.send(());
+            let (shutdown_complete_tx, shutdown_complete_rx) = std::sync::mpsc::channel();
+            let force_shutdown = force_shutdown.take().expect("force shutdown callback");
+            let watchdog = std::thread::Builder::new()
+                .name("nac-shutdown-watchdog".to_string())
+                .spawn(move || {
+                    if shutdown_complete_rx
+                        .recv_timeout(complete_shutdown_timeout)
+                        .is_err()
+                    {
+                        forced_shutdown_after_timeout(complete_shutdown_timeout, force_shutdown);
+                    }
+                })
+                .context("failed to start shutdown watchdog")?;
+
+            shutdown_manager.cancel_local_active_runs_for_shutdown().await;
+            let result = (&mut server)
+                .await
+                .context("server task stopped unexpectedly")?
+                .context("server stopped unexpectedly");
+            let _ = shutdown_complete_tx.send(());
+            watchdog
+                .join()
+                .map_err(|_| anyhow!("shutdown watchdog panicked"))?;
+            result
+        }
+    };
+    result
+}
+
+fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {
+    eprintln!(
+        "nac: complete graceful shutdown exceeded {} ms; forcing runtime exit",
+        timeout.as_millis()
+    );
+    force_shutdown();
 }
 
 async fn shutdown_signal() {
@@ -8057,6 +8123,7 @@ mod tests {
         http::Request,
     };
     use flate2::read::GzDecoder;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tower::ServiceExt;
 
     const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
@@ -9177,6 +9244,81 @@ mod tests {
 
         server.abort();
         let _ = server.await;
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn complete_shutdown_is_bounded_with_an_open_session_event_stream() {
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        let root = temp_root("bounded_shutdown_sse");
+        let nac_home = root.join("nac-home");
+        let _env = ScopedModelEnv::isolated(&nac_home, Some("shutdown-test-key"));
+        let manager = test_manager(&root);
+        nac_core::store::initialize(&root.join("store.db")).unwrap();
+        let snapshot = sessions::new_snapshot(
+            "shutdown-stream".to_string(),
+            root.clone(),
+            "gpt-5.2".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            BTreeMap::new(),
+        );
+        sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (forced_tx, forced_rx) = std::sync::mpsc::channel();
+        let server = tokio::spawn(serve_listener_with_shutdown(
+            listener,
+            manager,
+            async move {
+                let _ = shutdown_rx.await;
+            },
+            Duration::from_millis(100),
+            move || {
+                let _ = forced_tx.send(());
+            },
+        ));
+
+        let mut stream = tokio::net::TcpStream::connect(bound).await.unwrap();
+        stream
+            .write_all(
+                b"GET /sessions/shutdown-stream/events/stream HTTP/1.1\r\nHost: localhost\r\nAccept: text/event-stream\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let mut chunk = [0_u8; 1024];
+                let count = stream.read(&mut chunk).await.unwrap();
+                assert_ne!(count, 0, "event stream closed before its response");
+                response.extend_from_slice(&chunk[..count]);
+                if response
+                    .windows(b"\r\n\r\n".len())
+                    .any(|window| window == b"\r\n\r\n")
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("event stream response timed out");
+        let response = String::from_utf8_lossy(&response);
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(response.contains("content-type: text/event-stream"));
+
+        shutdown_tx.send(()).unwrap();
+        tokio::task::block_in_place(|| forced_rx.recv_timeout(Duration::from_secs(1)))
+            .expect("forced shutdown outlived the complete shutdown bound");
+        drop(stream);
+        server.abort();
         let _ = std::fs::remove_dir_all(root);
     }
 
