@@ -599,7 +599,9 @@ struct FinishingRun {
 
 struct CancellingRun {
     snapshot: ActiveRunSnapshot,
-    started_at: Instant,
+    /// Frozen when cancel is accepted, before shutdown barriers. Cleanup waits
+    /// must not grow the stored Stop duration.
+    duration_ms: u64,
     task: Option<JoinHandle<()>>,
     transcript_baseline: Option<usize>,
 }
@@ -2219,11 +2221,13 @@ impl SessionService {
                 agent.commit_pending_usage().await;
                 agent.last_usage.clone()
             };
+            // Same as a failed run: no new visible response, so a duration
+            // would overwrite the previous reply's stored time.
             let event_message = match self
                 .persist_run_snapshot(
                     &cancelling_run.snapshot,
                     cancelling_run.transcript_baseline,
-                    Some(duration_ms(cancelling_run.started_at.elapsed())),
+                    None,
                     usage,
                     DurableRunTerminal::Failed,
                 )
@@ -2275,13 +2279,12 @@ impl SessionService {
         // committed compaction projection when cancellation happened before
         // the following ordinary call completed.
         let cancel_usage = self.append_cancellation_message().await;
-        let cancel_duration_ms = duration_ms(cancelling_run.started_at.elapsed());
 
         let persistence_error = match self
             .persist_run_snapshot(
                 &cancelling_run.snapshot,
                 transcript_baseline,
-                Some(cancel_duration_ms),
+                Some(cancelling_run.duration_ms),
                 cancel_usage,
                 DurableRunTerminal::Canonical,
             )
@@ -2769,7 +2772,7 @@ impl SessionService {
         active_run.snapshot.submitted_user_message = None;
         Some(CancellingRun {
             snapshot: active_run.snapshot.clone(),
-            started_at: active_run.started_at,
+            duration_ms: duration_ms(active_run.started_at.elapsed()),
             task: active_run.task.take(),
             transcript_baseline: active_run.transcript_baseline,
         })
