@@ -18,6 +18,7 @@ openapi = ["dep:utoipa"]
 nac-contracts = { path = "../nac-contracts" }
 nac-credential-store = { path = "../nac-credential-store" }
 nac-managed = { path = "../nac-managed" }
+nac-process = { path = "../nac-process" }
 tokio = { workspace = true, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 reqwest = { workspace = true, features = ["json", "form", "rustls", "stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -50,3 +51,7 @@ openssh-sftp-client = { version = "0.15", default-features = false }
 utoipa = { workspace = true, optional = true, features = ["uuid"] }
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 parking_lot = "0.12"
+
+[dev-dependencies]
+nac-managed = { path = "../nac-managed", features = ["test-support"] }
+nac-process = { path = "../nac-process", features = ["test-support"] }

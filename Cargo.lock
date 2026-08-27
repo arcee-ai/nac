@@ -1652,6 +1652,7 @@ dependencies = [
  "nac-contracts",
  "nac-credential-store",
  "nac-managed",
+ "nac-process",
  "openssh-sftp-client",
  "parking_lot",
  "portable-pty",
@@ -1696,6 +1697,15 @@ dependencies = [
  "tokio",
  "toml",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "nac-process"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tokio",
  "uuid",
 ]
 

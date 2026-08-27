@@ -5,6 +5,7 @@ members = [
     "crates/nac-core",
     "crates/nac-credential-store",
     "crates/nac-managed",
+    "crates/nac-process",
     "crates/nac-server",
 ]
 resolver = "2"
