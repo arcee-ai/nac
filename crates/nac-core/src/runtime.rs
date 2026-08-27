@@ -623,6 +623,10 @@ impl OrchestratorRunConfig {
     pub fn resume_base_cwd(&self) -> &Path {
         &self.resume_base_cwd
     }
+
+    pub fn set_host_secret_store(&mut self, store: Option<crate::managed::HostSecretStore>) {
+        self.agent.set_host_secret_store(store);
+    }
 }
 
 #[derive(Debug, Clone)]

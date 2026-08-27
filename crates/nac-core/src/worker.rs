@@ -20,6 +20,12 @@ pub struct ManagedWorkerRunConfig {
     pub(crate) action: String,
 }
 
+impl ManagedWorkerRunConfig {
+    pub fn set_host_secret_store(&mut self, store: Option<crate::managed::HostSecretStore>) {
+        self.agent.set_host_secret_store(store);
+    }
+}
+
 pub fn build_worker_context_messages(
     thread_name: &str,
     worker_context: &WorkerContext,

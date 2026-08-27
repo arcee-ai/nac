@@ -486,6 +486,12 @@ pub struct ToolRuntime {
     pub permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
     /// Direct-only bridge for exact mid-run durable-goal baselines.
     pub(crate) goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
+    /// Present only for an explicitly configured Managed NAC host. The store
+    /// is read immediately before each command spawn so replacement/deletion
+    /// affects new processes while existing processes keep their snapshot.
+    pub host_secret_store: Option<crate::managed::HostSecretStore>,
+    pub command_redactions:
+        Arc<StdMutex<HashMap<String, crate::managed::CommandEnvironmentSnapshot>>>,
 }
 
 impl ToolRuntime {
@@ -493,6 +499,42 @@ impl ToolRuntime {
         self.allowed_tools
             .as_ref()
             .is_none_or(|allowed| allowed.contains(name))
+    }
+
+    pub(crate) fn command_environment_snapshot(
+        &self,
+    ) -> anyhow::Result<crate::managed::CommandEnvironmentSnapshot> {
+        self.host_secret_store
+            .as_ref()
+            .map(crate::managed::HostSecretStore::snapshot)
+            .transpose()
+            .map(|snapshot| {
+                snapshot.unwrap_or_else(crate::managed::CommandEnvironmentSnapshot::empty)
+            })
+    }
+
+    pub(crate) fn remember_output_environment(
+        &self,
+        output_id: impl Into<String>,
+        snapshot: crate::managed::CommandEnvironmentSnapshot,
+    ) {
+        self.command_redactions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(output_id.into(), snapshot);
+    }
+
+    pub(crate) fn redact_output(&self, output_id: &str, text: &str) -> anyhow::Result<String> {
+        let snapshot = self
+            .command_redactions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(output_id)
+            .cloned();
+        match snapshot {
+            Some(snapshot) => Ok(snapshot.redact(text)),
+            None => Ok(self.command_environment_snapshot()?.redact(text)),
+        }
     }
 }
 
@@ -2196,5 +2238,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         allowed_tools: None,
         permission_broker: None,
         goal_runtime: None,
+        host_secret_store: None,
+        command_redactions: Arc::new(StdMutex::new(HashMap::new())),
     }
 }

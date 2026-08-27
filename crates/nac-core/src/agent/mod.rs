@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
@@ -581,6 +581,8 @@ impl Agent {
                 allowed_tools: Some(allowed_tools),
                 permission_broker: None,
                 goal_runtime,
+                host_secret_store: None,
+                command_redactions: Arc::new(StdMutex::new(HashMap::new())),
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
@@ -596,6 +598,12 @@ impl Agent {
             partial_stream: StdMutex::new(ModelStreamDelta::default()),
             permission_rules: config.permission_rules,
         })
+    }
+
+    /// Attach the Managed NAC host-secret provider after server-owned session
+    /// construction. This does not alter the model-visible capability set.
+    pub fn set_host_secret_store(&mut self, store: Option<crate::managed::HostSecretStore>) {
+        self.tool_runtime.host_secret_store = store;
     }
 
     #[cfg(test)]

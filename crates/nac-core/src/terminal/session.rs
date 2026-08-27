@@ -55,6 +55,7 @@ impl TerminalSession {
         rows: u16,
         backend: &Arc<ExecutionBackend>,
         output_registry: OutputRegistry,
+        extra_envs: &[(String, String)],
     ) -> Result<Self> {
         let pty_system = NativePtySystem::default();
         let pty_pair = pty_system
@@ -71,7 +72,8 @@ impl TerminalSession {
         let output_lease = output_registry.create(ArtifactKind::Pty)?;
         let output_id = output_lease.output_id().to_string();
 
-        let envs = terminal_env_owned();
+        let mut envs = terminal_env_owned();
+        envs.extend(extra_envs.iter().cloned());
         let (cmd, pidfile) = backend.terminal_pty_command(command, cwd.as_deref(), &envs);
         // resolved_cwd mirrors the default-workdir fallback inside each
         // backend's terminal_pty_command: explicit cwd if provided, otherwise
@@ -500,6 +502,7 @@ mod tests {
             40,
             &backend,
             registry.clone(),
+            &[],
         )
         .unwrap();
         // The PTY uses the account's configured login shell, which may not
@@ -578,6 +581,7 @@ mod tests {
             40,
             &backend,
             registry.clone(),
+            &[],
         )
         .unwrap();
 
