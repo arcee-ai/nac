@@ -19,3 +19,4 @@ Detailed documentation for nac. The [root README](../README.md) has install, aut
 - [HTTP API](api/http.md)
 - [Managed NAC host](managed/README.md)
 - [Model request security](security/model-requests.md)
+- [Architecture decisions](architecture/README.md)
