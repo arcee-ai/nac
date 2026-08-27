@@ -619,6 +619,14 @@ Rules:
   delivery remain separate topology-specific implementations. Both end-to-end
   journeys and both cancellation paths, the full test build, and warning-
   denied Clippy pass. Server `lib.rs` is now 3,918 lines.
+- Transactional configuration now accepts a transport-neutral
+  `SessionConfigPatch` with application-owned tri-state fields; delivery maps
+  the wire `RequestField` exactly once. Required-field clearing, optional
+  clearing, header serialization, threshold validation, and diagnostic reset
+  moved with the application command while the HTTP/OpenAPI schema remains
+  unchanged. Empty no-op, invalid rollback, full state round-trip, OpenAPI
+  parity, the full test build, and warning-denied Clippy pass. Server `lib.rs`
+  is now 3,859 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -634,8 +642,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the durable-delegation runtime
-adapter without protected files. Then move creation/configuration pure
-validation and their transport-independent command contracts, followed by the
-remaining server composition/router split. Keep lifecycle gates, operation
-leases, and exact settlement ordering in their coordinator.
+Inspect exact worktree/staged diffs and commit the transport-neutral
+configuration contract without protected files. Then move the remaining shared
+creation/configuration validators and creation command contract, followed by
+the server composition/router split. Keep lifecycle gates, operation leases,
+and exact settlement ordering in their coordinator.

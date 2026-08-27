@@ -532,6 +532,14 @@ fn request_field_patch<T>(field: RequestField<T>) -> Option<Option<T>> {
     }
 }
 
+fn application_field<T>(field: RequestField<T>) -> application::Field<T> {
+    match field {
+        RequestField::Omitted => application::Field::Unchanged,
+        RequestField::Null => application::Field::Clear,
+        RequestField::Value(value) => application::Field::Set(value),
+    }
+}
+
 impl<T> utoipa::__dev::ComposeSchema for RequestField<T>
 where
     T: utoipa::__dev::ComposeSchema,
@@ -892,18 +900,25 @@ pub struct UpdateConfigRequest {
 }
 
 impl UpdateConfigRequest {
-    fn is_empty(&self) -> bool {
-        matches!(self.model, RequestField::Omitted)
-            && matches!(self.base_url, RequestField::Omitted)
-            && matches!(self.backend, RequestField::Omitted)
-            && matches!(self.reasoning_effort, RequestField::Omitted)
-            && matches!(self.api_key_env, RequestField::Omitted)
-            && matches!(self.extra_headers, RequestField::Omitted)
-            && matches!(
+    fn into_application(self) -> application::session_configuration::SessionConfigPatch {
+        application::session_configuration::SessionConfigPatch {
+            model: application_field(self.model),
+            base_url: application_field(self.base_url),
+            backend: application_field(self.backend),
+            reasoning_effort: application_field(self.reasoning_effort),
+            api_key_env: application_field(self.api_key_env),
+            extra_headers: match application_field(self.extra_headers) {
+                application::Field::Unchanged => application::Field::Unchanged,
+                application::Field::Clear => application::Field::Clear,
+                application::Field::Set(HeadersRequest(headers)) => {
+                    application::Field::Set(headers)
+                }
+            },
+            orchestrator_compaction_threshold: application_field(
                 self.orchestrator_compaction_threshold,
-                RequestField::Omitted
-            )
-            && matches!(self.light_model, RequestField::Omitted)
+            ),
+            light_model: application_field(self.light_model),
+        }
     }
 }
 
@@ -2025,7 +2040,7 @@ impl SessionManager {
         request: UpdateConfigRequest,
     ) -> Result<()> {
         self.session_configuration()
-            .update_session_config(session_id, request)
+            .update_session_config(session_id, request.into_application())
             .await
     }
 
@@ -3431,80 +3446,6 @@ fn enforce_trusted_base_url(
         return Ok(());
     }
     validate_caller_supplied_base_url(backend, base_url, &policy.trusted_hosts)
-}
-
-fn apply_raw_config_patch(
-    config: &mut sessions::RawSessionConfig,
-    request: UpdateConfigRequest,
-) -> Result<()> {
-    match request.model {
-        RequestField::Omitted => {}
-        RequestField::Null => {
-            return Err(request_configuration_error(
-                "invalid model configuration: required field 'model' cannot be null",
-            ));
-        }
-        RequestField::Value(value) => config.model = nonblank_request_string(value, "model")?,
-    }
-    match request.base_url {
-        RequestField::Omitted => {}
-        RequestField::Null => {
-            return Err(request_configuration_error(
-                "invalid model configuration: required field 'base_url' cannot be null",
-            ));
-        }
-        RequestField::Value(value) => {
-            config.base_url = nonblank_request_string(value, "base_url")?;
-        }
-    }
-    match request.backend {
-        RequestField::Omitted => {}
-        RequestField::Null => {
-            return Err(request_configuration_error(
-                "invalid model configuration: required field 'backend' cannot be null",
-            ));
-        }
-        RequestField::Value(value) => {
-            config.backend = Some(nonblank_request_string(value, "backend")?);
-        }
-    }
-    match request.reasoning_effort {
-        RequestField::Omitted => {}
-        RequestField::Null => config.reasoning_effort = None,
-        RequestField::Value(value) => {
-            config.reasoning_effort = Some(nonblank_request_string(value, "reasoning_effort")?);
-        }
-    }
-    match request.api_key_env {
-        RequestField::Omitted => {}
-        RequestField::Null => config.api_key_env = None,
-        RequestField::Value(value) => config.api_key_env = Some(value),
-    }
-    match request.extra_headers {
-        RequestField::Omitted => {}
-        RequestField::Null => config.extra_headers_json = None,
-        RequestField::Value(HeadersRequest(headers)) => {
-            config.extra_headers_json = if headers.is_empty() {
-                None
-            } else {
-                Some(serde_json::to_string(&headers).map_err(|error| {
-                    request_configuration_error(format!(
-                        "invalid model configuration: failed to serialize extra_headers: {error}"
-                    ))
-                })?)
-            };
-        }
-    }
-    match request.orchestrator_compaction_threshold {
-        RequestField::Omitted => {}
-        RequestField::Null => config.orchestrator_compaction_threshold = None,
-        RequestField::Value(threshold) => {
-            let threshold = validated_compaction_threshold(threshold)?;
-            config.orchestrator_compaction_threshold = (threshold != 0).then_some(threshold);
-        }
-    }
-    config.diagnostics.clear();
-    Ok(())
 }
 
 fn parse_prospective_model_config(
