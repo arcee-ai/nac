@@ -419,7 +419,10 @@ pub fn codex_auth_status() -> Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the provider adapter keeps request, auth, streaming, cache, and cancellation inputs explicit"
+)]
 pub async fn send_responses(
     client: &Client,
     base_url: &str,

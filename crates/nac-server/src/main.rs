@@ -53,7 +53,10 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
-#[allow(clippy::large_enum_variant)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Clap owns the closed root command payloads and boxing would complicate derive wiring"
+)]
 enum RootCommand {
     /// Manage ChatGPT credentials used by Codex models
     #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]

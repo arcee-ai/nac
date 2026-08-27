@@ -283,7 +283,10 @@ enum ToolContentRepr {
 #[cfg(feature = "openapi")]
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(untagged)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "the schema-only mirror is referenced by OpenAPI generation outside runtime construction"
+)]
 pub(crate) enum ToolContentSchema {
     Text(String),
     Parts(Vec<ToolContentPartSchema>),
@@ -292,7 +295,10 @@ pub(crate) enum ToolContentSchema {
 #[cfg(feature = "openapi")]
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "the schema-only mirror is referenced by OpenAPI generation outside runtime construction"
+)]
 pub(crate) enum ToolContentPartSchema {
     Text { text: String },
     Image { image: ToolImageSchema },
@@ -300,7 +306,10 @@ pub(crate) enum ToolContentPartSchema {
 
 #[cfg(feature = "openapi")]
 #[derive(Serialize, utoipa::ToSchema)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "the schema-only mirror is referenced by OpenAPI generation outside runtime construction"
+)]
 pub(crate) struct ToolImageSchema {
     mime_type: String,
     data: String,

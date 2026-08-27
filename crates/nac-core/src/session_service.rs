@@ -464,7 +464,10 @@ impl SessionClientHandle {
         self.service.frontend_snapshot().await
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "submission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_submit_prepared_prompt(
         &self,
         prompt: PreparedPrompt,
@@ -472,7 +475,10 @@ impl SessionClientHandle {
         self.try_submit_prompt(prompt.agent_prompt)
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "submission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_submit_prepared_prompt_with_lease(
         &self,
         prompt: PreparedPrompt,
@@ -485,7 +491,10 @@ impl SessionClientHandle {
         )
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "submission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_submit_prepared_managed_orchestrator_prompt_with_lease(
         &self,
         prompt: PreparedPrompt,
@@ -503,7 +512,10 @@ impl SessionClientHandle {
         )
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "submission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -832,7 +844,10 @@ impl SessionService {
             .unwrap_or_default()
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "submission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_submit_prepared_prompt(
         &self,
         prompt: PreparedPrompt,

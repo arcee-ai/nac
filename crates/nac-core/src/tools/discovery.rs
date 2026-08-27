@@ -409,7 +409,10 @@ async fn classify_grep_root(fs: &mut WorkspaceFs, root: &str) -> SearchResult<Gr
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "recursive discovery keeps root policy, budgets, ignore state, and cancellation explicit"
+)]
 async fn collect_grep_root(
     fs: &mut WorkspaceFs,
     root: &str,

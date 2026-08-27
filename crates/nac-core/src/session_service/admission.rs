@@ -148,7 +148,10 @@ impl SessionService {
         Ok(operation_lease)
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -156,7 +159,10 @@ impl SessionService {
         self.try_submit_prompt_inner(None, expanded_prompt, None, RunAdmissionKind::default())
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_submit_prompt_for_client(
         &self,
         client_id: SessionClientId,
@@ -170,7 +176,10 @@ impl SessionService {
         )
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_submit_prompt_for_client_with_lease(
         &self,
         client_id: SessionClientId,
@@ -185,7 +194,10 @@ impl SessionService {
         )
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_submit_traditional_child_prompt(
         &self,
         expanded_prompt: String,
@@ -202,7 +214,10 @@ impl SessionService {
         )
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
     #[expect(
         clippy::expect_used,
         reason = "successful run admission installs the prompt-commit channel before returning"
@@ -302,7 +317,10 @@ impl SessionService {
         Ok(active)
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub(super) fn try_begin_run_with_lease(
         &self,
         client_id: Option<SessionClientId>,
@@ -313,7 +331,10 @@ impl SessionService {
         self.try_begin_run_inner(client_id, expanded_prompt, supplied_lease, true, admission)
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub(super) fn try_begin_run_inner(
         &self,
         client_id: Option<SessionClientId>,

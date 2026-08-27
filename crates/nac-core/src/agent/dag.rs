@@ -30,7 +30,10 @@ pub(crate) struct DagExecContext {
 ///    `(original_index, tool_call_id, tool_name, args_str)`
 /// 3. `Vec<(usize, String, String, ToolResult)>` — parse errors for malformed
 ///    thread calls as `(original_index, tool_call_id, args_str, error_result)`
-#[allow(clippy::type_complexity)]
+#[expect(
+    clippy::type_complexity,
+    reason = "the tuple preserves the three semantic partitions without a public wrapper type"
+)]
 pub(crate) fn partition_tool_calls(
     tool_calls: Vec<ToolCall>,
     runtime: &ToolRuntime,

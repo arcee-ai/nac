@@ -1,7 +1,6 @@
 use super::*;
 
 impl SessionService {
-    #[allow(clippy::result_large_err)]
     pub(super) async fn finish_run(&self, run_id: &SessionRunId, outcome: RunOutcome) {
         loop {
             if self.finish_run_once(run_id, outcome.clone()).await {

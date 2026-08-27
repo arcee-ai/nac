@@ -78,7 +78,10 @@ impl ThinkingLevelMap {
     /// `None`), as opposed to merely absent. Currently consumed by tests;
     /// it documents the user-override `null` wire-value case, which neither
     /// the seed catalog nor the generator ever produces.
-    #[allow(dead_code)] // test-consumed; the /models listing reads supported_efforts
+    #[allow(
+        dead_code,
+        reason = "tests validate the negative effort projection while the API reads the positive view"
+    )]
     pub fn is_explicitly_unsupported(&self, effort: ReasoningEffort) -> bool {
         matches!(self.0.get(&effort), Some(None))
     }

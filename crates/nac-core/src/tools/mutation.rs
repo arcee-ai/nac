@@ -1338,11 +1338,17 @@ fn publish(
 // `mode_t` is `u16` on macOS and `u32` on Linux; the explicit casts keep
 // `MetadataExt::mode()` arithmetic portable across both CI targets.
 #[cfg(unix)]
-#[allow(clippy::unnecessary_cast)]
+#[allow(
+    clippy::unnecessary_cast,
+    reason = "libc mode-bit types vary by Unix target and the contract requires u32"
+)]
 const SET_USER_ID_MODE_BIT: u32 = libc::S_ISUID as u32;
 
 #[cfg(unix)]
-#[allow(clippy::unnecessary_cast)]
+#[allow(
+    clippy::unnecessary_cast,
+    reason = "libc mode-bit types vary by Unix target and the contract requires u32"
+)]
 const SET_GROUP_ID_MODE_BIT: u32 = libc::S_ISGID as u32;
 
 #[cfg(unix)]

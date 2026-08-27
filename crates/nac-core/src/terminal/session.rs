@@ -47,7 +47,10 @@ pub struct TerminalSession {
 }
 
 impl TerminalSession {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "PTY creation keeps command, geometry, backend, output lease, and environment authority explicit"
+    )]
     pub fn spawn(
         name: String,
         command: &str,

@@ -800,7 +800,10 @@ impl TranscriptLogWriter {
     /// index mismatch, that physical row and every later reserved row are
     /// deleted in the same IMMEDIATE transaction that refreshes the session
     /// summary. Malformed or foreign reserved rows fail before any mutation.
-    #[allow(clippy::type_complexity)]
+    #[expect(
+        clippy::type_complexity,
+        reason = "the repair result keeps rows, repaired range, and visible-count metadata atomic"
+    )]
     pub fn read_tail_repairing_gap(
         &self,
         session_id: &str,

@@ -273,7 +273,10 @@ fn canonicalize_existing(path: &Path) -> Option<PathBuf> {
 }
 
 #[derive(Clone)]
-#[allow(private_interfaces)]
+#[allow(
+    private_interfaces,
+    reason = "the public enum hides backend-specific session implementation details"
+)]
 pub enum SandboxSession {
     Podman(Arc<podman::PodmanSession>),
 }
@@ -631,7 +634,10 @@ fn host_workspace_mounts_from_spec(spec: &SandboxSpec) -> Option<Vec<HostWorkspa
     Some(mounts)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "sandbox construction keeps security-sensitive backend, mount, owner, and network inputs explicit"
+)]
 pub fn build_sandbox_spec(
     backend: SandboxBackendType,
     image: String,

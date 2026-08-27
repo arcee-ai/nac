@@ -228,7 +228,11 @@ impl EffectiveSandboxOptions {
     }
 }
 
-#[allow(dead_code, clippy::large_enum_variant)]
+#[allow(
+    dead_code,
+    clippy::large_enum_variant,
+    reason = "the construction contract preserves owned state for all session modes without boxing"
+)]
 pub(crate) enum OrchestratorSession {
     Active {
         session_id: String,
@@ -304,7 +308,10 @@ pub struct ResumePickerRunConfig {
     pub worker_executable: Option<PathBuf>,
 }
 
-#[allow(clippy::large_enum_variant)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "run-state variants own construction inputs and avoid heap indirection on the hot path"
+)]
 pub enum RunState {
     Orchestrator { run_config: OrchestratorRunConfig },
     ResumePicker(ResumePickerRunConfig),
