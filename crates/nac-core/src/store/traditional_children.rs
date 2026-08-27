@@ -94,12 +94,19 @@ pub struct TraditionalChildRecord {
     pub nesting_depth: u64,
     pub status: TraditionalChildStatus,
     pub generation: u64,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub run_id: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub execution_mode: Option<TraditionalChildExecutionMode>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub report: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub failure: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub change_summary: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub verification_summary: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub completion_inbox_id: Option<i64>,
     pub created_at: String,
     pub updated_at: String,

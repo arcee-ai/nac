@@ -267,7 +267,7 @@ describe("paged read fencing", () => {
             event: {
               type: "thread_finished",
               name: "B",
-              exit_code: null,
+              exit_code: 0,
               timed_out: false,
             },
           },
@@ -287,7 +287,7 @@ describe("paged read fencing", () => {
             event: {
               type: "thread_finished",
               name: "A",
-              exit_code: null,
+              exit_code: 0,
               timed_out: false,
             },
           },

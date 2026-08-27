@@ -43,7 +43,9 @@ pub use delivery::projects::{
     DeleteProjectSessions, ProjectList, ReorderProjectsRequest, ReorderProjectsResponse,
     UpdateProjectRequest,
 };
-pub use delivery::server::{router, serve, serve_with, serve_with_policy, BindPolicy};
+pub use delivery::server::{
+    openapi_document, router, serve, serve_with, serve_with_policy, BindPolicy,
+};
 pub use delivery::sessions::{
     ListSessionsQuery, ReorderSessionsRequest, ReorderSessionsResponse,
     UpdateSessionPresentationRequest,

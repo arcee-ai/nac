@@ -354,8 +354,8 @@ function CreateProjectForm({
         backend = record.backend as BackendKind;
         model = record.model;
         baseUrl = record.base_url;
-        apiKeyEnv = record.api_key_env;
-        configuredEffort = record.reasoning_effort;
+        apiKeyEnv = record.api_key_env ?? null;
+        configuredEffort = record.reasoning_effort ?? null;
         defaultModelConfigId = record.config_id;
       } else {
         backend = selection.backend;

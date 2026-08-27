@@ -218,6 +218,8 @@ pub async fn run_arcee_auth_action(action: ArceeAuthAction) -> Result<()> {
 
 /// A provider that authenticates from a browser login rather than an API key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(rename_all = "snake_case"))]
 pub enum ManagedAuthProvider {
     Arcee,
     Codex,

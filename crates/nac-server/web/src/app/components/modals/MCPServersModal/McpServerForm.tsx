@@ -42,6 +42,10 @@ function splitArgs(text: string): string[] {
     .filter(Boolean);
 }
 
+function knownTransport(value: string | null | undefined): McpTransport {
+  return value === "stdio" || value === "streamable_http" ? value : "streamable_http";
+}
+
 export function McpServerForm({
   record,
   template,
@@ -75,8 +79,8 @@ export function McpServerForm({
 
   const [name, setName] = useState(record?.name ?? template?.name ?? "");
   const [enabled, setEnabled] = useState(record?.enabled ?? true);
-  const [transport, setTransport] = useState<McpTransport>(
-    record?.transport ?? template?.transport ?? "streamable_http",
+  const [transport, setTransport] = useState<McpTransport>(() =>
+    knownTransport(record?.transport ?? template?.transport),
   );
   const [url, setUrl] = useState(record?.url ?? template?.url ?? "");
   const [command, setCommand] = useState(record?.command ?? "");

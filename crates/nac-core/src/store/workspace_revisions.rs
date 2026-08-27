@@ -13,7 +13,9 @@ pub struct WorkspaceRevisionRecord {
     pub run_id: String,
     pub commit_sha: String,
     /// The commit this revision is shown as a change against.
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub base_sha: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub branch: Option<String>,
     /// Prompt that started the run, for telling revisions apart in a list.
     pub label: String,
@@ -26,6 +28,7 @@ pub struct WorkspaceRevisionRecord {
     /// like at this point in the conversation". `None` on rows written before
     /// the column existed.
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub transcript_len: Option<u64>,
 }
 

@@ -52,12 +52,17 @@ pub struct SessionGoalRecord {
     pub goal_id: String,
     pub objective: String,
     pub status: GoalStatus,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub token_budget: Option<u64>,
     pub tokens_used: u64,
     pub time_used_ms: u64,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub accounting_run_id: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub accounting_token_baseline: Option<u64>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub accounting_started_at_epoch_ms: Option<u64>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub continuation_run_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,

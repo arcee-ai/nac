@@ -161,6 +161,7 @@ function composer(
       last_user_prompt: null,
       sandboxed: false,
       ssh_host: null,
+      title: null,
       created_at: "2026-08-25T00:00:00Z",
       updated_at: "2026-08-25T00:00:00Z",
       run_count: 0,
@@ -369,7 +370,7 @@ describe("slash-command suggestions", () => {
     commandFixtures = [
       compactDefinition,
       {
-        command: "continue",
+        command: "compact",
         name: "continue",
         description: "Continue the session",
         accepts_arguments: false,
@@ -428,7 +429,7 @@ describe("slash-command suggestions", () => {
   it("pointer completion keeps focus and argument commands append one space", () => {
     commandFixtures = [
       {
-        command: "run",
+        command: "goal",
         name: "run",
         description: "Run a workset",
         accepts_arguments: true,

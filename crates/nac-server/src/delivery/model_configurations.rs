@@ -64,11 +64,15 @@ pub struct ModelConfigFromFileRequest {
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ResolvedModelConfiguration {
     pub backend: BackendKind,
+    #[schema(required)]
     pub model: Option<String>,
     pub base_url: String,
+    #[schema(required)]
     pub api_key_env: Option<String>,
+    #[schema(required)]
     pub reasoning_effort: Option<ReasoningEffort>,
     pub models: Vec<ProviderModel>,
+    #[schema(required)]
     pub models_error: Option<String>,
 }
 

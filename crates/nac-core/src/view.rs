@@ -43,9 +43,11 @@ pub struct SessionSummarySnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_config_error: Option<String>,
     pub visible_message_count: usize,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub last_user_prompt: Option<String>,
     pub sandboxed: bool,
     /// OpenSSH/freeform target the session runs on; `None` = local session.
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub ssh_host: Option<String>,
     /// Port and key the session was created with, so anything rebuilding the
     /// connection reaches the same machine the same way. Omitted when the
@@ -55,6 +57,7 @@ pub struct SessionSummarySnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_identity_file: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub title: Option<String>,
     #[serde(default)]
     pub pinned: bool,
@@ -85,6 +88,7 @@ pub struct ThreadSnapshot {
     pub created_at: String,
     pub updated_at: String,
     pub episode_count: i64,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub latest_action: Option<String>,
 }
 
@@ -99,6 +103,10 @@ pub struct EpisodeSnapshot {
     /// `ok` for a retained handoff, otherwise how the dispatch died. Snapshots
     /// written before dispatch outcomes were recorded only held handoffs.
     #[serde(default = "retained_episode_status")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(required, value_type = store::EpisodeStatus)
+    )]
     pub status: String,
     pub created_at: String,
 }

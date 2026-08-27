@@ -237,8 +237,8 @@ fn embedded_frontend_router() -> Router {
         .route("/assets/{*path}", get(serve_asset))
 }
 
-fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
-    let documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
+fn documented_api() -> OpenApiRouter<SessionManager> {
+    OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
         .routes(routes!(managed_status::healthz_handler))
         .routes(routes!(managed_status::readyz_handler))
@@ -406,7 +406,18 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
         .routes(routes!(delivery::session_runs::recent_events))
         .routes(routes!(delivery::session_runs::stream_events))
         .routes(routes!(delivery::session_runs::cancel_active_run))
-        .with_state(manager.clone());
+}
+
+/// Return the exact OpenAPI document assembled for the running HTTP router.
+///
+/// Build tooling uses this state-free seam so checked-in consumers derive from
+/// the same route and schema registrations served at `/openapi.json`.
+pub fn openapi_document() -> utoipa::openapi::OpenApi {
+    documented_api().split_for_parts().1
+}
+
+fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
+    let documented = documented_api().with_state(manager.clone());
     let (router, openapi) = documented.split_for_parts();
     (
         router.nest_service("/mcp", mcp::streamable_http_service(manager)),

@@ -375,7 +375,7 @@ function SettingsForm({
           backend: record.backend as BackendKind,
           model: record.model,
           base_url: record.base_url,
-          api_key_env: record.api_key_env,
+          api_key_env: record.api_key_env ?? null,
         };
       } else {
         selected = selection;

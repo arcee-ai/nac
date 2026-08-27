@@ -35,9 +35,9 @@ const TIMED_OUT_PREVIEW = "Command timed out after";
 export function toolCallFailed(event: {
   is_error: boolean;
   content_preview: string;
-  command_status?: "completed" | "timed_out" | "cancelled" | "spawn_error";
+  command_status?: "completed" | "timed_out" | "cancelled" | "spawn_error" | null;
 }): boolean {
-  if (event.command_status !== undefined) {
+  if (event.command_status != null) {
     return event.is_error || event.command_status !== "completed";
   }
   return event.is_error || event.content_preview.startsWith(TIMED_OUT_PREVIEW);

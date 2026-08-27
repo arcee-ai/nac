@@ -12,6 +12,8 @@
     "format:check": "oxfmt --check .",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "generate:api": "node scripts/generate-api-types.mjs",
+    "check:api": "node scripts/generate-api-types.mjs --check",
     "sync-file-icons": "node scripts/sync-file-icons.mjs",
     "preview": "vite preview"
   },

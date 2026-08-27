@@ -23,6 +23,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ApiError, RequestField, SessionManager};
 
+#[derive(utoipa::ToSchema)]
+#[schema(rename_all = "snake_case")]
+#[allow(dead_code)] // Schema-only enum: runtime validation keeps the existing string DTO.
+enum McpTransportSchema {
+    Stdio,
+    StreamableHttp,
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct McpLibraryResponse {
     pub entries: Vec<mcp::McpLibraryEntry>,
@@ -34,6 +42,7 @@ pub struct McpLibraryResponse {
 pub struct McpServerView {
     pub name: String,
     pub enabled: bool,
+    #[schema(value_type = McpTransportSchema)]
     pub transport: String,
     pub command: Option<String>,
     pub args: Vec<String>,
@@ -53,6 +62,7 @@ pub struct CreateMcpServerRequest {
     pub name: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[schema(value_type = McpTransportSchema)]
     pub transport: String,
     pub command: Option<String>,
     #[serde(default)]
