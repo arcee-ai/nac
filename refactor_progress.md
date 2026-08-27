@@ -821,6 +821,15 @@ Rules:
   the SSH and Podman contract cases remain explicitly ignored pending their
   optional infrastructure. The complete core test build and warning-denied
   Clippy are green.
+- Terminal ownership is now responsibility-sized: the 229-line manager root
+  owns shared state, construction, durable authority, and pipe reading; a
+  330-line interactive owner handles PTY admission/input; a 399-line one-shot
+  owner handles process lifecycle and bounded stream capture; and a 299-line
+  retention owner handles output paging, settlement, retained handles, leases,
+  and remote cleanup retries. Cross-owner methods are parent-scoped only.
+  All 35 terminal manager regressions pass with the same two optional SSH/
+  Podman cases ignored; the complete core test build and warning-denied Clippy
+  are green.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -836,7 +845,6 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 terminal-manager test separation with exact-path staging. Then
-decompose process admission/lifecycle from retained-output/terminal ownership
-and audit the remaining tool root/kernel surfaces before declaring M4/M5
-complete.
+Commit the M4 terminal ownership extraction with exact-path staging. Then
+audit the remaining tool root/kernel surfaces and run the complete core suite
+before declaring M4/M5 structurally complete.
