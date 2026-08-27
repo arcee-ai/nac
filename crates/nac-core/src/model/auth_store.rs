@@ -57,6 +57,16 @@ pub(crate) fn with_credential_lock<T>(
     result
 }
 
+/// Try to serialize an async credential refresh without blocking an executor
+/// thread. The returned guard keeps the cross-process file lock until drop.
+pub(crate) fn try_acquire_credential_lock(path: &Path) -> Result<Option<FileLock>> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    FileLock::try_acquire(path)
+}
+
 pub(super) fn read_arcee_auth_string() -> Result<Option<String>> {
     read_auth_string_from_path(&arcee_auth_file_path()?)
 }
@@ -145,6 +155,24 @@ pub(super) fn write_arcee_auth_string(raw: &str) -> Result<()> {
 
 pub(crate) fn write_auth_string_to_path(path: &Path, raw: &str) -> Result<()> {
     atomic_replace_auth_file(path, |file| file.write_all(raw.as_bytes()))
+}
+
+pub(crate) fn remove_auth_file_from_path(path: &Path) -> Result<bool> {
+    validate_regular_destination(path)?;
+    match fs::remove_file(path) {
+        Ok(()) => {
+            if let Some(parent) = path.parent() {
+                sync_parent_directory(parent).with_context(|| {
+                    format!("failed to sync auth directory {}", parent.display())
+                })?;
+            }
+            Ok(true)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to remove credential {}", path.display()))
+        }
+    }
 }
 
 fn atomic_replace_auth_file(
@@ -325,7 +353,7 @@ impl Drop for TempFileCleanup {
     }
 }
 
-pub(super) struct FileLock {
+pub(crate) struct FileLock {
     file: File,
 }
 

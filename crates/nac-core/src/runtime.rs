@@ -624,8 +624,14 @@ impl OrchestratorRunConfig {
         &self.resume_base_cwd
     }
 
-    pub fn set_host_secret_store(&mut self, store: Option<crate::managed::HostSecretStore>) {
-        self.agent.set_host_secret_store(store);
+    pub fn set_managed_host_context(
+        &mut self,
+        store: Option<crate::managed::HostSecretStore>,
+        github: Option<crate::managed_github::ManagedGitHubAuth>,
+        home_root: Option<PathBuf>,
+    ) {
+        self.agent
+            .set_managed_host_context(store, github, home_root);
     }
 }
 

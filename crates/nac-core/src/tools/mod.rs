@@ -490,6 +490,8 @@ pub struct ToolRuntime {
     /// is read immediately before each command spawn so replacement/deletion
     /// affects new processes while existing processes keep their snapshot.
     pub host_secret_store: Option<crate::managed::HostSecretStore>,
+    pub managed_github: Option<crate::managed_github::ManagedGitHubAuth>,
+    pub managed_home_root: Option<PathBuf>,
     pub command_redactions:
         Arc<StdMutex<HashMap<String, crate::managed::CommandEnvironmentSnapshot>>>,
 }
@@ -501,16 +503,26 @@ impl ToolRuntime {
             .is_none_or(|allowed| allowed.contains(name))
     }
 
-    pub(crate) fn command_environment_snapshot(
+    pub(crate) async fn command_environment_snapshot(
         &self,
     ) -> anyhow::Result<crate::managed::CommandEnvironmentSnapshot> {
-        self.host_secret_store
+        let mut snapshot = self
+            .host_secret_store
             .as_ref()
             .map(crate::managed::HostSecretStore::snapshot)
             .transpose()
             .map(|snapshot| {
                 snapshot.unwrap_or_else(crate::managed::CommandEnvironmentSnapshot::empty)
-            })
+            })?;
+        if let Some(home_root) = self.managed_home_root.as_ref() {
+            snapshot.insert_dedicated("HOME", home_root.to_string_lossy(), false);
+        }
+        if let Some(auth) = self.managed_github.as_ref() {
+            if let Some(token) = auth.current_token().await? {
+                snapshot.insert_dedicated("GH_TOKEN", token.secret(), true);
+            }
+        }
+        Ok(snapshot)
     }
 
     pub(crate) fn remember_output_environment(
@@ -533,7 +545,24 @@ impl ToolRuntime {
             .cloned();
         match snapshot {
             Some(snapshot) => Ok(snapshot.redact(text)),
-            None => Ok(self.command_environment_snapshot()?.redact(text)),
+            None => {
+                let mut snapshot = self
+                    .host_secret_store
+                    .as_ref()
+                    .map(crate::managed::HostSecretStore::snapshot)
+                    .transpose()?
+                    .unwrap_or_else(crate::managed::CommandEnvironmentSnapshot::empty);
+                if let Some(token) = self
+                    .managed_github
+                    .as_ref()
+                    .map(crate::managed_github::ManagedGitHubAuth::stored_token_for_redaction)
+                    .transpose()?
+                    .flatten()
+                {
+                    snapshot.insert_dedicated("GH_TOKEN", token.secret(), true);
+                }
+                Ok(snapshot.redact(text))
+            }
         }
     }
 }
@@ -2239,6 +2268,8 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         permission_broker: None,
         goal_runtime: None,
         host_secret_store: None,
+        managed_github: None,
+        managed_home_root: None,
         command_redactions: Arc::new(StdMutex::new(HashMap::new())),
     }
 }
