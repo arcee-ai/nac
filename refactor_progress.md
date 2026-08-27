@@ -596,6 +596,15 @@ Rules:
   response mapping. OpenAPI/router parity, attached skill projection, the full
   test build, and warning-denied Clippy pass. Server `lib.rs` is now 4,768
   lines.
+- Session attachment and durable recovery now belong to a cohesive 409-line
+  application owner. It owns configuration-version cache validation,
+  resource-lease-first resume construction, recovery reconciliation under the
+  operation lease, cache publication, direct inbox wake-up, orphaned
+  completion-suppression repair, and delegated monitor restart. Existing
+  manager methods are compatibility facades for controllers and application
+  consumers. Cached/uncached recovery, event-epoch rotation, ordinary no-
+  sidecar attachment, resource-lease ordering, the full test build, and
+  warning-denied Clippy pass. Server `lib.rs` is now 4,483 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -611,8 +620,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the remaining session delivery
-slice without protected files. Then move the session-configuration pure
-validation helpers and transport-independent command contract, followed by
-attachment/recovery and session creation. Keep lifecycle gates, operation
-leases, and exact settlement ordering in their coordinator.
+Inspect exact worktree/staged diffs and commit the attachment/recovery slice
+without protected files. Then move session creation and configuration's pure
+validation/transport-independent command contract. Keep lifecycle gates,
+operation leases, and exact settlement ordering in their coordinator.
