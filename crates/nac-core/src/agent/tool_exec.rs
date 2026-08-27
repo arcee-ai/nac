@@ -163,7 +163,7 @@ async fn spawn_and_collect_non_thread(
                     "unknown".to_string(),
                     "unknown".to_string(),
                     ToolResult {
-                        content: (format!("Tool task panicked: {}", error)).into(),
+                        content: (format!("Tool task panicked: {error}")).into(),
                         is_error: true,
                     },
                 ));
@@ -233,10 +233,10 @@ async fn execute_with_dag_error(
     // Produce error ToolResults for all thread dispatches.
     let error_message = match &dag_err {
         dag::DagError::DuplicateName(name) => {
-            format!("Duplicate thread name '{}' in parallel dispatch", name)
+            format!("Duplicate thread name '{name}' in parallel dispatch")
         }
         dag::DagError::Cycle(desc) => {
-            format!("Circular dependency in thread dispatch: {}", desc)
+            format!("Circular dependency in thread dispatch: {desc}")
         }
     };
 

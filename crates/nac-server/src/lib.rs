@@ -918,7 +918,7 @@ impl SessionManager {
         if self.persisted_operation_session_exists(session_id)? {
             Ok(())
         } else {
-            Err(anyhow!("session '{}' was not found", session_id))
+            Err(anyhow!("session '{session_id}' was not found"))
         }
     }
 

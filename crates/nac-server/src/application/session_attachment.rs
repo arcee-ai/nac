@@ -93,8 +93,7 @@ impl<'a> SessionAttachmentApplication<'a> {
             return Ok(service);
         }
         Err(anyhow!(
-            "session '{}' configuration kept changing during attachment",
-            session_id
+            "session '{session_id}' configuration kept changing during attachment"
         ))
     }
 
@@ -305,7 +304,7 @@ impl<'a> SessionAttachmentApplication<'a> {
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
             .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+            .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
         let resource_lease = summary
             .sandboxed
             .then(|| {
@@ -367,7 +366,7 @@ impl<'a> SessionAttachmentApplication<'a> {
             .into_iter()
             .find(|entry| entry.summary.session_id == session_id)
             .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{}' was not found", session_id))?;
+            .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
         // For a sandbox row, shared resource authority must precede snapshot
         // loading and any observer-side Podman inspection/materialization. A
         // concurrent deletion either wins before this acquisition (so the

@@ -205,27 +205,23 @@ pub fn resolve_model_base_url(backend: BackendKind, base_url: Option<String>) ->
     let base_url = required_nonblank_setting(base_url, "base_url")?;
     let parsed = Url::parse(&base_url).map_err(|error| {
         model_configuration_error(format!(
-            "invalid model configuration: base_url '{}' is not a valid absolute URL: {}",
-            base_url, error
+            "invalid model configuration: base_url '{base_url}' is not a valid absolute URL: {error}"
         ))
     })?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err(model_configuration_error(format!(
-            "invalid model configuration: base_url '{}' must be an absolute http(s) URL with a host",
-            base_url
+            "invalid model configuration: base_url '{base_url}' must be an absolute http(s) URL with a host"
         )));
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(model_configuration_error(format!(
-            "invalid model configuration: base_url '{}' must not embed userinfo",
-            base_url
+            "invalid model configuration: base_url '{base_url}' must not embed userinfo"
         )));
     }
     let host = parsed.host().expect("host presence checked above");
     if parsed.scheme() == "http" && !allows_plaintext_transport(&host) {
         return Err(model_configuration_error(format!(
-            "invalid model configuration: base_url '{}' requires HTTPS; plaintext HTTP is accepted only for loopback and private-network hosts",
-            base_url
+            "invalid model configuration: base_url '{base_url}' requires HTTPS; plaintext HTTP is accepted only for loopback and private-network hosts"
         )));
     }
     Ok(base_url)
@@ -334,15 +330,13 @@ impl EffectiveModelSettings {
 fn required_nonblank_setting(value: Option<String>, name: &str) -> Result<String> {
     let value = value.ok_or_else(|| {
         model_configuration_error(format!(
-            "invalid model configuration: required setting '{}' is missing; set it in config.toml or the session settings",
-            name
+            "invalid model configuration: required setting '{name}' is missing; set it in config.toml or the session settings"
         ))
     })?;
     let normalized = value.trim();
     if normalized.is_empty() {
         return Err(model_configuration_error(format!(
-            "invalid model configuration: required setting '{}' must not be blank",
-            name
+            "invalid model configuration: required setting '{name}' must not be blank"
         )));
     }
     Ok(normalized.to_string())

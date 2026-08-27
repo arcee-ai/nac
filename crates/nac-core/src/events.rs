@@ -1369,7 +1369,7 @@ impl EventSink {
         if matches!(event, AgentEvent::ModelCallStarted { .. }) {
             if self.stderr_prefixed {
                 if let Ok(encoded) = serde_json::to_string(&event) {
-                    eprintln!("{}{}", STDERR_EVENT_PREFIX, encoded);
+                    eprintln!("{STDERR_EVENT_PREFIX}{encoded}");
                 }
             }
             return;
@@ -1379,7 +1379,7 @@ impl EventSink {
         };
         if self.stderr_prefixed {
             if let Ok(encoded) = serde_json::to_string(&event) {
-                eprintln!("{}{}", STDERR_EVENT_PREFIX, encoded);
+                eprintln!("{STDERR_EVENT_PREFIX}{encoded}");
             }
         }
         if let Some(bus) = &self.bus {

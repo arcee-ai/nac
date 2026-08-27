@@ -62,10 +62,7 @@ impl SkillRegistry {
         }
 
         for name in shadowed {
-            eprintln!(
-                "Skill '{}' is shadowed by a higher-precedence definition",
-                name
-            );
+            eprintln!("Skill '{name}' is shadowed by a higher-precedence definition");
         }
 
         if skills.is_empty() {
@@ -117,7 +114,7 @@ impl SkillRegistry {
     pub fn activate(&self, name: &str) -> ToolResult {
         let Some(content) = self.render_for_prompt(name) else {
             return ToolResult {
-                content: (format!("Error: unknown skill '{}'", name)).into(),
+                content: (format!("Error: unknown skill '{name}'")).into(),
                 is_error: true,
             };
         };

@@ -147,8 +147,7 @@ impl SandboxBackendType {
         match s {
             "podman" => Ok(Self::Podman),
             other => Err(anyhow!(
-                "invalid sandbox backend '{}': expected 'podman'",
-                other
+                "invalid sandbox backend '{other}': expected 'podman'"
             )),
         }
     }
@@ -431,8 +430,7 @@ impl SandboxSession {
 
         if requested.exists() {
             return Err(anyhow!(
-                "Path '{}' is not mounted into the sandbox. Use /workspace or an explicitly mounted guest path.",
-                path
+                "Path '{path}' is not mounted into the sandbox. Use /workspace or an explicitly mounted guest path."
             ));
         }
 
@@ -549,14 +547,14 @@ pub async fn reconcile_podman_creation_records(store_path: &Path) -> Result<()> 
 pub fn parse_mount_spec(raw: &str, read_only: bool, cwd: &Path) -> Result<MountSpec> {
     let (host_raw, guest_raw) = raw
         .split_once(':')
-        .ok_or_else(|| anyhow!("invalid mount '{}': expected HOST:GUEST", raw))?;
+        .ok_or_else(|| anyhow!("invalid mount '{raw}': expected HOST:GUEST"))?;
 
     if host_raw.is_empty() || guest_raw.is_empty() {
-        return Err(anyhow!("invalid mount '{}': expected HOST:GUEST", raw));
+        return Err(anyhow!("invalid mount '{raw}': expected HOST:GUEST"));
     }
 
     let host = absolutize_host_path(host_raw, cwd)
-        .with_context(|| format!("invalid host path in mount '{}'", raw))?;
+        .with_context(|| format!("invalid host path in mount '{raw}'"))?;
     if !host.exists() {
         return Err(anyhow!("mount source '{}' does not exist", host.display()));
     }

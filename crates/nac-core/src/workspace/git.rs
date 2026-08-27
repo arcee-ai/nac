@@ -580,16 +580,16 @@ fn local_worktree(repo_root: &Path, relpath: &str, limit: u64) -> Result<Worktre
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(WorktreeRead::Missing)
         }
-        Err(error) => return Err(error).with_context(|| format!("cannot stat '{}'", relpath)),
+        Err(error) => return Err(error).with_context(|| format!("cannot stat '{relpath}'")),
     };
 
     if metadata.file_type().is_symlink() {
         let parent = path.parent().unwrap_or(repo_root);
         let resolved_parent = parent
             .canonicalize()
-            .with_context(|| format!("failed to resolve parent for {}", relpath))?;
+            .with_context(|| format!("failed to resolve parent for {relpath}"))?;
         let target = std::fs::read_link(&path)
-            .with_context(|| format!("failed to read symlink target for {}", relpath))?;
+            .with_context(|| format!("failed to read symlink target for {relpath}"))?;
         return Ok(WorktreeRead::Symlink {
             target: target
                 .as_os_str()
@@ -606,7 +606,7 @@ fn local_worktree(repo_root: &Path, relpath: &str, limit: u64) -> Result<Worktre
 
     let resolved = path
         .canonicalize()
-        .with_context(|| format!("failed to resolve {}", relpath))?;
+        .with_context(|| format!("failed to resolve {relpath}"))?;
     let escapes = !resolved.starts_with(repo_root);
     let size = metadata.len();
     if size > limit {
@@ -617,7 +617,7 @@ fn local_worktree(repo_root: &Path, relpath: &str, limit: u64) -> Result<Worktre
         });
     }
 
-    let bytes = std::fs::read(&path).with_context(|| format!("failed to read {}", relpath))?;
+    let bytes = std::fs::read(&path).with_context(|| format!("failed to read {relpath}"))?;
     Ok(WorktreeRead::Regular {
         size,
         escapes,
@@ -632,7 +632,7 @@ fn local_worktree(repo_root: &Path, relpath: &str, limit: u64) -> Result<Worktre
 /// rest of the stream.
 fn parse_remote_worktree(stdout: &[u8], relpath: &str) -> Result<WorktreeRead> {
     if stdout.is_empty() {
-        bail!("the remote host reported nothing for '{}'", relpath);
+        bail!("the remote host reported nothing for '{relpath}'");
     }
 
     let (header, body) = match stdout.iter().position(|byte| *byte == b'\n') {
@@ -652,7 +652,7 @@ fn parse_remote_worktree(stdout: &[u8], relpath: &str) -> Result<WorktreeRead> {
             } else {
                 rest
             };
-            bail!("cannot stat '{}': {}", relpath, message)
+            bail!("cannot stat '{relpath}': {message}")
         }
         "symlink" => Ok(WorktreeRead::Symlink {
             target: body.to_vec(),
@@ -664,9 +664,7 @@ fn parse_remote_worktree(stdout: &[u8], relpath: &str) -> Result<WorktreeRead> {
             let size = fields
                 .next()
                 .and_then(|size| size.parse::<u64>().ok())
-                .ok_or_else(|| {
-                    anyhow!("the remote report for '{}' has no readable size", relpath)
-                })?;
+                .ok_or_else(|| anyhow!("the remote report for '{relpath}' has no readable size"))?;
             let bytes = match fields.next() {
                 Some("raw") => Some(body.to_vec()),
                 _ => None,
@@ -677,7 +675,7 @@ fn parse_remote_worktree(stdout: &[u8], relpath: &str) -> Result<WorktreeRead> {
                 bytes,
             })
         }
-        other => bail!("the remote report for '{}' is unknown: {}", relpath, other),
+        other => bail!("the remote report for '{relpath}' is unknown: {other}"),
     }
 }
 

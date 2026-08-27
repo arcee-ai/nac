@@ -58,8 +58,7 @@ pub(crate) fn partition_tool_calls(
                         args_str,
                         ToolResult {
                             content: (format!(
-                                "Error: failed to parse tool arguments for '{}': {}",
-                                name, error
+                                "Error: failed to parse tool arguments for '{name}': {error}"
                             ))
                             .into(),
                             is_error: true,
@@ -292,8 +291,7 @@ pub(crate) fn spawn_non_thread_into(
                         tool_name.clone(),
                         ToolResult {
                             content: (format!(
-                                "Error: failed to parse tool arguments for '{}': {}",
-                                tool_name, error
+                                "Error: failed to parse tool arguments for '{tool_name}': {error}"
                             ))
                             .into(),
                             is_error: true,
@@ -561,7 +559,7 @@ pub(crate) async fn execute_with_dag(
                                     "unknown".to_string(),
                                     "unknown".to_string(),
                                     ToolResult {
-                                        content: format!("Tool task panicked: {}", error).into(),
+                                        content: format!("Tool task panicked: {error}").into(),
                                         is_error: true,
                                     },
                                 ));
@@ -613,7 +611,7 @@ pub(crate) async fn execute_with_dag(
                         "unknown".to_string(),
                         "unknown".to_string(),
                         ToolResult {
-                            content: (format!("Tool task panicked: {}", error)).into(),
+                            content: (format!("Tool task panicked: {error}")).into(),
                             is_error: true,
                         },
                     ));
@@ -645,7 +643,7 @@ pub(crate) async fn execute_with_dag(
                     "unknown".to_string(),
                     "unknown".to_string(),
                     ToolResult {
-                        content: (format!("Tool task panicked: {}", error)).into(),
+                        content: (format!("Tool task panicked: {error}")).into(),
                         is_error: true,
                     },
                 ));

@@ -307,7 +307,7 @@ pub fn require_str(args: &Value, key: &str) -> Result<String, ToolResult> {
         .and_then(|value| value.as_str())
         .map(|value| value.to_string())
         .ok_or_else(|| ToolResult {
-            content: (format!("Error: '{}' argument required", key)).into(),
+            content: (format!("Error: '{key}' argument required")).into(),
             is_error: true,
         })
 }
@@ -319,7 +319,7 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
 
     let Some(items) = value.as_array() else {
         return Err(ToolResult {
-            content: (format!("Error: '{}' must be an array of strings", key)).into(),
+            content: (format!("Error: '{key}' must be an array of strings")).into(),
             is_error: true,
         });
     };
@@ -328,7 +328,7 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
     for item in items {
         let Some(value) = item.as_str() else {
             return Err(ToolResult {
-                content: (format!("Error: '{}' must be an array of strings", key)).into(),
+                content: (format!("Error: '{key}' must be an array of strings")).into(),
                 is_error: true,
             });
         };
@@ -371,7 +371,7 @@ pub async fn execute_tool_with_context(
     if name.starts_with("mcp__") {
         let Some(registry) = &runtime.mcp else {
             return ToolResult {
-                content: (format!("Error: MCP tool '{}' is not available", name)).into(),
+                content: (format!("Error: MCP tool '{name}' is not available")).into(),
                 is_error: true,
             };
         };
@@ -408,7 +408,7 @@ pub async fn execute_tool_with_context(
         "workset_read" => workset::execute_read(args, runtime).await,
         "workset_list" => workset::execute_list(args, runtime).await,
         unknown => ToolResult {
-            content: (format!("Error: unknown tool '{}'", unknown)).into(),
+            content: (format!("Error: unknown tool '{unknown}'")).into(),
             is_error: true,
         },
     }

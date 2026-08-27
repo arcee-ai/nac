@@ -32,7 +32,7 @@ pub(super) fn parse_openai_responses_response(
     let output = value
         .get("output")
         .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("Response from {} did not include output items", url))?;
+        .ok_or_else(|| anyhow!("Response from {url} did not include output items"))?;
 
     let mut message_text_parts = Vec::new();
     let mut tool_calls = Vec::new();

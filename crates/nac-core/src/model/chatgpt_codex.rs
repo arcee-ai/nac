@@ -116,41 +116,35 @@ impl CodexRequestError {
 
 pub(super) fn validate_base_url(base_url: &str) -> Result<Url> {
     let parsed = Url::parse(base_url)
-        .map_err(|error| anyhow!("invalid Codex base URL '{}': {}", base_url, error))?;
+        .map_err(|error| anyhow!("invalid Codex base URL '{base_url}': {error}"))?;
     if parsed.scheme() != "https" {
         return Err(anyhow!(
-            "invalid Codex base URL '{}': managed Codex requires HTTPS",
-            base_url
+            "invalid Codex base URL '{base_url}': managed Codex requires HTTPS"
         ));
     }
     if parsed.host_str() != Some("chatgpt.com") {
         return Err(anyhow!(
-            "invalid Codex base URL '{}': managed Codex requires the approved ChatGPT origin",
-            base_url
+            "invalid Codex base URL '{base_url}': managed Codex requires the approved ChatGPT origin"
         ));
     }
     if parsed.port_or_known_default() != Some(443) {
         return Err(anyhow!(
-            "invalid Codex base URL '{}': managed Codex requires effective port 443",
-            base_url
+            "invalid Codex base URL '{base_url}': managed Codex requires effective port 443"
         ));
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(anyhow!(
-            "invalid Codex base URL '{}': userinfo is not allowed",
-            base_url
+            "invalid Codex base URL '{base_url}': userinfo is not allowed"
         ));
     }
     if parsed.query().is_some() || parsed.fragment().is_some() {
         return Err(anyhow!(
-            "invalid Codex base URL '{}': query parameters and fragments are not allowed",
-            base_url
+            "invalid Codex base URL '{base_url}': query parameters and fragments are not allowed"
         ));
     }
     if !matches!(parsed.path(), "/backend-api" | "/backend-api/") {
         return Err(anyhow!(
-            "invalid Codex base URL '{}': managed Codex requires path '/backend-api'",
-            base_url
+            "invalid Codex base URL '{base_url}': managed Codex requires path '/backend-api'"
         ));
     }
     Ok(parsed)
@@ -1627,7 +1621,7 @@ fn expiry_status(expires_at_ms: u64) -> String {
         format!("expired {seconds}s ago")
     } else {
         let seconds = expires_at_ms.saturating_sub(now) / 1000;
-        format!("in {}s", seconds)
+        format!("in {seconds}s")
     }
 }
 

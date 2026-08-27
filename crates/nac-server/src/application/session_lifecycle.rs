@@ -131,7 +131,7 @@ impl<'a> SessionLifecycleApplication<'a> {
 
         let deleted = view::delete_session(&self.manager.inner.store_path, session_id)?;
         if !deleted {
-            return Err(anyhow!("session '{}' was not found", session_id));
+            return Err(anyhow!("session '{session_id}' was not found"));
         }
         if let Some(target) = revision_target {
             if let Err(error) = workspace::forget(&target, session_id) {

@@ -155,7 +155,7 @@ pub(crate) fn fork(cwd: &Path, session_key: &str) -> Result<Option<SessionWorktr
     };
     let scratch_root = nac_home.join("worktrees");
     let worktree_path = scratch_root.join(session_key);
-    let branch = format!("nac/{:.12}", session_key);
+    let branch = format!("nac/{session_key:.12}");
     if let Err(error) = worktree::create_without_checkout(&repo.root, &worktree_path, &branch) {
         eprintln!("nac: {error:#}; sandbox will mount the live checkout");
         return Ok(None);

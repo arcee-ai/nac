@@ -457,10 +457,10 @@ pub async fn serve_with_policy(
     nac_core::reconcile_podman_creation_records(&manager.inner.store_path).await?;
     let listener = TcpListener::bind(addr)
         .await
-        .with_context(|| format!("failed to bind {}", addr))?;
+        .with_context(|| format!("failed to bind {addr}"))?;
     let bound = listener
         .local_addr()
-        .with_context(|| format!("failed to read bound address for {}", addr))?;
+        .with_context(|| format!("failed to read bound address for {addr}"))?;
     on_listening(bound);
     serve_listener_with_shutdown(
         listener,

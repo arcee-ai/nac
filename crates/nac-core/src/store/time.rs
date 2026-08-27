@@ -43,5 +43,5 @@ pub(super) fn now_utc() -> String {
         mo += 1;
     }
     day += remaining as u32;
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, mo, day, h, m, s)
+    format!("{y:04}-{mo:02}-{day:02} {h:02}:{m:02}:{s:02}")
 }

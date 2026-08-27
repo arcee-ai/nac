@@ -88,8 +88,7 @@ impl ManagedHostConfig {
         for name in &self.model_credential_environment_names {
             if !is_valid_environment_name(name) {
                 bail!(
-                    "invalid managed model credential environment name '{}'; expected [A-Za-z_][A-Za-z0-9_]*",
-                    name
+                    "invalid managed model credential environment name '{name}'; expected [A-Za-z_][A-Za-z0-9_]*"
                 );
             }
         }
@@ -243,10 +242,7 @@ impl HostSecretStore {
 
     fn validate_name(&self, name: &str) -> Result<()> {
         if !is_valid_environment_name(name) {
-            bail!(
-                "invalid secret name '{}'; expected [A-Za-z_][A-Za-z0-9_]*",
-                name
-            );
+            bail!("invalid secret name '{name}'; expected [A-Za-z_][A-Za-z0-9_]*");
         }
         if is_reserved_environment_name(name) || self.reserved_names.contains(name) {
             bail!("secret name '{name}' is reserved by NAC or the managed runtime");
@@ -393,10 +389,7 @@ fn validate_secret_value(value: &str) -> Result<()> {
         bail!("secret value must not be empty");
     }
     if value.len() > MAX_HOST_SECRET_VALUE_BYTES {
-        bail!(
-            "secret value must be at most {} bytes",
-            MAX_HOST_SECRET_VALUE_BYTES
-        );
+        bail!("secret value must be at most {MAX_HOST_SECRET_VALUE_BYTES} bytes");
     }
     Ok(())
 }
@@ -417,10 +410,7 @@ fn validate_store_limits(stored: &StoredHostSecrets) -> Result<()> {
             .ok_or_else(|| anyhow!("managed secret store size overflow"))?;
     }
     if total > MAX_HOST_SECRET_TOTAL_BYTES {
-        bail!(
-            "managed host secret data must be at most {} bytes",
-            MAX_HOST_SECRET_TOTAL_BYTES
-        );
+        bail!("managed host secret data must be at most {MAX_HOST_SECRET_TOTAL_BYTES} bytes");
     }
     Ok(())
 }
