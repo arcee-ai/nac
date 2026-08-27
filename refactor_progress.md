@@ -612,6 +612,13 @@ Rules:
   transaction. SSH/sandbox rejection, inheritance/null behavior, managed
   credential preflight, invalid backend/effort rejection, the full test build,
   and warning-denied Clippy pass. Server `lib.rs` is now 4,314 lines.
+- The traditional-child and managed-orchestrator controller implementations
+  now live in a dedicated 410-line durable-delegation runtime adapter with
+  explicit imports. Foreground/background admission and wait, continuation,
+  steering/read, cancellation, wake-up, generation checks, and completion
+  delivery remain separate topology-specific implementations. Both end-to-end
+  journeys and both cancellation paths, the full test build, and warning-
+  denied Clippy pass. Server `lib.rs` is now 3,918 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -627,7 +634,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the session-creation slice
-without protected files. Then move creation/configuration pure validation and
-their transport-independent command contracts. Keep lifecycle gates, operation
+Inspect exact worktree/staged diffs and commit the durable-delegation runtime
+adapter without protected files. Then move creation/configuration pure
+validation and their transport-independent command contracts, followed by the
+remaining server composition/router split. Keep lifecycle gates, operation
 leases, and exact settlement ordering in their coordinator.
