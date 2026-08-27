@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use nac_core::projects::{self, ProjectRecord, ProjectStoreError};
 use nac_core::{runtime, sessions, view};
 
+use super::Field;
 use crate::filesystem::{self, BrowseKind, BrowseQuery};
 use crate::{SessionManager, SshRequest};
 
@@ -20,18 +21,11 @@ pub(crate) struct CreateProject {
     pub(crate) default_model_config_id: Option<String>,
 }
 
-/// Transport-independent update semantics for a project field.
-pub(crate) enum ProjectField<T> {
-    Unchanged,
-    Clear,
-    Set(T),
-}
-
 pub(crate) struct UpdateProject {
-    pub(crate) name: ProjectField<String>,
-    pub(crate) description: ProjectField<String>,
-    pub(crate) default_model_config_id: ProjectField<String>,
-    pub(crate) pinned: ProjectField<bool>,
+    pub(crate) name: Field<String>,
+    pub(crate) description: Field<String>,
+    pub(crate) default_model_config_id: Field<String>,
+    pub(crate) pinned: Field<bool>,
 }
 
 #[derive(Clone, Copy)]
@@ -292,23 +286,20 @@ impl<'a> ProjectApplication<'a> {
     }
 }
 
-fn required_patch<T>(
-    field: ProjectField<T>,
-    name: &str,
-) -> Result<Option<T>, ProjectApplicationError> {
+fn required_patch<T>(field: Field<T>, name: &str) -> Result<Option<T>, ProjectApplicationError> {
     match field {
-        ProjectField::Unchanged => Ok(None),
-        ProjectField::Clear => Err(ProjectApplicationError::InvalidInput(format!(
+        Field::Unchanged => Ok(None),
+        Field::Clear => Err(ProjectApplicationError::InvalidInput(format!(
             "{name} cannot be null"
         ))),
-        ProjectField::Set(value) => Ok(Some(value)),
+        Field::Set(value) => Ok(Some(value)),
     }
 }
 
-fn optional_patch<T>(field: ProjectField<T>) -> Option<Option<T>> {
+fn optional_patch<T>(field: Field<T>) -> Option<Option<T>> {
     match field {
-        ProjectField::Unchanged => None,
-        ProjectField::Clear => Some(None),
-        ProjectField::Set(value) => Some(Some(value)),
+        Field::Unchanged => None,
+        Field::Clear => Some(None),
+        Field::Set(value) => Some(Some(value)),
     }
 }

@@ -339,6 +339,9 @@ Rules:
 - `217825f refactor(server): isolate project application service` — moves the
   complete project use-case family behind a focused application facade while
   preserving HTTP contracts and lifecycle deletion ordering.
+- `fd30178 refactor(server): isolate project HTTP delivery` — moves project
+  DTOs and thin Axum/OpenAPI handlers behind a delivery boundary while keeping
+  crate-root public re-exports and the generated contract stable.
 - Baseline `make check` passed at `90dd3c9` on 2026-08-27.
 - M0 inventory and dependency plan are complete; no production behavior changed.
 - M1 extracted the complete inline test modules from server `lib.rs`,
@@ -372,6 +375,12 @@ Rules:
   `make crate-check CRATE=nac-server` is green. Server `lib.rs` is now 7,754
   lines, down from its 17,351-line inline-test baseline and 7,977 lines after
   the application extraction.
+- Saved SSH configuration CRUD now has a 96-line application service over the
+  durable store and a 125-line HTTP delivery adapter. A shared application
+  `Field<T>` carries tri-state patch semantics without importing HTTP DTOs.
+  Focused application validation/update/delete coverage was added; the complete
+  server gate passes 150 library and 23 binary tests, and warning-denied Clippy
+  is green. Server `lib.rs` is now 7,637 lines.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -387,7 +396,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the project delivery-adapter
-slice without protected files. Then extract the next focused server use-case
-family, using the project application/delivery seams as the dependency-direction
-template.
+Inspect exact worktree/staged diffs and commit the SSH configuration
+application/delivery slice without protected files. Then extract saved model
+configuration operations while preserving credential rollback/retirement and
+provider-destination policy ordering.

@@ -17,6 +17,9 @@ pub use delivery::projects::{
     DeleteProjectSessions, ProjectList, ReorderProjectsRequest, ReorderProjectsResponse,
     UpdateProjectRequest,
 };
+pub use delivery::ssh_configurations::{
+    CreateSshConfigurationRequest, SshConfigurationList, UpdateSshConfigurationRequest,
+};
 pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
 pub use managed_auth::{
     DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
@@ -88,7 +91,7 @@ use nac_core::{
         SessionRunHandle, SessionService, SessionSubmitError, ThreadEventPage,
     },
     sessions,
-    ssh_configurations::{self, SshConfigurationRecord, SshConfigurationStoreError},
+    ssh_configurations::SshConfigurationStoreError,
     store::{
         GoalStatus, InboxDelivery, ManagedOrchestratorExecutionMode, ManagedOrchestratorRecord,
         ManagedOrchestratorStatus, PermissionGrantRecord, SessionGoalRecord, SessionInboxRecord,
@@ -923,33 +926,6 @@ pub struct ModelConfigurationList {
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct CreateSshConfigurationRequest {
-    pub name: String,
-    pub ssh_host: String,
-    pub ssh_port: Option<u16>,
-    pub ssh_identity_file: Option<String>,
-}
-
-/// Edits a saved SSH setup in place. Every field is tri-state: omit it to keep
-/// what is stored, send null to clear it, send a value to replace it.
-#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
-pub struct UpdateSshConfigurationRequest {
-    #[serde(default)]
-    pub name: RequestField<String>,
-    #[serde(default)]
-    pub ssh_host: RequestField<String>,
-    #[serde(default)]
-    pub ssh_port: RequestField<u16>,
-    #[serde(default)]
-    pub ssh_identity_file: RequestField<String>,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct SshConfigurationList {
-    pub configurations: Vec<SshConfigurationRecord>,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ModelConfigFromFileRequest {
     pub path: String,
 }
@@ -1510,6 +1486,12 @@ impl SessionManager {
 
     pub(crate) fn projects(&self) -> application::projects::ProjectApplication<'_> {
         application::projects::ProjectApplication::new(self)
+    }
+
+    pub(crate) fn ssh_configurations(
+        &self,
+    ) -> application::ssh_configurations::SshConfigurationApplication<'_> {
+        application::ssh_configurations::SshConfigurationApplication::new(&self.inner.store_path)
     }
     async fn browse_ssh(
         &self,
@@ -4714,10 +4696,13 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
             delete_model_config_handler
         ))
         .routes(routes!(saved_model_config_models_handler))
-        .routes(routes!(list_ssh_configs_handler, create_ssh_config_handler))
         .routes(routes!(
-            update_ssh_config_handler,
-            delete_ssh_config_handler
+            delivery::ssh_configurations::list_handler,
+            delivery::ssh_configurations::create_handler
+        ))
+        .routes(routes!(
+            delivery::ssh_configurations::update_handler,
+            delivery::ssh_configurations::delete_handler
         ))
         .routes(routes!(mcp_api::library_handler))
         .routes(routes!(
@@ -5790,108 +5775,6 @@ async fn delete_model_config_handler(
     for name in generated {
         let _ = remove_api_key(name);
     }
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    get,
-    path = "/ssh-configs",
-    operation_id = "get_ssh_configs",
-    tag = "ssh-configs",
-    responses((status = 200, description = "Success", body = SshConfigurationList, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn list_ssh_configs_handler(
-    State(manager): State<SessionManager>,
-) -> std::result::Result<Json<SshConfigurationList>, ApiError> {
-    let configurations = ssh_configurations::list_ssh_configurations(&manager.inner.store_path)?;
-    Ok(Json(SshConfigurationList { configurations }))
-}
-
-/// Save a named SSH connection under a reusable setup.
-#[utoipa::path(
-    post,
-    path = "/ssh-configs",
-    operation_id = "post_ssh_configs",
-    tag = "ssh-configs",
-    request_body(content = CreateSshConfigurationRequest, content_type = "application/json"),
-    responses((status = 201, description = "Success", body = SshConfigurationRecord, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn create_ssh_config_handler(
-    State(manager): State<SessionManager>,
-    payload: std::result::Result<Json<CreateSshConfigurationRequest>, JsonRejection>,
-) -> std::result::Result<(StatusCode, Json<SshConfigurationRecord>), ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    let id = uuid::Uuid::new_v4();
-    let configuration = ssh_configurations::NewSshConfiguration {
-        name: request.name,
-        ssh_host: request.ssh_host,
-        ssh_port: request.ssh_port,
-        ssh_identity_file: request.ssh_identity_file,
-    };
-    let record = ssh_configurations::insert_ssh_configuration(
-        &manager.inner.store_path,
-        &id.to_string(),
-        configuration,
-    )?;
-    Ok((StatusCode::CREATED, Json(record)))
-}
-
-/// Edit a saved SSH setup, keeping whatever the request leaves out.
-#[utoipa::path(
-    patch,
-    path = "/ssh-configs/{config_id}",
-    operation_id = "patch_ssh_configs_config_id",
-    tag = "ssh-configs",
-    params(("config_id" = String, Path)),
-    request_body(content = UpdateSshConfigurationRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = SshConfigurationRecord, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn update_ssh_config_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(config_id): AxumPath<String>,
-    payload: std::result::Result<Json<UpdateSshConfigurationRequest>, JsonRejection>,
-) -> std::result::Result<Json<SshConfigurationRecord>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    let existing =
-        ssh_configurations::load_ssh_configuration(&manager.inner.store_path, &config_id)?;
-
-    let configuration = ssh_configurations::NewSshConfiguration {
-        name: replaceable_text(request.name, &existing.name),
-        ssh_host: replaceable_text(request.ssh_host, &existing.ssh_host),
-        ssh_port: match request.ssh_port {
-            RequestField::Value(port) => Some(port),
-            RequestField::Null => None,
-            RequestField::Omitted => existing.ssh_port,
-        },
-        ssh_identity_file: match request.ssh_identity_file {
-            RequestField::Value(path) => Some(path),
-            RequestField::Null => None,
-            RequestField::Omitted => existing.ssh_identity_file.clone(),
-        },
-    };
-
-    let record = ssh_configurations::update_ssh_configuration(
-        &manager.inner.store_path,
-        &config_id,
-        configuration,
-    )?;
-    Ok(Json(record))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/ssh-configs/{config_id}",
-    operation_id = "delete_ssh_configs_config_id",
-    tag = "ssh-configs",
-    params(("config_id" = String, Path)),
-    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn delete_ssh_config_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(config_id): AxumPath<String>,
-) -> std::result::Result<StatusCode, ApiError> {
-    ssh_configurations::load_ssh_configuration(&manager.inner.store_path, &config_id)?;
-    ssh_configurations::delete_ssh_configuration(&manager.inner.store_path, &config_id)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
