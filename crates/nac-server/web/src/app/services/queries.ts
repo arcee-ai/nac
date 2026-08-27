@@ -35,7 +35,11 @@ import {
   fenceSessionSnapshot,
   isCurrentSessionGeneration,
 } from "@/app/services/sessionRefresh";
-import { setOptimisticUserPrompt } from "@/app/store/runtimeStore";
+import {
+  requestRunCancel,
+  restoreRunCancel,
+  setOptimisticUserPrompt,
+} from "@/app/store/runtimeStore";
 import type {
   BackendKind,
   BranchList,
@@ -1210,6 +1214,10 @@ export function useCancelRun() {
   const invalidate = useInvalidators();
   return useMutation({
     mutationFn: (id: string) => api.cancelActiveRun(id),
+    onMutate: () => requestRunCancel(),
+    onError: (_error, _id, previous) => {
+      if (previous) restoreRunCancel(previous);
+    },
     onSuccess: (_data, id) => invalidate.session(id),
   });
 }

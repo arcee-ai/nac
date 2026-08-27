@@ -53,7 +53,7 @@ export interface RuntimeThread {
  */
 const THREAD_LOG_LIMIT = 200;
 
-interface RuntimeState {
+export interface RuntimeState {
   sessionId: string | null;
   running: boolean;
   activity: string;
@@ -230,6 +230,38 @@ function flagCancelledThreads(
       thread.status === "running" ? { ...thread, cancelled: true } : thread,
     ]),
   );
+}
+
+/**
+ * Paint Stop immediately. The HTTP cancel still waits for worker trees; SSE
+ * `run_cancelled` confirms the same terminal state without flipping running back on.
+ */
+export function requestRunCancel(): RuntimeState {
+  const previous = getState();
+  if (!previous.running) {
+    return previous;
+  }
+  setState((state) => ({
+    running: false,
+    activity: "",
+    error: null,
+    modelError: null,
+    streamSettled: true,
+    threads: terminalizeThreads(flagCancelledThreads(state.threads)),
+  }));
+  return previous;
+}
+
+/** Restore the pre-Stop snapshot when the cancel request itself fails. */
+export function restoreRunCancel(previous: RuntimeState): void {
+  setState({
+    running: previous.running,
+    activity: previous.activity,
+    error: previous.error,
+    modelError: previous.modelError,
+    streamSettled: previous.streamSettled,
+    threads: previous.threads,
+  });
 }
 
 /** Identifies the log lines whose events carry no id of their own. */

@@ -13,8 +13,10 @@ use crate::model::{ModelClient, TokenUsage};
 use crate::process::ProcessTreeGuard;
 use crate::tools::{ThreadCancellation, ToolRuntime};
 const CANCEL_ACK_GRACE: Duration = Duration::from_millis(250);
-// SSH cleanup can spend five seconds in the kill request; Podman can spend two.
-const COOPERATIVE_CLEANUP_GRACE: Duration = Duration::from_secs(7);
+// After ACK the worker is already tearing down one-shots. Waiting multiple
+// seconds here is what made Stop feel stuck while `sleep` workers were live;
+// SIGKILL of the worker tree follows this grace via `process_tree.terminate`.
+const COOPERATIVE_CLEANUP_GRACE: Duration = Duration::from_millis(500);
 const READER_DRAIN_GRACE: Duration = Duration::from_millis(100);
 
 pub(super) struct WorkerRun {
