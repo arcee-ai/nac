@@ -36,8 +36,14 @@ impl TerminalManager {
             .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    #[allow(dead_code)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the compatibility entry point forwards explicit PTY construction authority"
+    )]
+    #[allow(
+        dead_code,
+        reason = "retained for native callers while production uses the environment-aware entry point"
+    )]
     pub async fn create_with_cancellation(
         &self,
         name: String,
@@ -52,7 +58,10 @@ impl TerminalManager {
             .await
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "interactive creation keeps command, geometry, backend, cancellation, and environment explicit"
+    )]
     pub async fn create_with_environment(
         &self,
         name: String,

@@ -127,6 +127,11 @@ zero-backlog async guard last.
   invariants retain their explicit panic semantics behind narrow `#[expect]`
   attributes whose reasons state the proof. Tests use the reference-repository
   convention `allow-expect-in-tests = true`.
+- `allow_attributes_without_reason`: complete. The 50-item inventory now uses
+  narrow, reasoned `#[expect]` attributes for intentional Clippy diagnostics
+  and reasoned `#[allow]` only for cross-target Rust dead-code/interface cases.
+  Converting to expectations exposed one stale `result_large_err` suppression,
+  which was removed instead of documented.
 
 ## Verification and next action
 
@@ -194,6 +199,10 @@ initially reported 254 failures because loopback test-server binds were denied;
 the same suite passed with the required loopback permission, and a second quiet
 workspace run confirmed exit status 0.
 
-Next: commit this exact lint boundary, then add
-`allow_attributes_without_reason`, run autofix, and document or remove each
-remaining suppression before its own green commit.
+The `allow_attributes_without_reason` slice passes `make format-check`,
+`make lint`, `git diff --check`, and the full Rust workspace suite with 1,157
+core tests (nine ignored), 148 server library tests, 23 server binary tests, and
+all remaining workspace tests green.
+
+Next: commit this exact lint boundary, then add the zero-backlog
+`future_not_send` guard, run autofix, and verify its own green boundary.

@@ -49,7 +49,10 @@ fn now_utc() -> String {
     format!("{y:04}-{mo:02}-{day:02} {h:02}:{m:02}:{s:02}.{nanos:09}")
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "snapshot construction mirrors the durable session record without an overlapping builder DTO"
+)]
 pub fn new_snapshot(
     session_id: String,
     cwd: PathBuf,

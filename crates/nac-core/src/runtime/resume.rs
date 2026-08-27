@@ -189,7 +189,10 @@ pub async fn build_resume_config_for_session_with_lease(
     Ok(run_config)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "resume composition keeps persisted snapshot, overrides, lease, and executable authority explicit"
+)]
 pub(super) async fn build_resume_config_from_snapshot(
     snapshot: SessionSnapshot,
     store_path: PathBuf,

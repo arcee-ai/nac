@@ -25,7 +25,10 @@ use crate::{ApiError, RequestField, SessionManager};
 
 #[derive(utoipa::ToSchema)]
 #[schema(rename_all = "snake_case")]
-#[allow(dead_code)] // Schema-only enum: runtime validation keeps the existing string DTO.
+#[allow(
+    dead_code,
+    reason = "OpenAPI owns this enum while runtime validation preserves the existing string DTO"
+)]
 enum McpTransportSchema {
     Stdio,
     StreamableHttp,

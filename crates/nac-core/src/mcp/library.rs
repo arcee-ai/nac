@@ -72,7 +72,10 @@ const SMITHERY_CATEGORIES: &[(&str, &str)] = &[
 /// The curated entries embedded in the binary: available offline, and the
 /// only place auth headers and hints are known.
 pub fn embedded_library_entries() -> Vec<McpLibraryEntry> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the test fixture mirrors every independent MCP library entry field"
+    )]
     fn entry(
         category: &str,
         name: &str,

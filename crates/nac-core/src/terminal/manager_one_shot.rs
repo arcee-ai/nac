@@ -1,8 +1,14 @@
 use super::*;
 
 impl TerminalManager {
-    #[allow(clippy::too_many_arguments)]
-    #[allow(dead_code)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the compatibility entry point forwards explicit command execution authority"
+    )]
+    #[allow(
+        dead_code,
+        reason = "retained for native callers while production uses the environment-aware entry point"
+    )]
     pub async fn exec_one_shot(
         &self,
         cmd: &str,
@@ -28,7 +34,10 @@ impl TerminalManager {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one-shot execution keeps backend, bounds, cancellation, and environment explicit"
+    )]
     #[expect(
         clippy::expect_used,
         reason = "the child command configures piped stdout and stderr immediately before spawn"
