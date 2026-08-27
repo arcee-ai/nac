@@ -161,7 +161,9 @@ async fn run_glob(
     args: &Value,
     cancellation: &Arc<AtomicBool>,
 ) -> SearchResult<Value> {
-    let object = args.as_object().expect("validated object");
+    let object = args
+        .as_object()
+        .ok_or_else(|| SearchError::new("invalid_arguments", "arguments must be an object"))?;
     let pattern = required_string(
         object,
         "pattern",
@@ -209,7 +211,9 @@ async fn run_grep(
     args: &Value,
     cancellation: &Arc<AtomicBool>,
 ) -> SearchResult<Value> {
-    let object = args.as_object().expect("validated object");
+    let object = args
+        .as_object()
+        .ok_or_else(|| SearchError::new("invalid_arguments", "arguments must be an object"))?;
     let plan = compile_grep(object)?;
     let common = parse_common(object)?;
     let roots_value = object.get("roots").cloned().unwrap_or_else(|| json!(["."]));
@@ -261,7 +265,12 @@ async fn run_grep(
     validate_collection(globs_array, "globs", MAX_GLOBS)?;
     let glob_matchers = globs_array
         .iter()
-        .map(|value| compile_glob(value.as_str().expect("validated string")))
+        .map(|value| {
+            let value = value.as_str().ok_or_else(|| {
+                SearchError::new("invalid_arguments", "globs must be an array of strings")
+            })?;
+            compile_glob(value)
+        })
         .collect::<SearchResult<Vec<_>>>()?;
 
     let mut inventory = Vec::new();

@@ -342,6 +342,10 @@ impl PendingContainerCreation {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "only successful creation transfers the still-owned cleanup record"
+    )]
     fn transfer_record(&mut self) -> CreationRecordAuthority {
         self.task = None;
         self.record
@@ -762,6 +766,10 @@ impl PodmanSession {
         &self.spec
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "poisoning the creation-record lock invalidates container cleanup ownership"
+    )]
     pub(crate) fn retain_for_durable_session(&self) {
         self.cleanup_on_drop.store(false, Ordering::Release);
         let creation_record = self
@@ -1098,6 +1106,10 @@ impl PodmanSession {
         Ok(String::from_utf8_lossy(&output.stdout).trim() == "true")
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the creation task is installed in the pending guard immediately before awaiting it"
+    )]
     async fn create_container(&self) -> Result<()> {
         let ownership_token = uuid::Uuid::new_v4().to_string();
         let record = create_creation_record(
@@ -1243,6 +1255,10 @@ impl PodmanSession {
     /// Explicitly destroy the sandbox container, regardless of remaining
     /// `Arc` references. `--ignore` makes absence idempotent while every real
     /// runtime failure remains visible to the lifecycle caller.
+    #[expect(
+        clippy::expect_used,
+        reason = "poisoning the creation-record lock invalidates container cleanup ownership"
+    )]
     pub(crate) async fn destroy(&self) -> Result<()> {
         destroy_owned_container(&self.session_key).await?;
         let creation_record = self
@@ -1258,6 +1274,10 @@ impl PodmanSession {
 }
 
 impl Drop for PodmanSession {
+    #[expect(
+        clippy::expect_used,
+        reason = "poisoning the mutable creation record invalidates rollback ownership"
+    )]
     fn drop(&mut self) {
         if !self.cleanup_on_drop.load(Ordering::Acquire) {
             return;

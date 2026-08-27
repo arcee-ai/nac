@@ -370,6 +370,10 @@ impl SseReader {
         self.decode_bytes(&bytes);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Utf8Error::valid_up_to guarantees the prefix accepted here is valid UTF-8"
+    )]
     fn decode_bytes(&mut self, bytes: &[u8]) {
         let mut at = 0;
         while at < bytes.len() {

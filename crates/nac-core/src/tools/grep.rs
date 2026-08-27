@@ -32,9 +32,13 @@ impl kernel::NativeTool for GrepTool {
             .map(|roots| {
                 roots
                     .iter()
-                    .map(|root| root.as_str().expect("grep roots are decoded"))
-                    .collect::<Vec<_>>()
+                    .map(|root| {
+                        root.as_str()
+                            .ok_or_else(|| invalid("decoded grep root is not a string"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
             })
+            .transpose()?
             .unwrap_or_else(|| vec!["."]);
         roots
             .into_iter()
@@ -72,7 +76,7 @@ impl kernel::NativeTool for GrepTool {
         }
         input
             .as_object_mut()
-            .expect("grep input is decoded as an object")
+            .ok_or_else(|| invalid("decoded grep input is not an object"))?
             .insert("roots".to_string(), Value::Array(roots));
         Ok(())
     }

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -224,6 +224,14 @@ impl OutputRegistry {
         })
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a poisoned output registry may contain partially applied quota bookkeeping"
+    )]
+    fn lock_inner(&self) -> MutexGuard<'_, RegistryInner> {
+        self.inner.lock().expect("command output registry poisoned")
+    }
+
     #[cfg(test)]
     pub(crate) fn with_artifact_limit_for_test(
         limits: CommandOutputLimits,
@@ -239,7 +247,7 @@ impl OutputRegistry {
             ArtifactKind::Pty => "termout",
         };
         let output_id = format!("{prefix}-{number}");
-        let mut inner = self.inner.lock().expect("command output registry poisoned");
+        let mut inner = self.lock_inner();
         if inner.artifacts.len() >= self.max_artifacts {
             let oldest_id = inner
                 .artifacts
@@ -278,13 +286,7 @@ impl OutputRegistry {
     }
 
     fn settle(&self, output_id: &str) {
-        if let Some(artifact) = self
-            .inner
-            .lock()
-            .expect("command output registry poisoned")
-            .artifacts
-            .get_mut(output_id)
-        {
+        if let Some(artifact) = self.lock_inner().artifacts.get_mut(output_id) {
             artifact.active = false;
         }
     }
@@ -294,7 +296,7 @@ impl OutputRegistry {
             return Ok(());
         }
         if stream == OutputStream::Combined {
-            let inner = self.inner.lock().expect("command output registry poisoned");
+            let inner = self.lock_inner();
             let artifact = inner
                 .artifacts
                 .get(output_id)
@@ -305,7 +307,7 @@ impl OutputRegistry {
             drop(inner);
         }
 
-        let mut inner = self.inner.lock().expect("command output registry poisoned");
+        let mut inner = self.lock_inner();
         let sequence = inner.next_sequence;
         inner.next_sequence = inner.next_sequence.saturating_add(1);
         let artifact = inner
@@ -405,7 +407,7 @@ impl OutputRegistry {
     }
 
     pub fn stats(&self, output_id: &str) -> Result<ArtifactStats> {
-        let inner = self.inner.lock().expect("command output registry poisoned");
+        let inner = self.lock_inner();
         let artifact = inner
             .artifacts
             .get(output_id)
@@ -434,7 +436,7 @@ impl OutputRegistry {
                 "limit must not exceed {MAX_OUTPUT_PAGE_BYTES} bytes"
             ));
         }
-        let inner = self.inner.lock().expect("command output registry poisoned");
+        let inner = self.lock_inner();
         let artifact = inner
             .artifacts
             .get(output_id)
@@ -483,7 +485,7 @@ impl OutputRegistry {
         output_id: &str,
         max_chars: usize,
     ) -> Result<((String, bool), (String, bool))> {
-        let inner = self.inner.lock().expect("command output registry poisoned");
+        let inner = self.lock_inner();
         let artifact = inner
             .artifacts
             .get(output_id)
@@ -521,7 +523,7 @@ impl OutputRegistry {
         requested_start: u64,
         max_chars: usize,
     ) -> Result<OutputPreview> {
-        let inner = self.inner.lock().expect("command output registry poisoned");
+        let inner = self.lock_inner();
         let artifact = inner
             .artifacts
             .get(output_id)
@@ -541,7 +543,7 @@ impl OutputRegistry {
     }
 
     pub fn clear(&self) {
-        let mut inner = self.inner.lock().expect("command output registry poisoned");
+        let mut inner = self.lock_inner();
         inner.artifacts.clear();
         inner.retained_bytes = 0;
     }

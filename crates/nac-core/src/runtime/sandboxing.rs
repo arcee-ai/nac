@@ -118,12 +118,13 @@ pub(super) async fn build_sandbox_session_inner(
             mounts.push(parse_mount_spec(mount, true, cwd)?);
         }
 
-        let workdir = options.sandbox_workdir.clone().unwrap_or_else(|| {
-            inferred_workdir
+        let workdir = match options.sandbox_workdir.clone() {
+            Some(workdir) => workdir,
+            None => inferred_workdir
                 .to_str()
-                .expect("sandbox worktree paths are validated as UTF-8")
-                .to_string()
-        });
+                .ok_or_else(|| anyhow::anyhow!("sandbox worktree path is not valid UTF-8"))?
+                .to_string(),
+        };
         let skills_workspace_dir = workspace_dir_from_mounts(&mounts, PathBuf::from(&workdir))
             .unwrap_or_else(|| cwd.to_path_buf());
         mounts.extend(skills::auto_mounts(

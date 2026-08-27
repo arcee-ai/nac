@@ -108,6 +108,10 @@ fn controller(
     Ok((parent, controller))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "managed orchestrator records contain only JSON-representable fields"
+)]
 fn record_result(record: ManagedOrchestratorRecord) -> ToolResult {
     let is_error = matches!(
         record.status,

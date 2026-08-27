@@ -38,7 +38,7 @@ impl kernel::NativeTool for EditTool {
         let path = input
             .get("path")
             .and_then(Value::as_str)
-            .expect("edit input is decoded before resource projection");
+            .ok_or_else(|| argument_error("decoded edit input is missing its path"))?;
         let path = services
             .runtime
             .backend
@@ -65,7 +65,7 @@ impl kernel::NativeTool for EditTool {
             .ok_or_else(|| argument_error("authorized mutation target is missing"))?;
         let object = input
             .as_object_mut()
-            .expect("edit input is decoded as an object");
+            .ok_or_else(|| argument_error("decoded edit input is not an object"))?;
         object.insert("path".to_string(), Value::String(path.resource.clone()));
         object.insert("_nac_authorized_path_bound".to_string(), Value::Bool(true));
         Ok(())

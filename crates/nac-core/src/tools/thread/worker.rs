@@ -167,6 +167,10 @@ pub(super) struct WorkerInvocation<'a> {
     pub(super) timeout_secs: u64,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the header snapshot is a string-to-string map and cannot fail JSON serialization"
+)]
 fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
     command
         .arg("--api-model")

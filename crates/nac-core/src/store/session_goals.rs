@@ -265,7 +265,8 @@ pub fn create_session_goal(
             now
         ],
     )?;
-    let goal = load_with_connection(&transaction, session_id)?.expect("inserted goal");
+    let goal = load_with_connection(&transaction, session_id)?
+        .ok_or_else(|| anyhow!("inserted session goal could not be reloaded"))?;
     transaction.commit()?;
     Ok(goal)
 }
@@ -342,7 +343,8 @@ pub fn update_session_goal_by_user(
             expected_version
         ],
     )?;
-    let goal = load_with_connection(&transaction, session_id)?.expect("updated goal");
+    let goal = load_with_connection(&transaction, session_id)?
+        .ok_or_else(|| anyhow!("updated session goal could not be reloaded"))?;
     transaction.commit()?;
     Ok(goal)
 }

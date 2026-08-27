@@ -647,6 +647,10 @@ pub(super) fn estimate_tool_tokens(tools: &[ToolDefinition]) -> u64 {
     serialized_byte_len(tools) / 4
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the hashed message and tool contract contains no fallible serialization values"
+)]
 fn update_serialized<T: Serialize>(hasher: &mut Sha256, value: &T) {
     let serialized = serde_json::to_vec(value).expect("message serialization must succeed");
     update_bytes(hasher, &serialized);

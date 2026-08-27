@@ -128,6 +128,10 @@ struct ConnectionPermit {
 }
 
 impl Drop for ConnectionPermit {
+    #[expect(
+        clippy::expect_used,
+        reason = "permit construction and drop maintain exact per-store and total connection counts"
+    )]
     fn drop(&mut self) {
         let mut state = self
             .capacity

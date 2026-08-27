@@ -787,7 +787,7 @@ async fn run_codex_auth_cli(cli: CodexAuthCli) -> Result<()> {
         None => {
             let mut root = Cli::command();
             root.find_subcommand_mut("codex-auth")
-                .expect("codex-auth command must exist")
+                .ok_or_else(|| anyhow!("codex-auth command is missing from the CLI definition"))?
                 .print_help()?;
             println!();
             Ok(())
@@ -816,7 +816,7 @@ async fn run_arcee_auth_cli(cli: ArceeAuthCli) -> Result<()> {
         None => {
             let mut root = Cli::command();
             root.find_subcommand_mut("arcee-auth")
-                .expect("arcee-auth command must exist")
+                .ok_or_else(|| anyhow!("arcee-auth command is missing from the CLI definition"))?
                 .print_help()?;
             println!();
             Ok(())

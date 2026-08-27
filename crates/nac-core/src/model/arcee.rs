@@ -371,6 +371,10 @@ impl ArceeAuthService {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the canonical Arcee authentication URL is a compile-time invariant"
+)]
 fn validate_auth_service_base_url(base_url: &str) -> Result<()> {
     let parsed = validate_approved_base_url(base_url)
         .with_context(|| format!("invalid Arcee auth service URL '{base_url}'"))?;

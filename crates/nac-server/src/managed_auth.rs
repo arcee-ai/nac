@@ -139,14 +139,20 @@ pub(crate) struct ManagedLoginRegistry {
 
 impl ManagedLoginRegistry {
     fn insert(&self, id: String, login: PendingLogin) {
-        let mut entries = self.entries.lock().expect("managed login registry");
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         entries.insert(id, login);
         // Abandoned logins are only noticed when another one starts; there is
         // no other moment that is guaranteed to come.
         let now = Instant::now();
         entries.retain(|_, entry| {
             let finished = !matches!(
-                *entry.outcome.lock().expect("managed login outcome"),
+                *entry
+                    .outcome
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
                 LoginOutcome::Pending
             );
             let keep = !entry.expired(now, finished);
@@ -163,7 +169,10 @@ impl ManagedLoginRegistry {
         id: &str,
         provider: ManagedAuthProvider,
     ) -> Result<DeviceLoginStateResponse, ApiError> {
-        let mut entries = self.entries.lock().expect("managed login registry");
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = entries.get(id).ok_or_else(|| ApiError {
             status: StatusCode::NOT_FOUND,
             message: format!("no login in progress with id '{id}'"),
@@ -176,7 +185,10 @@ impl ManagedLoginRegistry {
         }
 
         let state = {
-            let outcome = entry.outcome.lock().expect("managed login outcome");
+            let outcome = entry
+                .outcome
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             match &*outcome {
                 LoginOutcome::Pending => None,
                 LoginOutcome::Complete(snapshot) => Some(DeviceLoginStateResponse::Complete {
@@ -198,7 +210,10 @@ impl ManagedLoginRegistry {
     }
 
     fn cancel(&self, id: &str) -> bool {
-        let mut entries = self.entries.lock().expect("managed login registry");
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match entries.remove(id) {
             Some(entry) => {
                 entry.task.abort();
@@ -242,7 +257,9 @@ impl SessionManager {
             let outcome = Arc::clone(&outcome);
             async move {
                 let result = pending.complete().await;
-                let mut slot = outcome.lock().expect("managed login outcome");
+                let mut slot = outcome
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 *slot = match result {
                     Ok(snapshot) => LoginOutcome::Complete(Box::new(snapshot)),
                     Err(error) => LoginOutcome::Failed(format!("{error}")),

@@ -313,6 +313,10 @@ impl McpRegistry {
 }
 
 impl ClientHandler for NacMcpClientHandler {
+    #[expect(
+        clippy::expect_used,
+        reason = "the locally constructed MCP capability object matches the protocol schema"
+    )]
     fn get_info(&self) -> ClientInfo {
         let capabilities = if self.roots.is_empty() {
             serde_json::json!({})

@@ -29,6 +29,10 @@ impl TerminalManager {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::expect_used,
+        reason = "the child command configures piped stdout and stderr immediately before spawn"
+    )]
     pub async fn exec_one_shot_with_environment(
         &self,
         cmd: &str,

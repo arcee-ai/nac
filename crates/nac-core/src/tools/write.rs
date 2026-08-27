@@ -38,7 +38,7 @@ impl kernel::NativeTool for WriteTool {
         let path = input
             .get("path")
             .and_then(Value::as_str)
-            .expect("write input is decoded before resource projection");
+            .ok_or_else(|| argument_error("decoded write input is missing its path"))?;
         let path = services
             .runtime
             .backend
@@ -65,7 +65,7 @@ impl kernel::NativeTool for WriteTool {
             .ok_or_else(|| argument_error("authorized mutation target is missing"))?;
         let object = input
             .as_object_mut()
-            .expect("write input is decoded as an object");
+            .ok_or_else(|| argument_error("decoded write input is not an object"))?;
         object.insert("path".to_string(), Value::String(path.resource.clone()));
         object.insert("_nac_authorized_path_bound".to_string(), Value::Bool(true));
         Ok(())

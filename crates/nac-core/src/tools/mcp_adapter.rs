@@ -81,6 +81,10 @@ pub(super) async fn invoke(
     snapshot.invoke(name, input, services, context).await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a one-element imported capability registry cannot collide or omit its element"
+)]
 fn snapshot(
     definition: ToolDefinition,
     registry: Arc<McpRegistry>,

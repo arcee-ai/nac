@@ -475,11 +475,7 @@ impl SessionManager {
                     Arc::new(application::managed::StoreProjectRegistrar::new(
                         &store_path,
                     )),
-                    Some(
-                        managed
-                            .github_auth()
-                            .expect("validated managed GitHub configuration"),
-                    ),
+                    Some(managed.github_auth()?),
                 )
             })
             .transpose()?;
@@ -528,22 +524,23 @@ impl SessionManager {
         self.inner.managed_host.as_ref()
     }
 
-    fn attach_managed_command_environment(&self, run_config: &mut runtime::OrchestratorRunConfig) {
+    fn attach_managed_command_environment(
+        &self,
+        run_config: &mut runtime::OrchestratorRunConfig,
+    ) -> Result<()> {
         let Some(managed) = self.inner.managed_host.as_ref() else {
             run_config.set_command_environment_provider(None);
-            return;
+            return Ok(());
         };
+        let github_auth = managed.github_auth()?;
         run_config.set_command_environment_provider(Some(Arc::new(
             nac_managed::ManagedCommandEnvironmentProvider::new(
                 Some(managed.secret_store()),
-                Some(
-                    managed
-                        .github_auth()
-                        .expect("validated managed GitHub configuration"),
-                ),
+                Some(github_auth),
                 Some(managed.home_root.clone()),
             ),
         )));
+        Ok(())
     }
 
     fn resolve_launch_location(

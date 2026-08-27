@@ -65,11 +65,11 @@ pub(super) fn bind_exec_command_resources(
         .ok_or_else(|| invalid("authorized command working directory is missing"))?;
     let object = input
         .as_object_mut()
-        .expect("exec_command input is decoded as an object");
+        .ok_or_else(|| invalid("decoded exec_command input is not an object"))?;
     let command = object
         .get("cmd")
         .and_then(Value::as_str)
-        .expect("exec_command input has a decoded command");
+        .ok_or_else(|| invalid("decoded exec_command input is missing cmd"))?;
     let command = crate::permissions::bind_authorized_shell_command(
         command,
         std::path::Path::new(&cwd),
@@ -191,6 +191,10 @@ fn exec_command_resources(
     Ok(resources)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a Rust string always has a JSON string representation"
+)]
 fn write_stdin_resources(
     input: &Value,
     runtime: &ToolRuntime,

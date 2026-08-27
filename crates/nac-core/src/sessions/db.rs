@@ -226,7 +226,7 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
             run_id,
             update
                 .finished_run_disposition
-                .expect("validated finished run disposition"),
+                .ok_or_else(|| anyhow!("finished run is missing its validated disposition"))?,
         )?;
     } else if let Some(run_id) = update.failed_run_id.as_deref() {
         if let Some(goal) = update.goal_settlement.as_ref() {

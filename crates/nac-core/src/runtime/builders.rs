@@ -84,7 +84,7 @@ async fn build_run_config_inner(
         let connection = options
             .ssh
             .connection(&config_paths)
-            .expect("a trimmed ssh host yields a connection");
+            .ok_or_else(|| anyhow::anyhow!("validated SSH host did not yield a connection"))?;
         let requested_remote_cwd = remote_cwd_or_home(options.workspace_cwd.clone());
         let requested_remote_cwd_text = requested_remote_cwd
             .to_str()

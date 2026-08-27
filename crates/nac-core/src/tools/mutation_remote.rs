@@ -453,6 +453,10 @@ finally:
     lock_file.close()
 "#;
 
+#[expect(
+    clippy::expect_used,
+    reason = "one reserved and validated remote image part remains within ToolContent limits"
+)]
 pub(crate) async fn execute_remote(payload: Value, runtime: &ToolRuntime) -> ToolResult {
     let args = vec![
         "-I".to_string(),

@@ -141,7 +141,11 @@ impl<'a> ProjectApplication<'a> {
             .await?;
             let connection = ssh
                 .resolved_connection(&self.manager.inner.root_cwd)
-                .expect("normalized SSH host must produce a connection");
+                .ok_or_else(|| {
+                    ProjectApplicationError::InvalidInput(
+                        "normalized SSH host did not produce a connection".to_string(),
+                    )
+                })?;
             (
                 PathBuf::from(listing.path),
                 Some(connection.host),

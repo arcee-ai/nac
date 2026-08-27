@@ -218,7 +218,11 @@ pub fn resolve_model_base_url(backend: BackendKind, base_url: Option<String>) ->
             "invalid model configuration: base_url '{base_url}' must not embed userinfo"
         )));
     }
-    let host = parsed.host().expect("host presence checked above");
+    let host = parsed.host().ok_or_else(|| {
+        model_configuration_error(format!(
+            "invalid model configuration: base_url '{base_url}' must include a host"
+        ))
+    })?;
     if parsed.scheme() == "http" && !allows_plaintext_transport(&host) {
         return Err(model_configuration_error(format!(
             "invalid model configuration: base_url '{base_url}' requires HTTPS; plaintext HTTP is accepted only for loopback and private-network hosts"
