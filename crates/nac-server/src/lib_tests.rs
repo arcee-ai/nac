@@ -3484,6 +3484,7 @@ async fn managed_orchestrator_http_api_runs_foreground_then_delivers_background_
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let orchestrator = manager
+                .delegation()
                 .managed_orchestrator("delegating", &foreground.orchestrator_session_id)
                 .unwrap();
             if orchestrator.status == ManagedOrchestratorStatus::Completed {
@@ -3495,6 +3496,7 @@ async fn managed_orchestrator_http_api_runs_foreground_then_delivers_background_
     .await
     .expect("background orchestrator should settle");
     let completed = manager
+        .delegation()
         .managed_orchestrator("delegating", &foreground.orchestrator_session_id)
         .unwrap();
     assert_eq!(completed.generation, 2);
@@ -4007,6 +4009,7 @@ async fn traditional_child_http_api_runs_foreground_then_delivers_background_com
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let child = manager
+                .delegation()
                 .traditional_child("direct", &foreground.child_session_id)
                 .unwrap();
             if child.status == nac_core::store::TraditionalChildStatus::Completed {
@@ -4679,12 +4682,18 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
         assert_eq!(compact.status(), StatusCode::NOT_FOUND);
     }
 
-    let child_error = ApiError::from(manager.traditional_child("parent-b", &child).unwrap_err());
+    let child_error = ApiError::from(
+        manager
+            .delegation()
+            .traditional_child("parent-b", &child)
+            .unwrap_err(),
+    );
     assert_eq!(child_error.status, StatusCode::NOT_FOUND);
     assert_eq!(child_error.message, "traditional child was not found");
     assert!(!child_error.message.contains(&child));
     let child_cancel_error = ApiError::from(
         manager
+            .delegation()
             .cancel_traditional_child("parent-b", &child)
             .await
             .unwrap_err(),
@@ -4716,6 +4725,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
 
     let orchestrator_error = ApiError::from(
         manager
+            .delegation()
             .managed_orchestrator("delegating-b", &orchestrator)
             .unwrap_err(),
     );
@@ -4727,6 +4737,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
     assert!(!orchestrator_error.message.contains(&orchestrator));
     let orchestrator_cancel_error = ApiError::from(
         manager
+            .delegation()
             .cancel_managed_orchestrator("delegating-b", &orchestrator)
             .await
             .unwrap_err(),
@@ -4898,7 +4909,9 @@ async fn peer_owned_direct_and_managed_cancellation_fail_fast() {
         sessions::SessionOperationLease::try_acquire(&store_path, &orchestrator).unwrap();
     let managed_error = tokio::time::timeout(
         Duration::from_secs(1),
-        managed_manager.cancel_managed_orchestrator("delegating", &orchestrator),
+        managed_manager
+            .delegation()
+            .cancel_managed_orchestrator("delegating", &orchestrator),
     )
     .await
     .expect("peer-owned managed cancellation must not hang")

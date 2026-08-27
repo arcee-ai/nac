@@ -517,6 +517,13 @@ Rules:
   cancellation, invalid-stage mapping, OpenAPI/router parity, full server test
   compilation, and warning-denied server Clippy pass. Server `lib.rs` is 6,357
   lines.
+- Traditional child sessions and managed child orchestrators now cross one
+  focused delegation application boundary while remaining distinct durable
+  topologies. Parent behavior/nesting checks, controller selection, and
+  foreground/background completion waits moved intact; a separate delivery
+  adapter owns the six route pairs and maps HTTP DTOs into application
+  commands. Both end-to-end foreground/background HTTP journeys, OpenAPI/router
+  parity, the full server test build, and the server crate check pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -532,7 +539,7 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the workspace application/
-delivery slice without protected files. Then continue M2 with session and
-delegation transport/application seams, keeping lifecycle gates and exact
-completion-delivery ordering in their current coordinator.
+Inspect exact worktree/staged diffs and commit the delegation application/
+delivery slice without protected files. Then continue M2 with the primary
+session transport/application seam, keeping lifecycle gates, operation leases,
+and exact run-admission/settlement ordering in the lifecycle coordinator.
