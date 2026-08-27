@@ -782,6 +782,16 @@ Rules:
   34 tests with its three documented optional/environment-specific cases
   ignored, all 14 kernel characterizations pass, and warning-denied Clippy is
   green.
+- `exec_command`, `write_stdin`, and `read_command_output` are now explicit
+  native prepared-invocation types behind a focused 355-line terminal adapter.
+  It owns full decode, shell/handle/output resource projection, canonical
+  command/workdir binding, exclusive mutation vs parallel output admission,
+  and delegation to the existing cancellation/retention/process owner. The
+  numeric legacy built-in dispatcher and all kind matches are removed. The
+  685-line terminal behavior suite moved to a sibling test file; all 18 tests
+  and all 14 kernel characterizations pass, warning-denied Clippy is green, and
+  the tool composition root is 971 lines. The Git prompt loopback case required
+  the authorized unsandboxed run.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -797,7 +807,7 @@ Rules:
 
 ## Exact next action
 
-Commit the M5 native glob/grep convergence with exact-path staging. Then
-migrate the three terminal command tools out of the remaining numeric legacy
-dispatcher while preserving definitions, validation, binding, admission,
-execution, retention, cancellation, and capability ordering.
+Commit the M5 native terminal-tool convergence with exact-path staging. Then
+separate capability/registry composition and common invocation routing from
+tool runtime/thread lifecycle ownership, and audit imported MCP invocation so
+dynamic tools traverse the explicit authorization boundary.
