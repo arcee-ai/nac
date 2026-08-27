@@ -115,7 +115,6 @@ use nac_core::{
     store::{
         GoalStatus, InboxDelivery, ManagedOrchestratorExecutionMode, ManagedOrchestratorRecord,
         ManagedOrchestratorStatus, PermissionGrantRecord, SessionGoalRecord, SessionInboxRecord,
-        UserGoalUpdate,
     },
     types::Message,
     view::{self, SessionSummarySnapshot},
@@ -1333,6 +1332,10 @@ impl SessionManager {
         application::sessions::SessionStateApplication::new(self)
     }
 
+    pub(crate) fn session_intents(&self) -> application::sessions::SessionIntentApplication<'_> {
+        application::sessions::SessionIntentApplication::new(self)
+    }
+
     async fn browse_ssh(
         &self,
         request: SshBrowseRequest,
@@ -2034,21 +2037,14 @@ impl SessionManager {
         session_id: &str,
         request: CreateInboxItemRequest,
     ) -> Result<SessionInboxRecord> {
-        self.require_primary_direct_session(session_id)?;
-        let service = self.attach_session(session_id).await?;
-        let prompt = match service.prepare_user_input(&request.prompt) {
-            PreparedUserInput::Empty => return Err(anyhow!("prompt is empty")),
-            PreparedUserInput::InvalidSlashCommand { message } => return Err(anyhow!(message)),
-            PreparedUserInput::FrontendCommand(command) => {
-                return Err(anyhow!(
-                    "frontend command '{}' is not supported by the server API",
-                    frontend_command_name(command)
-                ));
-            }
-            PreparedUserInput::SubmitPrompt(prompt) => prompt,
-        };
-        service
-            .enqueue_direct_input(request.delivery, &prompt.agent_prompt, None)
+        self.session_intents()
+            .create_inbox_item(
+                session_id,
+                application::sessions::CreateInboxItem {
+                    delivery: request.delivery,
+                    prompt: request.prompt,
+                },
+            )
             .await
     }
 
@@ -2058,10 +2054,15 @@ impl SessionManager {
         item_id: i64,
         request: UpdateInboxItemRequest,
     ) -> Result<SessionInboxRecord> {
-        self.require_primary_direct_session(session_id)?;
-        self.attach_session(session_id)
-            .await?
-            .update_direct_inbox_item(item_id, request.expected_version, request.delivery)
+        self.session_intents()
+            .update_inbox_item(
+                session_id,
+                item_id,
+                application::sessions::UpdateInboxItem {
+                    expected_version: request.expected_version,
+                    delivery: request.delivery,
+                },
+            )
             .await
     }
 
@@ -2071,10 +2072,9 @@ impl SessionManager {
         item_id: i64,
         request: CancelInboxItemRequest,
     ) -> Result<SessionInboxRecord> {
-        self.require_primary_direct_session(session_id)?;
-        self.attach_session(session_id)
-            .await?
-            .cancel_direct_inbox_item(item_id, request.expected_version)
+        self.session_intents()
+            .cancel_inbox_item(session_id, item_id, request.expected_version)
+            .await
     }
 
     pub async fn permission_state(&self, session_id: &str) -> Result<PermissionStateResponse> {
@@ -2094,9 +2094,14 @@ impl SessionManager {
         session_id: &str,
         request: CreateGoalRequest,
     ) -> Result<SessionGoalRecord> {
-        self.attach_session(session_id)
-            .await?
-            .create_direct_goal(&request.objective, request.token_budget)
+        self.session_intents()
+            .create_goal(
+                session_id,
+                application::sessions::CreateGoal {
+                    objective: request.objective,
+                    token_budget: request.token_budget,
+                },
+            )
             .await
     }
 
@@ -2106,12 +2111,12 @@ impl SessionManager {
         goal_id: &str,
         request: UpdateGoalRequest,
     ) -> Result<SessionGoalRecord> {
-        self.attach_session(session_id)
-            .await?
-            .update_direct_goal(
+        self.session_intents()
+            .update_goal(
+                session_id,
                 goal_id,
-                request.expected_version,
-                UserGoalUpdate {
+                application::sessions::UpdateGoal {
+                    expected_version: request.expected_version,
                     objective: request.objective,
                     token_budget: request_field_patch(request.token_budget),
                     status: request.status,
@@ -2126,9 +2131,9 @@ impl SessionManager {
         goal_id: &str,
         expected_version: i64,
     ) -> Result<()> {
-        self.attach_session(session_id)
-            .await?
-            .clear_direct_goal(goal_id, expected_version)
+        self.session_intents()
+            .clear_goal(session_id, goal_id, expected_version)
+            .await
     }
 
     pub async fn reply_permission_request(
@@ -2137,15 +2142,15 @@ impl SessionManager {
         request_id: &str,
         reply: PermissionReply,
     ) -> Result<()> {
-        self.attach_session(session_id)
-            .await?
-            .reply_permission_request(request_id, reply)
+        self.session_intents()
+            .reply_permission_request(session_id, request_id, reply)
+            .await
     }
 
     pub async fn delete_permission_grant(&self, session_id: &str, grant_id: &str) -> Result<()> {
-        self.attach_session(session_id)
-            .await?
-            .delete_permission_grant(grant_id)
+        self.session_intents()
+            .delete_permission_grant(session_id, grant_id)
+            .await
     }
 
     pub async fn thread_events(

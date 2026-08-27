@@ -540,6 +540,15 @@ Rules:
   catalog consumers use the owner directly. Focused snapshot-recovery, inbox,
   permission, and skill-route regressions plus the full server test build and
   warning-denied Clippy pass.
+- Inbox creation/edit/cancellation, goal lifecycle mutations, and permission
+  replies/grant deletion now belong to `SessionIntentApplication`. Its command
+  types are transport-independent, direct-session eligibility and slash-
+  command validation remain exact, and it explicitly cannot acquire operation
+  leases or start runs. Existing manager methods are compatibility facades.
+  Focused inbox, permission, complete goal lifecycle, and traditional-child
+  rejection regressions plus the full test build and warning-denied Clippy
+  pass. The cohesive sessions application module is 509 lines because it owns
+  the catalog, attached-state, and non-run user-intent seams together.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -555,8 +564,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the attached-session query slice
-without protected files. Then continue M2 with session attachment, submission,
-inbox/goals, permissions, events, configuration, cancellation, and deletion,
-keeping lifecycle gates, operation leases, and exact run-admission/settlement
-ordering in the lifecycle coordinator.
+Inspect exact worktree/staged diffs and commit the session-intent slice without
+protected files. Then continue M2 with session attachment, submission,
+steering/events, configuration, cancellation, and deletion, keeping lifecycle
+gates, operation leases, and exact run-admission/settlement ordering in the
+lifecycle coordinator.

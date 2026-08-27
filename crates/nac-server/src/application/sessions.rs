@@ -2,21 +2,179 @@ use std::{collections::HashMap, time::Instant};
 
 use anyhow::{anyhow, Context, Result};
 use nac_core::{
-    permissions::PermissionRequest,
+    commands::PreparedUserInput,
+    permissions::{PermissionReply, PermissionRequest},
     session_service::{
         FrontendSnapshotLoadOptions, MessagePageRequest, MessagesPageSnapshot,
         SessionFrontendSnapshot, SessionFrontendSnapshotLoad, ThreadEventPage,
     },
     sessions,
-    store::{PermissionGrantRecord, SessionGoalRecord, SessionInboxRecord},
+    store::{
+        GoalStatus, InboxDelivery, PermissionGrantRecord, SessionGoalRecord, SessionInboxRecord,
+        UserGoalUpdate,
+    },
     view::{self, SessionSummarySnapshot},
     workspace::GitTarget,
 };
 
 use crate::{
-    git_target_key, GitTargetKey, ManagedSessionSummary, SessionLineageKind,
+    frontend_command_name, git_target_key, GitTargetKey, ManagedSessionSummary, SessionLineageKind,
     SessionLineageSnapshot, SessionManager, WorkspaceDiffCacheEntry, WORKSPACE_DIFF_MEASURE_BUDGET,
 };
+
+pub(crate) struct CreateInboxItem {
+    pub(crate) delivery: InboxDelivery,
+    pub(crate) prompt: String,
+}
+
+pub(crate) struct UpdateInboxItem {
+    pub(crate) expected_version: i64,
+    pub(crate) delivery: InboxDelivery,
+}
+
+pub(crate) struct CreateGoal {
+    pub(crate) objective: String,
+    pub(crate) token_budget: Option<u64>,
+}
+
+pub(crate) struct UpdateGoal {
+    pub(crate) expected_version: i64,
+    pub(crate) objective: Option<String>,
+    pub(crate) token_budget: Option<Option<u64>>,
+    pub(crate) status: Option<GoalStatus>,
+}
+
+/// User-intent mutations attached to an existing direct session.
+///
+/// This owner validates direct-session eligibility and prompt preparation but
+/// deliberately does not acquire operation leases or start model runs.
+pub(crate) struct SessionIntentApplication<'a> {
+    manager: &'a SessionManager,
+}
+
+impl<'a> SessionIntentApplication<'a> {
+    pub(crate) fn new(manager: &'a SessionManager) -> Self {
+        Self { manager }
+    }
+
+    pub(crate) async fn create_inbox_item(
+        &self,
+        session_id: &str,
+        command: CreateInboxItem,
+    ) -> Result<SessionInboxRecord> {
+        self.manager.require_primary_direct_session(session_id)?;
+        let service = self.manager.attach_session(session_id).await?;
+        let prompt = match service.prepare_user_input(&command.prompt) {
+            PreparedUserInput::Empty => return Err(anyhow!("prompt is empty")),
+            PreparedUserInput::InvalidSlashCommand { message } => return Err(anyhow!(message)),
+            PreparedUserInput::FrontendCommand(command) => {
+                return Err(anyhow!(
+                    "frontend command '{}' is not supported by the server API",
+                    frontend_command_name(command)
+                ));
+            }
+            PreparedUserInput::SubmitPrompt(prompt) => prompt,
+        };
+        service
+            .enqueue_direct_input(command.delivery, &prompt.agent_prompt, None)
+            .await
+    }
+
+    pub(crate) async fn update_inbox_item(
+        &self,
+        session_id: &str,
+        item_id: i64,
+        command: UpdateInboxItem,
+    ) -> Result<SessionInboxRecord> {
+        self.manager.require_primary_direct_session(session_id)?;
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .update_direct_inbox_item(item_id, command.expected_version, command.delivery)
+            .await
+    }
+
+    pub(crate) async fn cancel_inbox_item(
+        &self,
+        session_id: &str,
+        item_id: i64,
+        expected_version: i64,
+    ) -> Result<SessionInboxRecord> {
+        self.manager.require_primary_direct_session(session_id)?;
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .cancel_direct_inbox_item(item_id, expected_version)
+    }
+
+    pub(crate) async fn create_goal(
+        &self,
+        session_id: &str,
+        command: CreateGoal,
+    ) -> Result<SessionGoalRecord> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .create_direct_goal(&command.objective, command.token_budget)
+            .await
+    }
+
+    pub(crate) async fn update_goal(
+        &self,
+        session_id: &str,
+        goal_id: &str,
+        command: UpdateGoal,
+    ) -> Result<SessionGoalRecord> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .update_direct_goal(
+                goal_id,
+                command.expected_version,
+                UserGoalUpdate {
+                    objective: command.objective,
+                    token_budget: command.token_budget,
+                    status: command.status,
+                },
+            )
+            .await
+    }
+
+    pub(crate) async fn clear_goal(
+        &self,
+        session_id: &str,
+        goal_id: &str,
+        expected_version: i64,
+    ) -> Result<()> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .clear_direct_goal(goal_id, expected_version)
+    }
+
+    pub(crate) async fn reply_permission_request(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        reply: PermissionReply,
+    ) -> Result<()> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .reply_permission_request(request_id, reply)
+    }
+
+    pub(crate) async fn delete_permission_grant(
+        &self,
+        session_id: &str,
+        grant_id: &str,
+    ) -> Result<()> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .delete_permission_grant(grant_id)
+    }
+}
 
 /// Session catalog and presentation use cases.
 ///
