@@ -746,6 +746,13 @@ Rules:
   local path normalization, invalid legacy repair, SSH+sandbox rejection, the
   complete core test build, and warning-denied Clippy pass. The picker tests'
   loopback mock required the authorized unsandboxed test run.
+- Sandbox option resolution and construction now lives in a focused 223-line
+  owner. It keeps enablement separate from defaults, rejects SSH+sandbox
+  combinations before persistence, maps mounts/workspaces and GPU selectors,
+  rolls back forked worktrees on specification failure, and launches with the
+  existing durable owner/activity keys. Sandbox default/enablement, GPU CDI,
+  explicit-mount mapping, worktree rollback, remote conflict, the complete core
+  test build, and warning-denied Clippy pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -761,6 +768,6 @@ Rules:
 
 ## Exact next action
 
-Commit the M4 runtime resume extraction with exact-path staging. Then
-decompose runtime contracts, sandbox, and execution-context ownership without
+Commit the M4 runtime sandbox extraction with exact-path staging. Then
+decompose runtime contracts and execution-context/SSH ownership without
 changing behavior selection or backend choice.
