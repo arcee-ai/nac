@@ -86,6 +86,8 @@ zero-backlog async guard last.
 - `clone_on_ref_ptr`: complete. All 27 reference-count increments now use
   explicit `Arc::clone`; the type-erased native-tool registry uses
   `Arc::<T>::clone` so the result can retain its existing trait-object coercion.
+- `redundant_clone`: complete. Clippy removed all six redundant clones; each
+  source value was at its last use and is now moved directly.
 
 ## Verification and next action
 
@@ -102,5 +104,9 @@ green test inventory recorded above.
 The `clone_on_ref_ptr` slice passes `make format-check`, `make lint`,
 `git diff --check`, and the full `nac-core` suite (1,156 passed, nine ignored).
 
-Next: commit this exact lint boundary, then add `redundant_clone` and run
-autofix before any manual repair.
+The `redundant_clone` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite with the same green test
+inventory recorded above.
+
+Next: commit this exact lint boundary, then add
+`semicolon_if_nothing_returned` and run autofix before any manual repair.

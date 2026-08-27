@@ -413,7 +413,7 @@ pub async fn update_server_handler(
         library_id: match request.library_id {
             RequestField::Value(id) => Some(id),
             RequestField::Null => None,
-            RequestField::Omitted => existing.library_id.clone(),
+            RequestField::Omitted => existing.library_id,
         },
     };
 

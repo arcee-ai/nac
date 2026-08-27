@@ -59,7 +59,7 @@ fn resolved_file_resources(
     if !path_is_within(&resolved_path, &workspace) {
         resources.push(
             PermissionResource::new("external_directory", display.clone())
-                .with_display(display.clone())
+                .with_display(display)
                 .with_save_resource(external_directory_pattern(&resolved_path)),
         );
     }

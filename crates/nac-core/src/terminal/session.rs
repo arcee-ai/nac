@@ -118,7 +118,7 @@ impl TerminalSession {
         let alive = Arc::new(AtomicBool::new(true));
         let alive_clone = Arc::clone(&alive);
         let reader_output_id = output_id.clone();
-        let reader_output_registry = output_registry.clone();
+        let reader_output_registry = output_registry;
         let notify = Arc::new(Notify::new());
         let notify_clone = Arc::clone(&notify);
 
