@@ -16,6 +16,8 @@ use crate::model::auth_store::{
     read_auth_string_from_path, with_credential_lock, write_auth_string_to_path,
 };
 
+pub use nac_contracts::CommandEnvironmentSnapshot;
+
 pub const MANAGED_CONFIG_VERSION: u32 = 1;
 const SECRET_STORE_VERSION: u32 = 1;
 pub const MAX_HOST_SECRETS: usize = 128;
@@ -138,63 +140,6 @@ pub struct HostSecretSummary {
     pub updated_at_unix_ms: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CommandEnvironmentSnapshot {
-    values: BTreeMap<String, String>,
-    redactions: Vec<String>,
-}
-
-impl CommandEnvironmentSnapshot {
-    pub fn empty() -> Self {
-        Self {
-            values: BTreeMap::new(),
-            redactions: Vec::new(),
-        }
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.values
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.as_str()))
-    }
-
-    pub fn get(&self, name: &str) -> Option<&str> {
-        self.values.get(name).map(String::as_str)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
-
-    pub(crate) fn insert_dedicated(
-        &mut self,
-        name: impl Into<String>,
-        value: impl Into<String>,
-        redact: bool,
-    ) {
-        let value = value.into();
-        if redact && !value.is_empty() {
-            self.redactions.push(value.clone());
-        }
-        self.values.insert(name.into(), value);
-    }
-
-    pub fn redact(&self, text: &str) -> String {
-        let mut redacted = text.to_string();
-        let mut values = self
-            .redactions
-            .iter()
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>();
-        values.sort_by_key(|value| std::cmp::Reverse(value.len()));
-        values.dedup();
-        for value in values {
-            redacted = redacted.replace(value, "[REDACTED]");
-        }
-        redacted
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct HostSecretStore {
     state_root: PathBuf,
@@ -249,7 +194,7 @@ impl HostSecretStore {
             .map(|(name, secret)| (name, secret.value))
             .collect::<BTreeMap<_, _>>();
         let redactions = values.values().cloned().collect();
-        Ok(CommandEnvironmentSnapshot { values, redactions })
+        Ok(CommandEnvironmentSnapshot::from_parts(values, redactions))
     }
 
     pub fn put(&self, name: &str, value: &str) -> Result<HostSecretSummary> {

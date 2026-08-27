@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/nac-core", "crates/nac-server", "crates/nac-catalog-gen"]
+members = ["crates/nac-contracts", "crates/nac-core", "crates/nac-server", "crates/nac-catalog-gen"]
 resolver = "2"
 
 [workspace.dependencies]
