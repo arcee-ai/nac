@@ -558,6 +558,12 @@ Rules:
   methods are compatibility facades. Focused path-safe admission failure,
   peer cancellation, active steering, and idempotent cancellation regressions,
   the full server test build, and warning-denied Clippy pass.
+- The attached-session HTTP surface (snapshot/messages, inbox, goals,
+  permissions, and thread events) now lives in a dedicated delivery adapter
+  rather than server composition. The move retains route operations, response
+  shapes, status/error mapping, pagination clamps, and application-owner calls.
+  OpenAPI/router parity, goal HTTP lifecycle, snapshot recovery, the full
+  server test build, and warning-denied Clippy pass.
 
 ## Residual risks, coverage gaps, and pending decisions
 
@@ -573,8 +579,8 @@ Rules:
 
 ## Exact next action
 
-Inspect exact worktree/staged diffs and commit the session-run slice without
-protected files. Then continue M2 with attachment/recovery, configuration,
-deletion, and the remaining session HTTP delivery split, keeping lifecycle
-gates, operation leases, and exact settlement/cleanup ordering in their
-coordinator.
+Inspect exact worktree/staged diffs and commit the attached-session delivery
+slice without protected files. Then continue M2 with run/event delivery,
+attachment/recovery, configuration, deletion, and session creation, keeping
+lifecycle gates, operation leases, and exact settlement/cleanup ordering in
+their coordinator.
