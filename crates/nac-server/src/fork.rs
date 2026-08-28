@@ -285,7 +285,6 @@ fn persist_fork(
         source_id,
         fork_id,
         &prefix,
-        blob_len,
         source_transcript_len,
         message_idx,
         &source_name,
@@ -310,11 +309,11 @@ fn finish_persisted_fork(
     source_id: &str,
     fork_id: &str,
     prefix: &[Message],
-    blob_len: usize,
     source_transcript_len: usize,
     message_idx: usize,
     source_name: &str,
 ) -> Result<(), ForkSessionError> {
+    let blob_len = leading_system_len(prefix);
     let start_idx = u64::try_from(blob_len)
         .map_err(|error| report_failure(source_id, "write the forked transcript log", &error))?;
     store::TranscriptLogWriter::new(store_path)
