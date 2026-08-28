@@ -101,7 +101,7 @@ pub fn claim_thread_steering(
     session_id: &str,
     dispatch_id: &str,
 ) -> Result<Vec<ThreadSteeringRecord>> {
-    retry_busy(|| claim_thread_steering_once(path, session_id, dispatch_id))
+    crate::store::retry_busy(|| claim_thread_steering_once(path, session_id, dispatch_id))
 }
 
 fn claim_thread_steering_once(
@@ -136,7 +136,9 @@ pub fn acknowledge_thread_steering_batch(
     session_id: &str,
     dispatch_id: &str,
 ) -> Result<()> {
-    retry_busy(|| acknowledge_thread_steering_batch_once(path, ids, session_id, dispatch_id))
+    crate::store::retry_busy(|| {
+        acknowledge_thread_steering_batch_once(path, ids, session_id, dispatch_id)
+    })
 }
 
 fn acknowledge_thread_steering_batch_once(
@@ -186,11 +188,11 @@ pub fn expire_thread_steering(
     session_id: &str,
     dispatch_id: &str,
 ) -> Result<Vec<ThreadSteeringRecord>> {
-    retry_busy(|| expire_thread_steering_once(path, session_id, Some(dispatch_id)))
+    crate::store::retry_busy(|| expire_thread_steering_once(path, session_id, Some(dispatch_id)))
 }
 
 pub fn expire_session_steering(path: &Path, session_id: &str) -> Result<Vec<ThreadSteeringRecord>> {
-    retry_busy(|| expire_thread_steering_once(path, session_id, None))
+    crate::store::retry_busy(|| expire_thread_steering_once(path, session_id, None))
 }
 
 fn expire_thread_steering_once(
@@ -239,22 +241,6 @@ fn expire_thread_steering_once(
             record
         })
         .collect())
-}
-
-fn retry_busy<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
-    const RETRY_DELAYS: [std::time::Duration; 4] = [
-        std::time::Duration::from_millis(20),
-        std::time::Duration::from_millis(50),
-        std::time::Duration::from_millis(100),
-        std::time::Duration::from_millis(200),
-    ];
-    for delay in RETRY_DELAYS {
-        match operation() {
-            Err(error) if is_sqlite_busy(&error) => std::thread::sleep(delay),
-            result => return result,
-        }
-    }
-    operation()
 }
 
 #[cfg(test)]

@@ -60,11 +60,21 @@ export function smoothScrollTo(
     });
     signal?.addEventListener("abort", interrupt, { once: true });
 
+    // Re-read the bottom each frame when we aimed at it: a send can grow the
+    // transcript while the glide is still running, and a frozen `to` would
+    // land short then snap.
+    const aimingAtBottom = targetTop >= maxTop;
     const step = (timestamp: number) => {
       if (cancelled) return;
       start ??= timestamp;
       const progress = Math.min(1, (timestamp - start) / durationMs);
-      element.scrollTop = from + distance * easeOutCubic(progress);
+      const liveMax = Math.max(0, element.scrollHeight - element.clientHeight);
+      const toNow = aimingAtBottom ? liveMax : Math.min(to, liveMax);
+      const next = from + (toNow - from) * easeOutCubic(progress);
+      // Content can shrink mid-glide (the last-turn min-height moving off a
+      // bubble). Interpolating toward a smaller liveMax would scroll up; keep
+      // the send motion one-way down.
+      element.scrollTop = aimingAtBottom ? Math.max(element.scrollTop, next) : next;
       if (progress < 1) frame = requestAnimationFrame(step);
       else stop(true);
     };

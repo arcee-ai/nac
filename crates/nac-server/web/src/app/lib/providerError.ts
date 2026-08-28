@@ -191,6 +191,9 @@ export function humanError(error: RunError, backend?: string | null): HumanError
 
   // Billing is asked before credentials: a request that ran out of credits was
   // authenticated perfectly well, and its body still names the key that paid.
+  // HTTP 402 / insufficient_credits is also the platform reserving against
+  // catalog max_tokens when the remaining balance cannot cover that hold
+  // (issue #219) — the wallet can still show a positive amount.
   if (has("hard_limit_exceeded", "hard limit exceeded")) {
     return {
       title: "Spending limit reached",
@@ -213,11 +216,12 @@ export function humanError(error: RunError, backend?: string | null): HumanError
     codes.has(402)
   ) {
     return {
-      title: "No credits",
-      description: "Top up your credits to continue.",
+      title: "Not enough credits for this request",
+      description:
+        "The provider reserved more than the remaining balance allows. The wallet can still show a balance. Top up, or retry.",
       fix: {
         kind: "link",
-        label: "Top-up Your Wallet",
+        label: "Open wallet",
         url: platformUrl(raw, WALLET_PATH),
       },
     };
