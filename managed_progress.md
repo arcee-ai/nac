@@ -502,3 +502,16 @@ journey now opens the Project form and asserts the managed Trinity model and
 host-supplied credential state. The focused three managed journeys, all 179
 frontend tests, typecheck, lint, and a fresh interactive tab pass with zero
 console errors.
+
+### Managed-model integration closure
+
+Commits `52ea611`, `7492aa4`, and `7d4e8a1` complete the semantic port of
+`67c5655` through the refactored ownership boundaries. The final candidate
+passes `make ci`, `make test-durability`, `make test-assets`, all 14
+production-embedded Playwright journeys, the static image contract, and the
+live managed Docker image smoke. The live image consumed the separate mounted
+model credential and rejected an overwrite through its read-only volume.
+
+The remaining external exercise is optional human validation with real
+provider and organization GitHub/SAML credentials. It is a coverage gap, not a
+local product blocker; no implementation or local acceptance work remains.
