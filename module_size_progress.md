@@ -94,7 +94,7 @@ existing writers and drift checks remain authoritative.
 - Dedicated-suite decomposition: complete.
 - Agent production extraction: complete.
 - Automated enforcement and navigation: complete, pending commit.
-- Full acceptance: pending.
+- Full acceptance: complete, pending final evidence commit.
 
 ## Decisions and next action
 
@@ -239,3 +239,67 @@ and `make format-check` pass.
 Next: commit the guard/navigation boundary, run the complete acceptance matrix,
 then record final counts, generated state, commits, compatibility, and any
 infrastructure gap.
+
+## Final acceptance
+
+Status: complete. Every one of the 806 tracked human-source files selected by
+the policy is at or below 2,000 physical lines, with no exception entry. The
+largest is the cohesive agent turn state machine at 1,983 lines; the next is the
+durable transcript owner at 1,965. Machine-maintained locks, generated
+contracts/assets/catalog data, fixtures, and binary media remain under their
+existing single-writer or drift checks rather than being manually fragmented.
+
+### Hotspot delta
+
+| Baseline file | Before | Final owner/root | Largest extracted sibling |
+| --- | ---: | ---: | ---: |
+| server `lib_tests.rs` | 9,263 | 769 | contract/security 1,560 |
+| `session_service_tests.rs` | 5,386 | 815 | recovery/cancellation 1,438 |
+| `sandbox/podman.rs` | 3,035 | 1,434 | tests 1,597 |
+| `runtime_tests.rs` | 2,765 | 48 | construction 1,714 |
+| `events.rs` | 2,638 | 1,446 | tests 1,173 |
+| `model/chatgpt_codex.rs` | 2,444 | 1,641 | tests 798 |
+| `sessions/mod.rs` | 2,212 | 307 | facade tests 1,896 |
+| `agent/mod.rs` | 2,185 | 1,983 | transcript state 102 |
+| `model/arcee.rs` | 2,028 | 1,074 | tests 954 |
+
+### Commits
+
+1. `57bf852` — extract five oversized inline test suites.
+2. `ed3981e` — organize runtime construction and remote/resume tests.
+3. `19673a6` — organize session lifecycle behavior tests.
+4. `d797905` — organize server delivery/lifecycle behavior tests.
+5. `a554bb8` — separate agent prompt, failure, and transcript policies.
+6. `6455320` — enforce the human-source size budget in check/CI and guides.
+
+### Final verification
+
+- `make ci`: passed formatting, frontend/Rust warning-denied lint, the source
+  size guard, all workspace Rust tests (1,157 core passed and nine ignored; 148
+  server library; 23 server binary; all other crate/doc tests), 178 frontend
+  tests, generated OpenAPI/TypeScript checks, production asset build/drift, and
+  the managed image contract.
+- `make check`: passed the 806-file source-size guard and locked workspace type
+  check.
+- `make test-durability`: all ten crash-window, relationship, lease,
+  cancellation, and managed-binding selections passed under their new module
+  paths.
+- `make test-e2e`: all 14 production-embedded ordinary and managed browser
+  journeys passed.
+- `make test-managed-image`: Docker built the locked Linux/amd64 release image;
+  readiness, restart, and shutdown smoke passed. Docker Desktop emitted the
+  expected amd64-on-arm64 emulation warnings.
+- Generated OpenAPI, TypeScript, model data, and committed production assets
+  are unchanged/current. `git diff --check` is clean.
+
+### Compatibility and protected state
+
+The refactor changes private module/test paths and contributor enforcement only.
+It intentionally changes no HTTP/OpenAPI/MCP shape, persisted schema/value,
+session topology, prompt bytes, permission/sandbox behavior, managed workflow,
+or frontend behavior. Test helper selectors that launch subprocesses were
+updated to their new private paths and exercised by the full suites.
+
+The pre-existing modified `.gitignore` and `progress.md`, plus untracked
+`.agents/skills/goal-prompt/`, `demo_review.md`, and `manual_todo.md`, remain
+unstaged and unchanged by this work.
