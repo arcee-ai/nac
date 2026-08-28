@@ -267,8 +267,8 @@ redaction. Focused and broad verification before its commit:
 - `cargo clippy --locked -p nac-core -p nac-server --lib -- -D warnings` — passed.
 - `cargo check --locked -p nac-core -p nac-server --all-features` — passed.
 
-Historical `progress.md` and `demo_review.md` remain evidence only and are not
-acceptance authority for these new contracts.
+Historical `working_docs/progress.md` and `working_docs/demo_review.md` remain
+evidence only and are not acceptance authority for these new contracts.
 
 The managed UI/readiness candidate passed:
 
