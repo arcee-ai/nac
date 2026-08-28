@@ -91,8 +91,7 @@ existing writers and drift checks remain authoritative.
 
 - Inventory and policy: in progress.
 - Inline-test extraction: complete, pending commit.
-- Dedicated-suite decomposition: runtime and session-service complete; server
-  pending.
+- Dedicated-suite decomposition: complete.
 - Agent production extraction: pending.
 - Automated enforcement and navigation: pending.
 - Full acceptance: pending.
@@ -168,3 +167,26 @@ including their server relationship/managed-binding consumers.
 
 Next: commit the session lifecycle test boundary, then decompose the server test
 bag without duplicating its expensive router/session fixtures.
+
+### Server delivery and lifecycle suites
+
+The 9,263-line server bag is now a 769-line shared harness plus ten focused
+modules: contract/security (1,560), configuration (1,491), child/lease topology
+(1,224), managed topology (961), lifecycle (772), catalog/launch (706), recovery
+(602), presentation (583), managed delivery (380), and projects (244). The
+existing compaction suite remains a 724-line independent owner.
+
+Compilation exposed four truly shared test capabilities, which now live once in
+the common root: the serialized model-environment lock, hanging-model fixture,
+POST/PUT helpers, and the already-shared manager/session seed harness. The
+project test module is named `project_routes` to avoid shadowing the imported
+core project store. The embedded-asset assertion uses the correct path relative
+to its new contract owner. Root-level subprocess helpers kept their exact test
+paths.
+
+All 148 server library tests pass serially, including loopback, lease,
+descriptor-limit, shutdown, managed topology, and OpenAPI/asset behavior.
+Warning-denied server/core Clippy passes.
+
+Next: commit the server test ownership boundary, then reduce the sole remaining
+oversized human source, `agent/mod.rs`, through a substantive internal seam.
