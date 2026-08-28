@@ -103,6 +103,9 @@ export function selectThread(
   selectedThread: string | null,
   selectedThreadEpisode: string | null = null,
 ): void {
+  if (import.meta.env.DEV) {
+    console.debug("[nac:threads] select", { name: selectedThread, episode: selectedThreadEpisode });
+  }
   setState({ selectedThread, selectedThreadEpisode });
   if (selectedThread) showSidePanelList(false);
 }
@@ -143,17 +146,35 @@ export function selectFileListing(fileListing: FileListing): void {
 }
 
 /**
- * Revisions, files and folders belong to one session, so carrying them into
- * another would point the panels at something that is not theirs.
+ * Wipe the session-scoped pointers that belong to the inspector we just left.
+ * Threads, worksets, revisions, files and folders belong to one session, so
+ * carrying them into another would point the panels at something that is not
+ * theirs. A leftover selectedThread in particular was injected into the next
+ * session's thread list as a ghost row that vanished the moment you clicked a
+ * real one.
  */
 export function resetSessionSelection(): void {
+  if (import.meta.env.DEV) {
+    const prev = getState();
+    console.debug("[nac:threads] resetSessionSelection", {
+      selectedThread: prev.selectedThread,
+      selectedWorkset: prev.selectedWorkset,
+    });
+  }
   setState({
+    selectedThread: null,
+    selectedThreadEpisode: null,
+    selectedWorkset: null,
     selectedRevision: null,
     selectedFile: null,
     toggledFolders: new Set(),
     panelList: false,
     selectedThreadRunning: false,
   });
+}
+
+if (import.meta.env.DEV) {
+  Object.assign(globalThis, { __nacSelectThread: selectThread });
 }
 
 export const useSidePanelCollapsed = () => useStore((s) => s.collapsed);

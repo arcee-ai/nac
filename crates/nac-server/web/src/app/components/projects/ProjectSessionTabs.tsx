@@ -179,13 +179,13 @@ export function ProjectSessionTabs({
     endDrag();
   };
 
-  // Closing the chat being read has to leave another one to read.
+  // Closing the chat being read hands the screen to a neighbour. The last tab
+  // has none, so the list is the place left to land.
   const closeTab = (sessionId: string) => {
     if (sessionId === activeSessionId) {
       const index = visible.findIndex((entry) => entry.summary.session_id === sessionId);
       const next = visible[index + 1] ?? visible[index - 1];
-      if (!next) return;
-      navigate(routes.session(next.summary.session_id));
+      navigate(next ? routes.session(next.summary.session_id) : routes.list());
     }
     dismissChatTab(sessionId);
   };
@@ -253,8 +253,7 @@ export function ProjectSessionTabs({
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}
                   onClick={() => navigate(routes.session(sessionId))}
-                  // The last tab has nowhere to hand the screen over to.
-                  onDismiss={visible.length > 1 ? () => closeTab(sessionId) : undefined}
+                  onDismiss={() => closeTab(sessionId)}
                 />
               </div>
             );
