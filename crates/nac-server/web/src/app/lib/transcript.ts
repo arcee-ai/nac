@@ -543,7 +543,7 @@ export function buildTranscript(
   const ctx: BuildContext = {
     liveThreads,
     liveFinishedToolCalls,
-    worksets: snapshot?.worksets.items ?? [],
+    worksets: snapshot?.worksets?.items ?? [],
     threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
     dispatchCounts,
   };
