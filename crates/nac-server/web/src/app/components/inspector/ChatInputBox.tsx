@@ -32,6 +32,7 @@ import {
   formatTokensCompact,
   runMetrics,
   sessionEnvLabel,
+  tokenUsage,
 } from "@/app/lib/format";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
