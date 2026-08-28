@@ -92,7 +92,7 @@ existing writers and drift checks remain authoritative.
 - Inventory and policy: in progress.
 - Inline-test extraction: complete, pending commit.
 - Dedicated-suite decomposition: complete.
-- Agent production extraction: pending.
+- Agent production extraction: complete.
 - Automated enforcement and navigation: pending.
 - Full acceptance: pending.
 
@@ -190,3 +190,27 @@ Warning-denied server/core Clippy passes.
 
 Next: commit the server test ownership boundary, then reduce the sole remaining
 oversized human source, `agent/mod.rs`, through a substantive internal seam.
+
+### Agent loop ownership
+
+`agent/mod.rs` is now 1,983 lines, down from 2,185, and remains the cohesive
+model/tool turn state machine. Three private owners were extracted:
+
+- `prompt_rendering.rs` (59) owns checked-in prompt templates, placeholder
+  invariants, and the established direct/worker/orchestrator/child renderers;
+- `failed_tool_round.rs` (69) owns canonical repeated-failure identity and its
+  bounded operator detail;
+- `transcript_state.rs` (102) owns initial-system augmentation, incomplete tool
+  turn detection, transcript equality, and operation-lease snapshot reads.
+
+The parent explicitly re-exports only the prompt/truncation contracts already
+used elsewhere; all other helpers remain private to the agent owner. This
+removes closed policies from the loop without splitting individual state-machine
+phases or adding one-call wrappers.
+
+All 120 agent-selected tests pass (118 runnable, two credentialed live tests
+ignored), all ten traditional-child/store prompt tests pass, and warning-denied
+`nac-core` Clippy is green.
+
+Next: commit the agent ownership seam, add the deterministic tracked
+human-source size guard, and update durable navigation with the exact policy.
