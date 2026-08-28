@@ -357,9 +357,7 @@ export function Transcript({
   // Send glided twice (user bubble, then the min-height hop).
   const lastTurn = turns[turns.length - 1];
   const liveTurn =
-    running &&
-    lastTurn?.kind === "model" &&
-    (!showPending || lastTurn.key === STREAMING_TURN_KEY);
+    running && lastTurn?.kind === "model" && (!showPending || lastTurn.key === STREAMING_TURN_KEY);
   // Keep the pill under the optimistic bubble too; otherwise it only appears
   // when `running` flips and the layout jumps.
   const showModelPending = (running || showPending) && !liveTurn;
@@ -540,8 +538,7 @@ export function Transcript({
               }
 
               const lastIsThisRun =
-                index === turns.length - 1 &&
-                !(showPending && turn.key !== STREAMING_TURN_KEY);
+                index === turns.length - 1 && !(showPending && turn.key !== STREAMING_TURN_KEY);
               const row = (
                 <ModelMessage
                   key={turn.key}

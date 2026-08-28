@@ -78,9 +78,7 @@ export interface StickToBottom {
  * from a scrollbar drag if only the numbers are consulted, which used to abandon
  * follow-mode a hundred pixels short of the end of a stream.
  */
-export function useStickToBottom({
-  resetKey = null,
-}: StickToBottomOptions = {}): StickToBottom {
+export function useStickToBottom({ resetKey = null }: StickToBottomOptions = {}): StickToBottom {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [showJumpButton, setShowJumpButton] = useState(false);
@@ -168,19 +166,16 @@ export function useStickToBottom({
       const controller = new AbortController();
       followAbort.current = controller;
       beginProgrammaticScroll();
-      void smoothScrollTo(
-        element,
-        element.scrollHeight,
-        durationMs,
-        controller.signal,
-      ).then((completed) => {
-        if (followAbort.current !== controller) return;
-        followAbort.current = null;
-        endProgrammaticScroll();
-        syncJumpButton();
-        followDuration.current = FOLLOW_DURATION_MS;
-        if (!completed) return;
-      });
+      void smoothScrollTo(element, element.scrollHeight, durationMs, controller.signal).then(
+        (completed) => {
+          if (followAbort.current !== controller) return;
+          followAbort.current = null;
+          endProgrammaticScroll();
+          syncJumpButton();
+          followDuration.current = FOLLOW_DURATION_MS;
+          if (!completed) return;
+        },
+      );
     },
     [beginProgrammaticScroll, cancelFollow, endProgrammaticScroll, syncJumpButton],
   );
