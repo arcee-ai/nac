@@ -1243,7 +1243,7 @@ fn parse_process_stat(stat: &str) -> Option<(libc::pid_t, libc::pid_t, u64)> {
 
 #[cfg(target_os = "linux")]
 fn open_pidfd(pid: libc::pid_t) -> std::io::Result<OwnedFd> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if PIDFD_OPEN_FAILURE_PID.load(std::sync::atomic::Ordering::SeqCst) == pid {
         return Err(std::io::Error::from_raw_os_error(libc::EPERM));
     }

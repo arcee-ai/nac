@@ -1151,6 +1151,7 @@ fn portable_ps_identity(pid: u32) -> String {
 fn cancellation_wrapper_uses_ps_to_kill_session_escaped_descendants_without_proc() {
     use std::os::unix::process::CommandExt;
 
+    let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
         "nac-wrapper-portable-descendants-{}",
         uuid::Uuid::new_v4()
@@ -1239,6 +1240,7 @@ fn portable_cleanup_keeps_child_authority_when_root_disappears_after_discovery()
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;
 
+    let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!("nac-wrapper-root-loss-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let descendant_pid_path = root.join("descendant.pid");
@@ -1324,6 +1326,7 @@ fn portable_cleanup_keeps_child_authority_when_root_disappears_after_discovery()
 #[cfg(unix)]
 #[test]
 fn cancellation_wrapper_does_not_kill_a_reused_pid_with_a_different_identity() {
+    let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
     let root =
         std::env::temp_dir().join(format!("nac-wrapper-pid-identity-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
@@ -1360,6 +1363,7 @@ fn cancellation_wrapper_does_not_kill_a_reused_pid_with_a_different_identity() {
 #[cfg(unix)]
 #[test]
 fn portable_identity_rejects_same_start_time_with_a_different_command_signature() {
+    let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
         "nac-wrapper-portable-identity-{}",
         uuid::Uuid::new_v4()
@@ -1401,6 +1405,7 @@ fn portable_identity_rejects_same_start_time_with_a_different_command_signature(
 fn portable_identity_inspection_failure_retains_retry_authority() {
     use std::os::unix::fs::PermissionsExt;
 
+    let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
         "nac-wrapper-portable-uncertain-{}",
         uuid::Uuid::new_v4()

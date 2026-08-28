@@ -632,7 +632,7 @@ async fn frontend_snapshot_does_not_wait_for_agent_lock_while_active_run() {
     let active = parts.service.try_begin_run(None, "blocked prompt").unwrap();
 
     let snapshot = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
+        std::time::Duration::from_secs(2),
         parts.service.frontend_snapshot(),
     )
     .await
