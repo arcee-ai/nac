@@ -30,3 +30,12 @@ fn runtime_inventory_reports_only_missing_tool_names() {
     assert!(!check.ready);
     assert!(check.detail.contains("this-tool-does-not-exist-nac"));
 }
+
+#[cfg(unix)]
+#[test]
+fn runtime_ownership_accepts_owner_or_root_with_the_expected_group() {
+    assert!(ownership_is_accepted(10_001, 10_001, 10_001, 10_001));
+    assert!(ownership_is_accepted(0, 10_001, 10_001, 10_001));
+    assert!(!ownership_is_accepted(20_001, 10_001, 10_001, 10_001));
+    assert!(!ownership_is_accepted(0, 20_001, 10_001, 10_001));
+}

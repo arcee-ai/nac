@@ -25,8 +25,8 @@ export function ManagedStatusPanel() {
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <StatusCard
-          label="Arcee model"
-          value={host.model_ready ? "Ready" : "Needs attention"}
+          label={host.model.display_name}
+          value={host.model_ready ? host.model.id : "Needs attention"}
           ready={host.model_ready}
         />
         <StatusCard
@@ -38,6 +38,8 @@ export function ManagedStatusPanel() {
         <StatusCard label="Host secrets" value={String(host.secret_count)} ready />
       </div>
       <div className="rounded-lg bg-elevation-level-2 p-4">
+        <p className="label-small text-basic-secondary">Managed model endpoint</p>
+        <p className="code-small mb-3 break-all text-basic-primary">{host.model.endpoint}</p>
         <p className="label-small text-basic-secondary">Repository root</p>
         <p className="code-small break-all text-basic-primary">{host.repository_root}</p>
       </div>

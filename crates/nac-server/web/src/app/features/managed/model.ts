@@ -1,4 +1,5 @@
-import type { ManagedCloneOperation } from "@/app/types/api";
+import type { CatalogPick } from "@/app/lib/catalog";
+import type { ManagedCloneOperation, ManagedHostStatus } from "@/app/types/api";
 
 export type ManagedTab = "status" | "github" | "secrets";
 
@@ -31,4 +32,29 @@ export function repositoryIdentity(fullName: string | null | undefined): [string
 
 export function cloneIsRunning(operation: ManagedCloneOperation | null): boolean {
   return operation?.status === "running";
+}
+
+type ManagedModelHostStatus = Pick<ManagedHostStatus, "model" | "model_ready">;
+
+export function managedModelPick(status: ManagedModelHostStatus | null): CatalogPick | null {
+  return status
+    ? {
+        backend: status.model.backend,
+        model: status.model.id,
+        baseUrl: status.model.endpoint,
+      }
+    : null;
+}
+
+export function matchesManagedModelPick(
+  status: ManagedModelHostStatus | null,
+  pick: CatalogPick | null,
+): boolean {
+  return Boolean(
+    pick &&
+    status &&
+    pick.backend === status.model.backend &&
+    pick.model === status.model.id &&
+    pick.baseUrl === status.model.endpoint,
+  );
 }

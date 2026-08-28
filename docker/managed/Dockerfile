@@ -108,7 +108,7 @@ RUN test "$(dpkg --print-architecture)" = amd64 \
     && groupadd --gid 10001 nac \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/nac --shell /bin/bash nac \
     && install -d -o 10001 -g 10001 -m 0700 /var/lib/nac \
-    && install -d -o 10001 -g 10001 -m 0755 /repositories /run/nac \
+    && install -d -o 10001 -g 10001 -m 0755 /repositories /run/nac /run/secrets/nac \
     && install -d -o 10001 -g 10001 -m 0755 /etc/nac \
     && install -d -o 10001 -g 10001 -m 1777 /tmp \
     && install -d -o 10001 -g 10001 -m 0755 /home/nac/.cargo /home/nac/.local /home/nac/go

@@ -456,3 +456,36 @@ credential, publish on a non-3210 host port during local testing, and validate
 device authorization, repository/branch onboarding, Git/`gh`, secrets,
 restart/rescheduling, `/healthz`, `/readyz`, and `/managed/status`. Never point
 this branch binary at the published-main store or its port 3210 process.
+
+## Refactored integration of managed host model bootstrap (2026-08-27)
+
+Commit `67c5655` landed on the original `90dd3c9` architecture after this
+worktree had already extracted the managed bounded context and decomposed the
+server/runtime/frontend owners. Its behavior was therefore ported semantically
+rather than cherry-picked back across superseded files:
+
+- `nac-managed` owns the strict, provider-neutral host profile and hardened
+  mounted-credential/readiness facts; server composition validates the backend
+  against the harness model taxonomy through a narrow profile;
+- core model/runtime/session construction accepts a provider-neutral trusted
+  credential path. Only that path crosses hidden worker argv; the credential
+  value never enters argv, the environment, SQLite, or command snapshots;
+- managed session creation supplies the host model only when callers omit the
+  entire identity, while explicit settings remain authoritative. Resume
+  reconstructs the ephemeral source only for a matching persisted profile;
+- the focused model-catalog application and managed status projection report
+  safe readiness/profile metadata without exposing credential bytes;
+- generated OpenAPI/TypeScript contracts and the managed frontend feature now
+  derive the host default, exact profile matching, and credential presentation
+  from that response; and
+- the managed image smoke uses a separate read-only credential volume and
+  proves consumption plus failed overwrite.
+
+The inward credential slice is commit `52ea611`. Focused validation for the
+application/UI/image slice is green: 19 `nac-managed` tests, the managed
+create/persist/resume/catalog/status server regression, frontend profile-model
+tests, all 178 frontend tests, workspace check, format/lint, generated-contract
+drift, source-size enforcement, the static image contract, and all 14
+production-embedded Playwright journeys. The generated production bundle is
+current. Full immutable-candidate acceptance and the live managed-image smoke
+follow the integration commit.

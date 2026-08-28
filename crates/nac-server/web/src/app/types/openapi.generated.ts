@@ -383,6 +383,7 @@ export interface components {
       github_status: string;
       logical_host_id: string;
       managed: boolean;
+      model: components["schemas"]["ManagedModelStatus"];
       model_ready: boolean;
       owner?: string | null;
       project_count: number;
@@ -393,6 +394,12 @@ export interface components {
       secret_count: number;
       session_count: number;
       version: string;
+    };
+    ManagedModelStatus: {
+      backend: components["schemas"]["BackendKind"];
+      display_name: string;
+      endpoint: string;
+      id: string;
     };
     ManagedOrchestratorRecord: {
       completion_inbox_id?: number | null;

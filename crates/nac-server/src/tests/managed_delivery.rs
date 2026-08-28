@@ -157,6 +157,62 @@ async fn managed_host_secret_api_is_write_only_and_unmanaged_hosts_fail_closed()
 }
 
 #[tokio::test]
+async fn managed_host_supplies_default_model_and_mounted_credential() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_model_default");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_managed_credential(&root.join("model-token"), "host-model-key\n");
+    let manager = test_managed_manager(&root);
+
+    let created = manager
+        .create_session(CreateSessionRequest::default())
+        .await
+        .expect("managed host profile should launch without user model settings");
+    let session_id = created
+        .metadata
+        .session_id
+        .clone()
+        .expect("created session id");
+    let stored = sessions::load_session(&root.join("store.db"), &session_id).unwrap();
+    assert_eq!(stored.backend, BackendKind::ArceeApi);
+    assert_eq!(stored.model, "trinity-large-thinking");
+    assert_eq!(stored.base_url, "https://api.arcee.ai/api/v1");
+    assert_eq!(stored.api_key_env, None);
+
+    manager
+        .inner
+        .active_sessions
+        .write()
+        .await
+        .remove(&session_id);
+    manager
+        .attach_session(&session_id)
+        .await
+        .expect("mounted credential source should survive session resume");
+
+    let app = router(manager);
+    let listing = response_json(get_response(app.clone(), "/models", None).await).await;
+    let arcee = listing["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|provider| provider["id"] == "arcee-api")
+        .unwrap();
+    assert_eq!(arcee["auth_status"], "ready");
+    assert_eq!(arcee["auth_hint"], serde_json::Value::Null);
+    assert_eq!(arcee["default_base_url"], "https://api.arcee.ai/api/v1");
+
+    let status = response_json(get_response(app, "/managed/status", None).await).await;
+    assert_eq!(status["model"]["backend"], "arcee-api");
+    assert_eq!(status["model"]["id"], "trinity-large-thinking");
+    assert!(status["model_ready"].is_boolean());
+    assert!(!status.to_string().contains("host-model-key"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn managed_github_status_is_metadata_only_and_unmanaged_hosts_fail_closed() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("managed_github_status");

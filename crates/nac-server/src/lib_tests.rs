@@ -238,7 +238,9 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
         state_root,
         home_root,
         github_client_id: "Iv1.test".to_string(),
-        model_endpoint: "https://models.example.test/v1".to_string(),
+        model_backend: "arcee-api".to_string(),
+        model_id: "trinity-large-thinking".to_string(),
+        model_endpoint: "https://api.arcee.ai/api/v1".to_string(),
         model_credential_file: root.join("model-token"),
         model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
     };

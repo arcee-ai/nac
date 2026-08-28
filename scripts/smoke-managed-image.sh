@@ -33,6 +33,7 @@ state_volume="$suffix-state"
 repository_volume="$suffix-repositories"
 home_volume="$suffix-home"
 config_volume="$suffix-config"
+credential_volume="$suffix-model-credential"
 ready_file="${TMPDIR:-/tmp}/$suffix-ready.json"
 
 cleanup() {
@@ -40,15 +41,27 @@ cleanup() {
     "$container_runtime" rm -f "$container_name" >/dev/null 2>&1 || true
     "$container_runtime" volume rm \
         "$state_volume" "$repository_volume" "$home_volume" "$config_volume" \
+        "$credential_volume" \
         >/dev/null 2>&1 || true
 }
 trap cleanup EXIT HUP INT TERM
 
-for volume in "$state_volume" "$repository_volume" "$home_volume" "$config_volume"; do
+for volume in "$state_volume" "$repository_volume" "$home_volume" "$config_volume" "$credential_volume"; do
     "$container_runtime" volume create "$volume" >/dev/null
 done
 
 fixture='managed-image-smoke-model-credential'
+"$container_runtime" run --rm \
+    --entrypoint /bin/sh \
+    --user 0:0 \
+    --volume "$credential_volume:/run/secrets/model" \
+    "$image" -ceu '
+        umask 077
+        printf "%s\n" "managed-image-smoke-model-credential" > /run/secrets/model/credential
+        chown 10001:10001 /run/secrets/model/credential
+        chmod 0400 /run/secrets/model/credential
+    '
+
 "$container_runtime" run --rm \
     --entrypoint /bin/sh \
     --user 10001:10001 \
@@ -58,7 +71,6 @@ fixture='managed-image-smoke-model-credential'
     --volume "$config_volume:/etc/nac" \
     "$image" -ceu '
         umask 077
-        printf "%s\n" "managed-image-smoke-model-credential" > /var/lib/nac/model-credential
         printf "%s\n" \
             "version = 1" \
             "logical_host_id = \"managed-image-smoke\"" \
@@ -68,8 +80,10 @@ fixture='managed-image-smoke-model-credential'
             "state_root = \"/var/lib/nac\"" \
             "home_root = \"/home/nac\"" \
             "github_client_id = \"Iv1.smoke\"" \
+            "model_backend = \"arcee-api\"" \
+            "model_id = \"trinity-large-thinking\"" \
             "model_endpoint = \"https://models.example.test/v1\"" \
-            "model_credential_file = \"/var/lib/nac/model-credential\"" \
+            "model_credential_file = \"/run/secrets/model/credential\"" \
             "model_credential_environment_names = [\"ARCEE_API_KEY\"]" \
             > /etc/nac/managed.toml
         printf "%s\n" durable > /var/lib/nac/restart-canary
@@ -92,6 +106,7 @@ start_container() {
         --volume "$repository_volume:/repositories" \
         --volume "$home_volume:/home/nac" \
         --volume "$config_volume:/etc/nac:ro" \
+        --volume "$credential_volume:/run/secrets/model:ro" \
         --tmpfs /tmp:rw,noexec,nosuid,nodev,uid=10001,gid=10001,mode=1777 \
         --tmpfs /run/nac:rw,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0755 \
         "$image" >/dev/null
@@ -139,6 +154,11 @@ port=$(wait_until_ready)
     test "$(cat /var/lib/nac/restart-canary)" = durable
     test "$(cat /repositories/restart-canary)" = durable
     test "$(cat /home/nac/restart-canary)" = durable
+    test "$(cat /run/secrets/model/credential)" = managed-image-smoke-model-credential
+    if printf "%s\n" overwritten > /run/secrets/model/credential 2>/dev/null; then
+        echo "model credential mount unexpectedly accepted a write" >&2
+        exit 1
+    fi
 '
 
 index_html=$(curl -fsS --noproxy '*' --connect-timeout 1 --max-time 5 \

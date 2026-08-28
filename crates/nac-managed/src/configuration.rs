@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use nac_credential_store::{
-    read_auth_string_from_path, with_credential_lock, write_auth_string_to_path,
+    read_auth_string_from_path, read_mounted_credential_string, with_credential_lock,
+    write_auth_string_to_path,
 };
 
 pub use nac_contracts::CommandEnvironmentSnapshot;
@@ -37,6 +38,8 @@ pub struct ManagedHostConfig {
     pub state_root: PathBuf,
     pub home_root: PathBuf,
     pub github_client_id: String,
+    pub model_backend: String,
+    pub model_id: String,
     pub model_endpoint: String,
     pub model_credential_file: PathBuf,
     #[serde(default)]
@@ -69,6 +72,8 @@ impl ManagedHostConfig {
         validate_nonblank("logical_host_id", &self.logical_host_id)?;
         validate_nonblank("public_hostname", &self.public_hostname)?;
         validate_nonblank("github_client_id", &self.github_client_id)?;
+        validate_nonblank("model_backend", &self.model_backend)?;
+        validate_nonblank("model_id", &self.model_id)?;
         validate_absolute_path("repository_root", &self.repository_root)?;
         validate_absolute_path("state_root", &self.state_root)?;
         validate_absolute_path("home_root", &self.home_root)?;
@@ -102,6 +107,18 @@ impl ManagedHostConfig {
 
     pub fn github_auth(&self) -> Result<crate::github::ManagedGitHubAuth> {
         crate::github::ManagedGitHubAuth::new(&self.state_root, self.github_client_id.clone())
+    }
+
+    /// Read the operator-mounted model credential without copying it into NAC
+    /// storage or exporting it to the process/command environment.
+    pub fn model_credential(&self) -> Result<String> {
+        let value = read_mounted_credential_string(&self.model_credential_file)?
+            .ok_or_else(|| anyhow!("managed model credential file is unavailable"))?;
+        let value = value.trim().to_string();
+        if value.is_empty() {
+            bail!("managed model credential file is empty or whitespace-only");
+        }
+        Ok(value)
     }
 }
 

@@ -76,13 +76,17 @@ repository_root = "/repositories"
 state_root = "/var/lib/nac"
 home_root = "/home/nac"
 github_client_id = "Iv1.example"
-model_endpoint = "https://models.example.com/v1"
+model_backend = "arcee-api"
+model_id = "trinity-large-thinking"
+model_endpoint = "https://api.arcee.ai/api/v1"
 model_credential_file = "/var/lib/nac/model-credential"
 model_credential_environment_names = ["ARCEE_API_KEY"]
 ```
 
-The model credential file must be a nonblank, finite, owner-only regular file
-owned by `10001:10001`; symlinks are rejected. It is not a generic host secret
+The model credential file must be a nonblank, finite regular file with no access
+for other users. It may be owned by `10001:10001`, or root-owned and readable by
+runtime group `10001` for a Kubernetes Secret projection; symlinks are rejected.
+It is mounted read-only and is not a generic host secret
 and is not copied into command environments. GitHub access and refresh tokens
 remain owner-only NAC state and are never returned by the status APIs.
 

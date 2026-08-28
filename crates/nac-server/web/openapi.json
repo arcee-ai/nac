@@ -9215,6 +9215,7 @@
           "public_hostname",
           "repository_root",
           "model_ready",
+          "model",
           "github_status",
           "secret_count",
           "project_count",
@@ -9236,6 +9237,9 @@
           },
           "managed": {
             "type": "boolean"
+          },
+          "model": {
+            "$ref": "#/components/schemas/ManagedModelStatus"
           },
           "model_ready": {
             "type": "boolean"
@@ -9272,6 +9276,29 @@
             "minimum": 0
           },
           "version": {
+            "type": "string"
+          }
+        }
+      },
+      "ManagedModelStatus": {
+        "type": "object",
+        "required": [
+          "backend",
+          "id",
+          "endpoint",
+          "display_name"
+        ],
+        "properties": {
+          "backend": {
+            "$ref": "#/components/schemas/BackendKind"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "id": {
             "type": "string"
           }
         }
