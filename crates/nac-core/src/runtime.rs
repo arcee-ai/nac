@@ -57,8 +57,8 @@ pub use configuration::{
 pub(crate) use contracts::OrchestratorSession;
 pub use contracts::{
     EffectiveSandboxOptions, ManagedWorkerOptions, ModelOptions, OptionalModelOption,
-    OrchestratorRunConfig, ResumeOptions, ResumePickerRunConfig, RunOptions, RunState,
-    SandboxOptions, SshOptions, StoreOptions, WorkerDispatchOptions,
+    OrchestratorRunConfig, ResumeModelOptions, ResumeOptions, ResumePickerRunConfig, RunOptions,
+    RunState, SandboxOptions, SshOptions, StoreOptions, WorkerDispatchOptions,
 };
 use model_resolution::{
     default_config_cwd, managed_worker_effective_model_settings, worker_command_output_limits,

@@ -6,6 +6,25 @@ use super::sse::{read_sse_response_with_extra_headers, with_source_chain, Stream
 use super::*;
 use anyhow::Context;
 
+fn read_trusted_api_key_file(path: &std::path::Path) -> Result<String> {
+    let value = nac_credential_store::read_mounted_credential_string(path)
+        .map_err(|error| model_configuration_error(error.to_string()))?
+        .ok_or_else(|| {
+            model_configuration_error(format!(
+                "trusted model credential file {} is unavailable",
+                path.display()
+            ))
+        })?;
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Err(model_configuration_error(format!(
+            "trusted model credential file {} is empty or whitespace-only",
+            path.display()
+        )));
+    }
+    Ok(value)
+}
+
 fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
     let mut end = value.len().min(max_bytes);
     while !value.is_char_boundary(end) {
@@ -205,6 +224,7 @@ pub struct ModelClient {
     backend: BackendKind,
     reasoning_effort: Option<ReasoningEffort>,
     api_key_env: Option<String>,
+    trusted_api_key_file: Option<std::path::PathBuf>,
     extra_headers: std::collections::BTreeMap<String, String>,
     arcee_credential_source: Option<ArceeCredentialSource>,
     /// Anthropic prompt-cache TTL. `None` = default 5-minute TTL (workers);
@@ -225,7 +245,7 @@ impl ModelClient {
         // ArceeApi validates through `resolve_arcee_api_credentials` below
         // (its base-url check must fire first); every other backend
         // validates its api_key_env selector here.
-        if backend != BackendKind::ArceeApi {
+        if settings.trusted_api_key_file.is_none() && backend != BackendKind::ArceeApi {
             validate_backend_api_key_env(backend, settings.api_key_env.as_deref())?;
         }
         if backend == BackendKind::ArceeAuth {
@@ -238,10 +258,19 @@ impl ModelClient {
                 (String::new(), Some(ArceeCredentialSource::StoredLogin))
             }
             BackendKind::ArceeApi => {
-                let (_, api_key, source) = resolve_arcee_api_credentials(
-                    &settings.base_url,
-                    settings.api_key_env.as_deref(),
-                )?;
+                arcee::validate_approved_base_url(&settings.base_url)
+                    .map_err(classify_model_configuration_error)?;
+                let api_key = match settings.trusted_api_key_file.as_deref() {
+                    Some(path) => read_trusted_api_key_file(path)?,
+                    None => {
+                        resolve_arcee_api_credentials(
+                            &settings.base_url,
+                            settings.api_key_env.as_deref(),
+                        )?
+                        .1
+                    }
+                };
+                let source = ArceeCredentialSource::ApiKey;
                 (api_key, Some(source))
             }
             BackendKind::ChatGptCodexResponses => {
@@ -250,10 +279,13 @@ impl ModelClient {
                 chatgpt_codex::preflight_stored_auth().map_err(classify_stored_codex_auth_error)?;
                 (String::new(), None)
             }
-            _ => (
-                api_key_for_backend(backend, settings.api_key_env.as_deref())?,
-                None,
-            ),
+            _ => {
+                let api_key = match settings.trusted_api_key_file.as_deref() {
+                    Some(path) => read_trusted_api_key_file(path)?,
+                    None => api_key_for_backend(backend, settings.api_key_env.as_deref())?,
+                };
+                (api_key, None)
+            }
         };
         let client = no_redirect_model_client()?;
 
@@ -265,6 +297,7 @@ impl ModelClient {
             backend,
             reasoning_effort: settings.reasoning_effort,
             api_key_env: settings.api_key_env,
+            trusted_api_key_file: settings.trusted_api_key_file,
             extra_headers: settings.extra_headers,
             arcee_credential_source,
             cache_ttl: None,
@@ -399,6 +432,10 @@ impl ModelClient {
 
     pub fn api_key_env(&self) -> Option<&str> {
         self.api_key_env.as_deref()
+    }
+
+    pub fn trusted_api_key_file(&self) -> Option<&std::path::Path> {
+        self.trusted_api_key_file.as_deref()
     }
 
     pub fn extra_headers(&self) -> &std::collections::BTreeMap<String, String> {
@@ -1048,6 +1085,7 @@ impl ModelClient {
             backend: BackendKind::OpenAiResponses,
             reasoning_effort: Some(ReasoningEffort::Xhigh),
             api_key_env: None,
+            trusted_api_key_file: None,
             extra_headers: std::collections::BTreeMap::new(),
             arcee_credential_source: None,
             cache_ttl: None,

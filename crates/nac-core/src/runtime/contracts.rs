@@ -40,10 +40,21 @@ pub struct ModelOptions {
     pub api_base_url: Option<String>,
     pub api_model: Option<String>,
     pub api_key_env: OptionalModelOption<String>,
+    /// Trusted operator-mounted credential path. This is internal runtime
+    /// composition state and is never populated from ordinary CLI/HTTP input.
+    pub trusted_api_key_file: Option<PathBuf>,
     pub extra_headers: Option<BTreeMap<String, String>>,
     /// Optional light worker model; `Some` enables weight-classified
     /// dispatch for the session, `None` keeps single-model behavior.
     pub light_model: Option<LightModelSettings>,
+}
+
+/// Ephemeral model inputs needed to reconstruct a persisted session.
+///
+/// These values are deliberately not part of the durable session snapshot.
+#[derive(Debug, Clone, Default)]
+pub struct ResumeModelOptions {
+    pub trusted_api_key_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]

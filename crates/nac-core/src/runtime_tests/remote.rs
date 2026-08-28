@@ -223,6 +223,7 @@ async fn resume_rejects_ssh_snapshot_with_sandbox_metadata_before_restore() {
         None,
         true,
         None,
+        ResumeModelOptions::default(),
     )
     .await
     {
@@ -262,6 +263,7 @@ async fn invalid_legacy_snapshot_requires_settings_repair_without_persistence() 
         None,
         true,
         None,
+        ResumeModelOptions::default(),
     )
     .await
     {
@@ -582,6 +584,7 @@ async fn ssh_fresh_run_resume_base_and_resume_control_socket_use_local_config_cw
         &NacConfig::default(),
         resume_base_cwd,
         None,
+        ResumeModelOptions::default(),
     )
     .await
     .expect("remote resume should keep using the local config cwd");

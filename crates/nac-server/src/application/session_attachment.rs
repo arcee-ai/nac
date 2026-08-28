@@ -325,6 +325,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 self.manager.inner.root_cwd.clone(),
                 Some(self.manager.inner.worker_executable.clone()),
                 operation_lease,
+                runtime::ResumeModelOptions::default(),
             )
             .await?
         } else {
@@ -334,6 +335,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 &config,
                 self.manager.inner.root_cwd.clone(),
                 Some(self.manager.inner.worker_executable.clone()),
+                runtime::ResumeModelOptions::default(),
             )
             .await?
         };
@@ -391,6 +393,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 &config,
                 self.manager.inner.root_cwd.clone(),
                 Some(self.manager.inner.worker_executable.clone()),
+                runtime::ResumeModelOptions::default(),
             )
             .await?;
         self.manager

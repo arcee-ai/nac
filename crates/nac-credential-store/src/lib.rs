@@ -53,6 +53,98 @@ pub fn read_auth_string_from_path(path: &Path) -> Result<Option<String>> {
         .with_context(|| format!("credential file {} is not valid UTF-8", path.display()))
 }
 
+/// Read a platform-mounted credential without requiring owner-only mode.
+///
+/// Kubernetes Secret projections are commonly root-owned and group-readable
+/// through a pod `fsGroup`. This reader therefore accepts owner/group access,
+/// while still rejecting symlinks, non-regular files, access for other users,
+/// and oversized values. Callers remain responsible for checking any expected
+/// owner/group identity that is part of their deployment contract.
+pub fn read_mounted_credential_string(path: &Path) -> Result<Option<String>> {
+    const MAX_MOUNTED_CREDENTIAL_BYTES: u64 = 64 * 1024;
+
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(anyhow!(
+                "refusing to read symlink credential path {}",
+                path.display()
+            ));
+        }
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(anyhow!(
+                "refusing to read non-regular credential path {}",
+                path.display()
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
+        }
+    }
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to securely open mounted credential {}",
+                    path.display()
+                )
+            });
+        }
+    };
+    ensure_open_file_is_regular(&file, path, "mounted credential file")?;
+    ensure_mounted_credential_permissions(&file, path)?;
+
+    let mut raw = Vec::new();
+    file.take(MAX_MOUNTED_CREDENTIAL_BYTES + 1)
+        .read_to_end(&mut raw)
+        .with_context(|| format!("failed to read mounted credential {}", path.display()))?;
+    if raw.len() as u64 > MAX_MOUNTED_CREDENTIAL_BYTES {
+        return Err(anyhow!(
+            "mounted credential {} exceeds the size limit",
+            path.display()
+        ));
+    }
+    String::from_utf8(raw)
+        .map(Some)
+        .with_context(|| format!("credential file {} is not valid UTF-8", path.display()))
+}
+
+#[cfg(unix)]
+fn ensure_mounted_credential_permissions(file: &File, path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode = file
+        .metadata()
+        .with_context(|| format!("failed to inspect mounted credential {}", path.display()))?
+        .permissions()
+        .mode()
+        & 0o777;
+    if mode & 0o007 == 0 {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "refusing to read mounted credential {} accessible by other users",
+            path.display()
+        ))
+    }
+}
+
+#[cfg(not(unix))]
+fn ensure_mounted_credential_permissions(_file: &File, _path: &Path) -> Result<()> {
+    Ok(())
+}
+
 /// A managed credential file whose Unix mode permits group or other access.
 ///
 /// This is a caller-actionable safety/configuration failure rather than a
@@ -564,6 +656,59 @@ mod tests {
             read_auth_string_from_path(&path).unwrap().as_deref(),
             Some("regular-credential-content")
         );
+    }
+
+    #[test]
+    fn mounted_credential_read_accepts_group_read_without_other_access() {
+        let dir = TestDir::new("mounted-read-group");
+        let path = dir.path("model-token");
+        fs::write(&path, "mounted-credential-content").unwrap();
+        set_mode(&path, 0o640);
+
+        assert_eq!(
+            read_mounted_credential_string(&path).unwrap().as_deref(),
+            Some("mounted-credential-content")
+        );
+    }
+
+    #[test]
+    fn mounted_credential_read_rejects_other_access_without_leaking_value() {
+        let dir = TestDir::new("mounted-read-other");
+        let path = dir.path("model-token");
+        fs::write(&path, "secret-must-not-appear-in-errors").unwrap();
+        set_mode(&path, 0o644);
+
+        let error = read_mounted_credential_string(&path).unwrap_err();
+
+        assert!(error.to_string().contains("accessible by other users"));
+        assert!(!error.to_string().contains("secret-must-not-appear"));
+    }
+
+    #[test]
+    fn mounted_credential_read_rejects_symlink_without_reading_target() {
+        let dir = TestDir::new("mounted-read-symlink");
+        let target = dir.path("target-token");
+        let path = dir.path("model-token");
+        fs::write(&target, "target-credential-content").unwrap();
+        set_mode(&target, 0o600);
+        symlink(&target, &path).unwrap();
+
+        let error = read_mounted_credential_string(&path).unwrap_err();
+
+        assert!(error.to_string().contains("symlink credential path"));
+        assert!(!error.to_string().contains("target-credential-content"));
+    }
+
+    #[test]
+    fn mounted_credential_read_rejects_oversized_value() {
+        let dir = TestDir::new("mounted-read-size");
+        let path = dir.path("model-token");
+        fs::write(&path, vec![b'x'; 64 * 1024 + 1]).unwrap();
+        set_mode(&path, 0o600);
+
+        let error = read_mounted_credential_string(&path).unwrap_err();
+
+        assert!(error.to_string().contains("exceeds the size limit"));
     }
 
     #[test]

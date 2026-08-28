@@ -60,6 +60,7 @@ async fn create_and_resume_effort_snapshot(
         &NacConfig::default(),
         root.to_path_buf(),
         None,
+        ResumeModelOptions::default(),
     )
     .await
     .unwrap()
@@ -120,6 +121,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
         &NacConfig::default(),
         root.clone(),
         None,
+        ResumeModelOptions::default(),
     )
     .await
     .unwrap();
@@ -282,6 +284,7 @@ fn explicit_model_settings_beat_config_and_config_supplies_omissions() {
             api_base_url: Some(" https://explicit.example/v1 ".to_string()),
             api_model: Some(" explicit-model ".to_string()),
             api_key_env: OptionalModelOption::Value("EXPLICIT_API_KEY".to_string()),
+            trusted_api_key_file: None,
             extra_headers: Some(headers.clone()),
             light_model: None,
         },
@@ -625,6 +628,7 @@ async fn resume_picker_defers_snapshot_and_credential_validation_until_selection
         &NacConfig::default(),
         picker.lookup_cwd,
         None,
+        ResumeModelOptions::default(),
     )
     .await
     {
@@ -697,6 +701,7 @@ async fn resume_picker_and_selection_perform_no_network() {
         &NacConfig::default(),
         picker.lookup_cwd,
         None,
+        ResumeModelOptions::default(),
     )
     .await
     {
@@ -1317,6 +1322,7 @@ async fn resume_and_delegated_worker_reject_arcee_api_key_env_early() {
         None,
         true,
         None,
+        ResumeModelOptions::default(),
     )
     .await
     {
@@ -1575,6 +1581,7 @@ async fn resume_effort_migration_requires_operation_lease() {
         &NacConfig::default(),
         root.clone(),
         None,
+        ResumeModelOptions::default(),
     )
     .await
     .is_err());
@@ -1592,6 +1599,7 @@ async fn resume_effort_migration_requires_operation_lease() {
         root.clone(),
         None,
         &lease,
+        ResumeModelOptions::default(),
     )
     .await
     .unwrap();
@@ -1637,6 +1645,7 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
                 api_base_url: Some("https://snapshot.example/v1".to_string()),
                 api_model: Some("snapshot-model".to_string()),
                 api_key_env: OptionalModelOption::Value(key_name.to_string()),
+                trusted_api_key_file: None,
                 extra_headers: Some(headers.clone()),
                 light_model: None,
             },

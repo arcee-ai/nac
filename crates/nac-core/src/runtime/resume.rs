@@ -62,6 +62,7 @@ pub async fn build_resume_config(
         Some(&lease),
         true,
         None,
+        ResumeModelOptions::default(),
     )
     .await?;
     record_interrupted_run_recovery(&mut run_config, recovery);
@@ -74,6 +75,7 @@ pub async fn build_resume_config_for_session(
     config: &NacConfig,
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
+    model: ResumeModelOptions,
 ) -> Result<OrchestratorRunConfig> {
     let lease = sessions::SessionOperationLease::try_acquire(&store_path, session_id)?;
     lease.validate(&store_path, session_id)?;
@@ -88,6 +90,7 @@ pub async fn build_resume_config_for_session(
         Some(&lease),
         true,
         None,
+        model,
     )
     .await?;
     record_interrupted_run_recovery(&mut run_config, recovery);
@@ -100,6 +103,7 @@ pub async fn build_resume_config_for_session_attachment(
     config: &NacConfig,
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
+    model: ResumeModelOptions,
 ) -> Result<(
     OrchestratorRunConfig,
     bool,
@@ -121,6 +125,7 @@ pub async fn build_resume_config_for_session_attachment(
             None,
             true,
             Some(metadata),
+            model.clone(),
         )
         .await?;
         return Ok((run_config, true, None));
@@ -140,6 +145,7 @@ pub async fn build_resume_config_for_session_attachment(
                 Some(&lease),
                 true,
                 None,
+                model.clone(),
             )
             .await?;
             record_interrupted_run_recovery(&mut run_config, recovery);
@@ -155,6 +161,7 @@ pub async fn build_resume_config_for_session_attachment(
                 None,
                 false,
                 Some(metadata),
+                model,
             )
             .await?;
             Ok((run_config, false, None))
@@ -170,6 +177,7 @@ pub async fn build_resume_config_for_session_with_lease(
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
     operation_lease: &sessions::SessionOperationLease,
+    model: ResumeModelOptions,
 ) -> Result<OrchestratorRunConfig> {
     operation_lease.validate(&store_path, session_id)?;
     let recovery = store::reconcile_active_run(&store_path, session_id)?;
@@ -183,6 +191,7 @@ pub async fn build_resume_config_for_session_with_lease(
         Some(operation_lease),
         true,
         None,
+        model,
     )
     .await?;
     record_interrupted_run_recovery(&mut run_config, recovery);
@@ -202,6 +211,7 @@ pub(super) async fn build_resume_config_from_snapshot(
     operation_lease: Option<&sessions::SessionOperationLease>,
     persist_recovery: bool,
     resolved_metadata: Option<ModelMetadata>,
+    model: ResumeModelOptions,
 ) -> Result<OrchestratorRunConfig> {
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     let agent_mode = match snapshot.behavior {
@@ -247,6 +257,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         snapshot.extra_headers.clone(),
         metadata,
     )
+    .and_then(|settings| settings.with_trusted_api_key_file(model.trusted_api_key_file))
     .map_err(|error| {
         anyhow::anyhow!(
             "stored session model settings are invalid; settings repair required: {error}"
