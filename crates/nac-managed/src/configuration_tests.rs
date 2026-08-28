@@ -31,6 +31,8 @@ fn valid_config(root: &Path) -> ManagedHostConfig {
         state_root: root.join("state"),
         home_root: root.join("home"),
         github_client_id: "Iv1.example".to_string(),
+        model_backend: "arcee-api".to_string(),
+        model_id: "trinity-large-thinking".to_string(),
         model_endpoint: "https://models.example.test/v1".to_string(),
         model_credential_file: root.join("model-token"),
         model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
@@ -49,7 +51,7 @@ fn managed_configuration_is_strict_and_structurally_validated() {
     std::fs::write(
         &path,
         format!(
-            "version = 1\nlogical_host_id = \"host-123\"\nowner = \"owner@example.test\"\npublic_hostname = \"nac.example.test\"\nrepository_root = \"{0}/repositories\"\nstate_root = \"{0}/state\"\nhome_root = \"{0}/home\"\ngithub_client_id = \"Iv1.example\"\nmodel_endpoint = \"https://models.example.test/v1\"\nmodel_credential_file = \"{0}/model-token\"\nmodel_credential_environment_names = [\"ARCEE_API_KEY\"]\n",
+            "version = 1\nlogical_host_id = \"host-123\"\nowner = \"owner@example.test\"\npublic_hostname = \"nac.example.test\"\nrepository_root = \"{0}/repositories\"\nstate_root = \"{0}/state\"\nhome_root = \"{0}/home\"\ngithub_client_id = \"Iv1.example\"\nmodel_backend = \"arcee-api\"\nmodel_id = \"trinity-large-thinking\"\nmodel_endpoint = \"https://models.example.test/v1\"\nmodel_credential_file = \"{0}/model-token\"\nmodel_credential_environment_names = [\"ARCEE_API_KEY\"]\n",
             root.0.display()
         ),
     )

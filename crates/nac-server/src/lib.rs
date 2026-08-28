@@ -306,6 +306,7 @@ struct SessionManagerInner {
     store_path: PathBuf,
     worker_executable: PathBuf,
     managed_host: Option<nac_managed::ManagedHostConfig>,
+    managed_model: Option<application::managed::ManagedModelProfile>,
     managed_clones: Option<nac_managed::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
@@ -464,6 +465,12 @@ impl SessionManager {
             .transpose()?
             .unwrap_or(std::env::current_exe().context("failed to resolve current executable")?);
 
+        let managed_model = options
+            .managed_host
+            .as_ref()
+            .map(application::managed::ManagedModelProfile::from_config)
+            .transpose()?;
+
         let managed_clones = options
             .managed_host
             .as_ref()
@@ -485,6 +492,7 @@ impl SessionManager {
                 store_path: store_path.clone(),
                 worker_executable,
                 managed_host: options.managed_host,
+                managed_model,
                 managed_clones,
                 active_sessions: RwLock::new(HashMap::new()),
 
@@ -522,6 +530,10 @@ impl SessionManager {
 
     pub fn managed_host(&self) -> Option<&nac_managed::ManagedHostConfig> {
         self.inner.managed_host.as_ref()
+    }
+
+    pub(crate) fn managed_model(&self) -> Option<&application::managed::ManagedModelProfile> {
+        self.inner.managed_model.as_ref()
     }
 
     fn attach_managed_command_environment(
@@ -584,6 +596,10 @@ impl SessionManager {
         &self,
     ) -> application::model_configurations::ModelConfigurationApplication<'_> {
         application::model_configurations::ModelConfigurationApplication::new(self)
+    }
+
+    pub(crate) fn model_catalog(&self) -> application::model_catalog::ModelCatalogApplication<'_> {
+        application::model_catalog::ModelCatalogApplication::new(self)
     }
 
     pub(crate) fn ssh_configurations(

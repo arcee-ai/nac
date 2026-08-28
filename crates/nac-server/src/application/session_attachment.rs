@@ -20,6 +20,18 @@ pub(crate) struct SessionAttachmentApplication<'a> {
 }
 
 impl<'a> SessionAttachmentApplication<'a> {
+    fn resume_model_options(&self, session_id: &str) -> Result<runtime::ResumeModelOptions> {
+        let Some(profile) = self.manager.managed_model() else {
+            return Ok(runtime::ResumeModelOptions::default());
+        };
+        let snapshot = sessions::load_session(&self.manager.inner.store_path, session_id)?;
+        Ok(if profile.matches_session(&snapshot) {
+            profile.resume_options()
+        } else {
+            runtime::ResumeModelOptions::default()
+        })
+    }
+
     pub(crate) fn new(manager: &'a SessionManager) -> Self {
         Self { manager }
     }
@@ -317,6 +329,7 @@ impl<'a> SessionAttachmentApplication<'a> {
             &summary.cwd
         };
         let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
+        let model = self.resume_model_options(session_id)?;
         let mut run_config = if let Some(operation_lease) = operation_lease {
             runtime::build_resume_config_for_session_with_lease(
                 self.manager.inner.store_path.clone(),
@@ -325,7 +338,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 self.manager.inner.root_cwd.clone(),
                 Some(self.manager.inner.worker_executable.clone()),
                 operation_lease,
-                runtime::ResumeModelOptions::default(),
+                model.clone(),
             )
             .await?
         } else {
@@ -335,7 +348,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 &config,
                 self.manager.inner.root_cwd.clone(),
                 Some(self.manager.inner.worker_executable.clone()),
-                runtime::ResumeModelOptions::default(),
+                model,
             )
             .await?
         };
@@ -386,6 +399,7 @@ impl<'a> SessionAttachmentApplication<'a> {
             &summary.cwd
         };
         let config = NacConfig::load_without_model_from_cwd(config_cwd)?;
+        let model = self.resume_model_options(session_id)?;
         let (mut run_config, cacheable, operation_lease) =
             runtime::build_resume_config_for_session_attachment(
                 self.manager.inner.store_path.clone(),
@@ -393,7 +407,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 &config,
                 self.manager.inner.root_cwd.clone(),
                 Some(self.manager.inner.worker_executable.clone()),
-                runtime::ResumeModelOptions::default(),
+                model,
             )
             .await?;
         self.manager

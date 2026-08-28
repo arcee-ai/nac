@@ -887,8 +887,8 @@ async fn launch_model_defaults_handler(
     tag = "models",
     responses((status = 200, description = "Success", body = ModelListing, content_type = "application/json"))
 )]
-async fn models_handler() -> Json<ModelListing> {
-    Json(nac_core::model::api_listing())
+async fn models_handler(State(manager): State<SessionManager>) -> Json<ModelListing> {
+    Json(manager.model_catalog().listing())
 }
 
 #[utoipa::path(

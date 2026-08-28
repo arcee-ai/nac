@@ -23,6 +23,28 @@ use crate::{
 
 use super::Field;
 
+fn apply_managed_model_defaults(
+    request: &mut SessionCreationCommand,
+    profile: Option<&super::managed::ManagedModelProfile>,
+) {
+    let Some(profile) = profile else {
+        return;
+    };
+    let identity_omitted = matches!(request.model, Field::Unchanged)
+        && matches!(request.base_url, Field::Unchanged)
+        && matches!(request.backend, Field::Unchanged)
+        && matches!(request.api_key_env, Field::Unchanged);
+    if !identity_omitted {
+        return;
+    }
+    request.model = Field::Set(profile.model_id.clone());
+    request.base_url = Field::Set(profile.endpoint.clone());
+    request.backend = Field::Set(profile.backend.as_str().to_string());
+    // Explicit absence suppresses conventional environment auto-selection;
+    // the trusted mounted file is attached after request parsing.
+    request.api_key_env = Field::Clear;
+}
+
 fn project_location_conflicts(request: &SessionCreationCommand) -> bool {
     request
         .cwd
@@ -278,6 +300,7 @@ impl<'a> SessionCreationApplication<'a> {
                 "invalid request: ssh_host and sandbox options cannot both be set"
             ));
         }
+        apply_managed_model_defaults(&mut request, self.manager.managed_model());
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
         let orchestrator_compaction_threshold =
             create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
@@ -289,6 +312,15 @@ impl<'a> SessionCreationApplication<'a> {
             request.api_key_env,
             request.extra_headers,
         )?;
+        if let Some(profile) = self.manager.managed_model() {
+            let uses_host_profile = model.backend == Some(profile.backend)
+                && model.api_model.as_deref() == Some(profile.model_id.as_str())
+                && model.api_base_url.as_deref() == Some(profile.endpoint.as_str())
+                && matches!(model.api_key_env, OptionalModelOption::Clear);
+            if uses_host_profile {
+                model.trusted_api_key_file = Some(profile.credential_file.clone());
+            }
+        }
         model.light_model = match request.light_model {
             Field::Unchanged | Field::Clear => None,
             Field::Set(light) => {

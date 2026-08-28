@@ -1,8 +1,62 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use nac_contracts::{NewProject, ProjectRecord};
+use nac_core::{
+    model::{provider_uses_api_key, BackendKind},
+    runtime::ResumeModelOptions,
+    sessions::SessionSnapshot,
+};
 use nac_managed::{HostSecretStore, HostSecretSummary, ManagedHostConfig, ProjectRegistrar};
+
+/// Core-facing interpretation of the nonsecret managed model contract.
+///
+/// `nac-managed` deliberately owns only provider-neutral configuration. The
+/// composition layer resolves that identifier into the harness model taxonomy
+/// and rejects profiles that cannot consume an API-key credential.
+#[derive(Clone, Debug)]
+pub(crate) struct ManagedModelProfile {
+    pub(crate) backend: BackendKind,
+    pub(crate) model_id: String,
+    pub(crate) endpoint: String,
+    pub(crate) credential_file: PathBuf,
+}
+
+impl ManagedModelProfile {
+    pub(crate) fn from_config(config: &ManagedHostConfig) -> Result<Self> {
+        let backend = config
+            .model_backend
+            .parse::<BackendKind>()
+            .map_err(anyhow::Error::msg)
+            .with_context(|| {
+                format!(
+                    "managed model_backend '{}' is not supported by this NAC build",
+                    config.model_backend
+                )
+            })?;
+        if !provider_uses_api_key(backend) {
+            bail!("managed model_backend '{backend}' must use an API-key credential");
+        }
+        Ok(Self {
+            backend,
+            model_id: config.model_id.clone(),
+            endpoint: config.model_endpoint.clone(),
+            credential_file: config.model_credential_file.clone(),
+        })
+    }
+
+    pub(crate) fn matches_session(&self, snapshot: &SessionSnapshot) -> bool {
+        snapshot.backend == self.backend
+            && snapshot.base_url == self.endpoint
+            && snapshot.api_key_env.is_none()
+    }
+
+    pub(crate) fn resume_options(&self) -> ResumeModelOptions {
+        ResumeModelOptions {
+            trusted_api_key_file: Some(self.credential_file.clone()),
+        }
+    }
+}
 
 /// SQLite-backed adapter for the managed clone workflow's project port.
 #[derive(Clone)]

@@ -1067,3 +1067,55 @@ post-review note says otherwise:
 Commit this final generated-contract repair and acceptance handoff with exact-
 path staging. No implementation, verification, or review work remains after
 that commit.
+
+## Post-candidate managed model contract integration
+
+After the original acceptance candidate, the human merged
+`67c5655 feat(managed): bootstrap host model credentials` onto the historical
+`90dd3c9` baseline and requested that its behavior be incorporated here. A
+blind merge would have restored retired owners (`nac-core::managed`, the
+monolithic runtime/server, handwritten frontend DTOs, and generic managed UI),
+so this worktree treats the side commit as a behavior contract and ports it
+through the current dependency graph.
+
+### Implemented slices
+
+- `52ea611 feat(core): support mounted model credentials` introduces one
+  provider-neutral trusted credential source. The shared credential adapter
+  rejects symlinks, nonregular/oversized/non-UTF-8 files, and access for other
+  users based on the opened descriptor. Model construction permits the source
+  only for API-key providers; direct/resume/worker builders carry only the
+  path, and the hidden worker flag never carries secret bytes.
+- The pending managed application slice keeps strict host configuration and
+  readiness in independent `nac-managed`, resolves the backend at server
+  composition, applies omitted launch defaults in session creation, restores
+  the source during matching resume, projects `/models` and
+  `/managed/status` through focused application/delivery owners, derives the
+  frontend schema from OpenAPI, and keeps managed model state under the
+  frontend feature. The image owns a distinct read-only credential mount.
+
+No persistence schema, public session vocabulary, ordinary host default, MCP
+shape, permission decision, backend-selection rule, or managed topology was
+changed. The new managed TOML fields and status object are the exact additive
+contract introduced by `67c5655`; unmanaged composition remains inert.
+
+### Integration verification before commit
+
+- workspace all-target/all-feature check, `make format-check`, `make lint`,
+  `make test-source-size`, `make test-api-contract`, and
+  `make test-managed-image-contract` pass;
+- all 13 credential-store tests, 1,158 core library tests (nine ignored), all
+  19 managed tests, and the focused managed server create/resume/catalog/status
+  regression pass;
+- frontend typecheck/lint, the focused managed-profile model test, all 178
+  frontend tests, the generated production build, and all 14
+  production-embedded Playwright journeys pass.
+
+### Exact next action
+
+Commit the managed application/UI/image slice with exact-path staging and the
+current generated contract/assets, leaving `.gitignore`, `progress.md`, the
+local goal-prompt skill, `demo_review.md`, and `manual_todo.md` untouched. Then
+run the complete immutable-candidate acceptance gates, the available live
+managed image smoke, a bounded browser smoke of the new managed model surface,
+and the already-authorized final dependency/safety/contract review.

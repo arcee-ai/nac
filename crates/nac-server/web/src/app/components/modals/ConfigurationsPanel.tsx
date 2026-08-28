@@ -24,6 +24,8 @@ import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { type Source, SourceMenu } from "@/app/components/modals/SourceMenu";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
+import { ManagedModelCredentialStatus } from "@/app/features/managed/presentation/ManagedModelCredentialStatus";
 import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
 import { KEY_DEBOUNCE_MS, modelItems, type Validation } from "@/app/lib/apiKey";
 import { type CatalogPick, defaultCatalogPick } from "@/app/lib/catalog";
@@ -120,6 +122,7 @@ export function ConfigurationsPanel({
   children?: React.ReactNode;
 }) {
   const toast = useToast();
+  const managedModel = useManagedModelProfile();
   const { data: saved } = useModelConfigs();
   const catalog = useModelCatalog();
   const deleteConfig = useDeleteModelConfig();
@@ -176,8 +179,11 @@ export function ConfigurationsPanel({
   // that opens — a single click. Derived, so the default settles once the catalog
   // arrives and disappears again the moment another source is chosen.
   const catalogDefault = useMemo(
-    () => (source.kind === "catalog" ? defaultCatalogPick(catalog.data) : null),
-    [source.kind, catalog.data],
+    () =>
+      source.kind === "catalog"
+        ? (managedModel.defaultPick ?? defaultCatalogPick(catalog.data))
+        : null,
+    [source.kind, catalog.data, managedModel.defaultPick],
   );
   const catalogPick = pickedModel ?? catalogDefault;
 
@@ -217,16 +223,25 @@ export function ConfigurationsPanel({
   const { signedIn } = useManagedSignIn(backend);
 
   const catalogProvider = catalog.data?.providers.find((entry) => entry.id === backend) ?? null;
+  const managedCatalogProfile = source.kind === "catalog" && managedModel.matches(catalogPick);
   /**
    * Whether the server can already authenticate as the picked provider. A
    * managed one answers from the live sign-in rather than the catalog snapshot,
    * which still reads `no_credential` for the seconds after a login lands.
    */
-  const catalogCredential = needsKey ? catalogProvider?.auth_status === "ready" : signedIn;
+  const catalogCredential = managedCatalogProfile
+    ? managedModel.credentialReady
+    : needsKey
+      ? catalogProvider?.auth_status === "ready"
+      : signedIn;
   // Only an API-key provider can be fixed from here; a managed one needs its
   // browser login, which the sign-in callout below the box owns.
   const catalogNeedsKey =
-    source.kind === "catalog" && Boolean(catalogPick) && needsKey && !catalogCredential;
+    source.kind === "catalog" &&
+    Boolean(catalogPick) &&
+    needsKey &&
+    !managedCatalogProfile &&
+    !catalogCredential;
 
   const validates = (source.kind === "new" && discovers) || catalogNeedsKey;
   const keyQuery = useProviderModels(backend, debouncedKey, null, validates);
@@ -326,6 +341,7 @@ export function ConfigurationsPanel({
 
     if (source.kind === "catalog") {
       if (!catalogPick || !catalogPick.baseUrl) return null;
+      if (managedCatalogProfile && !catalogCredential) return null;
       if (catalogCredential) {
         // The credential is already on the server, so nothing is saved and
         // `api_key_env` stays unset for session resolution to fill in with the
@@ -422,6 +438,7 @@ export function ConfigurationsPanel({
     preservesInitial,
     catalogPick,
     catalogCredential,
+    managedCatalogProfile,
     catalogProvider,
     name,
     apiKey,
@@ -602,7 +619,9 @@ export function ConfigurationsPanel({
                   {needsKey ? (
                     <>
                       <Separator />
-                      {catalogCredential ? (
+                      {managedCatalogProfile ? (
+                        <ManagedModelCredentialStatus ready={catalogCredential} />
+                      ) : catalogCredential ? (
                         <ConfigRow
                           label="Credential"
                           verticalOnMobile

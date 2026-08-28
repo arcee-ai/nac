@@ -65,11 +65,20 @@ pub(crate) struct ManagedHostStatusResponse {
     #[schema(value_type = String)]
     repository_root: PathBuf,
     model_ready: bool,
+    model: ManagedModelStatus,
     github_status: &'static str,
     secret_count: usize,
     project_count: usize,
     session_count: usize,
     checks: Vec<ReadinessCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub(crate) struct ManagedModelStatus {
+    backend: nac_core::model::BackendKind,
+    id: String,
+    endpoint: String,
+    display_name: &'static str,
 }
 
 #[utoipa::path(
@@ -175,6 +184,9 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
     let managed = manager
         .managed_host()
         .ok_or_else(|| anyhow::anyhow!("Managed NAC is not configured"))?;
+    let model = manager
+        .managed_model()
+        .ok_or_else(|| anyhow::anyhow!("managed model profile is unavailable"))?;
     let checks = readiness_checks(
         manager,
         MANAGED_RUNTIME_UID,
@@ -203,6 +215,12 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         public_hostname: managed.public_hostname.clone(),
         repository_root: managed.repository_root.clone(),
         model_ready,
+        model: ManagedModelStatus {
+            backend: model.backend,
+            id: model.model_id.clone(),
+            endpoint: model.endpoint.clone(),
+            display_name: "Managed Arcee",
+        },
         github_status,
         secret_count,
         project_count,
