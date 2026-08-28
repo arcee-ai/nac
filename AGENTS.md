@@ -112,6 +112,7 @@ make crate-test CRATE=nac-core
 make format-check
 make lint
 make test
+make test-source-size
 make ci
 make test-durability
 make test-assets
@@ -142,8 +143,14 @@ container infrastructure as an explicit coverage gap, not a passing result.
 - Preserve unrelated dirty worktree state. Stage exact paths, inspect staged
   and unstaged diffs, and avoid destructive Git operations.
 - Keep production modules around 500 lines where ownership permits. A cohesive
-  module over 800 lines needs an ownership explanation in its nearest guide;
-  do not game the target with empty wrappers or one-call fragments.
+  module over 800 lines needs an ownership explanation in its nearest guide.
+  Every tracked human-authored source/configuration/guide file must remain at
+  or below 2,000 physical lines (`make test-source-size`). A rare cohesive
+  exception may be at most 3,000 lines and must name its durable ownership
+  reason in the guard; the current repository has no exceptions. Machine-owned
+  generated artifacts and lockfiles use their existing single-writer/drift
+  checks instead. Do not game either target with empty wrappers, numbered
+  fragments, include-only shards, or one-call indirection.
 - Put tests next to their owner, using sibling test modules when inline tests
   obscure production responsibilities.
 - Backward-compatible migrations only unless an explicit decision authorizes a

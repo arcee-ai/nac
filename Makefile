@@ -1,4 +1,4 @@
-.PHONY: all build dev demo release install ci test test-rust test-web generate-api-contract test-api-contract test-assets test-e2e test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all build dev demo release install ci test test-rust test-web test-source-size generate-api-contract test-api-contract test-assets test-e2e test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -72,8 +72,8 @@ install:
 ## Run portable formatting, lint, unit, and asset gates (release CI also runs test-e2e)
 ci: format-check lint test
 
-## Run workspace Rust tests, frontend tests, and web asset checks
-test: test-rust test-web test-assets test-managed-image-contract
+## Run workspace Rust tests, frontend tests, source-size, and web asset checks
+test: test-source-size test-rust test-web test-assets test-managed-image-contract
 
 test-rust:
 	$(CARGO) test --workspace --locked
@@ -81,6 +81,10 @@ test-rust:
 ## Run frontend unit and component tests
 test-web:
 	npm --prefix $(WEB_DIR) test
+
+## Keep tracked human-authored files within the agent-context budget
+test-source-size:
+	bash scripts/check-source-size.sh
 
 ## Regenerate the checked-in OpenAPI document and frontend schema types
 generate-api-contract:
@@ -144,8 +148,8 @@ managed-image:
 test-managed-image:
 	MANAGED_IMAGE="$(MANAGED_IMAGE)" sh scripts/smoke-managed-image.sh
 
-## Type-check the workspace without producing binaries
-check:
+## Check source ownership size and type-check without producing binaries
+check: test-source-size
 	$(CARGO) check --workspace --locked
 
 ## Lint frontend and production Rust targets
@@ -203,6 +207,7 @@ help:
 		'  test         Run Rust/frontend tests and web asset checks' \
 		'  test-rust    Run cargo test --workspace --locked' \
 		'  test-web     Run frontend unit and component tests' \
+		'  test-source-size Enforce the 2,000-line human-source ceiling' \
 		'  test-assets  Lint, typecheck and rebuild the web app' \
 		'  test-e2e     Run production-embedded Playwright tests' \
 		'  test-durability Run focused lifecycle/crash-window regressions' \

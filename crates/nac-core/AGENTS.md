@@ -24,7 +24,8 @@ It must not own HTTP/React delivery or managed-host product onboarding.
 
 ## Starting points
 
-- `src/agent/` — model loop, prompts, compaction, message/tool boundaries.
+- `src/agent/` — model loop, prompt rendering, compaction, transcript state,
+  repeated tool-failure policy, and message/tool boundaries.
 - `src/runtime/` — configuration/model resolution and direct/orchestrator/
   worker/resume/backend construction.
 - `src/session_service/AGENTS.md` — run admission through durable settlement.
@@ -40,9 +41,10 @@ The following production owners deliberately exceed 800 lines. Keep their
 listed responsibility closed; a new concern requires a real submodule/port:
 
 - `agent/mod.rs` owns the model/tool turn state machine, prompt commit boundary,
-  failure-loop control, usage/event settlement, and compaction handoff.
-  Compaction algorithms, prompt text, previews, and tests already live beside
-  it; do not add session persistence or delivery mapping to the loop.
+  usage/event settlement, and compaction handoff. Prompt rendering,
+  repeated-failure identity, transcript preparation, compaction algorithms,
+  previews, and tests live beside it; do not return those policies or add
+  session persistence/delivery mapping to the loop.
 - `events.rs` owns the typed agent/session event vocabulary plus the bounded
   replay/stream bus and durable thread-event bridge. Do not add React/SSE
   formatting; delivery serializes these contracts.
