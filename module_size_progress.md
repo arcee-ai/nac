@@ -93,7 +93,7 @@ existing writers and drift checks remain authoritative.
 - Inline-test extraction: complete, pending commit.
 - Dedicated-suite decomposition: complete.
 - Agent production extraction: complete.
-- Automated enforcement and navigation: pending.
+- Automated enforcement and navigation: complete, pending commit.
 - Full acceptance: pending.
 
 ## Decisions and next action
@@ -214,3 +214,28 @@ ignored), all ten traditional-child/store prompt tests pass, and warning-denied
 
 Next: commit the agent ownership seam, add the deterministic tracked
 human-source size guard, and update durable navigation with the exact policy.
+
+### Automated ownership budget
+
+`scripts/check-source-size.sh` scans NUL-delimited tracked paths and counts
+physical lines in human-authored Rust/TypeScript/JavaScript, styles, scripts,
+configuration, data, markup, and Markdown. It excludes only named machine
+writers: Cargo/npm locks, OpenAPI/generated TypeScript, embedded production
+assets, the generated model catalog, and the catalog generator's upstream
+fixture. Those artifacts remain covered by their existing single-writer and
+drift gates.
+
+The default and current ceiling is 2,000 lines. The guard has an explicit
+reason-bearing exception structure capped at 3,000, but its exception list is
+empty. It checks 805 currently tracked human-source files and passes. `make
+test-source-size` is part of both `make test`/`make ci` and `make check`; the root
+guide documents the policy and rejects arbitrary fragmentation. The core guide
+now directs prompt rendering, failure identity, and transcript preparation to
+their new agent owners.
+
+`bash -n scripts/check-source-size.sh`, `make test-source-size`, `make check`,
+and `make format-check` pass.
+
+Next: commit the guard/navigation boundary, run the complete acceptance matrix,
+then record final counts, generated state, commits, compatibility, and any
+infrastructure gap.
