@@ -136,7 +136,10 @@ impl ProcessTreeGuard {
             let root_pid = child.id().map(|pid| pid as libc::pid_t);
             #[cfg(target_os = "linux")]
             let root_start_time = root_pid.and_then(process_start_time);
-            #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+            #[cfg_attr(
+                not(target_os = "macos"),
+                allow(unused_mut, reason = "only macOS starts the descendant census")
+            )]
             let mut guard = Self {
                 root_pid,
                 #[cfg(target_os = "linux")]
@@ -520,6 +523,9 @@ fn signal_env_tagged(key: &str, value: &str, signal: libc::c_int) {
         if pid == self_pid() {
             continue;
         }
+        // SAFETY: `pid` is an integer process identifier read from `/proc` and
+        // `signal` is passed through to the OS; `kill` has no pointer or memory
+        // validity preconditions. Failure is intentionally best-effort here.
         unsafe {
             libc::kill(pid, signal);
         }
@@ -971,18 +977,16 @@ impl CapturedDescendants {
     fn signal_best_effort(&mut self, signal: libc::c_int) {
         self.processes
             .retain(|process| match process.send_signal(signal) {
-                Ok(()) => true,
                 Err(error) if error.raw_os_error() == Some(libc::ESRCH) => false,
-                Err(_) => true,
+                Ok(()) | Err(_) => true,
             });
     }
 
     fn all_exited(&mut self) -> bool {
         self.processes
             .retain(|process| match process.send_signal(0) {
-                Ok(()) => true,
                 Err(error) if error.raw_os_error() == Some(libc::ESRCH) => false,
-                Err(_) => true,
+                Ok(()) | Err(_) => true,
             });
         self.processes.is_empty() && self.failures.count == 0
     }

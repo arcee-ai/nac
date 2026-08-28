@@ -443,8 +443,11 @@ fn exchange_paths(left: &Path, right: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
     // SAFETY: both paths are live NUL-terminated C strings and `AT_FDCWD`
     // makes them relative to the process cwd; `RENAME_EXCHANGE` is valid here.
+    // Calling the kernel entry point keeps this available on musl, whose libc
+    // bindings do not expose a `renameat2` wrapper.
     let result = unsafe {
-        libc::renameat2(
+        libc::syscall(
+            libc::SYS_renameat2,
             libc::AT_FDCWD,
             left.as_ptr(),
             libc::AT_FDCWD,
