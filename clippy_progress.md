@@ -213,3 +213,56 @@ workspace test target.
 Next: commit this exact lint boundary, then run the final repository acceptance
 suite, audit the resulting policy and commit range, and record the final clean
 handoff in one verification commit.
+
+## Final acceptance
+
+Status: complete. NAC now carries 17 additional focused Clippy lints, each
+introduced through an isolated autofix, repair, verification, and commit
+boundary. The policy remains curated rather than enabling whole lint groups;
+production `unwrap`/`expect` paths, undocumented unsafe blocks, unexplained
+suppressions, nondeterministic hash iteration, non-Send futures, ownership
+noise, and the selected allocation/control-flow issues are all hard-gated by
+`make lint`.
+
+Lint-boundary commits, oldest first:
+
+1. `ab68ca7` — `uninlined_format_args`
+2. `5bcf27c` — `redundant_closure_for_method_calls`
+3. `98b3761` — `clone_on_ref_ptr`
+4. `244ef01` — `redundant_clone`
+5. `2c0c55f` — `semicolon_if_nothing_returned`
+6. `145ae19` — `match_same_arms`
+7. `0d68e93` — `needless_collect`
+8. `76977b6` — `unused_async`
+9. `ef476db` — `significant_drop_in_scrutinee`
+10. `d9775b8` — `trivially_copy_pass_by_ref`
+11. `97e14c3` — `missing_assert_message`
+12. `4e39682` — `undocumented_unsafe_blocks`
+13. `80ce5ed` — `iter_over_hash_type`
+14. `747aabe` — `unwrap_used`
+15. `ae0be82` — `expect_used`
+16. `99c224b` — `allow_attributes_without_reason`
+17. `7abee71` — `future_not_send`
+
+Final candidate evidence:
+
+- `make ci`: passed, including formatting, frontend/Rust lint, 1,157 core
+  tests (nine ignored), 148 server library tests, 23 server binary tests, all
+  other Rust workspace tests, 178 frontend tests, OpenAPI/type drift checks,
+  production asset rebuild/drift check, and managed-image contract checks.
+- `make check`: passed for the locked workspace.
+- `make test-durability`: all ten focused crash-window, cancellation,
+  relationship, lease, and managed-binding regressions passed.
+- `make test-e2e`: all 14 production-embedded ordinary and managed browser
+  journeys passed.
+- `make test-managed-image`: Docker 29.7.2 built the locked Linux/amd64 release
+  image and the readiness/restart/shutdown smoke passed. Host/image architecture
+  mismatch warnings were expected under Docker Desktop emulation.
+- Generated OpenAPI, TypeScript types, and committed web assets remained
+  current; no generated diff was produced.
+
+Protected pre-existing `.gitignore`, `progress.md`, goal-prompt skill,
+`demo_review.md`, and `manual_todo.md` state remains unstaged and unchanged by
+this goal. No user-visible API, persistence, session-topology, or configuration
+contract was intentionally changed; panic-prone internal failures were either
+made explicit errors or retained only as reasoned invariant assertions.

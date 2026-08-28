@@ -29,12 +29,12 @@ unused_lifetimes = "warn"
 
 [workspace.lints.clippy]
 # Keep this list high-signal and warning-free so `make lint` remains a hard gate.
-# Pedantic/nursery and panic-style lints can be enabled incrementally as their
-# existing backlog is paid down.
+# Broad groups and preference-heavy restrictions remain opt-in; add focused
+# lints incrementally with a clean boundary and repository-level evidence.
+allow_attributes_without_reason = "warn"
 dbg_macro = "warn"
 clone_on_ref_ptr = "warn"
 expect_used = "warn"
-allow_attributes_without_reason = "warn"
 future_not_send = "warn"
 iter_over_hash_type = "warn"
 match_same_arms = "warn"
