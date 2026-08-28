@@ -83,14 +83,15 @@ pub(crate) fn insert_session_fork_with_connection(
 /// session: threads, episodes, live thread events, steering, worksets, and
 /// workspace revisions.
 ///
-/// The fork's transcript blob already holds the prefix, so orchestrator
-/// transcript-log rows are not copied. A prefix that is the whole source
-/// transcript copies every current artifact. A shorter prefix keeps only
-/// threads and worksets mentioned in those messages. History is cut at the
-/// last transcript-log timestamp in the prefix (or, without a log, at as
-/// many thread dispatches as that prefix recorded). Steering is copied by
-/// that same cutoff, not by tool-call ids — worker dispatch ids are a
-/// different UUID.
+/// The fork writes the system head as its snapshot blob and the rest of
+/// `prefix` as new transcript-log rows, so source orchestrator log rows are
+/// not copied — their `idx` values belong to the source blob length. A
+/// prefix that is the whole source transcript copies every current artifact.
+/// A shorter prefix keeps only threads and worksets mentioned in those
+/// messages. History is cut at the last transcript-log timestamp in the
+/// prefix (or, without a log, at as many thread dispatches as that prefix
+/// recorded). Steering is copied by that same cutoff, not by tool-call ids
+/// — worker dispatch ids are a different UUID.
 pub fn clone_session_conversation_artifacts(
     path: &Path,
     source_session_id: &str,

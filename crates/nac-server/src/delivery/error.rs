@@ -237,7 +237,10 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("unknown host")
         {
             StatusCode::NOT_FOUND
-        } else if message.contains("busy")
+        } else if nac_core::store::is_sqlite_busy(&error)
+            || message.contains("database is locked")
+            || message.contains("timed out waiting for SQLite connection capacity")
+            || message.contains("busy")
             || message.contains("uncommitted changes")
             || message.contains("no active run")
             || message.contains("not active")

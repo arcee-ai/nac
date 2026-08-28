@@ -77,8 +77,12 @@ pub(super) fn deserialize_light_model(
 }
 
 pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
+    crate::store::retry_busy(|| create_session_once(path, snapshot))
+}
+
+fn create_session_once(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
     insert_new_session_in_transaction(&tx, path, snapshot)?;
     tx.commit()?;

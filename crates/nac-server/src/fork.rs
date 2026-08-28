@@ -2,7 +2,9 @@
 //!
 //! The fork copies the transcript through the named assistant turn (and any
 //! trailing tool results) and keeps the same workspace, model, and project.
-//! It does not clone a sandbox worktree — that is a git checkout, not a chat.
+//! Inherited messages after the system head go into the transcript log
+//! (never-fold), so revert and resend work on the copied conversation. It
+//! does not clone a sandbox worktree — that is a git checkout, not a chat.
 //! Billed usage stays with the source: copying it would double-count the same
 //! spend in the project rollup. The fork starts at zero cost and keeps only
 //! the last context-window gauge so the inherited transcript still reads as
@@ -167,8 +169,8 @@ impl SessionManager {
             .map_err(|error| report_failure(session_id, "read the transcript", &error))?;
         let end = fork_end_index(&messages, message_idx)?;
         let prefix = messages[..=end].to_vec();
-        // Live merged length, not `messages_json`: the blob is write-once and
-        // the log tail is what `prefix` was sliced from.
+        // Live merged length, not `messages_json`: the source blob is
+        // write-once and the log tail is what `prefix` was sliced from.
         let source_transcript_len = messages.len();
 
         let store_path = self.inner.store_path.clone();
@@ -236,6 +238,9 @@ fn persist_fork(
         .filter(|message| is_visible_response(message))
         .count();
     let source_behavior = source.behavior;
+    // Never-fold: the blob is the system head; the copied conversation is
+    // this session's transcript log, so revert/resend can target it.
+    let blob_len = leading_system_len(&prefix);
     let mut fork = sessions::new_snapshot(
         fork_id.to_string(),
         source.cwd,
@@ -245,7 +250,7 @@ fn persist_fork(
         source.reasoning_effort,
         source.sandbox_spec,
         source.ssh,
-        prefix,
+        prefix[..blob_len].to_vec(),
         source.api_key_env,
         source.extra_headers,
     );
@@ -302,7 +307,7 @@ fn persist_fork(
         store_path,
         source_id,
         fork_id,
-        &fork.messages,
+        &prefix,
         source_transcript_len,
         message_idx,
         &source_name,
@@ -331,6 +336,12 @@ fn finish_persisted_fork(
     message_idx: usize,
     source_name: &str,
 ) -> Result<(), ForkSessionError> {
+    let blob_len = leading_system_len(prefix);
+    let start_idx = u64::try_from(blob_len)
+        .map_err(|error| report_failure(source_id, "write the forked transcript log", &error))?;
+    store::TranscriptLogWriter::new(store_path)
+        .and_then(|writer| writer.append_batch(fork_id, start_idx, &prefix[blob_len..]))
+        .map_err(|error| report_failure(source_id, "write the forked transcript log", &error))?;
     store::clone_session_conversation_artifacts(
         store_path,
         source_id,
@@ -352,6 +363,13 @@ fn finish_persisted_fork(
     store::insert_session_fork(store_path, source_id, fork_id, message_idx, source_name)
         .map_err(|error| report_failure(source_id, "record the fork link", &error))?;
     Ok(())
+}
+
+fn leading_system_len(messages: &[Message]) -> usize {
+    messages
+        .iter()
+        .take_while(|message| matches!(message, Message::System { .. }))
+        .count()
 }
 
 fn fork_end_index(messages: &[Message], message_idx: usize) -> Result<usize, ForkSessionError> {
@@ -539,7 +557,29 @@ mod tests {
 
         let fork = sessions::load_session(&store_path, "fork").unwrap();
         assert_eq!(fork.behavior, sessions::SessionBehavior::Direct);
-        assert_eq!(fork.messages.len(), messages.len());
+        assert_eq!(fork.messages.len(), 1);
+        assert!(matches!(
+            fork.messages.as_slice(),
+            [Message::System { content }] if content == "direct policy"
+        ));
+        let inherited_tail = store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .read_tail_from("fork", 1)
+            .unwrap();
+        assert_eq!(
+            inherited_tail
+                .iter()
+                .map(|(idx, _)| *idx)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert!(matches!(
+            inherited_tail.as_slice(),
+            [
+                (_, Message::User { content: prompt }),
+                (_, Message::Assistant { content: Some(response), .. })
+            ] if prompt == "change the code" && response == "done"
+        ));
         assert!(fork.unattributed_token_usage.is_none());
         let inherited_context = fork.token_usages.last().unwrap().as_ref().unwrap();
         assert_eq!(inherited_context.orchestrator_context_tokens, 42);
