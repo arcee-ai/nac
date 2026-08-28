@@ -602,6 +602,7 @@ fn resolution_and_validation_paths_never_touch_the_network() {
         BackendKind::AnthropicMessages,
         BackendKind::ArceeAuth,
         BackendKind::ArceeApi,
+        BackendKind::XaiAuth,
     ] {
         let metadata = resolve(provider, "any-model");
         assert_eq!(metadata.provider, provider);

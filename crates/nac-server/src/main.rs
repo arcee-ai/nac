@@ -10,8 +10,8 @@ use anyhow::{anyhow, Context, Result};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use nac_core::{
     model::{
-        run_arcee_auth_action, run_codex_auth_action, ArceeAuthAction, BackendKind,
-        CodexAuthAction, ReasoningEffort,
+        run_arcee_auth_action, run_codex_auth_action, run_xai_auth_action, ArceeAuthAction,
+        BackendKind, CodexAuthAction, ReasoningEffort, XaiAuthAction,
     },
     runtime::{
         self, ManagedWorkerOptions, ModelOptions, OptionalModelOption, SandboxOptions,
@@ -61,6 +61,15 @@ enum RootCommand {
     /// Manage Arcee account credentials
     #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
     ArceeAuth(ArceeAuthCli),
+
+    /// Manage xAI SuperGrok credentials
+    #[command(
+        name = "xai-auth",
+        alias = "grok-auth",
+        version = RELEASE_VERSION,
+        long_version = BUILD_VERSION
+    )]
+    XaiAuth(XaiAuthCli),
 
     /// Download and reinstall the latest nac-web release
     #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
@@ -179,6 +188,22 @@ enum ArceeAuthCommand {
 }
 
 #[derive(Args)]
+struct XaiAuthCli {
+    #[command(subcommand)]
+    command: Option<XaiAuthCommand>,
+}
+
+#[derive(Subcommand)]
+enum XaiAuthCommand {
+    /// Sign in to SuperGrok using device code authorization
+    Login,
+    /// Show stored SuperGrok credential status
+    Status,
+    /// Remove stored SuperGrok credentials
+    Logout,
+}
+
+#[derive(Args)]
 struct UpgradeCli {
     /// Directory containing the nac-web executable to replace.
     ///
@@ -256,6 +281,8 @@ enum BackendArg {
     ArceeAuth,
     #[value(name = "arcee-api")]
     ArceeApi,
+    #[value(name = "xai-auth")]
+    XaiAuth,
 }
 
 impl From<BackendArg> for BackendKind {
@@ -269,6 +296,7 @@ impl From<BackendArg> for BackendKind {
             BackendArg::AnthropicMessages => Self::AnthropicMessages,
             BackendArg::ArceeAuth => Self::ArceeAuth,
             BackendArg::ArceeApi => Self::ArceeApi,
+            BackendArg::XaiAuth => Self::XaiAuth,
         }
     }
 }
@@ -442,6 +470,7 @@ async fn run() -> Result<()> {
         Some(RootCommand::ManagedWorker(worker)) => run_managed_worker(worker).await,
         Some(RootCommand::CodexAuth(auth)) => run_codex_auth_cli(auth).await,
         Some(RootCommand::ArceeAuth(auth)) => run_arcee_auth_cli(auth).await,
+        Some(RootCommand::XaiAuth(auth)) => run_xai_auth_cli(auth).await,
         Some(RootCommand::Upgrade(upgrade)) => run_upgrade_cli(upgrade).await,
     }
 }
@@ -699,6 +728,35 @@ fn codex_auth_action(command: CodexAuthCommand) -> CodexAuthAction {
         CodexAuthCommand::Login => CodexAuthAction::Login,
         CodexAuthCommand::Status => CodexAuthAction::Status,
         CodexAuthCommand::Logout => CodexAuthAction::Logout,
+    }
+}
+
+async fn run_xai_auth_cli(cli: XaiAuthCli) -> Result<()> {
+    match cli.command {
+        Some(command) => {
+            let is_login = matches!(command, XaiAuthCommand::Login);
+            run_xai_auth_action(xai_auth_action(command)).await?;
+            if is_login {
+                println!("Login complete. Run `nac-web` to start the dashboard.");
+            }
+            Ok(())
+        }
+        None => {
+            let mut root = Cli::command();
+            root.find_subcommand_mut("xai-auth")
+                .expect("xai-auth command must exist")
+                .print_help()?;
+            println!();
+            Ok(())
+        }
+    }
+}
+
+fn xai_auth_action(command: XaiAuthCommand) -> XaiAuthAction {
+    match command {
+        XaiAuthCommand::Login => XaiAuthAction::Login,
+        XaiAuthCommand::Status => XaiAuthAction::Status,
+        XaiAuthCommand::Logout => XaiAuthAction::Logout,
     }
 }
 
@@ -1004,6 +1062,20 @@ thread_timeout_secs = 7200
                 command: Some(ArceeAuthCommand::Login)
             }))
         ));
+
+        let cli = Cli::try_parse_from(["nac-web", "xai-auth"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(RootCommand::XaiAuth(XaiAuthCli { command: None }))
+        ));
+
+        let cli = Cli::try_parse_from(["nac-web", "grok-auth", "login"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(RootCommand::XaiAuth(XaiAuthCli {
+                command: Some(XaiAuthCommand::Login)
+            }))
+        ));
     }
 
     #[test]
@@ -1144,6 +1216,8 @@ thread_timeout_secs = 7200
             &["nac-web", "codex-auth", "--no-open"],
             &["nac-web", "--no-open", "arcee-auth"],
             &["nac-web", "arcee-auth", "--no-open"],
+            &["nac-web", "--no-open", "xai-auth"],
+            &["nac-web", "xai-auth", "--no-open"],
             &["nac-web", "--no-open", "upgrade"],
             &["nac-web", "upgrade", "--no-open"],
             &["nac-web", "--no-open", "__worker"],
@@ -1175,6 +1249,7 @@ thread_timeout_secs = 7200
             &["nac-web"][..],
             &["nac-web", "codex-auth"],
             &["nac-web", "arcee-auth"],
+            &["nac-web", "xai-auth"],
             &["nac-web", "upgrade"],
         ] {
             let mut long_args = prefix.to_vec();
@@ -1204,6 +1279,7 @@ thread_timeout_secs = 7200
         for args in [
             &["nac-web", "codex-auth", "login", "--version"][..],
             &["nac-web", "arcee-auth", "status", "--version"],
+            &["nac-web", "xai-auth", "status", "--version"],
             &["nac-web", "__worker", "--version"],
         ] {
             let error = Cli::try_parse_from(args.iter().copied())
@@ -1222,6 +1298,8 @@ thread_timeout_secs = 7200
             "Manage ChatGPT credentials used by Codex models",
             "arcee-auth",
             "Manage Arcee account credentials",
+            "xai-auth",
+            "Manage xAI SuperGrok credentials",
             "upgrade",
             "Download and reinstall the latest nac-web release",
             "-p, --port <PORT>",
@@ -1252,6 +1330,7 @@ thread_timeout_secs = 7200
         for (group, credential) in [
             ("codex-auth", "ChatGPT credentials"),
             ("arcee-auth", "Arcee account credentials"),
+            ("xai-auth", "xAI SuperGrok credentials"),
         ] {
             let help = rendered_help(&["nac-web", group, "--help"]);
             for expected in ["login", "status", "logout", "help", credential] {
@@ -1295,6 +1374,17 @@ thread_timeout_secs = 7200
                 "Show stored Arcee credential status",
             ),
             ("arcee-auth", "logout", "Remove stored Arcee credentials"),
+            (
+                "xai-auth",
+                "login",
+                "Sign in to SuperGrok using device code authorization",
+            ),
+            (
+                "xai-auth",
+                "status",
+                "Show stored SuperGrok credential status",
+            ),
+            ("xai-auth", "logout", "Remove stored SuperGrok credentials"),
         ] {
             let help = rendered_help(&["nac-web", group, action, "--help"]);
             let usage = format!("Usage: nac-web {group} {action}");

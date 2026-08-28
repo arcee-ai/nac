@@ -75,6 +75,7 @@ fn api_key_backends_validate_selectors_and_auto_select_the_conventional_var() {
         backend::auto_select_api_key_env(BackendKind::ChatGptCodexResponses),
         None
     );
+    assert_eq!(backend::auto_select_api_key_env(BackendKind::XaiAuth), None);
 
     for (selector, expected) in [
         ("OPENAI_API_KEY", "openai-selected"),
@@ -188,6 +189,10 @@ fn managed_backends_reject_any_present_api_key_selector() {
             BackendKind::ChatGptCodexResponses,
             "stored OAuth from auth.json",
         ),
+        (
+            BackendKind::XaiAuth,
+            "xAI SuperGrok uses stored OAuth from xai_auth.json",
+        ),
     ] {
         for selector in ["MANAGED_KEY", "", "   ", " SURROUNDED_KEY "] {
             let error = validate_backend_api_key_env(backend, Some(selector))
@@ -244,6 +249,7 @@ fn managed_backends_materialize_only_absent_base_urls() {
             CHATGPT_CODEX_CANONICAL_BASE_URL,
         ),
         (BackendKind::ArceeAuth, ARCEE_AUTH_CANONICAL_BASE_URL),
+        (BackendKind::XaiAuth, XAI_AUTH_CANONICAL_BASE_URL),
     ] {
         let materialized = EffectiveModelSettings::from_optional(
             Some(backend),
@@ -383,6 +389,27 @@ fn effective_settings_reject_unsupported_reasoning_before_client_or_persistence(
         ),
         (BackendKind::ArceeAuth, "model", &[]),
         (BackendKind::ArceeApi, "model", &[]),
+        (
+            BackendKind::XaiAuth,
+            "model",
+            &[
+                ReasoningEffort::None,
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+                ReasoningEffort::Xhigh,
+            ],
+        ),
+        (
+            BackendKind::XaiAuth,
+            "grok-4.5",
+            &[
+                ReasoningEffort::None,
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ],
+        ),
     ];
 
     for (backend, model, supported) in cases {

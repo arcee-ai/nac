@@ -7343,7 +7343,7 @@ mod tests {
 
         assert!(body["catalog_version"].as_u64().unwrap() >= 1);
         let providers = body["providers"].as_array().unwrap();
-        assert_eq!(providers.len(), 8);
+        assert_eq!(providers.len(), 9);
         let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
 
         // Auth requirements and managed base URLs derive from the backend
@@ -7357,6 +7357,7 @@ mod tests {
             nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
         );
         assert_eq!(by_id("chatgpt-codex-responses")["auth"], "codex_oauth");
+        assert_eq!(by_id("xai-auth")["auth"], "xai_oauth");
 
         // Catalog endpoint defaults: present for the five models.dev
         // providers and the hand-seeded arcee-api (exact values are pinned
@@ -7375,7 +7376,7 @@ mod tests {
                 "{id} must serve a catalog default_base_url"
             );
         }
-        for id in ["arcee-auth", "chatgpt-codex-responses"] {
+        for id in ["arcee-auth", "chatgpt-codex-responses", "xai-auth"] {
             assert!(
                 by_id(id)["default_base_url"].is_null(),
                 "{id} must not serve a catalog default_base_url"
@@ -7385,11 +7386,16 @@ mod tests {
             by_id("chatgpt-codex-responses")["managed_base_url"],
             nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL
         );
+        assert_eq!(
+            by_id("xai-auth")["managed_base_url"],
+            nac_core::model::XAI_AUTH_CANONICAL_BASE_URL
+        );
         // Managed providers without a stored credential hint their login
         // command (a code constant, independent of machine catalog layers).
         for (id, command) in [
             ("arcee-auth", "nac-web arcee-auth login"),
             ("chatgpt-codex-responses", "nac-web codex-auth login"),
+            ("xai-auth", "nac-web xai-auth login"),
         ] {
             if by_id(id)["auth_status"] == "no_credential" {
                 assert_eq!(by_id(id)["auth_hint"], command, "{id}");

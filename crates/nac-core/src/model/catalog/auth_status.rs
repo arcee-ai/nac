@@ -19,6 +19,7 @@ fn managed_login_hint(provider: BackendKind) -> &'static str {
     match provider {
         BackendKind::ArceeAuth => "nac-web arcee-auth login",
         BackendKind::ChatGptCodexResponses => "nac-web codex-auth login",
+        BackendKind::XaiAuth => "nac-web xai-auth login",
         other => unreachable!("non-managed backend '{other}' has no login hint"),
     }
 }
@@ -31,6 +32,7 @@ fn managed_credential_present(provider: BackendKind) -> bool {
     match provider {
         BackendKind::ArceeAuth => arcee::stored_credential_present(),
         BackendKind::ChatGptCodexResponses => chatgpt_codex::stored_credential_present(),
+        BackendKind::XaiAuth => crate::model::xai::stored_credential_present(),
         other => unreachable!("non-managed backend '{other}' has no stored credential"),
     }
 }

@@ -38,6 +38,7 @@ pub fn provider_default_base_url(backend: BackendKind) -> Option<&'static str> {
         BackendKind::TogetherChat => Some("https://api.together.xyz/v1"),
         BackendKind::ArceeApi | BackendKind::ArceeAuth => Some(ARCEE_AUTH_CANONICAL_BASE_URL),
         BackendKind::ChatGptCodexResponses => Some(CHATGPT_CODEX_CANONICAL_BASE_URL),
+        BackendKind::XaiAuth => Some(XAI_AUTH_CANONICAL_BASE_URL),
     }
 }
 
@@ -73,7 +74,8 @@ fn models_url(backend: BackendKind, base_url: &str) -> Option<String> {
         | BackendKind::FireworksChat
         | BackendKind::TogetherChat
         | BackendKind::ArceeApi
-        | BackendKind::ArceeAuth => Some(format!("{trimmed}/models")),
+        | BackendKind::ArceeAuth
+        | BackendKind::XaiAuth => Some(format!("{trimmed}/models")),
     }
 }
 
@@ -204,6 +206,12 @@ pub async fn list_managed_provider_models(
                 .header("ChatGPT-Account-Id", account_id);
             (base_url, request)
         }
+        ManagedAuthProvider::Xai => {
+            let base_url = resolve_model_base_url(backend, None)?;
+            let token = xai::stored_auth_for_request(&client).await?;
+            let url = model_index_url(backend, &base_url)?;
+            (base_url, model_index_request(&url)?.bearer_auth(token))
+        }
     };
 
     read_model_list(request, &base_url, "the provider rejected this login").await
@@ -256,7 +264,7 @@ mod tests {
 
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    const ALL_BACKENDS: [BackendKind; 8] = [
+    const ALL_BACKENDS: [BackendKind; 9] = [
         BackendKind::OpenAiResponses,
         BackendKind::ChatGptCodexResponses,
         BackendKind::AnthropicMessages,
@@ -265,6 +273,7 @@ mod tests {
         BackendKind::TogetherChat,
         BackendKind::ArceeAuth,
         BackendKind::ArceeApi,
+        BackendKind::XaiAuth,
     ];
 
     /// Restates the classification the launch UI depends on. A new backend has
@@ -277,7 +286,9 @@ mod tests {
             | BackendKind::FireworksChat
             | BackendKind::TogetherChat
             | BackendKind::ArceeApi => true,
-            BackendKind::ChatGptCodexResponses | BackendKind::ArceeAuth => false,
+            BackendKind::ChatGptCodexResponses | BackendKind::ArceeAuth | BackendKind::XaiAuth => {
+                false
+            }
         }
     }
 

@@ -64,6 +64,7 @@ interface ManagedLaunchBaseUrlMap {
 export const MANAGED_LAUNCH_BASE_URLS: ManagedLaunchBaseUrlMap = {
   "arcee-auth": "https://api.arcee.ai/api/v1",
   "chatgpt-codex-responses": "https://chatgpt.com/backend-api",
+  "xai-auth": "https://api.x.ai/v1",
 };
 
 export type CredentialMode = "inherit" | "none" | "variable";
@@ -77,7 +78,11 @@ export function managedLaunchBaseUrl(backend: string | null | undefined): string
 
 /** Backends that authenticate from stored credentials (no api_key_env allowed). */
 export function backendUsesStoredCredentials(backend: string): boolean {
-  return backend === "arcee-auth" || backend === "chatgpt-codex-responses";
+  return (
+    backend === "arcee-auth" ||
+    backend === "chatgpt-codex-responses" ||
+    backend === "xai-auth"
+  );
 }
 
 export function nullable(value: string | null | undefined): string | null {
@@ -114,7 +119,12 @@ function validateCredentialMode(backend: string | undefined, mode: CredentialMod
   if (!backend) return;
   const stored = backendUsesStoredCredentials(backend);
   if (stored && mode !== "none") {
-    const source = backend === "arcee-auth" ? "stored Arcee login" : "stored Codex OAuth";
+    const source =
+      backend === "arcee-auth"
+        ? "stored Arcee login"
+        : backend === "xai-auth"
+          ? "stored SuperGrok OAuth"
+          : "stored Codex OAuth";
     throw new Error(
       `${backend} uses ${source} and does not accept an API key environment variable`,
     );

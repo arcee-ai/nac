@@ -19,6 +19,7 @@ import type { BackendKind, ManagedAuthProvider } from "@/app/types/api";
 const PROVIDER_ICONS = {
   arcee: IconName.Arcee,
   codex: IconName.ChatGpt,
+  xai: IconName.Xai,
 } satisfies Record<ManagedAuthProvider, IconName>;
 
 /**
