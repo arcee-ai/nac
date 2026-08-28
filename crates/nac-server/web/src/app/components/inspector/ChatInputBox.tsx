@@ -308,8 +308,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const metrics = runMetrics(snapshot, entry, running ? runUsage : null);
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
   const catalog = useModelCatalog();
+  const persistedUsage = tokenUsage(snapshot);
+  // A fork inherits context but not spend, so the gauge must not depend on
+  // billed usage being present.
+  const contextTokens = metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
   const context = contextGauge(
-    metrics.usage?.total_tokens ?? null,
+    contextTokens,
     resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
   );
   const now = useNow(1000, running);
@@ -1228,10 +1232,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             </span>
           )}
 
-          {metrics.usage ? (
+          {metrics.usage || contextTokens ? (
             <div className="flex items-center gap-[2px] min-w-0">
               {/* The backend reports the live context window here, not a sum
-                  of the columns beside it. */}
+                  of the columns beside it. A fork can have context without
+                  billed spend, so this badge is not gated on usage. */}
               <StatBadge
                 iconName={IconName.Timelaps}
                 value={context.value}
@@ -1241,7 +1246,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               />
               {/* The per-direction columns go with the model name, leaving the
                   narrow row the reading that matters. */}
-              {narrow ? null : (
+              {metrics.usage && !narrow ? (
                 <>
                   <StatBadge
                     iconName={IconName.ArrowTop}
@@ -1267,7 +1272,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                     labelClassName="tag-label"
                   />
                 </>
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>
