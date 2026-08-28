@@ -488,6 +488,55 @@ fn codex_request_reasoning_is_driven_only_by_explicit_effort() {
 }
 
 #[test]
+fn codex_request_preserves_nullable_new_delegation_contracts() {
+    let messages = [Message::User {
+        content: "delegate this work".to_string(),
+    }];
+    let levels =
+        catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol").thinking_level_map;
+    let definitions = crate::tools::direct_with_orchestrator_tool_definitions(false);
+    let request = codex_responses_request(
+        "gpt-5.6-sol",
+        None,
+        &messages,
+        &definitions,
+        &levels,
+        Some("session-1"),
+    );
+    let tools = request["tools"].as_array().expect("Codex request tools");
+
+    for (tool_name, session_id) in [
+        ("subagent", "child_session_id"),
+        ("orchestrator_launch", "orchestrator_session_id"),
+    ] {
+        let tool = tools
+            .iter()
+            .find(|tool| tool["name"] == tool_name)
+            .unwrap_or_else(|| panic!("missing {tool_name} in Codex request"));
+        let parameters = &tool["parameters"];
+        let properties = parameters["properties"]
+            .as_object()
+            .expect("launch properties");
+        let required = parameters["required"]
+            .as_array()
+            .expect("launch required fields")
+            .iter()
+            .map(|value| value.as_str().expect("required field name"))
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(
+            required,
+            properties.keys().map(String::as_str).collect(),
+            "{tool_name} wire schema must be strict-compatible"
+        );
+        assert_eq!(
+            parameters["properties"][session_id]["type"],
+            json!(["string", "null"]),
+            "{tool_name} wire schema must preserve new-session null semantics"
+        );
+    }
+}
+
+#[test]
 fn codex_session_headers_share_the_prompt_cache_key() {
     let request = apply_codex_session_headers(
         Client::new().post("https://chatgpt.com/backend-api/codex/responses"),

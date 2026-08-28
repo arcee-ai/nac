@@ -63,15 +63,15 @@ impl NativeTool for SubagentTool {
     fn definition(&self) -> ToolDefinition {
         definition(
             "subagent",
-            "Launch or continue a durable traditional child session. New children have fresh context and inherit the parent model/backend/workspace ceiling. Foreground waits for a structured outcome; background returns immediately and delivers exactly one completion through the parent inbox. A child_session_id continues that exact child; if it is running, the prompt steers its current generation. Available profiles:\n- general: general coding work with the eight native coding tools; nesting, goals, and orchestrator control are disabled.",
+            "Launch or continue a durable traditional child session. New children have fresh context and inherit the parent model/backend/workspace ceiling. Pass null as child_session_id to launch a new child; a string continues that exact child and steers its current generation when it is running. Foreground waits for a structured outcome; background returns immediately and delivers exactly one completion through the parent inbox. Available profiles:\n- general: general coding work with the eight native coding tools; nesting, goals, and orchestrator control are disabled.",
             json!({
                 "profile": {"type": "string", "enum": [GENERAL_CHILD_PROFILE], "description": "The immutable child profile."},
                 "description": {"type": "string", "minLength": 1, "maxLength": 120, "description": "A short 3-5 word task label shown to the user."},
                 "prompt": {"type": "string", "minLength": 1, "description": "Complete task and context for a new child, or steering/continuation text for an existing child."},
-                "child_session_id": {"type": "string", "minLength": 1, "description": "Continue or steer this child. Omit to create a fresh child conversation."},
-                "background": {"type": "boolean", "default": false, "description": "Return immediately and deliver completion durably to the parent inbox."}
+                "child_session_id": {"type": ["string", "null"], "minLength": 1, "description": "Pass null to create a fresh child conversation, or an existing child ID to continue or steer it."},
+                "background": {"type": "boolean", "description": "Use false to wait for the structured outcome, or true to return immediately and receive completion through the durable inbox."}
             }),
-            &["profile", "description", "prompt"],
+            &["profile", "description", "prompt", "child_session_id", "background"],
         )
     }
 
@@ -440,6 +440,7 @@ mod tests {
                 "profile": "general",
                 "description": "review store",
                 "prompt": "inspect persistence",
+                "child_session_id": null,
                 "background": false
             }),
             &runtime,
@@ -484,6 +485,8 @@ mod tests {
 
         let starts = controller.starts.lock().unwrap();
         assert_eq!(starts.len(), 2);
+        assert!(starts[0].child_session_id.is_none());
+        assert!(starts[1].child_session_id.is_none());
         assert_eq!(
             starts[0].execution_mode,
             TraditionalChildExecutionMode::Foreground

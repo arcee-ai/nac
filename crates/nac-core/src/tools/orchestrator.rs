@@ -131,14 +131,14 @@ impl NativeTool for LaunchTool {
     fn definition(&self) -> ToolDefinition {
         definition(
             "orchestrator_launch",
-            "Launch or continue a separate durable NAC orchestrator session. Foreground waits for its final report; background returns immediately and delivers completion automatically. Use the returned orchestrator_session_id to steer, inspect, wait, cancel, or continue it.",
+            "Launch or continue a separate durable NAC orchestrator session. Pass null as orchestrator_session_id to launch a new session, or an existing ID to continue it. Foreground waits for its final report; background returns immediately and delivers completion automatically. Use the returned orchestrator_session_id to steer, inspect, wait, cancel, or continue it.",
             json!({
                 "description": {"type":"string","minLength":1,"maxLength":120},
                 "prompt": {"type":"string","minLength":1},
-                "orchestrator_session_id": {"type":"string","minLength":1},
-                "background": {"type":"boolean","default":false}
+                "orchestrator_session_id": {"type":["string", "null"],"minLength":1,"description":"Pass null to launch a new orchestrator session, or an existing orchestrator ID to continue it."},
+                "background": {"type":"boolean","description":"Use false to wait for the final report, or true to return immediately and receive completion automatically."}
             }),
-            &["description", "prompt"],
+            &["description", "prompt", "orchestrator_session_id", "background"],
         )
     }
 
@@ -608,6 +608,7 @@ mod tests {
             json!({
                 "description": "implement persistence",
                 "prompt": "implement and verify",
+                "orchestrator_session_id": null,
                 "background": false
             }),
             &runtime,
@@ -641,6 +642,8 @@ mod tests {
 
         let starts = controller.starts.lock().unwrap();
         assert_eq!(starts.len(), 2);
+        assert!(starts[0].orchestrator_session_id.is_none());
+        assert!(starts[1].orchestrator_session_id.is_none());
         assert_eq!(
             starts[0].execution_mode,
             ManagedOrchestratorExecutionMode::Foreground
