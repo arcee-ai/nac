@@ -1136,4 +1136,55 @@ credential state. Focused verification passes: frontend format/lint/typecheck,
 all 179 frontend tests, all three managed Playwright journeys, a rebuilt
 production bundle, and a clean fresh in-app-browser tab with all three behavior
 selectors, Trinity/Arcee default, managed credential status, and zero console
-errors. Full post-repair gates remain the next action before closure review.
+errors.
+
+### Final post-integration acceptance
+
+The immutable candidate at `7d4e8a1` passed the complete acceptance contract on
+2026-08-27:
+
+- `make ci` passed workspace formatting and warning-denied Clippy, the 1,158
+  core tests (nine intentionally ignored), 13 credential-store tests, 19
+  managed tests, two process tests, 149 server library tests, 23 server binary
+  tests, 179 frontend tests, OpenAPI/generated-TypeScript drift, frontend lint,
+  typecheck/build, source-size enforcement, and the static managed-image
+  contract. One earlier core PTY preview test exceeded its timing window under
+  suite load; it then passed three consecutive focused runs and the complete CI
+  rerun, with no code change required.
+- `make test-durability` passed all ten focused crash, recovery, cancellation,
+  relationship, lease, and settlement checks. Its first sandboxed invocation
+  was denied permission to bind a loopback test server; the identical command
+  passed outside that sandbox restriction.
+- `make test-assets`, `make test-e2e`, and
+  `make test-managed-image-contract` passed. All 14 production-embedded
+  Playwright journeys are green, including the managed create-project model
+  regression.
+- `make test-managed-image` built and exercised the pinned Linux/amd64 image on
+  the available Docker runtime. Readiness, restart, toolchain, shutdown, and
+  the separate model-credential mount passed; attempted credential overwrite
+  failed on the read-only volume as required. Docker emitted only the expected
+  amd64-on-arm64 emulation warning.
+- The bounded in-app browser smoke independently covered ordinary project and
+  session launch, all three immutable behavior selectors, managed status,
+  GitHub/Add repository entry, and the Trinity/Arcee managed model projection
+  without real credentials. A fresh tab emitted no console errors.
+
+The single independent acceptance review was already consumed on the preceding
+candidate and found one generated-frontend-contract blocker, which was repaired
+before this integration. Its other dependency, behavior, safety/durability,
+public-contract, generation, and navigation dimensions were clear. The three
+managed-model integration commits were therefore audited locally as a bounded
+delta: Cargo remains acyclic, `nac-managed` still depends inward only on
+contracts/credential/process owners, generated contracts and assets are
+current, and all tracked human-authored source files remain within the enforced
+2,000-line limit (809 files checked).
+
+The integration commit sequence is:
+
+- `52ea611 feat(core): support mounted model credentials`
+- `7492aa4 feat(managed): bootstrap host model profile`
+- `7d4e8a1 fix(web): decouple managed model profile context`
+
+No implementation, verification, review, or product decision remains. The
+next action is human testing with real provider/GitHub credentials if desired;
+the exact manual instructions above remain current.
