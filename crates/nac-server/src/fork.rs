@@ -3,6 +3,10 @@
 //! The fork copies the transcript through the named assistant turn (and any
 //! trailing tool results) and keeps the same workspace, model, and project.
 //! It does not clone a sandbox worktree — that is a git checkout, not a chat.
+//! Billed usage stays with the source: copying it would double-count the same
+//! spend in the project rollup. The fork starts at zero cost and keeps only
+//! the last context-window gauge so the inherited transcript still reads as
+//! full.
 
 use axum::{
     extract::{Path as AxumPath, State},
@@ -232,7 +236,32 @@ fn persist_fork(
     if let Some(spec) = fork.sandbox_spec.as_mut() {
         spec.worktree = None;
     }
-    fork.token_usages = source.token_usages.into_iter().take(visible).collect();
+    // Inherited transcript is context, not this session's spend. Copying
+    // billed usage would double-count the source in the project rollup.
+    fork.token_usages = {
+        let mut usages = vec![None; visible];
+        let context = source
+            .token_usages
+            .iter()
+            .take(visible)
+            .rev()
+            .flatten()
+            .find(|usage| usage.orchestrator_context_tokens > 0)
+            .cloned()
+            .map(|mut usage| {
+                usage.input_tokens = 0;
+                usage.output_tokens = 0;
+                usage.cache_read_tokens = 0;
+                usage.cache_write_tokens = 0;
+                usage.reasoning_tokens = 0;
+                usage.cost = Default::default();
+                usage
+            });
+        if let (Some(usage), Some(last)) = (context, usages.last_mut()) {
+            *last = Some(usage);
+        }
+        usages
+    };
     if let Some(durations) = source.response_durations_ms {
         let truncated: Vec<_> = durations.into_iter().take(visible).collect();
         fork.last_response_duration_ms = truncated.last().copied().flatten();
@@ -243,7 +272,6 @@ fn persist_fork(
             .flatten();
         fork.response_durations_ms = Some(truncated);
     }
-    fork.unattributed_token_usage = source.unattributed_token_usage;
 
     sessions::create_session(store_path, &fork)
         .map_err(|error| report_failure(source_id, "create the forked session", &error))?;
