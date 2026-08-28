@@ -91,7 +91,8 @@ existing writers and drift checks remain authoritative.
 
 - Inventory and policy: in progress.
 - Inline-test extraction: complete, pending commit.
-- Dedicated-suite decomposition: pending.
+- Dedicated-suite decomposition: runtime complete; session-service and server
+  pending.
 - Agent production extraction: pending.
 - Automated enforcement and navigation: pending.
 - Full acceptance: pending.
@@ -133,3 +134,19 @@ their serial rerun passed completely. Warning-denied `nac-core` Clippy passes.
 
 Next: commit the inline-test ownership slice, then decompose the dedicated
 runtime, session-service, and server test bags around shared fixture roots.
+
+### Runtime behavior suites
+
+The 2,765-line runtime test bag is now a 48-line shared fixture/composition root
+with two named owners: `runtime_tests/construction.rs` (1,714 lines) covers
+configuration, model/backend resolution, construction, persistence parity, and
+sandbox option validation; `runtime_tests/remote.rs` (1,010 lines) covers local
+resume normalization plus SSH construction and reattachment. The only fixture
+found to cross the boundary, `complete_model_config`, moved to the shared root
+instead of being duplicated or exposed outside the test module.
+
+All 48 runtime tests pass serially with their loopback/process fixtures, and
+warning-denied `nac-core` Clippy remains green.
+
+Next: commit the runtime-suite boundary, then partition the session-service
+suite by projection/direct-interaction and recovery/settlement ownership.
