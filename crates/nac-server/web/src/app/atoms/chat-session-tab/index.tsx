@@ -13,6 +13,10 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
   running?: boolean;
   /** Display title of the chat this session was forked from. */
   forkedFromTitle?: string | null;
+  /** Compact identity shown after the title, such as the session behavior. */
+  badge?: string;
+  /** Full accessible meaning of the compact badge. */
+  badgeLabel?: string;
   /** Takes the tab off the strip. The chat itself is untouched. */
   onDismiss?: () => void;
 }
@@ -46,9 +50,12 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   active = false,
   running = false,
   forkedFromTitle,
+  badge,
+  badgeLabel,
   onDismiss,
   className = "",
   type = "button",
+  "aria-label": ariaLabel,
   ...props
 }) => {
   const labelClass = running
@@ -71,7 +78,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
     >
       <button
         type={type}
-        aria-label={title}
+        aria-label={ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)}
         aria-current={active ? "page" : undefined}
         className="flex flex-1 min-w-0 items-center justify-start gap-1 px-2 py-1 h-10 w-full max-w-32 min-w-10"
         {...props}
@@ -87,9 +94,17 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
                 : "text-btn-secondary group-hover:text-btn-secondary-hovered"
           }
         />
-        <span className={cn("label-micro w-full min-w-0 truncate text-left", labelClass)}>
+        <span className={cn("label-micro w-full min-w-0 flex-1 truncate text-left", labelClass)}>
           {title}
         </span>
+        {badge ? (
+          <span
+            title={badgeLabel}
+            className="tag-label max-w-[56px] shrink-0 truncate rounded bg-elevation-level-3 px-1 text-basic-tertiary"
+          >
+            {badge}
+          </span>
+        ) : null}
       </button>
       {onDismiss ? (
         <Button

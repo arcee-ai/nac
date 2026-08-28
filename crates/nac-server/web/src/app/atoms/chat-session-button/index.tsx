@@ -13,6 +13,10 @@ interface ChatSessionButtonProps extends Omit<
   running?: boolean;
   /** Display title of the chat this session was forked from. */
   forkedFromTitle?: string | null;
+  /** Compact identity shown after the title, such as the session behavior. */
+  badge?: string;
+  /** Full accessible meaning of the compact badge. */
+  badgeLabel?: string;
   /** Taller touch target and always-visible actions for the mobile modal. */
   isMobile?: boolean;
   /** Rename and delete controls, revealed on hover and on keyboard focus. */
@@ -35,10 +39,13 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   active = false,
   running = false,
   forkedFromTitle,
+  badge,
+  badgeLabel,
   isMobile = false,
   actions,
   className = "",
   type = "button",
+  "aria-label": ariaLabel,
   ...props
 }) => {
   const labelClass = running
@@ -60,7 +67,8 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
     >
       <button
         type={type}
-        title={title}
+        title={badgeLabel ? `${title} · ${badgeLabel}` : title}
+        aria-label={ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)}
         aria-current={active ? "page" : undefined}
         className={cn("flex flex-1 items-center min-w-0 text-left", isMobile ? "gap-3" : "gap-1.5")}
         {...props}
@@ -70,9 +78,23 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
           running={running}
           className={running ? undefined : labelClass}
         />
-        <span className={cn("truncate", isMobile ? "text-medium" : "label-small", labelClass)}>
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            isMobile ? "text-medium" : "label-small",
+            labelClass,
+          )}
+        >
           {title}
         </span>
+        {badge ? (
+          <span
+            title={badgeLabel}
+            className="tag-label max-w-[76px] shrink-0 truncate rounded bg-elevation-level-3 px-1 text-basic-tertiary"
+          >
+            {badge}
+          </span>
+        ) : null}
       </button>
       {actions ? (
         <div

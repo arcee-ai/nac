@@ -20,13 +20,9 @@ import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useSessionFetching } from "@/app/hooks/useSessionFetching";
-import {
-  DEFAULT_SESSION_PANEL,
-  SESSION_PANEL_LABEL,
-  WIDE_SESSION_PANELS,
-  type SessionPanel,
-} from "@/app/lib/routes";
+import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
+import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useWorkspaceRevisionChanges } from "@/app/services/queries";
 import {
   selectRevision,
@@ -158,21 +154,16 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
   const selectedRevision = useSelectedRevision();
   const behavior = snapshot?.metadata.behavior ?? "orchestrator";
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const delegatedTranscript = snapshot?.lineage != null;
-  const widePanels: readonly SessionPanel[] = delegatedTranscript
-    ? ["files"]
-    : direct
-      ? ["delegated", "files"]
-      : WIDE_SESSION_PANELS.filter((name) => name !== "delegated");
+  const panelPolicy = sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
+  const delegatedTranscript = panelPolicy.readOnly;
+  const widePanels = panelPolicy.widePanels;
 
   // History belongs to the phone's bottom bar: a wide box reaches revisions
   // through its footer chip, so a link to that panel lands on the default one.
-  const fallback: SessionPanel = delegatedTranscript
-    ? "files"
-    : direct
-      ? "delegated"
-      : DEFAULT_SESSION_PANEL;
-  const active = widePanels.includes(panel) || (isMobile && panel === "history") ? panel : fallback;
+  const active =
+    widePanels.includes(panel) || (isMobile && panelPolicy.mobilePanels.includes(panel))
+      ? panel
+      : panelPolicy.defaultPanel;
 
   const body = (
     <>

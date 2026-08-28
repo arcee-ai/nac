@@ -25,6 +25,7 @@ import { cn } from "@/app/lib/cn";
 import { parseStoreTime } from "@/app/lib/format";
 import { primarySessions } from "@/app/lib/projects";
 import { perfRender } from "@/app/lib/perfDebug";
+import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
 import {
   DEFAULT_SESSION_PANEL,
@@ -135,14 +136,12 @@ export default function SessionPage() {
   useRunStateSync(snapshot?.active_run);
   useAutoSshConnect(id, entry?.summary);
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator";
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const sessionPanels: readonly SessionPanel[] = snapshot?.lineage
-    ? ["files", "history"]
-    : direct
-      ? ["delegated", "files", "history"]
-      : ["threads", "files", "worksets", "history"];
+  const panelPolicy = sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
+  const sessionPanels = panelPolicy.mobilePanels;
   const requestedPanel = isSessionPanel(panel) ? panel : DEFAULT_SESSION_PANEL;
-  const effectivePanel = sessionPanels.includes(requestedPanel) ? requestedPanel : sessionPanels[0];
+  const effectivePanel = sessionPanels.includes(requestedPanel)
+    ? requestedPanel
+    : panelPolicy.defaultPanel;
 
   useEffect(() => {
     if (!id || !snapshot || !isSessionPanel(panel) || panel === effectivePanel) return;

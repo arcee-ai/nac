@@ -166,6 +166,8 @@ test("asks for immutable behavior on every first and new chat", async ({
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect(page.getByText("Immutable behavior")).toBeVisible();
   await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toBeVisible();
   await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
 
@@ -177,6 +179,10 @@ test("asks for immutable behavior on every first and new chat", async ({
   await page.getByRole("radio", { name: /^Direct coding agent / }).click();
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect(page).toHaveURL(/\/session\/[^/]+\/delegated$/);
+  const directSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+  expect(directSessionId).toBeTruthy();
+  await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+  await page.reload();
   await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
   await expect(page.getByText("Delegated work", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
@@ -189,10 +195,27 @@ test("asks for immutable behavior on every first and new chat", async ({
   );
   await behaviorChoices.filter({ hasText: "Direct + NAC orchestration" }).click();
   await page.getByRole("button", { name: "Create chat" }).click();
+  await expect.poll(() => page.url()).not.toContain(`/session/${directSessionId}/`);
   await expect(page).toHaveURL(/\/session\/[^/]+\/delegated$/);
+  await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
+  await expect(page.getByText("Managed NAC orchestrators", { exact: true })).toBeVisible();
+  await page.reload();
   await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
   await expect(page.getByText("Traditional coding agents", { exact: true })).toBeVisible();
   await expect(page.getByText("Managed NAC orchestrators", { exact: true })).toBeVisible();
+
+  const tabs = page.locator(".chat-session-tab button");
+  await expect(tabs.filter({ has: page.getByText("Orchestrator", { exact: true }) })).toHaveCount(
+    1,
+  );
+  await expect(tabs.filter({ has: page.getByText("Direct", { exact: true }) })).toHaveCount(1);
+  await expect(tabs.filter({ has: page.getByText("Direct + NAC", { exact: true }) })).toHaveCount(
+    1,
+  );
+  await tabs.filter({ has: page.getByText("Orchestrator", { exact: true }) }).click();
+  await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
+  await tabs.filter({ has: page.getByText("Direct", { exact: true }) }).click();
+  await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
 });
 
 test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({
@@ -498,8 +521,55 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
     { kind: "text", text: "child completed" },
   );
   harness.provider.enqueue(
+    "orchestrator-workset",
+    {
+      token: "E2E_ORCHESTRATOR_TOKEN",
+      requiredTools: ["thread", "workset_define"],
+    },
+    {
+      kind: "function_call",
+      name: "workset_define",
+      callId: "managed-workset-1",
+      arguments: {
+        id: "managed-release",
+        goal: "Verify the managed transcript topology",
+        status: "running",
+        summary: "Managed transcript topology",
+        verification_recipe: "Open the managed transcript panels",
+        workset_items: [
+          {
+            title: "Verify managed panels",
+            scope: "web session UI",
+            description: "Create one retained worker episode for panel navigation.",
+            role: "verification",
+            depends_on: [],
+            acceptance: "The managed transcript exposes its own thread and workset.",
+          },
+        ],
+      },
+    },
+  );
+  harness.provider.enqueue(
+    "orchestrator-thread",
+    { functionOutputCallId: "managed-workset-1" },
+    {
+      kind: "function_call",
+      name: "thread",
+      callId: "managed-thread-1",
+      arguments: {
+        name: "managed-ui",
+        action: "E2E_MANAGED_THREAD_TOKEN verify the managed transcript UI",
+      },
+    },
+  );
+  harness.provider.enqueue(
+    "managed-worker-completion",
+    { token: "E2E_MANAGED_THREAD_TOKEN", requiredTools: ["read"] },
+    { kind: "text", text: "managed worker completed" },
+  );
+  harness.provider.enqueue(
     "orchestrator-completion",
-    { token: "E2E_ORCHESTRATOR_TOKEN" },
+    { functionOutputCallId: "managed-thread-1" },
     { kind: "text", text: "orchestrator completed" },
   );
   const parentId = await createSession(request, harness, "direct-with-orchestrator");
@@ -548,11 +618,17 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(page.getByRole("button", { name: /goal/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Open panel" }).click();
   const mobilePanel = page.getByRole("dialog");
   await expect(mobilePanel).toBeVisible();
+  await expect(mobilePanel.getByRole("tab", { name: "Files" })).toBeVisible();
+  await expect(mobilePanel.getByRole("tab", { name: "History" })).toBeVisible();
+  await expect(mobilePanel.getByRole("tab", { name: "Threads" })).toHaveCount(0);
+  await expect(mobilePanel.getByRole("tab", { name: "Worksets" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
   await mobilePanel.getByRole("button", { name: "Close" }).click();
   await expect(mobilePanel).toBeHidden();
@@ -569,6 +645,37 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
     page.getByText("Managed NAC orchestrator · Coordinate the compatibility audit"),
   ).toBeVisible();
   await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Worksets" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Worksets_managed-release" }).click();
+  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/worksets$`));
+  await expect(
+    page.getByText("Verify the managed transcript topology", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /managed-ui/i }).click();
+  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/threads$`));
+  await expect(page.getByText("managed worker completed", { exact: true })).toBeVisible();
+
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Resend" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open panel" }).click();
+  const managedMobilePanel = page.getByRole("dialog");
+  await expect(managedMobilePanel.getByRole("tab", { name: "Threads" })).toBeVisible();
+  await expect(managedMobilePanel.getByRole("tab", { name: "Files" })).toBeVisible();
+  await expect(managedMobilePanel.getByRole("tab", { name: "Worksets" })).toBeVisible();
+  await expect(managedMobilePanel.getByRole("tab", { name: "History" })).toBeVisible();
+  await managedMobilePanel.getByRole("tab", { name: "History" }).click();
+  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/history$`));
+  await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
+  await managedMobilePanel.getByRole("button", { name: "Close" }).click();
+  await expect(managedMobilePanel).toBeHidden();
+  await page.getByRole("button", { name: "Back to Parent" }).click();
+  await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
 });
