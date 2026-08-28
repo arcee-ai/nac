@@ -527,3 +527,10 @@ credential behavior remains unchanged. Pre-commit workspace check, Clippy,
 focused process/fork tests, all 179 frontend tests, frontend static checks, and
 the 2,000-line source guard pass. The complete clean-commit acceptance gates
 follow the merge commit.
+
+Clean-candidate CI, durability, generated-asset drift, and static managed-image
+contract checks pass after the merge. The production browser suite found a
+stale “New chat” locator after mainline standardized the action text to “New
+Session”; the action now exposes the unambiguous accessible name “Create new
+session.” The focused regression and all 14 embedded journeys pass, including
+all three managed-host journeys.

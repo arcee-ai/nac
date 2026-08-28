@@ -1224,3 +1224,23 @@ guard. The sandboxed frontend cleanup test could not spawn `ps`; the identical
 suite passed outside that restriction. Clean-commit `make ci`, durability,
 asset, embedded E2E, and static managed-image gates remain the exact next
 action after the merge commit.
+
+### Convergence acceptance and stale browser contract
+
+Merge commit `2dd6d4b` preserves `allison-demo` as its second parent. On that
+clean candidate, `make ci`, `make test-durability`, `make test-assets`, and
+`make test-managed-image-contract` passed. CI covered 1,158 core tests (nine
+expected ignores), 151 server library tests, 23 binary tests, 19 managed
+tests, 13 credential-store tests, two process tests, and all 179 frontend unit
+tests, along with formatting, Clippy, generated-contract drift, production
+build, and source-size enforcement.
+
+The first production-embedded browser run exposed a stale mainline locator:
+the merged UI intentionally calls the action “New Session,” but the retained
+journey still searched for “New chat.” Using “New Session” directly also
+revealed two controls with the same accessible name (the empty-session tab and
+the create action). The create action now has the precise accessible name
+“Create new session,” preserving visible wording while removing ambiguity;
+the semantic Playwright locator follows that contract. The focused journey and
+then all 14 production-embedded journeys pass. The rebuilt hashed asset is
+included with the correction.
