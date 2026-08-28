@@ -213,6 +213,11 @@ test("completes the managed first-run, write-only secret, and clone journey", as
 
   await expect(page.getByTestId("managed-empty-status")).toContainText("Arcee model");
   await expect(page.getByTestId("managed-empty-status")).toContainText("Not connected");
+  await page.getByRole("button", { name: "Create Project" }).click();
+  await expect(page.getByRole("dialog")).toContainText("New Project");
+  await expect(page.getByRole("button", { name: /Trinity-Large-Thinking/ })).toBeVisible();
+  await expect(page.getByText("Detected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Add repository" }).click();
   await expect(page.getByTestId("managed-github-settings")).toBeVisible();
   await page

@@ -1119,3 +1119,21 @@ local goal-prompt skill, `demo_review.md`, and `manual_todo.md` untouched. Then
 run the complete immutable-candidate acceptance gates, the available live
 managed image smoke, a bounded browser smoke of the new managed model surface,
 and the already-authorized final dependency/safety/contract review.
+
+### Browser-smoke regression and repair
+
+The required interactive smoke reached a supported surface not covered by the
+existing managed journeys: **Create Project** from an empty managed host. That
+modal is intentionally composed outside `ManagedHostProvider`; the first port
+of `useManagedModelProfile` incorrectly required the provider and threw before
+the form could render. This was a qualified direct regression of the refactor.
+
+The repaired controller reads `useManagedHostStatus` directly—the narrow query
+it actually needs—while the pure profile projection/matching remains in the
+managed feature model. The managed Playwright journey now opens this exact
+surface and asserts the generated managed model selection and operator-owned
+credential state. Focused verification passes: frontend format/lint/typecheck,
+all 179 frontend tests, all three managed Playwright journeys, a rebuilt
+production bundle, and a clean fresh in-app-browser tab with all three behavior
+selectors, Trinity/Arcee default, managed credential status, and zero console
+errors. Full post-repair gates remain the next action before closure review.

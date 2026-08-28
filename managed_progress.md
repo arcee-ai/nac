@@ -489,3 +489,16 @@ drift, source-size enforcement, the static image contract, and all 14
 production-embedded Playwright journeys. The generated production bundle is
 current. Full immutable-candidate acceptance and the live managed-image smoke
 follow the integration commit.
+
+### Interactive smoke repair
+
+The bounded in-app browser smoke found one direct integration regression after
+`7492aa4`: the empty managed-host **Create Project** modal can render outside
+the modal-owning `ManagedHostProvider`, while the new model-profile hook had
+required that provider. Opening the form therefore blanked the page. The hook
+now depends directly on the managed-status query it reads, so it remains
+feature-owned without depending on modal context. The managed Playwright
+journey now opens the Project form and asserts the managed Trinity model and
+host-supplied credential state. The focused three managed journeys, all 179
+frontend tests, typecheck, lint, and a fresh interactive tab pass with zero
+console errors.
