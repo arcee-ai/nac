@@ -64,7 +64,8 @@ pub(crate) fn api_kind_for(provider: BackendKind) -> ApiKind {
         | BackendKind::FireworksChat
         | BackendKind::TogetherChat
         | BackendKind::ArceeAuth
-        | BackendKind::ArceeApi => ApiKind::OpenAiCompletions,
+        | BackendKind::ArceeApi
+        | BackendKind::OpencodeGo => ApiKind::OpenAiCompletions,
         BackendKind::OpenAiResponses => ApiKind::OpenAiResponses,
         BackendKind::ChatGptCodexResponses => ApiKind::ChatGptCodexResponses,
         BackendKind::AnthropicMessages => ApiKind::AnthropicMessages,

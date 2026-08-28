@@ -787,3 +787,31 @@ async fn anthropic_root_shaped_base_url_appends_v1_messages_exactly_once() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].path, "/v1/messages");
 }
+
+#[tokio::test]
+async fn opencode_go_anthropic_models_post_to_messages_not_v1_messages() {
+    let server = ScriptedServer::start(vec![s5_anthropic_response()]);
+    let mut client = test_model_client(
+        BackendKind::OpencodeGo,
+        format!("{}/v1", server.base_url.trim_end_matches('/')),
+        std::collections::BTreeMap::new(),
+    );
+    client.model = "qwen3.8-max".to_string();
+    client.resolved_model = catalog::resolve(BackendKind::OpencodeGo, "qwen3.8-max");
+    client
+        .send_turn(
+            vec![Message::User {
+                content: "hi".to_string(),
+            }],
+            vec![],
+        )
+        .await
+        .expect("scripted response should parse");
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].path, "/v1/messages");
+    assert_eq!(
+        requests[0].headers.get("x-api-key").map(String::as_str),
+        Some("selected-provider-credential")
+    );
+}

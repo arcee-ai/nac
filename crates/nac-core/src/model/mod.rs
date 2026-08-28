@@ -40,6 +40,7 @@ mod chat_stream;
 mod chatgpt_codex;
 mod client;
 mod history;
+mod opencode_go;
 mod providers;
 mod pseudo_tool_calls;
 mod redact;
@@ -90,6 +91,7 @@ pub(crate) use types::{
 pub use types::{
     managed_backend_base_url, resolve_model_base_url, EffectiveModelSettings,
     ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL,
+    OPENCODE_GO_CANONICAL_BASE_URL,
 };
 pub use types::{BackendKind, DispatchWeight, ReasoningEffort};
 

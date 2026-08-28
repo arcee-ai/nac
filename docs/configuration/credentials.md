@@ -1,6 +1,10 @@
 # Providers and logins
 
-Arcee device login, ChatGPT Codex OAuth, and API-key backends. Managed logins reject `api_key_env`; API-key providers select a credential environment variable instead. See [Model configuration](model.md) for selector rules.
+Arcee device login, ChatGPT Codex OAuth, OpenCode Go, and API-key backends. Managed logins reject `api_key_env`; API-key providers select a credential environment variable instead. See [Model configuration](model.md) for selector rules.
+
+## OpenCode Go
+
+OpenCode Go is a subscription gateway, not a device login. Create a key at https://opencode.ai/auth and export OPENCODE_API_KEY, or name another variable with api_key_env. The opencode-go backend materializes base_url = "https://opencode.ai/zen/go/v1" when absent. An official opencode.ai URL must use path /zen/go/v1 so a Zen URL cannot take the key. Other hosts still need [security] trusted_base_url_hosts. Seeded models pick Chat Completions, Responses, or Anthropic Messages from the catalog. Anthropic requests go to {base}/messages. Completions and Responses send Authorization: Bearer. Anthropic sends x-api-key. This is the OpenCode Go subscription, not OpenCode Zen.
 
 ## ChatGPT Codex OAuth
 

@@ -14,7 +14,8 @@ export type BackendKind =
   | "chatgpt-codex-responses"
   | "anthropic-messages"
   | "arcee-auth"
-  | "arcee-api";
+  | "arcee-api"
+  | "opencode-go";
 
 /** `nac_core::model::types::ReasoningEffort`, serialized lowercase. */
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

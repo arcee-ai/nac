@@ -256,6 +256,8 @@ enum BackendArg {
     ArceeAuth,
     #[value(name = "arcee-api")]
     ArceeApi,
+    #[value(name = "opencode-go")]
+    OpencodeGo,
 }
 
 impl From<BackendArg> for BackendKind {
@@ -269,6 +271,7 @@ impl From<BackendArg> for BackendKind {
             BackendArg::AnthropicMessages => Self::AnthropicMessages,
             BackendArg::ArceeAuth => Self::ArceeAuth,
             BackendArg::ArceeApi => Self::ArceeApi,
+            BackendArg::OpencodeGo => Self::OpencodeGo,
         }
     }
 }
@@ -951,6 +954,7 @@ thread_timeout_secs = 7200
         for (raw, expected) in [
             ("arcee-auth", BackendKind::ArceeAuth),
             ("arcee-api", BackendKind::ArceeApi),
+            ("opencode-go", BackendKind::OpencodeGo),
         ] {
             let mut args = vec!["nac-web", "__worker", "--backend", raw];
             args.extend(required);

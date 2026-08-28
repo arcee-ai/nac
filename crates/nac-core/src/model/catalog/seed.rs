@@ -22,8 +22,9 @@
 //! [`ARCEE_THIRD_PARTY_SEED_MODELS`]).
 
 use super::{
-    api_kind_for, Compat, CompletionsThinkingFormat, ModelCatalog, ModelCostRates, ModelMetadata,
-    ModelSource, ProviderCatalog, ThinkingLevelMap, PROVIDER_DEFAULT_MODEL_ID,
+    api_kind_for, ApiKind, Compat, CompletionsThinkingFormat, CostTier, ModelCatalog,
+    ModelCostRates, ModelMetadata, ModelSource, ProviderCatalog, ThinkingLevelMap,
+    PROVIDER_DEFAULT_MODEL_ID,
 };
 use crate::model::{BackendKind, ReasoningEffort};
 use std::collections::BTreeMap;
@@ -47,6 +48,75 @@ fn deepseek_levels() -> ThinkingLevelMap {
         (ReasoningEffort::High, "high"),
         (ReasoningEffort::Max, "max"),
     ])
+}
+
+fn none_through_xhigh_levels() -> ThinkingLevelMap {
+    levels(&[
+        (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Xhigh, "xhigh"),
+    ])
+}
+
+fn none_and_minimal_through_xhigh_levels() -> ThinkingLevelMap {
+    levels(&[
+        (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Minimal, "minimal"),
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Xhigh, "xhigh"),
+    ])
+}
+
+fn none_and_minimal_through_high_levels() -> ThinkingLevelMap {
+    levels(&[
+        (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Minimal, "minimal"),
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+    ])
+}
+
+fn none_and_minimal_through_max_levels() -> ThinkingLevelMap {
+    levels(&[
+        (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Minimal, "minimal"),
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Max, "max"),
+    ])
+}
+
+fn none_low_through_max_levels() -> ThinkingLevelMap {
+    levels(&[
+        (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Xhigh, "xhigh"),
+        (ReasoningEffort::Max, "max"),
+    ])
+}
+
+fn none_high_max_levels() -> ThinkingLevelMap {
+    levels(THIRD_PARTY_NONE_HIGH_MAX_LEVELS)
+}
+
+fn low_medium_high_levels() -> ThinkingLevelMap {
+    levels(&[
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+    ])
+}
+
+fn low_high_max_levels() -> ThinkingLevelMap {
+    levels(THIRD_PARTY_LOW_HIGH_MAX_LEVELS)
 }
 
 /// fireworks-chat / together-chat: none through high, sent verbatim.
@@ -138,6 +208,33 @@ fn rates(input: f64, output: f64, cache_read: f64, cache_write: f64) -> ModelCos
         cache_read,
         cache_write,
         tiers: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tiered_rates(
+    input: f64,
+    output: f64,
+    cache_read: f64,
+    cache_write: f64,
+    input_tokens_above: u64,
+    tier_input: f64,
+    tier_output: f64,
+    tier_cache_read: f64,
+    tier_cache_write: f64,
+) -> ModelCostRates {
+    ModelCostRates {
+        input,
+        output,
+        cache_read,
+        cache_write,
+        tiers: Some(vec![CostTier {
+            input_tokens_above,
+            input: tier_input,
+            output: tier_output,
+            cache_read: tier_cache_read,
+            cache_write: tier_cache_write,
+        }]),
     }
 }
 
@@ -402,6 +499,309 @@ fn arcee_seed_models(provider: BackendKind) -> Vec<ModelMetadata> {
     models
 }
 
+#[allow(clippy::too_many_arguments)]
+fn go_model(
+    id: &str,
+    display_name: &str,
+    api: ApiKind,
+    context_window: u64,
+    max_tokens: u64,
+    cost: ModelCostRates,
+    thinking_level_map: ThinkingLevelMap,
+    adaptive_thinking: bool,
+) -> ModelMetadata {
+    let compat = match api {
+        ApiKind::OpenAiCompletions => completions_compat(
+            Some(CompletionsThinkingFormat::Arcee),
+            "reasoning_content",
+            None,
+        ),
+        _ => Compat::default(),
+    };
+    let mut model = seeded_model(
+        BackendKind::OpencodeGo,
+        id,
+        display_name,
+        context_window,
+        max_tokens,
+        cost,
+        true,
+        thinking_level_map,
+        compat,
+    );
+    model.api = api;
+    model.adaptive_thinking = adaptive_thinking;
+    model
+}
+
+fn opencode_go_seed_models() -> Vec<ModelMetadata> {
+    let completions = ApiKind::OpenAiCompletions;
+    let responses = ApiKind::OpenAiResponses;
+    let anthropic = ApiKind::AnthropicMessages;
+    vec![
+        go_model(
+            "deepseek-v4-flash",
+            "DeepSeek V4 Flash",
+            responses,
+            1_000_000,
+            384_000,
+            rates(0.14, 0.28, 0.0028, 0.0),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "deepseek-v4-pro",
+            "DeepSeek V4 Pro",
+            completions,
+            1_000_000,
+            384_000,
+            rates(0.435, 0.87, 0.003625, 0.0),
+            none_high_max_levels(),
+            false,
+        ),
+        go_model(
+            "glm-5",
+            "GLM-5",
+            completions,
+            202_752,
+            32_768,
+            rates(1.0, 3.2, 0.2, 0.0),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "glm-5.1",
+            "GLM-5.1",
+            completions,
+            202_752,
+            32_768,
+            rates(1.4, 4.4, 0.26, 0.0),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "glm-5.2",
+            "GLM-5.2",
+            completions,
+            1_000_000,
+            131_072,
+            rates(1.4, 4.4, 0.26, 0.0),
+            none_and_minimal_through_max_levels(),
+            false,
+        ),
+        go_model(
+            "glm-5.3",
+            "GLM-5.3",
+            completions,
+            1_000_000,
+            131_072,
+            rates(1.4, 4.4, 0.26, 0.0),
+            none_and_minimal_through_max_levels(),
+            false,
+        ),
+        go_model(
+            "gpt-5.6-luna",
+            "GPT-5.6 Luna",
+            responses,
+            1_050_000,
+            128_000,
+            tiered_rates(0.2, 1.2, 0.02, 0.25, 272_000, 0.4, 1.8, 0.04, 0.5),
+            none_low_through_max_levels(),
+            false,
+        ),
+        go_model(
+            "grok-4.5",
+            "Grok 4.5",
+            responses,
+            500_000,
+            500_000,
+            rates(2.0, 6.0, 0.3, 0.0),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "hy3",
+            "Hy3",
+            completions,
+            256_000,
+            64_000,
+            rates(0.14, 0.58, 0.035, 0.0),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "hy3-preview",
+            "Hy3 Preview",
+            completions,
+            256_000,
+            64_000,
+            rates(0.14, 0.58, 0.035, 0.0),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "kimi-k2.5",
+            "Kimi K2.5",
+            completions,
+            262_144,
+            65_536,
+            rates(0.6, 3.0, 0.1, 0.0),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "kimi-k2.6",
+            "Kimi K2.6",
+            completions,
+            262_144,
+            65_536,
+            rates(0.95, 4.0, 0.16, 0.0),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "kimi-k2.7-code",
+            "Kimi K2.7 Code",
+            completions,
+            262_144,
+            262_144,
+            rates(0.95, 4.0, 0.19, 0.0),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "kimi-k3",
+            "Kimi K3",
+            completions,
+            1_048_576,
+            131_072,
+            rates(3.0, 15.0, 0.3, 0.0),
+            low_high_max_levels(),
+            false,
+        ),
+        go_model(
+            "mimo-v2-omni",
+            "MiMo-V2-Omni",
+            completions,
+            262_144,
+            128_000,
+            rates(0.4, 2.0, 0.08, 0.0),
+            none_through_high_levels(),
+            false,
+        ),
+        go_model(
+            "mimo-v2-pro",
+            "MiMo-V2-Pro",
+            completions,
+            1_048_576,
+            128_000,
+            rates(1.0, 3.0, 0.2, 0.0),
+            none_through_high_levels(),
+            false,
+        ),
+        go_model(
+            "mimo-v2.5",
+            "MiMo V2.5",
+            completions,
+            1_000_000,
+            128_000,
+            rates(0.14, 0.28, 0.0028, 0.0),
+            none_through_high_levels(),
+            false,
+        ),
+        go_model(
+            "mimo-v2.5-pro",
+            "MiMo V2.5 Pro",
+            completions,
+            1_048_576,
+            128_000,
+            rates(0.435, 0.87, 0.003625, 0.0),
+            none_through_high_levels(),
+            false,
+        ),
+        go_model(
+            "minimax-m2.5",
+            "MiniMax-M2.5",
+            anthropic,
+            204_800,
+            65_536,
+            rates(0.3, 1.2, 0.06, 0.375),
+            low_medium_high_levels(),
+            true,
+        ),
+        go_model(
+            "minimax-m2.7",
+            "MiniMax-M2.7",
+            completions,
+            204_800,
+            131_072,
+            rates(0.3, 1.2, 0.06, 0.375),
+            low_medium_high_levels(),
+            false,
+        ),
+        go_model(
+            "minimax-m3",
+            "MiniMax-M3",
+            completions,
+            1_000_000,
+            131_072,
+            rates(0.3, 1.2, 0.06, 0.0),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "qwen3.5-plus",
+            "Qwen3.5 Plus",
+            completions,
+            262_144,
+            65_536,
+            rates(0.2, 1.2, 0.02, 0.25),
+            none_and_minimal_through_high_levels(),
+            false,
+        ),
+        go_model(
+            "qwen3.6-plus",
+            "Qwen3.6 Plus",
+            completions,
+            1_000_000,
+            65_536,
+            tiered_rates(0.5, 3.0, 0.05, 0.625, 256_000, 2.0, 6.0, 0.2, 2.5),
+            none_and_minimal_through_high_levels(),
+            false,
+        ),
+        go_model(
+            "qwen3.7-max",
+            "Qwen3.7 Max",
+            anthropic,
+            1_000_000,
+            65_536,
+            rates(2.5, 7.5, 0.5, 3.125),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "qwen3.7-plus",
+            "Qwen3.7 Plus",
+            anthropic,
+            1_000_000,
+            65_536,
+            tiered_rates(0.4, 1.6, 0.04, 0.5, 256_000, 1.2, 4.8, 0.12, 1.5),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+        go_model(
+            "qwen3.8-max",
+            "Qwen3.8 Max",
+            anthropic,
+            1_000_000,
+            131_072,
+            rates(2.0, 6.0, 0.25, 2.5),
+            none_and_minimal_through_xhigh_levels(),
+            false,
+        ),
+    ]
+}
+
 pub(super) fn seed_catalog() -> ModelCatalog {
     let mut providers: BTreeMap<BackendKind, ProviderCatalog> = BTreeMap::new();
     let mut register = |default: ModelMetadata,
@@ -566,6 +966,22 @@ pub(super) fn seed_catalog() -> ModelCatalog {
             (backend == BackendKind::ArceeApi).then_some("https://api.arcee.ai/api/v1"),
         );
     }
+    register(
+        entry(
+            BackendKind::OpencodeGo,
+            PROVIDER_DEFAULT_MODEL_ID,
+            true,
+            none_through_xhigh_levels(),
+            completions_compat(
+                Some(CompletionsThinkingFormat::Arcee),
+                "reasoning_content",
+                None,
+            ),
+        ),
+        &opencode_go_seed_models(),
+        Some("OPENCODE_API_KEY"),
+        Some(crate::model::OPENCODE_GO_CANONICAL_BASE_URL),
+    );
 
     ModelCatalog { providers }
 }
