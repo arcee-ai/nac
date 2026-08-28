@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   STICK_TOLERANCE_PX,
@@ -364,13 +364,25 @@ export function useStickToBottom({ resetKey = null }: StickToBottomOptions = {})
   // Opening a transcript is a fresh start however the last one was left: an
   // abandoned follow-mode must not carry over, and the arriving content has to
   // be pinned to rather than glided onto, since none of it has been read yet.
-  useEffect(() => {
+  // Layout, not effect: the content ResizeObserver already ran after paint if
+  // this waited, treated the swap as growth of the previous session, and a
+  // follow started then aborted left the reused scroller off the bottom.
+  useLayoutEffect(() => {
     cancelFollow();
     stuck.current = true;
-    hasPinned.current = false;
     prevScrollHeight.current = 0;
     prevContentHeight.current = 0;
-  }, [resetKey, cancelFollow]);
+    const element = scrollRef.current;
+    if (!element) {
+      hasPinned.current = false;
+      return;
+    }
+    hasPinned.current = true;
+    beginProgrammaticScroll();
+    scrollToBottomInstantly(element);
+    syncJumpButton();
+    endProgrammaticScroll();
+  }, [resetKey, beginProgrammaticScroll, cancelFollow, endProgrammaticScroll, syncJumpButton]);
 
   const jumpToLatest = useCallback(() => {
     const element = scrollRef.current;
