@@ -568,7 +568,11 @@ function signalTrackedProcesses(
 }
 
 async function processTable(): Promise<Array<{ pid: number; ppid: number; command: string }>> {
-  const ps = spawn("ps", ["eww", "-axo", "pid=,ppid=,command="], {
+  const args =
+    process.platform === "darwin"
+      ? ["eww", "-axo", "pid=,ppid=,command="]
+      : ["eww", "-e", "-o", "pid=,ppid=,command="];
+  const ps = spawn("ps", args, {
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
