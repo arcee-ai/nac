@@ -91,7 +91,7 @@ existing writers and drift checks remain authoritative.
 
 - Inventory and policy: in progress.
 - Inline-test extraction: complete, pending commit.
-- Dedicated-suite decomposition: runtime complete; session-service and server
+- Dedicated-suite decomposition: runtime and session-service complete; server
   pending.
 - Agent production extraction: pending.
 - Automated enforcement and navigation: pending.
@@ -150,3 +150,21 @@ warning-denied `nac-core` Clippy remains green.
 
 Next: commit the runtime-suite boundary, then partition the session-service
 suite by projection/direct-interaction and recovery/settlement ownership.
+
+### Session lifecycle behavior suites
+
+The 5,386-line session-service bag is now an 815-line fixture/foundational-test
+root plus four invariant-focused siblings: projection (782), direct interaction
+(1,339), settlement (1,025), and recovery/cancellation (1,438). Cross-family
+fixtures remain private in the common ancestor; `assert_run_started_event` was
+the only helper discovered after compilation to be shared by three families and
+was moved rather than duplicated. The subprocess selector was updated to its
+new recovery module path so the crash-window test still launches exactly the
+intended helper.
+
+All 63 session-service tests pass (62 runnable, one manual benchmark ignored),
+warning-denied `nac-core` Clippy passes, and all ten durability selections pass,
+including their server relationship/managed-binding consumers.
+
+Next: commit the session lifecycle test boundary, then decompose the server test
+bag without duplicating its expensive router/session fixtures.
