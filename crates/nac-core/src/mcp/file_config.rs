@@ -340,10 +340,14 @@ impl DocumentRevision {
 #[cfg(unix)]
 fn file_identity(metadata: &std::fs::Metadata) -> FileIdentity {
     use std::os::unix::fs::MetadataExt;
+    #[cfg(target_os = "linux")]
+    let file_type = metadata.mode() & libc::S_IFMT;
+    #[cfg(not(target_os = "linux"))]
+    let file_type = metadata.mode() & u32::from(libc::S_IFMT);
     FileIdentity {
         device: metadata.dev(),
         inode: metadata.ino(),
-        file_type: metadata.mode() & u32::from(libc::S_IFMT),
+        file_type,
     }
 }
 
