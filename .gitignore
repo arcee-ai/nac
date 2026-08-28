@@ -8,3 +8,9 @@ nac.db
 crates/nac-core/src/model/client_local.rs
 # local-only Cursor rules / agent handoff notes
 .cursor/
+# Local working documents live here. Keep the directory itself in Git via
+# .gitkeep, but never commit its contents.
+/working_docs/*
+!/working_docs/.gitkeep
+# Local repository goal prompt retained for possible future use.
+/.agents/skills/goal-prompt/
