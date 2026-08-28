@@ -300,7 +300,7 @@ export function ProjectSessionTabs({
             variant={ButtonVariant.Ghost}
             size={ButtonSize.Medium}
             content={ButtonContent.Icon}
-            aria-label="New Session"
+            aria-label="Create new session"
             disabled={empty}
             onClick={() => void projectActions.newChat(projectId)}
           >
