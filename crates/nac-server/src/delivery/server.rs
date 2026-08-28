@@ -397,6 +397,8 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(compaction::handler))
         .routes(routes!(revert::handler))
         .routes(routes!(revert::regenerate_handler))
+        .routes(routes!(fork::handler))
+        .routes(routes!(fork::dismiss_handler))
         .routes(routes!(
             delivery::session_runs::queue_orchestrator_steering_handler
         ))

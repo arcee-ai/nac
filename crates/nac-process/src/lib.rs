@@ -1,18 +1,30 @@
 //! Process-tree supervision shared by terminal, worker, and managed Git adapters.
 
+#[cfg(target_os = "macos")]
+use std::collections::HashSet;
 #[cfg(unix)]
 use std::collections::VecDeque;
 #[cfg(target_os = "linux")]
 use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 use tokio::process::{Child, Command};
 use tokio::time::sleep;
 
 const TERMINATE_GRACE: Duration = Duration::from_millis(500);
 const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(25);
+#[cfg(unix)]
+const PROCESS_TREE_ENV: &str = "NAC_PROCESS_TREE";
+#[cfg(unix)]
+const PROCESS_TREE_ROOT_ENV: &str = "NAC_PROCESS_TREE_ROOT";
 #[cfg(all(any(test, feature = "test-support"), target_os = "linux"))]
 pub static PIDFD_OPEN_FAILURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -33,6 +45,16 @@ pub struct ProcessTreeGuard {
     pgid: Option<libc::pid_t>,
     #[cfg(unix)]
     group_leader: Option<Child>,
+    #[cfg(unix)]
+    tree_id: Option<String>,
+    #[cfg(unix)]
+    root_id: Option<String>,
+    /// True when this guard spawned a new process-group session and should
+    /// reap every descendant that inherited `NAC_PROCESS_TREE_ROOT`.
+    #[cfg(unix)]
+    owns_session: bool,
+    #[cfg(target_os = "macos")]
+    census: Option<MacosCensus>,
 }
 
 impl ProcessTreeGuard {
@@ -56,12 +78,40 @@ impl ProcessTreeGuard {
             pgid: root_pid.filter(|pid| unsafe { libc::getpgid(*pid) } == *pid),
             #[cfg(unix)]
             group_leader: None,
+            #[cfg(unix)]
+            tree_id: None,
+            #[cfg(unix)]
+            root_id: None,
+            #[cfg(unix)]
+            owns_session: false,
+            #[cfg(target_os = "macos")]
+            census: None,
+        }
+    }
+
+    pub fn spawn_tracked(command: &mut Command) -> std::io::Result<(Child, Self)> {
+        #[cfg(unix)]
+        {
+            let (tree_id, root_id, _owns_session) = stamp_tree_env(command);
+            let child = command.spawn()?;
+            let mut guard = Self::for_child(&child);
+            guard.tree_id = Some(tree_id);
+            guard.root_id = Some(root_id);
+            #[cfg(target_os = "macos")]
+            guard.start_census();
+            Ok((child, guard))
+        }
+        #[cfg(not(unix))]
+        {
+            let child = command.spawn()?;
+            Ok((child, Self::for_child(&child)))
         }
     }
 
     pub fn spawn_supervised(command: &mut Command) -> std::io::Result<(Child, Self)> {
         #[cfg(unix)]
         {
+            let (tree_id, root_id, owns_session) = stamp_tree_env(command);
             let mut leader_command = Command::new("/bin/sleep");
             leader_command
                 .arg("2147483647")
@@ -69,6 +119,7 @@ impl ProcessTreeGuard {
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .kill_on_drop(true);
+            apply_tree_env(&mut leader_command, &tree_id, &root_id);
             isolate_process_group(&mut leader_command);
             let mut group_leader = leader_command.spawn()?;
             let pgid = group_leader.id().ok_or_else(|| {
@@ -85,16 +136,22 @@ impl ProcessTreeGuard {
             let root_pid = child.id().map(|pid| pid as libc::pid_t);
             #[cfg(target_os = "linux")]
             let root_start_time = root_pid.and_then(process_start_time);
-            Ok((
-                child,
-                Self {
-                    root_pid,
-                    #[cfg(target_os = "linux")]
-                    root_start_time,
-                    pgid: Some(pgid),
-                    group_leader: Some(group_leader),
-                },
-            ))
+            #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+            let mut guard = Self {
+                root_pid,
+                #[cfg(target_os = "linux")]
+                root_start_time,
+                pgid: Some(pgid),
+                group_leader: Some(group_leader),
+                tree_id: Some(tree_id),
+                root_id: Some(root_id),
+                owns_session,
+                #[cfg(target_os = "macos")]
+                census: None,
+            };
+            #[cfg(target_os = "macos")]
+            guard.start_census();
+            Ok((child, guard))
         }
 
         #[cfg(not(unix))]
@@ -115,6 +172,15 @@ impl ProcessTreeGuard {
             }
             self.pgid = None;
             self.group_leader = None;
+            self.tree_id = None;
+            self.root_id = None;
+            self.owns_session = false;
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(census) = self.census.as_mut() {
+                    census.stop();
+                }
+            }
         }
     }
 
@@ -150,7 +216,7 @@ impl ProcessTreeGuard {
         #[cfg(target_os = "linux")]
         let mut cleanup_result = Ok(());
         #[cfg(not(target_os = "linux"))]
-        let cleanup_result = Ok(());
+        let mut cleanup_result = Ok(());
         #[cfg(unix)]
         if let Some(pgid) = self.pgid {
             let leader_pid = self
@@ -165,6 +231,7 @@ impl ProcessTreeGuard {
                         Some(pgid),
                         "initial descendant scan",
                     );
+                    descendants.extend(self.capture_tagged("initial tag scan"));
                     descendants.signal_best_effort(libc::SIGTERM);
 
                     let deadline = sleep(TERMINATE_GRACE);
@@ -221,6 +288,11 @@ impl ProcessTreeGuard {
             if child.id().is_some() {
                 let _ = child.wait().await;
             }
+            #[cfg(unix)]
+            {
+                cleanup_result =
+                    first_cleanup_error(cleanup_result, self.finish_tagged_cleanup().await);
+            }
             self.disarm();
             return cleanup_result;
         }
@@ -230,9 +302,10 @@ impl ProcessTreeGuard {
         // finish, then kill the child itself.
         #[cfg(target_os = "linux")]
         if let Some(root_pid) = self.root_pid {
-            cleanup_result =
-                capture_descendants(root_pid, self.root_start_time, None, "descendant scan")
-                    .signal_all(libc::SIGKILL);
+            let mut descendants =
+                capture_descendants(root_pid, self.root_start_time, None, "descendant scan");
+            descendants.extend(self.capture_tagged("descendant tag scan"));
+            cleanup_result = descendants.signal_all(libc::SIGKILL);
         }
         #[cfg(all(unix, not(target_os = "linux")))]
         if let Some(root_pid) = self.root_pid {
@@ -241,8 +314,117 @@ impl ProcessTreeGuard {
 
         let _ = child.kill().await;
         let _ = child.wait().await;
+        #[cfg(unix)]
+        {
+            cleanup_result =
+                first_cleanup_error(cleanup_result, self.finish_tagged_cleanup().await);
+        }
         self.disarm();
         cleanup_result
+    }
+
+    #[cfg(unix)]
+    fn signal_tagged(&self, signal: libc::c_int) {
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(tree_id) = self.tree_id.as_deref() {
+                signal_env_tagged(PROCESS_TREE_ENV, tree_id, signal);
+            }
+            if self.owns_session {
+                if let Some(root_id) = self.root_id.as_deref() {
+                    signal_env_tagged(PROCESS_TREE_ROOT_ENV, root_id, signal);
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(census) = &self.census {
+                signal_pids(&census.snapshot(), signal);
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = signal;
+        }
+    }
+
+    #[cfg(unix)]
+    async fn finish_tagged_cleanup(&mut self) -> std::io::Result<()> {
+        // Freeze the Darwin census before the wait loop so newly observed
+        // PIDs cannot appear after we have already signalled the known set.
+        #[cfg(target_os = "macos")]
+        if let Some(census) = self.census.as_mut() {
+            census.stop();
+        }
+        self.signal_tagged(libc::SIGKILL);
+        let deadline = Instant::now() + TERMINATE_GRACE;
+        loop {
+            let leftovers = self.live_tagged_pids();
+            if leftovers.is_empty() {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::other(format!(
+                    "incomplete descendant cleanup: tagged pid(s) still alive: {}",
+                    leftovers
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
+            self.signal_tagged(libc::SIGKILL);
+            sleep(EXIT_POLL_INTERVAL).await;
+        }
+    }
+
+    #[cfg(unix)]
+    fn live_tagged_pids(&self) -> Vec<libc::pid_t> {
+        let mut leftovers = Vec::new();
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(tree_id) = self.tree_id.as_deref() {
+                leftovers.extend(live_env_tagged(PROCESS_TREE_ENV, tree_id));
+            }
+            if self.owns_session {
+                if let Some(root_id) = self.root_id.as_deref() {
+                    leftovers.extend(live_env_tagged(PROCESS_TREE_ROOT_ENV, root_id));
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(census) = &self.census {
+            leftovers.extend(
+                census
+                    .snapshot()
+                    .into_iter()
+                    .filter(|&pid| pid != self_pid() && process_is_live(pid)),
+            );
+        }
+        leftovers.sort_unstable();
+        leftovers.dedup();
+        leftovers
+    }
+
+    #[cfg(target_os = "macos")]
+    fn start_census(&mut self) {
+        if let Some(root) = self.root_pid {
+            self.census = Some(MacosCensus::start(root));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn capture_tagged(&self, context: &str) -> CapturedDescendants {
+        let mut captured = CapturedDescendants::default();
+        if let Some(tree_id) = self.tree_id.as_deref() {
+            captured.extend(capture_env_tagged(PROCESS_TREE_ENV, tree_id, context));
+        }
+        if self.owns_session {
+            if let Some(root_id) = self.root_id.as_deref() {
+                captured.extend(capture_env_tagged(PROCESS_TREE_ROOT_ENV, root_id, context));
+            }
+        }
+        captured
     }
 
     #[cfg(unix)]
@@ -283,6 +465,7 @@ impl Drop for ProcessTreeGuard {
     fn drop(&mut self) {
         #[cfg(unix)]
         {
+            self.signal_tagged(libc::SIGKILL);
             let owns_group = self.root_pid.is_some() || self.group_leader.is_some();
             if owns_group {
                 if let Some(pgid) = self.pgid.take() {
@@ -296,6 +479,307 @@ impl Drop for ProcessTreeGuard {
         }
     }
 }
+
+#[cfg(unix)]
+fn first_cleanup_error(
+    current: std::io::Result<()>,
+    tagged: std::io::Result<()>,
+) -> std::io::Result<()> {
+    match current {
+        Err(error) => Err(error),
+        Ok(()) => tagged,
+    }
+}
+
+#[cfg(unix)]
+fn stamp_tree_env(command: &mut Command) -> (String, String, bool) {
+    let inherited = std::env::var(PROCESS_TREE_ROOT_ENV).ok();
+    let owns_session = inherited.is_none();
+    let root_id = inherited.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let tree_id = uuid::Uuid::new_v4().to_string();
+    apply_tree_env(command, &tree_id, &root_id);
+    (tree_id, root_id, owns_session)
+}
+
+#[cfg(unix)]
+fn apply_tree_env(command: &mut Command, tree_id: &str, root_id: &str) {
+    command.env(PROCESS_TREE_ENV, tree_id);
+    command.env(PROCESS_TREE_ROOT_ENV, root_id);
+}
+
+#[cfg(unix)]
+fn self_pid() -> libc::pid_t {
+    // SAFETY: `getpid` has no arguments, pointer preconditions, or failure
+    // mode; it returns the calling process identity.
+    unsafe { libc::getpid() }
+}
+
+#[cfg(target_os = "linux")]
+fn signal_env_tagged(key: &str, value: &str, signal: libc::c_int) {
+    for pid in pids_with_env(key, value) {
+        if pid == self_pid() {
+            continue;
+        }
+        unsafe {
+            libc::kill(pid, signal);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn live_env_tagged(key: &str, value: &str) -> Vec<libc::pid_t> {
+    pids_with_env(key, value)
+        .into_iter()
+        .filter(|&pid| pid != self_pid() && process_is_live(pid))
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn pids_with_env(key: &str, value: &str) -> Vec<libc::pid_t> {
+    all_pids()
+        .into_iter()
+        .filter(|&pid| pid > 1 && process_has_env(pid, key, value))
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn all_pids() -> Vec<libc::pid_t> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<libc::pid_t>().ok())
+        })
+        .filter(|pid| *pid > 1)
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn process_has_env(pid: libc::pid_t, key: &str, value: &str) -> bool {
+    let Ok(bytes) = std::fs::read(format!("/proc/{pid}/environ")) else {
+        return false;
+    };
+    let needle = format!("{key}={value}");
+    bytes
+        .split(|byte| *byte == 0)
+        .any(|entry| entry == needle.as_bytes())
+}
+
+#[cfg(target_os = "linux")]
+fn process_is_live(pid: libc::pid_t) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return false;
+    };
+    let Some((_, rest)) = stat.rsplit_once(") ") else {
+        return false;
+    };
+    !matches!(rest.as_bytes().first().copied(), Some(b'Z' | b'X'))
+}
+
+#[cfg(target_os = "macos")]
+fn process_is_live(pid: libc::pid_t) -> bool {
+    // Live p_stat values from sys/proc.h. Treat only SRUN/SSLEEP/SSTOP as
+    // leftover work: `pbi_status != SZOMB` is too wide because Darwin can
+    // report a wait status such as 9 (SIGKILL) in this field, which made a
+    // dying orphan look alive and fail closed.
+    const SRUN: u32 = 2;
+    const SSLEEP: u32 = 3;
+    const SSTOP: u32 = 4;
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: `info` points to writable storage of exactly `size` bytes for
+    // `PROC_PIDTBSDINFO`; the kernel initializes it when it reports success.
+    let returned = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if returned <= 0 {
+        return false;
+    }
+    // SAFETY: a positive `proc_pidinfo` result initialized `info` above.
+    let info = unsafe { info.assume_init() };
+    matches!(info.pbi_status, SRUN | SSLEEP | SSTOP)
+}
+
+#[cfg(target_os = "macos")]
+struct MacosCensus {
+    seen: Arc<Mutex<HashSet<libc::pid_t>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(target_os = "macos")]
+impl MacosCensus {
+    fn start(root: libc::pid_t) -> Self {
+        let seen = Arc::new(Mutex::new(HashSet::from([root])));
+        let stop = Arc::new(AtomicBool::new(false));
+        let seen_thread = Arc::clone(&seen);
+        let stop_thread = Arc::clone(&stop);
+        let thread = std::thread::Builder::new()
+            .name("nac-process-census".to_string())
+            .spawn(move || macos_census_loop(root, seen_thread, stop_thread))
+            .ok();
+        Self { seen, stop, thread }
+    }
+
+    fn snapshot(&self) -> Vec<libc::pid_t> {
+        self.seen
+            .lock()
+            .map(|seen| seen.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    fn stop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for MacosCensus {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_watch_pid(kq: i32, pid: libc::pid_t) {
+    // SAFETY: an all-zero `kevent` is a valid starting value whose fields are
+    // fully initialized below before it is passed to the kernel.
+    let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+    event.ident = pid as usize;
+    event.filter = libc::EVFILT_PROC;
+    event.flags = libc::EV_ADD | libc::EV_ENABLE;
+    event.fflags = libc::NOTE_EXIT | libc::NOTE_FORK | libc::NOTE_EXEC;
+    // SAFETY: `event` is initialized and valid for one input element; the
+    // output pointers are null because this call only registers a filter.
+    let _ = unsafe { libc::kevent(kq, &event, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
+}
+
+#[cfg(target_os = "macos")]
+fn macos_discover_children(pid: libc::pid_t, seen: &Mutex<HashSet<libc::pid_t>>, kq: i32) {
+    for child in direct_child_pids_macos(pid) {
+        let inserted = seen
+            .lock()
+            .map(|mut seen| seen.insert(child))
+            .unwrap_or(false);
+        if inserted {
+            macos_watch_pid(kq, child);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_census_loop(
+    root: libc::pid_t,
+    seen: Arc<Mutex<HashSet<libc::pid_t>>>,
+    stop: Arc<AtomicBool>,
+) {
+    // SAFETY: `kqueue` has no pointer preconditions and returns either an
+    // owned descriptor or a negative error sentinel.
+    let kq = unsafe { libc::kqueue() };
+    if kq >= 0 {
+        macos_watch_pid(kq, root);
+    }
+    while !stop.load(Ordering::Relaxed) {
+        let snapshot = seen
+            .lock()
+            .map(|seen| seen.iter().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for pid in snapshot {
+            macos_discover_children(pid, &seen, kq);
+        }
+        if kq < 0 {
+            std::thread::sleep(Duration::from_millis(5));
+            continue;
+        }
+        let timeout = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 5_000_000,
+        };
+        // SAFETY: an all-zero `kevent` is a valid output buffer element; the
+        // kernel initializes the returned prefix before it is read.
+        let mut events = [unsafe { std::mem::zeroed::<libc::kevent>() }; 16];
+        // SAFETY: `events` is writable for its declared length, `timeout`
+        // points to a valid timespec, and the null change-list has length zero.
+        let n = unsafe {
+            libc::kevent(
+                kq,
+                std::ptr::null(),
+                0,
+                events.as_mut_ptr(),
+                events.len() as i32,
+                &timeout,
+            )
+        };
+        if n <= 0 {
+            continue;
+        }
+        for event in events.iter().take(n as usize) {
+            let pid = event.ident as libc::pid_t;
+            if pid > 1 {
+                let _ = seen.lock().map(|mut seen| seen.insert(pid));
+                macos_watch_pid(kq, pid);
+                macos_discover_children(pid, &seen, kq);
+            }
+        }
+    }
+    if kq >= 0 {
+        // SAFETY: a nonnegative `kqueue` result is an owned descriptor and is
+        // closed exactly once after the census loop exits.
+        unsafe {
+            libc::close(kq);
+        }
+    }
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn process_is_live(pid: libc::pid_t) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+#[cfg(target_os = "linux")]
+fn capture_env_tagged(key: &str, value: &str, context: &str) -> CapturedDescendants {
+    let mut captured = CapturedDescendants::default();
+    for pid in pids_with_env(key, value) {
+        if pid == self_pid() {
+            continue;
+        }
+        let Some(start_time) = process_start_time(pid) else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            continue;
+        };
+        let Some((ppid, pgrp, _)) = parse_process_stat(&stat) else {
+            continue;
+        };
+        match ProcessIdentity::capture(ProcessMetadata {
+            pid,
+            ppid,
+            pgrp,
+            start_time,
+        }) {
+            Ok(Some(identity)) => captured.processes.push(identity),
+            Ok(None) => {}
+            Err(error) => captured.failures.record(pid, context, error),
+        }
+    }
+    captured
+}
+
 #[cfg(all(unix, not(target_os = "linux")))]
 fn descendants_outside_group(root: libc::pid_t, pgid: libc::pid_t) -> Vec<libc::pid_t> {
     descendant_pids(root)
@@ -1036,8 +1520,7 @@ mod tests {
             .stderr(Stdio::null())
             .kill_on_drop(true);
         isolate_process_group(&mut command);
-        let mut child = command.spawn().unwrap();
-        let mut guard = ProcessTreeGuard::for_child(&child);
+        let (mut child, mut guard) = ProcessTreeGuard::spawn_tracked(&mut command).unwrap();
 
         tokio::time::timeout(Duration::from_secs(2), async {
             while !root.join("descendant-ready").exists() {

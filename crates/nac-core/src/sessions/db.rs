@@ -797,10 +797,15 @@ SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
        p.title, COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0),
        COALESCE(p.version, 0), s.visible_message_count, s.last_user_prompt,
        s.token_usages_json, COALESCE(s.run_count, 0), s.ssh_port, s.ssh_identity_file,
-       sp.project_id, s.behavior
+       sp.project_id, s.behavior,
+       fsrc.source_session_id, fsrc.source_title, origin_p.title,
+       origin_s.last_user_prompt, origin_s.session_id
 FROM sessions s
 LEFT JOIN session_presentations p ON p.session_id = s.session_id
 LEFT JOIN session_projects sp ON sp.session_id = s.session_id
+LEFT JOIN session_forks fsrc ON fsrc.fork_session_id = s.session_id
+LEFT JOIN sessions origin_s ON origin_s.session_id = fsrc.source_session_id
+LEFT JOIN session_presentations origin_p ON origin_p.session_id = fsrc.source_session_id
 "#;
 
 fn query_session_summary(
@@ -872,6 +877,11 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         ssh_identity_file: row.get(19)?,
         project_id: row.get(20)?,
         behavior: row.get(21)?,
+        fork_source_session_id: row.get(22)?,
+        fork_source_title: row.get(23)?,
+        fork_origin_title: row.get(24)?,
+        fork_origin_prompt: row.get(25)?,
+        fork_origin_session_id: row.get(26)?,
     })
 }
 
@@ -898,6 +908,11 @@ struct SessionSummaryRow {
     ssh_identity_file: Option<String>,
     project_id: Option<String>,
     behavior: String,
+    fork_source_session_id: Option<String>,
+    fork_source_title: Option<String>,
+    fork_origin_title: Option<String>,
+    fork_origin_prompt: Option<String>,
+    fork_origin_session_id: Option<String>,
 }
 
 impl SessionSummaryRow {
@@ -955,6 +970,13 @@ impl SessionSummaryRow {
             total_tokens,
             total_cost_micros,
             run_count: self.run_count.max(0) as u64,
+            forked_from: crate::store::fork_origin_from_parts(
+                self.fork_source_session_id,
+                self.fork_source_title,
+                self.fork_origin_title,
+                self.fork_origin_prompt,
+                self.fork_origin_session_id,
+            ),
         })
     }
 }

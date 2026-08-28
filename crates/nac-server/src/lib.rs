@@ -3,6 +3,7 @@ mod compaction;
 mod delegation_runtime;
 mod delivery;
 mod filesystem;
+mod fork;
 mod light_model;
 mod managed_auth;
 mod managed_github;
@@ -58,6 +59,7 @@ pub use delivery::workspace::{
     WorkspaceFileQuery, WorkspaceRevisionQuery,
 };
 pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
+pub use fork::{DismissForkError, ForkSessionError, ForkSessionRequest, ForkSessionResponse};
 pub use managed_auth::{
     DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
     ManagedAuthStatusResponse,

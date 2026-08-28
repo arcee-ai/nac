@@ -6,7 +6,7 @@
     "license": {
       "name": ""
     },
-    "version": "0.1.3"
+    "version": "0.1.4"
   },
   "paths": {
     "/auth": {
@@ -3890,6 +3890,187 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Bad request or rejected path/query/body extraction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/fork": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_fork",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForkSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or rejected path/query/body extraction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "JSON body validation failed",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/forks/{fork_id}": {
+      "delete": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "delete_sessions_session_id_forks_fork_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fork_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
           },
           "400": {
             "description": "Bad request or rejected path/query/body extraction",
@@ -8555,6 +8736,30 @@
           "cancelled"
         ]
       },
+      "ForkSessionRequest": {
+        "type": "object",
+        "required": [
+          "message_idx"
+        ],
+        "properties": {
+          "message_idx": {
+            "type": "integer",
+            "description": "Transcript index of the assistant message to fork from. Trailing tool\nresults that belong to that turn are copied with it.",
+            "minimum": 0
+          }
+        }
+      },
+      "ForkSessionResponse": {
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
       "FunctionCall": {
         "type": "object",
         "required": [
@@ -11676,6 +11881,54 @@
           }
         }
       },
+      "SessionForkLink": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "source_message_idx",
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "True when the forked session row is gone. The original chat still\nshows the marker as a deleted item until the user dismisses it."
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "source_message_idx": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Live fork presentation title. Absent on a deleted fork."
+          }
+        }
+      },
+      "SessionForkOrigin": {
+        "type": "object",
+        "description": "The chat this session was forked from, for tab and list-row marks.",
+        "required": [
+          "session_id",
+          "title"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "True when the original chat row is gone. The stored title still names it."
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "SessionFrontendSnapshot": {
         "type": "object",
         "required": [
@@ -11723,6 +11976,13 @@
               "format": "int64"
             },
             "description": "Delivered orchestrator steering records whose verbatim user message is\nalready present in the transcript source backing this snapshot. The\nfrontend hides those records so guidance renders exactly once — as the\ncanonical user message."
+          },
+          "forks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionForkLink"
+            },
+            "description": "Conversation forks created from a model turn in this session."
           },
           "message_created_at": {
             "type": "array",
@@ -12097,6 +12357,17 @@
           },
           "cwd": {
             "type": "string"
+          },
+          "forked_from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SessionForkOrigin",
+                "description": "Present when this chat was forked from another session."
+              }
+            ]
           },
           "last_user_prompt": {
             "type": [

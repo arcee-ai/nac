@@ -12,6 +12,7 @@ mod projects;
 mod render;
 mod run_recovery;
 mod schema;
+mod session_forks;
 mod session_goals;
 mod session_inbox;
 mod ssh_configurations;
@@ -38,6 +39,11 @@ pub use run_recovery::{
     RunRecoveryRecord, RunRecoveryStatus, RunTerminalDisposition,
 };
 pub use schema::{check_readiness, default_store_path, initialize, schema_version};
+pub use session_forks::{
+    clone_session_conversation_artifacts, dismiss_session_fork, insert_session_fork,
+    list_session_forks, SessionForkLink, SessionForkOrigin,
+};
+pub(crate) use session_forks::{fork_origin_from_parts, list_session_forks_with_connection};
 pub use session_goals::*;
 pub use session_inbox::*;
 pub use ssh_configurations::*;

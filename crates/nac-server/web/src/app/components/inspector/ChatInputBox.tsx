@@ -32,6 +32,7 @@ import {
   formatTokensCompact,
   runMetrics,
   sessionEnvLabel,
+  tokenUsage,
 } from "@/app/lib/format";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
@@ -62,7 +63,16 @@ import {
   useUpdateInboxItem,
 } from "@/app/services/queries";
 import { consumePromptRequests } from "@/app/store/composerStore";
-import { pushLocalEvent, useRunUsage, useRunning } from "@/app/store/runtimeStore";
+import {
+  liftSessionSpend,
+  pushLocalEvent,
+  useCancelArmed,
+  useLastElapsedMs,
+  useRunStartedAt,
+  useRunUsage,
+  useRunning,
+  useSessionSpend,
+} from "@/app/store/runtimeStore";
 import {
   markSshConnected,
   markSshDisconnected,
@@ -272,6 +282,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
   const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
   const running = useRunning(sessionId);
+  const stopping = useCancelArmed(sessionId);
   const toast = useToast();
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
@@ -303,17 +314,32 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const listboxId = useId();
 
   // The snapshot only accounts for a run once it ends, so while one is going
-  // the stream's own tally is what keeps these counters moving.
+  // (or Stopping, before persist lands) the stream's own tally keeps the
+  // session spend from dropping back to the previous turn. After Stop the
+  // snapshot can briefly be zeros — sessionSpend is the floor that never
+  // drops while this tab is open.
   const runUsage = useRunUsage();
-  const metrics = runMetrics(snapshot, entry, running ? runUsage : null);
+  const sessionSpend = useSessionSpend();
+  useEffect(() => {
+    liftSessionSpend(tokenUsage(snapshot));
+  }, [snapshot]);
+  const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
   const catalog = useModelCatalog();
+  const persistedUsage = tokenUsage(snapshot);
+  // A fork inherits context but not spend, so the gauge must not depend on
+  // billed usage being present.
+  const contextTokens = metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
   const context = contextGauge(
-    metrics.usage?.total_tokens ?? null,
+    contextTokens,
     resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
   );
   const now = useNow(1000, running);
-  const elapsedMs = metrics.startedAt ? now - metrics.startedAt : metrics.lastResponseMs;
+  const runStartedAt = useRunStartedAt();
+  const lastElapsedMs = useLastElapsedMs();
+  // Stop freezes the clock at click; Stopping must not keep adding cleanup time.
+  const liveElapsed = running && runStartedAt != null ? Math.max(0, now - runStartedAt) : null;
+  const elapsedMs = liveElapsed ?? lastElapsedMs ?? metrics.lastResponseMs;
 
   const sshTarget = sshTargetFromSummary(entry?.summary);
   const sshStatus = useSshConnectionStatus(sshTarget);
@@ -330,7 +356,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     createGoal.isPending ||
     updateGoal.isPending ||
     clearGoal.isPending;
-  const busy = mutationPending || (running && !runningDirect);
+  const busy = mutationPending || stopping || (running && !runningDirect);
   const canSend = Boolean(value.trim()) && !busy;
   const pendingInbox = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
   const changeInboxDelivery = async (
@@ -751,11 +777,17 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   );
 
   const stoppingRun = running && !runningDirect;
-  const sendIcon = <Icon iconName={stoppingRun ? IconName.Stop : IconName.Plane} />;
-  const sendLabel = stoppingRun ? "Stop run" : runningDirect ? "Steer active run" : "Send";
-  const sendType = stoppingRun ? "button" : "submit";
-  const sendDisabled = !stoppingRun && !canSend;
-  const onSend = stoppingRun ? () => void stop() : undefined;
+  const sendIcon = <Icon iconName={stoppingRun || stopping ? IconName.Stop : IconName.Plane} />;
+  const sendLabel = stopping
+    ? "Stopping run"
+    : stoppingRun
+      ? "Stop run"
+      : runningDirect
+        ? "Steer active run"
+        : "Send";
+  const sendType = stoppingRun || stopping ? "button" : "submit";
+  const sendDisabled = stopping || (!stoppingRun && !canSend);
+  const onSend = stoppingRun && !stopping ? () => void stop() : undefined;
 
   const sendButton = isMobile ? (
     <StickyButton
@@ -764,6 +796,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       content={ButtonContent.Icon}
       type={sendType}
       disabled={sendDisabled}
+      loading={stopping}
       aria-label={sendLabel}
       onPointerDown={preserveSuggestionFocus}
       onClick={onSend}
@@ -778,6 +811,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       content={ButtonContent.Icon}
       type={sendType}
       disabled={sendDisabled}
+      loading={stopping}
       aria-label={sendLabel}
       onPointerDown={preserveSuggestionFocus}
       onClick={onSend}
@@ -1228,10 +1262,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             </span>
           )}
 
-          {metrics.usage ? (
+          {metrics.usage || contextTokens ? (
             <div className="flex items-center gap-[2px] min-w-0">
               {/* The backend reports the live context window here, not a sum
-                  of the columns beside it. */}
+                  of the columns beside it. A fork can have context without
+                  billed spend, so this badge is not gated on usage. */}
               <StatBadge
                 iconName={IconName.Timelaps}
                 value={context.value}
@@ -1241,7 +1276,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               />
               {/* The per-direction columns go with the model name, leaving the
                   narrow row the reading that matters. */}
-              {narrow ? null : (
+              {metrics.usage && !narrow ? (
                 <>
                   <StatBadge
                     iconName={IconName.ArrowTop}
@@ -1267,7 +1302,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                     labelClassName="tag-label"
                   />
                 </>
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>

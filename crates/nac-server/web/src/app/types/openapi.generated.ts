@@ -270,6 +270,8 @@ export interface components {
       thread_name: string;
     };
     EpisodeStatus: "ok" | "error" | "timed_out" | "cancelled";
+    ForkSessionRequest: { message_idx: number };
+    ForkSessionResponse: { session_id: string };
     FunctionCall: { arguments: string; name: string };
     GeneratedCredential: { name: string };
     GitHubBranchListResponse: { branches: string[] };
@@ -750,11 +752,19 @@ export interface components {
       sequence_id: number;
       session_id?: string | null;
     };
+    SessionForkLink: {
+      deleted: boolean;
+      session_id: string;
+      source_message_idx: number;
+      title?: string | null;
+    };
+    SessionForkOrigin: { deleted?: boolean; session_id: string; title: string };
     SessionFrontendSnapshot: {
       active_compaction?: null | components["schemas"]["ActiveCompactionSnapshot"];
       active_run?: null | components["schemas"]["ActiveRunSnapshot"];
       active_threads?: string[];
       covered_orchestrator_steering_ids?: number[];
+      forks?: components["schemas"]["SessionForkLink"][];
       message_created_at?: (string | null)[];
       messages: components["schemas"]["Message"][];
       metadata: components["schemas"]["SessionMetadata"];
@@ -821,6 +831,7 @@ export interface components {
       behavior?: components["schemas"]["SessionBehavior"];
       created_at: string;
       cwd: string;
+      forked_from?: null | components["schemas"]["SessionForkOrigin"];
       last_user_prompt: string | null;
       model: string;
       model_config_error?: string | null;

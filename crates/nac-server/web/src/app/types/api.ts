@@ -237,6 +237,10 @@ export type SessionFrontendSnapshot = ApiSchema<"SessionFrontendSnapshot">;
 /** `GET /sessions/{id}` flattens the snapshot and adds paging metadata. */
 export type SessionSnapshotResponse = ApiSchema<"SessionSnapshotResponse">;
 
+export type SessionForkOrigin = ApiSchema<"SessionForkOrigin">;
+
+export type SessionForkLink = ApiSchema<"SessionForkLink">;
+
 export type SessionLineage = ApiSchema<"SessionLineageSnapshot">;
 
 export type ManagedSessionSummary = ApiSchema<"ManagedSessionSummary">;
@@ -442,6 +446,10 @@ export type RevertSessionRequest = ApiSchema<"RevertSessionRequest">;
 export type RevertSessionResponse = ApiSchema<"RevertSessionResponse">;
 
 export type RegenerateSessionRequest = ApiSchema<"RegenerateSessionRequest">;
+
+export type ForkSessionRequest = ApiSchema<"ForkSessionRequest">;
+
+export type ForkSessionResponse = ApiSchema<"ForkSessionResponse">;
 
 export type OrchestratorSteeringResponse = ApiSchema<"OrchestratorSteeringResponse">;
 
