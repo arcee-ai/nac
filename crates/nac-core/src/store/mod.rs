@@ -76,6 +76,25 @@ pub fn is_sqlite_busy(error: &anyhow::Error) -> bool {
     })
 }
 
+/// Retry a store write that hit SQLITE_BUSY / SQLITE_LOCKED. `busy_timeout`
+/// already waits on BUSY; LOCKED (and a BUSY that outlived the timeout)
+/// still needs a short outer retry, which session create and steering share.
+pub fn retry_busy<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
+    const RETRY_DELAYS: [std::time::Duration; 4] = [
+        std::time::Duration::from_millis(20),
+        std::time::Duration::from_millis(50),
+        std::time::Duration::from_millis(100),
+        std::time::Duration::from_millis(200),
+    ];
+    for delay in RETRY_DELAYS {
+        match operation() {
+            Err(error) if is_sqlite_busy(&error) => std::thread::sleep(delay),
+            result => return result,
+        }
+    }
+    operation()
+}
+
 /// How a dispatch ended.
 ///
 /// Only [`EpisodeStatus::Ok`] episodes are retained context: they are the ones
