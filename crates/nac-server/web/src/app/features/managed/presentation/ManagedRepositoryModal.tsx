@@ -14,11 +14,10 @@ import {
   LoaderSize,
   Modal,
   ModalSize,
-  PopoverPlacement,
-  Select,
 } from "@/app/atoms";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { cloneIsRunning, repositoryIdentity } from "@/app/features/managed/model";
+import { ManagedBranchPicker } from "@/app/features/managed/presentation/ManagedBranchPicker";
 import {
   managedQueryKeys,
   useManagedGitHub,
@@ -142,7 +141,7 @@ export function ManagedRepositoryModal({
   };
 
   const busy = starting || cloneIsRunning(operation);
-  const branchItems = (branches.data?.branches ?? []).map((name) => ({ id: name, label: name }));
+  const branchError = branches.error ? humanErrorText(toRunError(branches.error)) : null;
 
   return (
     <Modal
@@ -255,18 +254,14 @@ export function ManagedRepositoryModal({
             </div>
             {selected ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="flex flex-col gap-1 text-small text-basic-secondary">
-                  Branch
-                  <Select
-                    items={branchItems}
-                    value={branch}
-                    onValueChange={setBranch}
-                    disabled={branches.isLoading}
-                    className="w-full"
-                    triggerClassName="w-full"
-                    placement={PopoverPlacement.BottomLeft}
-                  />
-                </label>
+                <ManagedBranchPicker
+                  key={selected.full_name}
+                  branches={branches.data?.branches ?? []}
+                  value={branch}
+                  onValueChange={setBranch}
+                  isLoading={branches.isLoading}
+                  error={branchError}
+                />
                 <Input
                   inputSize={InputSize.Large}
                   label="Project name"
