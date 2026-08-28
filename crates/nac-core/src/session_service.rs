@@ -1575,6 +1575,8 @@ impl SessionService {
     /// Take the session back to just before the user message at `message_idx`:
     /// that message and everything after it leave the transcript, and the
     /// checkout returns to the revision that was current when it was sent.
+    /// Messages that still live in the snapshot blob (forked or legacy
+    /// prefix) are truncated there; later log rows are deleted.
     ///
     /// Order matters. The checkout is restored first, because a git failure
     /// there is recoverable — nothing has been forgotten yet — whereas a
@@ -1612,11 +1614,6 @@ impl SessionService {
                 .map(|snapshot| snapshot.messages.len())
                 .unwrap_or_default()
         };
-        if message_idx < blob_len {
-            return Err(anyhow::anyhow!(
-                "message {message_idx} predates this session's transcript log and cannot be reverted to"
-            ));
-        }
 
         let store_path = self.metadata.store_path.clone();
         let workspace_git = self.workspace_git.clone();
@@ -1650,14 +1647,26 @@ impl SessionService {
             _ => false,
         };
 
+        // The blob is write-once at run end, but revert can shrink it: forks
+        // and legacy sessions keep inherited history there, and Resend has to
+        // be able to walk back into that prefix.
         {
             let writer = Arc::clone(&writer);
             let session_id = session_id.clone();
-            tokio::task::spawn_blocking(move || {
-                writer.delete_from(&session_id, message_idx as u64)
-            })
-            .await
-            .map_err(|error| anyhow::anyhow!("transcript truncation task failed: {error}"))??;
+            if message_idx < blob_len {
+                let kept = messages[..message_idx].to_vec();
+                tokio::task::spawn_blocking(move || {
+                    writer.replace_snapshot_and_delete_from(&session_id, &kept)
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("transcript truncation task failed: {error}"))??;
+            } else {
+                tokio::task::spawn_blocking(move || {
+                    writer.delete_from(&session_id, message_idx as u64)
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("transcript truncation task failed: {error}"))??;
+            }
         }
 
         let kept = &messages[..message_idx];
@@ -1683,6 +1692,9 @@ impl SessionService {
         let run_state_update = {
             let mut snapshot = self.session_snapshot.lock().await;
             snapshot.as_mut().map(|snapshot| {
+                if message_idx < blob_len {
+                    snapshot.messages = kept.to_vec();
+                }
                 let mut durations =
                     response_duration_history_from_snapshot(snapshot, kept_responses);
                 durations.truncate(kept_responses);

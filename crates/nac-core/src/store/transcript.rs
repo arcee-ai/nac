@@ -777,10 +777,10 @@ impl TranscriptLogWriter {
         Ok(row_ids.len())
     }
 
-    /// Replace the legacy snapshot prefix and delete every committed log row
-    /// at or beyond its new length in one transaction. This is reserved for
-    /// recovery when dangling-tool normalization trims into the otherwise
-    /// write-once snapshot blob.
+    /// Replace the snapshot blob and delete every committed log row at or
+    /// beyond its new length in one transaction. Run end never rewrites the
+    /// blob; this is the truncation path that does, when dangling-tool
+    /// recovery or revert/resend walks into the legacy or forked prefix.
     pub fn replace_snapshot_and_delete_from(
         &self,
         session_id: &str,
