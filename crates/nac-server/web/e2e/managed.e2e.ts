@@ -8,7 +8,20 @@ type ManagedDoubleState = {
   clonePolls: number;
   projectReady: boolean;
   secrets: string[];
+  cloneRequest: Record<string, unknown> | null;
+  cloneBranch: string;
 };
+
+const alternateBranch = "feature/platform.v2/long-prefix-hot-fix";
+const branchFixture = [
+  "main",
+  ...Array.from(
+    { length: 140 },
+    (_, index) => `feature/generated-prefix-${String(index + 1).padStart(3, "0")}`,
+  ),
+  alternateBranch,
+  "release",
+];
 
 const hostStatus = (state: ManagedDoubleState) => ({
   managed: true,
@@ -49,14 +62,17 @@ const githubStatus = (state: ManagedDoubleState) => ({
   git_configured: state.connected,
 });
 
-const cloneOperation = (status: "running" | "completed" | "cancelled") => ({
+const cloneOperation = (
+  state: ManagedDoubleState,
+  status: "running" | "completed" | "cancelled",
+) => ({
   version: 1,
   operation_id: "0123456789abcdef0123456789abcdef",
   status,
   repository_id: 42,
   repository: "arcee-ai/managed-demo",
   source_identity: "github:42:arcee-ai/managed-demo",
-  branch: "main",
+  branch: state.cloneBranch,
   destination: "/repositories/managed-demo",
   project_id: "managed-project-e2e",
   project_name: "managed-demo",
@@ -80,6 +96,8 @@ async function installManagedDouble(page: Page, initiallyConnected = false) {
     clonePolls: 0,
     projectReady: false,
     secrets: [],
+    cloneRequest: null,
+    cloneBranch: "main",
   };
   await page.route("**/projects", async (route: Route) => {
     if (route.request().method() !== "GET") return route.fallback();
@@ -163,19 +181,23 @@ async function installManagedDouble(page: Page, initiallyConnected = false) {
       });
     }
     if (path === "/managed/github/repositories/arcee-ai/managed-demo/branches") {
-      return route.fulfill({ json: { branches: ["main", "release"] } });
+      return route.fulfill({ json: { branches: branchFixture } });
     }
     if (path === "/managed/github/clone-operations" && method === "POST") {
+      state.cloneRequest = request.postDataJSON() as Record<string, unknown>;
+      state.cloneBranch = String(state.cloneRequest.branch);
       state.clonePolls = 0;
-      return route.fulfill({ json: cloneOperation("running") });
+      return route.fulfill({ json: cloneOperation(state, "running") });
     }
     if (path === "/managed/github/clone-operations/0123456789abcdef0123456789abcdef") {
-      if (method === "DELETE") return route.fulfill({ json: cloneOperation("cancelled") });
+      if (method === "DELETE") {
+        return route.fulfill({ json: cloneOperation(state, "cancelled") });
+      }
       state.clonePolls += 1;
       const status = state.clonePolls < 2 ? "running" : "completed";
       if (status === "completed") state.projectReady = true;
       return route.fulfill({
-        json: cloneOperation(status),
+        json: cloneOperation(state, status),
       });
     }
     if (path === "/managed/secrets" && method === "GET") {
@@ -208,7 +230,7 @@ test("completes the managed first-run, write-only secret, and clone journey", as
   harness,
   page,
 }) => {
-  await installManagedDouble(page);
+  const state = await installManagedDouble(page);
   await page.goto(harness.baseUrl);
 
   await expect(page.getByTestId("managed-empty-status")).toContainText("Arcee model");
@@ -243,9 +265,21 @@ test("completes the managed first-run, write-only secret, and clone journey", as
   await page.getByLabel("Find repository").fill("managed-demo");
   await page.getByRole("button", { name: /arcee-ai\/managed-demo/ }).click();
   await expect(page.getByText("/repositories/managed-demo")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Branch: main", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Branch: main", exact: true }).click();
+  await page.getByRole("combobox", { name: "Find branch" }).fill("LONG-PREFIX");
+  await page.getByRole("option", { name: alternateBranch }).click();
   await page.getByRole("button", { name: "Clone repository" }).click();
   await expect(page.getByText("Cloning objects: 75%")).toBeVisible();
   await expect(page).toHaveURL(/#\/project\/managed-project-e2e$/);
+  expect(state.cloneRequest).toEqual({
+    repository_id: 42,
+    repository: "arcee-ai/managed-demo",
+    branch: alternateBranch,
+    destination: "managed-demo",
+    project_name: "managed-demo",
+    project_description: null,
+  });
 });
 
 test("keeps device authorization and repository selection usable at 390 by 844", async ({
@@ -253,7 +287,7 @@ test("keeps device authorization and repository selection usable at 390 by 844",
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await installManagedDouble(page);
+  const state = await installManagedDouble(page);
   await page.goto(harness.baseUrl);
 
   await page.getByRole("button", { name: "Add repository" }).first().click();
@@ -265,8 +299,15 @@ test("keeps device authorization and repository selection usable at 390 by 844",
   await expect(page.getByText("ABCD-EFGH")).toBeVisible();
   await expect(page.getByTestId("managed-repository-modal")).toBeVisible();
   await page.getByRole("button", { name: /arcee-ai\/managed-demo/ }).click();
-  await expect(page.getByRole("button", { name: /main/ })).toBeVisible();
+  await page.getByRole("button", { name: "Branch: main", exact: true }).click();
+  await page.getByRole("combobox", { name: "Find branch" }).fill("platform.v2");
+  await page.getByRole("option", { name: alternateBranch }).click();
+  await expect(
+    page.getByRole("button", { name: `Branch: ${alternateBranch}`, exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Clone repository" })).toBeVisible();
+  await page.getByRole("button", { name: "Clone repository" }).click();
+  await expect.poll(() => state.cloneRequest?.branch).toBe(alternateBranch);
 });
 
 test("cancels an in-progress managed clone without publishing a Project", async ({
