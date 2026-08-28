@@ -163,17 +163,15 @@ export function Transcript({
   const dismissFork = useDismissSessionFork();
   const olderMessages = useLoadOlderMessages(sessionId);
   const { data: revisions } = useWorkspaceRevisions(sessionId);
-  const latestRevisionId = revisions?.at(-1)?.id ?? 0;
-  const { scrollRef, contentRef, showJumpButton, jumpToLatest } = useStickToBottom({
+  const { scrollRef, contentRef, showJumpButton, jumpToLatest, followLatest } = useStickToBottom({
     resetKey: sessionId,
-    pinKey: [
-      running ? "running" : "idle",
-      snapshot?.active_run ? "active" : "settled",
-      snapshot?.messages.length ?? 0,
-      latestRevisionId,
-    ].join(":"),
+    // Intentionally not keyed on running / active_run / message count: those
+    // used to instant-snap on Send and bounce on Stop. Growth/shrink observers
+    // keep the bottom edge; followLatest(300) covers the send glide.
   });
   const prependAnchor = useRef<{ height: number; top: number } | null>(null);
+  const hadPending = useRef(false);
+  const sendFollowReady = useRef(false);
   const messageWindowStart = snapshot?.message_page?.start ?? 0;
 
   useLayoutEffect(() => {
@@ -226,6 +224,21 @@ export function Transcript({
   // once that prompt is in the snapshot the copy is a duplicate no matter how
   // many model turns have piled up on top of it.
   const showPending = Boolean(pendingText && lastUserText(snapshotTurns) !== pendingText);
+  useLayoutEffect(() => {
+    hadPending.current = false;
+    sendFollowReady.current = false;
+  }, [sessionId]);
+  useEffect(() => {
+    sendFollowReady.current = true;
+  }, [sessionId]);
+  // Same moment ArceeFM starts its 300ms glide: the prompt bubble just
+  // appeared. Opening an already-running chat must not take this path — that
+  // is the first pin.
+  useLayoutEffect(() => {
+    const appeared = showPending && !hadPending.current;
+    hadPending.current = showPending;
+    if (appeared && sendFollowReady.current) followLatest(300);
+  }, [showPending, followLatest]);
   const turns = useMemo(
     () =>
       withStreamedOutput(
@@ -336,10 +349,17 @@ export function Transcript({
     }
   }, [showPending, optimisticPrompt]);
 
-  // Once the run has a model message of its own, that message carries the
+  // Once *this* run has a model message of its own, that message carries the
   // liveness — its pill spins and its header names the activity. A standalone
-  // row below would be a second pill for the same run.
-  const liveTurn = running && turns[turns.length - 1]?.kind === "model";
+  // row below would be a second pill for the same run. The last snapshot model
+  // turn is the previous reply; treating it as live hid the pending pill and
+  // left `isLast` min-height on the old bubble until the stream opened, so
+  // Send glided twice (user bubble, then the min-height hop).
+  const lastTurn = turns[turns.length - 1];
+  const liveTurn =
+    running &&
+    lastTurn?.kind === "model" &&
+    (!showPending || lastTurn.key === STREAMING_TURN_KEY);
   // Keep the pill under the optimistic bubble too; otherwise it only appears
   // when `running` flips and the layout jumps.
   const showModelPending = (running || showPending) && !liveTurn;
@@ -519,14 +539,20 @@ export function Transcript({
                 }
               }
 
+              const lastIsThisRun =
+                index === turns.length - 1 &&
+                !(showPending && turn.key !== STREAMING_TURN_KEY);
               const row = (
                 <ModelMessage
                   key={turn.key}
                   turn={turn}
                   model={model}
-                  active={running && index === turns.length - 1}
-                  isLast={index === turns.length - 1}
-                  activity={running && index === turns.length - 1 ? activity : undefined}
+                  active={running && lastIsThisRun}
+                  // Pending model chrome below the optimistic bubble is the
+                  // visual last row; leaving min-height on the previous reply
+                  // made Send shrink-then-grow a frame later.
+                  isLast={lastIsThisRun && !showModelPending}
+                  activity={running && lastIsThisRun ? activity : undefined}
                   selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
                   selectedWorkset={panel === "worksets" ? selectedWorkset : null}
                   onSelectThread={focusThread}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   STICK_TOLERANCE_PX,
@@ -13,8 +13,10 @@ const JUMP_BUTTON_TOLERANCE_PX = 400;
 const UNSTICK_TOLERANCE_PX = 60;
 /** Duration of the jump-to-latest animation. */
 const JUMP_DURATION_MS = 400;
-/** How long the view takes to glide onto content that has just arrived. */
+/** How long the view takes to glide onto streamed content. */
 const FOLLOW_DURATION_MS = 200;
+/** How long the view takes to glide onto a just-sent prompt (matches ArceeFM). */
+const SEND_DURATION_MS = 300;
 /**
  * Past a viewport of catching up the glide gives way to a snap. Following a
  * stream never asks for more than a few lines at a time, so anything this far
@@ -41,12 +43,6 @@ export interface StickToBottomOptions {
    * session URLs to the same element, so nothing here would otherwise unmount.
    */
   resetKey?: string | null;
-  /**
-   * Layout boundary that must preserve the bottom edge without animation.
-   * Streaming deltas still glide; run transitions and snapshot commits pin
-   * before paint so their differently shaped representations cannot flash.
-   */
-  pinKey?: string | null;
 }
 
 export interface StickToBottom {
@@ -57,6 +53,11 @@ export interface StickToBottom {
   /** True when the user is far enough up to warrant offering a way back. */
   showJumpButton: boolean;
   jumpToLatest: () => void;
+  /**
+   * Glide to the bottom after the user sends. Instant pin on the same commit
+   * would cancel this and read as a jump.
+   */
+  followLatest: (durationMs?: number) => void;
 }
 
 /**
@@ -79,7 +80,6 @@ export interface StickToBottom {
  */
 export function useStickToBottom({
   resetKey = null,
-  pinKey = null,
 }: StickToBottomOptions = {}): StickToBottom {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -97,9 +97,10 @@ export function useStickToBottom({
   // is overtaken by more growth, by a reflow, or by the user taking the wheel.
   const followAbort = useRef<AbortController | null>(null);
   const followFrame = useRef<number | null>(null);
-  /** Growth arrived mid-glide; re-aim once the current one lands. */
-  const followPending = useRef(false);
   const hasPinned = useRef(false);
+  /** Duration the in-flight glide should use. */
+  const followDuration = useRef(FOLLOW_DURATION_MS);
+  const prevContentHeight = useRef(0);
 
   const settleTimeout = useRef<number | null>(null);
 
@@ -137,21 +138,52 @@ export function useStickToBottom({
   const cancelFollow = useCallback(() => {
     followAbort.current?.abort();
     followAbort.current = null;
-    followPending.current = false;
     if (followFrame.current !== null) {
       cancelAnimationFrame(followFrame.current);
       followFrame.current = null;
     }
   }, []);
 
-  useLayoutEffect(() => {
-    const element = scrollRef.current;
-    if (!element || !stuck.current) return;
-    cancelFollow();
-    beginProgrammaticScroll();
-    scrollToBottomInstantly(element);
-    endProgrammaticScroll();
-  }, [pinKey, beginProgrammaticScroll, cancelFollow, endProgrammaticScroll]);
+  const startGlide = useCallback(
+    (durationMs: number) => {
+      const element = scrollRef.current;
+      if (!element || !stuck.current) return;
+      followDuration.current = durationMs;
+      // Already tracking the live bottom each frame. A second glide after this
+      // one lands was the double downward scroll on Send.
+      if (followAbort.current) return;
+      syncJumpButton();
+      const distance = distanceFromBottom(element);
+      if (distance <= 0) return;
+      const firstPin = !hasPinned.current;
+      hasPinned.current = true;
+      if (firstPin || distance > element.clientHeight * FOLLOW_MAX_VIEWPORTS) {
+        cancelFollow();
+        beginProgrammaticScroll();
+        scrollToBottomInstantly(element);
+        syncJumpButton();
+        endProgrammaticScroll();
+        return;
+      }
+      const controller = new AbortController();
+      followAbort.current = controller;
+      beginProgrammaticScroll();
+      void smoothScrollTo(
+        element,
+        element.scrollHeight,
+        durationMs,
+        controller.signal,
+      ).then((completed) => {
+        if (followAbort.current !== controller) return;
+        followAbort.current = null;
+        endProgrammaticScroll();
+        syncJumpButton();
+        followDuration.current = FOLLOW_DURATION_MS;
+        if (!completed) return;
+      });
+    },
+    [beginProgrammaticScroll, cancelFollow, endProgrammaticScroll, syncJumpButton],
+  );
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -176,7 +208,8 @@ export function useStickToBottom({
 
     const onScroll = () => {
       const distance = distanceFromBottom(element);
-      const reflowed = element.scrollHeight !== prevScrollHeight.current;
+      const previousHeight = prevScrollHeight.current;
+      const reflowed = element.scrollHeight !== previousHeight;
       prevScrollHeight.current = element.scrollHeight;
 
       // Nobody scrolls and resizes the document in the same event, so a changed
@@ -265,55 +298,8 @@ export function useStickToBottom({
       endProgrammaticScroll();
     };
 
-    // Observer callbacks run after layout, so the height a markdown block just
-    // settled on is already measurable and the glide aims at the real bottom.
     const follow = (): void => {
-      if (!stuck.current) return;
-      // One glide at a time. Growth that lands mid-flight is picked up when the
-      // current one finishes, so the target is never left behind.
-      if (followAbort.current) {
-        followPending.current = true;
-        return;
-      }
-
-      const distance = distanceFromBottom(element);
-      syncJumpButton();
-      if (distance <= 0) return;
-      // Only content that turned up while the view was already settled at the
-      // bottom is worth gliding onto. The first pin puts us there in the first
-      // place, so it never animates however short the transcript is.
-      const firstPin = !hasPinned.current;
-      hasPinned.current = true;
-      if (firstPin || distance > element.clientHeight * FOLLOW_MAX_VIEWPORTS) {
-        snap();
-        return;
-      }
-
-      const controller = new AbortController();
-      followAbort.current = controller;
-      beginProgrammaticScroll();
-      void smoothScrollTo(
-        element,
-        element.scrollHeight,
-        FOLLOW_DURATION_MS,
-        controller.signal,
-      ).then((completed) => {
-        // Overtaken by a snap or by another glide, which owns the state now.
-        if (followAbort.current !== controller) return;
-        followAbort.current = null;
-        endProgrammaticScroll();
-        syncJumpButton();
-        if (!completed) {
-          // A wheel or touch cut the glide short; the input handlers have
-          // already decided what that meant for follow-mode.
-          followPending.current = false;
-          return;
-        }
-        if (followPending.current) {
-          followPending.current = false;
-          follow();
-        }
-      });
+      startGlide(followDuration.current);
     };
 
     // A burst of callbacks — a markdown block, then the code blocks inside it
@@ -330,8 +316,24 @@ export function useStickToBottom({
       // Observer callbacks still run inside the frame that laid the content out,
       // so pinning here beats the paint. Deferring the first one would show the
       // reader a frame at the top of a transcript they never scrolled to.
-      if (!hasPinned.current) follow();
-      else scheduleFollow();
+      const contentH = content.offsetHeight;
+      const deltaH = contentH - prevContentHeight.current;
+      const shrunk = prevContentHeight.current > 0 && deltaH < 0;
+      prevContentHeight.current = contentH;
+      if (!hasPinned.current) {
+        follow();
+        return;
+      }
+      // Composer collapse / last-turn min-height moving used to abort the send
+      // glide here; the next grow then started a second scroll down. An
+      // in-flight bottom glide already re-reads liveMax — leave it running.
+      if (shrunk) {
+        if (!stuck.current) return;
+        if (distanceFromBottom(element) <= STICK_TOLERANCE_PX) return;
+        snap();
+        return;
+      }
+      scheduleFollow();
     });
     growth.observe(content);
     // The container itself changes when a side panel opens or the window is
@@ -339,7 +341,12 @@ export function useStickToBottom({
     // correction rather than new content, so it lands instantly — gliding
     // through it would read as the page moving on its own.
     const reflow = new ResizeObserver(() => {
-      if (stuck.current) snap();
+      if (!stuck.current) return;
+      // Input collapsing after Send resizes this port; snapping here yanked
+      // the send glide into an instant jump.
+      if (followAbort.current || animating.current) return;
+      if (distanceFromBottom(element) <= STICK_TOLERANCE_PX) return;
+      snap();
     });
     reflow.observe(element);
 
@@ -352,7 +359,7 @@ export function useStickToBottom({
         settleTimeout.current = null;
       }
     };
-  }, [beginProgrammaticScroll, cancelFollow, endProgrammaticScroll, syncJumpButton]);
+  }, [beginProgrammaticScroll, cancelFollow, endProgrammaticScroll, startGlide, syncJumpButton]);
 
   // Opening a transcript is a fresh start however the last one was left: an
   // abandoned follow-mode must not carry over, and the arriving content has to
@@ -362,6 +369,7 @@ export function useStickToBottom({
     stuck.current = true;
     hasPinned.current = false;
     prevScrollHeight.current = 0;
+    prevContentHeight.current = 0;
   }, [resetKey, cancelFollow]);
 
   const jumpToLatest = useCallback(() => {
@@ -381,5 +389,15 @@ export function useStickToBottom({
     });
   }, [beginProgrammaticScroll, cancelFollow, endProgrammaticScroll, syncJumpButton]);
 
-  return { scrollRef, contentRef, showJumpButton, jumpToLatest };
+  const followLatest = useCallback(
+    (durationMs = SEND_DURATION_MS) => {
+      // A send must glide even if this is the first growth we have seen —
+      // treating it as the opening pin would snap.
+      hasPinned.current = true;
+      startGlide(durationMs);
+    },
+    [startGlide],
+  );
+
+  return { scrollRef, contentRef, showJumpButton, jumpToLatest, followLatest };
 }
