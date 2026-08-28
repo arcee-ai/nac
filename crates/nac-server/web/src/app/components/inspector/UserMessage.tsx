@@ -46,6 +46,8 @@ interface UserMessageProps {
   onRevert?: ((messageIndex: number, text: string) => void) | null;
   /** Disable destructive / network actions while a run is in flight. */
   actionsDisabled?: boolean;
+  /** Parent-owned delegated transcripts expose copy/time but no mutation affordances. */
+  readOnly?: boolean;
 }
 
 /** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
@@ -58,10 +60,11 @@ export const UserMessage = memo(function UserMessage({
   onRefresh = null,
   onRevert = null,
   actionsDisabled = false,
+  readOnly = false,
 }: UserMessageProps) {
   perfRender("UserMessage");
-  const canRefresh = onRefresh != null && messageIndex != null;
-  const canRevert = onRevert != null && messageIndex != null;
+  const canRefresh = !readOnly && onRefresh != null && messageIndex != null;
+  const canRevert = !readOnly && onRevert != null && messageIndex != null;
   const isMobile = useIsMobile();
   return (
     <div className="group/user-msg flex flex-col items-end w-full max-w-full pt-4 pb-8">
@@ -136,7 +139,7 @@ export const UserMessage = memo(function UserMessage({
                 <Icon iconName={IconName.TurnLeft} size={16} />
               </Button>
             </Tooltip>
-          ) : (
+          ) : readOnly ? null : (
             <Tooltip
               title="This message is not in the transcript yet"
               position={TooltipPosition.BottomLeft}

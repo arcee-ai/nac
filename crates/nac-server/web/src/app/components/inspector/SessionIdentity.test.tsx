@@ -22,6 +22,11 @@ describe("session identity", () => {
 
     expect(screen.getByText("Immutable behavior")).toBeTruthy();
     expect(screen.getByText("Direct + NAC orchestration")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "About Direct + NAC orchestration" }));
+    expect(
+      screen.getByText(/top-level agent edits files and runs commands directly/i),
+    ).toBeTruthy();
+    expect(screen.getByText(/separate NAC orchestrator sessions/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Back to Parent" })).toBeNull();
   });
 
@@ -53,5 +58,27 @@ describe("session identity", () => {
     expect(screen.getByText(/Traditional coding agent · Check the lifecycle seam/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Back to Parent" }));
     expect(screen.getByTestId("location").textContent).toBe("/session/parent/threads");
+  });
+
+  it("keeps managed-orchestrator lineage explicit alongside its behavior", () => {
+    render(
+      <MemoryRouter>
+        <SessionIdentity
+          behavior="orchestrator"
+          lineage={{
+            kind: "managed-orchestrator",
+            parent_session_id: "parent",
+            root_session_id: "parent",
+            description: "Coordinate the release audit",
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("NAC orchestrator")).toBeTruthy();
+    expect(
+      screen.getByText(/Managed NAC orchestrator · Coordinate the release audit/),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to Parent" })).toBeTruthy();
   });
 });

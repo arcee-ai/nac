@@ -20,6 +20,7 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
 import { isActiveRun, NEW_CHAT_TITLE } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
+import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import type { DropEdge } from "@/app/lib/sessionOrder";
 import { applyTabOrder, placeIdAt, targetIndexInGroup } from "@/app/lib/sessionOrder";
 import { NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
@@ -204,6 +205,7 @@ export function ProjectSessionTabs({
         ) : (
           visible.map((entry) => {
             const sessionId = entry.summary.session_id;
+            const behavior = sessionBehaviorPresentation(entry.summary.behavior);
             return (
               <div
                 key={sessionId}
@@ -249,6 +251,8 @@ export function ProjectSessionTabs({
                 ) : null}
                 <ChatSessionTab
                   title={sessionTitle(entry.summary)}
+                  badge={behavior.navigationLabel}
+                  badgeLabel={behavior.label}
                   active={sessionId === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}

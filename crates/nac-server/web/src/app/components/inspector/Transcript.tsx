@@ -339,6 +339,7 @@ export function Transcript({
   const isMobile = useIsMobile();
 
   const model = snapshot?.metadata.model ?? "";
+  const readOnly = snapshot?.lineage != null;
   // A revision is captured per finished run, so each model turn carries what
   // its own run changed instead of one running total for the whole checkout.
   const turnRevisions = useMemo(() => revisionsByTurn(turns, revisions), [turns, revisions]);
@@ -518,8 +519,9 @@ export function Transcript({
                     timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
                     messageIndex={turn.messageIndex}
                     actionsDisabled={actionsBusy}
-                    onRefresh={refreshIndex === index ? resend : null}
-                    onRevert={openRevert}
+                    readOnly={readOnly}
+                    onRefresh={!readOnly && refreshIndex === index ? resend : null}
+                    onRevert={readOnly ? null : openRevert}
                   />
                 );
               }
@@ -557,16 +559,21 @@ export function Transcript({
                   userMessageIndex={precedingUser?.messageIndex}
                   userText={precedingUser?.text}
                   actionsDisabled={actionsBusy}
+                  readOnly={readOnly}
                   onRefresh={
-                    precedingUserIndex != null && refreshIndex === precedingUserIndex
+                    !readOnly && precedingUserIndex != null && refreshIndex === precedingUserIndex
                       ? resend
                       : null
                   }
-                  onRevert={openRevert}
-                  onFork={createFork}
-                  forks={(snapshot?.forks ?? []).filter(
-                    (entry) => entry.source_message_idx === turn.messageIndex,
-                  )}
+                  onRevert={readOnly ? null : openRevert}
+                  onFork={readOnly ? null : createFork}
+                  forks={
+                    readOnly
+                      ? []
+                      : (snapshot?.forks ?? []).filter(
+                          (entry) => entry.source_message_idx === turn.messageIndex,
+                        )
+                  }
                   onOpenFork={openFork}
                   onDismissFork={dismissForkMarker}
                   snapshotRevision={
