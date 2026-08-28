@@ -68,8 +68,11 @@ export function Breadcrumbs() {
   // missing project is still visible.
   const chatTitle = currentEntry ? sessionTitle(currentEntry.summary) : null;
   const avatarId = project?.project_id ?? sessionId ?? "";
-  // The project chip pulses only for the chat actually running under it.
-  const running = isActiveRun(currentEntry?.active_run);
+  // The project chip pulses when any chat in that project is running, not
+  // only the one whose tab is open. An unassigned chat can only pulse for itself.
+  const running = projectId
+    ? projectSessions.some((entry) => isActiveRun(entry.active_run))
+    : isActiveRun(currentEntry?.active_run);
 
   // A phone has no room for the trail: inside a project only the project shows,
   // and the button that opens it doubles as the way back to the list.

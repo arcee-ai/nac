@@ -7,6 +7,7 @@ import {
   ButtonSize,
   ButtonVariant,
   ChatSessionTab,
+  ChatSessionTabSkeleton,
   Icon,
   IconName,
   Popover,
@@ -17,7 +18,7 @@ import {
 import { ChatSessionPopover } from "@/app/components/projects/ChatSessionPopover";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
-import { isActiveRun } from "@/app/lib/format";
+import { isActiveRun, NEW_CHAT_TITLE } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
 import type { DropEdge } from "@/app/lib/sessionOrder";
 import { applyTabOrder, placeIdAt, targetIndexInGroup } from "@/app/lib/sessionOrder";
@@ -83,6 +84,25 @@ export function ProjectSessionTabs({
   useEffect(() => {
     restoreChatTab(activeSessionId);
   }, [activeSessionId]);
+
+  // Unassigned is a fact about a loaded chat. A missing summary is just a gap
+  // — first paint, or the list dropping this id before the router leaves it —
+  // and must not flash the orphan banner over a project that still has chats.
+  if (!projectId && !summary) {
+    return (
+      <div
+        className="flex h-12 items-center gap-3 px-2 border-b border-b-tertiary"
+        aria-busy="true"
+        aria-label="Loading chats"
+      >
+        {leading}
+        <div className="flex items-start gap-2 flex-1 min-w-0 overflow-x-auto overflow-y-clip [&>*]:shrink-0">
+          <ChatSessionTabSkeleton />
+          <ChatSessionTabSkeleton />
+        </div>
+      </div>
+    );
+  }
 
   if (!projectId) {
     return (
@@ -159,13 +179,13 @@ export function ProjectSessionTabs({
     endDrag();
   };
 
-  // Closing the chat being read has to leave another one to read.
+  // Closing the chat being read hands the screen to a neighbour. The last tab
+  // has none, so the list is the place left to land.
   const closeTab = (sessionId: string) => {
     if (sessionId === activeSessionId) {
       const index = visible.findIndex((entry) => entry.summary.session_id === sessionId);
       const next = visible[index + 1] ?? visible[index - 1];
-      if (!next) return;
-      navigate(routes.session(next.summary.session_id));
+      navigate(next ? routes.session(next.summary.session_id) : routes.list());
     }
     dismissChatTab(sessionId);
   };
@@ -177,7 +197,7 @@ export function ProjectSessionTabs({
       <div className="flex items-start gap-2 flex-1 min-w-0 overflow-x-auto overflow-y-clip [&>*]:shrink-0">
         {empty ? (
           <ChatSessionTab
-            title="New Chat"
+            title={NEW_CHAT_TITLE}
             active
             onClick={() => void projectActions.newChat(projectId)}
           />
@@ -231,9 +251,9 @@ export function ProjectSessionTabs({
                   title={sessionTitle(entry.summary)}
                   active={sessionId === activeSessionId}
                   running={isActiveRun(entry.active_run)}
+                  forkedFromTitle={entry.summary.forked_from?.title}
                   onClick={() => navigate(routes.session(sessionId))}
-                  // The last tab has nowhere to hand the screen over to.
-                  onDismiss={visible.length > 1 ? () => closeTab(sessionId) : undefined}
+                  onDismiss={() => closeTab(sessionId)}
                 />
               </div>
             );
@@ -272,7 +292,7 @@ export function ProjectSessionTabs({
           </Button>
         </Popover>
         <Tooltip
-          title="New chat"
+          title="New Session"
           keyboardShortcuts={NEW_CHAT_KEYS}
           position={Tooltip.Position.BottomLeft}
         >
@@ -280,7 +300,7 @@ export function ProjectSessionTabs({
             variant={ButtonVariant.Ghost}
             size={ButtonSize.Medium}
             content={ButtonContent.Icon}
-            aria-label="New chat"
+            aria-label="New Session"
             disabled={empty}
             onClick={() => void projectActions.newChat(projectId)}
           >

@@ -71,7 +71,7 @@ export function ChatSessionPopover({
             }}
           >
             <Icon iconName={IconName.Add} className="shrink-0" />
-            <span className="flex-1 min-w-0 truncate text-left">New chat</span>
+            <span className="flex-1 min-w-0 truncate text-left">New Session</span>
           </Button>
         ) : null}
       </div>

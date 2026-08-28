@@ -221,6 +221,9 @@ pub struct SessionFrontendSnapshot {
     /// canonical user message.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub covered_orchestrator_steering_ids: Vec<i64>,
+    /// Conversation forks created from a model turn in this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forks: Vec<crate::store::SessionForkLink>,
     pub worksets: WorksetsSnapshot,
     pub workspace: WorkspaceSnapshot,
 }
@@ -341,6 +344,7 @@ struct FrontendSnapshotBlockingLoad {
     thread_events: DecodedThreadEvents,
     thread_event_boundary: SessionEventBoundary,
     thread_steering: Vec<crate::store::ThreadSteeringRecord>,
+    forks: Vec<crate::store::SessionForkLink>,
     worksets: WorksetsSnapshot,
     run_recovery_warning: Option<String>,
     workspace: WorkspaceSnapshot,

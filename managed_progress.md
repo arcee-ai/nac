@@ -515,3 +515,15 @@ model credential and rejected an overwrite through its read-only volume.
 The remaining external exercise is optional human validation with real
 provider and organization GitHub/SAML credentials. It is a coverage gap, not a
 local product blocker; no implementation or local acceptance work remains.
+
+## Mainline fork/cancellation convergence (2026-08-28)
+
+The refactor branch now merges `allison-demo` through `fbbc09d`. Mainline
+conversation forks, durable stopping semantics, and descendant cleanup were
+preserved while remaining inside the refactored store, application, process,
+delivery, and frontend feature boundaries. The generated API contract and
+embedded production bundle include the fork surface; managed-host model and
+credential behavior remains unchanged. Pre-commit workspace check, Clippy,
+focused process/fork tests, all 179 frontend tests, frontend static checks, and
+the 2,000-line source guard pass. The complete clean-commit acceptance gates
+follow the merge commit.

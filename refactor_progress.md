@@ -1188,3 +1188,39 @@ The integration commit sequence is:
 No implementation, verification, review, or product decision remains. The
 next action is human testing with real provider/GitHub credentials if desired;
 the exact manual instructions above remain current.
+
+## Allison-demo convergence (2026-08-28)
+
+The current merge incorporates `allison-demo` through `fbbc09d`, including the
+mainline conversation-fork contract, stronger durable cancellation state, and
+environment-tagged descendant cleanup. The behavior was integrated at the
+refactored ownership seams rather than restoring superseded gravity wells:
+
+- durable fork relationships and schema version 24 remain in the core store;
+  frontend projection exposes fork links, while the focused server fork use
+  case owns prefix cloning, lifecycle admission, zero-spend initialization,
+  dismissal, and thin HTTP delivery;
+- `nac-process` now owns environment-tagged descendant discovery and cleanup,
+  and terminal execution uses its tracked-spawn constructor;
+- the feature-owned session query module preserves stopping state, optimistic
+  cancellation rollback, fork cache invalidation, and same-session placeholder
+  behavior without reviving the old global query module; and
+- Rust/OpenAPI remains the frontend DTO source of truth. Fork DTOs were added
+  to the generated contract and the production bundle was rebuilt from the
+  merged source.
+
+The local planning convention now ignores `working_docs/` except for its
+placeholder and ignores the repository-local goal-prompt skill. The durable
+root and nested `AGENTS.md` ownership guides remain tracked. The stale
+untracked root guide in the shared `allison-demo` checkout was removed as
+authorized; its local goal skill is preserved and will become ignored after a
+future fast-forward.
+
+Pre-commit verification is green: workspace all-target/all-feature check,
+warning-denied Clippy, the two focused process tests, two focused server fork
+tests, frontend typecheck/lint/format, all 179 frontend unit tests, generated
+OpenAPI/TypeScript generation, production build, and the 812-file source-size
+guard. The sandboxed frontend cleanup test could not spawn `ps`; the identical
+suite passed outside that restriction. Clean-commit `make ci`, durability,
+asset, embedded E2E, and static managed-image gates remain the exact next
+action after the merge commit.

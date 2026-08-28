@@ -1,8 +1,7 @@
 import type React from "react";
 
 import { cn } from "../../lib/cn";
-import Loader, { LoaderSize } from "../loader";
-import { ButtonContent, ButtonVariant, loaderVariant } from "./index";
+import Button, { ButtonContent, ButtonSize, ButtonVariant } from "./index";
 
 interface StickyButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "size"> {
   variant?: ButtonVariant;
@@ -38,27 +37,18 @@ const StickyButton: React.FC<StickyButtonProps> & {
         className,
       )}
     >
-      <button
+      <Button
+        size={ButtonSize.Large}
+        variant={variant}
+        content={content}
         type={type}
-        className={cn(
-          "btn btn-large btn-sticky",
-          variant,
-          content,
-          (disabled || loading) && "btn-disabled",
-          loading && "relative",
-          stretches && "w-full",
-          buttonClassName,
-        )}
-        disabled={disabled || loading}
+        disabled={disabled}
+        loading={loading}
+        className={cn("btn-sticky", stretches && "w-full", buttonClassName)}
         {...props}
       >
         {children}
-        {loading ? (
-          <div className="absolute fade top-[50%] left-[50%] -translate-x-1/2 -translate-y-1/2">
-            <Loader size={LoaderSize.Large} variant={loaderVariant[variant]} />
-          </div>
-        ) : null}
-      </button>
+      </Button>
     </div>
   );
 };

@@ -1,4 +1,6 @@
 import type React from "react";
+
+import { cn } from "../../lib/cn";
 import Loader, { LoaderSize, LoaderVariant } from "../loader";
 
 // Enums
@@ -42,9 +44,9 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const loaderSize = {
-  "btn-medium": LoaderSize.Medium,
+  "btn-medium": LoaderSize.Small,
   "btn-small": LoaderSize.Small,
-  "btn-large": LoaderSize.Large,
+  "btn-large": LoaderSize.Small,
 };
 
 export const loaderVariant = {
@@ -81,26 +83,18 @@ const Button: React.FC<ButtonProps> & {
   type = "button",
   ...props
 }) => {
-  const classes = [
+  const classes = cn(
     "btn",
     size,
     variant,
     content,
-    disabled || loading ? "btn-disabled" : "",
-    loading ? "relative" : "",
+    (disabled || loading) && "btn-disabled",
     className,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  );
 
   return (
     <button type={type} className={classes} disabled={disabled || loading} {...props}>
-      {children}
-      {loading ? (
-        <div className="absolute fade top-[50%] left-[50%] -translate-x-1/2 -translate-y-1/2">
-          <Loader size={loaderSize[size]} variant={loaderVariant[variant]} />
-        </div>
-      ) : null}
+      {loading ? <Loader size={loaderSize[size]} variant={loaderVariant[variant]} /> : children}
     </button>
   );
 };

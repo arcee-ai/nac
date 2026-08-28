@@ -48,9 +48,14 @@ import {
   type ThreadLogLine,
   type ToolCallEntry,
 } from "@/app/lib/threadLog";
-import { dispatchActions, dispatchThreadName, partitionThreadCalls } from "@/app/lib/transcript";
+import {
+  cancelledThreadNames,
+  dispatchActions,
+  dispatchThreadName,
+  partitionThreadCalls,
+} from "@/app/lib/transcript";
 import { useThreadEventPages } from "@/app/services/queries";
-import { useLiveThreads, useStreamStatus } from "@/app/store/runtimeStore";
+import { useLiveThreads, useStreamStatus, type RuntimeThread } from "@/app/store/runtimeStore";
 import { setSelectedThreadRunning } from "@/app/store/sessionLayoutStore";
 import type {
   AgentEvent,
@@ -59,6 +64,35 @@ import type {
   ThreadSnapshot,
   ToolCall,
 } from "@/app/types/api";
+
+/**
+ * Whether this session actually named the thread. A leftover selectedThread
+ * from another session (or from a live row that has since vanished) is not
+ * enough — that used to inject a ghost list row that disappeared on click.
+ */
+function sessionOwnsThreadName(
+  snapshot: SessionSnapshotResponse | null | undefined,
+  dispatchedNames: Set<string>,
+  liveThreads: Record<string, RuntimeThread>,
+  name: string,
+): boolean {
+  if (!name) return false;
+  if (dispatchedNames.has(name)) return true;
+  if (liveThreads[name]) return true;
+  if (!snapshot) return false;
+  if (snapshot.threads.some((thread) => thread.name === name)) return true;
+  if (Object.hasOwn(snapshot.thread_episodes, name)) return true;
+  return (snapshot.active_threads ?? []).includes(name);
+}
+
+function logThreadList(payload: Record<string, unknown>): void {
+  if (!import.meta.env.DEV) return;
+  console.debug("[nac:threads]", payload);
+  const bag = globalThis as { __nacThreadLogs?: Record<string, unknown>[] };
+  const logs = (bag.__nacThreadLogs ??= []);
+  logs.push(payload);
+  if (logs.length > 80) logs.splice(0, logs.length - 80);
+}
 
 /**
  * Stand-in row for a thread the stream has announced but the store has not
@@ -697,6 +731,26 @@ export function ThreadsView({
   const sessionId = snapshot?.metadata.session_id ?? "";
   const waveRank = useMemo(() => waveRankByName(snapshot?.messages), [snapshot?.messages]);
   const actions = useMemo(() => dispatchActions(snapshot?.messages ?? []), [snapshot?.messages]);
+  const cancelledNames = useMemo(
+    () => cancelledThreadNames(snapshot?.messages ?? []),
+    [snapshot?.messages],
+  );
+  // A cancelled dispatch never writes an episode, and `threads` is keyed off
+  // episodes. Names belong on the list when the chat still has the card (or
+  // the worker is live). `thread_events` keys are not enough: a reverted or
+  // superseded first run can leave hundreds of events with no matching
+  // tool_call, which used to inject a ghost row that vanished on click.
+  const dispatchedNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const message of snapshot?.messages ?? []) {
+      if (message.role !== "assistant") continue;
+      for (const call of message.tool_calls ?? []) {
+        if (call.function?.name !== "thread") continue;
+        names.add(dispatchThreadName(call));
+      }
+    }
+    return names;
+  }, [snapshot?.messages]);
   // Switching tabs resets live thread state before SSE catches up. Until then
   // every `active_threads` name would look pending and the detail pane would
   // claim nothing is selected even though the list already has rows.
@@ -732,10 +786,24 @@ export function ThreadsView({
 
   const ordered = useMemo(() => {
     const persisted = new Set(threads.map((thread) => thread.name));
-    // Live-only rows fill the gap until the snapshot retains them. Finished
-    // ones stay too — otherwise the row blinks out between `thread_finished`
-    // and the refetch that brings episodes.
+    // Names the snapshot never retained (cancelled before an episode, or still
+    // in-flight) still belong on the list: the chat already named them.
     const extras = new Set<string>();
+    for (const name of dispatchedNames) {
+      if (!persisted.has(name)) extras.add(name);
+    }
+    // A click on the chat card selects a name that is not in thread_events
+    // yet. Keep that name on the list so the click lands — but only when this
+    // session actually named it. A leftover selectedThread from another
+    // session used to be injected here as a ghost row (0 episodes, no
+    // commands) that disappeared the moment you clicked a real thread.
+    if (
+      selected &&
+      !persisted.has(selected) &&
+      sessionOwnsThreadName(snapshot, dispatchedNames, liveThreads, selected)
+    ) {
+      extras.add(selected);
+    }
     for (const name of runningNames) {
       if (!persisted.has(name)) extras.add(name);
     }
@@ -761,7 +829,17 @@ export function ThreadsView({
       if (rankDiff !== 0) return rankDiff;
       return 0;
     });
-  }, [threads, runningNames, pendingNames, liveThreads, sessionId, waveRank]);
+  }, [
+    threads,
+    dispatchedNames,
+    selected,
+    runningNames,
+    pendingNames,
+    liveThreads,
+    sessionId,
+    snapshot,
+    waveRank,
+  ]);
 
   const selectable = useMemo(
     () => ordered.filter((thread) => !pendingNames.has(thread.name)),
@@ -794,9 +872,45 @@ export function ThreadsView({
     [eventPages.data],
   );
   useEffect(() => {
-    if (selected || !currentName) return;
+    if (!currentName) return;
+    if (selected === currentName) return;
+    if (selected && ordered.some((thread) => thread.name === selected)) return;
     onSelect(currentName);
-  }, [selected, currentName, onSelect]);
+  }, [selected, currentName, ordered, onSelect]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const persisted = threads.map((thread) => thread.name);
+    const extras = ordered
+      .filter((thread) => !persisted.includes(thread.name))
+      .map((thread) => thread.name);
+    const eventKeys = Object.keys(snapshot?.thread_events ?? {});
+    const orphanEvents = eventKeys.filter(
+      (name) =>
+        !dispatchedNames.has(name) &&
+        !persisted.includes(name) &&
+        !liveThreads[name] &&
+        !(snapshot?.active_threads ?? []).includes(name),
+    );
+    const droppedGhost =
+      selected && !sessionOwnsThreadName(snapshot, dispatchedNames, liveThreads, selected)
+        ? selected
+        : null;
+    if (!droppedGhost && extras.length === 0 && orphanEvents.length === 0) return;
+    logThreadList({
+      session: sessionId,
+      selected,
+      droppedGhost,
+      extras,
+      orphanEvents,
+      dispatched: [...dispatchedNames],
+      persisted,
+      eventKeys,
+      live: Object.keys(liveThreads),
+      active: snapshot?.active_threads ?? [],
+      listed: ordered.map((thread) => thread.name),
+    });
+  }, [selected, ordered, dispatchedNames, liveThreads, snapshot, sessionId, threads]);
 
   // Same running bit the detail pane uses — the dialog title shimmer reads it.
   useEffect(() => {
@@ -823,7 +937,16 @@ export function ThreadsView({
             {visible.map((thread) => {
               const pending = pendingNames.has(thread.name);
               const running = runningNames.has(thread.name);
-              const errored = liveThreads[thread.name]?.isError;
+              const live = liveThreads[thread.name];
+              const lastEpisode = snapshot.thread_episodes?.[thread.name]?.at(-1);
+              const episodeCount =
+                snapshot.thread_episodes?.[thread.name]?.length ?? thread.episode_count;
+              const cancelled =
+                Boolean(live?.cancelled) ||
+                cancelledNames.has(thread.name) ||
+                lastEpisode?.status === "cancelled" ||
+                (!running && !pending && episodeCount === 0);
+              const errored = live?.isError;
               // The task is the only description a thread has, so the row hands
               // it over on hover rather than making the name stand for it.
               const task = actions[thread.name] || thread.latest_action || "";
@@ -843,6 +966,12 @@ export function ThreadsView({
                       />
                     ) : running ? (
                       <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
+                    ) : cancelled ? (
+                      <Icon
+                        iconName={IconName.Close}
+                        size={16}
+                        className="shrink-0 [&>path]:!fill-basic-muted"
+                      />
                     ) : (
                       <Icon
                         iconName={errored ? IconName.Danger : IconName.CheckCircle}

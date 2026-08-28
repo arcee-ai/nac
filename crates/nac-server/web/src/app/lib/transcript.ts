@@ -5,7 +5,7 @@
 // it dispatched. Thread tool calls from one assistant message form one package;
 // in-batch `threads` deps split that package into stacked DAG rows.
 
-import { displayPromptFromMessageText, invokedSkillNames } from "@/app/lib/format";
+import { displayPromptFromMessageText, invokedSkillNames, parseStoreTime } from "@/app/lib/format";
 import type { JsonObject, JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
@@ -17,6 +17,7 @@ import type {
   Message,
   SessionSnapshotResponse,
   ToolCall,
+  WorksetSnapshot,
 } from "@/app/types/api";
 
 /** Exact assistant marker written after any partial response on cancellation. */
@@ -139,6 +140,39 @@ interface BuildContext {
   threadEpisodes: Record<string, AgentEvent[][]>;
   /** How often each name is dispatched across the whole transcript. */
   dispatchCounts: Record<string, number>;
+  /**
+   * Orchestrator tool-call ids whose `tool_call_finished` already arrived.
+   * DAG batches only commit tool *messages* once every thread in the round
+   * returns, so a workset can be saved long before `results` sees the call.
+   */
+  liveFinishedToolCalls: Record<string, true>;
+  worksets: WorksetSnapshot[];
+  /** Latest dispatch of this name exists only because the user stopped. */
+  cancelledNames: Set<string>;
+}
+
+/**
+ * `workset_define` is pending until its tool result is in the transcript, a
+ * live finish event lands, or the saved workset is at least as new as this
+ * assistant message. Existence of an older workset with the same id is not
+ * enough — the orchestrator often re-defines the plan in the same batch as
+ * the next wave of threads.
+ */
+function worksetDefinePending(
+  callId: string,
+  worksetId: string,
+  results: Map<string, string>,
+  messageCreatedAt: string | null,
+  ctx: BuildContext,
+): boolean {
+  if (results.has(callId) || ctx.liveFinishedToolCalls[callId]) return false;
+  if (!worksetId || !messageCreatedAt) return true;
+  const workset = ctx.worksets.find((item) => item.id === worksetId);
+  if (!workset) return true;
+  const saved = parseStoreTime(workset.updated_at);
+  const called = parseStoreTime(messageCreatedAt);
+  if (!Number.isFinite(saved) || !Number.isFinite(called)) return true;
+  return saved < called;
 }
 
 /**
@@ -312,6 +346,69 @@ function toolResultsForAssistant(
 }
 
 /**
+ * Thread names whose latest dispatch exists only because the user stopped the
+ * run. A later dispatch of the same name — finished or still in flight —
+ * drops off this set, so Continue does not keep painting the live card as
+ * cancelled.
+ *
+ * A stop does not always write a tool result for every dispatch — a name that
+ * never started has no `[tool call cancelled by user]` row. Those still belong
+ * here: the run ended without them, so a checkmark would claim work that never
+ * ran.
+ */
+export function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string> {
+  const cancelled = new Set<string>();
+  messages.forEach((message, index) => {
+    if (message.role !== "assistant") return;
+    const results = toolResultsForAssistant(messages, index);
+    const threadCalls = (message.tool_calls ?? []).filter(
+      (call) => call.function?.name === "thread",
+    );
+    if (!threadCalls.length) return;
+
+    const turnCancelled = assistantTurnCancelled(messages, index);
+    let anyCancelMarker = false;
+    for (const call of threadCalls) {
+      const result = results.get(call.id);
+      const name = dispatchThreadName(call);
+      if (result == null) {
+        if (!turnCancelled) cancelled.delete(name);
+        continue;
+      }
+      if (result.startsWith(TOOL_CALL_CANCELLED_MARKER)) {
+        cancelled.add(name);
+        anyCancelMarker = true;
+      } else {
+        cancelled.delete(name);
+      }
+    }
+
+    if (!anyCancelMarker && !turnCancelled) return;
+    for (const call of threadCalls) {
+      if (results.get(call.id) != null) continue;
+      cancelled.add(dispatchThreadName(call));
+    }
+  });
+  return cancelled;
+}
+
+/** True when this assistant turn is followed by the run-cancelled marker. */
+function assistantTurnCancelled(
+  messages: SessionSnapshotResponse["messages"],
+  assistantIndex: number,
+): boolean {
+  for (let index = assistantIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role === "tool") continue;
+    if (message.role === "assistant") {
+      return typeof message.content === "string" && message.content.trim() === RUN_CANCELLED_MARKER;
+    }
+    return false;
+  }
+  return false;
+}
+
+/**
  * @param episode Which dispatch of this name the card stands for, from 0.
  * @param batchNames Thread names in this assistant message (for in-batch deps).
  * @param finishedNames Names in this batch that have finished (tool result or
@@ -355,8 +452,17 @@ function describeThread(
       ? false
       : episodeEvents?.some((event) => event.type === "thread_finished");
   const finishedLive = live?.status === "finished";
+  // A follow-up that re-dispatches a stopped name is the live episode now.
+  // The previous cancel marker still belongs on the older card; it must not
+  // keep this one on Close while the worker is running.
+  const liveRunning = live?.status === "running" && !live.cancelled;
   const cancelled =
-    result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true || Boolean(live?.cancelled);
+    !liveRunning &&
+    (result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true ||
+      Boolean(live?.cancelled) ||
+      (result == null &&
+        episode === (ctx.dispatchCounts[name] ?? 1) - 1 &&
+        ctx.cancelledNames.has(name)));
   const state: ThreadState = cancelled
     ? "cancelled"
     : live?.isError
@@ -486,6 +592,7 @@ export function withStreamedOutput(
 export function buildTranscript(
   snapshot: SessionSnapshotResponse | null,
   liveThreads: Record<string, RuntimeThread>,
+  liveFinishedToolCalls: Record<string, true> = {},
 ): TranscriptTurn[] {
   const messages = snapshot?.messages ?? [];
   const durations = snapshot?.response_timing.response_durations_ms ?? [];
@@ -507,8 +614,11 @@ export function buildTranscript(
   }
   const ctx: BuildContext = {
     liveThreads,
+    liveFinishedToolCalls,
+    worksets: snapshot?.worksets?.items ?? [],
     threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
     dispatchCounts,
+    cancelledNames: cancelledThreadNames(messages),
   };
 
   const turns: TranscriptTurn[] = [];
@@ -586,11 +696,12 @@ export function buildTranscript(
       if (name === "thread") {
         threadCalls.push(call);
       } else if (name === "workset_define") {
+        const worksetId = text(parseArguments(call).id);
         blocks.push({
           kind: "workset",
           key,
-          worksetId: text(parseArguments(call).id),
-          pending: !results.has(call.id),
+          worksetId,
+          pending: worksetDefinePending(call.id, worksetId, results, createdAt[index] ?? null, ctx),
         });
       } else if (!SILENT_TOOLS.has(name)) {
         blocks.push({ kind: "tool", key, name, pending: !results.has(call.id) });
