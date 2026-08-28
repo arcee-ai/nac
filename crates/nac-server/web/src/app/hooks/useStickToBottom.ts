@@ -134,13 +134,18 @@ export function useStickToBottom({ resetKey = null }: StickToBottomOptions = {})
   }, []);
 
   const cancelFollow = useCallback(() => {
+    const aborted = followAbort.current !== null;
     followAbort.current?.abort();
     followAbort.current = null;
     if (followFrame.current !== null) {
       cancelAnimationFrame(followFrame.current);
       followFrame.current = null;
     }
-  }, []);
+    // Nulling followAbort makes the glide's then() skip endProgrammaticScroll,
+    // so wheel-up / session reset would leave `animating` set and skip later
+    // container-resize corrections. Hand the view back here when we abort.
+    if (aborted) endProgrammaticScroll();
+  }, [endProgrammaticScroll]);
 
   const startGlide = useCallback(
     (durationMs: number) => {
