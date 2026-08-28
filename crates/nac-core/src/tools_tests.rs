@@ -201,6 +201,45 @@ fn direct_registries_preserve_exact_topology_capabilities() {
     );
 }
 
+#[test]
+fn launch_tools_use_strict_compatible_nullable_new_session_ids() {
+    let definitions = super::direct_with_orchestrator_tool_definitions(false);
+    for (tool_name, session_id) in [
+        ("subagent", "child_session_id"),
+        ("orchestrator_launch", "orchestrator_session_id"),
+    ] {
+        let parameters = &definitions
+            .iter()
+            .find(|definition| definition.function.name == tool_name)
+            .unwrap_or_else(|| panic!("missing {tool_name} definition"))
+            .function
+            .parameters;
+        let properties = parameters["properties"]
+            .as_object()
+            .expect("launch properties");
+        let required = parameters["required"]
+            .as_array()
+            .expect("launch required fields")
+            .iter()
+            .map(|value| value.as_str().expect("required field name"))
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            required,
+            properties
+                .keys()
+                .map(String::as_str)
+                .collect::<HashSet<_>>(),
+            "{tool_name} must mark every property required for Responses strict mode"
+        );
+        assert_eq!(
+            parameters["properties"][session_id]["type"],
+            serde_json::json!(["string", "null"]),
+            "{tool_name} must encode a fresh launch as a nullable session ID"
+        );
+        assert_eq!(parameters["additionalProperties"], false);
+    }
+}
+
 #[tokio::test]
 async fn registered_read_supports_native_and_model_boundary_calls() {
     let directory = std::env::temp_dir().join(format!("nac-kernel-{}", uuid::Uuid::new_v4()));
