@@ -23,6 +23,7 @@ import {
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
+import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -112,6 +113,7 @@ export function TranscriptRecoveryNotice({ warning }: { warning?: string | null 
  */
 function resendTargetIndex(turns: TranscriptTurn[]): number | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (turns[index]?.kind === "delegated-completion") return null;
     if (turns[index]?.kind === "user") return index;
   }
   return null;
@@ -121,6 +123,7 @@ function resendTargetIndex(turns: TranscriptTurn[]): number | null {
 function lastUserText(turns: TranscriptTurn[]): string | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
+    if (turn.kind === "delegated-completion") return null;
     if (turn.kind === "user") return turn.text;
   }
   return null;
@@ -510,6 +513,9 @@ export function Transcript({
 
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {
+              if (turn.kind === "delegated-completion") {
+                return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
+              }
               if (turn.kind === "user") {
                 return (
                   <UserMessage
@@ -532,6 +538,7 @@ export function Transcript({
               let precedingUser: Extract<TranscriptTurn, { kind: "user" }> | null = null;
               for (let prior = index - 1; prior >= 0; prior -= 1) {
                 const candidate = turns[prior];
+                if (candidate?.kind === "delegated-completion") break;
                 if (candidate?.kind === "user") {
                   precedingUserIndex = prior;
                   precedingUser = candidate;

@@ -25,6 +25,28 @@ export function SessionIdentity({
         ? "Managed NAC orchestrator"
         : null;
 
+  if (lineage && relationship) {
+    return (
+      <nav
+        aria-label="Delegated session breadcrumb"
+        className="mt-16 flex min-h-9 w-full shrink-0 flex-wrap items-center gap-2 border-b border-border-primary bg-elevation-level-1 px-3 py-1.5 md:mt-0"
+      >
+        <Button
+          size={ButtonSize.Small}
+          variant={ButtonVariant.Ghost}
+          onClick={() => navigate(routes.session(lineage.parent_session_id, "delegated"))}
+        >
+          Parent chat
+        </Button>
+        <span aria-hidden="true" className="text-basic-muted">
+          →
+        </span>
+        <span className="text-xs font-medium text-basic-primary">{relationship}</span>
+        <span className="min-w-0 truncate text-xs text-basic-secondary">{lineage.description}</span>
+      </nav>
+    );
+  }
+
   return (
     <div className="flex min-h-9 w-full shrink-0 flex-wrap items-center gap-2 border-b border-border-primary bg-elevation-level-1 px-3 py-1.5">
       <span className="tag-label uppercase text-basic-tertiary">Immutable behavior</span>
@@ -40,21 +62,6 @@ export function SessionIdentity({
       >
         How it works
       </Button>
-      {lineage ? (
-        <>
-          <span className="text-xs text-basic-secondary">
-            {relationship} · {lineage.description}
-          </span>
-          <Button
-            className="ml-auto"
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Ghost}
-            onClick={() => navigate(routes.session(lineage.parent_session_id))}
-          >
-            Back to Parent
-          </Button>
-        </>
-      ) : null}
       {expanded ? (
         <div className="flex basis-full flex-col gap-1 pb-1 text-xs text-basic-secondary">
           <span>{presentation.topLevel}</span>

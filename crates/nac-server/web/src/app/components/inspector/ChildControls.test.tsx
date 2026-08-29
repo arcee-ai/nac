@@ -99,11 +99,11 @@ afterEach(() => {
 describe("traditional child controls", () => {
   it("starts the visible general profile in background mode", async () => {
     mount();
-    fireEvent.click(screen.getByRole("button", { name: "Durable child sessions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Launch coding agent" }));
     const [description, prompt] = screen.getAllByRole("textbox");
     fireEvent.change(description, { target: { value: "Review persistence" } });
     fireEvent.change(prompt, { target: { value: "Inspect the store and run focused tests." } });
-    fireEvent.click(screen.getByRole("button", { name: "Start child" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start coding agent" }));
 
     await waitFor(() =>
       expect(fakes.start).toHaveBeenCalledWith(SESSION_ID, {
@@ -115,12 +115,11 @@ describe("traditional child controls", () => {
     );
   });
 
-  it("shows durable status and propagates cancellation", async () => {
+  it("keeps the control launch-only while preserving running permission bridges", async () => {
     mount([child()]);
-    fireEvent.click(screen.getByRole("button", { name: "Durable child sessions" }));
-    expect(screen.getByRole("dialog").textContent).toContain("running · generation 1");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-    await waitFor(() => expect(fakes.cancel).toHaveBeenCalledWith(SESSION_ID, "child-1"));
+    expect(screen.getByRole("button", { name: "Permissions for Review persistence" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Launch coding agent" }));
+    expect(screen.getByRole("dialog").textContent).not.toContain("generation 1");
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 });

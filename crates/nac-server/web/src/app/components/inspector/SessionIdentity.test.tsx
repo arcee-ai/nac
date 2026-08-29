@@ -55,9 +55,11 @@ describe("session identity", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/Traditional coding agent · Check the lifecycle seam/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Back to Parent" }));
-    expect(screen.getByTestId("location").textContent).toBe("/session/parent/threads");
+    expect(screen.getByRole("navigation", { name: "Delegated session breadcrumb" })).toBeTruthy();
+    expect(screen.getByText("Traditional coding agent")).toBeTruthy();
+    expect(screen.getByText("Check the lifecycle seam")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Parent chat" }));
+    expect(screen.getByTestId("location").textContent).toBe("/session/parent/delegated");
   });
 
   it("keeps managed-orchestrator lineage explicit alongside its behavior", () => {
@@ -75,10 +77,8 @@ describe("session identity", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("NAC orchestrator")).toBeTruthy();
-    expect(
-      screen.getByText(/Managed NAC orchestrator · Coordinate the release audit/),
-    ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Back to Parent" })).toBeTruthy();
+    expect(screen.getByText("Managed NAC orchestrator")).toBeTruthy();
+    expect(screen.getByText("Coordinate the release audit")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Parent chat" })).toBeTruthy();
   });
 });

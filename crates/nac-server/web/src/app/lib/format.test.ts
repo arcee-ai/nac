@@ -147,8 +147,14 @@ describe("displayPromptFromMessageText", () => {
       displayPromptFromMessageText(
         `${prefix}${JSON.stringify({
           source: "traditional_child",
+          child_session_id: "child-1",
+          generation: 1,
           status: "completed",
           description: "review persistence",
+          report: "done",
+          failure: null,
+          change_summary: null,
+          verification_summary: null,
         })}`,
       ),
     ).toBe("[traditional child completed: review persistence]");
@@ -162,8 +168,12 @@ describe("displayPromptFromMessageText", () => {
       displayPromptFromMessageText(
         `${prefix}${JSON.stringify({
           source: "managed_orchestrator",
+          orchestrator_session_id: "orchestrator-1",
+          generation: 1,
           status: "completed",
           description: "implement persistence",
+          report: "done",
+          failure: null,
         })}`,
       ),
     ).toBe("[managed orchestrator completed: implement persistence]");
