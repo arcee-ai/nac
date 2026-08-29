@@ -198,11 +198,11 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect.poll(() => page.url()).not.toContain(`/session/${directSessionId}/`);
   await expect(page).toHaveURL(/\/session\/[^/]+\/delegated$/);
   await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
-  await expect(page.getByText("Managed NAC orchestrators", { exact: true })).toBeVisible();
+  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
-  await expect(page.getByText("Traditional coding agents", { exact: true })).toBeVisible();
-  await expect(page.getByText("Managed NAC orchestrators", { exact: true })).toBeVisible();
+  await expect(page.getByText("Coding agents", { exact: true })).toBeVisible();
+  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
 
   const tabs = page.locator(".chat-session-tab button");
   await expect(tabs.filter({ has: page.getByText("Orchestrator", { exact: true }) })).toHaveCount(
@@ -510,11 +510,109 @@ test("replaces a completed durable goal from the production dialog", async ({
   harness.provider.assertConsumed();
 });
 
+test("shows live background delegated work, terminal events, cancellation, and generation 2", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const success = new ScriptGate();
+  const cancelled = new ScriptGate();
+  const continued = new ScriptGate();
+  harness.provider.enqueue(
+    "background-success",
+    { token: "E2E_BACKGROUND_SUCCESS" },
+    { kind: "text", text: "background child completed" },
+    success,
+  );
+  harness.provider.enqueue(
+    "background-cancel",
+    { token: "E2E_BACKGROUND_CANCEL" },
+    { kind: "text", text: "should be cancelled" },
+    cancelled,
+  );
+  harness.provider.enqueue(
+    "background-failure",
+    { token: "E2E_BACKGROUND_FAILURE" },
+    { kind: "http_error", status: 400, body: "scripted child failure" },
+  );
+  for (const [id, token, afterStep] of [
+    ["observe-failure", "Background failure", "background-failure"],
+    ["observe-cancel", "Background cancellation", "background-cancel"],
+    ["observe-success", "Background success", "background-success"],
+  ] as const) {
+    harness.provider.enqueue(
+      id,
+      { token, afterStep },
+      { kind: "text", text: `${id} acknowledged` },
+    );
+  }
+  harness.provider.enqueue(
+    "background-generation-2",
+    { token: "E2E_GENERATION_TWO" },
+    { kind: "text", text: "second generation completed" },
+    continued,
+  );
+  harness.provider.enqueue(
+    "observe-generation-2",
+    { token: "Background success", afterStep: "background-generation-2" },
+    { kind: "text", text: "generation 2 acknowledged" },
+  );
+
+  const parentId = await createSession(request, harness, "direct");
+  await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
+  const launch = async (description: string, prompt: string) => {
+    const response = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
+      data: { profile: "general", description, prompt, background: true },
+    });
+    expect(response.ok()).toBe(true);
+    return (await response.json()) as { child_session_id: string };
+  };
+  const successChild = await launch("Background success", "E2E_BACKGROUND_SUCCESS");
+  await success.accepted;
+  await launch("Background cancellation", "E2E_BACKGROUND_CANCEL");
+  await cancelled.accepted;
+  await launch("Background failure", "E2E_BACKGROUND_FAILURE");
+
+  const successRow = page.locator("article").filter({ hasText: "Background success" });
+  const cancelRow = page.locator("article").filter({ hasText: "Background cancellation" });
+  const failureRow = page.locator("article").filter({ hasText: "Background failure" });
+  await expect(successRow).toContainText("Running");
+  await expect(cancelRow).toContainText("Running");
+  await expect(successRow.getByRole("button", { name: "Steer" })).toBeVisible();
+  await cancelRow.getByRole("button", { name: "Cancel" }).click();
+  await expect(cancelRow).toContainText("Cancelled");
+  cancelled.release();
+  await expect(failureRow).toContainText("Failed");
+
+  success.release();
+  await expect(successRow).toContainText("Completed");
+  await expect(page.getByLabel("Coding agent completed")).toContainText("Background success");
+  await expect(page.getByLabel("Coding agent failed")).toContainText("Background failure");
+  await expect(page.getByLabel("Coding agent cancelled")).toContainText("Background cancellation");
+  await expect(page.getByRole("button", { name: "Resend" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
+
+  await successRow.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("textbox", { name: "Continuation prompt" }).fill("E2E_GENERATION_TWO");
+  await page.getByRole("dialog").getByRole("button", { name: "Continue", exact: true }).click();
+  await continued.accepted;
+  await expect(successRow).toContainText("Running");
+  await expect(successRow).toContainText("Generation 2");
+  continued.release();
+  await expect(successRow).toContainText("Completed");
+  await expect(page.getByLabel("Coding agent completed").last()).toContainText("Generation 2");
+  await expect(page.getByRole("button", { name: "Open exact transcript" }).last()).toBeVisible();
+  expect(successChild.child_session_id).toBeTruthy();
+  harness.provider.assertConsumed();
+});
+
 test("navigates to read-only child and managed-orchestrator transcripts", async ({
   harness,
   page,
   request,
 }) => {
+  const orchestratorCompletion = new ScriptGate();
   harness.provider.enqueue(
     "child-completion",
     { token: "E2E_CHILD_TOKEN" },
@@ -571,6 +669,12 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
     "orchestrator-completion",
     { functionOutputCallId: "managed-thread-1" },
     { kind: "text", text: "orchestrator completed" },
+    orchestratorCompletion,
+  );
+  harness.provider.enqueue(
+    "orchestrator-parent-observation",
+    { token: "Coordinate the compatibility audit", afterStep: "orchestrator-completion" },
+    { kind: "text", text: "managed completion acknowledged" },
   );
   const parentId = await createSession(request, harness, "direct-with-orchestrator");
   const childResponse = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
@@ -592,7 +696,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
       data: {
         description: "Coordinate the compatibility audit",
         prompt: "E2E_ORCHESTRATOR_TOKEN",
-        background: false,
+        background: true,
       },
       timeout: 15_000,
     },
@@ -602,17 +706,17 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
     (await orchestratorResponse.json()) as { orchestrator_session_id?: string }
   ).orchestrator_session_id;
   expect(orchestratorId).toBeTruthy();
-  harness.provider.assertConsumed();
+  await orchestratorCompletion.accepted;
 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
-  await expect(page.getByText("Traditional coding agents", { exact: true })).toBeVisible();
-  await expect(page.getByText("Managed NAC orchestrators", { exact: true })).toBeVisible();
-  const childRow = page.getByText("Inspect the child lifecycle", { exact: true }).locator("../..");
-  await expect(childRow).toContainText("General coding agent · completed");
-  await childRow.getByRole("button", { name: "Open transcript" }).click();
-  await expect(
-    page.getByText("Traditional coding agent · Inspect the child lifecycle"),
-  ).toBeVisible();
+  await expect(page.getByText("Coding agents", { exact: true })).toBeVisible();
+  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
+  const childRow = page.locator("article").filter({ hasText: "Inspect the child lifecycle" });
+  await expect(childRow).toContainText("Coding agent");
+  await expect(childRow).toContainText("Completed");
+  await childRow.getByRole("button", { name: "Open" }).click();
+  await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
+  await expect(page.getByText("Inspect the child lifecycle", { exact: true })).toBeVisible();
   await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /goal/i })).toHaveCount(0);
@@ -634,16 +738,24 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(mobilePanel).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.getByRole("button", { name: "Back to Parent" }).click();
+  await page.getByRole("button", { name: "Parent chat" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
   const orchestratorRow = page
-    .getByText("Coordinate the compatibility audit", { exact: true })
-    .locator("../..");
-  await expect(orchestratorRow).toContainText("Separate NAC orchestrator · completed");
-  await orchestratorRow.getByRole("button", { name: "Open transcript" }).click();
-  await expect(
-    page.getByText("Managed NAC orchestrator · Coordinate the compatibility audit"),
-  ).toBeVisible();
+    .locator("article")
+    .filter({ hasText: "Coordinate the compatibility audit" });
+  await expect(orchestratorRow).toContainText("NAC orchestrator");
+  await expect(orchestratorRow).toContainText("Running");
+  await expect(orchestratorRow.getByRole("button", { name: "Steer" })).toBeVisible();
+  await expect(orchestratorRow.getByRole("button", { name: "Cancel" })).toBeVisible();
+  orchestratorCompletion.release();
+  await expect(orchestratorRow).toContainText("Completed");
+  await expect(page.getByLabel("NAC orchestrator completed")).toContainText(
+    "Coordinate the compatibility audit",
+  );
+  harness.provider.assertConsumed();
+  await orchestratorRow.getByRole("button", { name: "Open" }).click();
+  await expect(page.getByText("Managed NAC orchestrator", { exact: true })).toBeVisible();
+  await expect(page.getByText("Coordinate the compatibility audit", { exact: true })).toBeVisible();
   await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
   await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
@@ -676,6 +788,6 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
   await managedMobilePanel.getByRole("button", { name: "Close" }).click();
   await expect(managedMobilePanel).toBeHidden();
-  await page.getByRole("button", { name: "Back to Parent" }).click();
+  await page.getByRole("button", { name: "Parent chat" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
 });

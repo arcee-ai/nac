@@ -79,11 +79,11 @@ afterEach(() => {
 describe("managed orchestrator controls", () => {
   it("starts a background orchestrator objective", async () => {
     mount();
-    fireEvent.click(screen.getByRole("button", { name: "Managed orchestrators" }));
+    fireEvent.click(screen.getByRole("button", { name: "Launch NAC orchestrator" }));
     const [description, prompt] = screen.getAllByRole("textbox");
     fireEvent.change(description, { target: { value: "Implement persistence" } });
     fireEvent.change(prompt, { target: { value: "Implement and verify the durable store." } });
-    fireEvent.click(screen.getByRole("button", { name: "Start orchestrator" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start NAC orchestrator" }));
     await waitFor(() =>
       expect(fakes.start).toHaveBeenCalledWith(SESSION_ID, {
         description: "Implement persistence",
@@ -93,11 +93,10 @@ describe("managed orchestrator controls", () => {
     );
   });
 
-  it("shows durable status and propagates cancellation", async () => {
+  it("keeps the composer control launch-only", () => {
     mount([orchestrator()]);
-    fireEvent.click(screen.getByRole("button", { name: "Managed orchestrators" }));
-    expect(screen.getByRole("dialog").textContent).toContain("running · generation 1");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(fakes.cancel).toHaveBeenCalledWith(SESSION_ID, "orchestrator-1"));
+    fireEvent.click(screen.getByRole("button", { name: "Launch NAC orchestrator" }));
+    expect(screen.getByRole("dialog").textContent).not.toContain("generation 1");
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 });

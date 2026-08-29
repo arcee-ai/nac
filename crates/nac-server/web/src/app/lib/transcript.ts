@@ -6,6 +6,10 @@
 // in-batch `threads` deps split that package into stacked DAG rows.
 
 import { displayPromptFromMessageText, invokedSkillNames, parseStoreTime } from "@/app/lib/format";
+import {
+  parseDelegatedCompletion,
+  type DelegatedCompletion,
+} from "@/app/features/delegation/completion";
 import type { JsonObject, JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
@@ -102,7 +106,15 @@ export interface ModelTurn {
   messageIndex: number | null;
 }
 
-export type TranscriptTurn = UserTurn | ModelTurn;
+export interface DelegatedCompletionTurn {
+  kind: "delegated-completion";
+  key: string;
+  completion: DelegatedCompletion;
+  messageIndex: number;
+  createdAt: string | null;
+}
+
+export type TranscriptTurn = UserTurn | ModelTurn | DelegatedCompletionTurn;
 
 /**
  * Key of a model turn that exists only as a stream, with nothing persisted to
@@ -638,6 +650,17 @@ export function buildTranscript(
 
     if (message.role === "user") {
       current = null;
+      const completion = parseDelegatedCompletion(message.content);
+      if (completion) {
+        turns.push({
+          kind: "delegated-completion",
+          key: `delegated-completion-${absoluteIndex}`,
+          completion,
+          messageIndex: absoluteIndex,
+          createdAt: createdAt[index] ?? null,
+        });
+        return;
+      }
       turns.push({
         kind: "user",
         key: `user-${absoluteIndex}`,
