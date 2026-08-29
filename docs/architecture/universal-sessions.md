@@ -561,18 +561,374 @@ NAC workers into sessions in any of these commits.
 - Making worker threads appear in the chat list.
 - Cross-process mutation safety beyond the existing process-local gate.
 
-## Open product choices (decide before phase 2)
+## Decisions to lock
 
-These do not block phase 1. They do block later phases if left fuzzy.
+These are the product questions the plan still leaves open. Phase 1
+(Agent always has NAC spawn tools; two-card picker) can start without
+them. Phase 2 and later should not start until the marked items are
+answered. Each item lists options and a recommendation; the
+recommendation is not a decision until you confirm it.
 
-1. **Does the first user keystroke in a settled spawn permanently close
-   parent continue?** Recommended: yes (`composer_claimed_by_user`).
-2. **Does Continue-in-X auto-send a first prompt?** Recommended: no.
-3. **Default New Chat type.** Recommended: Agent.
-4. **Running-assignment visibility.** Recommended: nested under parent
-   in Delegated work; not a top-level tab until it settles.
-5. **Spawn tool names.** Recommended: keep `subagent*` / `orchestrator_*`
-   through phase 3; rename in phase 5.
+### A. Ownership after a spawn settles
+
+Needed before phase 2.
+
+**A1. Who owns the composer once the assignment is no longer running?**
+
+Today the parent owns continue / steer / cancel forever and the web
+child is read-only. The new model wants a peer chat after the task.
+
+- *Parent keeps exclusive continue until the user opens the child and
+  sends.* First user send sets `composer_claimed_by_user`. After that
+  `session_spawn` with that id is rejected.
+- *Either side may write.* Parent continue and user typing share one
+  log. Two authors, interleaved tool history, messy inbox completions.
+- *Assignment never becomes a peer.* Settled child stays read-only.
+  Contradicts "no subagent species".
+
+Recommendation: first option. The lock is temporal; the claim is
+one-way.
+
+**A2. Does delete-parent still destroy children?**
+
+- *Cascade only `running` (and maybe never-opened idle) children.*
+  Settled, claimed sessions survive as ordinary chats.
+- *Always cascade.* A "just a session" you have been talking to
+  disappears when you delete the parent tab.
+- *Never cascade.* A crashed running child becomes an orphan with a
+  dangling assignment.
+
+Recommendation: cascade running and never-opened; keep claimed.
+
+**A3. May a settled spawn create a goal?**
+
+- *Yes, it is a normal Agent.* Matches "locks only while running".
+- *No forever.* That is today's caste again.
+
+Recommendation: yes after settle; reject `create_goal` only while the
+session is the child of a `running` assignment.
+
+**A4. May a settled spawn spawn further sessions?**
+
+- *Yes.* Trees of agents form after unlock. The original parent is not
+  the grandparent of those new rows; the settled child is a new parent.
+- *No, depth stays 1 forever.* Species again.
+
+Recommendation: yes. Cap *running* assignments per parent (today: 4),
+not lifetime descendants.
+
+### B. Continue-in-X
+
+Needed before phase 4. Does not block phase 1.
+
+**B1. Does the button send a prompt, or only set up the new session?**
+
+You asked for setup, not a fork. That still leaves "setup" vs "start".
+
+- *Idle landing.* New session has system head + handoff brief. User
+  types the first real instruction. Safe; one extra click.
+- *Auto-run.* Server also inserts a synthetic user prompt ("continue
+  this work") and starts a generation. Faster; the model invents a
+  goal you did not confirm.
+
+Recommendation: idle landing.
+
+**B2. How much of the source conversation is projected?**
+
+Same question fork already answered for same-type copies: through the
+named assistant turn.
+
+- *Through the clicked turn, prose only.* Matches fork's index; you
+  can continue from an older answer. Tool calls dropped.
+- *Whole conversation always.* The button on an old turn lies.
+- *Last turn only.* Simpler UI; no "continue from here".
+
+Recommendation: through the clicked turn, like fork.
+
+**B3. Where is the button shown?**
+
+- *Every finished assistant turn* that is not on a running assignment
+  and not read-only, same hover row as Fork.
+- *Newest assistant turn only.* Hides the "from here" story.
+
+Recommendation: every finished turn, same as Fork.
+
+**B4. May one source turn produce many handoffs?**
+
+Fork already allows many forks from one turn and shows them as chips.
+
+- *Many handoffs, shown like forks.* Agent turn → two NAC setups is
+  legal (retry / second planner).
+- *At most one live handoff per source turn.* Cleaner; blocks "try
+  again in NAC".
+
+Recommendation: many, with chips on the source turn (`ForkSessionItem`
+pattern). Click opens the target.
+
+**B5. May you hand off a session that was itself a handoff?**
+
+Agent → NAC → Agent is the interesting case: the second hop must
+project *NAC prose*, not resurrect the original Agent tool log.
+
+- *Allow, each hop projects only its own source.* Chains stay honest.
+- *Forbid.* Then Continue-in-X is a one-shot escape hatch.
+
+Recommendation: allow. The invariant is "project this transcript", not
+"project the original human chat".
+
+**B6. May you hand off a spawn?**
+
+- *Not while `running`.* Parent still owns that generation.
+- *After settle, yes, if the user claimed the composer — or even if
+  not.* A finished Agent child is a session; Continue in NAC is
+  meaningful.
+- *Never.* Spawned sessions stay same-type forever.
+
+Recommendation: reject while running; allow after settle.
+
+**B7. Does a handoff inherit the workspace, sandbox, and model?**
+
+Fork inherits workspace and model, not billed usage, and does not
+clone a sandbox worktree.
+
+- *Same as fork / spawn.* Shared checkout, same model and backend.
+  Two loops can collide on files; that is already true of children.
+- *Fresh worktree from HEAD.* Safer isolation; slower; different from
+  fork.
+
+Recommendation: inherit like fork/spawn in v1. Do not invent a third
+workspace rule.
+
+**B8. What is the new session's title?**
+
+- *`Continue in NAC` / `Continue in Agent` plus a short source title.*
+- *Copy the source title.* Two chats look identical in the list.
+- *Leave `New Session` until the first model turn names it.*
+
+Recommendation: `Continue in NAC — {source title}` (truncated).
+
+### C. New chat and the picker
+
+Needed before the phase 1 UI commit. Small, but user-visible.
+
+**C1. What does New Chat offer?**
+
+You said the user may create both types.
+
+- *Two cards, default Agent.* Honest; still a door.
+- *No picker: every New Chat is Agent.* NAC exists only via Continue
+  in NAC or a spawn. Fewer doors; user cannot start a blank planner.
+- *Two cards, default NAC.* Today's default; fights the "one coding
+  chat" direction.
+
+Recommendation: two cards, default Agent.
+
+**C2. Required first chat in an empty project?**
+
+Same options as C1. Today's dialog preselects NAC and is
+server-idempotent.
+
+Recommendation: same as New Chat (Agent). Keep idempotency.
+
+### D. Where sessions appear
+
+Needed before phase 2.
+
+**D1. Is a running assignment on the top-level chat list?**
+
+- *No. Only Delegated work (and a lineage badge if you deep-link).*
+  The list stays "chats I can talk to".
+- *Yes, dimmed / locked.* You see it, you cannot type.
+- *Yes, fully.* Then the composer policy and the list disagree.
+
+Recommendation: not on the top-level list until it settles.
+
+**D2. After settle, does it stay in Delegated work?**
+
+- *Leave Delegated work. Move to the ordinary list with an optional
+  "Spawned by {parent}" hint and Back to Parent.*
+- *Stay in both places.* Duplicate navigation.
+- *Stay only in Delegated work.* Then it is still a species.
+
+Recommendation: list + hint; Delegated work is for *running*
+assignments only.
+
+**D3. People / flow control after unification?**
+
+- *One "Start a session" control: type (Agent|NAC), description,
+  prompt, background.*
+- *Keep two controls (people vs flow) even after one table.*
+
+Recommendation: one control, once phase 5 lands. Until then the two
+existing controls can stay.
+
+### E. NAC as a parent
+
+Needed before phase 3.
+
+**E1. How does a NAC parent receive a child completion?**
+
+Agent parents use `session_inbox` (steer / queue) and wake the parent
+run. Orchestrator sessions today do not expose that inbox in the
+composer (`ChatInputBox` is direct-only). A NAC planner has
+`thread_steering`, not a user-visible inbox.
+
+- *Give NAC the same durable `session_inbox` and inject a completion
+  as a user-looking message, identical to Agent.* One delivery path.
+  The NAC composer must grow steer/queue or silently enqueue.
+- *Write the completion into the NAC transcript as an assistant/tool
+  result on the next planner turn only.* No wake if the planner is
+  idle.
+- *Do not wake NAC. The user reads Delegated work and types the next
+  NAC prompt by hand.*
+
+Recommendation: same inbox + wake as Agent. If the NAC composer has
+no steer/queue yet, completions still enqueue and the next user (or
+idle planner) turn consumes them. Do not build a second queue.
+
+**E2. When should a NAC planner spawn a session instead of a worker
+thread?**
+
+If both exist, the prompt must say so or the model will pick at
+random.
+
+- *Threads = short bounded coding inside this plan. Sessions = work
+  the user may open as its own chat, or another planner.*
+- *NAC never uses threads once it can spawn Agent sessions.* Huge
+  rewrite; out of scope.
+- *NAC never spawns Agent sessions; threads stay the only coding
+  path. NAC may only spawn another NAC.* Smaller matrix than you
+  asked for.
+
+Recommendation: first option. Workers stay. The orchestrator prompt
+gets an explicit paragraph in phase 3.
+
+**E3. Does a NAC-spawned Agent start with a goal?**
+
+- *No. Description + prompt only, same as today's child.*
+- *Yes, `create_goal` from the description.* Goals are user-owned
+  today and children cannot have them. Auto-goal fights that.
+
+Recommendation: no auto-goal.
+
+### F. Caps, trees, and races
+
+Needed before phase 2 (caps) and phase 3 (NAC trees).
+
+**F1. What does "at most four running" count?**
+
+Today traditional children count per *root*; managed orchestrators
+count per *parent*. After unification those should be one number.
+
+- *Four running assignments per parent.* Simple; a busy tree can have
+  more than four alive in the project.
+- *Four running assignments per root / project.* Stricter fan-out.
+
+Recommendation: four per parent, same as each of today's tables. Do
+not tighten in the same change as the model shift.
+
+**F2. Shared checkout collisions**
+
+Unchanged from today: one process-local write gate, overlapping
+mutations remain the caller's problem. Confirm we are *not* solving
+this in the session redesign.
+
+Recommendation: leave as-is. Mention in the Agent/NAC spawn prompts.
+
+### G. Permissions
+
+Needed before phase 2.
+
+**G1. Where do approval prompts appear for a running assignment?**
+
+Today: parent keeps a child-scoped permission connection; fail closed
+if the parent UI is gone.
+
+- *Keep that while `running`. After settle (and claim), approvals
+  belong to the child's own lock icon.*
+- *Always parent.* The peer chat cannot approve its own `exec_command`.
+- *Always child.* Parent may be on a phone tab that is not mounted.
+
+Recommendation: parent while running; child after claim.
+
+**G2. Remembered grants**
+
+Today children do not inherit remembered grants.
+
+- *Keep that for the assignment lifetime, including after settle.*
+  The new peer starts with a clean grant table.
+- *Copy grants on settle.* Convenience; surprising escalation.
+
+Recommendation: never inherit. The unlocked peer accumulates its own.
+
+### H. Names and API
+
+Does not block any phase if we keep today's names until phase 5.
+
+**H1. Wire `behavior` values**
+
+- *Keep `direct` / `orchestrator`. UI says Agent / NAC.*
+- *Rename the enum to `agent` / `nac` now.* Breaks every client and
+  old database in the same release as the product change.
+
+Recommendation: keep wire values. Rename only if you later want a
+breaking API revision of its own.
+
+**H2. Model tool names**
+
+- *Keep `subagent*` and `orchestrator_*` through phase 3; rename to
+  `session_*` in phase 5.*
+- *Rename first, then expand who can call them.* More churn before
+  the matrix works.
+
+Recommendation: rename last.
+
+**H3. MCP outgoing session-control**
+
+`docs/usage/managed-orchestrators.md` says native controls share the
+outgoing MCP names. Changing HTTP/tool names without the MCP catalog
+forks the two surfaces.
+
+Recommendation: phase 5 includes the MCP catalog, or MCP stays on the
+old names as wrappers.
+
+### I. Handoff brief quality
+
+Needed before phase 4.
+
+**I1. Mechanical projection vs model summary**
+
+Already out of scope for v1: no model summarizer. Confirm the cap
+(plan: 32 KiB, fail closed) and that thinking/reasoning blocks are
+dropped with tool messages.
+
+Recommendation: drop thoughts, tools, workset/thread cards; keep
+user text and assistant prose only.
+
+**I2. Language of the handoff note**
+
+The brief is a user message in the *target* transcript. It must not
+look like a human order if we later add auto-run (B1).
+
+Recommendation: prefix it the way inbox completions are prefixed
+today ("treat the following as handoff context, not as user
+instructions") even in idle-landing v1.
+
+### J. Confirm as closed (not open, unless you reopen)
+
+These were settled in the conversation and the plan treats them as
+invariants. Say so if any of them is wrong:
+
+1. Two session types only. No `direct-with-orchestrator` as a type.
+2. Type is immutable. No mid-chat switch.
+3. Fork = same type, copy log. Continue-in-X = other type, project.
+4. User, Agent, and NAC may create both types.
+5. Spawned session is a normal session; locks last only while the
+   assigned generation is running.
+6. NAC workers stay threads, not chats.
+7. Planner never gets file tools.
+8. Parent log never merges child tool history.
+9. Do not resurrect the old hidden-picker prototype.
 
 ## Pointers
 
