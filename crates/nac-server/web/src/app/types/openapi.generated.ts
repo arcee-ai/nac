@@ -768,6 +768,7 @@ export interface components {
       message_created_at?: (string | null)[];
       messages: components["schemas"]["Message"][];
       metadata: components["schemas"]["SessionMetadata"];
+      primary_tool_events?: components["schemas"]["AgentEvent"][];
       response_timing: components["schemas"]["ResponseTimingSnapshot"];
       sessions: components["schemas"]["SessionSummarySnapshot"][];
       thread_episodes: Record<string, components["schemas"]["EpisodeSnapshot"][]>;

@@ -1,6 +1,66 @@
 use super::*;
 
 #[tokio::test]
+async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
+    let (parts, store_path) = test_active_service("primary_tool_events", "primary-session");
+    parts
+        .service
+        .event_bus
+        .emit_agent(AgentEvent::ToolCallStarted {
+            thread_name: None,
+            call_id: "call-primary".to_string(),
+            name: "exec_command".to_string(),
+            args_preview: "RAW_ARGUMENTS_MUST_NOT_SURVIVE".to_string(),
+            key_arg_preview: None,
+            args_detail: Some(
+                serde_json::json!({
+                    "cmd": "printf primary-preview",
+                    "env": {"API_KEY": "SECRET_MUST_NOT_SURVIVE"},
+                    "workdir": "/safe/work"
+                })
+                .to_string(),
+            ),
+        });
+    parts
+        .service
+        .event_bus
+        .emit_agent(AgentEvent::ToolCallFinished {
+            thread_name: None,
+            call_id: "call-primary".to_string(),
+            name: "exec_command".to_string(),
+            content_preview: "primary result".to_string(),
+            is_error: false,
+            command_status: Some(crate::terminal::CommandStatus::Completed),
+            exit_code: Some(0),
+        });
+    parts
+        .service
+        .event_bus
+        .emit_agent(AgentEvent::ThreadStarted {
+            name: crate::events::PRIMARY_TOOL_EVENT_TARGET.to_string(),
+            action: "collision must remain thread-owned".to_string(),
+            source_threads: Vec::new(),
+        });
+
+    let snapshot = parts.service.frontend_snapshot().await.unwrap();
+
+    assert_eq!(
+        snapshot
+            .thread_events
+            .get(crate::events::PRIMARY_TOOL_EVENT_TARGET)
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(snapshot.primary_tool_events.len(), 2);
+    let serialized = serde_json::to_string(&snapshot.primary_tool_events).unwrap();
+    assert!(serialized.contains("printf primary-preview"));
+    assert!(serialized.contains("primary result"));
+    assert!(!serialized.contains("RAW_ARGUMENTS_MUST_NOT_SURVIVE"));
+    assert!(!serialized.contains("SECRET_MUST_NOT_SURVIVE"));
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn frontend_snapshot_uses_three_operation_scoped_connections() {
     let (parts, store_path) =
         test_active_service("snapshot_connection_reuse", "connection-session");

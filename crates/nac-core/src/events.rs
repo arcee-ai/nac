@@ -19,6 +19,14 @@ pub const SESSION_EVENT_BUS_REPLAY_BYTE_CAP: usize = 256 * 1024;
 /// of output for a subscriber that is briefly slow to read.
 pub const ASSISTANT_DELTA_CHANNEL_CAPACITY: usize = 256;
 
+/// Internal thread-event target for sanitized top-level tool lifecycle rows.
+///
+/// Primary direct calls have no worker `thread_name`, but their safe event
+/// projection must survive reload so the transcript does not fall back to raw
+/// durable tool payloads. This target is never exposed as a worker thread; the
+/// frontend snapshot projection separates its events into `primary_tool_events`.
+pub(crate) const PRIMARY_TOOL_EVENT_TARGET: &str = "__nac_primary_tools__";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -832,6 +840,28 @@ impl SessionEventBus {
 
 fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
     match event {
+        AgentEvent::ToolCallStarted {
+            thread_name: None,
+            name,
+            ..
+        }
+        | AgentEvent::ToolCallFinished {
+            thread_name: None,
+            name,
+            ..
+        } if !matches!(
+            name.as_str(),
+            "thread"
+                | "threads"
+                | "thread_read"
+                | "thread_delete"
+                | "workset_define"
+                | "workset_read"
+                | "workset_list"
+        ) =>
+        {
+            Some(PRIMARY_TOOL_EVENT_TARGET)
+        }
         AgentEvent::RunStarted { thread_name, .. }
         | AgentEvent::ToolCallStarted { thread_name, .. }
         | AgentEvent::ToolCallFinished { thread_name, .. }
@@ -884,6 +914,7 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             let key = existing_key
                 .filter(|k| !k.is_empty() && !k.starts_with('{') && !k.starts_with('['))
                 .unwrap_or_else(|| key_arg_preview(&name, args_detail.as_deref(), &args_preview));
+            let key = bounded_tool_preview(&redact_credentials(&key, &[]));
             let safe_args = safe_tool_arguments(&name, args_detail.as_deref(), &args_preview);
             AgentEvent::ToolCallStarted {
                 thread_name,
@@ -891,7 +922,7 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
                 args_preview: safe_args,
                 key_arg_preview: Some(key),
                 args_detail: None,
-                name,
+                name: safe_tool_name(&name),
             }
         }
         AgentEvent::ToolCallFinished {
@@ -905,8 +936,8 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
         } => AgentEvent::ToolCallFinished {
             thread_name,
             call_id,
-            name,
-            content_preview,
+            name: safe_tool_name(&name),
+            content_preview: bounded_tool_preview(&redact_credentials(&content_preview, &[])),
             is_error,
             command_status,
             exit_code,
@@ -1014,6 +1045,17 @@ fn bounded_provider_message(message: &str) -> String {
         end -= 1;
     }
     message[..end].to_string()
+}
+
+fn safe_tool_name(name: &str) -> String {
+    name.chars()
+        .filter(|character| !character.is_control())
+        .take(160)
+        .collect()
+}
+
+fn bounded_tool_preview(value: &str) -> String {
+    value.chars().take(180).collect()
 }
 
 fn sanitize_external_session_event(event: SessionEvent) -> Option<SessionEvent> {

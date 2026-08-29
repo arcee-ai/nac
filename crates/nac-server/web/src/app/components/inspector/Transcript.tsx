@@ -67,6 +67,7 @@ import {
   setOptimisticUserPrompt,
   useActivity,
   useFinishedToolCalls,
+  usePrimaryToolEvents,
   useCancelArmed,
   useLiveThreads,
   useOptimisticUserPrompt,
@@ -146,6 +147,7 @@ export function Transcript({
   const error = useRunError();
   const liveThreads = useLiveThreads();
   const finishedToolCalls = useFinishedToolCalls();
+  const primaryToolEvents = usePrimaryToolEvents();
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
   const optimisticPrompt = useOptimisticUserPrompt();
@@ -210,8 +212,10 @@ export function Transcript({
   // straight back, which is what keeps the memoized rows from re-rendering.
   const snapshotTurns = useMemo(
     () =>
-      perfTime("buildTranscript", () => buildTranscript(snapshot, liveThreads, finishedToolCalls)),
-    [snapshot, liveThreads, finishedToolCalls],
+      perfTime("buildTranscript", () =>
+        buildTranscript(snapshot, liveThreads, finishedToolCalls, primaryToolEvents),
+      ),
+    [snapshot, liveThreads, finishedToolCalls, primaryToolEvents],
   );
   // Prefer the live active_run copy; fall back to the optimistic prompt set at
   // Send so the bubble is already above the model pill before the round-trip.

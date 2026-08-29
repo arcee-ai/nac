@@ -1556,14 +1556,21 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
         "one live signal per commit point: prompt@1, steering@2, assistant@3, tool batch@4, assistant@5"
     );
 
-    // Live-only: the bus persists nothing for these events — thread_events
-    // holds exactly the five transcript log rows and no event rows.
+    // Transcript append notifications remain live-only. The ALL-1 projection
+    // intentionally persists only the sanitized top-level tool lifecycle so
+    // primary transcript detail survives reload.
     assert_eq!(read_log(&store_path, "session").len(), 5);
-    assert!(
-        crate::store::load_all_thread_events(&store_path, "session", 100)
-            .unwrap()
-            .is_empty()
-    );
+    let thread_events = crate::store::load_all_thread_events(&store_path, "session", 100).unwrap();
+    let primary = thread_events
+        .get(crate::events::PRIMARY_TOOL_EVENT_TARGET)
+        .expect("sanitized primary tool rows should be durable");
+    assert_eq!(primary.len(), 2);
+    assert!(primary
+        .iter()
+        .all(|record| record.event_json.contains("unknown_alpha")));
+    assert!(primary
+        .iter()
+        .all(|record| !record.event_json.contains("args_detail")));
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

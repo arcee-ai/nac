@@ -18,6 +18,7 @@ import {
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
 import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
+import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
 import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
@@ -215,6 +216,8 @@ export const ModelMessage = memo(function ModelMessage({
                     pending={block.pending}
                   />
                 );
+              case "tool-detail":
+                return <ToolCallDetail key={block.key} tool={block.presentation} />;
               case "wave":
                 return (
                   <ThreadWave

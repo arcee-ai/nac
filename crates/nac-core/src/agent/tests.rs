@@ -262,6 +262,54 @@ fn exec_command_result_preview_uses_structured_previews() {
 }
 
 #[test]
+fn key_argument_preview_is_family_aware_and_fail_closed() {
+    for (name, args, expected) in [
+        ("read", r#"{"path":"src/lib.rs"}"#, "src/lib.rs"),
+        ("glob", r#"{"pattern":"**/*.rs"}"#, "**/*.rs"),
+        ("grep", r#"{"pattern":"AgentEvent"}"#, "AgentEvent"),
+        ("web_search", r#"{"query":"NAC docs"}"#, "NAC docs"),
+        (
+            "orchestrator_launch",
+            r#"{"description":"Audit storage","prompt":"SECRET_PROMPT"}"#,
+            "Audit storage",
+        ),
+        (
+            "subagent",
+            r#"{"description":"Review tests","prompt":"SECRET_PROMPT"}"#,
+            "Review tests",
+        ),
+        (
+            "mcp__linear__linear_read_issue",
+            r#"{"name":"ALL-1","authorization":"SECRET_HEADER"}"#,
+            "ALL-1",
+        ),
+    ] {
+        assert_eq!(key_arg_preview(name, Some(args), args), expected);
+    }
+
+    assert_eq!(
+        key_arg_preview(
+            "write_stdin",
+            Some(r#"{"session_id":"term-1","chars":"SECRET_STDIN"}"#),
+            "ignored"
+        ),
+        "→ term-1 (12 input chars)"
+    );
+    assert_eq!(
+        key_arg_preview(
+            "unknown_tool",
+            Some(r#"{"password":"SECRET_VALUE"}"#),
+            "SECRET_RAW_PREVIEW"
+        ),
+        ""
+    );
+    assert_eq!(
+        key_arg_preview("read", Some("malformed SECRET_VALUE"), "SECRET_RAW_PREVIEW"),
+        ""
+    );
+}
+
+#[test]
 fn exec_command_result_preview_includes_nonzero_exit() {
     let result = ToolResult {
         content: (serde_json::json!({
