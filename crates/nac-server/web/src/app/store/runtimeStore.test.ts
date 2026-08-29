@@ -81,6 +81,44 @@ describe("canonical refresh classification", () => {
       ),
     ).toBe("replace-snapshot");
   });
+
+  it("retains and settles safe primary tool overlays by call identity", () => {
+    resetRuntime("session-a");
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: {
+          type: "tool_call_started",
+          thread_name: null,
+          call_id: "call-primary",
+          name: "read",
+          args_preview: '{"operation":"read"}',
+          key_arg_preview: "src/lib.rs",
+        },
+      }),
+    );
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: {
+          type: "tool_call_finished",
+          thread_name: null,
+          call_id: "call-primary",
+          name: "read",
+          content_preview: "src/lib.rs",
+          is_error: false,
+        },
+      }),
+    );
+
+    expect(getRuntimeState().primaryToolEvents).toHaveLength(2);
+    expect(getRuntimeState().primaryToolEvents.map((event) => event.type)).toEqual([
+      "tool_call_started",
+      "tool_call_finished",
+    ]);
+    applyEnvelope(envelope({ type: "transcript_reverted", transcript_len: 0 }));
+    expect(getRuntimeState().primaryToolEvents).toEqual([]);
+  });
 });
 
 describe("run cancellation", () => {

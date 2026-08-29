@@ -12003,6 +12003,13 @@
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
           },
+          "primary_tool_events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentEvent"
+            },
+            "description": "Sanitized, bounded lifecycle events for top-level direct tool calls.\nKept separate from worker logs so primary calls cannot become a fake\ndelegated topology and the web never needs raw transcript payloads."
+          },
           "response_timing": {
             "$ref": "#/components/schemas/ResponseTimingSnapshot"
           },

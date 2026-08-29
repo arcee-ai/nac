@@ -35,6 +35,7 @@ impl SessionService {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
             return Ok(DecodedThreadEvents {
                 events: HashMap::new(),
+                primary_tool_events: Vec::new(),
                 diagnostics: Vec::new(),
             });
         };
@@ -141,6 +142,7 @@ fn decode_thread_events(
     records: HashMap<String, Vec<crate::store::ThreadEventRecord>>,
 ) -> DecodedThreadEvents {
     let mut events = HashMap::new();
+    let mut primary_tool_events = Vec::new();
     let mut diagnostics = Vec::new();
     let mut records: Vec<_> = records.into_iter().collect();
     records.sort_by(|(left, _), (right, _)| left.cmp(right));
@@ -149,12 +151,34 @@ fn decode_thread_events(
             .into_iter()
             .filter_map(|record| decode_thread_event(record, &mut diagnostics))
             .collect::<Vec<_>>();
+        if thread_name == crate::events::PRIMARY_TOOL_EVENT_TARGET {
+            let mut ordinary_events = Vec::new();
+            for event in decoded {
+                match &event {
+                    AgentEvent::ToolCallStarted {
+                        thread_name: None, ..
+                    }
+                    | AgentEvent::ToolCallFinished {
+                        thread_name: None, ..
+                    } => primary_tool_events.push(event),
+                    _ => ordinary_events.push(event),
+                }
+            }
+            // A model-selected worker name can equal the private persistence
+            // bucket. Preserve any genuinely thread-owned rows rather than
+            // hiding that durable transcript behind the projection detail.
+            if !ordinary_events.is_empty() {
+                events.insert(thread_name, ordinary_events);
+            }
+            continue;
+        }
         if !decoded.is_empty() {
             events.insert(thread_name, decoded);
         }
     }
     DecodedThreadEvents {
         events,
+        primary_tool_events,
         diagnostics,
     }
 }
@@ -351,6 +375,7 @@ impl SessionService {
             threads: blocking.threads,
             thread_episodes: blocking.thread_episodes,
             thread_events: blocking.thread_events.events,
+            primary_tool_events: blocking.thread_events.primary_tool_events,
             thread_event_boundary: blocking.thread_event_boundary,
             thread_event_diagnostics: blocking.thread_events.diagnostics,
             thread_steering: blocking.thread_steering,

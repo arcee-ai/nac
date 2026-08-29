@@ -81,7 +81,7 @@ pub(crate) fn key_arg_preview(
 ) -> String {
     let args_json = args_detail.unwrap_or(args_preview);
     let Ok(obj) = serde_json::from_str::<serde_json::Value>(args_json) else {
-        return truncate_string(args_preview, 120);
+        return String::new();
     };
     let get_str = |key: &str| {
         obj.get(key)
@@ -90,11 +90,12 @@ pub(crate) fn key_arg_preview(
     };
 
     match tool_name {
-        "read" | "write" | "edit" => {
-            get_str("path").unwrap_or_else(|| truncate_string(args_preview, 120))
-        }
+        "read" | "write" | "edit" => get_str("path")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
         "exec_command" => get_str("cmd")
             .or_else(|| get_str("command"))
+            .map(|value| truncate_string(&value, 120))
             .unwrap_or_else(|| {
                 let workdir = get_str("workdir").unwrap_or_default();
                 if !workdir.is_empty() {
@@ -105,18 +106,60 @@ pub(crate) fn key_arg_preview(
             }),
         "write_stdin" => {
             if let Some(session_id) = get_str("session_id") {
-                let chars = get_str("chars")
-                    .map(|c| truncate_string(&c, 60))
-                    .unwrap_or_default();
-                if chars.is_empty() {
+                let input_chars = get_str("chars").map_or(0, |chars| chars.chars().count());
+                if input_chars == 0 {
                     format!("→ {}", truncate_string(&session_id, 40))
                 } else {
-                    format!("→ {chars}")
+                    format!(
+                        "→ {} ({input_chars} input chars)",
+                        truncate_string(&session_id, 40)
+                    )
                 }
             } else {
-                truncate_string(args_preview, 120)
+                String::new()
             }
         }
+        "read_command_output" => get_str("output_id")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "glob" => get_str("pattern")
+            .or_else(|| get_str("root"))
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "grep" => get_str("pattern")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "web_search" => get_str("query")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "web_fetch" => get_str("url")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "create_goal" => get_str("objective")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "get_goal" => "current goal".to_string(),
+        "update_goal" => get_str("status")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "subagent" => get_str("description")
+            .or_else(|| get_str("child_session_id"))
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "subagent_status" | "subagent_cancel" => get_str("child_session_id")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "orchestrator_launch" => get_str("description")
+            .or_else(|| get_str("orchestrator_session_id"))
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "orchestrator_status"
+        | "orchestrator_read"
+        | "orchestrator_wait"
+        | "orchestrator_cancel"
+        | "orchestrator_steer" => get_str("orchestrator_session_id")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
         "thread" => {
             let name = get_str("name").unwrap_or_default();
             let action = get_str("action").unwrap_or_default();
@@ -125,12 +168,12 @@ pub(crate) fn key_arg_preview(
             } else if !name.is_empty() {
                 truncate_string(&name, 120)
             } else {
-                truncate_string(args_preview, 120)
+                String::new()
             }
         }
-        "thread_read" | "thread_delete" => {
-            get_str("name").unwrap_or_else(|| truncate_string(args_preview, 120))
-        }
+        "thread_read" | "thread_delete" => get_str("name")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
         "threads" | "workset_list" => "list".to_string(),
         "workset_define" => {
             let id = get_str("id").unwrap_or_default();
@@ -140,10 +183,12 @@ pub(crate) fn key_arg_preview(
             } else if !id.is_empty() {
                 truncate_string(&id, 120)
             } else {
-                truncate_string(args_preview, 120)
+                String::new()
             }
         }
-        "workset_read" => get_str("id").unwrap_or_else(|| truncate_string(args_preview, 120)),
+        "workset_read" => get_str("id")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
         _ if tool_name.starts_with("mcp__") => {
             for key in &[
                 "query",
@@ -159,9 +204,9 @@ pub(crate) fn key_arg_preview(
                     return truncate_string(&val, 120);
                 }
             }
-            truncate_string(args_preview, 120)
+            String::new()
         }
-        _ => truncate_string(args_preview, 120),
+        _ => String::new(),
     }
 }
 

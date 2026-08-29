@@ -73,6 +73,8 @@ export interface RuntimeState {
    * before the DAG batch commits its tool messages.
    */
   finishedToolCalls: Record<string, true>;
+  /** Safe top-level tool lifecycle overlays, merged with durable snapshot rows by call id. */
+  primaryToolEvents: AgentEvent[];
   /** Prose the current model call has produced so far. */
   streamText: string;
   /** Reasoning the current model call has produced so far. */
@@ -136,6 +138,7 @@ export const runtimeStore = createStore<RuntimeState>(
     events: [],
     threads: {},
     finishedToolCalls: {},
+    primaryToolEvents: [],
     streamText: "",
     streamReasoning: "",
     streamSettled: false,
@@ -165,6 +168,7 @@ export function resetRuntime(sessionId: string | null): void {
     events: [],
     threads: {},
     finishedToolCalls: {},
+    primaryToolEvents: [],
     streamText: "",
     streamReasoning: "",
     streamSettled: false,
@@ -505,6 +509,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         streamReasoning: "",
         threads: {},
         finishedToolCalls: {},
+        primaryToolEvents: [],
       });
       return "replace-snapshot";
     case "agent":
@@ -521,6 +526,7 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
       // A thread's own calls also feed its card in the chat and its tail in the
       // side panel, which is why they are kept per thread as well as below.
       pushThreadLog(event.thread_name, event);
+      if (!event.thread_name) pushPrimaryToolEvent(event);
       pushEvent({
         seq,
         kind: "tool",
@@ -541,6 +547,7 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
     case "tool_call_finished": {
       const failed = toolCallFailed(event);
       pushThreadLog(event.thread_name, event);
+      if (!event.thread_name) pushPrimaryToolEvent(event);
       pushEvent({
         seq,
         kind: "tool",
@@ -696,6 +703,21 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
   }
 }
 
+/** Retain a bounded, de-duplicated top-level overlay across snapshot refetches. */
+function pushPrimaryToolEvent(event: AgentEvent): void {
+  if (event.type !== "tool_call_started" && event.type !== "tool_call_finished") return;
+  setState((state) => {
+    const identity = `${event.type}:${event.call_id}`;
+    const withoutPrior = state.primaryToolEvents.filter(
+      (candidate) =>
+        candidate.type !== event.type ||
+        !("call_id" in candidate) ||
+        `${candidate.type}:${candidate.call_id}` !== identity,
+    );
+    return { primaryToolEvents: [...withoutPrior, event].slice(-400) };
+  });
+}
+
 function steeringVerb(type: string): string {
   if (type.endsWith("queued")) return "Steering queued";
   if (type.endsWith("delivered")) return "Steering delivered";
@@ -712,6 +734,7 @@ export const useLiveEvents = () => useStore((s) => s.events);
 export const useStreamStatus = () => useStore((s) => s.streamStatus);
 export const useLiveThreads = () => useStore((s) => s.threads);
 export const useFinishedToolCalls = () => useStore((s) => s.finishedToolCalls);
+export const usePrimaryToolEvents = () => useStore((s) => s.primaryToolEvents);
 export const useRunUsage = () => useStore((s) => s.runUsage);
 export const useSessionSpend = () => useStore((s) => s.sessionSpend);
 export const useRunStartedAt = () => useStore((s) => s.runStartedAt);

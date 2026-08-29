@@ -13,12 +13,19 @@ import {
 import type { JsonObject, JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
+import {
+  assistantTurnCancelled,
+  collectToolResults,
+  indexToolEvents,
+  presentToolCall,
+  type ToolResultRecord,
+  type ToolPresentation,
+} from "@/app/lib/toolPresentation";
 import { mergeThreadLog, persistedThreadLog, type ThreadLogLine } from "@/app/lib/threadLog";
 import type { RuntimeThread } from "@/app/store/runtimeStore";
 import type {
   AgentEvent,
   DispatchWeight,
-  Message,
   SessionSnapshotResponse,
   ToolCall,
   WorksetSnapshot,
@@ -74,6 +81,7 @@ export type TranscriptBlock =
   | { kind: "text"; key: string; text: string }
   | { kind: "workset"; key: string; worksetId: string; pending: boolean }
   | { kind: "tool"; key: string; name: string; pending: boolean }
+  | { kind: "tool-detail"; key: string; presentation: ToolPresentation }
   /** One assistant dispatch batch, split into topological DAG rows. */
   | { kind: "wave"; key: string; rows: TranscriptThread[][] };
 
@@ -173,7 +181,7 @@ interface BuildContext {
 function worksetDefinePending(
   callId: string,
   worksetId: string,
-  results: Map<string, string>,
+  results: Map<string, ToolResultRecord>,
   messageCreatedAt: string | null,
   ctx: BuildContext,
 ): boolean {
@@ -327,36 +335,6 @@ function eventsForEpisode(
   return episodes[episode - dropped];
 }
 
-function toolContentPreview(content: Extract<Message, { role: "tool" }>["content"]): string {
-  if (typeof content === "string") return content;
-  return content
-    .map((part) => (part.type === "text" ? part.text : `[Image: ${part.image.mime_type}]`))
-    .join("\n\n");
-}
-
-/**
- * Tool results that belong to one assistant message: the run of `tool` rows
- * that follow it, stopping at the next user/assistant turn.
- *
- * Scoped per turn so a reused `tool_call_id` (historically `recovered_1` from
- * reasoning salvage) cannot steal an earlier episode onto a later thread card.
- */
-function toolResultsForAssistant(
-  messages: SessionSnapshotResponse["messages"],
-  assistantIndex: number,
-): Map<string, string> {
-  const results = new Map<string, string>();
-  for (let index = assistantIndex + 1; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (message.role === "tool") {
-      results.set(message.tool_call_id, toolContentPreview(message.content));
-      continue;
-    }
-    if (message.role === "assistant" || message.role === "user") break;
-  }
-  return results;
-}
-
 /**
  * Thread names whose latest dispatch exists only because the user stopped the
  * run. A later dispatch of the same name — finished or still in flight —
@@ -372,16 +350,16 @@ export function cancelledThreadNames(messages: SessionSnapshotResponse["messages
   const cancelled = new Set<string>();
   messages.forEach((message, index) => {
     if (message.role !== "assistant") return;
-    const results = toolResultsForAssistant(messages, index);
+    const results = collectToolResults(messages, index);
     const threadCalls = (message.tool_calls ?? []).filter(
       (call) => call.function?.name === "thread",
     );
     if (!threadCalls.length) return;
 
-    const turnCancelled = assistantTurnCancelled(messages, index);
+    const turnCancelled = assistantTurnCancelled(messages, index, RUN_CANCELLED_MARKER);
     let anyCancelMarker = false;
     for (const call of threadCalls) {
-      const result = results.get(call.id);
+      const result = results.get(call.id)?.text;
       const name = dispatchThreadName(call);
       if (result == null) {
         if (!turnCancelled) cancelled.delete(name);
@@ -404,22 +382,6 @@ export function cancelledThreadNames(messages: SessionSnapshotResponse["messages
   return cancelled;
 }
 
-/** True when this assistant turn is followed by the run-cancelled marker. */
-function assistantTurnCancelled(
-  messages: SessionSnapshotResponse["messages"],
-  assistantIndex: number,
-): boolean {
-  for (let index = assistantIndex + 1; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (message.role === "tool") continue;
-    if (message.role === "assistant") {
-      return typeof message.content === "string" && message.content.trim() === RUN_CANCELLED_MARKER;
-    }
-    return false;
-  }
-  return false;
-}
-
 /**
  * @param episode Which dispatch of this name the card stands for, from 0.
  * @param batchNames Thread names in this assistant message (for in-batch deps).
@@ -433,7 +395,7 @@ function describeThread(
   episode: number,
   identity: string,
   ctx: BuildContext,
-  results: Map<string, string>,
+  results: Map<string, ToolResultRecord>,
   batchNames: Set<string>,
   finishedNames: Set<string>,
 ): TranscriptThread {
@@ -442,7 +404,7 @@ function describeThread(
   const action = text(args.action);
   const rawWeight = text(args.weight);
   const weight = rawWeight === "light" || rawWeight === "heavy" ? rawWeight : null;
-  const result = results.get(call.id) ?? null;
+  const result = results.get(call.id)?.text ?? null;
   // The stream is keyed by name and only ever describes the dispatch running
   // now, which is the newest one. Handing it to the earlier cards of that name
   // would replay this episode's commands on them and mark them failed with it.
@@ -605,11 +567,22 @@ export function buildTranscript(
   snapshot: SessionSnapshotResponse | null,
   liveThreads: Record<string, RuntimeThread>,
   liveFinishedToolCalls: Record<string, true> = {},
+  livePrimaryToolEvents: AgentEvent[] = [],
 ): TranscriptTurn[] {
   const messages = snapshot?.messages ?? [];
   const durations = snapshot?.response_timing.response_durations_ms ?? [];
   const createdAt = snapshot?.message_created_at ?? [];
   const windowStart = snapshot?.message_page?.start ?? 0;
+  const direct =
+    snapshot?.metadata?.behavior === "direct" ||
+    snapshot?.metadata?.behavior === "direct-with-orchestrator";
+  const toolEvents = indexToolEvents(
+    direct ? [...(snapshot?.primary_tool_events ?? []), ...livePrimaryToolEvents] : [],
+  );
+  let lastUserIndex = -1;
+  messages.forEach((message, index) => {
+    if (message.role === "user") lastUserIndex = index;
+  });
 
   const windowDispatchCounts = countThreadDispatches(messages);
   const persistedDispatchCounts = new Map(
@@ -711,7 +684,7 @@ export function buildTranscript(
       });
     }
 
-    const results = toolResultsForAssistant(messages, index);
+    const results = collectToolResults(messages, index);
     const threadCalls: ToolCall[] = [];
     (message.tool_calls ?? []).forEach((call, callIndex) => {
       const name = call.function?.name ?? "tool";
@@ -727,7 +700,24 @@ export function buildTranscript(
           pending: worksetDefinePending(call.id, worksetId, results, createdAt[index] ?? null, ctx),
         });
       } else if (!SILENT_TOOLS.has(name)) {
-        blocks.push({ kind: "tool", key, name, pending: !results.has(call.id) });
+        const result = results.get(call.id);
+        if (direct) {
+          blocks.push({
+            kind: "tool-detail",
+            key: `tool-${call.id}`,
+            presentation: presentToolCall({
+              call,
+              events: toolEvents.get(call.id),
+              hasResult: result != null,
+              resultText: result?.text ?? null,
+              resultHasImage: result?.hasImage ?? false,
+              active: Boolean(snapshot?.active_run) && index > lastUserIndex,
+              turnCancelled: assistantTurnCancelled(messages, index, RUN_CANCELLED_MARKER),
+            }),
+          });
+        } else {
+          blocks.push({ kind: "tool", key, name, pending: result == null });
+        }
       }
     });
 

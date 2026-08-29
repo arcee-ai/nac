@@ -137,6 +137,104 @@ test("round-trips a native tool result through the scripted Responses provider",
   await expect(page.getByText("tool result received")).toBeVisible();
 });
 
+for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
+  test(`keeps rich ${behavior} primary tool details through live settlement and reload`, async ({
+    harness,
+    page,
+    request,
+  }) => {
+    const callId = `all1-${behavior}`;
+    const command = "sleep 1; printf ALL1_TOOL_COMPLETE";
+    harness.provider.enqueue(
+      `${behavior}-tool-call`,
+      { token: `ALL1_${behavior}_TOKEN`, requiredTools: ["exec_command"] },
+      {
+        kind: "function_call",
+        name: "exec_command",
+        callId,
+        arguments: { cmd: command },
+        stream: true,
+      },
+    );
+    harness.provider.enqueue(
+      `${behavior}-tool-finished`,
+      { functionOutputCallId: callId },
+      { kind: "text", text: `${behavior} rich tool complete`, stream: true },
+    );
+
+    const sessionId = await createSession(request, harness, behavior);
+    await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+    const composer = page.getByRole("combobox", { name: "Message" });
+    await composer.fill(`ALL1_${behavior}_TOKEN`);
+    await page.getByRole("button", { name: "Send" }).click();
+    await harness.provider.waitForRequestCount(1);
+
+    const card = page.locator(`[data-tool-call-id="${callId}"]`);
+    await expect(card).toContainText("Run command");
+    await expect(card).toContainText(command);
+    await expect(card).toContainText("Running");
+    await page.getByRole("button", { name: "Allow once" }).click();
+    await expect(card).toContainText("Running");
+
+    await harness.provider.waitForRequestCount(2);
+    await waitForRunIdle(request, harness, sessionId);
+    await expect(card).toContainText("Succeeded");
+    await expect(card).toContainText("ALL1_TOOL_COMPLETE");
+    await expect(page.getByText(`${behavior} rich tool complete`)).toBeVisible();
+
+    await page.reload();
+    const reloaded = page.locator(`[data-tool-call-id="${callId}"]`);
+    await expect(reloaded).toContainText("Run command");
+    await expect(reloaded).toContainText(command);
+    await expect(reloaded).toContainText("Succeeded");
+    await expect(reloaded).toContainText("ALL1_TOOL_COMPLETE");
+    await expect(reloaded).toHaveCount(1);
+    harness.provider.assertConsumed();
+  });
+}
+
+test("renders an unknown primary tool failure safely after reload", async ({
+  harness,
+  page,
+  request,
+}) => {
+  harness.provider.enqueue(
+    "all1-unknown-call",
+    { token: "ALL1_UNKNOWN_TOKEN" },
+    {
+      kind: "function_call",
+      name: "mcp__unknown__dangerous_tool",
+      callId: "all1-unknown",
+      arguments: {
+        authorization: "Bearer RAW_SECRET_MUST_NOT_RENDER",
+        body: "UNBOUNDED_RAW_BODY_MUST_NOT_RENDER",
+      },
+      stream: true,
+    },
+  );
+  harness.provider.enqueue(
+    "all1-unknown-finished",
+    { functionOutputCallId: "all1-unknown" },
+    { kind: "text", text: "unknown failure observed", stream: true },
+  );
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  await page.getByRole("combobox", { name: "Message" }).fill("ALL1_UNKNOWN_TOKEN");
+  await page.getByRole("button", { name: "Send" }).click();
+  await harness.provider.waitForRequestCount(2);
+  await waitForRunIdle(request, harness, sessionId);
+
+  const card = page.locator('[data-tool-call-id="all1-unknown"]');
+  await expect(card).toContainText("MCP · Dangerous tool");
+  await expect(card).toContainText("Failed");
+  await expect(page.locator("body")).not.toContainText("RAW_SECRET_MUST_NOT_RENDER");
+  await expect(page.locator("body")).not.toContainText("UNBOUNDED_RAW_BODY_MUST_NOT_RENDER");
+  await page.reload();
+  await expect(page.locator('[data-tool-call-id="all1-unknown"]')).toContainText("Failed");
+  await expect(page.locator('[data-tool-call-id="all1-unknown"]')).toHaveCount(1);
+  harness.provider.assertConsumed();
+});
+
 test("asks for immutable behavior on every first and new chat", async ({
   harness,
   page,

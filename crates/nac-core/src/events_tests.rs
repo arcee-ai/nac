@@ -1,4 +1,5 @@
 use super::*;
+use crate::terminal::CommandStatus;
 
 #[test]
 fn decode_prefixed_event_round_trip() {
@@ -1105,6 +1106,66 @@ fn mcp_server_skipped_sanitization_redacts_credentials_and_bounds_length() {
         "reason not bounded: {} bytes",
         reason.len()
     );
+}
+
+#[test]
+fn primary_tool_event_sanitization_keeps_only_bounded_safe_presentation_fields() {
+    let started = AgentEvent::ToolCallStarted {
+        thread_name: None,
+        call_id: "call-safe".to_string(),
+        name: format!("exec_command\u{0}{}", "x".repeat(200)),
+        args_preview: r#"{"cmd":"printf safe","authorization":"Bearer sk-tool-canary","env":{"TOKEN":"sk-tool-canary"}}"#.to_string(),
+        key_arg_preview: Some(format!(
+            "Authorization: Bearer sk-tool-canary; printf safe {}",
+            "x".repeat(400)
+        )),
+        args_detail: Some(
+            r#"{"cmd":"printf safe","authorization":"Bearer sk-tool-canary","env":{"TOKEN":"sk-tool-canary"}}"#.to_string(),
+        ),
+    };
+    let sanitized = sanitize_external_agent_event(started).unwrap();
+    let AgentEvent::ToolCallStarted {
+        name,
+        args_preview,
+        key_arg_preview,
+        args_detail,
+        ..
+    } = sanitized
+    else {
+        panic!("expected ToolCallStarted");
+    };
+    let key_arg_preview = key_arg_preview.unwrap_or_default();
+    let serialized = format!("{name}{args_preview}{key_arg_preview}");
+    assert!(!serialized.contains("sk-tool-canary"), "{serialized}");
+    assert!(!name.contains('\u{0}'));
+    assert!(name.chars().count() <= 160);
+    assert!(key_arg_preview.chars().count() <= 180);
+    assert_eq!(args_detail, None);
+    assert!(serialized.contains("printf safe"), "{serialized}");
+
+    let finished = AgentEvent::ToolCallFinished {
+        thread_name: None,
+        call_id: "call-safe".to_string(),
+        name: "exec_command".to_string(),
+        content_preview: format!(
+            "Authorization: Bearer sk-tool-canary; command completed {}",
+            "y".repeat(400)
+        ),
+        is_error: false,
+        command_status: Some(CommandStatus::Completed),
+        exit_code: Some(0),
+    };
+    let sanitized = sanitize_external_agent_event(finished).unwrap();
+    let serialized = serde_json::to_string(&sanitized).unwrap();
+    assert!(!serialized.contains("sk-tool-canary"), "{serialized}");
+    assert!(serialized.contains("command completed"), "{serialized}");
+    let AgentEvent::ToolCallFinished {
+        content_preview, ..
+    } = sanitized
+    else {
+        panic!("expected ToolCallFinished");
+    };
+    assert!(content_preview.chars().count() <= 180);
 }
 
 const MODEL_ERROR_CANARY: &str = "sk-canary-sink-12345";
