@@ -87,15 +87,21 @@ assigned generation is `running`:
 When that generation settles (`completed`, `failed`, `cancelled`,
 `interrupted`):
 
-- the assignment row remains as history
+- the parent row stays forever; nothing about lineage is deleted
+- the child's chat input is enabled again
 - the session is a peer on the project chat list
 - the user can type, fork, continue-in-X, create a goal, and spawn
-- the parent may still spawn-continue that exact id only if the user has
-  not taken the composer; otherwise the relationship is closed
+- the parent may start another generation on the same child; input
+  disables again for that task only
+
+Locked (2026-08-29): parent info is permanent. The only UI lock is
+`chat input disabled` while the current assigned generation is
+`running`. There is no `composer_claimed_by_user` and no closing of
+the parent relationship.
 
 This replaces today's permanent caste: `profile = general`,
-`nesting_depth = 1` forever, read-only web MVP, cascade-delete, hidden
-from the primary chat list.
+`nesting_depth = 1` forever, read-only web MVP, hidden from the
+primary chat list.
 
 ### Product surface
 
@@ -103,8 +109,8 @@ from the primary chat list.
 - Model-message actions keep Resend, Revert, Fork, Copy.
 - Add one other-type action: **Continue in NAC** on an Agent turn,
   **Continue in Agent** on a NAC turn. Same row as Fork. Not a fork.
-- Delegated work lists *currently assigned* spawns. Settled sessions
-  live on the ordinary chat list with an optional "spawned by …" hint.
+- Delegated work can list spawns. Settled sessions also live on the
+  ordinary chat list. "Spawned by …" / Back to Parent stay forever.
 - People / flow controls launch a spawn. They do not define a species.
 
 ## Why this works
@@ -142,7 +148,7 @@ Agent↔NAC always needs two transcripts.
 | Continue-in-X | new `session_handoffs` + HTTP + ModelMessage button |
 | Child cannot have goals / grandchildren | true only while assignment is running |
 | Delegated transcripts read-only forever | read-only only while assigned and running |
-| Delete parent deletes children | do not cascade after settle; user-created and handed-off sessions never cascade |
+| Delete parent deletes children | parent *pointer* is never wiped (A1); whether deleting the parent session also deletes children is still A2 |
 | Session behavior picker, three cards | two cards |
 | New chat defaults to NAC | default to Agent; NAC remains explicitly creatable |
 
@@ -190,7 +196,6 @@ generation               INTEGER
 run_id, execution_mode, report, failure
 change_summary, verification_summary     -- Agent children only; NULL for NAC
 completion_inbox_id, completion_suppressed
-composer_claimed_by_user INTEGER         -- 1 after the user types in the settled child
 created_at, updated_at, version
 ```
 
@@ -424,17 +429,17 @@ last only while `status = running`.
    `application/delegation.rs`).
 4. Goal service: reject `create_goal` only when the session has a
    running assignment as the child. Settled children may own a goal.
-5. Web: `sessionPanelPolicy` uses `lineageKind` + assignment status, not
-   lineage alone. Settled child transcripts are composable. Composer
-   sets `composer_claimed_by_user` on first user send.
-6. Delete-parent cascade: delete only children that are still `running`
-   or never opened by the user. Settled, claimed sessions stay.
-7. Put settled children on the project session list
+5. Web: `sessionPanelPolicy` uses assignment status, not lineage alone.
+   Chat input is disabled only while the assignment is `running`.
+   Lineage / Back to Parent remain after settle.
+6. Put settled children on the project session list
    (`newestPrimarySessionForProject` and list filters in
-   `crates/nac-server/web/src/app/lib/projects.ts`).
+   `crates/nac-server/web/src/app/lib/projects.ts`). Parent pointer
+   stays on those rows.
 
 Acceptance: after a child completes, it appears as an Agent chat, the
-user can type, and it cannot be spawned-from until it settles.
+user can type, parent info is still there, and a new parent task on
+that child disables input again.
 
 ### Phase 3 — NAC can spawn sessions
 
@@ -563,42 +568,42 @@ NAC workers into sessions in any of these commits.
 
 ## Decisions to lock
 
-These are the product questions the plan still leaves open. Phase 1
-(Agent always has NAC spawn tools; two-card picker) can start without
-them. Phase 2 and later should not start until the marked items are
-answered. Each item lists options and a recommendation; the
-recommendation is not a decision until you confirm it.
+These are the product questions the plan still leaves open, except
+where marked LOCKED. Phase 1 can start without the rest. Phase 2
+needs A2–A4 and G. Phase 4 needs B (B1 is the only one that decides
+whether Continue-in-X also starts a run).
 
 ### A. Ownership after a spawn settles
 
 Needed before phase 2.
 
-**A1. Who owns the composer once the assignment is no longer running?**
+**A1. Parent info and chat input — LOCKED (2026-08-29)**
 
-Today the parent owns continue / steer / cancel forever and the web
-child is read-only. The new model wants a peer chat after the task.
+The parent pointer is never deleted. "Spawned by …", lineage, and Back
+to Parent stay for the life of both sessions.
 
-- *Parent keeps exclusive continue until the user opens the child and
-  sends.* First user send sets `composer_claimed_by_user`. After that
-  `session_spawn` with that id is rejected.
-- *Either side may write.* Parent continue and user typing share one
-  log. Two authors, interleaved tool history, messy inbox completions.
-- *Assignment never becomes a peer.* Settled child stays read-only.
-  Contradicts "no subagent species".
+The only lock is chat input disabled while the current assigned
+generation is `running`. After settle the input is enabled. If the
+parent starts another task on that same child, input disables again
+for that generation only.
 
-Recommendation: first option. The lock is temporal; the claim is
-one-way.
+There is no `composer_claimed_by_user` and no "closing" the
+relationship after the user types.
 
 **A2. Does delete-parent still destroy children?**
 
-- *Cascade only `running` (and maybe never-opened idle) children.*
-  Settled, claimed sessions survive as ordinary chats.
-- *Always cascade.* A "just a session" you have been talking to
-  disappears when you delete the parent tab.
-- *Never cascade.* A crashed running child becomes an orphan with a
-  dangling assignment.
+This is about deleting the parent *session*, not about erasing the
+parent pointer (A1). Still open.
 
-Recommendation: cascade running and never-opened; keep claimed.
+- *Cascade only `running` children.* Settled children stay as ordinary
+  chats; their lineage can point at a missing parent title.
+- *Always cascade.* Deleting the parent tab also deletes every child
+  session, including ones you have been talking to.
+- *Never cascade.* A crashed running child can become an orphan.
+
+Recommendation: cascade only `running`; keep settled children. The
+parent *info* on those children is not wiped (A1) even if the parent
+session itself is later gone — show it as a stale lineage.
 
 **A3. May a settled spawn create a goal?**
 
@@ -621,17 +626,27 @@ not lifetime descendants.
 
 Needed before phase 4. Does not block phase 1.
 
-**B1. Does the button send a prompt, or only set up the new session?**
+**B1. After you click Continue in NAC / Agent, does that new chat
+start working by itself?**
 
-You asked for setup, not a fork. That still leaves "setup" vs "start".
+Concrete walk. You are in an Agent chat. The model answered. You
+click **Continue in NAC** on that answer.
 
-- *Idle landing.* New session has system head + handoff brief. User
-  types the first real instruction. Safe; one extra click.
-- *Auto-run.* Server also inserts a synthetic user prompt ("continue
-  this work") and starts a generation. Faster; the model invents a
-  goal you did not confirm.
+The server always creates a new NAC session and puts a brief of the
+clicked conversation into it (prose only). Then one of two things:
 
-Recommendation: idle landing.
+- *Wait for you.* You land in that NAC chat. The composer is empty
+  and enabled. Nothing runs until you type ("zajmij się loginem",
+  "zaplanuj auth", …). The button only *set up* the other chat.
+- *Start by itself.* The new NAC chat immediately begins a run, as
+  if you had already sent "kontynuuj tę pracę". Faster, but the
+  planner invents the next step without a new instruction from you.
+
+This is not about fork. Fork always copies and waits. B1 is only:
+does Continue-in-X also press Send.
+
+Recommendation: wait for you. Matches "setup, not a fork". Say if
+you instead want it to start by itself.
 
 **B2. How much of the source conversation is projected?**
 
@@ -678,13 +693,12 @@ Recommendation: allow. The invariant is "project this transcript", not
 
 **B6. May you hand off a spawn?**
 
-- *Not while `running`.* Parent still owns that generation.
-- *After settle, yes, if the user claimed the composer — or even if
-  not.* A finished Agent child is a session; Continue in NAC is
-  meaningful.
+- *Not while `running` (input is disabled anyway).* After settle the
+  child is a normal session, so Continue in NAC / Agent is available.
 - *Never.* Spawned sessions stay same-type forever.
 
-Recommendation: reject while running; allow after settle.
+Recommendation: reject while running; allow after settle. Parent
+info on that child is unchanged (A1).
 
 **B7. Does a handoff inherit the workspace, sandbox, and model?**
 
@@ -745,13 +759,18 @@ Recommendation: not on the top-level list until it settles.
 
 **D2. After settle, does it stay in Delegated work?**
 
-- *Leave Delegated work. Move to the ordinary list with an optional
-  "Spawned by {parent}" hint and Back to Parent.*
-- *Stay in both places.* Duplicate navigation.
-- *Stay only in Delegated work.* Then it is still a species.
+Parent info stays forever (A1) on the child: hint + Back to Parent.
+That is separate from whether Delegated work is a live board or an
+archive.
 
-Recommendation: list + hint; Delegated work is for *running*
-assignments only.
+- *Ordinary list after settle; Delegated work is the running board.
+  Lineage remains on the child.*
+- *Stay in both places.*
+- *Stay only in Delegated work.* Then it still looks like a species.
+
+Recommendation: first option. Permanent parent info lives on the
+child row, not as a requirement that Delegated work keep finished
+rows.
 
 **D3. People / flow control after unification?**
 
@@ -844,12 +863,12 @@ Needed before phase 2.
 Today: parent keeps a child-scoped permission connection; fail closed
 if the parent UI is gone.
 
-- *Keep that while `running`. After settle (and claim), approvals
-  belong to the child's own lock icon.*
+- *Keep that while `running`. After settle, approvals belong to the
+  child's own lock icon.*
 - *Always parent.* The peer chat cannot approve its own `exec_command`.
 - *Always child.* Parent may be on a phone tab that is not mounted.
 
-Recommendation: parent while running; child after claim.
+Recommendation: parent while running; child after settle.
 
 **G2. Remembered grants**
 
@@ -923,8 +942,9 @@ invariants. Say so if any of them is wrong:
 2. Type is immutable. No mid-chat switch.
 3. Fork = same type, copy log. Continue-in-X = other type, project.
 4. User, Agent, and NAC may create both types.
-5. Spawned session is a normal session; locks last only while the
-   assigned generation is running.
+5. Spawned session is a normal session. Parent info stays forever.
+   The only lock is chat input disabled while the assigned generation
+   is running.
 6. NAC workers stay threads, not chats.
 7. Planner never gets file tools.
 8. Parent log never merges child tool history.
