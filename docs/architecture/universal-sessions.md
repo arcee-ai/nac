@@ -488,6 +488,8 @@ a NAC spawn.
 
 ### Phase 4 — continue-in-X
 
+Landed.
+
 Goal: the ModelMessage action the product wants.
 
 1. Schema: `session_handoffs`.

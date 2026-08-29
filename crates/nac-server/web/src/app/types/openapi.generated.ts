@@ -177,6 +177,11 @@ export interface components {
           reason: components["schemas"]["CompactionSkipReason"];
           status: "unchanged";
         };
+    ContinueSessionRequest: {
+      message_idx: number;
+      target_behavior: components["schemas"]["SessionBehavior"];
+    };
+    ContinueSessionResponse: { session_id: string };
     CostTier: {
       cache_read: number;
       cache_write: number;

@@ -25,7 +25,9 @@ The wire values are:
   no longer write this value. Existing rows keep working as Agent.
 
 Behavior cannot be switched after creation. Start another chat to choose a
-different topology. A managed orchestrator is itself an immutable
+different topology, or use **Continue in NAC** / **Continue in Agent** on a
+finished model turn to open an idle chat of the other type with a projected
+prose brief. Fork still copies a same-type transcript. A managed orchestrator is itself an immutable
 `orchestrator` session, while a traditional child inherits direct execution
 internals but is recognized by its durable parent relationship. Both delegated
 transcripts show their lineage and a **Back to Parent** action. Chat input is

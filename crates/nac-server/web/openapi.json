@@ -3745,6 +3745,121 @@
         }
       }
     },
+    "/sessions/{session_id}/continue": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_continue",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContinueSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinueSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or rejected path/query/body extraction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "JSON body validation failed",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/events": {
       "get": {
         "tags": [
@@ -8166,6 +8281,35 @@
           "no_eligible_boundary",
           "already_compacted"
         ]
+      },
+      "ContinueSessionRequest": {
+        "type": "object",
+        "required": [
+          "message_idx",
+          "target_behavior"
+        ],
+        "properties": {
+          "message_idx": {
+            "type": "integer",
+            "description": "Transcript index of the assistant message to project through.",
+            "minimum": 0
+          },
+          "target_behavior": {
+            "$ref": "#/components/schemas/SessionBehavior",
+            "description": "The other session type. Agent sources continue in NAC; NAC sources\ncontinue in Agent."
+          }
+        }
+      },
+      "ContinueSessionResponse": {
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        }
       },
       "CostTier": {
         "type": "object",

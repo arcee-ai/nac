@@ -42,7 +42,7 @@ pub(crate) fn render_general_child_system_prompt(
     clippy::expect_used,
     reason = "the checked-in orchestrator prompt must retain both formatting placeholders"
 )]
-pub(super) fn render_orchestrator_system_prompt(
+pub(crate) fn render_orchestrator_system_prompt(
     working_directory: &str,
     thread_timeout_secs: u64,
 ) -> String {

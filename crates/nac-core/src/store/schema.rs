@@ -3,6 +3,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+// 26 adds session_handoffs (other-type continue-in-X briefs).
 // 25 freezes commissioned-task transcript prefixes on spawn assignment rows.
 // 24 adds session_forks (conversation clones plus deleted tombstones). 22 adds
 // durable direct-parent managed orchestrator relationships. 21 adds
@@ -19,7 +20,7 @@ use std::time::{Duration, Instant};
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 25;
+const STORE_SCHEMA_VERSION: i64 = 26;
 
 /// Current durable-store schema version for credential-free readiness and
 /// operational status reporting.
@@ -393,7 +394,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | 25 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -516,6 +517,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
         "INTEGER CHECK (frozen_message_count IS NULL OR frozen_message_count >= 0)",
     )?;
     create_session_forks_table(&transaction)?;
+    create_session_handoffs_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -1046,6 +1048,32 @@ fn create_session_forks_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Other-type continue-in-X links. Session ids are not foreign keys so a
+/// deleted target still leaves a source-turn marker, same as forks.
+fn create_session_handoffs_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_handoffs (
+             handoff_id TEXT NOT NULL PRIMARY KEY,
+             source_session_id TEXT NOT NULL,
+             target_session_id TEXT NOT NULL,
+             source_message_idx INTEGER NOT NULL
+                 CHECK (source_message_idx >= 0),
+             source_behavior TEXT NOT NULL
+                 CHECK (source_behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator')),
+             target_behavior TEXT NOT NULL
+                 CHECK (target_behavior IN ('direct', 'orchestrator')),
+             created_at TEXT NOT NULL,
+             CHECK (source_session_id <> target_session_id),
+             CHECK (source_behavior <> target_behavior)
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_handoffs_source
+             ON session_handoffs(source_session_id, source_message_idx);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_session_handoffs_target
+             ON session_handoffs(target_session_id);",
+    )?;
+    Ok(())
+}
+
 /// An earlier draft of schema 17 cascaded the origin row away with the source
 /// chat. Rebuild so a fork still knows it is a fork after that chat is gone.
 fn rebuild_session_forks_without_source_fk(conn: &Connection) -> Result<()> {
@@ -1439,6 +1467,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "traditional_children",
         "managed_orchestrators",
         "session_forks",
+        "session_handoffs",
         "projects",
         "session_projects",
     ] {

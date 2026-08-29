@@ -757,6 +757,8 @@ mod compaction;
 mod configuration;
 #[path = "tests/contract.rs"]
 mod contract;
+#[path = "tests/handoff.rs"]
+mod handoff;
 #[path = "tests/lifecycle.rs"]
 mod lifecycle;
 #[path = "tests/managed_delivery.rs"]

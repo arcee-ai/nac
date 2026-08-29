@@ -15,6 +15,7 @@ mod run_recovery;
 mod schema;
 mod session_forks;
 mod session_goals;
+mod session_handoffs;
 mod session_inbox;
 mod ssh_configurations;
 mod steering;
@@ -47,6 +48,7 @@ pub use session_forks::{
 };
 pub(crate) use session_forks::{fork_origin_from_parts, list_session_forks_with_connection};
 pub use session_goals::*;
+pub use session_handoffs::{insert_session_handoff, list_session_handoffs, SessionHandoffRecord};
 pub use session_inbox::*;
 pub use ssh_configurations::*;
 pub use steering::*;

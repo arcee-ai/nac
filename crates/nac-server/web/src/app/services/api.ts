@@ -70,7 +70,9 @@ import type {
   ReorderSessionsResponse,
   ResolvedModelConfiguration,
   RevertSessionResponse,
+  ContinueSessionResponse,
   ForkSessionResponse,
+  SessionBehavior,
   SessionSnapshotResponse,
   SessionEventBoundary,
   SessionSummarySnapshot,
@@ -729,6 +731,11 @@ export const api = {
   forkSession: (id: string, messageIdx: number) =>
     request<ForkSessionResponse>("POST", `${sessionPath(id)}/fork`, {
       body: { message_idx: messageIdx },
+    }),
+
+  continueSession: (id: string, messageIdx: number, targetBehavior: SessionBehavior) =>
+    request<ContinueSessionResponse>("POST", `${sessionPath(id)}/continue`, {
+      body: { message_idx: messageIdx, target_behavior: targetBehavior },
     }),
 
   dismissSessionFork: (id: string, forkId: string) =>

@@ -81,6 +81,9 @@ interface ModelMessageProps {
   onRevert?: ((messageIndex: number, text: string) => void) | null;
   /** Clone this turn into a new chat. */
   onFork?: ((messageIndex: number) => void) | null;
+  /** Open an idle chat of the other type from this turn. */
+  onContinue?: ((messageIndex: number) => void) | null;
+  continueLabel?: string;
   /** Forks created from this model turn. */
   forks?: SessionForkLink[];
   onOpenFork?: (sessionId: string) => void;
@@ -118,6 +121,8 @@ export const ModelMessage = memo(function ModelMessage({
   onRefresh = null,
   onRevert = null,
   onFork = null,
+  onContinue = null,
+  continueLabel = "Continue",
   forks = [],
   onOpenFork,
   onDismissFork,
@@ -334,6 +339,22 @@ export const ModelMessage = memo(function ModelMessage({
                   className="md:!h-4 md:!min-h-4 md:!p-0"
                 >
                   <Icon iconName={IconName.Scheme} size={16} />
+                </Button>
+              </Tooltip>
+            ) : null}
+
+            {!readOnly && !active && onContinue != null && forkIndex != null ? (
+              <Tooltip title={continueLabel} position={TooltipPosition.BottomRight}>
+                <Button
+                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                  content={ButtonContent.Icon}
+                  aria-label={continueLabel}
+                  disabled={actionsDisabled}
+                  onClick={() => onContinue(forkIndex)}
+                  className="md:!h-4 md:!min-h-4 md:!p-0"
+                >
+                  <Icon iconName={IconName.ArrowRight} size={16} />
                 </Button>
               </Tooltip>
             ) : null}

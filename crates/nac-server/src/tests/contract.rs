@@ -111,6 +111,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
         "/sessions/{session_id}/orchestrators/{orchestrator_session_id}/cancel",
     ),
     ("POST", "/sessions/{session_id}/permissions/{request_id}"),
+    ("POST", "/sessions/{session_id}/continue"),
     ("POST", "/sessions/{session_id}/fork"),
     ("POST", "/sessions/{session_id}/regenerate"),
     ("POST", "/sessions/{session_id}/revert"),

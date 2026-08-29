@@ -60,6 +60,34 @@ describe("transcript topology badge navigation", () => {
     expect(onSelectThread).toHaveBeenCalledWith("api", "api:0");
   });
 
+  it("offers continue-in-X on a finished model turn", () => {
+    const onContinue = vi.fn();
+    const turn: ModelTurn = {
+      kind: "model",
+      key: "model-1",
+      durationMs: 25,
+      messageIndex: 2,
+      blocks: [{ kind: "text", key: "text-1", text: "Ready to hand off" }],
+    };
+
+    render(
+      <ModelMessage
+        turn={turn}
+        model="gpt-5.6-sol"
+        active={false}
+        selectedThreadEpisode={null}
+        selectedWorkset={null}
+        onSelectThread={vi.fn()}
+        onSelectWorkset={vi.fn()}
+        onContinue={onContinue}
+        continueLabel="Continue in NAC"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue in NAC" }));
+    expect(onContinue).toHaveBeenCalledWith(2);
+  });
+
   it("keeps parent-owned transcripts free of mutation affordances", () => {
     const turn: ModelTurn = {
       kind: "model",
@@ -82,6 +110,8 @@ describe("transcript topology badge navigation", () => {
         onRefresh={vi.fn()}
         onRevert={vi.fn()}
         onFork={vi.fn()}
+        onContinue={vi.fn()}
+        continueLabel="Continue in NAC"
         forks={[
           {
             session_id: "fork-1",
@@ -97,6 +127,7 @@ describe("transcript topology badge navigation", () => {
     expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create fork" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue in NAC" })).toBeNull();
     expect(screen.queryByText("Forked chat")).toBeNull();
     expect(screen.getByRole("button", { name: "Copy message" })).not.toBeNull();
   });

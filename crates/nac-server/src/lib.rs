@@ -4,6 +4,7 @@ mod delegation_runtime;
 mod delivery;
 mod filesystem;
 mod fork;
+mod handoff;
 mod light_model;
 mod managed_auth;
 mod managed_github;
@@ -60,6 +61,7 @@ pub use delivery::workspace::{
 };
 pub use filesystem::{BrowseEntry, BrowseKind, BrowseListing, BrowseQuery};
 pub use fork::{DismissForkError, ForkSessionError, ForkSessionRequest, ForkSessionResponse};
+pub use handoff::{ContinueSessionError, ContinueSessionRequest, ContinueSessionResponse};
 pub use managed_auth::{
     DeviceLoginStartedResponse, DeviceLoginStateResponse, ManagedAuthListResponse,
     ManagedAuthStatusResponse,

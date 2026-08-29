@@ -45,6 +45,7 @@ import type {
   CreateSessionRequest,
   ManagedSessionSummary,
   RawSessionConfig,
+  SessionBehavior,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
   ThreadEventPage,
@@ -494,6 +495,29 @@ export function useForkSession() {
   return useMutation({
     mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
       api.forkSession(id, messageIdx),
+    onSuccess: (_data, { id }) => {
+      void invalidate.sessionRoot(id);
+      void invalidate.sessions();
+    },
+  });
+}
+
+/**
+ * Open an idle chat of the other type from a finished model turn. The source
+ * snapshot is refetched so later chips can land under that turn.
+ */
+export function useContinueSession() {
+  const invalidate = useQueryInvalidators();
+  return useMutation({
+    mutationFn: ({
+      id,
+      messageIdx,
+      targetBehavior,
+    }: {
+      id: string;
+      messageIdx: number;
+      targetBehavior: SessionBehavior;
+    }) => api.continueSession(id, messageIdx, targetBehavior),
     onSuccess: (_data, { id }) => {
       void invalidate.sessionRoot(id);
       void invalidate.sessions();

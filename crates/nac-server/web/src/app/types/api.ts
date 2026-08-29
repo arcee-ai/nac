@@ -451,6 +451,10 @@ export type ForkSessionRequest = ApiSchema<"ForkSessionRequest">;
 
 export type ForkSessionResponse = ApiSchema<"ForkSessionResponse">;
 
+export type ContinueSessionRequest = ApiSchema<"ContinueSessionRequest">;
+
+export type ContinueSessionResponse = ApiSchema<"ContinueSessionResponse">;
+
 export type OrchestratorSteeringResponse = ApiSchema<"OrchestratorSteeringResponse">;
 
 export type ThreadSteeringResponse = ApiSchema<"ThreadSteeringResponse">;

@@ -41,11 +41,11 @@ use compaction::{CompactionPolicy, CompactionState, PreparedProviderView};
 use failed_tool_round::failed_tool_round;
 pub(crate) use preview::key_arg_preview;
 use preview::*;
+use prompt_rendering::render_worker_system_prompt;
 pub(crate) use prompt_rendering::{
     render_direct_system_prompt, render_direct_with_orchestrator_system_prompt,
-    render_general_child_system_prompt,
+    render_general_child_system_prompt, render_orchestrator_system_prompt,
 };
-use prompt_rendering::{render_orchestrator_system_prompt, render_worker_system_prompt};
 use tool_exec::execute_tools_parallel;
 pub(crate) use transcript_state::truncate_incomplete_tool_turn;
 use transcript_state::{

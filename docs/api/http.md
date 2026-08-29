@@ -116,6 +116,17 @@ exists; otherwise it participates in the same successor queue as ordinary
 queued input. These routes reject orchestrator sessions and child sessions whose assignment
 is still idle or running. Settled children use the same inbox as a normal Agent.
 
+## Continue in the other type
+
+`POST /sessions/{session_id}/continue` opens an idle chat of the other type
+from a finished assistant turn. The body is `{ "message_idx", "target_behavior" }`
+where `target_behavior` is `orchestrator` from an Agent source or `direct`
+from a NAC source. The new session inherits workspace, model, backend, project,
+and credentials. Its transcript is projected prose plus a handoff note — source
+tool calls, tool results, and thoughts are not copied, and nothing runs until
+the user sends the first prompt. Same-type targets, busy sources, and running
+assignments are rejected. Fork still copies a same-type transcript.
+
 ## Traditional child sessions
 
 `GET /sessions/{session_id}/children` lists the durable children of a direct

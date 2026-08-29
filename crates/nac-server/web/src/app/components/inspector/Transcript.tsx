@@ -30,7 +30,7 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
-import { assignmentIsOpen } from "@/app/lib/sessionBehavior";
+import { assignmentIsOpen, isAgentBehavior } from "@/app/lib/sessionBehavior";
 import { RevertModal } from "@/app/components/modals/RevertModal";
 import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
@@ -46,6 +46,7 @@ import {
 } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
+  useContinueSession,
   useDismissSessionFork,
   useForkSession,
   useLoadOlderMessages,
@@ -166,6 +167,7 @@ export function Transcript({
   const submitRun = useSubmitRun();
   const regenerateRun = useRegenerateRun();
   const forkSession = useForkSession();
+  const continueSession = useContinueSession();
   const dismissFork = useDismissSessionFork();
   const olderMessages = useLoadOlderMessages(sessionId);
   const { data: revisions } = useWorkspaceRevisions(sessionId);
@@ -267,7 +269,12 @@ export function Transcript({
 
   const refreshIndex = useMemo(() => resendTargetIndex(turns), [turns]);
   const actionsBusy =
-    running || stopping || submitRun.isPending || regenerateRun.isPending || forkSession.isPending;
+    running ||
+    stopping ||
+    submitRun.isPending ||
+    regenerateRun.isPending ||
+    forkSession.isPending ||
+    continueSession.isPending;
   const [revertTarget, setRevertTarget] = useState<{
     messageIdx: number;
     prompt: string;
@@ -300,6 +307,32 @@ export function Transcript({
       })();
     },
     [actionsBusy, backend, regenerate, sessionId, toast],
+  );
+
+  const continueInOther = continueSession.mutateAsync;
+  const continueLabel = isAgentBehavior(snapshot?.metadata.behavior)
+    ? "Continue in NAC"
+    : "Continue in Agent";
+  const continueTargetBehavior = isAgentBehavior(snapshot?.metadata.behavior)
+    ? "orchestrator"
+    : "direct";
+  const createContinue = useCallback(
+    (messageIdx: number) => {
+      if (actionsBusy) return;
+      void (async () => {
+        try {
+          const response = await continueInOther({
+            id: sessionId,
+            messageIdx,
+            targetBehavior: continueTargetBehavior,
+          });
+          navigate(routes.session(response.session_id));
+        } catch (err) {
+          toast.error(`Failed to continue: ${humanErrorText(toRunError(err), backend)}`);
+        }
+      })();
+    },
+    [actionsBusy, backend, continueInOther, continueTargetBehavior, navigate, sessionId, toast],
   );
 
   const fork = forkSession.mutateAsync;
@@ -588,6 +621,8 @@ export function Transcript({
                   }
                   onRevert={mutateLocked ? null : openRevert}
                   onFork={readOnly ? null : createFork}
+                  onContinue={readOnly ? null : createContinue}
+                  continueLabel={continueLabel}
                   forks={
                     readOnly
                       ? []

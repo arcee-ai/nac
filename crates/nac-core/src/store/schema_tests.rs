@@ -272,6 +272,18 @@ fn assert_current_schema(conn: &Connection) {
             "version",
         ]
     );
+    assert_eq!(
+        table_columns(conn, "session_handoffs"),
+        [
+            "handoff_id",
+            "source_session_id",
+            "target_session_id",
+            "source_message_idx",
+            "source_behavior",
+            "target_behavior",
+            "created_at",
+        ]
+    );
     for table in [
         "thread_steering",
         "thread_events",
@@ -455,7 +467,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 25);
+    assert_eq!(STORE_SCHEMA_VERSION, 26);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
