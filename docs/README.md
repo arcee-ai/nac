@@ -20,3 +20,4 @@ Detailed documentation for nac. The [root README](../README.md) has install, aut
 - [Managed NAC host](managed/README.md)
 - [Model request security](security/model-requests.md)
 - [Architecture decisions](architecture/README.md)
+- [Universal two-type sessions (proposal)](architecture/universal-sessions.md)
