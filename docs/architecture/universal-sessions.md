@@ -570,8 +570,8 @@ NAC workers into sessions in any of these commits.
 
 These are the product questions the plan still leaves open, except
 where marked LOCKED. Phase 1 can start without the rest. Phase 2
-needs A2–A4 and G. Phase 4 needs B (B1 is the only one that decides
-whether Continue-in-X also starts a run).
+needs A2–A4 and G. Phase 4 needs the remaining B items; B1 is locked
+to idle setup.
 
 ### A. Ownership after a spawn settles
 
@@ -627,26 +627,12 @@ not lifetime descendants.
 Needed before phase 4. Does not block phase 1.
 
 **B1. After you click Continue in NAC / Agent, does that new chat
-start working by itself?**
+start working by itself? — LOCKED (2026-08-29)**
 
-Concrete walk. You are in an Agent chat. The model answered. You
-click **Continue in NAC** on that answer.
-
-The server always creates a new NAC session and puts a brief of the
-clicked conversation into it (prose only). Then one of two things:
-
-- *Wait for you.* You land in that NAC chat. The composer is empty
-  and enabled. Nothing runs until you type ("zajmij się loginem",
-  "zaplanuj auth", …). The button only *set up* the other chat.
-- *Start by itself.* The new NAC chat immediately begins a run, as
-  if you had already sent "kontynuuj tę pracę". Faster, but the
-  planner invents the next step without a new instruction from you.
-
-This is not about fork. Fork always copies and waits. B1 is only:
-does Continue-in-X also press Send.
-
-Recommendation: wait for you. Matches "setup, not a fork". Say if
-you instead want it to start by itself.
+Option 1: wait for you. The button only sets up the other chat.
+You land in the new session with the brief already there. Nothing
+runs until you type the first prompt. Continue-in-X does not press
+Send.
 
 **B2. How much of the source conversation is projected?**
 
