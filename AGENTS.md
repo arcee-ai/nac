@@ -102,9 +102,17 @@ or concurrency seam. Add characterization coverage with the change.
 
 ## Commands
 
+In every fresh worktree, run `make setup` before development or verification.
+Run it again after either lockfile changes. It fetches the locked Rust dependency
+graph, installs the locked web dependency tree, and ensures Playwright Chromium
+is available for the production E2E lane. Rust/Cargo and Node/npm are host
+prerequisites; the target reports a direct installation hint when either is
+missing.
+
 Use locked Cargo commands and targeted checks while iterating:
 
 ```sh
+make setup
 make build
 make check
 make crate-check CRATE=nac-core
