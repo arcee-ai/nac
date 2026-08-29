@@ -1,11 +1,12 @@
 # Traditional child sessions
 
-Traditional children are durable, fresh-context coding sessions launched by a
-`direct` or `direct-with-orchestrator` parent. They are separate from NAC's
-orchestrator workers: a child has its own transcript and generations, while it
-shares the parent's workspace and inherits the parent's model, backend, project,
-sandbox or SSH configuration, and configured permission rules. Remembered
-permission grants are not inherited.
+Traditional children are durable, fresh-context coding sessions launched by an
+Agent parent (`direct` or the compatibility alias
+`direct-with-orchestrator`). NAC parents cannot create them. They are separate
+from NAC's orchestrator workers: a child has its own transcript and generations,
+while it shares the parent's workspace and inherits the parent's model, backend,
+project, sandbox or SSH configuration, and configured permission rules.
+Remembered permission grants are not inherited.
 
 When a running child needs new approval, the parent chat keeps a child-scoped
 permission connection open and presents that request beside the child controls.

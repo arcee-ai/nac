@@ -271,6 +271,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("traditional child nesting limit")
             || message.contains("running assigned sessions cannot launch")
             || message.contains("managed orchestrator prompt is empty")
+            || message.contains("NAC sessions cannot create sessions")
             || message.contains("managed orchestrators require an agent parent")
             || message.contains("managed orchestrators require direct-with-orchestrator")
             || message.contains("managed orchestrator description")
@@ -280,6 +281,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("traditional child sessions cannot own autonomous goals")
             || message.contains("running assigned sessions cannot own autonomous goals")
             || message.contains("only for direct behaviors")
+            || message.contains("only to direct parent sessions")
         {
             StatusCode::BAD_REQUEST
         } else {

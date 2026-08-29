@@ -281,9 +281,7 @@ fn create_traditional_child_relationship_with_connection(
         .optional()?
         .ok_or_else(|| anyhow!("parent session '{parent_session_id}' was not found"))?;
     if parent_behavior == "orchestrator" {
-        return Err(anyhow!(
-            "traditional children are available only to direct parent sessions"
-        ));
+        return Err(anyhow!(crate::sessions::NAC_CANNOT_CREATE_SESSIONS));
     }
     if assignment_is_open_with_connection(connection, parent_session_id)? {
         return Err(anyhow!("running assigned sessions cannot launch children"));
@@ -731,6 +729,36 @@ mod tests {
         .unwrap();
         assert_eq!(grandchild.parent_session_id, "child");
         assert_eq!(grandchild.status, TraditionalChildStatus::Idle);
+    }
+
+    #[test]
+    fn orchestrator_parent_cannot_create_traditional_children() {
+        let path = fixture("nac-parent");
+        insert_test_session(&path, "planner");
+        insert_test_session(&path, "from-nac");
+        let connection = open_runtime_connection(&path).unwrap();
+        connection
+            .execute(
+                "UPDATE sessions SET behavior = CASE session_id
+                    WHEN 'planner' THEN 'orchestrator'
+                    ELSE 'direct' END
+                 WHERE session_id IN ('planner', 'from-nac')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            create_traditional_child_relationship(
+                &path,
+                "planner",
+                "from-nac",
+                GENERAL_CHILD_PROFILE,
+                "forbidden",
+            )
+            .unwrap_err()
+            .to_string(),
+            crate::sessions::NAC_CANNOT_CREATE_SESSIONS
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

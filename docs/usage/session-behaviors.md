@@ -16,7 +16,8 @@ The wire values are:
 
 - `orchestrator` — NAC's established planner and worker-thread topology. It
   retains the Threads and Worksets navigation and remains the default when an
-  API client or legacy database row omits `behavior`.
+  API client or legacy database row omits `behavior`. NAC never creates
+  sessions; it plans through threads and worksets only.
 - `direct` — a persistent coding Agent with native file and terminal tools,
   durable goals, traditional child coding agents, and native controls for
   separate managed NAC sessions. Its primary side panel is Delegated work.

@@ -150,6 +150,37 @@ async fn traditional_child_http_api_runs_foreground_then_delivers_background_com
 
     let rejected = get_response(app, "/sessions/orchestrator/children", None).await;
     assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(rejected).await["error"],
+        sessions::NAC_CANNOT_CREATE_SESSIONS
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn nac_parent_cannot_create_traditional_children() {
+    let root = temp_root("nac_parent_children");
+    seed_editable_session(&root, "orchestrator");
+    let app = router(test_manager(&root));
+
+    let rejected = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/orchestrator/children")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"profile":"general","description":"forbidden spawn","prompt":"do not create a session","background":true}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(rejected).await["error"],
+        sessions::NAC_CANNOT_CREATE_SESSIONS
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 

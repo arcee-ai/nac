@@ -560,11 +560,38 @@ async fn managed_orchestrator_http_api_runs_foreground_then_delivers_background_
             .status(),
         StatusCode::OK
     );
+    let rejected = get_response(app, "/sessions/orchestrator/orchestrators", None).await;
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
-        get_response(app, "/sessions/orchestrator/orchestrators", None)
-            .await
-            .status(),
-        StatusCode::BAD_REQUEST
+        response_json(rejected).await["error"],
+        sessions::NAC_CANNOT_CREATE_SESSIONS
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn nac_parent_cannot_create_managed_orchestrators() {
+    let root = temp_root("nac_parent_orchestrators");
+    seed_editable_session(&root, "orchestrator");
+    let app = router(test_manager(&root));
+
+    let rejected = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/orchestrator/orchestrators")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"description":"forbidden spawn","prompt":"do not create a session","background":true}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(rejected).await["error"],
+        sessions::NAC_CANNOT_CREATE_SESSIONS
     );
     let _ = std::fs::remove_dir_all(root);
 }

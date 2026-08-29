@@ -33,7 +33,7 @@ the user via New Chat / Continue-in-X).
 | UI name | Persisted `sessions.behavior` | Primary `tools[]` | May edit files |
 |---|---|---|---|
 | Agent | `direct` | file/terminal + goals + spawn | yes |
-| NAC | `orchestrator` | `thread`, `threads`, `thread_read`, `thread_delete`, `workset_define`, `workset_read`, `workset_list` + spawn | no |
+| NAC | `orchestrator` | `thread`, `threads`, `thread_read`, `thread_delete`, `workset_define`, `workset_read`, `workset_list` | no |
 
 Wire values stay `direct` and `orchestrator` so existing rows and
 `POST /sessions` keep working. UI copy says Agent and NAC.
@@ -466,6 +466,8 @@ deleted, sidebar preview still shows only the task, and a new parent
 task on that child disables input again.
 
 ### Phase 3 — NAC does not spawn (explicit non-goal)
+
+Landed.
 
 Goal: keep the planner file-free and session-free. Do not add spawn
 tools or spawn HTTP on `orchestrator` parents.

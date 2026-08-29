@@ -208,6 +208,31 @@ fn direct_registries_preserve_exact_topology_capabilities() {
         &delegating_web[super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()..],
         super::WEB_TOOL_NAMES
     );
+
+    let orchestrator = super::orchestrator_tool_definitions(None, None)
+        .into_iter()
+        .map(|definition| definition.function.name)
+        .collect::<Vec<_>>();
+    assert!(super::SPAWN_TOOL_NAMES
+        .iter()
+        .all(|name| !orchestrator.iter().any(|tool| tool == name)));
+    assert!(orchestrator.iter().all(|name| !name.starts_with("session_")
+        && !name.contains("subagent")
+        && !name.starts_with("orchestrator_")));
+    for file_tool in [
+        "read",
+        "write",
+        "edit",
+        "glob",
+        "grep",
+        "exec_command",
+        "create_goal",
+    ] {
+        assert!(
+            !orchestrator.iter().any(|name| name == file_tool),
+            "NAC must not expose {file_tool}"
+        );
+    }
 }
 
 #[test]

@@ -9,6 +9,64 @@ fn test_agent_creation() {
 }
 
 #[test]
+fn orchestrator_surface_stays_session_free() {
+    let client = ModelClient::new_for_test();
+    let agent = Agent::with_config(
+        client,
+        AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
+            mode: AgentMode::Orchestrator,
+            session_behavior: Some(crate::sessions::SessionBehavior::Orchestrator),
+            store_path: crate::store::default_store_path(),
+            session_id: None,
+            orchestrator_compaction_threshold: None,
+            initial_messages: Vec::new(),
+            thread_name: None,
+            dispatch_id: None,
+            event_sink: EventSink::none(),
+            workspace_cwd: PathBuf::from("/workspace"),
+            config_cwd: PathBuf::from("/workspace"),
+            working_directory: "/workspace".to_string(),
+            worker_executable: None,
+            sandbox: None,
+            ssh: None,
+            mcp: None,
+            skills: None,
+            extra_tool_defs: Vec::new(),
+            agents_md_message: None,
+            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            light_client: None,
+            permission_rules: Vec::new(),
+        },
+    )
+    .unwrap();
+    let names = agent
+        .tool_definitions_for_test()
+        .iter()
+        .map(|definition| definition.function.name.as_str())
+        .collect::<Vec<_>>();
+    assert!(crate::tools::SPAWN_TOOL_NAMES
+        .iter()
+        .all(|name| !names.contains(name)));
+    assert!(names.iter().all(|name| {
+        !name.starts_with("session_")
+            && !name.contains("subagent")
+            && !name.starts_with("orchestrator_")
+    }));
+    let prompt = match agent.messages.first() {
+        Some(Message::System { content }) => content,
+        _ => panic!("orchestrator must start with a system prompt"),
+    };
+    assert!(prompt.contains("You must use threads for all coding work"));
+    assert!(prompt.contains("You cannot read, write, or edit files directly"));
+    let compact = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(!compact.contains("subagent"));
+    assert!(!compact.contains("orchestrator_launch"));
+    assert!(!compact.contains("session_spawn"));
+    assert!(!compact.to_lowercase().contains("launching sessions"));
+}
+
+#[test]
 fn worker_prompt_prefers_native_workspace_discovery() {
     let prompt = render_worker_system_prompt("/workspace");
     assert!(prompt.contains("Use glob to find workspace paths"));

@@ -134,7 +134,7 @@ completion inbox ID, timestamps, and version.
 These endpoints reject orchestrator parents, grandchildren, mismatched parent
 ownership, changes to a child's profile or description, sandboxed sessions
 without a host-backed shared workspace, and more than four simultaneously
-running children per root parent.
+running children per root parent. NAC never creates sessions.
 
 ## Managed orchestrator sessions
 

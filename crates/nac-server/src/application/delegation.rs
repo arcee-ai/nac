@@ -43,10 +43,8 @@ impl<'a> DelegationApplication<'a> {
         parent_session_id: &str,
     ) -> Result<Vec<TraditionalChildRecord>> {
         let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior == sessions::SessionBehavior::Orchestrator {
-            return Err(anyhow!(
-                "traditional children are available only for direct behaviors"
-            ));
+        if service.metadata().behavior.is_nac() {
+            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
         }
         if nac_core::store::assignment_is_open(&self.manager.inner.store_path, parent_session_id)? {
             return Err(anyhow!("running assigned sessions cannot launch children"));
@@ -62,7 +60,10 @@ impl<'a> DelegationApplication<'a> {
         parent_session_id: &str,
         command: StartTraditionalChild,
     ) -> Result<TraditionalChildRecord> {
-        self.manager.attach_session(parent_session_id).await?;
+        let service = self.manager.attach_session(parent_session_id).await?;
+        if service.metadata().behavior.is_nac() {
+            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
+        }
         let controller =
             nac_core::traditional_children::controller_for(&self.manager.inner.store_path)?;
         let child = controller
@@ -119,8 +120,8 @@ impl<'a> DelegationApplication<'a> {
         parent_session_id: &str,
     ) -> Result<Vec<ManagedOrchestratorRecord>> {
         let service = self.manager.attach_session(parent_session_id).await?;
-        if !service.metadata().behavior.is_agent() {
-            return Err(anyhow!("managed orchestrators require an agent parent"));
+        if service.metadata().behavior.is_nac() {
+            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
         }
         nac_core::store::list_managed_orchestrators(
             &self.manager.inner.store_path,
@@ -133,7 +134,10 @@ impl<'a> DelegationApplication<'a> {
         parent_session_id: &str,
         command: StartManagedOrchestrator,
     ) -> Result<ManagedOrchestratorRecord> {
-        self.manager.attach_session(parent_session_id).await?;
+        let service = self.manager.attach_session(parent_session_id).await?;
+        if service.metadata().behavior.is_nac() {
+            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
+        }
         let controller =
             nac_core::orchestration_control::controller_for(&self.manager.inner.store_path)?;
         let orchestrator = controller

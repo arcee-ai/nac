@@ -164,6 +164,9 @@ fn create_managed_orchestrator_relationship_with_connection(
             .ok_or_else(|| anyhow!("session '{session_id}' was not found"))
     };
     let parent_behavior = behavior(parent_session_id)?;
+    if parent_behavior == "orchestrator" {
+        return Err(anyhow!(crate::sessions::NAC_CANNOT_CREATE_SESSIONS));
+    }
     if parent_behavior != "direct" && parent_behavior != "direct-with-orchestrator" {
         return Err(anyhow!("managed orchestrators require an agent parent"));
     }
@@ -612,15 +615,17 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert!(create_managed_orchestrator_relationship(
-            &path,
-            "planner",
-            "third-orchestrator",
-            "forbidden",
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("agent parent"));
+        assert_eq!(
+            create_managed_orchestrator_relationship(
+                &path,
+                "planner",
+                "third-orchestrator",
+                "forbidden",
+            )
+            .unwrap_err()
+            .to_string(),
+            crate::sessions::NAC_CANNOT_CREATE_SESSIONS
+        );
     }
 
     #[test]

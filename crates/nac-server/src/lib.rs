@@ -1342,8 +1342,8 @@ impl SessionManager {
             parent_session_id,
         )?;
         let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
-        if !parent.behavior.is_agent() {
-            return Err(anyhow!("managed orchestrators require an agent parent"));
+        if parent.behavior.is_nac() {
+            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
         }
         if nac_core::store::load_managed_orchestrator(&self.inner.store_path, parent_session_id)?
             .is_some()
@@ -1653,10 +1653,8 @@ impl SessionManager {
             parent_session_id,
         )?;
         let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
-        if parent.behavior == sessions::SessionBehavior::Orchestrator {
-            return Err(anyhow!(
-                "traditional children are available only to direct parent sessions"
-            ));
+        if parent.behavior.is_nac() {
+            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
         }
         if parent.sandbox_spec.is_some() {
             let parent_service = self.attach_session_locked(parent_session_id, None).await?;

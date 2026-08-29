@@ -81,7 +81,15 @@ impl SessionBehavior {
     pub const fn is_agent(self) -> bool {
         matches!(self, Self::Direct | Self::DirectWithOrchestrator)
     }
+
+    /// NAC planner chats. They use threads and worksets and never create sessions.
+    pub const fn is_nac(self) -> bool {
+        matches!(self, Self::Orchestrator)
+    }
 }
+
+/// Fail-closed product rule: NAC plans through threads and worksets only.
+pub const NAC_CANNOT_CREATE_SESSIONS: &str = "NAC sessions cannot create sessions";
 
 impl fmt::Display for SessionBehavior {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
