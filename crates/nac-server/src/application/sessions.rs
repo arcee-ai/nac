@@ -236,6 +236,8 @@ impl<'a> SessionStateApplication<'a> {
                 parent_session_id: child.parent_session_id,
                 root_session_id: child.root_session_id,
                 description: child.description,
+                assignment_status: child.status,
+                frozen_message_count: child.frozen_message_count,
             }));
         }
         if let Some(orchestrator) =
@@ -246,6 +248,8 @@ impl<'a> SessionStateApplication<'a> {
                 parent_session_id: orchestrator.parent_session_id,
                 root_session_id: orchestrator.root_session_id,
                 description: orchestrator.description,
+                assignment_status: orchestrator.status,
+                frozen_message_count: orchestrator.frozen_message_count,
             }));
         }
         Ok(None)

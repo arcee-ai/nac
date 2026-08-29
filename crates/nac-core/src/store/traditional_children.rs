@@ -65,6 +65,10 @@ impl TraditionalChildStatus {
             Self::Completed | Self::Failed | Self::Cancelled | Self::Interrupted
         )
     }
+
+    pub const fn is_open(self) -> bool {
+        matches!(self, Self::Idle | Self::Running)
+    }
 }
 
 impl std::str::FromStr for TraditionalChildStatus {
@@ -111,6 +115,8 @@ pub struct TraditionalChildRecord {
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
+    #[cfg_attr(feature = "openapi", schema(required))]
+    pub frozen_message_count: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,7 +138,7 @@ const CHILD_COLUMNS: &str =
     "child_session_id, parent_session_id, root_session_id, profile, description, \
      nesting_depth, status, generation, run_id, execution_mode, report, failure, \
      change_summary, verification_summary, completion_inbox_id, created_at, \
-     updated_at, version";
+     updated_at, version, frozen_message_count";
 
 fn row_to_child(row: &rusqlite::Row<'_>) -> rusqlite::Result<TraditionalChildRecord> {
     let status: String = row.get(6)?;
@@ -167,10 +173,21 @@ fn row_to_child(row: &rusqlite::Row<'_>) -> rusqlite::Result<TraditionalChildRec
         created_at: row.get(15)?,
         updated_at: row.get(16)?,
         version: row.get(17)?,
+        frozen_message_count: row
+            .get::<_, Option<i64>>(18)?
+            .map(|value| u64::try_from(value))
+            .transpose()
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    18,
+                    rusqlite::types::Type::Integer,
+                    error.into(),
+                )
+            })?,
     })
 }
 
-fn load_child_with_connection(
+pub(crate) fn load_child_with_connection(
     connection: &rusqlite::Connection,
     child_session_id: &str,
 ) -> Result<Option<TraditionalChildRecord>> {
@@ -268,10 +285,8 @@ fn create_traditional_child_relationship_with_connection(
             "traditional children are available only to direct parent sessions"
         ));
     }
-    if load_child_with_connection(connection, parent_session_id)?.is_some() {
-        return Err(anyhow!(
-            "traditional child nesting limit reached (1): child sessions cannot launch children"
-        ));
+    if assignment_is_open_with_connection(connection, parent_session_id)? {
+        return Err(anyhow!("running assigned sessions cannot launch children"));
     }
     let child_behavior: String = connection
         .query_row(
@@ -546,10 +561,13 @@ pub fn settle_traditional_child_run(
     }
 
     let now = now_utc();
+    let frozen_message_count =
+        next_frozen_message_count(&transaction, child_session_id, current.frozen_message_count)?;
     transaction.execute(
         "UPDATE traditional_children
          SET status = ?3, report = ?4, failure = ?5, change_summary = ?6,
-             verification_summary = ?7, updated_at = ?8, version = version + 1
+             verification_summary = ?7, frozen_message_count = ?8,
+             updated_at = ?9, version = version + 1
          WHERE child_session_id = ?1 AND run_id = ?2 AND status = 'running'",
         params![
             child_session_id,
@@ -559,6 +577,7 @@ pub fn settle_traditional_child_run(
             terminal.failure,
             terminal.change_summary,
             terminal.verification_summary,
+            frozen_message_count as i64,
             now
         ],
     )?;
@@ -680,7 +699,38 @@ mod tests {
         )
         .unwrap_err()
         .to_string()
-        .contains("nesting limit"));
+        .contains("running assigned sessions cannot launch children"));
+
+        begin_traditional_child_run(
+            &path,
+            "child",
+            "run-1",
+            TraditionalChildExecutionMode::Foreground,
+        )
+        .unwrap();
+        settle_traditional_child_run(
+            &path,
+            "child",
+            "run-1",
+            TraditionalChildTerminal {
+                status: TraditionalChildStatus::Completed,
+                report: Some("done".to_string()),
+                failure: None,
+                change_summary: None,
+                verification_summary: None,
+            },
+        )
+        .unwrap();
+        let grandchild = create_traditional_child_relationship(
+            &path,
+            "child",
+            "grandchild",
+            GENERAL_CHILD_PROFILE,
+            "nested after settle",
+        )
+        .unwrap();
+        assert_eq!(grandchild.parent_session_id, "child");
+        assert_eq!(grandchild.status, TraditionalChildStatus::Idle);
     }
 
     #[test]

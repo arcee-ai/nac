@@ -23,7 +23,7 @@ import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { parseStoreTime } from "@/app/lib/format";
-import { primarySessions } from "@/app/lib/projects";
+import { listableSessions } from "@/app/lib/projects";
 import { perfRender } from "@/app/lib/perfDebug";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -136,7 +136,11 @@ export default function SessionPage() {
   useRunStateSync(snapshot?.active_run);
   useAutoSshConnect(id, entry?.summary);
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator";
-  const panelPolicy = sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
+  const panelPolicy = sessionPanelPolicy(
+    behavior,
+    snapshot?.lineage?.kind,
+    snapshot?.lineage?.assignment_status,
+  );
   const sessionPanels = panelPolicy.mobilePanels;
   const requestedPanel = isSessionPanel(panel) ? panel : DEFAULT_SESSION_PANEL;
   const effectivePanel = sessionPanels.includes(requestedPanel)
@@ -220,7 +224,7 @@ export default function SessionPage() {
   // tick than the cache update.
   const projectId = (entry ? entry.summary.project_id : heldProjectId) ?? null;
   const projectSessions = projectId
-    ? primarySessions(allSessions)
+    ? listableSessions(allSessions)
         .filter((session) => session.summary.project_id === projectId)
         .sort((a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at))
     : [];

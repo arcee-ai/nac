@@ -15,15 +15,16 @@ without one, the request fails closed and the operation is not executed.
 
 Open the people control beside the direct-session composer to start, inspect,
 continue, steer, cancel, or open a child transcript. The first visible profile
-is `general`. It exposes exactly `read`, `write`, `edit`, `glob`, `grep`,
-`exec_command`, `write_stdin`, and `read_command_output`; it cannot create goals,
-launch another child, or control orchestrator sessions.
+is `general`. While the current assignment is idle or running it gets Agent
+coding tools except spawn and `create_goal`. After that generation settles,
+the child is a normal Agent: the user can type, create a goal, and spawn.
 
 The parent's Delegated work panel shows each child's description, coding-agent
 type, status, and generation. Opening a row shows the child's lineage and a
-**Back to Parent** action. That transcript is read-only in the web MVP;
-continue, steer, and cancel it from the parent's people control. Child goal
-ownership is rejected by the service as well as hidden by the UI.
+**Back to Parent** action. Chat input stays disabled only while the assignment
+is running. Messages from the commissioned task stay in the transcript and
+cannot be reverted. Continue, steer, and cancel a running generation from the
+parent's people control.
 
 A foreground launch waits for the generation's structured outcome. A background
 launch returns its durable child ID immediately. When a background generation
@@ -36,8 +37,9 @@ automatically.
 Continuing a terminal child starts its next generation with the same immutable
 profile, description, parent, model/backend, and workspace. Sending a prompt to
 a running child steers that generation. A parent can have at most four running
-children, and the nesting limit is one: children cannot launch grandchildren.
-Deleting a parent deletes its child sessions as well.
+children. A running assignment cannot launch grandchildren; a settled child can.
+Deleting a parent deletes only its still-running child sessions. Settled
+children remain, and their parent pointer may go stale if the parent is gone.
 
 Parent and child coding tools using the same local checkout share a process-local
 read/write gate, which serializes tool-level mutations while allowing discovery

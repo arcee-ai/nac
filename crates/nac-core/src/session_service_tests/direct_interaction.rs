@@ -527,9 +527,65 @@ async fn traditional_child_cannot_create_an_autonomous_goal() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("cannot own autonomous goals"));
+    // Idle assignments stay parent-owned; a settled child may create a goal.
     assert!(crate::store::load_session_goal(&store_path, session_id)
         .unwrap()
         .is_none());
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn settled_child_can_create_an_autonomous_goal() {
+    let session_id = "session-settled-child-goal";
+    let (parts, store_path) = test_direct_active_service(
+        "settled_child_goal",
+        session_id,
+        ModelClient::new_for_test(),
+    );
+    crate::store::insert_test_session(&store_path, "parent");
+    crate::store::open_runtime_connection(&store_path)
+        .unwrap()
+        .execute(
+            "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'parent'",
+            [],
+        )
+        .unwrap();
+    crate::store::create_traditional_child_relationship(
+        &store_path,
+        "parent",
+        session_id,
+        crate::store::GENERAL_CHILD_PROFILE,
+        "bounded child",
+    )
+    .unwrap();
+    crate::store::begin_traditional_child_run(
+        &store_path,
+        session_id,
+        "run-1",
+        crate::store::TraditionalChildExecutionMode::Foreground,
+    )
+    .unwrap();
+    crate::store::settle_traditional_child_run(
+        &store_path,
+        session_id,
+        "run-1",
+        crate::store::TraditionalChildTerminal {
+            status: crate::store::TraditionalChildStatus::Completed,
+            report: Some("done".to_string()),
+            failure: None,
+            change_summary: None,
+            verification_summary: None,
+        },
+    )
+    .unwrap();
+
+    let goal = parts
+        .service
+        .create_direct_goal("continue after the assignment", None)
+        .await
+        .unwrap();
+    assert_eq!(goal.objective, "continue after the assignment");
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -734,10 +790,7 @@ async fn child_pre_prompt_crash_is_interrupted_and_delivered_once_after_restart(
             .len(),
         1
     );
-    let inbox_error = parts.service.list_direct_inbox().unwrap_err();
-    assert!(inbox_error
-        .to_string()
-        .contains("accept input only through their parent"));
+    assert!(parts.service.list_direct_inbox().unwrap().is_empty());
 
     let repeated = parts
         .service

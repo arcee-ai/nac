@@ -937,9 +937,13 @@ impl SessionManager {
         }
     }
 
+    pub(crate) fn assignment_is_open(&self, session_id: &str) -> Result<bool> {
+        nac_core::store::assignment_is_open(&self.inner.store_path, session_id)
+    }
+
     fn require_primary_operation_session(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
-        if self.session_lineage(session_id)?.is_some() {
+        if self.assignment_is_open(session_id)? {
             return Err(anyhow!(
                 "delegated sessions accept work only through their parent"
             ));
@@ -949,7 +953,7 @@ impl SessionManager {
 
     fn require_primary_direct_session(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
-        if self.session_lineage(session_id)?.is_some() {
+        if self.assignment_is_open(session_id)? {
             return Err(anyhow!(
                 "delegated sessions accept input only through their parent"
             ));
@@ -1662,12 +1666,8 @@ impl SessionManager {
                 ));
             }
         }
-        if nac_core::store::load_traditional_child(&self.inner.store_path, parent_session_id)?
-            .is_some()
-        {
-            return Err(anyhow!(
-                "traditional child nesting limit reached (1): child sessions cannot launch children"
-            ));
+        if nac_core::store::assignment_is_open(&self.inner.store_path, parent_session_id)? {
+            return Err(anyhow!("running assigned sessions cannot launch children"));
         }
         let parent_prompt_cwd = nac_core::traditional_children::parent_prompt_working_directory(
             &parent.cwd,

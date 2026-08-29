@@ -118,14 +118,11 @@ impl SessionManager {
             return Err(ForkSessionError::NotFound);
         }
         if self
-            .session_lineage(session_id)
+            .assignment_is_open(session_id)
             .map_err(|error| report_failure(session_id, "verify primary ownership", &error))?
-            .is_some()
         {
-            // Delegated sessions are intentionally indistinguishable from an
-            // unknown id at public generic-work boundaries. Their parent owns
-            // every continuation, cancellation, deletion, and conversation
-            // derivation operation.
+            // Running assignments stay parent-owned at public generic-work
+            // boundaries so they remain indistinguishable from an unknown id.
             return Err(ForkSessionError::NotFound);
         }
 
@@ -147,9 +144,8 @@ impl SessionManager {
             return Err(ForkSessionError::NotFound);
         }
         if self
-            .session_lineage(session_id)
+            .assignment_is_open(session_id)
             .map_err(|error| report_failure(session_id, "recheck primary ownership", &error))?
-            .is_some()
         {
             return Err(ForkSessionError::NotFound);
         }

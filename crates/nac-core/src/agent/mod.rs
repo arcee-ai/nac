@@ -130,6 +130,32 @@ pub struct AgentConfig {
 
 /// Light-model addendum to the orchestrator system prompt: names the light
 /// model so weight classification has a real signal.
+fn rewrite_direct_assignment_system_prompt(
+    current: &str,
+    working_directory: &str,
+    description: Option<&str>,
+    assignment_open: bool,
+) -> String {
+    let agent_base = render_direct_with_orchestrator_system_prompt(working_directory);
+    let child_base =
+        description.map(|value| render_general_child_system_prompt(working_directory, value));
+    let suffix = current
+        .strip_prefix(&agent_base)
+        .or_else(|| {
+            child_base
+                .as_deref()
+                .and_then(|base| current.strip_prefix(base))
+        })
+        .unwrap_or("");
+    let mut next = if assignment_open {
+        child_base.unwrap_or_else(|| agent_base.clone())
+    } else {
+        agent_base
+    };
+    next.push_str(suffix);
+    next
+}
+
 fn light_model_prompt_guidance(light: &ModelClient) -> String {
     format!(
         "\n\nA light worker model is configured. Every thread dispatch requires a \
@@ -145,6 +171,8 @@ pub struct Agent {
     client: ModelClient,
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
+    extra_tool_defs: Vec<ToolDefinition>,
+    working_directory: String,
     admission_controlled_tools: bool,
     direct_primary: bool,
     web_retrieval_eligible: bool,
@@ -267,28 +295,48 @@ impl Agent {
                     config.light_client.as_deref(),
                 ),
             ),
-            AgentMode::Direct => match traditional_child.as_ref() {
-                Some(child) => (
-                    render_general_child_system_prompt(&cwd, &child.description),
-                    tools::worker_tool_definitions(client.supports_image_tool_results()),
-                ),
-                None => (
-                    render_direct_with_orchestrator_system_prompt(&cwd),
-                    tools::direct_with_orchestrator_tool_definitions(
-                        client.supports_image_tool_results(),
-                    ),
-                ),
-            },
+            AgentMode::Direct => {
+                let assignment_open = traditional_child
+                    .as_ref()
+                    .is_some_and(|child| child.status.is_open());
+                if assignment_open {
+                    let description = traditional_child
+                        .as_ref()
+                        .map(|child| child.description.as_str())
+                        .unwrap_or_default();
+                    (
+                        render_general_child_system_prompt(&cwd, description),
+                        tools::running_assigned_direct_tool_definitions(
+                            client.supports_image_tool_results(),
+                        ),
+                    )
+                } else {
+                    (
+                        render_direct_with_orchestrator_system_prompt(&cwd),
+                        tools::direct_with_orchestrator_tool_definitions(
+                            client.supports_image_tool_results(),
+                        ),
+                    )
+                }
+            }
         };
         if config.mode == AgentMode::Orchestrator {
             if let Some(light) = config.light_client.as_deref() {
                 system_prompt.push_str(&light_model_prompt_guidance(light));
             }
         }
+        let extra_tool_defs = if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
+            config.extra_tool_defs.clone()
+        } else {
+            Vec::new()
+        };
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
         }
-        let web_retrieval_eligible = mode == AgentMode::Direct && traditional_child.is_none();
+        let assignment_open = traditional_child
+            .as_ref()
+            .is_some_and(|child| child.status.is_open());
+        let web_retrieval_eligible = mode == AgentMode::Direct && !assignment_open;
         if web_retrieval_eligible
             && tool_defs.iter().any(|definition| {
                 tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str())
@@ -346,8 +394,8 @@ impl Agent {
                 .map(|definition| definition.function.name.clone())
                 .collect(),
         );
-        let goal_runtime = match (mode, config.session_id.as_ref(), traditional_child.as_ref()) {
-            (AgentMode::Direct, Some(session_id), None) => Some(Arc::new(
+        let goal_runtime = match (mode, config.session_id.as_ref(), assignment_open) {
+            (AgentMode::Direct, Some(session_id), false) => Some(Arc::new(
                 crate::goals::GoalRuntime::new(config.store_path.clone(), session_id.clone()),
             )),
             _ => None,
@@ -359,6 +407,8 @@ impl Agent {
             client,
             messages,
             tool_defs,
+            extra_tool_defs,
+            working_directory: cwd,
             admission_controlled_tools: mode == AgentMode::Direct,
             direct_primary: mode == AgentMode::Direct,
             web_retrieval_eligible,
@@ -415,6 +465,7 @@ impl Agent {
     /// and the tool names are replaced together before the request and the
     /// resulting runtime is cloned into exactly that response's tool round.
     fn refresh_model_request_capabilities(&mut self) -> Result<Vec<ToolDefinition>> {
+        self.sync_assignment_surface()?;
         let credential = if self.web_retrieval_eligible {
             crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV)?
         } else {
@@ -445,11 +496,51 @@ impl Agent {
         definitions
     }
 
+    pub(crate) fn sync_assignment_surface(&mut self) -> Result<()> {
+        if !self.direct_primary {
+            return Ok(());
+        }
+        let Some(session_id) = self.tool_runtime.session_id.clone() else {
+            return Ok(());
+        };
+        let assignment = crate::store::load_assignment(&self.tool_runtime.store_path, &session_id)?;
+        let open = assignment
+            .as_ref()
+            .is_some_and(|record| record.status.is_open());
+        let image_read = self.client.supports_image_tool_results();
+        let mut tool_defs = if open {
+            tools::running_assigned_direct_tool_definitions(image_read)
+        } else {
+            tools::direct_with_orchestrator_tool_definitions(image_read)
+        };
+        tool_defs.extend(self.extra_tool_defs.iter().cloned());
+        self.tool_defs = tool_defs;
+        self.web_retrieval_eligible = !open;
+        if !open && self.tool_runtime.goal_runtime.is_none() {
+            self.tool_runtime.goal_runtime = Some(Arc::new(crate::goals::GoalRuntime::new(
+                self.tool_runtime.store_path.clone(),
+                session_id,
+            )));
+        }
+        if let Some(Message::System { content }) = self.messages.first_mut() {
+            *content = rewrite_direct_assignment_system_prompt(
+                content,
+                &self.working_directory,
+                assignment
+                    .as_ref()
+                    .map(|record| record.description.as_str()),
+                open,
+            );
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     fn model_request_capabilities_for_test(
         &mut self,
         credential: Option<&str>,
     ) -> Vec<ToolDefinition> {
+        self.sync_assignment_surface().expect("assignment surface");
         self.install_model_request_capabilities(credential.map(str::to_string))
     }
 

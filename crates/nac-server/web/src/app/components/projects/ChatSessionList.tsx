@@ -73,7 +73,9 @@ export function ChatSessionList({
           <GroupLabel className="px-2">{group.label}</GroupLabel>
           <div className="flex flex-col gap-1">
             {group.items.map((entry) => {
-              const title = sessionTitle(entry.summary);
+              const title = entry.lineage?.description?.trim()
+                ? entry.lineage.description
+                : sessionTitle(entry.summary);
               const behavior = sessionBehaviorPresentation(entry.summary.behavior);
               return (
                 <ChatSessionButton

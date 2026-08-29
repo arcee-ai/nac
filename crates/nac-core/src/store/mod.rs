@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+mod assignments;
 mod managed_orchestrators;
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
@@ -25,6 +26,7 @@ mod transcript;
 mod worksets;
 mod workspace_revisions;
 
+pub use assignments::*;
 pub use managed_orchestrators::*;
 pub use model_configurations::*;
 pub use permission_grants::*;

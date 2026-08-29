@@ -30,6 +30,7 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
+import { assignmentIsOpen } from "@/app/lib/sessionBehavior";
 import { RevertModal } from "@/app/components/modals/RevertModal";
 import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
@@ -346,7 +347,9 @@ export function Transcript({
   const isMobile = useIsMobile();
 
   const model = snapshot?.metadata.model ?? "";
-  const readOnly = snapshot?.lineage != null;
+  const assignmentOpen = assignmentIsOpen(snapshot?.lineage?.assignment_status);
+  const frozenMessageCount = snapshot?.lineage?.frozen_message_count ?? 0;
+  const readOnly = assignmentOpen;
   // A revision is captured per finished run, so each model turn carries what
   // its own run changed instead of one running total for the whole checkout.
   const turnRevisions = useMemo(() => revisionsByTurn(turns, revisions), [turns, revisions]);
@@ -521,6 +524,9 @@ export function Transcript({
                 return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
               }
               if (turn.kind === "user") {
+                const taskFrozen =
+                  turn.messageIndex != null && turn.messageIndex < frozenMessageCount;
+                const mutateLocked = readOnly || taskFrozen;
                 return (
                   <UserMessage
                     key={turn.key}
@@ -529,9 +535,9 @@ export function Transcript({
                     timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
                     messageIndex={turn.messageIndex}
                     actionsDisabled={actionsBusy}
-                    readOnly={readOnly}
-                    onRefresh={!readOnly && refreshIndex === index ? resend : null}
-                    onRevert={readOnly ? null : openRevert}
+                    readOnly={mutateLocked}
+                    onRefresh={!mutateLocked && refreshIndex === index ? resend : null}
+                    onRevert={mutateLocked ? null : openRevert}
                   />
                 );
               }
@@ -552,6 +558,10 @@ export function Transcript({
 
               const lastIsThisRun =
                 index === turns.length - 1 && !(showPending && turn.key !== STREAMING_TURN_KEY);
+              const taskFrozen =
+                precedingUser?.messageIndex != null &&
+                precedingUser.messageIndex < frozenMessageCount;
+              const mutateLocked = readOnly || taskFrozen;
               const row = (
                 <ModelMessage
                   key={turn.key}
@@ -570,13 +580,13 @@ export function Transcript({
                   userMessageIndex={precedingUser?.messageIndex}
                   userText={precedingUser?.text}
                   actionsDisabled={actionsBusy}
-                  readOnly={readOnly}
+                  readOnly={mutateLocked}
                   onRefresh={
-                    !readOnly && precedingUserIndex != null && refreshIndex === precedingUserIndex
+                    !mutateLocked && precedingUserIndex != null && refreshIndex === precedingUserIndex
                       ? resend
                       : null
                   }
-                  onRevert={readOnly ? null : openRevert}
+                  onRevert={mutateLocked ? null : openRevert}
                   onFork={readOnly ? null : createFork}
                   forks={
                     readOnly

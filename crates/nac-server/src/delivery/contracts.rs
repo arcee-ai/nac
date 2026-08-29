@@ -631,6 +631,8 @@ pub struct SessionLineageSnapshot {
     pub parent_session_id: String,
     pub root_session_id: String,
     pub description: String,
+    pub assignment_status: nac_core::store::TraditionalChildStatus,
+    pub frozen_message_count: Option<u64>,
 }
 
 impl From<nac_core::session_service::MessagePageMetadata> for MessagePageMetadata {

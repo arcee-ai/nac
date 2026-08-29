@@ -556,6 +556,8 @@ describe("direct inbox and goal journeys", () => {
           parent_session_id: "parent",
           root_session_id: "parent",
           description: "Review ownership",
+          assignment_status: "running",
+          frozen_message_count: null,
         },
       },
       false,

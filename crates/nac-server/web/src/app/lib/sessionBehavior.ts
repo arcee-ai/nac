@@ -90,18 +90,35 @@ const MANAGED_ORCHESTRATOR_PANELS: SessionPanelPolicy = {
   readOnly: true,
 };
 
+export type AssignmentStatus =
+  | "idle"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+export function assignmentIsOpen(status: AssignmentStatus | string | null | undefined): boolean {
+  return status === "idle" || status === "running";
+}
+
 /**
- * Session ownership and panel topology are related but distinct. Every
- * delegated transcript is read-only, while the durable relationship kind says
- * whether that transcript owns an orchestrator's Threads and Worksets or is a
- * traditional child with Files/History only.
+ * Session ownership and panel topology are related but distinct. An open
+ * assignment keeps the child read-only; after settle the session uses the
+ * same panels as a user-created Agent or NAC.
  */
 export function sessionPanelPolicy(
   behavior: SessionBehavior | null | undefined,
   lineageKind: SessionLineage["kind"] | null | undefined,
+  assignmentStatus?: AssignmentStatus | string | null,
 ): SessionPanelPolicy {
-  if (lineageKind === "traditional-child") return TRADITIONAL_CHILD_PANELS;
-  if (lineageKind === "managed-orchestrator") return MANAGED_ORCHESTRATOR_PANELS;
+  const open = assignmentIsOpen(assignmentStatus);
+  if (lineageKind === "traditional-child") {
+    return open ? TRADITIONAL_CHILD_PANELS : DIRECT_PANELS;
+  }
+  if (lineageKind === "managed-orchestrator") {
+    return open ? MANAGED_ORCHESTRATOR_PANELS : ORCHESTRATOR_PANELS;
+  }
   return sessionBehaviorPresentation(behavior).id === "orchestrator"
     ? ORCHESTRATOR_PANELS
     : DIRECT_PANELS;

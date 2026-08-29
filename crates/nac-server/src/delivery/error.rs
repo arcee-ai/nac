@@ -269,6 +269,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("traditional child prompt is empty")
             || message.contains("traditional child profile")
             || message.contains("traditional child nesting limit")
+            || message.contains("running assigned sessions cannot launch")
             || message.contains("managed orchestrator prompt is empty")
             || message.contains("managed orchestrators require an agent parent")
             || message.contains("managed orchestrators require direct-with-orchestrator")
@@ -277,6 +278,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("host-backed shared workspace")
             || message.contains("frontend command")
             || message.contains("traditional child sessions cannot own autonomous goals")
+            || message.contains("running assigned sessions cannot own autonomous goals")
             || message.contains("only for direct behaviors")
         {
             StatusCode::BAD_REQUEST

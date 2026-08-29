@@ -36,6 +36,7 @@ function orchestrator(
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
     version: 1,
+    frozen_message_count: null,
   };
 }
 

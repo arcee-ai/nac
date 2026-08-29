@@ -78,9 +78,8 @@ impl SessionManager {
             return Err(CompactSessionError::NotFound);
         }
         if self
-            .session_lineage(session_id)
+            .assignment_is_open(session_id)
             .map_err(|error| report_failure(session_id, "verify session ownership", &error))?
-            .is_some()
         {
             return Err(CompactSessionError::NotFound);
         }
@@ -104,9 +103,8 @@ impl SessionManager {
                 return Err(CompactSessionError::NotFound);
             }
             if self
-                .session_lineage(session_id)
+                .assignment_is_open(session_id)
                 .map_err(|error| report_failure(session_id, "recheck session ownership", &error))?
-                .is_some()
             {
                 return Err(CompactSessionError::NotFound);
             }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  listableSessions,
   newestPrimarySessionForProject,
   orphanSessions,
   primarySessions,
@@ -11,7 +12,7 @@ import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 function session(
   id: string,
   projectId: string | undefined,
-  delegated = false,
+  delegated: false | "running" | "completed" = false,
 ): ManagedSessionSummary {
   return {
     active: false,
@@ -21,6 +22,8 @@ function session(
           parent_session_id: "parent",
           root_session_id: "parent",
           description: "delegated",
+          assignment_status: delegated,
+          frozen_message_count: delegated === "completed" ? 3 : null,
         }
       : null,
     summary: {
@@ -52,25 +55,31 @@ describe("project chat ownership", () => {
     } as ProjectRecord;
     const sessions = [
       session("parent", "project"),
-      session("child", "project", true),
+      session("child", "project", "running"),
+      session("settled", "project", "completed"),
       session("orphan", undefined),
-      session("orphan-child", undefined, true),
+      session("orphan-child", undefined, "running"),
     ];
 
     expect(primarySessions(sessions).map((entry) => entry.summary.session_id)).toEqual([
       "parent",
       "orphan",
     ]);
+    expect(listableSessions(sessions).map((entry) => entry.summary.session_id)).toEqual([
+      "parent",
+      "settled",
+      "orphan",
+    ]);
     expect(
       projectEntries([project], sessions)[0].sessions.map((entry) => entry.summary.session_id),
-    ).toEqual(["parent"]);
+    ).toEqual(["parent", "settled"]);
     expect(orphanSessions(sessions).map((entry) => entry.summary.session_id)).toEqual(["orphan"]);
   });
 
   it("redirects a project to its newest primary chat even when a child is newer", () => {
     const parent = session("parent", "project");
     parent.summary.updated_at = "2026-08-25T00:00:01Z";
-    const child = session("child", "project", true);
+    const child = session("child", "project", "running");
     child.summary.updated_at = "2026-08-25T00:00:03Z";
     const newerParent = session("newer-parent", "project");
     newerParent.summary.updated_at = "2026-08-25T00:00:02Z";

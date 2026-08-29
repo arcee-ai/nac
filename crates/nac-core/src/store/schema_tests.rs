@@ -245,6 +245,7 @@ fn assert_current_schema(conn: &Connection) {
             "verification_summary",
             "completion_inbox_id",
             "completion_suppressed",
+            "frozen_message_count",
             "created_at",
             "updated_at",
             "version",
@@ -265,6 +266,7 @@ fn assert_current_schema(conn: &Connection) {
             "failure",
             "completion_inbox_id",
             "completion_suppressed",
+            "frozen_message_count",
             "created_at",
             "updated_at",
             "version",
@@ -453,7 +455,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 24);
+    assert_eq!(STORE_SCHEMA_VERSION, 25);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -601,6 +603,7 @@ fn v20_store_adds_durable_traditional_children() {
             "verification_summary",
             "completion_inbox_id",
             "completion_suppressed",
+            "frozen_message_count",
             "created_at",
             "updated_at",
             "version",
@@ -642,6 +645,7 @@ fn v21_store_adds_durable_managed_orchestrators() {
             "failure",
             "completion_inbox_id",
             "completion_suppressed",
+            "frozen_message_count",
             "created_at",
             "updated_at",
             "version",

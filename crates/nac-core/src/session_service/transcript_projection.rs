@@ -227,6 +227,15 @@ impl SessionService {
                 "message {message_idx} is not a user message, and only a user message marks a point to revert to"
             ));
         }
+        if let Some(frozen) =
+            crate::store::assignment_frozen_message_count(&self.metadata.store_path, &session_id)?
+        {
+            if (message_idx as u64) < frozen {
+                return Err(anyhow::anyhow!(
+                    "commissioned-task messages cannot be removed"
+                ));
+            }
+        }
         let blob_len = {
             let snapshot = self.session_snapshot.lock().await;
             snapshot

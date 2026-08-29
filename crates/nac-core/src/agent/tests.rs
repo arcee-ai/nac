@@ -126,7 +126,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
     );
     assert_eq!(
         names(&child),
-        crate::tools::WORKER_TOOL_NAMES.map(str::to_string)
+        crate::tools::RUNNING_ASSIGNED_DIRECT_TOOL_NAMES.map(str::to_string)
     );
     assert_eq!(
         names(&delegating),
@@ -154,7 +154,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
     );
     assert_eq!(
         capability_names(child.model_request_capabilities_for_test(Some("child-exa-canary"))),
-        crate::tools::WORKER_TOOL_NAMES
+        crate::tools::RUNNING_ASSIGNED_DIRECT_TOOL_NAMES
     );
     let delegating_web = capability_names(
         delegating.model_request_capabilities_for_test(Some("delegating-exa-canary")),
@@ -184,6 +184,37 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         Some(Message::System { content })
             if content.contains("Managed orchestration")
                 && content.contains("separate durable NAC orchestrator sessions")
+    ));
+
+    crate::store::begin_traditional_child_run(
+        &store_path,
+        "child",
+        "run-1",
+        crate::store::TraditionalChildExecutionMode::Foreground,
+    )
+    .unwrap();
+    crate::store::settle_traditional_child_run(
+        &store_path,
+        "child",
+        "run-1",
+        crate::store::TraditionalChildTerminal {
+            status: crate::store::TraditionalChildStatus::Completed,
+            report: Some("done".to_string()),
+            failure: None,
+            change_summary: None,
+            verification_summary: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        capability_names(child.model_request_capabilities_for_test(None)),
+        crate::tools::DIRECT_TOOL_NAMES
+    );
+    assert!(matches!(
+        child.messages.first(),
+        Some(Message::System { content })
+            if content.contains("Managed orchestration")
+                && !content.contains("traditional child coding agent")
     ));
 
     drop(parent);

@@ -27,10 +27,10 @@ Behavior cannot be switched after creation. Start another chat to choose a
 different topology. A managed orchestrator is itself an immutable
 `orchestrator` session, while a traditional child inherits direct execution
 internals but is recognized by its durable parent relationship. Both delegated
-transcripts show their lineage and a **Back to Parent** action. They are
-read-only in the web MVP: continuation, steering, and cancellation remain owned
-by the parent workflow, and a traditional child cannot create an autonomous
-goal.
+transcripts show their lineage and a **Back to Parent** action. Chat input is
+disabled only while the current assignment is running; after settle the child
+is a normal Agent or NAC. Continuation, steering, and cancellation of a
+running generation remain owned by the parent workflow.
 
 While a direct run is active, the ordinary composer remains available. **Send**
 creates a durable `steer` item for the active run; **Queue Next** creates a

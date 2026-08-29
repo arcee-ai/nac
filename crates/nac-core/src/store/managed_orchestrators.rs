@@ -25,6 +25,8 @@ pub struct ManagedOrchestratorRecord {
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
+    #[cfg_attr(feature = "openapi", schema(required))]
+    pub frozen_message_count: Option<u64>,
 }
 
 pub struct ManagedOrchestratorTerminal {
@@ -41,7 +43,7 @@ pub struct ManagedOrchestratorSettlement {
 const COLUMNS: &str =
     "orchestrator_session_id, parent_session_id, root_session_id, description, status, \
      generation, run_id, execution_mode, report, failure, completion_inbox_id, created_at, \
-     updated_at, version";
+     updated_at, version, frozen_message_count";
 
 fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ManagedOrchestratorRecord> {
     let status: String = row.get(4)?;
@@ -72,10 +74,21 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ManagedOrchestrato
         created_at: row.get(11)?,
         updated_at: row.get(12)?,
         version: row.get(13)?,
+        frozen_message_count: row
+            .get::<_, Option<i64>>(14)?
+            .map(|value| u64::try_from(value))
+            .transpose()
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    14,
+                    rusqlite::types::Type::Integer,
+                    error.into(),
+                )
+            })?,
     })
 }
 
-fn load_with_connection(
+pub(crate) fn load_with_connection(
     connection: &rusqlite::Connection,
     orchestrator_session_id: &str,
 ) -> Result<Option<ManagedOrchestratorRecord>> {
@@ -153,6 +166,11 @@ fn create_managed_orchestrator_relationship_with_connection(
     let parent_behavior = behavior(parent_session_id)?;
     if parent_behavior != "direct" && parent_behavior != "direct-with-orchestrator" {
         return Err(anyhow!("managed orchestrators require an agent parent"));
+    }
+    if assignment_is_open_with_connection(connection, parent_session_id)? {
+        return Err(anyhow!(
+            "running assigned sessions cannot launch managed orchestrators"
+        ));
     }
     if behavior(orchestrator_session_id)? != "orchestrator" {
         return Err(anyhow!("managed session must use orchestrator behavior"));
@@ -447,9 +465,14 @@ pub fn settle_managed_orchestrator_run(
             newly_settled: false,
         });
     }
+    let frozen_message_count = next_frozen_message_count(
+        &transaction,
+        orchestrator_session_id,
+        current.frozen_message_count,
+    )?;
     transaction.execute(
         "UPDATE managed_orchestrators SET status = ?3, report = ?4, failure = ?5,
-             updated_at = ?6, version = version + 1
+             frozen_message_count = ?6, updated_at = ?7, version = version + 1
          WHERE orchestrator_session_id = ?1 AND run_id = ?2 AND status = 'running'",
         params![
             orchestrator_session_id,
@@ -457,6 +480,7 @@ pub fn settle_managed_orchestrator_run(
             terminal.status.as_str(),
             terminal.report,
             terminal.failure,
+            frozen_message_count as i64,
             now_utc()
         ],
     )?;

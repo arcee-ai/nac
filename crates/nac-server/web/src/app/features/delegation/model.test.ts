@@ -20,6 +20,7 @@ const base = {
   created_at: "2026-08-28T10:00:00Z",
   updated_at: "2026-08-28T11:00:00Z",
   version: 1,
+  frozen_message_count: null,
 };
 
 function child(overrides: Partial<TraditionalChildRecord> = {}): TraditionalChildRecord {

@@ -17,9 +17,10 @@ the direct parent never receives raw thread or workset tools.
 
 The parent's Delegated work panel lists managed orchestrators separately from
 traditional coding agents, with description, type, status, and generation.
-Opening a row shows its durable lineage and **Back to Parent** action. The
-managed transcript is read-only in the web MVP; use the parent's flow control
-for continuation, steering, and cancellation.
+Opening a row shows its durable lineage and **Back to Parent** action. Chat
+input is disabled only while the assignment is running; after settle the NAC
+session is a normal chat. Use the parent's flow control for continuation,
+steering, and cancellation of a running generation.
 
 A foreground launch waits for the generation's final report. A background
 launch returns immediately, then atomically queues one completion for the

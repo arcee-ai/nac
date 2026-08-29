@@ -34,6 +34,7 @@ const child: TraditionalChildRecord = {
   created_at: "2026-08-25T00:00:00Z",
   updated_at: "2026-08-25T00:00:00Z",
   version: 3,
+  frozen_message_count: null,
 };
 
 const orchestrator: ManagedOrchestratorRecord = {
@@ -51,6 +52,7 @@ const orchestrator: ManagedOrchestratorRecord = {
   created_at: "2026-08-25T00:00:00Z",
   updated_at: "2026-08-25T00:00:00Z",
   version: 2,
+  frozen_message_count: 6,
 };
 
 const listChildren = vi.spyOn(api, "listTraditionalChildren");

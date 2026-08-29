@@ -3,6 +3,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+// 25 freezes commissioned-task transcript prefixes on spawn assignment rows.
 // 24 adds session_forks (conversation clones plus deleted tombstones). 22 adds
 // durable direct-parent managed orchestrator relationships. 21 adds
 // durable traditional child sessions. 20 added durable direct-session
@@ -18,7 +19,7 @@ use std::time::{Duration, Instant};
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 24;
+const STORE_SCHEMA_VERSION: i64 = 25;
 
 /// Current durable-store schema version for credential-free readiness and
 /// operational status reporting.
@@ -392,7 +393,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -501,6 +502,18 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
         "managed_orchestrators",
         "completion_suppressed",
         "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
+    )?;
+    ensure_column(
+        &transaction,
+        "traditional_children",
+        "frozen_message_count",
+        "INTEGER CHECK (frozen_message_count IS NULL OR frozen_message_count >= 0)",
+    )?;
+    ensure_column(
+        &transaction,
+        "managed_orchestrators",
+        "frozen_message_count",
+        "INTEGER CHECK (frozen_message_count IS NULL OR frozen_message_count >= 0)",
     )?;
     create_session_forks_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
@@ -1225,6 +1238,8 @@ fn create_traditional_children_table(conn: &Connection) -> Result<()> {
                  REFERENCES session_inbox(id) ON DELETE SET NULL,
              completion_suppressed INTEGER NOT NULL DEFAULT 0
                  CHECK (completion_suppressed IN (0, 1)),
+             frozen_message_count INTEGER
+                 CHECK (frozen_message_count IS NULL OR frozen_message_count >= 0),
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL,
              version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
@@ -1278,6 +1293,8 @@ fn create_managed_orchestrators_table(conn: &Connection) -> Result<()> {
                  REFERENCES session_inbox(id) ON DELETE SET NULL,
              completion_suppressed INTEGER NOT NULL DEFAULT 0
                  CHECK (completion_suppressed IN (0, 1)),
+             frozen_message_count INTEGER
+                 CHECK (frozen_message_count IS NULL OR frozen_message_count >= 0),
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL,
              version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),

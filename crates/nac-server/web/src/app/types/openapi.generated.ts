@@ -409,6 +409,7 @@ export interface components {
       description: string;
       execution_mode?: null | components["schemas"]["TraditionalChildExecutionMode"];
       failure?: string | null;
+      frozen_message_count: number | null;
       generation: number;
       orchestrator_session_id: string;
       parent_session_id: string;
@@ -799,7 +800,9 @@ export interface components {
     };
     SessionLineageKind: "traditional-child" | "managed-orchestrator";
     SessionLineageSnapshot: {
+      assignment_status: components["schemas"]["TraditionalChildStatus"];
       description: string;
+      frozen_message_count?: number | null;
       kind: components["schemas"]["SessionLineageKind"];
       parent_session_id: string;
       root_session_id: string;
@@ -998,6 +1001,7 @@ export interface components {
       description: string;
       execution_mode: null | components["schemas"]["TraditionalChildExecutionMode"];
       failure: string | null;
+      frozen_message_count: number | null;
       generation: number;
       nesting_depth: number;
       parent_session_id: string;

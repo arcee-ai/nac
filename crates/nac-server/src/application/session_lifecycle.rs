@@ -93,12 +93,16 @@ impl<'a> SessionLifecycleApplication<'a> {
         for orchestrator in
             nac_core::store::list_managed_orchestrators(&self.manager.inner.store_path, session_id)?
         {
-            Box::pin(self.delete_cascade(&orchestrator.orchestrator_session_id)).await?;
+            if orchestrator.status.is_open() {
+                Box::pin(self.delete_cascade(&orchestrator.orchestrator_session_id)).await?;
+            }
         }
         for child in
             nac_core::store::list_traditional_children(&self.manager.inner.store_path, session_id)?
         {
-            Box::pin(self.delete_cascade(&child.child_session_id)).await?;
+            if child.status.is_open() {
+                Box::pin(self.delete_cascade(&child.child_session_id)).await?;
+            }
         }
 
         // Snapshot decode failures remain fail-closed so cleanup authority is

@@ -45,6 +45,8 @@ describe("session identity", () => {
                     parent_session_id: "parent",
                     root_session_id: "parent",
                     description: "Check the lifecycle seam",
+                    assignment_status: "completed",
+                    frozen_message_count: 4,
                   }}
                 />
                 <Location />
@@ -72,6 +74,8 @@ describe("session identity", () => {
             parent_session_id: "parent",
             root_session_id: "parent",
             description: "Coordinate the release audit",
+            assignment_status: "running",
+            frozen_message_count: null,
           }}
         />
       </MemoryRouter>,

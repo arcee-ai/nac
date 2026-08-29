@@ -5,6 +5,7 @@ import {
   SESSION_BEHAVIORS,
   isAgentBehavior,
   sessionBehaviorPresentation,
+  assignmentIsOpen,
   sessionPanelPolicy,
 } from "@/app/lib/sessionBehavior";
 import type { SessionBehavior } from "@/app/types/api";
@@ -65,9 +66,9 @@ describe("session panel policy", () => {
     }
   });
 
-  it("keeps traditional children Files/History-only for every stored behavior", () => {
+  it("keeps traditional children Files/History-only while the assignment is open", () => {
     for (const behavior of behaviors) {
-      expect(sessionPanelPolicy(behavior, "traditional-child")).toEqual({
+      expect(sessionPanelPolicy(behavior, "traditional-child", "running")).toEqual({
         widePanels: ["files"],
         mobilePanels: ["files", "history"],
         defaultPanel: "files",
@@ -76,15 +77,42 @@ describe("session panel policy", () => {
     }
   });
 
+  it("treats settled traditional children as ordinary Agent chats", () => {
+    for (const behavior of ["direct", "direct-with-orchestrator"] satisfies SessionBehavior[]) {
+      expect(sessionPanelPolicy(behavior, "traditional-child", "completed")).toEqual({
+        widePanels: ["delegated", "files"],
+        mobilePanels: ["delegated", "files", "history"],
+        defaultPanel: "delegated",
+        readOnly: false,
+      });
+    }
+  });
+
   it("gives managed orchestrators their own Threads and Worksets while remaining read-only", () => {
     for (const behavior of behaviors) {
-      expect(sessionPanelPolicy(behavior, "managed-orchestrator")).toEqual({
+      expect(sessionPanelPolicy(behavior, "managed-orchestrator", "running")).toEqual({
         widePanels: ["threads", "files", "worksets"],
         mobilePanels: ["threads", "files", "worksets", "history"],
         defaultPanel: "threads",
         readOnly: true,
       });
     }
+  });
+
+  it("unlocks a settled managed orchestrator", () => {
+    expect(sessionPanelPolicy("orchestrator", "managed-orchestrator", "completed")).toEqual({
+      widePanels: ["threads", "files", "worksets"],
+      mobilePanels: ["threads", "files", "worksets", "history"],
+      defaultPanel: "threads",
+      readOnly: false,
+    });
+  });
+
+  it("treats idle and running as open assignments", () => {
+    expect(assignmentIsOpen("idle")).toBe(true);
+    expect(assignmentIsOpen("running")).toBe(true);
+    expect(assignmentIsOpen("completed")).toBe(false);
+    expect(assignmentIsOpen(null)).toBe(false);
   });
 
   it("preserves the legacy omitted-behavior default", () => {

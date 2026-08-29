@@ -9519,7 +9519,8 @@
           "generation",
           "created_at",
           "updated_at",
-          "version"
+          "version",
+          "frozen_message_count"
         ],
         "properties": {
           "completion_inbox_id": {
@@ -9550,6 +9551,14 @@
               "string",
               "null"
             ]
+          },
+          "frozen_message_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           },
           "generation": {
             "type": "integer",
@@ -12180,11 +12189,23 @@
           "kind",
           "parent_session_id",
           "root_session_id",
-          "description"
+          "description",
+          "assignment_status"
         ],
         "properties": {
+          "assignment_status": {
+            "$ref": "#/components/schemas/TraditionalChildStatus"
+          },
           "description": {
             "type": "string"
+          },
+          "frozen_message_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           },
           "kind": {
             "$ref": "#/components/schemas/SessionLineageKind"
@@ -13349,7 +13370,8 @@
           "completion_inbox_id",
           "created_at",
           "updated_at",
-          "version"
+          "version",
+          "frozen_message_count"
         ],
         "properties": {
           "change_summary": {
@@ -13389,6 +13411,14 @@
               "string",
               "null"
             ]
+          },
+          "frozen_message_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           },
           "generation": {
             "type": "integer",

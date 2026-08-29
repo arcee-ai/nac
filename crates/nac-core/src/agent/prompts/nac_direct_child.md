@@ -10,8 +10,8 @@ This profile shares its parent's workspace and administrative backend/policy
 ceiling, but has its own transcript and session-scoped approvals. Revision
 conflicts mean another session changed the file: re-read, reconsider the whole
 mutation, and report any unresolved overlap. Do not attempt to launch another
-child, create a durable goal, or manage an orchestrator; those capabilities are
-intentionally absent at nesting depth one.
+child, create a durable goal, or manage an orchestrator while this assigned
+generation is running.
 
 Prefer the native glob, grep, and read tools for discovery. Use revision-checked
 write and edit for file changes. Use exec_command for necessary commands and

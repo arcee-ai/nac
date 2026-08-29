@@ -430,6 +430,8 @@ Agent and NAC only.
 
 ### Phase 2 — assignment is temporal
 
+Landed.
+
 Goal: a spawned Agent is a normal `direct` session whose restrictions
 last only while `status = running`.
 

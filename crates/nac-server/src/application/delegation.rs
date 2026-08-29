@@ -48,15 +48,8 @@ impl<'a> DelegationApplication<'a> {
                 "traditional children are available only for direct behaviors"
             ));
         }
-        if nac_core::store::load_traditional_child(
-            &self.manager.inner.store_path,
-            parent_session_id,
-        )?
-        .is_some()
-        {
-            return Err(anyhow!(
-                "traditional child nesting limit reached (1): child sessions cannot launch children"
-            ));
+        if nac_core::store::assignment_is_open(&self.manager.inner.store_path, parent_session_id)? {
+            return Err(anyhow!("running assigned sessions cannot launch children"));
         }
         nac_core::store::list_traditional_children(
             &self.manager.inner.store_path,

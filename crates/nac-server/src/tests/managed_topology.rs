@@ -418,7 +418,7 @@ async fn traditional_child_goal_http_api_is_bad_request() {
     assert_eq!(
         body["error"],
         serde_json::Value::String(
-            "traditional child sessions cannot own autonomous goals".to_string()
+            "running assigned sessions cannot own autonomous goals".to_string()
         )
     );
 

@@ -182,8 +182,17 @@ fn direct_registries_preserve_exact_topology_capabilities() {
         .into_iter()
         .map(|definition| definition.function.name)
         .collect::<Vec<_>>();
+    let running_assigned = super::running_assigned_direct_tool_definitions(false)
+        .into_iter()
+        .map(|definition| definition.function.name)
+        .collect::<Vec<_>>();
     assert_eq!(worker, super::WORKER_TOOL_NAMES);
     assert_eq!(direct, super::DIRECT_TOOL_NAMES);
+    assert_eq!(running_assigned, super::RUNNING_ASSIGNED_DIRECT_TOOL_NAMES);
+    assert!(!running_assigned.iter().any(|name| name == "create_goal"));
+    assert!(super::SPAWN_TOOL_NAMES
+        .iter()
+        .all(|name| !running_assigned.iter().any(|assigned| assigned == name)));
     assert_eq!(delegating, super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES);
     assert_eq!(&delegating[14..], super::ORCHESTRATOR_CONTROL_TOOL_NAMES);
     assert_eq!(&direct_web[..super::DIRECT_TOOL_NAMES.len()], &direct);

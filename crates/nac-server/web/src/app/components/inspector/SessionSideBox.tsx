@@ -154,7 +154,11 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
   const selectedRevision = useSelectedRevision();
   const behavior = snapshot?.metadata.behavior ?? "orchestrator";
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const panelPolicy = sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
+  const panelPolicy = sessionPanelPolicy(
+    behavior,
+    snapshot?.lineage?.kind,
+    snapshot?.lineage?.assignment_status,
+  );
   const delegatedTranscript = panelPolicy.readOnly;
   const widePanels = panelPolicy.widePanels;
 

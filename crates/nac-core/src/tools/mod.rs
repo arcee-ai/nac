@@ -173,6 +173,30 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
+pub(crate) const SPAWN_TOOL_NAMES: [&str; 9] = [
+    "subagent",
+    "subagent_status",
+    "subagent_cancel",
+    "orchestrator_launch",
+    "orchestrator_status",
+    "orchestrator_steer",
+    "orchestrator_read",
+    "orchestrator_wait",
+    "orchestrator_cancel",
+];
+/// Agent tools minus spawn and `create_goal`, used while an assignment is open.
+pub(crate) const RUNNING_ASSIGNED_DIRECT_TOOL_NAMES: [&str; 10] = [
+    "read",
+    "write",
+    "edit",
+    "glob",
+    "grep",
+    "exec_command",
+    "write_stdin",
+    "read_command_output",
+    "get_goal",
+    "update_goal",
+];
 /// Compatibility alias: every Agent now has NAC spawn tools.
 pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 20] = DIRECT_TOOL_NAMES;
 
@@ -221,6 +245,29 @@ pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
                 && !GOAL_TOOL_NAMES.contains(&descriptor.name())
         })
         .definitions()
+}
+
+fn is_running_assigned_direct_capability(name: &str) -> bool {
+    DIRECT_TOOL_NAMES.contains(&name) && name != "create_goal" && !SPAWN_TOOL_NAMES.contains(&name)
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "the static running-assignment capability list is collision-checked"
+)]
+pub fn running_assigned_direct_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
+    let definitions = worker_tool_registry(image_read)
+        .expect("built-in direct tool registration must be collision-free")
+        .snapshot_where(|descriptor| is_running_assigned_direct_capability(descriptor.name()))
+        .definitions();
+    debug_assert_eq!(
+        definitions
+            .iter()
+            .map(|definition| definition.function.name.as_str())
+            .collect::<Vec<_>>(),
+        RUNNING_ASSIGNED_DIRECT_TOOL_NAMES
+    );
+    definitions
 }
 
 #[expect(

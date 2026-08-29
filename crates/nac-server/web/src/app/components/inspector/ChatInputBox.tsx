@@ -24,6 +24,7 @@ import { OrchestratorControls } from "@/app/components/inspector/OrchestratorCon
 import { SshBadge } from "@/app/components/SshBadge";
 import { resolveCatalogModel, type ResolvedCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
+import { assignmentIsOpen } from "@/app/lib/sessionBehavior";
 import {
   displayPromptFromMessageText,
   ENV_SSH,
@@ -292,7 +293,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const cancelInboxItem = useCancelInboxItem();
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const readOnly = entry?.lineage != null || snapshot?.lineage != null;
+  const readOnly = assignmentIsOpen(
+    entry?.lineage?.assignment_status ?? snapshot?.lineage?.assignment_status,
+  );
   const ownershipKnown = entry !== null || snapshot !== null;
   const inboxQuery = useSessionInbox(sessionId, direct && !readOnly);
   const goalQuery = useSessionGoal(sessionId, direct && !readOnly);

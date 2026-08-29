@@ -104,7 +104,8 @@ token baseline.
 `orchestrator` for compatibility. Session summaries and detail metadata expose
 the value. A delegated session detail response also includes `lineage` with a
 `traditional-child` or `managed-orchestrator` kind, parent and root session IDs,
-and the immutable relationship description.
+the immutable relationship description, `assignment_status`, and
+`frozen_message_count` once a generation has settled.
 
 Direct parents expose their durable input at `GET /sessions/{session_id}/inbox`
 and `POST /sessions/{session_id}/inbox`. A create body contains `delivery`
@@ -112,7 +113,8 @@ and `POST /sessions/{session_id}/inbox`. A create body contains `delivery`
 `PATCH /sessions/{session_id}/inbox/{item_id}` or be cancelled with versioned
 `DELETE` on that path. A steer targets the current non-finishing run when one
 exists; otherwise it participates in the same successor queue as ordinary
-queued input. These routes reject orchestrator and delegated-child ownership.
+queued input. These routes reject orchestrator sessions and child sessions whose assignment
+is still idle or running. Settled children use the same inbox as a normal Agent.
 
 ## Traditional child sessions
 
