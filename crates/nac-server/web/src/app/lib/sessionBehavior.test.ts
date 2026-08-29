@@ -1,41 +1,47 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CREATE_SESSION_BEHAVIORS,
   SESSION_BEHAVIORS,
+  isAgentBehavior,
   sessionBehaviorPresentation,
   sessionPanelPolicy,
 } from "@/app/lib/sessionBehavior";
 import type { SessionBehavior } from "@/app/types/api";
 
 describe("session behavior presentation", () => {
-  it("keeps one complete, immutable presentation model for all three public values", () => {
-    expect(SESSION_BEHAVIORS.map((behavior) => behavior.id)).toEqual([
-      "orchestrator",
+  it("offers Agent and NAC for new chats and presents hybrid rows as Agent", () => {
+    expect(SESSION_BEHAVIORS.map((behavior) => behavior.id)).toEqual(["direct", "orchestrator"]);
+    expect(CREATE_SESSION_BEHAVIORS.map((behavior) => behavior.id)).toEqual([
       "direct",
-      "direct-with-orchestrator",
+      "orchestrator",
     ]);
 
     expect(sessionBehaviorPresentation("orchestrator")).toMatchObject({
-      navigationLabel: "Orchestrator",
+      label: "NAC",
+      navigationLabel: "NAC",
       topLevel: expect.stringMatching(/planner/i),
       editsDirectly: false,
       delegation: expect.stringMatching(/retained NAC worker threads/i),
       inspection: expect.stringMatching(/Threads and Worksets/i),
     });
     expect(sessionBehaviorPresentation("direct")).toMatchObject({
-      navigationLabel: "Direct",
+      label: "Agent",
+      navigationLabel: "Agent",
       topLevel: expect.stringMatching(/persistent coding agent/i),
       editsDirectly: true,
-      delegation: expect.stringMatching(/fresh-context traditional coding agents/i),
+      delegation: expect.stringMatching(/separate NAC sessions/i),
       inspection: expect.stringMatching(/Delegated work/i),
     });
     expect(sessionBehaviorPresentation("direct-with-orchestrator")).toMatchObject({
-      navigationLabel: "Direct + NAC",
-      topLevel: expect.stringMatching(/persistent coding agent/i),
+      id: "direct-with-orchestrator",
+      label: "Agent",
+      navigationLabel: "Agent",
       editsDirectly: true,
-      delegation: expect.stringMatching(/separate NAC orchestrator sessions/i),
-      inspection: expect.stringMatching(/both delegated topologies/i),
     });
+    expect(isAgentBehavior("direct")).toBe(true);
+    expect(isAgentBehavior("direct-with-orchestrator")).toBe(true);
+    expect(isAgentBehavior("orchestrator")).toBe(false);
   });
 });
 

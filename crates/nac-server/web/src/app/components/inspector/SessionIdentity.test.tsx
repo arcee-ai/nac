@@ -21,12 +21,12 @@ describe("session identity", () => {
     );
 
     expect(screen.getByText("Immutable behavior")).toBeTruthy();
-    expect(screen.getByText("Direct + NAC orchestration")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "About Direct + NAC orchestration" }));
+    expect(screen.getByText("Agent")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "About Agent" }));
     expect(
       screen.getByText(/top-level agent edits files and runs commands directly/i),
     ).toBeTruthy();
-    expect(screen.getByText(/separate NAC orchestrator sessions/i)).toBeTruthy();
+    expect(screen.getByText(/separate NAC sessions/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Back to Parent" })).toBeNull();
   });
 

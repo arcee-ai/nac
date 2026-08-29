@@ -1338,10 +1338,8 @@ impl SessionManager {
             parent_session_id,
         )?;
         let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
-        if parent.behavior != sessions::SessionBehavior::DirectWithOrchestrator {
-            return Err(anyhow!(
-                "managed orchestrators require direct-with-orchestrator behavior"
-            ));
+        if !parent.behavior.is_agent() {
+            return Err(anyhow!("managed orchestrators require an agent parent"));
         }
         if nac_core::store::load_managed_orchestrator(&self.inner.store_path, parent_session_id)?
             .is_some()

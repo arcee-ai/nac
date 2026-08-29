@@ -1,11 +1,12 @@
 # Managed orchestrator sessions
 
-`direct-with-orchestrator` is a persistent coding-agent behavior with six extra
-native controls for separate NAC orchestrator sessions: launch, status, steer,
-read, wait, and cancel. Ordinary `direct` sessions keep the same 14-tool
-boundary, and orchestrator sessions never receive these controls. A managed
-orchestrator is always created with immutable `orchestrator` behavior, so it
-cannot recursively launch another orchestrator.
+Every Agent session (`direct`, and the compatibility alias
+`direct-with-orchestrator`) has six native controls for separate NAC
+orchestrator sessions: launch, status, steer, read, wait, and cancel.
+Orchestrator sessions never receive these controls and cannot create
+sessions. A managed orchestrator is always created with immutable
+`orchestrator` behavior, so it cannot recursively launch another
+orchestrator.
 
 Open the flow control beside the composer to start, inspect, continue, steer,
 cancel, or open a managed orchestrator transcript. A new session inherits its

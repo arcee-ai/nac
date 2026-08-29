@@ -245,8 +245,8 @@ test("asks for immutable behavior on every first and new chat", async ({
 
   const behaviorChoices = page.getByRole("radio");
   await expect(page.getByRole("dialog")).toContainText("New Chat");
-  await expect(behaviorChoices).toHaveCount(3);
-  await expect(behaviorChoices.filter({ hasText: "NAC orchestrator" }).first()).toHaveAttribute(
+  await expect(behaviorChoices).toHaveCount(2);
+  await expect(behaviorChoices.filter({ hasText: "Agent" }).first()).toHaveAttribute(
     "aria-checked",
     "true",
   );
@@ -257,63 +257,44 @@ test("asks for immutable behavior on every first and new chat", async ({
   // the first offer must not strand the project route behind a loader.
   await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
   await expect(page.getByRole("dialog")).toContainText("New Chat");
-  await expect(behaviorChoices.filter({ hasText: "NAC orchestrator" }).first()).toHaveAttribute(
+  await expect(behaviorChoices.filter({ hasText: "Agent" }).first()).toHaveAttribute(
     "aria-checked",
     "true",
   );
-  await page.getByRole("button", { name: "Create chat" }).click();
-  await expect(page.getByText("Immutable behavior")).toBeVisible();
-  await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
-  await page.reload();
-  await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
-  await expect(page.getByText("Threads", { exact: true })).toBeVisible();
-  await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
-
-  await page.getByRole("button", { name: "Create new session", exact: true }).click();
-  await expect(behaviorChoices.filter({ hasText: "NAC orchestrator" }).first()).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
-  await page.getByRole("radio", { name: /^Direct coding agent / }).click();
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect(page).toHaveURL(/\/session\/[^/]+\/delegated$/);
-  const directSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
-  expect(directSessionId).toBeTruthy();
-  await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+  const agentSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+  expect(agentSessionId).toBeTruthy();
+  await expect(page.getByText("Immutable behavior")).toBeVisible();
+  await expect(page.getByText("Agent", { exact: true }).first()).toBeVisible();
   await page.reload();
-  await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+  await expect(page.getByText("Agent", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Delegated work", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Create new session", exact: true }).click();
-  await expect(behaviorChoices.filter({ hasText: "NAC orchestrator" }).first()).toHaveAttribute(
+  await expect(behaviorChoices.filter({ hasText: "Agent" }).first()).toHaveAttribute(
     "aria-checked",
     "true",
   );
-  await behaviorChoices.filter({ hasText: "Direct + NAC orchestration" }).click();
+  await page.getByRole("radio", { name: /^NAC / }).click();
   await page.getByRole("button", { name: "Create chat" }).click();
-  await expect.poll(() => page.url()).not.toContain(`/session/${directSessionId}/`);
-  await expect(page).toHaveURL(/\/session\/[^/]+\/delegated$/);
-  await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
-  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
+  await expect.poll(() => page.url()).not.toContain(`/session/${agentSessionId}/`);
+  await expect(page).toHaveURL(/\/session\/[^/]+\/threads$/);
+  await expect(page.getByText("NAC", { exact: true }).first()).toBeVisible();
   await page.reload();
-  await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
-  await expect(page.getByText("Coding agents", { exact: true })).toBeVisible();
-  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
+  await expect(page.getByText("NAC", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Threads", { exact: true })).toBeVisible();
+  await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
 
   const tabs = page.locator(".chat-session-tab button");
-  await expect(tabs.filter({ has: page.getByText("Orchestrator", { exact: true }) })).toHaveCount(
-    1,
-  );
-  await expect(tabs.filter({ has: page.getByText("Direct", { exact: true }) })).toHaveCount(1);
-  await expect(tabs.filter({ has: page.getByText("Direct + NAC", { exact: true }) })).toHaveCount(
-    1,
-  );
-  await tabs.filter({ has: page.getByText("Orchestrator", { exact: true }) }).click();
-  await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
-  await tabs.filter({ has: page.getByText("Direct", { exact: true }) }).click();
-  await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+  await expect(tabs.filter({ has: page.getByText("Agent", { exact: true }) })).toHaveCount(1);
+  await expect(tabs.filter({ has: page.getByText("NAC", { exact: true }) })).toHaveCount(1);
+  await tabs.filter({ has: page.getByText("Agent", { exact: true }) }).click();
+  await expect(page.getByText("Agent", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
 });
 
 test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({

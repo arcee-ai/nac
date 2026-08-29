@@ -131,7 +131,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 // need to re-enter the parent's lifecycle gate.
                 Box::pin(self.manager.attach_session(&child_session_id)).await?;
             }
-            if metadata.behavior == sessions::SessionBehavior::DirectWithOrchestrator {
+            if metadata.behavior.is_agent() {
                 for orchestrator in nac_core::store::list_managed_orchestrators(
                     &self.manager.inner.store_path,
                     parent_session_id,

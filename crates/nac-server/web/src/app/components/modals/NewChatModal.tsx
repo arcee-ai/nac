@@ -38,7 +38,7 @@ function NewChatForm({
   const navigate = useNavigate();
   const toast = useToast();
   const createSession = useCreateSession();
-  const [behavior, setBehavior] = useState<SessionBehavior>("orchestrator");
+  const [behavior, setBehavior] = useState<SessionBehavior>("direct");
 
   const submit = async () => {
     try {

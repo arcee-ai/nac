@@ -2,9 +2,9 @@
 
 Every session has one immutable persisted behavior. The web asks which behavior
 to use when it creates the first chat in a project and again for every **New
-chat** action. It preselects **NAC orchestrator** each time and does not remember
-the previous choice. The chosen behavior is shown above the transcript for the
-lifetime of the chat.
+chat** action. It offers **Agent** and **NAC**, preselects **Agent**, and does
+not remember the previous choice. The chosen behavior is shown above the
+transcript for the lifetime of the chat.
 
 An empty-project route refreshes project and chat ownership before presenting
 the required first-chat dialog. The create is also server-idempotent, so two
@@ -17,12 +17,11 @@ The wire values are:
 - `orchestrator` — NAC's established planner and worker-thread topology. It
   retains the Threads and Worksets navigation and remains the default when an
   API client or legacy database row omits `behavior`.
-- `direct` — a persistent coding agent with native file and terminal tools,
-  durable goals, and traditional child coding agents. Its primary side panel is
-  Delegated work rather than empty orchestrator Threads or Worksets.
-- `direct-with-orchestrator` — the same direct coding agent plus native controls
-  for separate managed NAC orchestrator sessions. Delegated work keeps
-  traditional coding agents and managed orchestrators in distinct sections.
+- `direct` — a persistent coding Agent with native file and terminal tools,
+  durable goals, traditional child coding agents, and native controls for
+  separate managed NAC sessions. Its primary side panel is Delegated work.
+- `direct-with-orchestrator` — compatibility alias of `direct`. New chats
+  no longer write this value. Existing rows keep working as Agent.
 
 Behavior cannot be switched after creation. Start another chat to choose a
 different topology. A managed orchestrator is itself an immutable

@@ -155,7 +155,7 @@ function CreateProjectForm({
   const createModelConfig = useCreateModelConfig();
 
   const [mode, setMode] = useState<Mode>("local");
-  const [behavior, setBehavior] = useState<SessionBehavior>("orchestrator");
+  const [behavior, setBehavior] = useState<SessionBehavior>("direct");
   const [cwd, setCwd] = useState(defaultCwd);
   const [name, setName] = useState("");
   const [reasoning, setReasoning] = useState("");

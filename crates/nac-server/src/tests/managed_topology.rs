@@ -558,7 +558,7 @@ async fn managed_orchestrator_http_api_runs_foreground_then_delivers_background_
         get_response(app.clone(), "/sessions/ordinary-direct/orchestrators", None)
             .await
             .status(),
-        StatusCode::BAD_REQUEST
+        StatusCode::OK
     );
     assert_eq!(
         get_response(app, "/sessions/orchestrator/orchestrators", None)

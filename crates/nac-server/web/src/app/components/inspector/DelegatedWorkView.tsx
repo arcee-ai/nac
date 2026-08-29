@@ -28,6 +28,7 @@ import {
   useStartTraditionalChild,
   useTraditionalChildren,
 } from "@/app/services/queries";
+import { isAgentBehavior } from "@/app/lib/sessionBehavior";
 import type { SessionBehavior } from "@/app/types/api";
 
 function QueryError({ label, retry }: { label: string; retry: () => void }) {
@@ -62,7 +63,7 @@ export function DelegatedWorkView({
   behavior: SessionBehavior;
 }) {
   const children = useTraditionalChildren(sessionId, true);
-  const supportsOrchestrators = behavior === "direct-with-orchestrator";
+  const supportsOrchestrators = isAgentBehavior(behavior);
   const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
   const startChild = useStartTraditionalChild();
   const cancelChild = useCancelTraditionalChild();

@@ -8,56 +8,53 @@ import { SessionBehaviorPicker } from "@/app/components/modals/SessionBehaviorPi
 afterEach(cleanup);
 
 describe("session behavior picker", () => {
-  it("shows all immutable behaviors with orchestrator selected by default", () => {
-    render(<SessionBehaviorPicker value="orchestrator" onChange={() => {}} />);
+  it("shows Agent and NAC with Agent selected by default", () => {
+    render(<SessionBehaviorPicker value="direct" onChange={() => {}} />);
 
-    expect(screen.getAllByRole("radio")).toHaveLength(3);
-    expect(
-      screen.getByRole("radio", { name: /^NAC orchestrator /i }).getAttribute("aria-checked"),
-    ).toBe("true");
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect(screen.getByRole("radio", { name: /^Agent /i }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
     expect(screen.getByText(/start a new chat to choose a different behavior/i)).toBeTruthy();
 
-    const orchestrator = screen.getByRole("radio", { name: /^NAC orchestrator /i });
-    expect(orchestrator.textContent).toMatch(/planner/i);
-    expect(orchestrator.textContent).toMatch(/does not edit directly/i);
-    expect(orchestrator.textContent).toMatch(/retained NAC worker threads/i);
-    expect(orchestrator.textContent).toMatch(/Threads and Worksets/i);
+    const agent = screen.getByRole("radio", { name: /^Agent /i });
+    expect(agent.textContent).toMatch(/Default/);
+    expect(agent.textContent).toMatch(/persistent coding agent/i);
+    expect(agent.textContent).toMatch(/edits files and runs commands directly/i);
+    expect(agent.textContent).toMatch(/fresh-context coding agents and separate NAC sessions/i);
 
-    const direct = screen.getByRole("radio", { name: /^Direct coding agent /i });
-    expect(direct.textContent).toMatch(/persistent coding agent/i);
-    expect(direct.textContent).toMatch(/edits files and runs commands directly/i);
-    expect(direct.textContent).toMatch(/fresh-context traditional coding agents/i);
-
-    const hybrid = screen.getByRole("radio", { name: /^Direct \+ NAC orchestration /i });
-    expect(hybrid.textContent).toMatch(/persistent coding agent/i);
-    expect(hybrid.textContent).toMatch(/edits files and runs commands directly/i);
-    expect(hybrid.textContent).toMatch(/separate NAC orchestrator sessions/i);
+    const nac = screen.getByRole("radio", { name: /^NAC /i });
+    expect(nac.textContent).toMatch(/planner/i);
+    expect(nac.textContent).toMatch(/does not edit directly/i);
+    expect(nac.textContent).toMatch(/retained NAC worker threads/i);
+    expect(nac.textContent).toMatch(/Threads and Worksets/i);
+    expect(screen.queryByRole("radio", { name: /Direct \+ NAC/i })).toBeNull();
   });
 
-  it("reports an explicit direct-with-orchestrator choice", () => {
+  it("reports an explicit NAC choice", () => {
     const onChange = vi.fn();
-    render(<SessionBehaviorPicker value="orchestrator" onChange={onChange} />);
+    render(<SessionBehaviorPicker value="direct" onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("radio", { name: /^Direct \+ NAC orchestration /i }));
+    fireEvent.click(screen.getByRole("radio", { name: /^NAC /i }));
 
-    expect(onChange).toHaveBeenCalledWith("direct-with-orchestrator");
+    expect(onChange).toHaveBeenCalledWith("orchestrator");
   });
 
   it("supports roving keyboard selection with one tab stop", () => {
     const onChange = vi.fn();
-    const view = render(<SessionBehaviorPicker value="orchestrator" onChange={onChange} />);
-    const orchestrator = screen.getByRole("radio", { name: /^NAC orchestrator /i });
-    const direct = screen.getByRole("radio", { name: /^Direct coding agent /i });
+    const view = render(<SessionBehaviorPicker value="direct" onChange={onChange} />);
+    const agent = screen.getByRole("radio", { name: /^Agent /i });
+    const nac = screen.getByRole("radio", { name: /^NAC /i });
 
-    expect(orchestrator.tabIndex).toBe(0);
-    expect(direct.tabIndex).toBe(-1);
-    orchestrator.focus();
-    fireEvent.keyDown(orchestrator, { key: "ArrowRight" });
+    expect(agent.tabIndex).toBe(0);
+    expect(nac.tabIndex).toBe(-1);
+    agent.focus();
+    fireEvent.keyDown(agent, { key: "ArrowRight" });
 
-    expect(onChange).toHaveBeenCalledWith("direct");
-    expect(document.activeElement).toBe(direct);
+    expect(onChange).toHaveBeenCalledWith("orchestrator");
+    expect(document.activeElement).toBe(nac);
 
-    view.rerender(<SessionBehaviorPicker value="direct" onChange={onChange} />);
-    expect(direct.tabIndex).toBe(0);
+    view.rerender(<SessionBehaviorPicker value="orchestrator" onChange={onChange} />);
+    expect(nac.tabIndex).toBe(0);
   });
 });

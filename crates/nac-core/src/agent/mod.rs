@@ -218,20 +218,9 @@ impl Agent {
         } else {
             None
         };
-        let direct_behavior = if mode == AgentMode::Direct && traditional_child.is_none() {
-            config
-                .session_behavior
-                .or_else(|| {
-                    config.session_id.as_deref().and_then(|session_id| {
-                        crate::sessions::load_session(&config.store_path, session_id)
-                            .ok()
-                            .map(|snapshot| snapshot.behavior)
-                    })
-                })
-                .unwrap_or(crate::sessions::SessionBehavior::Direct)
-        } else {
-            crate::sessions::SessionBehavior::Direct
-        };
+        // Every primary Agent now shares one tool surface. Callers still pass
+        // session_behavior for construction identity; do not branch on it here.
+        let _ = config.session_behavior;
         let compaction = if matches!(mode, AgentMode::Orchestrator | AgentMode::Direct) {
             config.session_id.clone().map(|session_id| {
                 CompactionState::new(
@@ -284,18 +273,10 @@ impl Agent {
                     tools::worker_tool_definitions(client.supports_image_tool_results()),
                 ),
                 None => (
-                    if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
-                        render_direct_with_orchestrator_system_prompt(&cwd)
-                    } else {
-                        render_direct_system_prompt(&cwd)
-                    },
-                    if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
-                        tools::direct_with_orchestrator_tool_definitions(
-                            client.supports_image_tool_results(),
-                        )
-                    } else {
-                        tools::direct_tool_definitions(client.supports_image_tool_results())
-                    },
+                    render_direct_with_orchestrator_system_prompt(&cwd),
+                    tools::direct_with_orchestrator_tool_definitions(
+                        client.supports_image_tool_results(),
+                    ),
                 ),
             },
         };

@@ -1,5 +1,5 @@
 import { cn } from "@/app/lib/cn";
-import { SESSION_BEHAVIORS } from "@/app/lib/sessionBehavior";
+import { CREATE_SESSION_BEHAVIORS } from "@/app/lib/sessionBehavior";
 import type { SessionBehavior } from "@/app/types/api";
 
 export function SessionBehaviorPicker({
@@ -14,8 +14,8 @@ export function SessionBehaviorPicker({
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="label-small text-basic-primary">How should this chat work?</legend>
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-3" role="radiogroup">
-        {SESSION_BEHAVIORS.map((option, index) => {
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2" role="radiogroup">
+        {CREATE_SESSION_BEHAVIORS.map((option, index) => {
           const selected = option.id === value;
           return (
             <button
@@ -44,13 +44,14 @@ export function SessionBehaviorPicker({
                   event.key === "Home"
                     ? 0
                     : event.key === "End"
-                      ? SESSION_BEHAVIORS.length - 1
+                      ? CREATE_SESSION_BEHAVIORS.length - 1
                       : direction
-                        ? (index + direction + SESSION_BEHAVIORS.length) % SESSION_BEHAVIORS.length
+                        ? (index + direction + CREATE_SESSION_BEHAVIORS.length) %
+                          CREATE_SESSION_BEHAVIORS.length
                         : null;
                 if (targetIndex == null) return;
                 event.preventDefault();
-                onChange(SESSION_BEHAVIORS[targetIndex].id);
+                onChange(CREATE_SESSION_BEHAVIORS[targetIndex].id);
                 const radios =
                   event.currentTarget.parentElement?.querySelectorAll<HTMLElement>(
                     '[role="radio"]',
@@ -60,7 +61,7 @@ export function SessionBehaviorPicker({
             >
               <span className="flex items-center justify-between gap-2">
                 <span className="text-small font-medium text-basic-primary">{option.label}</span>
-                {option.id === "orchestrator" ? (
+                {option.id === "direct" ? (
                   <span className="tag-label shrink-0 text-basic-tertiary">Default</span>
                 ) : null}
               </span>

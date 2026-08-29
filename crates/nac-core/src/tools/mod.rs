@@ -142,7 +142,7 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
 ];
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 14] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 20] = [
     "read",
     "write",
     "edit",
@@ -157,6 +157,12 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 14] = [
     "subagent",
     "subagent_status",
     "subagent_cancel",
+    "orchestrator_launch",
+    "orchestrator_status",
+    "orchestrator_steer",
+    "orchestrator_read",
+    "orchestrator_wait",
+    "orchestrator_cancel",
 ];
 pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_launch",
@@ -167,28 +173,8 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 20] = [
-    "read",
-    "write",
-    "edit",
-    "glob",
-    "grep",
-    "exec_command",
-    "write_stdin",
-    "read_command_output",
-    "create_goal",
-    "get_goal",
-    "update_goal",
-    "subagent",
-    "subagent_status",
-    "subagent_cancel",
-    "orchestrator_launch",
-    "orchestrator_status",
-    "orchestrator_steer",
-    "orchestrator_read",
-    "orchestrator_wait",
-    "orchestrator_cancel",
-];
+/// Compatibility alias: every Agent now has NAC spawn tools.
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 20] = DIRECT_TOOL_NAMES;
 
 fn worker_tool_registry(
     image_read: bool,
@@ -242,11 +228,17 @@ pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     reason = "the static first-party tool registry and direct capability list are collision-checked"
 )]
 pub fn direct_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    worker_tool_registry(image_read)
+    let snapshot = worker_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
         .snapshot(DIRECT_TOOL_NAMES)
-        .expect("built-in direct capability selection must be complete")
-        .definitions()
+        .expect("built-in direct capability selection must be complete");
+    debug_assert!(
+        ORCHESTRATOR_CONTROL_TOOL_NAMES
+            .iter()
+            .all(|name| snapshot.contains(name)),
+        "every Agent must expose NAC spawn controls"
+    );
+    snapshot.definitions()
 }
 
 #[cfg(test)]
@@ -266,17 +258,7 @@ pub(crate) fn direct_tool_definitions_with_web(
     reason = "the static direct-with-orchestrator capability list is covered by registry tests"
 )]
 pub fn direct_with_orchestrator_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    let snapshot = worker_tool_registry(image_read)
-        .expect("built-in direct tool registration must be collision-free")
-        .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
-        .expect("direct-with-orchestrator capability selection must be complete");
-    debug_assert!(
-        ORCHESTRATOR_CONTROL_TOOL_NAMES
-            .iter()
-            .all(|name| snapshot.contains(name)),
-        "orchestrator runtime must expose every orchestrator control capability"
-    );
-    snapshot.definitions()
+    direct_tool_definitions(image_read)
 }
 
 #[cfg(test)]

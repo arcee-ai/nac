@@ -69,14 +69,10 @@ describe("project session tab behavior identity", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("button", { name: "Plan, NAC orchestrator" })).toBeTruthy();
-    expect(
-      screen
-        .getByRole("button", { name: "Code, Direct coding agent" })
-        .getAttribute("aria-current"),
-    ).toBe("page");
-    expect(
-      screen.getByRole("button", { name: "Coordinate, Direct + NAC orchestration" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Plan, NAC" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Code, Agent" }).getAttribute("aria-current")).toBe(
+      "page",
+    );
+    expect(screen.getByRole("button", { name: "Coordinate, Agent" })).toBeTruthy();
   });
 });

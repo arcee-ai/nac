@@ -126,10 +126,8 @@ impl<'a> DelegationApplication<'a> {
         parent_session_id: &str,
     ) -> Result<Vec<ManagedOrchestratorRecord>> {
         let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior != sessions::SessionBehavior::DirectWithOrchestrator {
-            return Err(anyhow!(
-                "managed orchestrators require direct-with-orchestrator behavior"
-            ));
+        if !service.metadata().behavior.is_agent() {
+            return Err(anyhow!("managed orchestrators require an agent parent"));
         }
         nac_core::store::list_managed_orchestrators(
             &self.manager.inner.store_path,

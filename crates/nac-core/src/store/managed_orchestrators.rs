@@ -150,10 +150,9 @@ fn create_managed_orchestrator_relationship_with_connection(
             .optional()?
             .ok_or_else(|| anyhow!("session '{session_id}' was not found"))
     };
-    if behavior(parent_session_id)? != "direct-with-orchestrator" {
-        return Err(anyhow!(
-            "managed orchestrators require a direct-with-orchestrator parent"
-        ));
+    let parent_behavior = behavior(parent_session_id)?;
+    if parent_behavior != "direct" && parent_behavior != "direct-with-orchestrator" {
+        return Err(anyhow!("managed orchestrators require an agent parent"));
     }
     if behavior(orchestrator_session_id)? != "orchestrator" {
         return Err(anyhow!("managed session must use orchestrator behavior"));
@@ -556,22 +555,48 @@ mod tests {
         assert_eq!(relation.root_session_id, "parent");
 
         insert_test_session(&path, "ordinary-direct");
+        insert_test_session(&path, "second-orchestrator");
         let connection = open_runtime_connection(&path).unwrap();
         connection
             .execute(
-                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'ordinary-direct'",
+                "UPDATE sessions SET behavior = CASE session_id
+                    WHEN 'ordinary-direct' THEN 'direct'
+                    WHEN 'second-orchestrator' THEN 'orchestrator'
+                    ELSE behavior END
+                 WHERE session_id IN ('ordinary-direct', 'second-orchestrator')",
+                [],
+            )
+            .unwrap();
+        let from_direct = create_managed_orchestrator_relationship(
+            &path,
+            "ordinary-direct",
+            "second-orchestrator",
+            "allowed from agent",
+        )
+        .unwrap();
+        assert_eq!(from_direct.parent_session_id, "ordinary-direct");
+
+        insert_test_session(&path, "planner");
+        insert_test_session(&path, "third-orchestrator");
+        connection
+            .execute(
+                "UPDATE sessions SET behavior = CASE session_id
+                    WHEN 'planner' THEN 'orchestrator'
+                    WHEN 'third-orchestrator' THEN 'orchestrator'
+                    ELSE behavior END
+                 WHERE session_id IN ('planner', 'third-orchestrator')",
                 [],
             )
             .unwrap();
         assert!(create_managed_orchestrator_relationship(
             &path,
-            "ordinary-direct",
-            "orchestrator",
+            "planner",
+            "third-orchestrator",
             "forbidden",
         )
         .unwrap_err()
         .to_string()
-        .contains("direct-with-orchestrator"));
+        .contains("agent parent"));
     }
 
     #[test]

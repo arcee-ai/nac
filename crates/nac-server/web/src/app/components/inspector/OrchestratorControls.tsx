@@ -20,6 +20,7 @@ import {
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useManagedOrchestrators, useStartManagedOrchestrator } from "@/app/services/queries";
+import { isAgentBehavior } from "@/app/lib/sessionBehavior";
 import type { SessionBehavior } from "@/app/types/api";
 
 interface OrchestratorControlsProps {
@@ -29,7 +30,7 @@ interface OrchestratorControlsProps {
 
 /** Internal durable NAC orchestration controls for the delegating direct behavior. */
 export function OrchestratorControls({ sessionId, behavior }: OrchestratorControlsProps) {
-  const enabled = behavior === "direct-with-orchestrator";
+  const enabled = isAgentBehavior(behavior);
   const query = useManagedOrchestrators(sessionId, enabled);
   const start = useStartManagedOrchestrator();
   const toast = useToast();

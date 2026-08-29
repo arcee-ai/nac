@@ -39,7 +39,10 @@ function orchestrator(
   };
 }
 
-function mount(records: ManagedOrchestratorRecord[] = []) {
+function mount(
+  records: ManagedOrchestratorRecord[] = [],
+  behavior: "direct" | "direct-with-orchestrator" = "direct",
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -48,7 +51,7 @@ function mount(records: ManagedOrchestratorRecord[] = []) {
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ToastProvider>
-          <OrchestratorControls sessionId={SESSION_ID} behavior="direct-with-orchestrator" />
+          <OrchestratorControls sessionId={SESSION_ID} behavior={behavior} />
         </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>,

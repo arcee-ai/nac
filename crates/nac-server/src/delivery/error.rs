@@ -270,6 +270,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("traditional child profile")
             || message.contains("traditional child nesting limit")
             || message.contains("managed orchestrator prompt is empty")
+            || message.contains("managed orchestrators require an agent parent")
             || message.contains("managed orchestrators require direct-with-orchestrator")
             || message.contains("managed orchestrator description")
             || message.contains("managed orchestrator sessions cannot launch")

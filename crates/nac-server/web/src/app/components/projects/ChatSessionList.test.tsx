@@ -55,17 +55,14 @@ describe("chat session behavior identity", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Plan the release, NAC orchestrator" })).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Fix the parser, Direct coding agent" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Plan the release, NAC" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Fix the parser, Agent" })).toBeTruthy();
     const hybrid = screen.getByRole("button", {
-      name: "Coordinate the migration, Direct + NAC orchestration",
+      name: "Coordinate the migration, Agent",
     });
     expect(hybrid).toBeTruthy();
-    expect(screen.getByText("Orchestrator")).toBeTruthy();
-    expect(screen.getByText("Direct")).toBeTruthy();
-    expect(screen.getByText("Direct + NAC")).toBeTruthy();
+    expect(screen.getAllByText("NAC")).toHaveLength(1);
+    expect(screen.getAllByText("Agent")).toHaveLength(2);
 
     fireEvent.click(hybrid);
     expect(onOpen).toHaveBeenCalledWith(

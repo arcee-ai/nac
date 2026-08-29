@@ -75,6 +75,12 @@ impl SessionBehavior {
             Self::DirectWithOrchestrator => "direct-with-orchestrator",
         }
     }
+
+    /// Agent chats: `direct` and the compatibility alias `direct-with-orchestrator`.
+    /// NAC (`orchestrator`) is not an agent.
+    pub const fn is_agent(self) -> bool {
+        matches!(self, Self::Direct | Self::DirectWithOrchestrator)
+    }
 }
 
 impl fmt::Display for SessionBehavior {

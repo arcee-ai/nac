@@ -174,6 +174,12 @@ fn direct_topologies_expose_exact_capability_boundaries() {
                 && content.contains("review the implementation")
     ));
     assert!(matches!(
+        parent.messages.first(),
+        Some(Message::System { content })
+            if content.contains("Managed orchestration")
+                && content.contains("separate durable NAC orchestrator sessions")
+    ));
+    assert!(matches!(
         delegating.messages.first(),
         Some(Message::System { content })
             if content.contains("Managed orchestration")

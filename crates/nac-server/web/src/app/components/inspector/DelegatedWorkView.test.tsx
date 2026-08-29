@@ -127,9 +127,10 @@ describe("delegated work", () => {
   it("navigates from a delegated row to its transcript", () => {
     mount("direct");
 
-    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    const childRow = screen.getByRole("article", { name: "Coding agent: Review permissions" });
+    fireEvent.click(within(childRow).getByRole("button", { name: "Open" }));
     expect(screen.getByTestId("location").textContent).toBe("/session/child-1/threads");
-    expect(screen.queryByText("NAC orchestrators")).toBeNull();
+    expect(screen.getByText("NAC orchestrators")).toBeTruthy();
   });
 
   it("keeps a recoverable retry entry point after a relationship-list failure", async () => {
