@@ -1,4 +1,4 @@
-.PHONY: all build dev demo release install ci test test-rust test-web test-source-size generate-api-contract test-api-contract test-assets test-e2e test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev demo release install ci test test-rust test-web test-source-size generate-api-contract test-api-contract test-assets test-e2e test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -23,6 +23,20 @@ INSTALL_ROOT ?= $(HOME)/.local
 
 # Default target
 all: build
+
+## Prepare a fresh worktree with all locked development dependencies
+setup:
+	@command -v "$(CARGO)" >/dev/null 2>&1 || { \
+		printf '%s\n' 'error: make setup requires Cargo; install Rust from https://rustup.rs'; \
+		exit 1; \
+	}
+	@command -v npm >/dev/null 2>&1 || { \
+		printf '%s\n' 'error: make setup requires npm; install Node.js from https://nodejs.org'; \
+		exit 1; \
+	}
+	$(CARGO) fetch --locked
+	npm --prefix $(WEB_DIR) ci
+	npm --prefix $(WEB_DIR) exec -- playwright install chromium
 
 ## Build the nac-web binary (debug)
 build:
@@ -198,6 +212,7 @@ help:
 		'Usage: make [target]' \
 		'' \
 		'Targets:' \
+		'  setup        Install locked Rust/web dependencies and Playwright Chromium' \
 		'  build        Build nac-web (debug) [default]' \
 		'  dev          Build and run nac-web, then open it in the default browser' \
 		'  demo         Rebuild production assets, then run the embedded app' \
