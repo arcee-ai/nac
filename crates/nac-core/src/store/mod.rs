@@ -44,8 +44,9 @@ pub use run_recovery::{
 };
 pub use schema::{check_readiness, default_store_path, initialize, schema_version};
 pub use session_assignments::{
-    list_session_assignments, load_session_assignment, load_session_assignment_for_parent,
-    SessionAssignmentChildBehavior, SessionAssignmentRecord,
+    list_session_assignments, list_suppressed_session_assignment_generations,
+    load_session_assignment, load_session_assignment_for_parent, SessionAssignmentChildBehavior,
+    SessionAssignmentRecord,
 };
 pub(crate) use session_assignments::{
     sync_assignment_from_managed_orchestrator, sync_assignment_from_traditional_child,

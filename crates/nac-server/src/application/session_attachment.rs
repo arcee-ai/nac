@@ -5,7 +5,6 @@ use nac_core::{
     runtime::{self, NacConfig},
     session_service::SessionService,
     sessions,
-    store::ManagedOrchestratorStatus,
 };
 
 use crate::SessionManager;
@@ -116,33 +115,33 @@ impl<'a> SessionAttachmentApplication<'a> {
             let Some(parent_session_id) = metadata.session_id.as_deref() else {
                 return Ok(());
             };
-            let running_children = nac_core::store::list_traditional_children(
+            let running = nac_core::store::list_session_assignments(
                 &self.manager.inner.store_path,
                 parent_session_id,
             )?
             .into_iter()
-            .filter(|child| child.status == nac_core::store::TraditionalChildStatus::Running)
-            .map(|child| child.child_session_id)
+            .filter(|assignment| {
+                assignment.status == nac_core::store::TraditionalChildStatus::Running
+            })
             .collect::<Vec<_>>();
-            for child_session_id in running_children {
+            for assignment in running {
                 // Attaching a child reconciles an abandoned generation from its
                 // durable run-recovery row. The parent is already cached before
                 // this method runs, so the resulting completion wake does not
                 // need to re-enter the parent's lifecycle gate.
-                Box::pin(self.manager.attach_session(&child_session_id)).await?;
-            }
-            if metadata.behavior.is_agent() {
-                for orchestrator in nac_core::store::list_managed_orchestrators(
-                    &self.manager.inner.store_path,
-                    parent_session_id,
-                )?
-                .into_iter()
-                .filter(|orchestrator| orchestrator.status == ManagedOrchestratorStatus::Running)
-                {
-                    self.manager.spawn_managed_orchestrator_monitor(
-                        orchestrator.orchestrator_session_id,
-                        orchestrator.generation,
-                    );
+                match assignment.child_behavior {
+                    nac_core::store::SessionAssignmentChildBehavior::Direct => {
+                        Box::pin(self.manager.attach_session(&assignment.child_session_id)).await?;
+                    }
+                    nac_core::store::SessionAssignmentChildBehavior::Orchestrator
+                        if metadata.behavior.is_agent() =>
+                    {
+                        self.manager.spawn_managed_orchestrator_monitor(
+                            assignment.child_session_id,
+                            assignment.generation,
+                        );
+                    }
+                    nac_core::store::SessionAssignmentChildBehavior::Orchestrator => {}
                 }
             }
         }
@@ -162,8 +161,8 @@ impl<'a> SessionAttachmentApplication<'a> {
         parent_session_id: &str,
     ) -> Result<()> {
         let store_path = &self.manager.inner.store_path;
-        for (child_session_id, generation) in
-            nac_core::store::list_suppressed_traditional_child_generations(
+        for (child_session_id, generation, child_behavior) in
+            nac_core::store::list_suppressed_session_assignment_generations(
                 store_path,
                 parent_session_id,
             )?
@@ -177,34 +176,22 @@ impl<'a> SessionAttachmentApplication<'a> {
                 Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
             };
             if sessions::load_session(store_path, &child_session_id).is_ok() {
-                nac_core::store::restore_traditional_child_completion(
-                    store_path,
-                    &child_session_id,
-                    generation,
-                )?;
-            }
-            drop(lease);
-        }
-        for (orchestrator_session_id, generation) in
-            nac_core::store::list_suppressed_managed_orchestrator_generations(
-                store_path,
-                parent_session_id,
-            )?
-        {
-            let lease = match sessions::SessionRelationshipLease::try_acquire(
-                store_path,
-                &orchestrator_session_id,
-            ) {
-                Ok(lease) => lease,
-                Err(sessions::SessionOperationLeaseError::Busy(_)) => continue,
-                Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
-            };
-            if sessions::load_session(store_path, &orchestrator_session_id).is_ok() {
-                nac_core::store::restore_managed_orchestrator_completion(
-                    store_path,
-                    &orchestrator_session_id,
-                    generation,
-                )?;
+                match child_behavior {
+                    nac_core::store::SessionAssignmentChildBehavior::Direct => {
+                        nac_core::store::restore_traditional_child_completion(
+                            store_path,
+                            &child_session_id,
+                            generation,
+                        )?;
+                    }
+                    nac_core::store::SessionAssignmentChildBehavior::Orchestrator => {
+                        nac_core::store::restore_managed_orchestrator_completion(
+                            store_path,
+                            &child_session_id,
+                            generation,
+                        )?;
+                    }
+                }
             }
             drop(lease);
         }

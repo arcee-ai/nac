@@ -14,27 +14,16 @@ pub struct AssignmentRecord {
 }
 
 pub fn load_assignment(path: &Path, session_id: &str) -> Result<Option<AssignmentRecord>> {
-    if let Some(child) = load_traditional_child(path, session_id)? {
-        return Ok(Some(AssignmentRecord {
-            session_id: child.child_session_id,
-            parent_session_id: child.parent_session_id,
-            root_session_id: child.root_session_id,
-            description: child.description,
-            status: child.status,
-            frozen_message_count: child.frozen_message_count,
-        }));
-    }
-    if let Some(orchestrator) = load_managed_orchestrator(path, session_id)? {
-        return Ok(Some(AssignmentRecord {
-            session_id: orchestrator.orchestrator_session_id,
-            parent_session_id: orchestrator.parent_session_id,
-            root_session_id: orchestrator.root_session_id,
-            description: orchestrator.description,
-            status: orchestrator.status,
-            frozen_message_count: orchestrator.frozen_message_count,
-        }));
-    }
-    Ok(None)
+    Ok(
+        load_session_assignment(path, session_id)?.map(|assignment| AssignmentRecord {
+            session_id: assignment.child_session_id,
+            parent_session_id: assignment.parent_session_id,
+            root_session_id: assignment.root_session_id,
+            description: assignment.description,
+            status: assignment.status,
+            frozen_message_count: assignment.frozen_message_count,
+        }),
+    )
 }
 
 /// Idle or running: the parent still owns the current generation.
@@ -65,24 +54,14 @@ fn assignment_status_with_connection(
     connection: &rusqlite::Connection,
     session_id: &str,
 ) -> Result<Option<TraditionalChildStatus>> {
-    let child: Option<String> = connection
+    let status: Option<String> = connection
         .query_row(
-            "SELECT status FROM traditional_children WHERE child_session_id = ?1",
+            "SELECT status FROM session_assignments WHERE child_session_id = ?1",
             params![session_id],
             |row| row.get(0),
         )
         .optional()?;
-    if let Some(status) = child {
-        return Ok(Some(status.parse()?));
-    }
-    let orchestrator: Option<String> = connection
-        .query_row(
-            "SELECT status FROM managed_orchestrators WHERE orchestrator_session_id = ?1",
-            params![session_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    orchestrator.map(|status| status.parse()).transpose()
+    status.map(|status| status.parse()).transpose()
 }
 
 pub(crate) fn session_transcript_len(

@@ -228,31 +228,26 @@ impl<'a> SessionStateApplication<'a> {
     }
 
     pub(crate) fn lineage(&self, session_id: &str) -> Result<Option<SessionLineageSnapshot>> {
-        if let Some(child) =
-            nac_core::store::load_traditional_child(&self.manager.inner.store_path, session_id)?
-        {
-            return Ok(Some(SessionLineageSnapshot {
-                kind: SessionLineageKind::TraditionalChild,
-                parent_session_id: child.parent_session_id,
-                root_session_id: child.root_session_id,
-                description: child.description,
-                assignment_status: child.status,
-                frozen_message_count: child.frozen_message_count,
-            }));
-        }
-        if let Some(orchestrator) =
-            nac_core::store::load_managed_orchestrator(&self.manager.inner.store_path, session_id)?
-        {
-            return Ok(Some(SessionLineageSnapshot {
-                kind: SessionLineageKind::ManagedOrchestrator,
-                parent_session_id: orchestrator.parent_session_id,
-                root_session_id: orchestrator.root_session_id,
-                description: orchestrator.description,
-                assignment_status: orchestrator.status,
-                frozen_message_count: orchestrator.frozen_message_count,
-            }));
-        }
-        Ok(None)
+        let Some(assignment) =
+            nac_core::store::load_session_assignment(&self.manager.inner.store_path, session_id)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(SessionLineageSnapshot {
+            kind: match assignment.child_behavior {
+                nac_core::store::SessionAssignmentChildBehavior::Direct => {
+                    SessionLineageKind::TraditionalChild
+                }
+                nac_core::store::SessionAssignmentChildBehavior::Orchestrator => {
+                    SessionLineageKind::ManagedOrchestrator
+                }
+            },
+            parent_session_id: assignment.parent_session_id,
+            root_session_id: assignment.root_session_id,
+            description: assignment.description,
+            assignment_status: assignment.status,
+            frozen_message_count: assignment.frozen_message_count,
+        }))
     }
 
     pub(crate) async fn messages_page(

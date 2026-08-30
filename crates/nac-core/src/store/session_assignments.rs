@@ -349,6 +349,31 @@ pub fn load_session_assignment_for_parent(
         .optional()?)
 }
 
+pub fn list_suppressed_session_assignment_generations(
+    path: &Path,
+    parent_session_id: &str,
+) -> Result<Vec<(String, u64, SessionAssignmentChildBehavior)>> {
+    let connection = open_runtime_connection(path)?;
+    let mut statement = connection.prepare(
+        "SELECT child_session_id, generation, child_behavior FROM session_assignments
+         WHERE parent_session_id = ?1 AND completion_suppressed = 1
+         ORDER BY child_session_id",
+    )?;
+    let rows = statement.query_map(params![parent_session_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u64>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut records = Vec::new();
+    for row in rows {
+        let (child_session_id, generation, child_behavior) = row?;
+        records.push((child_session_id, generation, child_behavior.parse()?));
+    }
+    Ok(records)
+}
+
 pub fn list_session_assignments(
     path: &Path,
     parent_session_id: &str,
@@ -406,6 +431,13 @@ mod tests {
         create_managed_orchestrator_relationship(&path, "parent", "orchestrator", "plan the work")
             .unwrap();
 
+        assert_eq!(
+            load_assignment(&path, "child")
+                .unwrap()
+                .unwrap()
+                .parent_session_id,
+            "parent"
+        );
         let listed = list_session_assignments(&path, "parent").unwrap();
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].child_session_id, "child");

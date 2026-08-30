@@ -150,11 +150,8 @@ fn has_running_relationship(
 ) -> Result<bool> {
     Ok(connection.query_row(
         "SELECT EXISTS(
-             SELECT 1 FROM traditional_children
+             SELECT 1 FROM session_assignments
              WHERE child_session_id = ?1 AND run_id = ?2 AND status = 'running'
-             UNION ALL
-             SELECT 1 FROM managed_orchestrators
-             WHERE orchestrator_session_id = ?1 AND run_id = ?2 AND status = 'running'
          )",
         params![session_id, run_id],
         |row| row.get(0),

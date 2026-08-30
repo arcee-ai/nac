@@ -216,39 +216,48 @@ impl CompletionSuppressionRollback {
     }
 
     fn suppress_running(&mut self, session_id: &str) -> Result<()> {
-        let managed_already = self.suppressed.iter().any(|entry| {
-            matches!(entry, SuppressedCompletion::Managed { session_id: existing, .. } if existing == session_id)
+        let already = self.suppressed.iter().any(|entry| match entry {
+            SuppressedCompletion::Managed {
+                session_id: existing,
+                ..
+            }
+            | SuppressedCompletion::Traditional {
+                session_id: existing,
+                ..
+            } => existing == session_id,
         });
-        if !managed_already
-            && nac_core::store::load_managed_orchestrator(&self.store_path, session_id)?
-                .is_some_and(|record| record.status == ManagedOrchestratorStatus::Running)
-        {
-            let record = nac_core::store::suppress_managed_orchestrator_completion(
-                &self.store_path,
-                session_id,
-            )?;
-            self.suppressed.push(SuppressedCompletion::Managed {
-                session_id: session_id.to_string(),
-                generation: record.generation,
-            });
+        if already {
+            return Ok(());
         }
-
-        let child_already = self.suppressed.iter().any(|entry| {
-            matches!(entry, SuppressedCompletion::Traditional { session_id: existing, .. } if existing == session_id)
-        });
-        if !child_already
-            && nac_core::store::load_traditional_child(&self.store_path, session_id)?.is_some_and(
-                |record| record.status == nac_core::store::TraditionalChildStatus::Running,
-            )
-        {
-            let record = nac_core::store::suppress_traditional_child_completion(
-                &self.store_path,
-                session_id,
-            )?;
-            self.suppressed.push(SuppressedCompletion::Traditional {
-                session_id: session_id.to_string(),
-                generation: record.generation,
-            });
+        let Some(assignment) =
+            nac_core::store::load_session_assignment(&self.store_path, session_id)?
+        else {
+            return Ok(());
+        };
+        if assignment.status != nac_core::store::TraditionalChildStatus::Running {
+            return Ok(());
+        }
+        match assignment.child_behavior {
+            nac_core::store::SessionAssignmentChildBehavior::Orchestrator => {
+                let record = nac_core::store::suppress_managed_orchestrator_completion(
+                    &self.store_path,
+                    session_id,
+                )?;
+                self.suppressed.push(SuppressedCompletion::Managed {
+                    session_id: session_id.to_string(),
+                    generation: record.generation,
+                });
+            }
+            nac_core::store::SessionAssignmentChildBehavior::Direct => {
+                let record = nac_core::store::suppress_traditional_child_completion(
+                    &self.store_path,
+                    session_id,
+                )?;
+                self.suppressed.push(SuppressedCompletion::Traditional {
+                    session_id: session_id.to_string(),
+                    generation: record.generation,
+                });
+            }
         }
         Ok(())
     }
@@ -1347,8 +1356,11 @@ impl SessionManager {
         if parent.behavior.is_nac() {
             return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
         }
-        if nac_core::store::load_managed_orchestrator(&self.inner.store_path, parent_session_id)?
-            .is_some()
+        if nac_core::store::load_session_assignment(&self.inner.store_path, parent_session_id)?
+            .is_some_and(|assignment| {
+                assignment.child_behavior
+                    == nac_core::store::SessionAssignmentChildBehavior::Orchestrator
+            })
         {
             return Err(anyhow!(
                 "managed orchestrator sessions cannot launch orchestrators"

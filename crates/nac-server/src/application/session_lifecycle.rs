@@ -90,18 +90,11 @@ impl<'a> SessionLifecycleApplication<'a> {
             .require_persisted_operation_session(session_id)?;
         suppression_rollback.suppress_running(session_id)?;
 
-        for orchestrator in
-            nac_core::store::list_managed_orchestrators(&self.manager.inner.store_path, session_id)?
+        for assignment in
+            nac_core::store::list_session_assignments(&self.manager.inner.store_path, session_id)?
         {
-            if orchestrator.status.is_open() {
-                Box::pin(self.delete_cascade(&orchestrator.orchestrator_session_id)).await?;
-            }
-        }
-        for child in
-            nac_core::store::list_traditional_children(&self.manager.inner.store_path, session_id)?
-        {
-            if child.status.is_open() {
-                Box::pin(self.delete_cascade(&child.child_session_id)).await?;
+            if assignment.status.is_open() {
+                Box::pin(self.delete_cascade(&assignment.child_session_id)).await?;
             }
         }
 
