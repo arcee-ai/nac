@@ -40,6 +40,8 @@ import type {
   GeneratedCredential,
   ManagedSessionSummary,
   ManagedOrchestratorRecord,
+  SessionAssignmentRecord,
+  StartSessionSpawnRequest,
   McpLibraryResponse,
   McpServerList,
   McpServerView,
@@ -605,6 +607,25 @@ export const api = {
     request<ManagedOrchestratorRecord>(
       "POST",
       `${sessionPath(id)}/orchestrators/${encodeURIComponent(orchestratorId)}/cancel`,
+    ),
+
+  listSessionSpawns: (id: string, signal?: AbortSignal) =>
+    request<SessionAssignmentRecord[]>("GET", `${sessionPath(id)}/spawns`, { signal }),
+
+  startSessionSpawn: (id: string, payload: StartSessionSpawnRequest) =>
+    request<SessionAssignmentRecord>("POST", `${sessionPath(id)}/spawns`, { body: payload }),
+
+  getSessionSpawn: (id: string, childId: string, signal?: AbortSignal) =>
+    request<SessionAssignmentRecord>(
+      "GET",
+      `${sessionPath(id)}/spawns/${encodeURIComponent(childId)}`,
+      { signal },
+    ),
+
+  cancelSessionSpawn: (id: string, childId: string) =>
+    request<SessionAssignmentRecord>(
+      "POST",
+      `${sessionPath(id)}/spawns/${encodeURIComponent(childId)}/cancel`,
     ),
 
   updateConfig: (id: string, payload: UpdateConfigRequest) =>

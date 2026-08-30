@@ -59,6 +59,7 @@ export const queryKeys = {
   sessionInbox: (id: string) => ["session", id, "inbox"] as const,
   traditionalChildren: (id: string) => ["session", id, "children"] as const,
   managedOrchestrators: (id: string) => ["session", id, "orchestrators"] as const,
+  sessionSpawns: (id: string) => ["session", id, "spawns"] as const,
   workspaceDiff: (
     id: string,
     path: string,

@@ -514,6 +514,8 @@ the Agent log as Agent.
 
 ### Phase 5 — unify spawn storage and names
 
+Landed. Dual-write `session_assignments` (schema 27). `GET`/`POST /sessions/{id}/spawns` is the unified resource; `/children` and `/orchestrators` stay as wrappers. Agent tools are `session_*`. Old spawn tables are not dropped in this release.
+
 Goal: one table, one HTTP resource, one tool family.
 
 1. Dual-write `session_assignments`.

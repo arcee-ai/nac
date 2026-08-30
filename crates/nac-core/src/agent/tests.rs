@@ -235,13 +235,13 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         parent.messages.first(),
         Some(Message::System { content })
             if content.contains("Managed orchestration")
-                && content.contains("separate durable NAC orchestrator sessions")
+                && content.contains("separate durable NAC sessions")
     ));
     assert!(matches!(
         delegating.messages.first(),
         Some(Message::System { content })
             if content.contains("Managed orchestration")
-                && content.contains("separate durable NAC orchestrator sessions")
+                && content.contains("separate durable NAC sessions")
     ));
 
     crate::store::begin_traditional_child_run(
@@ -364,12 +364,12 @@ fn key_argument_preview_is_family_aware_and_fail_closed() {
         ("grep", r#"{"pattern":"AgentEvent"}"#, "AgentEvent"),
         ("web_search", r#"{"query":"NAC docs"}"#, "NAC docs"),
         (
-            "orchestrator_launch",
+            "session_spawn",
             r#"{"description":"Audit storage","prompt":"SECRET_PROMPT"}"#,
             "Audit storage",
         ),
         (
-            "subagent",
+            "session_spawn",
             r#"{"description":"Review tests","prompt":"SECRET_PROMPT"}"#,
             "Review tests",
         ),

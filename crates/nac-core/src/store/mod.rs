@@ -13,6 +13,7 @@ mod projects;
 mod render;
 mod run_recovery;
 mod schema;
+mod session_assignments;
 mod session_forks;
 mod session_goals;
 mod session_handoffs;
@@ -42,6 +43,13 @@ pub use run_recovery::{
     RunRecoveryRecord, RunRecoveryStatus, RunTerminalDisposition,
 };
 pub use schema::{check_readiness, default_store_path, initialize, schema_version};
+pub use session_assignments::{
+    list_session_assignments, load_session_assignment, load_session_assignment_for_parent,
+    SessionAssignmentChildBehavior, SessionAssignmentRecord,
+};
+pub(crate) use session_assignments::{
+    sync_assignment_from_managed_orchestrator, sync_assignment_from_traditional_child,
+};
 pub use session_forks::{
     clone_session_conversation_artifacts, dismiss_session_fork, insert_session_fork,
     list_session_forks, SessionForkLink, SessionForkOrigin,

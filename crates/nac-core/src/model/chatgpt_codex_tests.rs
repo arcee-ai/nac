@@ -505,10 +505,7 @@ fn codex_request_preserves_nullable_new_delegation_contracts() {
     );
     let tools = request["tools"].as_array().expect("Codex request tools");
 
-    for (tool_name, session_id) in [
-        ("subagent", "child_session_id"),
-        ("orchestrator_launch", "orchestrator_session_id"),
-    ] {
+    for (tool_name, session_id) in [("session_spawn", "child_session_id")] {
         let tool = tools
             .iter()
             .find(|tool| tool["name"] == tool_name)

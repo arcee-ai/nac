@@ -86,6 +86,14 @@ impl SessionBehavior {
     pub const fn is_nac(self) -> bool {
         matches!(self, Self::Orchestrator)
     }
+
+    /// New rows persist only `direct` or `orchestrator`.
+    pub const fn for_create(self) -> Self {
+        match self {
+            Self::DirectWithOrchestrator => Self::Direct,
+            other => other,
+        }
+    }
 }
 
 /// Fail-closed product rule: NAC plans through threads and worksets only.

@@ -2,7 +2,8 @@ use anyhow::{anyhow, Result};
 use nac_core::{
     sessions,
     store::{
-        ManagedOrchestratorExecutionMode, ManagedOrchestratorRecord, TraditionalChildExecutionMode,
+        ManagedOrchestratorExecutionMode, ManagedOrchestratorRecord,
+        SessionAssignmentChildBehavior, SessionAssignmentRecord, TraditionalChildExecutionMode,
         TraditionalChildRecord,
     },
 };
@@ -21,6 +22,14 @@ pub(crate) struct StartManagedOrchestrator {
     pub(crate) description: String,
     pub(crate) prompt: String,
     pub(crate) orchestrator_session_id: Option<String>,
+    pub(crate) background: bool,
+}
+
+pub(crate) struct StartSessionSpawn {
+    pub(crate) behavior: SessionAssignmentChildBehavior,
+    pub(crate) description: String,
+    pub(crate) prompt: String,
+    pub(crate) child_session_id: Option<String>,
     pub(crate) background: bool,
 }
 
@@ -189,5 +198,93 @@ impl<'a> DelegationApplication<'a> {
         nac_core::orchestration_control::controller_for(&self.manager.inner.store_path)?
             .cancel(parent_session_id, orchestrator_session_id)
             .await
+    }
+
+    pub(crate) async fn list_session_assignments(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<Vec<SessionAssignmentRecord>> {
+        let service = self.manager.attach_session(parent_session_id).await?;
+        if service.metadata().behavior.is_nac() {
+            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
+        }
+        if nac_core::store::assignment_is_open(&self.manager.inner.store_path, parent_session_id)? {
+            return Err(anyhow!("running assigned sessions cannot launch children"));
+        }
+        nac_core::store::list_session_assignments(&self.manager.inner.store_path, parent_session_id)
+    }
+
+    pub(crate) async fn start_session_spawn(
+        &self,
+        parent_session_id: &str,
+        command: StartSessionSpawn,
+    ) -> Result<SessionAssignmentRecord> {
+        let child_session_id = match command.behavior {
+            SessionAssignmentChildBehavior::Direct => {
+                self.start_traditional_child(
+                    parent_session_id,
+                    StartTraditionalChild {
+                        profile: nac_core::store::GENERAL_CHILD_PROFILE.to_string(),
+                        description: command.description,
+                        prompt: command.prompt,
+                        child_session_id: command.child_session_id,
+                        background: command.background,
+                    },
+                )
+                .await?
+                .child_session_id
+            }
+            SessionAssignmentChildBehavior::Orchestrator => {
+                self.start_managed_orchestrator(
+                    parent_session_id,
+                    StartManagedOrchestrator {
+                        description: command.description,
+                        prompt: command.prompt,
+                        orchestrator_session_id: command.child_session_id,
+                        background: command.background,
+                    },
+                )
+                .await?
+                .orchestrator_session_id
+            }
+        };
+        nac_core::store::load_session_assignment_for_parent(
+            &self.manager.inner.store_path,
+            parent_session_id,
+            &child_session_id,
+        )?
+        .ok_or_else(|| anyhow!("session assignment disappeared after spawn"))
+    }
+
+    pub(crate) fn session_assignment(
+        &self,
+        parent_session_id: &str,
+        child_session_id: &str,
+    ) -> Result<SessionAssignmentRecord> {
+        nac_core::store::load_session_assignment_for_parent(
+            &self.manager.inner.store_path,
+            parent_session_id,
+            child_session_id,
+        )?
+        .ok_or_else(|| anyhow!("session assignment was not found"))
+    }
+
+    pub(crate) async fn cancel_session_spawn(
+        &self,
+        parent_session_id: &str,
+        child_session_id: &str,
+    ) -> Result<SessionAssignmentRecord> {
+        let assignment = self.session_assignment(parent_session_id, child_session_id)?;
+        match assignment.child_behavior {
+            SessionAssignmentChildBehavior::Direct => {
+                self.cancel_traditional_child(parent_session_id, child_session_id)
+                    .await?;
+            }
+            SessionAssignmentChildBehavior::Orchestrator => {
+                self.cancel_managed_orchestrator(parent_session_id, child_session_id)
+                    .await?;
+            }
+        }
+        self.session_assignment(parent_session_id, child_session_id)
     }
 }

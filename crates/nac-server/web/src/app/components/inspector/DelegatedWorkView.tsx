@@ -12,8 +12,7 @@ import {
   TextAreaSize,
 } from "@/app/atoms";
 import {
-  presentManagedOrchestrator,
-  presentTraditionalChild,
+  presentSessionAssignment,
   type DelegatedSessionPresentation,
 } from "@/app/features/delegation/model";
 import { DelegatedSessionRow } from "@/app/features/delegation/presentation/DelegatedSessionRow";
@@ -21,12 +20,9 @@ import { toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
-  useCancelManagedOrchestrator,
-  useCancelTraditionalChild,
-  useManagedOrchestrators,
-  useStartManagedOrchestrator,
-  useStartTraditionalChild,
-  useTraditionalChildren,
+  useCancelSessionSpawn,
+  useSessionSpawns,
+  useStartSessionSpawn,
 } from "@/app/services/queries";
 import { isAgentBehavior } from "@/app/lib/sessionBehavior";
 import type { SessionBehavior } from "@/app/types/api";
@@ -62,25 +58,17 @@ export function DelegatedWorkView({
   sessionId: string;
   behavior: SessionBehavior;
 }) {
-  const children = useTraditionalChildren(sessionId, true);
-  const supportsOrchestrators = isAgentBehavior(behavior);
-  const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
-  const startChild = useStartTraditionalChild();
-  const cancelChild = useCancelTraditionalChild();
-  const startOrchestrator = useStartManagedOrchestrator();
-  const cancelOrchestrator = useCancelManagedOrchestrator();
+  const enabled = isAgentBehavior(behavior);
+  const assignments = useSessionSpawns(sessionId, enabled);
+  const startSpawn = useStartSessionSpawn();
+  const cancelSpawn = useCancelSessionSpawn();
   const toast = useToast();
   const navigate = useNavigate();
   const [selected, setSelected] = useState<DelegatedSessionPresentation | null>(null);
   const [prompt, setPrompt] = useState("");
   const [background, setBackground] = useState(true);
-  const childRows = (children.data ?? []).map(presentTraditionalChild);
-  const orchestratorRows = (orchestrators.data ?? []).map(presentManagedOrchestrator);
-  const busy =
-    startChild.isPending ||
-    cancelChild.isPending ||
-    startOrchestrator.isPending ||
-    cancelOrchestrator.isPending;
+  const rows = (assignments.data ?? []).map(presentSessionAssignment);
+  const busy = startSpawn.isPending || cancelSpawn.isPending;
 
   const openPrompt = (row: DelegatedSessionPresentation) => {
     setSelected(row);
@@ -93,28 +81,16 @@ export function DelegatedWorkView({
       return;
     }
     try {
-      if (selected.kind === "coding-agent") {
-        await startChild.mutateAsync({
-          sessionId,
-          payload: {
-            profile: "general",
-            child_session_id: selected.id,
-            description: selected.description,
-            prompt: prompt.trim(),
-            background,
-          },
-        });
-      } else {
-        await startOrchestrator.mutateAsync({
-          sessionId,
-          payload: {
-            orchestrator_session_id: selected.id,
-            description: selected.description,
-            prompt: prompt.trim(),
-            background,
-          },
-        });
-      }
+      await startSpawn.mutateAsync({
+        sessionId,
+        payload: {
+          behavior: selected.kind === "coding-agent" ? "direct" : "orchestrator",
+          child_session_id: selected.id,
+          description: selected.description,
+          prompt: prompt.trim(),
+          background,
+        },
+      });
       setSelected(null);
       setPrompt("");
     } catch (error) {
@@ -123,11 +99,7 @@ export function DelegatedWorkView({
   };
   const cancel = async (row: DelegatedSessionPresentation) => {
     try {
-      if (row.kind === "coding-agent") {
-        await cancelChild.mutateAsync({ sessionId, childId: row.id });
-      } else {
-        await cancelOrchestrator.mutateAsync({ sessionId, orchestratorId: row.id });
-      }
+      await cancelSpawn.mutateAsync({ sessionId, childId: row.id });
     } catch (error) {
       toast.error(`Unable to cancel delegated work: ${errorMessage(toRunError(error))}`);
     }
@@ -152,42 +124,24 @@ export function DelegatedWorkView({
           finished generation, or cancel active work here.
         </p>
       </div>
-      <section aria-labelledby="coding-agents-heading" className="flex flex-col gap-2">
-        <h3 id="coding-agents-heading" className="tag-label uppercase text-basic-secondary">
-          Coding agents
+      <section aria-labelledby="delegated-work-heading" className="flex flex-col gap-2">
+        <h3 id="delegated-work-heading" className="tag-label uppercase text-basic-secondary">
+          Assignments
         </h3>
-        {children.isPending ? (
+        {!enabled ? (
+          <Empty>NAC sessions do not own delegated work.</Empty>
+        ) : assignments.isPending ? (
           <div role="status" className="text-small text-basic-secondary">
-            Loading coding agents…
+            Loading delegated work…
           </div>
-        ) : children.isError ? (
-          <QueryError label="Coding agents" retry={() => void children.refetch()} />
-        ) : childRows.length ? (
-          childRows.map(renderRow)
+        ) : assignments.isError ? (
+          <QueryError label="Delegated work" retry={() => void assignments.refetch()} />
+        ) : rows.length ? (
+          rows.map(renderRow)
         ) : (
-          <Empty>None yet. Launch a coding agent from the people control below the composer.</Empty>
+          <Empty>None yet. Spawn an Agent or NAC session from this chat.</Empty>
         )}
       </section>
-      {supportsOrchestrators ? (
-        <section aria-labelledby="nac-orchestrators-heading" className="flex flex-col gap-2">
-          <h3 id="nac-orchestrators-heading" className="tag-label uppercase text-basic-secondary">
-            NAC orchestrators
-          </h3>
-          {orchestrators.isPending ? (
-            <div role="status" className="text-small text-basic-secondary">
-              Loading NAC orchestrators…
-            </div>
-          ) : orchestrators.isError ? (
-            <QueryError label="NAC orchestrators" retry={() => void orchestrators.refetch()} />
-          ) : orchestratorRows.length ? (
-            orchestratorRows.map(renderRow)
-          ) : (
-            <Empty>
-              None yet. Launch a NAC orchestrator from the flow control below the composer.
-            </Empty>
-          )}
-        </section>
-      ) : null}
       <Modal
         open={selected != null}
         onClose={() => setSelected(null)}
@@ -215,7 +169,7 @@ export function DelegatedWorkView({
             </label>
             <Button
               variant={ButtonVariant.Primary}
-              loading={startChild.isPending || startOrchestrator.isPending}
+              loading={startSpawn.isPending}
               disabled={busy}
               onClick={() => void submit()}
             >

@@ -1,6 +1,7 @@
 import { formatStoreTime } from "@/app/lib/format";
 import type {
   ManagedOrchestratorRecord,
+  SessionAssignmentRecord,
   TraditionalChildRecord,
   TraditionalChildStatus,
 } from "@/app/types/api";
@@ -44,7 +45,7 @@ function nonempty(value: string | null | undefined): string | null {
 }
 
 function common(
-  record: TraditionalChildRecord | ManagedOrchestratorRecord,
+  record: TraditionalChildRecord | ManagedOrchestratorRecord | SessionAssignmentRecord,
   kind: DelegatedSessionKind,
   id: string,
 ): Omit<DelegatedSessionPresentation, "outcomeLabel" | "outcome"> {
@@ -104,5 +105,28 @@ export function presentManagedOrchestrator(
     ...common(orchestrator, "nac-orchestrator", orchestrator.orchestrator_session_id),
     outcomeLabel: failure ? "Error" : report ? "Outcome" : null,
     outcome: failure ?? report,
+  };
+}
+
+export function presentSessionAssignment(
+  assignment: SessionAssignmentRecord,
+): DelegatedSessionPresentation {
+  const kind = assignment.child_behavior === "direct" ? "coding-agent" : "nac-orchestrator";
+  const failure = nonempty(assignment.failure);
+  const report = nonempty(assignment.report);
+  const changes = nonempty(assignment.change_summary);
+  const verification = nonempty(assignment.verification_summary);
+  return {
+    ...common(assignment, kind, assignment.child_session_id),
+    outcomeLabel: failure
+      ? "Error"
+      : report
+        ? "Outcome"
+        : changes
+          ? "Changes"
+          : verification
+            ? "Verification"
+            : null,
+    outcome: failure ?? report ?? changes ?? verification,
   };
 }

@@ -205,6 +205,12 @@ export type ManagedOrchestratorRecord = ApiSchema<"ManagedOrchestratorRecord">;
 
 export type StartManagedOrchestratorRequest = ApiSchema<"StartManagedOrchestratorRequest">;
 
+export type SessionAssignmentChildBehavior = ApiSchema<"SessionAssignmentChildBehavior">;
+
+export type SessionAssignmentRecord = ApiSchema<"SessionAssignmentRecord">;
+
+export type StartSessionSpawnRequest = ApiSchema<"StartSessionSpawnRequest">;
+
 export type SessionEventBoundary = ApiSchema<"SessionEventBoundary">;
 
 export type SessionEventEnvelope = ApiSchema<"SessionEventEnvelope">;

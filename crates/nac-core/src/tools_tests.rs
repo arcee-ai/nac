@@ -194,7 +194,7 @@ fn direct_registries_preserve_exact_topology_capabilities() {
         .iter()
         .all(|name| !running_assigned.iter().any(|assigned| assigned == name)));
     assert_eq!(delegating, super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES);
-    assert_eq!(&delegating[14..], super::ORCHESTRATOR_CONTROL_TOOL_NAMES);
+    assert_eq!(&delegating[11..], super::ORCHESTRATOR_CONTROL_TOOL_NAMES);
     assert_eq!(&direct_web[..super::DIRECT_TOOL_NAMES.len()], &direct);
     assert_eq!(
         &direct_web[super::DIRECT_TOOL_NAMES.len()..],
@@ -238,10 +238,7 @@ fn direct_registries_preserve_exact_topology_capabilities() {
 #[test]
 fn launch_tools_use_strict_compatible_nullable_new_session_ids() {
     let definitions = super::direct_with_orchestrator_tool_definitions(false);
-    for (tool_name, session_id) in [
-        ("subagent", "child_session_id"),
-        ("orchestrator_launch", "orchestrator_session_id"),
-    ] {
+    for (tool_name, session_id) in [("session_spawn", "child_session_id")] {
         let parameters = &definitions
             .iter()
             .find(|definition| definition.function.name == tool_name)

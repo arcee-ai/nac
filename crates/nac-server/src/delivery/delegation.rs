@@ -3,11 +3,14 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use nac_core::store::{ManagedOrchestratorRecord, TraditionalChildRecord};
+use nac_core::store::{
+    ManagedOrchestratorRecord, SessionAssignmentChildBehavior, SessionAssignmentRecord,
+    TraditionalChildRecord,
+};
 use serde::Deserialize;
 
 use crate::{
-    application::delegation::{StartManagedOrchestrator, StartTraditionalChild},
+    application::delegation::{StartManagedOrchestrator, StartSessionSpawn, StartTraditionalChild},
     ApiError, ApiErrorBody, SessionManager,
 };
 
@@ -26,6 +29,16 @@ pub struct StartManagedOrchestratorRequest {
     pub description: String,
     pub prompt: String,
     pub orchestrator_session_id: Option<String>,
+    #[serde(default)]
+    pub background: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct StartSessionSpawnRequest {
+    pub behavior: SessionAssignmentChildBehavior,
+    pub description: String,
+    pub prompt: String,
+    pub child_session_id: Option<String>,
     #[serde(default)]
     pub background: bool,
 }
@@ -208,6 +221,98 @@ pub(crate) async fn cancel_managed_orchestrator(
         manager
             .delegation()
             .cancel_managed_orchestrator(&session_id, &orchestrator_session_id)
+            .await?,
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/spawns",
+    operation_id = "get_sessions_session_id_spawns",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Session assignments", body = Vec<SessionAssignmentRecord>, content_type = "application/json"), (status = 400, description = "Agent parent required", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Session not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn list_session_spawns(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> Result<Json<Vec<SessionAssignmentRecord>>, ApiError> {
+    Ok(Json(
+        manager
+            .delegation()
+            .list_session_assignments(&session_id)
+            .await?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/spawns",
+    operation_id = "post_sessions_session_id_spawns",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    request_body(content = StartSessionSpawnRequest, content_type = "application/json"),
+    responses((status = 201, description = "Assignment created, continued, or steered", body = SessionAssignmentRecord, content_type = "application/json"), (status = 400, description = "Invalid spawn request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Session not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Assignment concurrency or run conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn start_session_spawn(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: Result<Json<StartSessionSpawnRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<SessionAssignmentRecord>), ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let command = StartSessionSpawn {
+        behavior: request.behavior,
+        description: request.description,
+        prompt: request.prompt,
+        child_session_id: request.child_session_id,
+        background: request.background,
+    };
+    Ok((
+        StatusCode::CREATED,
+        Json(
+            manager
+                .delegation()
+                .start_session_spawn(&session_id, command)
+                .await?,
+        ),
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/sessions/{session_id}/spawns/{child_session_id}",
+    operation_id = "get_sessions_session_id_spawns_child_session_id",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("child_session_id" = String, Path)),
+    responses((status = 200, description = "Session assignment status", body = SessionAssignmentRecord, content_type = "application/json"), (status = 404, description = "Assignment not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn get_session_spawn(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, child_session_id)): AxumPath<(String, String)>,
+) -> Result<Json<SessionAssignmentRecord>, ApiError> {
+    Ok(Json(
+        manager
+            .delegation()
+            .session_assignment(&session_id, &child_session_id)?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/spawns/{child_session_id}/cancel",
+    operation_id = "post_sessions_session_id_spawns_child_session_id_cancel",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("child_session_id" = String, Path)),
+    responses((status = 200, description = "Session assignment cancelled", body = SessionAssignmentRecord, content_type = "application/json"), (status = 404, description = "Assignment not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Assignment run is remote or unavailable", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn cancel_session_spawn(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, child_session_id)): AxumPath<(String, String)>,
+) -> Result<Json<SessionAssignmentRecord>, ApiError> {
+    Ok(Json(
+        manager
+            .delegation()
+            .cancel_session_spawn(&session_id, &child_session_id)
             .await?,
     ))
 }

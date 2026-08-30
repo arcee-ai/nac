@@ -379,7 +379,7 @@ describe("delegated completion turns", () => {
       ],
       "direct",
     );
-    value.primary_tool_events = [primaryStart("completion", "subagent", "Review UI")];
+    value.primary_tool_events = [primaryStart("completion", "session_spawn", "Review UI")];
     const turns = buildTranscript(value, {});
     expect(turns[0]?.kind).toBe("delegated-completion");
     expect(toolDetails(turns)).toEqual([]);

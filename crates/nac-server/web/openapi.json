@@ -5907,6 +5907,273 @@
         }
       }
     },
+    "/sessions/{session_id}/spawns": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_spawns",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session assignments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionAssignmentRecord"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Agent parent required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_spawns",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartSessionSpawnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Assignment created, continued, or steered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAssignmentRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid spawn request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Assignment concurrency or run conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/spawns/{child_session_id}": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_spawns_child_session_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "child_session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session assignment status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAssignmentRecord"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Assignment not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/spawns/{child_session_id}/cancel": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_spawns_child_session_id_cancel",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "child_session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session assignment cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAssignmentRecord"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Assignment not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Assignment run is remote or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/steering": {
       "post": {
         "tags": [
@@ -11718,6 +11985,138 @@
           }
         }
       },
+      "SessionAssignmentChildBehavior": {
+        "type": "string",
+        "enum": [
+          "direct",
+          "orchestrator"
+        ]
+      },
+      "SessionAssignmentRecord": {
+        "type": "object",
+        "required": [
+          "assignment_id",
+          "child_session_id",
+          "parent_session_id",
+          "root_session_id",
+          "child_behavior",
+          "parent_behavior",
+          "description",
+          "status",
+          "generation",
+          "run_id",
+          "execution_mode",
+          "report",
+          "failure",
+          "change_summary",
+          "verification_summary",
+          "completion_inbox_id",
+          "completion_suppressed",
+          "frozen_message_count",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "assignment_id": {
+            "type": "string"
+          },
+          "change_summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "child_behavior": {
+            "$ref": "#/components/schemas/SessionAssignmentChildBehavior"
+          },
+          "child_session_id": {
+            "type": "string"
+          },
+          "completion_inbox_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "completion_suppressed": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "execution_mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TraditionalChildExecutionMode"
+              }
+            ]
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "frozen_message_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "parent_behavior": {
+            "$ref": "#/components/schemas/SessionBehavior"
+          },
+          "parent_session_id": {
+            "type": "string"
+          },
+          "report": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "root_session_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/TraditionalChildStatus"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "verification_summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "SessionBehavior": {
         "type": "string",
         "description": "Immutable execution behavior selected when a top-level session is created.\nStored as text so future behaviors can fail closed instead of being\nmisinterpreted as the orchestrator.",
@@ -12839,6 +13238,34 @@
               "string",
               "null"
             ]
+          },
+          "prompt": {
+            "type": "string"
+          }
+        }
+      },
+      "StartSessionSpawnRequest": {
+        "type": "object",
+        "required": [
+          "behavior",
+          "description",
+          "prompt"
+        ],
+        "properties": {
+          "background": {
+            "type": "boolean"
+          },
+          "behavior": {
+            "$ref": "#/components/schemas/SessionAssignmentChildBehavior"
+          },
+          "child_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
           },
           "prompt": {
             "type": "string"

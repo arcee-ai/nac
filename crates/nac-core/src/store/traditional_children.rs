@@ -313,8 +313,10 @@ fn create_traditional_child_relationship_with_connection(
             now
         ],
     )?;
-    load_child_with_connection(connection, child_session_id)?
-        .ok_or_else(|| anyhow!("traditional child relationship disappeared after creation"))
+    let child = load_child_with_connection(connection, child_session_id)?
+        .ok_or_else(|| anyhow!("traditional child relationship disappeared after creation"))?;
+    sync_assignment_from_traditional_child(connection, child_session_id)?;
+    Ok(child)
 }
 
 pub fn load_traditional_child(
@@ -435,6 +437,7 @@ pub fn begin_traditional_child_run(
     )?;
     let child = load_child_with_connection(&transaction, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child disappeared during run admission"))?;
+    sync_assignment_from_traditional_child(&transaction, child_session_id)?;
     transaction.commit()?;
     Ok(child)
 }
@@ -462,6 +465,7 @@ pub fn suppress_traditional_child_completion(
             "traditional child session '{child_session_id}' changed while suppressing completion"
         ));
     }
+    sync_assignment_from_traditional_child(&connection, child_session_id)?;
     load_child_with_connection(&connection, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child disappeared during completion suppression"))
 }
@@ -516,6 +520,7 @@ pub fn restore_traditional_child_completion(
             "traditional child session '{child_session_id}' changed while restoring completion"
         ));
     }
+    sync_assignment_from_traditional_child(&transaction, child_session_id)?;
     transaction.commit()?;
     Ok(())
 }
@@ -606,6 +611,7 @@ pub fn settle_traditional_child_run(
         settled = load_child_with_connection(&transaction, child_session_id)?
             .ok_or_else(|| anyhow!("traditional child disappeared after completion delivery"))?;
     }
+    sync_assignment_from_traditional_child(&transaction, child_session_id)?;
     transaction.commit()?;
     Ok(TraditionalChildSettlement {
         child: settled,

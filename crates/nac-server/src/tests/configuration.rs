@@ -70,13 +70,13 @@ threshold_tokens = 64000
             })
             .await
             .expect("an explicitly selected direct behavior should launch");
-        assert_eq!(direct.metadata.behavior, behavior);
+        assert_eq!(direct.metadata.behavior, behavior.for_create());
         let direct_id = direct.metadata.session_id.unwrap();
         assert_eq!(
             sessions::load_session(&root.join("store.db"), &direct_id)
                 .unwrap()
                 .behavior,
-            behavior
+            behavior.for_create()
         );
         assert_eq!(
             manager
@@ -85,7 +85,7 @@ threshold_tokens = 64000
                 .unwrap()
                 .metadata()
                 .behavior,
-            behavior
+            behavior.for_create()
         );
     }
 

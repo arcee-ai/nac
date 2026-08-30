@@ -62,6 +62,8 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
         "GET",
         "/sessions/{session_id}/orchestrators/{orchestrator_session_id}",
     ),
+    ("GET", "/sessions/{session_id}/spawns"),
+    ("GET", "/sessions/{session_id}/spawns/{child_session_id}"),
     ("GET", "/sessions/{session_id}/permissions"),
     ("GET", "/sessions/{session_id}/threads/{thread_name}/events"),
     ("GET", "/sessions/{session_id}/workspace/branches"),
@@ -109,6 +111,11 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     (
         "POST",
         "/sessions/{session_id}/orchestrators/{orchestrator_session_id}/cancel",
+    ),
+    ("POST", "/sessions/{session_id}/spawns"),
+    (
+        "POST",
+        "/sessions/{session_id}/spawns/{child_session_id}/cancel",
     ),
     ("POST", "/sessions/{session_id}/permissions/{request_id}"),
     ("POST", "/sessions/{session_id}/continue"),

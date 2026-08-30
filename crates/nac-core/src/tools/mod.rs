@@ -30,6 +30,7 @@ pub(crate) mod mutation;
 pub(crate) mod orchestrator;
 pub mod read;
 mod runtime_context;
+pub(crate) mod session;
 pub(crate) mod subagent;
 mod terminal_tools;
 pub mod thread;
@@ -142,7 +143,7 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
 ];
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 20] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 17] = [
     "read",
     "write",
     "edit",
@@ -154,35 +155,29 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 20] = [
     "create_goal",
     "get_goal",
     "update_goal",
-    "subagent",
-    "subagent_status",
-    "subagent_cancel",
-    "orchestrator_launch",
-    "orchestrator_status",
-    "orchestrator_steer",
-    "orchestrator_read",
-    "orchestrator_wait",
-    "orchestrator_cancel",
+    "session_spawn",
+    "session_status",
+    "session_steer",
+    "session_read",
+    "session_wait",
+    "session_cancel",
 ];
 pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
-    "orchestrator_launch",
-    "orchestrator_status",
-    "orchestrator_steer",
-    "orchestrator_read",
-    "orchestrator_wait",
-    "orchestrator_cancel",
+    "session_spawn",
+    "session_status",
+    "session_steer",
+    "session_read",
+    "session_wait",
+    "session_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const SPAWN_TOOL_NAMES: [&str; 9] = [
-    "subagent",
-    "subagent_status",
-    "subagent_cancel",
-    "orchestrator_launch",
-    "orchestrator_status",
-    "orchestrator_steer",
-    "orchestrator_read",
-    "orchestrator_wait",
-    "orchestrator_cancel",
+pub(crate) const SPAWN_TOOL_NAMES: [&str; 6] = [
+    "session_spawn",
+    "session_status",
+    "session_steer",
+    "session_read",
+    "session_wait",
+    "session_cancel",
 ];
 /// Agent tools minus spawn and `create_goal`, used while an assignment is open.
 pub(crate) const RUNNING_ASSIGNED_DIRECT_TOOL_NAMES: [&str; 10] = [
@@ -198,7 +193,7 @@ pub(crate) const RUNNING_ASSIGNED_DIRECT_TOOL_NAMES: [&str; 10] = [
     "update_goal",
 ];
 /// Compatibility alias: every Agent now has NAC spawn tools.
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 20] = DIRECT_TOOL_NAMES;
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 17] = DIRECT_TOOL_NAMES;
 
 fn worker_tool_registry(
     image_read: bool,
@@ -224,6 +219,12 @@ fn worker_tool_registry(
         .register(orchestrator::ReadTool)
         .register(orchestrator::WaitTool)
         .register(orchestrator::CancelTool)
+        .register(session::SessionSpawnTool)
+        .register(session::SessionStatusTool)
+        .register(session::SessionSteerTool)
+        .register(session::SessionReadTool)
+        .register(session::SessionWaitTool)
+        .register(session::SessionCancelTool)
         .register(web::WebSearchTool)
         .register(web::WebFetchTool)
         .finish()?;

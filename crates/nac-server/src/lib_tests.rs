@@ -771,3 +771,5 @@ mod presentation;
 mod project_routes;
 #[path = "tests/recovery.rs"]
 mod recovery;
+#[path = "tests/spawns.rs"]
+mod spawns;

@@ -726,6 +726,30 @@ export interface components {
       shm_size?: string | null;
       workdir?: string | null;
     };
+    SessionAssignmentChildBehavior: "direct" | "orchestrator";
+    SessionAssignmentRecord: {
+      assignment_id: string;
+      change_summary: string | null;
+      child_behavior: components["schemas"]["SessionAssignmentChildBehavior"];
+      child_session_id: string;
+      completion_inbox_id: number | null;
+      completion_suppressed: boolean;
+      created_at: string;
+      description: string;
+      execution_mode: null | components["schemas"]["TraditionalChildExecutionMode"];
+      failure: string | null;
+      frozen_message_count: number | null;
+      generation: number;
+      parent_behavior: components["schemas"]["SessionBehavior"];
+      parent_session_id: string;
+      report: string | null;
+      root_session_id: string;
+      run_id: string | null;
+      status: components["schemas"]["TraditionalChildStatus"];
+      updated_at: string;
+      verification_summary: string | null;
+      version: number;
+    };
     SessionBehavior: "orchestrator" | "direct" | "direct-with-orchestrator";
     SessionClientId: string;
     SessionEvent:
@@ -897,6 +921,13 @@ export interface components {
       background?: boolean;
       description: string;
       orchestrator_session_id?: string | null;
+      prompt: string;
+    };
+    StartSessionSpawnRequest: {
+      background?: boolean;
+      behavior: components["schemas"]["SessionAssignmentChildBehavior"];
+      child_session_id?: string | null;
+      description: string;
       prompt: string;
     };
     StartTraditionalChildRequest: {

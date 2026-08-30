@@ -605,11 +605,12 @@ mod tests {
         let client = crate::model::ModelClient::new_for_test();
 
         let foreground = crate::tools::execute_tool(
-            "orchestrator_launch",
+            "session_spawn",
             json!({
+                "behavior": "orchestrator",
                 "description": "implement persistence",
                 "prompt": "implement and verify",
-                "orchestrator_session_id": null,
+                "child_session_id": null,
                 "background": false
             }),
             &runtime,
@@ -622,10 +623,12 @@ mod tests {
         assert_eq!(foreground.status, ManagedOrchestratorStatus::Completed);
 
         let background = crate::tools::execute_tool(
-            "orchestrator_launch",
+            "session_spawn",
             json!({
+                "behavior": "orchestrator",
                 "description": "implement persistence",
                 "prompt": "continue in background",
+                "child_session_id": null,
                 "background": true
             }),
             &runtime,
@@ -681,10 +684,12 @@ mod tests {
 
         let launch = tokio::spawn(async move {
             crate::tools::execute_tool(
-                "orchestrator_launch",
+                "session_spawn",
                 json!({
+                    "behavior": "orchestrator",
                     "description": "implement persistence",
                     "prompt": "implement and verify",
+                    "child_session_id": null,
                     "background": false
                 }),
                 &runtime,
@@ -751,21 +756,17 @@ mod tests {
         ));
         let client = crate::model::ModelClient::new_for_test();
 
-        for tool in [
-            "orchestrator_status",
-            "orchestrator_wait",
-            "orchestrator_cancel",
-        ] {
+        for tool in ["session_status", "session_wait", "session_cancel"] {
             let foreign = crate::tools::execute_tool(
                 tool,
-                json!({"orchestrator_session_id": "orchestrator-a"}),
+                json!({"child_session_id": "orchestrator-a"}),
                 &runtime,
                 &client,
             )
             .await;
             let missing = crate::tools::execute_tool(
                 tool,
-                json!({"orchestrator_session_id": "missing"}),
+                json!({"child_session_id": "missing"}),
                 &runtime,
                 &client,
             )
@@ -778,7 +779,7 @@ mod tests {
             );
             assert_eq!(
                 foreign.content.as_text(),
-                Some("Error: managed orchestrator was not found")
+                Some("Error: session assignment was not found")
             );
         }
         assert_eq!(controller.cancels.load(Ordering::SeqCst), 0);

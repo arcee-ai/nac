@@ -65,9 +65,9 @@ describe("tool presentation mapper", () => {
       ["read_command_output", "Read command output"],
       ["web_search", "Search web"],
       ["web_fetch", "Fetch web page"],
-      ["subagent", "Start coding agent"],
-      ["orchestrator_launch", "Start NAC orchestrator"],
-      ["orchestrator_wait", "Wait for NAC orchestrator"],
+      ["session_spawn", "Start session"],
+      ["session_status", "Check session"],
+      ["session_wait", "Wait for session"],
     ] as const;
 
     for (const [name, label] of cases) {

@@ -615,7 +615,9 @@ export function Transcript({
                   actionsDisabled={actionsBusy}
                   readOnly={mutateLocked}
                   onRefresh={
-                    !mutateLocked && precedingUserIndex != null && refreshIndex === precedingUserIndex
+                    !mutateLocked &&
+                    precedingUserIndex != null &&
+                    refreshIndex === precedingUserIndex
                       ? resend
                       : null
                   }

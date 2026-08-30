@@ -186,8 +186,10 @@ fn create_managed_orchestrator_relationship_with_connection(
          VALUES (?1, ?2, ?2, ?3, 'idle', 0, ?4, ?4)",
         params![orchestrator_session_id, parent_session_id, description, now],
     )?;
-    load_with_connection(connection, orchestrator_session_id)?
-        .ok_or_else(|| anyhow!("managed orchestrator relationship disappeared after creation"))
+    let orchestrator = load_with_connection(connection, orchestrator_session_id)?
+        .ok_or_else(|| anyhow!("managed orchestrator relationship disappeared after creation"))?;
+    sync_assignment_from_managed_orchestrator(connection, orchestrator_session_id)?;
+    Ok(orchestrator)
 }
 
 pub fn load_managed_orchestrator(
@@ -341,6 +343,7 @@ pub fn begin_managed_orchestrator_run(
     }
     let record = load_with_connection(&transaction, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator disappeared during run admission"))?;
+    sync_assignment_from_managed_orchestrator(&transaction, orchestrator_session_id)?;
     transaction.commit()?;
     Ok(record)
 }
@@ -363,6 +366,7 @@ pub fn suppress_managed_orchestrator_completion(
             "managed orchestrator is not running or changed during completion suppression"
         ));
     }
+    sync_assignment_from_managed_orchestrator(&connection, orchestrator_session_id)?;
     load_with_connection(&connection, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator disappeared during completion suppression"))
 }
@@ -436,6 +440,7 @@ pub fn restore_managed_orchestrator_completion(
             "managed orchestrator '{orchestrator_session_id}' changed while restoring completion"
         ));
     }
+    sync_assignment_from_managed_orchestrator(&transaction, orchestrator_session_id)?;
     transaction.commit()?;
     Ok(())
 }
@@ -527,6 +532,7 @@ pub fn settle_managed_orchestrator_run(
         settled = load_with_connection(&transaction, orchestrator_session_id)?
             .ok_or_else(|| anyhow!("managed orchestrator disappeared after delivery"))?;
     }
+    sync_assignment_from_managed_orchestrator(&transaction, orchestrator_session_id)?;
     transaction.commit()?;
     Ok(ManagedOrchestratorSettlement {
         orchestrator: settled,

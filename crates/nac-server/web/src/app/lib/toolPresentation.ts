@@ -95,15 +95,12 @@ const TOOL_LABELS: Record<string, string> = {
   create_goal: "Create goal",
   get_goal: "Read goal",
   update_goal: "Update goal",
-  subagent: "Start coding agent",
-  subagent_status: "Check coding agent",
-  subagent_cancel: "Cancel coding agent",
-  orchestrator_launch: "Start NAC orchestrator",
-  orchestrator_status: "Check NAC orchestrator",
-  orchestrator_steer: "Steer NAC orchestrator",
-  orchestrator_read: "Read NAC orchestrator",
-  orchestrator_wait: "Wait for NAC orchestrator",
-  orchestrator_cancel: "Cancel NAC orchestrator",
+  session_spawn: "Start session",
+  session_status: "Check session",
+  session_steer: "Steer session",
+  session_read: "Read session",
+  session_wait: "Wait for session",
+  session_cancel: "Cancel session",
 };
 
 const STATUS_LABELS: Record<ToolPresentationStatus, string> = {

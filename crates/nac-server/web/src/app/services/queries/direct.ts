@@ -9,8 +9,10 @@ import type {
   ManagedOrchestratorRecord,
   PermissionReply,
   PermissionStateResponse,
+  SessionAssignmentRecord,
   SessionGoalRecord,
   StartManagedOrchestratorRequest,
+  StartSessionSpawnRequest,
   StartTraditionalChildRequest,
   TraditionalChildRecord,
   UpdateGoalRequest,
@@ -206,6 +208,57 @@ export function useCancelManagedOrchestrator() {
             candidate.orchestrator_session_id === orchestrator.orchestrator_session_id
               ? orchestrator
               : candidate,
+          ),
+      );
+    },
+  });
+}
+
+export function useSessionSpawns(sessionId: string, enabled: boolean) {
+  return useQuery<SessionAssignmentRecord[]>({
+    queryKey: queryKeys.sessionSpawns(sessionId),
+    queryFn: ({ signal }) => api.listSessionSpawns(sessionId, signal),
+    enabled,
+    refetchInterval: enabled ? 1_000 : false,
+    retry: false,
+  });
+}
+
+export function useStartSessionSpawn() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      payload,
+    }: {
+      sessionId: string;
+      payload: StartSessionSpawnRequest;
+    }) => api.startSessionSpawn(sessionId, payload),
+    onSuccess: (assignment, variables) => {
+      client.setQueryData<SessionAssignmentRecord[]>(
+        queryKeys.sessionSpawns(variables.sessionId),
+        (assignments = []) => {
+          const without = assignments.filter(
+            (candidate) => candidate.child_session_id !== assignment.child_session_id,
+          );
+          return [...without, assignment];
+        },
+      );
+    },
+  });
+}
+
+export function useCancelSessionSpawn() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, childId }: { sessionId: string; childId: string }) =>
+      api.cancelSessionSpawn(sessionId, childId),
+    onSuccess: (assignment, variables) => {
+      client.setQueryData<SessionAssignmentRecord[]>(
+        queryKeys.sessionSpawns(variables.sessionId),
+        (assignments = []) =>
+          assignments.map((candidate) =>
+            candidate.child_session_id === assignment.child_session_id ? assignment : candidate,
           ),
       );
     },

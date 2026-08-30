@@ -142,24 +142,15 @@ pub(crate) fn key_arg_preview(
         "update_goal" => get_str("status")
             .map(|value| truncate_string(&value, 120))
             .unwrap_or_default(),
-        "subagent" => get_str("description")
+        "session_spawn" => get_str("description")
             .or_else(|| get_str("child_session_id"))
             .map(|value| truncate_string(&value, 120))
             .unwrap_or_default(),
-        "subagent_status" | "subagent_cancel" => get_str("child_session_id")
-            .map(|value| truncate_string(&value, 120))
-            .unwrap_or_default(),
-        "orchestrator_launch" => get_str("description")
-            .or_else(|| get_str("orchestrator_session_id"))
-            .map(|value| truncate_string(&value, 120))
-            .unwrap_or_default(),
-        "orchestrator_status"
-        | "orchestrator_read"
-        | "orchestrator_wait"
-        | "orchestrator_cancel"
-        | "orchestrator_steer" => get_str("orchestrator_session_id")
-            .map(|value| truncate_string(&value, 120))
-            .unwrap_or_default(),
+        "session_status" | "session_read" | "session_wait" | "session_cancel" | "session_steer" => {
+            get_str("child_session_id")
+                .map(|value| truncate_string(&value, 120))
+                .unwrap_or_default()
+        }
         "thread" => {
             let name = get_str("name").unwrap_or_default();
             let action = get_str("action").unwrap_or_default();

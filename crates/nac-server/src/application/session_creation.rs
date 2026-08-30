@@ -242,7 +242,7 @@ impl<'a> SessionCreationApplication<'a> {
             }
         }
         self.manager.sweep_idle_sessions(None).await;
-        let behavior = request.behavior;
+        let behavior = request.behavior.for_create();
         let project_context = request
             .project_id
             .as_deref()
