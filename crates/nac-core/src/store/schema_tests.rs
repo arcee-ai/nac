@@ -109,6 +109,17 @@ fn insert_raw_checkpoint(
     )
 }
 
+fn table_present(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1
+         )",
+        params![table],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
 fn table_columns(conn: &Connection, table: &str) -> Vec<String> {
     let mut statement = conn
         .prepare(&format!("PRAGMA table_info({table})"))
@@ -226,52 +237,8 @@ fn assert_current_schema(conn: &Connection) {
             "version",
         ]
     );
-    assert_eq!(
-        table_columns(conn, "traditional_children"),
-        [
-            "child_session_id",
-            "parent_session_id",
-            "root_session_id",
-            "profile",
-            "description",
-            "nesting_depth",
-            "status",
-            "generation",
-            "run_id",
-            "execution_mode",
-            "report",
-            "failure",
-            "change_summary",
-            "verification_summary",
-            "completion_inbox_id",
-            "completion_suppressed",
-            "frozen_message_count",
-            "created_at",
-            "updated_at",
-            "version",
-        ]
-    );
-    assert_eq!(
-        table_columns(conn, "managed_orchestrators"),
-        [
-            "orchestrator_session_id",
-            "parent_session_id",
-            "root_session_id",
-            "description",
-            "status",
-            "generation",
-            "run_id",
-            "execution_mode",
-            "report",
-            "failure",
-            "completion_inbox_id",
-            "completion_suppressed",
-            "frozen_message_count",
-            "created_at",
-            "updated_at",
-            "version",
-        ]
-    );
+    assert!(!table_present(conn, "traditional_children"));
+    assert!(!table_present(conn, "managed_orchestrators"));
     assert_eq!(
         table_columns(conn, "session_handoffs"),
         [
@@ -315,8 +282,6 @@ fn assert_current_schema(conn: &Connection) {
         "thread_events",
         "session_inbox",
         "session_goals",
-        "traditional_children",
-        "managed_orchestrators",
         "session_assignments",
     ] {
         assert_session_cascade(conn, table);
@@ -494,7 +459,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 27);
+    assert_eq!(STORE_SCHEMA_VERSION, 28);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -612,26 +577,27 @@ fn v19_store_adds_durable_session_goals() {
 }
 
 #[test]
-fn v20_store_adds_durable_traditional_children() {
-    let path = temp_store_path("v20_traditional_children");
+fn v20_store_adds_session_assignments_without_legacy_child_tables() {
+    let path = temp_store_path("v20_session_assignments");
     initialize(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     legacy
-        .execute_batch("DROP TABLE traditional_children; PRAGMA user_version = 20;")
+        .execute_batch("DROP TABLE session_assignments; PRAGMA user_version = 20;")
         .unwrap();
     drop(legacy);
 
     initialize(&path).unwrap();
     let migrated = Connection::open(&path).unwrap();
     assert_eq!(
-        table_columns(&migrated, "traditional_children"),
+        table_columns(&migrated, "session_assignments"),
         [
+            "assignment_id",
             "child_session_id",
             "parent_session_id",
             "root_session_id",
-            "profile",
+            "child_behavior",
+            "parent_behavior",
             "description",
-            "nesting_depth",
             "status",
             "generation",
             "run_id",
@@ -648,6 +614,8 @@ fn v20_store_adds_durable_traditional_children() {
             "version",
         ]
     );
+    assert!(!table_present(&migrated, "traditional_children"));
+    assert!(!table_present(&migrated, "managed_orchestrators"));
     assert_eq!(
         migrated
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
@@ -658,38 +626,19 @@ fn v20_store_adds_durable_traditional_children() {
 }
 
 #[test]
-fn v21_store_adds_durable_managed_orchestrators() {
-    let path = temp_store_path("v21_managed_orchestrators");
+fn v21_store_does_not_recreate_managed_orchestrators() {
+    let path = temp_store_path("v21_no_managed_orchestrators");
     initialize(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     legacy
-        .execute_batch("DROP TABLE managed_orchestrators; PRAGMA user_version = 21;")
+        .execute_batch("DROP TABLE session_assignments; PRAGMA user_version = 21;")
         .unwrap();
     drop(legacy);
 
     initialize(&path).unwrap();
     let migrated = Connection::open(&path).unwrap();
-    assert_eq!(
-        table_columns(&migrated, "managed_orchestrators"),
-        [
-            "orchestrator_session_id",
-            "parent_session_id",
-            "root_session_id",
-            "description",
-            "status",
-            "generation",
-            "run_id",
-            "execution_mode",
-            "report",
-            "failure",
-            "completion_inbox_id",
-            "completion_suppressed",
-            "frozen_message_count",
-            "created_at",
-            "updated_at",
-            "version",
-        ]
-    );
+    assert!(table_present(&migrated, "session_assignments"));
+    assert!(!table_present(&migrated, "managed_orchestrators"));
     assert_eq!(
         migrated
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
@@ -700,15 +649,13 @@ fn v21_store_adds_durable_managed_orchestrators() {
 }
 
 #[test]
-fn v22_store_adds_relationship_completion_obligations() {
+fn v22_store_keeps_completion_obligations_on_session_assignments() {
     let path = temp_store_path("v22_relationship_obligations");
     initialize(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     legacy
         .execute_batch(
-            "ALTER TABLE traditional_children DROP COLUMN completion_suppressed;
-             ALTER TABLE managed_orchestrators DROP COLUMN completion_suppressed;
-             ALTER TABLE session_run_recovery DROP COLUMN terminal_disposition;
+            "ALTER TABLE session_run_recovery DROP COLUMN terminal_disposition;
              PRAGMA user_version = 22;",
         )
         .unwrap();
@@ -716,12 +663,86 @@ fn v22_store_adds_relationship_completion_obligations() {
 
     initialize(&path).unwrap();
     let migrated = Connection::open(&path).unwrap();
-    assert!(table_columns(&migrated, "traditional_children")
+    assert!(table_columns(&migrated, "session_assignments")
         .contains(&"completion_suppressed".to_string()));
-    assert!(table_columns(&migrated, "managed_orchestrators")
-        .contains(&"completion_suppressed".to_string()));
+    assert!(!table_present(&migrated, "traditional_children"));
+    assert!(!table_present(&migrated, "managed_orchestrators"));
     assert!(table_columns(&migrated, "session_run_recovery")
         .contains(&"terminal_disposition".to_string()));
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v27_store_drops_legacy_assignment_tables_after_backfill() {
+    let path = temp_store_path("v27_drop_legacy_assignments");
+    initialize(&path).unwrap();
+    crate::store::insert_test_session(&path, "parent");
+    crate::store::insert_test_session(&path, "child");
+    crate::store::insert_test_session(&path, "orchestrator");
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute(
+            "UPDATE sessions SET behavior = CASE session_id
+                WHEN 'parent' THEN 'direct'
+                WHEN 'child' THEN 'direct'
+                ELSE 'orchestrator' END
+             WHERE session_id IN ('parent', 'child', 'orchestrator')",
+            [],
+        )
+        .unwrap();
+    super::create_traditional_children_table(&legacy).unwrap();
+    super::create_managed_orchestrators_table(&legacy).unwrap();
+    legacy
+        .execute(
+            "INSERT INTO traditional_children
+             (child_session_id, parent_session_id, root_session_id, profile,
+              description, nesting_depth, status, generation, created_at, updated_at)
+             VALUES ('child', 'parent', 'parent', 'general', 'legacy child', 1, 'idle', 0,
+                     '2026-08-29T00:00:00Z', '2026-08-29T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    legacy
+        .execute(
+            "INSERT INTO managed_orchestrators
+             (orchestrator_session_id, parent_session_id, root_session_id, description,
+              status, generation, created_at, updated_at)
+             VALUES ('orchestrator', 'parent', 'parent', 'legacy nac', 'idle', 0,
+                     '2026-08-29T00:00:01Z', '2026-08-29T00:00:01Z')",
+            [],
+        )
+        .unwrap();
+    legacy
+        .execute_batch("DELETE FROM session_assignments; PRAGMA user_version = 27;")
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert!(!table_present(&migrated, "traditional_children"));
+    assert!(!table_present(&migrated, "managed_orchestrators"));
+    let child_id: String = migrated
+        .query_row(
+            "SELECT assignment_id FROM session_assignments WHERE child_session_id = 'child'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let orchestrator_id: String = migrated
+        .query_row(
+            "SELECT assignment_id FROM session_assignments WHERE child_session_id = 'orchestrator'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(child_id, "asgn_child");
+    assert_eq!(orchestrator_id, "asgn_orchestrator");
     assert_eq!(
         migrated
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))

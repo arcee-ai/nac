@@ -1,6 +1,6 @@
 use super::*;
 
-use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, TransactionBehavior};
 
 pub const MAX_RUNNING_MANAGED_ORCHESTRATORS: u64 = 4;
 const MAX_OUTCOME_CHARS: usize = 64 * 1024;
@@ -40,51 +40,27 @@ pub struct ManagedOrchestratorSettlement {
     pub newly_settled: bool,
 }
 
-const COLUMNS: &str =
-    "orchestrator_session_id, parent_session_id, root_session_id, description, status, \
-     generation, run_id, execution_mode, report, failure, completion_inbox_id, created_at, \
-     updated_at, version, frozen_message_count";
-
-fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ManagedOrchestratorRecord> {
-    let status: String = row.get(4)?;
-    let execution_mode: Option<String> = row.get(7)?;
-    Ok(ManagedOrchestratorRecord {
-        orchestrator_session_id: row.get(0)?,
-        parent_session_id: row.get(1)?,
-        root_session_id: row.get(2)?,
-        description: row.get(3)?,
-        status: status.parse().map_err(|error: anyhow::Error| {
-            rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, error.into())
-        })?,
-        generation: row.get(5)?,
-        run_id: row.get(6)?,
-        execution_mode: execution_mode
-            .map(|value| value.parse())
-            .transpose()
-            .map_err(|error: anyhow::Error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    7,
-                    rusqlite::types::Type::Text,
-                    error.into(),
-                )
-            })?,
-        report: row.get(8)?,
-        failure: row.get(9)?,
-        completion_inbox_id: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
-        version: row.get(13)?,
-        frozen_message_count: row
-            .get::<_, Option<i64>>(14)?
-            .map(|value| u64::try_from(value))
-            .transpose()
-            .map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    14,
-                    rusqlite::types::Type::Integer,
-                    error.into(),
-                )
-            })?,
+fn orchestrator_from_assignment(
+    assignment: SessionAssignmentRecord,
+) -> Option<ManagedOrchestratorRecord> {
+    (assignment.child_behavior == SessionAssignmentChildBehavior::Orchestrator).then(|| {
+        ManagedOrchestratorRecord {
+            orchestrator_session_id: assignment.child_session_id,
+            parent_session_id: assignment.parent_session_id,
+            root_session_id: assignment.root_session_id,
+            description: assignment.description,
+            status: assignment.status,
+            generation: assignment.generation,
+            run_id: assignment.run_id,
+            execution_mode: assignment.execution_mode,
+            report: assignment.report,
+            failure: assignment.failure,
+            completion_inbox_id: assignment.completion_inbox_id,
+            created_at: assignment.created_at,
+            updated_at: assignment.updated_at,
+            version: assignment.version,
+            frozen_message_count: assignment.frozen_message_count,
+        }
     })
 }
 
@@ -92,16 +68,10 @@ pub(crate) fn load_with_connection(
     connection: &rusqlite::Connection,
     orchestrator_session_id: &str,
 ) -> Result<Option<ManagedOrchestratorRecord>> {
-    Ok(connection
-        .query_row(
-            &format!(
-                "SELECT {COLUMNS} FROM managed_orchestrators
-                 WHERE orchestrator_session_id = ?1"
-            ),
-            params![orchestrator_session_id],
-            row_to_record,
-        )
-        .optional()?)
+    Ok(
+        load_session_assignment_with_connection(connection, orchestrator_session_id)?
+            .and_then(orchestrator_from_assignment),
+    )
 }
 
 pub fn create_managed_orchestrator_relationship(
@@ -180,16 +150,21 @@ fn create_managed_orchestrator_relationship_with_connection(
     }
     let now = now_utc();
     connection.execute(
-        "INSERT INTO managed_orchestrators
-         (orchestrator_session_id, parent_session_id, root_session_id, description,
-          status, generation, created_at, updated_at)
-         VALUES (?1, ?2, ?2, ?3, 'idle', 0, ?4, ?4)",
-        params![orchestrator_session_id, parent_session_id, description, now],
+        "INSERT INTO session_assignments
+         (assignment_id, child_session_id, parent_session_id, root_session_id,
+          child_behavior, parent_behavior, description, status, generation,
+          created_at, updated_at)
+         VALUES ('asgn_' || ?1, ?1, ?2, ?2, 'orchestrator', ?3, ?4, 'idle', 0, ?5, ?5)",
+        params![
+            orchestrator_session_id,
+            parent_session_id,
+            parent_behavior,
+            description,
+            now
+        ],
     )?;
-    let orchestrator = load_with_connection(connection, orchestrator_session_id)?
-        .ok_or_else(|| anyhow!("managed orchestrator relationship disappeared after creation"))?;
-    sync_assignment_from_managed_orchestrator(connection, orchestrator_session_id)?;
-    Ok(orchestrator)
+    load_with_connection(connection, orchestrator_session_id)?
+        .ok_or_else(|| anyhow!("managed orchestrator relationship disappeared after creation"))
 }
 
 pub fn load_managed_orchestrator(
@@ -205,17 +180,10 @@ pub fn load_managed_orchestrator_for_parent(
     parent_session_id: &str,
     orchestrator_session_id: &str,
 ) -> Result<Option<ManagedOrchestratorRecord>> {
-    let connection = open_runtime_connection(path)?;
-    Ok(connection
-        .query_row(
-            &format!(
-                "SELECT {COLUMNS} FROM managed_orchestrators
-                 WHERE parent_session_id = ?1 AND orchestrator_session_id = ?2"
-            ),
-            params![parent_session_id, orchestrator_session_id],
-            row_to_record,
-        )
-        .optional()?)
+    Ok(
+        load_session_assignment_for_parent(path, parent_session_id, orchestrator_session_id)?
+            .and_then(orchestrator_from_assignment),
+    )
 }
 
 /// Queue orchestrator-level steering only while the exact managed generation
@@ -254,13 +222,10 @@ pub fn list_managed_orchestrators(
     path: &Path,
     parent_session_id: &str,
 ) -> Result<Vec<ManagedOrchestratorRecord>> {
-    let connection = open_runtime_connection(path)?;
-    let mut statement = connection.prepare(&format!(
-        "SELECT {COLUMNS} FROM managed_orchestrators
-         WHERE parent_session_id = ?1 ORDER BY created_at, orchestrator_session_id"
-    ))?;
-    let rows = statement.query_map(params![parent_session_id], row_to_record)?;
-    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    Ok(list_session_assignments(path, parent_session_id)?
+        .into_iter()
+        .filter_map(orchestrator_from_assignment)
+        .collect())
 }
 
 /// Durable rollback obligations left by an interrupted session deletion.
@@ -270,16 +235,13 @@ pub fn list_suppressed_managed_orchestrator_generations(
     path: &Path,
     parent_session_id: &str,
 ) -> Result<Vec<(String, u64)>> {
-    let connection = open_runtime_connection(path)?;
-    let mut statement = connection.prepare(
-        "SELECT orchestrator_session_id, generation FROM managed_orchestrators
-         WHERE parent_session_id = ?1 AND completion_suppressed = 1
-         ORDER BY orchestrator_session_id",
-    )?;
-    let rows = statement.query_map(params![parent_session_id], |row| {
-        Ok((row.get(0)?, row.get(1)?))
-    })?;
-    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    Ok(
+        list_suppressed_session_assignment_generations(path, parent_session_id)?
+            .into_iter()
+            .filter(|(_, _, behavior)| *behavior == SessionAssignmentChildBehavior::Orchestrator)
+            .map(|(child_session_id, generation, _)| (child_session_id, generation))
+            .collect(),
+    )
 }
 
 pub fn begin_managed_orchestrator_run(
@@ -301,8 +263,8 @@ pub fn begin_managed_orchestrator_run(
         ));
     }
     let completion_suppressed: bool = transaction.query_row(
-        "SELECT completion_suppressed FROM managed_orchestrators
-         WHERE orchestrator_session_id = ?1",
+        "SELECT completion_suppressed FROM session_assignments
+         WHERE child_session_id = ?1 AND child_behavior = 'orchestrator'",
         params![orchestrator_session_id],
         |row| row.get(0),
     )?;
@@ -313,8 +275,8 @@ pub fn begin_managed_orchestrator_run(
         ));
     }
     let running: u64 = transaction.query_row(
-        "SELECT COUNT(*) FROM managed_orchestrators
-         WHERE root_session_id = ?1 AND status = 'running'",
+        "SELECT COUNT(*) FROM session_assignments
+         WHERE root_session_id = ?1 AND child_behavior = 'orchestrator' AND status = 'running'",
         params![current.root_session_id],
         |row| row.get(0),
     )?;
@@ -324,12 +286,12 @@ pub fn begin_managed_orchestrator_run(
         ));
     }
     let changed = transaction.execute(
-        "UPDATE managed_orchestrators
+        "UPDATE session_assignments
          SET status = 'running', generation = generation + 1, run_id = ?2,
              execution_mode = ?3, report = NULL, failure = NULL,
              completion_inbox_id = NULL, completion_suppressed = 0,
              updated_at = ?4, version = version + 1
-         WHERE orchestrator_session_id = ?1 AND version = ?5",
+         WHERE child_session_id = ?1 AND child_behavior = 'orchestrator' AND version = ?5",
         params![
             orchestrator_session_id,
             run_id,
@@ -343,7 +305,6 @@ pub fn begin_managed_orchestrator_run(
     }
     let record = load_with_connection(&transaction, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator disappeared during run admission"))?;
-    sync_assignment_from_managed_orchestrator(&transaction, orchestrator_session_id)?;
     transaction.commit()?;
     Ok(record)
 }
@@ -356,9 +317,10 @@ pub fn suppress_managed_orchestrator_completion(
     let current = load_with_connection(&connection, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator was not found"))?;
     let changed = connection.execute(
-        "UPDATE managed_orchestrators SET completion_suppressed = 1, updated_at = ?2,
+        "UPDATE session_assignments SET completion_suppressed = 1, updated_at = ?2,
              version = version + 1
-         WHERE orchestrator_session_id = ?1 AND status = 'running' AND version = ?3",
+         WHERE child_session_id = ?1 AND child_behavior = 'orchestrator'
+           AND status = 'running' AND version = ?3",
         params![orchestrator_session_id, now_utc(), current.version],
     )?;
     if changed != 1 {
@@ -366,7 +328,6 @@ pub fn suppress_managed_orchestrator_completion(
             "managed orchestrator is not running or changed during completion suppression"
         ));
     }
-    sync_assignment_from_managed_orchestrator(&connection, orchestrator_session_id)?;
     load_with_connection(&connection, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator disappeared during completion suppression"))
 }
@@ -386,8 +347,8 @@ pub fn restore_managed_orchestrator_completion(
         return Ok(());
     };
     let completion_suppressed: bool = transaction.query_row(
-        "SELECT completion_suppressed FROM managed_orchestrators
-         WHERE orchestrator_session_id = ?1",
+        "SELECT completion_suppressed FROM session_assignments
+         WHERE child_session_id = ?1 AND child_behavior = 'orchestrator'",
         params![orchestrator_session_id],
         |row| row.get(0),
     )?;
@@ -423,11 +384,11 @@ pub fn restore_managed_orchestrator_completion(
         completion_inbox_id = Some(transaction.last_insert_rowid());
     }
     let changed = transaction.execute(
-        "UPDATE managed_orchestrators
+        "UPDATE session_assignments
          SET completion_suppressed = 0, completion_inbox_id = COALESCE(completion_inbox_id, ?3),
              updated_at = ?4, version = version + 1
-         WHERE orchestrator_session_id = ?1 AND generation = ?2
-           AND completion_suppressed = 1",
+         WHERE child_session_id = ?1 AND child_behavior = 'orchestrator'
+           AND generation = ?2 AND completion_suppressed = 1",
         params![
             orchestrator_session_id,
             generation,
@@ -440,7 +401,6 @@ pub fn restore_managed_orchestrator_completion(
             "managed orchestrator '{orchestrator_session_id}' changed while restoring completion"
         ));
     }
-    sync_assignment_from_managed_orchestrator(&transaction, orchestrator_session_id)?;
     transaction.commit()?;
     Ok(())
 }
@@ -479,9 +439,10 @@ pub fn settle_managed_orchestrator_run(
         current.frozen_message_count,
     )?;
     transaction.execute(
-        "UPDATE managed_orchestrators SET status = ?3, report = ?4, failure = ?5,
+        "UPDATE session_assignments SET status = ?3, report = ?4, failure = ?5,
              frozen_message_count = ?6, updated_at = ?7, version = version + 1
-         WHERE orchestrator_session_id = ?1 AND run_id = ?2 AND status = 'running'",
+         WHERE child_session_id = ?1 AND child_behavior = 'orchestrator'
+           AND run_id = ?2 AND status = 'running'",
         params![
             orchestrator_session_id,
             run_id,
@@ -495,8 +456,8 @@ pub fn settle_managed_orchestrator_run(
     let mut settled = load_with_connection(&transaction, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator disappeared during settlement"))?;
     let completion_suppressed: bool = transaction.query_row(
-        "SELECT completion_suppressed FROM managed_orchestrators
-         WHERE orchestrator_session_id = ?1",
+        "SELECT completion_suppressed FROM session_assignments
+         WHERE child_session_id = ?1 AND child_behavior = 'orchestrator'",
         params![orchestrator_session_id],
         |row| row.get(0),
     )?;
@@ -525,14 +486,14 @@ pub fn settle_managed_orchestrator_run(
         )?;
         let inbox_id = transaction.last_insert_rowid();
         transaction.execute(
-            "UPDATE managed_orchestrators SET completion_inbox_id = ?2
-             WHERE orchestrator_session_id = ?1 AND completion_inbox_id IS NULL",
+            "UPDATE session_assignments SET completion_inbox_id = ?2
+             WHERE child_session_id = ?1 AND child_behavior = 'orchestrator'
+               AND completion_inbox_id IS NULL",
             params![orchestrator_session_id, inbox_id],
         )?;
         settled = load_with_connection(&transaction, orchestrator_session_id)?
             .ok_or_else(|| anyhow!("managed orchestrator disappeared after delivery"))?;
     }
-    sync_assignment_from_managed_orchestrator(&transaction, orchestrator_session_id)?;
     transaction.commit()?;
     Ok(ManagedOrchestratorSettlement {
         orchestrator: settled,

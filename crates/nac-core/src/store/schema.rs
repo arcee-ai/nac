@@ -3,25 +3,26 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-// 27 adds session_assignments (unified spawn rows, dual-written).
-// 26 adds session_handoffs (other-type continue-in-X briefs).
-// 25 freezes commissioned-task transcript prefixes on spawn assignment rows.
-// 24 adds session_forks (conversation clones plus deleted tombstones). 22 adds
-// durable direct-parent managed orchestrator relationships. 21 adds
-// durable traditional child sessions. 20 added durable direct-session
-// goals. 19 added revision/backend-bound direct permission grants. 18 added the durable
-// direct-session inbox. 17 added the immutable session
-// behavior discriminator and is also the
-// downgrade barrier: older binaries reject the future schema instead of
+// 28 drops traditional_children and managed_orchestrators after backfill
+// into session_assignments. 27 adds session_assignments (unified spawn
+// rows, dual-written). 26 adds session_handoffs (other-type continue-in-X
+// briefs). 25 freezes commissioned-task transcript prefixes on spawn
+// assignment rows. 24 adds session_forks (conversation clones plus deleted
+// tombstones). 22 adds durable direct-parent managed orchestrator
+// relationships. 21 adds durable traditional child sessions. 20 added
+// durable direct-session goals. 19 added revision/backend-bound direct
+// permission grants. 18 added the durable direct-session inbox. 17 added
+// the immutable session behavior discriminator and is also the downgrade
+// barrier: older binaries reject the future schema instead of
 // reconstructing a direct session as an orchestrator. 16 added project
-// presentation columns (pin, order, version). 15 added projects
-// and their one-to-many session links. 14 added the bounded interrupted-run
-// recovery row. 13 added the light-model columns (`light_model_json` on both
-// `sessions` and `model_configurations`) — `open_runtime_connection` returns
-// early whenever the stored version already equals this one. (12 carries the
-// same schema as 11, which added episodes.status; 10 added the
+// presentation columns (pin, order, version). 15 added projects and their
+// one-to-many session links. 14 added the bounded interrupted-run recovery
+// row. 13 added the light-model columns (`light_model_json` on both
+// `sessions` and `model_configurations`) — `open_runtime_connection`
+// returns early whenever the stored version already equals this one. (12
+// carries the same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 27;
+const STORE_SCHEMA_VERSION: i64 = 28;
 
 /// Current durable-store schema version for credential-free readiness and
 /// operational status reporting.
@@ -395,7 +396,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | 26 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -489,38 +490,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
     create_session_inbox_table(&transaction)?;
     create_permission_grants_table(&transaction)?;
     create_session_goals_table(&transaction)?;
-    create_traditional_children_table(&transaction)?;
-    create_managed_orchestrators_table(&transaction)?;
-    // Execution mode records how a generation was admitted and must remain
-    // immutable. Deletion suppresses completion delivery independently.
-    ensure_column(
-        &transaction,
-        "traditional_children",
-        "completion_suppressed",
-        "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
-    )?;
-    ensure_column(
-        &transaction,
-        "managed_orchestrators",
-        "completion_suppressed",
-        "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
-    )?;
-    ensure_column(
-        &transaction,
-        "traditional_children",
-        "frozen_message_count",
-        "INTEGER CHECK (frozen_message_count IS NULL OR frozen_message_count >= 0)",
-    )?;
-    ensure_column(
-        &transaction,
-        "managed_orchestrators",
-        "frozen_message_count",
-        "INTEGER CHECK (frozen_message_count IS NULL OR frozen_message_count >= 0)",
-    )?;
     create_session_forks_table(&transaction)?;
     create_session_handoffs_table(&transaction)?;
     create_session_assignments_table(&transaction)?;
-    backfill_session_assignments(&transaction)?;
+    drop_legacy_assignment_tables(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -1118,73 +1091,114 @@ fn create_session_assignments_table(conn: &Connection) -> Result<()> {
 }
 
 fn backfill_session_assignments(conn: &Connection) -> Result<()> {
-    conn.execute(
-        "INSERT OR IGNORE INTO session_assignments
-         (assignment_id, child_session_id, parent_session_id, root_session_id,
-          child_behavior, parent_behavior, description, status, generation, run_id,
-          execution_mode, report, failure, change_summary, verification_summary,
-          completion_inbox_id, completion_suppressed, frozen_message_count,
-          created_at, updated_at, version)
-         SELECT
-          'asgn_' || tc.child_session_id,
-          tc.child_session_id,
-          tc.parent_session_id,
-          tc.root_session_id,
-          'direct',
-          p.behavior,
-          tc.description,
-          tc.status,
-          tc.generation,
-          tc.run_id,
-          tc.execution_mode,
-          tc.report,
-          tc.failure,
-          tc.change_summary,
-          tc.verification_summary,
-          tc.completion_inbox_id,
-          tc.completion_suppressed,
-          tc.frozen_message_count,
-          tc.created_at,
-          tc.updated_at,
-          tc.version
-         FROM traditional_children tc
-         JOIN sessions p ON p.session_id = tc.parent_session_id
-         WHERE p.behavior IN ('direct', 'direct-with-orchestrator')",
-        [],
-    )?;
-    conn.execute(
-        "INSERT OR IGNORE INTO session_assignments
-         (assignment_id, child_session_id, parent_session_id, root_session_id,
-          child_behavior, parent_behavior, description, status, generation, run_id,
-          execution_mode, report, failure, change_summary, verification_summary,
-          completion_inbox_id, completion_suppressed, frozen_message_count,
-          created_at, updated_at, version)
-         SELECT
-          'asgn_' || mo.orchestrator_session_id,
-          mo.orchestrator_session_id,
-          mo.parent_session_id,
-          mo.root_session_id,
-          'orchestrator',
-          p.behavior,
-          mo.description,
-          mo.status,
-          mo.generation,
-          mo.run_id,
-          mo.execution_mode,
-          mo.report,
-          mo.failure,
-          NULL,
-          NULL,
-          mo.completion_inbox_id,
-          mo.completion_suppressed,
-          mo.frozen_message_count,
-          mo.created_at,
-          mo.updated_at,
-          mo.version
-         FROM managed_orchestrators mo
-         JOIN sessions p ON p.session_id = mo.parent_session_id
-         WHERE p.behavior IN ('direct', 'direct-with-orchestrator')",
-        [],
+    if table_exists(conn, "traditional_children")? {
+        conn.execute(
+            "INSERT OR IGNORE INTO session_assignments
+             (assignment_id, child_session_id, parent_session_id, root_session_id,
+              child_behavior, parent_behavior, description, status, generation, run_id,
+              execution_mode, report, failure, change_summary, verification_summary,
+              completion_inbox_id, completion_suppressed, frozen_message_count,
+              created_at, updated_at, version)
+             SELECT
+              'asgn_' || tc.child_session_id,
+              tc.child_session_id,
+              tc.parent_session_id,
+              tc.root_session_id,
+              'direct',
+              p.behavior,
+              tc.description,
+              tc.status,
+              tc.generation,
+              tc.run_id,
+              tc.execution_mode,
+              tc.report,
+              tc.failure,
+              tc.change_summary,
+              tc.verification_summary,
+              tc.completion_inbox_id,
+              tc.completion_suppressed,
+              tc.frozen_message_count,
+              tc.created_at,
+              tc.updated_at,
+              tc.version
+             FROM traditional_children tc
+             JOIN sessions p ON p.session_id = tc.parent_session_id
+             WHERE p.behavior IN ('direct', 'direct-with-orchestrator')",
+            [],
+        )?;
+    }
+    if table_exists(conn, "managed_orchestrators")? {
+        conn.execute(
+            "INSERT OR IGNORE INTO session_assignments
+             (assignment_id, child_session_id, parent_session_id, root_session_id,
+              child_behavior, parent_behavior, description, status, generation, run_id,
+              execution_mode, report, failure, change_summary, verification_summary,
+              completion_inbox_id, completion_suppressed, frozen_message_count,
+              created_at, updated_at, version)
+             SELECT
+              'asgn_' || mo.orchestrator_session_id,
+              mo.orchestrator_session_id,
+              mo.parent_session_id,
+              mo.root_session_id,
+              'orchestrator',
+              p.behavior,
+              mo.description,
+              mo.status,
+              mo.generation,
+              mo.run_id,
+              mo.execution_mode,
+              mo.report,
+              mo.failure,
+              NULL,
+              NULL,
+              mo.completion_inbox_id,
+              mo.completion_suppressed,
+              mo.frozen_message_count,
+              mo.created_at,
+              mo.updated_at,
+              mo.version
+             FROM managed_orchestrators mo
+             JOIN sessions p ON p.session_id = mo.parent_session_id
+             WHERE p.behavior IN ('direct', 'direct-with-orchestrator')",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn drop_legacy_assignment_tables(conn: &Connection) -> Result<()> {
+    if table_exists(conn, "traditional_children")? {
+        ensure_column(
+            conn,
+            "traditional_children",
+            "completion_suppressed",
+            "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
+        )?;
+        ensure_column(
+            conn,
+            "traditional_children",
+            "frozen_message_count",
+            "INTEGER CHECK (frozen_message_count IS NULL OR frozen_message_count >= 0)",
+        )?;
+    }
+    if table_exists(conn, "managed_orchestrators")? {
+        ensure_column(
+            conn,
+            "managed_orchestrators",
+            "completion_suppressed",
+            "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
+        )?;
+        ensure_column(
+            conn,
+            "managed_orchestrators",
+            "frozen_message_count",
+            "INTEGER CHECK (frozen_message_count IS NULL OR frozen_message_count >= 0)",
+        )?;
+    }
+    backfill_session_assignments(conn)?;
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS traditional_children;
+         DROP TABLE IF EXISTS managed_orchestrators;",
     )?;
     Ok(())
 }
@@ -1374,10 +1388,9 @@ fn create_session_goals_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Durable relationship and latest execution generation for an OpenCode-like
-/// traditional child session. The child is still a normal row in `sessions`;
-/// this table adds ownership, profile, bounded nesting, and exactly-once
-/// background completion delivery.
+/// Pre-28 assignment table, reconstructed only by schema tests that prove
+/// the backfill-and-drop path.
+#[cfg(test)]
 fn create_traditional_children_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS traditional_children (
@@ -1435,8 +1448,9 @@ fn create_traditional_children_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Durable ownership and latest run generation for an orchestrator session
-/// launched by a direct-with-orchestrator parent.
+/// Pre-28 assignment table, reconstructed only by schema tests that prove
+/// the backfill-and-drop path.
+#[cfg(test)]
 fn create_managed_orchestrators_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS managed_orchestrators (
@@ -1603,8 +1617,6 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "session_run_recovery",
         "session_inbox",
         "permission_grants",
-        "traditional_children",
-        "managed_orchestrators",
         "session_forks",
         "session_handoffs",
         "session_assignments",

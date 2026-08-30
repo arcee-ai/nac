@@ -190,11 +190,11 @@ Add one schema version (current `STORE_SCHEMA_VERSION` is 24 in
 `crates/nac-core/src/store/schema.rs`). Prefer a unified assignment table
 plus a new handoff table over growing the two existing spawn tables.
 
-### `session_assignments` (schema 25)
+### `session_assignments` (schema 27, sole store in schema 28)
 
-Replaces the *role* of `traditional_children` and `managed_orchestrators`
-without dropping those tables in the same change. Dual-write, then
-migrate, then drop.
+Replaces the *role* of `traditional_children` and `managed_orchestrators`.
+Schema 27 dual-wrote; schema 28 backfills any remaining rows and drops
+the old tables.
 
 ```text
 assignment_id            TEXT PK
@@ -221,9 +221,9 @@ Checks:
 - no `nesting_depth` column; running children are forbidden from spawning
   by application code, not by a permanent CHECK
 
-Keep `traditional_children` and `managed_orchestrators` readable until
-callers move. A store migration copies existing rows. Do not invent a
-third live write path.
+Callers still return the old record types by projecting from this table
+(`child_behavior = 'direct'` or `'orchestrator'`). Do not invent a third
+live write path.
 
 ### `session_handoffs` (schema 25)
 
@@ -514,7 +514,12 @@ the Agent log as Agent.
 
 ### Phase 5 — unify spawn storage and names
 
-Landed. Dual-write `session_assignments` (schema 27). `GET`/`POST /sessions/{id}/spawns` is the unified resource; `/children` and `/orchestrators` stay as wrappers. Agent tools are `session_*`. Old spawn tables are not dropped in this release.
+Landed. Dual-write `session_assignments` (schema 27). Writes and reads use
+`session_assignments` only; `traditional_children` and
+`managed_orchestrators` drop in schema 28. `GET`/`POST /sessions/{id}/spawns`
+is the unified resource; `/children` and `/orchestrators` stay as wrappers.
+Agent tools are `session_*`. Leftover `direct-with-orchestrator` session rows
+are not rewritten in this version.
 
 Goal: one table, one HTTP resource, one tool family.
 
@@ -524,10 +529,10 @@ Goal: one table, one HTTP resource, one tool family.
 3. `POST /sessions/{id}/spawns`; keep old paths as wrappers.
 4. Rename model tools to `session_*` and update
    `nac_direct.md`, `nac_direct_child.md`, `nac_orchestrator.md`.
-5. Drop `traditional_children` and `managed_orchestrators` in schema 26
-   after one release that dual-writes.
-6. Rewrite leftover `direct-with-orchestrator` rows to `direct` in that
-   same later version if the alias is no longer referenced.
+5. Drop `traditional_children` and `managed_orchestrators` in schema 28.
+   Landed.
+6. Rewrite leftover `direct-with-orchestrator` rows to `direct` in a
+   later version if the alias is no longer referenced.
 
 Acceptance: grep for `DirectWithOrchestrator` in create paths is empty.
 Delegated work has one list.

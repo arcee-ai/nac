@@ -30,8 +30,9 @@ workspace revisions, recovery markers, and cross-process coordination.
 - `schema.rs` / `schema_tests.rs` — migrations and complete schema contract.
 - `transcript.rs`, `thread_events.rs`, `threads.rs`, `worksets.rs` — durable
   execution history.
-- `traditional_children.rs`, `managed_orchestrators.rs` — distinct relationship
-  topologies and completion state.
+- `session_assignments.rs` — unified spawn assignment rows.
+- `traditional_children.rs`, `managed_orchestrators.rs` — Agent and NAC
+  assignment projections and completion state.
 - `session_inbox.rs`, `session_goals.rs`, `steering.rs` — durable continuation.
 - `run_recovery.rs`, `orchestrator_compaction.rs` — recovery markers.
 - `permission_grants.rs` — remembered authorization persistence.

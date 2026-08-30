@@ -1,8 +1,6 @@
-//! Unified spawn-assignment rows. Dual-written beside
-//! `traditional_children` and `managed_orchestrators` until those tables drop.
+//! Unified spawn-assignment rows. Agent and NAC projections keep the old
+//! record types; this table is the only persisted assignment store.
 
-use super::managed_orchestrators::load_with_connection;
-use super::traditional_children::load_child_with_connection;
 use super::*;
 
 use rusqlite::{params, OptionalExtension};
@@ -135,181 +133,6 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionAssignmentR
     })
 }
 
-fn assignment_id_for_child(child_session_id: &str) -> String {
-    format!("asgn_{child_session_id}")
-}
-
-fn parent_behavior_for_assignment(
-    connection: &rusqlite::Connection,
-    parent_session_id: &str,
-) -> Result<String> {
-    let behavior: String = connection
-        .query_row(
-            "SELECT behavior FROM sessions WHERE session_id = ?1",
-            params![parent_session_id],
-            |row| row.get(0),
-        )
-        .optional()?
-        .ok_or_else(|| anyhow!("parent session '{parent_session_id}' was not found"))?;
-    if behavior != "direct" && behavior != "direct-with-orchestrator" {
-        return Err(anyhow!(
-            "session assignments require an agent parent, not '{behavior}'"
-        ));
-    }
-    Ok(behavior)
-}
-
-fn upsert_session_assignment_with_connection(
-    connection: &rusqlite::Connection,
-    child_session_id: &str,
-    parent_session_id: &str,
-    root_session_id: &str,
-    child_behavior: SessionAssignmentChildBehavior,
-    description: &str,
-    status: TraditionalChildStatus,
-    generation: u64,
-    run_id: Option<&str>,
-    execution_mode: Option<TraditionalChildExecutionMode>,
-    report: Option<&str>,
-    failure: Option<&str>,
-    change_summary: Option<&str>,
-    verification_summary: Option<&str>,
-    completion_inbox_id: Option<i64>,
-    completion_suppressed: bool,
-    frozen_message_count: Option<u64>,
-    created_at: &str,
-    updated_at: &str,
-    version: i64,
-) -> Result<()> {
-    let parent_behavior = parent_behavior_for_assignment(connection, parent_session_id)?;
-    connection.execute(
-        "INSERT INTO session_assignments
-         (assignment_id, child_session_id, parent_session_id, root_session_id,
-          child_behavior, parent_behavior, description, status, generation, run_id,
-          execution_mode, report, failure, change_summary, verification_summary,
-          completion_inbox_id, completion_suppressed, frozen_message_count,
-          created_at, updated_at, version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                 ?16, ?17, ?18, ?19, ?20, ?21)
-         ON CONFLICT(child_session_id) DO UPDATE SET
-          parent_session_id = excluded.parent_session_id,
-          root_session_id = excluded.root_session_id,
-          child_behavior = excluded.child_behavior,
-          parent_behavior = excluded.parent_behavior,
-          description = excluded.description,
-          status = excluded.status,
-          generation = excluded.generation,
-          run_id = excluded.run_id,
-          execution_mode = excluded.execution_mode,
-          report = excluded.report,
-          failure = excluded.failure,
-          change_summary = excluded.change_summary,
-          verification_summary = excluded.verification_summary,
-          completion_inbox_id = excluded.completion_inbox_id,
-          completion_suppressed = excluded.completion_suppressed,
-          frozen_message_count = excluded.frozen_message_count,
-          updated_at = excluded.updated_at,
-          version = excluded.version",
-        params![
-            assignment_id_for_child(child_session_id),
-            child_session_id,
-            parent_session_id,
-            root_session_id,
-            child_behavior.as_str(),
-            parent_behavior,
-            description,
-            status.as_str(),
-            generation,
-            run_id,
-            execution_mode.map(TraditionalChildExecutionMode::as_str),
-            report,
-            failure,
-            change_summary,
-            verification_summary,
-            completion_inbox_id,
-            completion_suppressed,
-            frozen_message_count.map(|value| value as i64),
-            created_at,
-            updated_at,
-            version,
-        ],
-    )?;
-    Ok(())
-}
-
-pub(crate) fn sync_assignment_from_traditional_child(
-    connection: &rusqlite::Connection,
-    child_session_id: &str,
-) -> Result<()> {
-    let Some(child) = load_child_with_connection(connection, child_session_id)? else {
-        return Ok(());
-    };
-    let completion_suppressed: bool = connection.query_row(
-        "SELECT completion_suppressed FROM traditional_children WHERE child_session_id = ?1",
-        params![child_session_id],
-        |row| row.get(0),
-    )?;
-    upsert_session_assignment_with_connection(
-        connection,
-        &child.child_session_id,
-        &child.parent_session_id,
-        &child.root_session_id,
-        SessionAssignmentChildBehavior::Direct,
-        &child.description,
-        child.status,
-        child.generation,
-        child.run_id.as_deref(),
-        child.execution_mode,
-        child.report.as_deref(),
-        child.failure.as_deref(),
-        child.change_summary.as_deref(),
-        child.verification_summary.as_deref(),
-        child.completion_inbox_id,
-        completion_suppressed,
-        child.frozen_message_count,
-        &child.created_at,
-        &child.updated_at,
-        child.version,
-    )
-}
-
-pub(crate) fn sync_assignment_from_managed_orchestrator(
-    connection: &rusqlite::Connection,
-    orchestrator_session_id: &str,
-) -> Result<()> {
-    let Some(orchestrator) = load_with_connection(connection, orchestrator_session_id)? else {
-        return Ok(());
-    };
-    let completion_suppressed: bool = connection.query_row(
-        "SELECT completion_suppressed FROM managed_orchestrators
-         WHERE orchestrator_session_id = ?1",
-        params![orchestrator_session_id],
-        |row| row.get(0),
-    )?;
-    upsert_session_assignment_with_connection(
-        connection,
-        &orchestrator.orchestrator_session_id,
-        &orchestrator.parent_session_id,
-        &orchestrator.root_session_id,
-        SessionAssignmentChildBehavior::Orchestrator,
-        &orchestrator.description,
-        orchestrator.status,
-        orchestrator.generation,
-        orchestrator.run_id.as_deref(),
-        orchestrator.execution_mode,
-        orchestrator.report.as_deref(),
-        orchestrator.failure.as_deref(),
-        None,
-        None,
-        orchestrator.completion_inbox_id,
-        completion_suppressed,
-        orchestrator.frozen_message_count,
-        &orchestrator.created_at,
-        &orchestrator.updated_at,
-        orchestrator.version,
-    )
-}
-
 pub fn load_session_assignment(
     path: &Path,
     child_session_id: &str,
@@ -418,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn create_begin_and_settle_dual_write_both_assignment_kinds() {
+    fn create_begin_and_settle_persist_both_assignment_kinds() {
         let path = fixture("dual_write");
         create_traditional_child_relationship(
             &path,
@@ -485,29 +308,35 @@ mod tests {
     }
 
     #[test]
-    fn backfill_copies_legacy_rows_without_changing_assignment_ids() {
-        let path = fixture("backfill");
+    fn create_persists_only_on_session_assignments() {
+        let path = fixture("canonical_table");
         create_traditional_child_relationship(
             &path,
             "parent",
             "child",
             GENERAL_CHILD_PROFILE,
-            "legacy child",
+            "canonical child",
         )
         .unwrap();
-        let first = load_session_assignment(&path, "child").unwrap().unwrap();
-        let connection = open_runtime_connection(&path).unwrap();
-        connection
-            .execute("DELETE FROM session_assignments", [])
+        create_managed_orchestrator_relationship(&path, "parent", "orchestrator", "canonical nac")
             .unwrap();
-        drop(connection);
-        initialize(&path).unwrap();
-        let restored = load_session_assignment(&path, "child").unwrap().unwrap();
-        assert_eq!(restored.assignment_id, first.assignment_id);
-        assert_eq!(restored.description, "legacy child");
-        assert_eq!(
-            restored.child_behavior,
-            SessionAssignmentChildBehavior::Direct
-        );
+        let child = load_session_assignment(&path, "child").unwrap().unwrap();
+        let orchestrator = load_session_assignment(&path, "orchestrator")
+            .unwrap()
+            .unwrap();
+        assert_eq!(child.assignment_id, "asgn_child");
+        assert_eq!(orchestrator.assignment_id, "asgn_orchestrator");
+        let connection = open_runtime_connection(&path).unwrap();
+        let legacy_tables: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table'
+                   AND name IN ('traditional_children', 'managed_orchestrators')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_tables, 0);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

@@ -1,6 +1,6 @@
 use super::*;
 
-use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, TransactionBehavior};
 
 pub const GENERAL_CHILD_PROFILE: &str = "general";
 pub const MAX_RUNNING_TRADITIONAL_CHILDREN: u64 = 4;
@@ -134,73 +134,48 @@ pub struct TraditionalChildSettlement {
     pub newly_settled: bool,
 }
 
-const CHILD_COLUMNS: &str =
-    "child_session_id, parent_session_id, root_session_id, profile, description, \
-     nesting_depth, status, generation, run_id, execution_mode, report, failure, \
-     change_summary, verification_summary, completion_inbox_id, created_at, \
-     updated_at, version, frozen_message_count";
-
-fn row_to_child(row: &rusqlite::Row<'_>) -> rusqlite::Result<TraditionalChildRecord> {
-    let status: String = row.get(6)?;
-    let execution_mode: Option<String> = row.get(9)?;
-    Ok(TraditionalChildRecord {
-        child_session_id: row.get(0)?,
-        parent_session_id: row.get(1)?,
-        root_session_id: row.get(2)?,
-        profile: row.get(3)?,
-        description: row.get(4)?,
-        nesting_depth: row.get(5)?,
-        status: status.parse().map_err(|error: anyhow::Error| {
-            rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, error.into())
-        })?,
-        generation: row.get(7)?,
-        run_id: row.get(8)?,
-        execution_mode: execution_mode
-            .map(|value| value.parse())
-            .transpose()
-            .map_err(|error: anyhow::Error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    9,
-                    rusqlite::types::Type::Text,
-                    error.into(),
-                )
-            })?,
-        report: row.get(10)?,
-        failure: row.get(11)?,
-        change_summary: row.get(12)?,
-        verification_summary: row.get(13)?,
-        completion_inbox_id: row.get(14)?,
-        created_at: row.get(15)?,
-        updated_at: row.get(16)?,
-        version: row.get(17)?,
-        frozen_message_count: row
-            .get::<_, Option<i64>>(18)?
-            .map(|value| u64::try_from(value))
-            .transpose()
-            .map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    18,
-                    rusqlite::types::Type::Integer,
-                    error.into(),
-                )
-            })?,
+fn child_from_assignment(assignment: SessionAssignmentRecord) -> Option<TraditionalChildRecord> {
+    (assignment.child_behavior == SessionAssignmentChildBehavior::Direct).then(|| {
+        TraditionalChildRecord {
+            child_session_id: assignment.child_session_id,
+            parent_session_id: assignment.parent_session_id,
+            root_session_id: assignment.root_session_id,
+            profile: GENERAL_CHILD_PROFILE.to_string(),
+            description: assignment.description,
+            nesting_depth: 1,
+            status: assignment.status,
+            generation: assignment.generation,
+            run_id: assignment.run_id,
+            execution_mode: assignment.execution_mode,
+            report: assignment.report,
+            failure: assignment.failure,
+            change_summary: assignment.change_summary,
+            verification_summary: assignment.verification_summary,
+            completion_inbox_id: assignment.completion_inbox_id,
+            created_at: assignment.created_at,
+            updated_at: assignment.updated_at,
+            version: assignment.version,
+            frozen_message_count: assignment.frozen_message_count,
+        }
     })
+}
+
+fn load_direct_assignment(
+    connection: &rusqlite::Connection,
+    child_session_id: &str,
+) -> Result<Option<SessionAssignmentRecord>> {
+    Ok(
+        load_session_assignment_with_connection(connection, child_session_id)?.filter(
+            |assignment| assignment.child_behavior == SessionAssignmentChildBehavior::Direct,
+        ),
+    )
 }
 
 pub(crate) fn load_child_with_connection(
     connection: &rusqlite::Connection,
     child_session_id: &str,
 ) -> Result<Option<TraditionalChildRecord>> {
-    Ok(connection
-        .query_row(
-            &format!(
-                "SELECT {CHILD_COLUMNS} FROM traditional_children
-                 WHERE child_session_id = ?1"
-            ),
-            params![child_session_id],
-            row_to_child,
-        )
-        .optional()?)
+    Ok(load_direct_assignment(connection, child_session_id)?.and_then(child_from_assignment))
 }
 
 fn normalized_description(description: &str) -> Result<&str> {
@@ -301,22 +276,21 @@ fn create_traditional_child_relationship_with_connection(
     }
     let now = now_utc();
     connection.execute(
-        "INSERT INTO traditional_children
-         (child_session_id, parent_session_id, root_session_id, profile,
-          description, nesting_depth, status, generation, created_at, updated_at)
-         VALUES (?1, ?2, ?2, ?3, ?4, 1, 'idle', 0, ?5, ?5)",
+        "INSERT INTO session_assignments
+         (assignment_id, child_session_id, parent_session_id, root_session_id,
+          child_behavior, parent_behavior, description, status, generation,
+          created_at, updated_at)
+         VALUES ('asgn_' || ?1, ?1, ?2, ?2, 'direct', ?3, ?4, 'idle', 0, ?5, ?5)",
         params![
             child_session_id,
             parent_session_id,
-            profile,
+            parent_behavior,
             description,
             now
         ],
     )?;
-    let child = load_child_with_connection(connection, child_session_id)?
-        .ok_or_else(|| anyhow!("traditional child relationship disappeared after creation"))?;
-    sync_assignment_from_traditional_child(connection, child_session_id)?;
-    Ok(child)
+    load_child_with_connection(connection, child_session_id)?
+        .ok_or_else(|| anyhow!("traditional child relationship disappeared after creation"))
 }
 
 pub fn load_traditional_child(
@@ -332,30 +306,20 @@ pub fn load_traditional_child_for_parent(
     parent_session_id: &str,
     child_session_id: &str,
 ) -> Result<Option<TraditionalChildRecord>> {
-    let connection = open_runtime_connection(path)?;
-    Ok(connection
-        .query_row(
-            &format!(
-                "SELECT {CHILD_COLUMNS} FROM traditional_children
-                 WHERE parent_session_id = ?1 AND child_session_id = ?2"
-            ),
-            params![parent_session_id, child_session_id],
-            row_to_child,
-        )
-        .optional()?)
+    Ok(
+        load_session_assignment_for_parent(path, parent_session_id, child_session_id)?
+            .and_then(child_from_assignment),
+    )
 }
 
 pub fn list_traditional_children(
     path: &Path,
     parent_session_id: &str,
 ) -> Result<Vec<TraditionalChildRecord>> {
-    let connection = open_runtime_connection(path)?;
-    let mut statement = connection.prepare(&format!(
-        "SELECT {CHILD_COLUMNS} FROM traditional_children
-         WHERE parent_session_id = ?1 ORDER BY created_at ASC, child_session_id ASC"
-    ))?;
-    let rows = statement.query_map(params![parent_session_id], row_to_child)?;
-    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    Ok(list_session_assignments(path, parent_session_id)?
+        .into_iter()
+        .filter_map(child_from_assignment)
+        .collect())
 }
 
 /// Durable rollback obligations left by an interrupted session deletion.
@@ -365,16 +329,13 @@ pub fn list_suppressed_traditional_child_generations(
     path: &Path,
     parent_session_id: &str,
 ) -> Result<Vec<(String, u64)>> {
-    let connection = open_runtime_connection(path)?;
-    let mut statement = connection.prepare(
-        "SELECT child_session_id, generation FROM traditional_children
-         WHERE parent_session_id = ?1 AND completion_suppressed = 1
-         ORDER BY child_session_id",
-    )?;
-    let rows = statement.query_map(params![parent_session_id], |row| {
-        Ok((row.get(0)?, row.get(1)?))
-    })?;
-    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    Ok(
+        list_suppressed_session_assignment_generations(path, parent_session_id)?
+            .into_iter()
+            .filter(|(_, _, behavior)| *behavior == SessionAssignmentChildBehavior::Direct)
+            .map(|(child_session_id, generation, _)| (child_session_id, generation))
+            .collect(),
+    )
 }
 
 pub fn begin_traditional_child_run(
@@ -398,7 +359,8 @@ pub fn begin_traditional_child_run(
         ));
     }
     let completion_suppressed: bool = transaction.query_row(
-        "SELECT completion_suppressed FROM traditional_children WHERE child_session_id = ?1",
+        "SELECT completion_suppressed FROM session_assignments
+         WHERE child_session_id = ?1 AND child_behavior = 'direct'",
         params![child_session_id],
         |row| row.get(0),
     )?;
@@ -409,8 +371,8 @@ pub fn begin_traditional_child_run(
         ));
     }
     let running: u64 = transaction.query_row(
-        "SELECT COUNT(*) FROM traditional_children
-         WHERE root_session_id = ?1 AND status = 'running'",
+        "SELECT COUNT(*) FROM session_assignments
+         WHERE root_session_id = ?1 AND child_behavior = 'direct' AND status = 'running'",
         params![current.root_session_id],
         |row| row.get(0),
     )?;
@@ -420,13 +382,13 @@ pub fn begin_traditional_child_run(
         ));
     }
     transaction.execute(
-        "UPDATE traditional_children
+        "UPDATE session_assignments
          SET status = 'running', generation = generation + 1, run_id = ?2,
              execution_mode = ?3, report = NULL, failure = NULL,
              change_summary = NULL, verification_summary = NULL,
              completion_inbox_id = NULL, completion_suppressed = 0,
              updated_at = ?4, version = version + 1
-         WHERE child_session_id = ?1 AND version = ?5",
+         WHERE child_session_id = ?1 AND child_behavior = 'direct' AND version = ?5",
         params![
             child_session_id,
             run_id,
@@ -437,7 +399,6 @@ pub fn begin_traditional_child_run(
     )?;
     let child = load_child_with_connection(&transaction, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child disappeared during run admission"))?;
-    sync_assignment_from_traditional_child(&transaction, child_session_id)?;
     transaction.commit()?;
     Ok(child)
 }
@@ -455,9 +416,10 @@ pub fn suppress_traditional_child_completion(
         ));
     }
     let changed = connection.execute(
-        "UPDATE traditional_children
+        "UPDATE session_assignments
          SET completion_suppressed = 1, updated_at = ?2, version = version + 1
-         WHERE child_session_id = ?1 AND status = 'running' AND version = ?3",
+         WHERE child_session_id = ?1 AND child_behavior = 'direct'
+           AND status = 'running' AND version = ?3",
         params![child_session_id, now_utc(), current.version],
     )?;
     if changed != 1 {
@@ -465,7 +427,6 @@ pub fn suppress_traditional_child_completion(
             "traditional child session '{child_session_id}' changed while suppressing completion"
         ));
     }
-    sync_assignment_from_traditional_child(&connection, child_session_id)?;
     load_child_with_connection(&connection, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child disappeared during completion suppression"))
 }
@@ -485,7 +446,8 @@ pub fn restore_traditional_child_completion(
         return Ok(());
     };
     let completion_suppressed: bool = transaction.query_row(
-        "SELECT completion_suppressed FROM traditional_children WHERE child_session_id = ?1",
+        "SELECT completion_suppressed FROM session_assignments
+         WHERE child_session_id = ?1 AND child_behavior = 'direct'",
         params![child_session_id],
         |row| row.get(0),
     )?;
@@ -509,10 +471,11 @@ pub fn restore_traditional_child_completion(
         completion_inbox_id = Some(transaction.last_insert_rowid());
     }
     let changed = transaction.execute(
-        "UPDATE traditional_children
+        "UPDATE session_assignments
          SET completion_suppressed = 0, completion_inbox_id = COALESCE(completion_inbox_id, ?3),
              updated_at = ?4, version = version + 1
-         WHERE child_session_id = ?1 AND generation = ?2 AND completion_suppressed = 1",
+         WHERE child_session_id = ?1 AND child_behavior = 'direct'
+           AND generation = ?2 AND completion_suppressed = 1",
         params![child_session_id, generation, completion_inbox_id, now_utc()],
     )?;
     if changed != 1 {
@@ -520,7 +483,6 @@ pub fn restore_traditional_child_completion(
             "traditional child session '{child_session_id}' changed while restoring completion"
         ));
     }
-    sync_assignment_from_traditional_child(&transaction, child_session_id)?;
     transaction.commit()?;
     Ok(())
 }
@@ -567,11 +529,12 @@ pub fn settle_traditional_child_run(
     let frozen_message_count =
         next_frozen_message_count(&transaction, child_session_id, current.frozen_message_count)?;
     transaction.execute(
-        "UPDATE traditional_children
+        "UPDATE session_assignments
          SET status = ?3, report = ?4, failure = ?5, change_summary = ?6,
              verification_summary = ?7, frozen_message_count = ?8,
              updated_at = ?9, version = version + 1
-         WHERE child_session_id = ?1 AND run_id = ?2 AND status = 'running'",
+         WHERE child_session_id = ?1 AND child_behavior = 'direct'
+           AND run_id = ?2 AND status = 'running'",
         params![
             child_session_id,
             run_id,
@@ -587,7 +550,8 @@ pub fn settle_traditional_child_run(
     let mut settled = load_child_with_connection(&transaction, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child disappeared during settlement"))?;
     let completion_suppressed: bool = transaction.query_row(
-        "SELECT completion_suppressed FROM traditional_children WHERE child_session_id = ?1",
+        "SELECT completion_suppressed FROM session_assignments
+         WHERE child_session_id = ?1 AND child_behavior = 'direct'",
         params![child_session_id],
         |row| row.get(0),
     )?;
@@ -603,15 +567,15 @@ pub fn settle_traditional_child_run(
         )?;
         let inbox_id = transaction.last_insert_rowid();
         transaction.execute(
-            "UPDATE traditional_children
+            "UPDATE session_assignments
              SET completion_inbox_id = ?2
-             WHERE child_session_id = ?1 AND completion_inbox_id IS NULL",
+             WHERE child_session_id = ?1 AND child_behavior = 'direct'
+               AND completion_inbox_id IS NULL",
             params![child_session_id, inbox_id],
         )?;
         settled = load_child_with_connection(&transaction, child_session_id)?
             .ok_or_else(|| anyhow!("traditional child disappeared after completion delivery"))?;
     }
-    sync_assignment_from_traditional_child(&transaction, child_session_id)?;
     transaction.commit()?;
     Ok(TraditionalChildSettlement {
         child: settled,
