@@ -4,7 +4,14 @@
 // The session screen always shows the chat; the URL only selects which panel
 // the side box has open.
 // Order is also the tab order in the side box.
-export const SESSION_PANELS = ["threads", "delegated", "files", "worksets", "history"] as const;
+export const SESSION_PANELS = [
+  "threads",
+  "thoughts",
+  "delegated",
+  "files",
+  "worksets",
+  "history",
+] as const;
 
 export type SessionPanel = (typeof SESSION_PANELS)[number];
 
@@ -12,6 +19,7 @@ export type SessionPanel = (typeof SESSION_PANELS)[number];
 // name so links that are already out there still land on it.
 export const SESSION_PANEL_LABEL = {
   threads: "Threads",
+  thoughts: "Thoughts & Tools",
   delegated: "Delegated work",
   files: "Files",
   worksets: "Worksets",
@@ -22,11 +30,15 @@ export const SESSION_PANEL_LABEL = {
  * Panels the wide side box tabs between. A wide box carries the revisions in
  * its footer chip, so History is a phone-only panel of the bottom bar.
  */
-export const WIDE_SESSION_PANELS = SESSION_PANELS.filter((panel) => panel !== "history");
+export const WIDE_SESSION_PANELS = SESSION_PANELS.filter(
+  (panel) => panel !== "history",
+);
 
 export const DEFAULT_SESSION_PANEL: SessionPanel = "threads";
 
-export function isSessionPanel(value: string | undefined): value is SessionPanel {
+export function isSessionPanel(
+  value: string | undefined,
+): value is SessionPanel {
   // SAFETY: the cast only widens the readonly tuple to a mutable array for
   // `includes`; no element is ever written through it.
   return (SESSION_PANELS as readonly string[]).includes(value ?? "");

@@ -1,6 +1,6 @@
 use super::*;
 
-use rusqlite::{params, TransactionBehavior};
+use rusqlite::{TransactionBehavior, params};
 
 pub const GENERAL_CHILD_PROFILE: &str = "general";
 pub const MAX_RUNNING_TRADITIONAL_CHILDREN: u64 = 4;
@@ -658,16 +658,18 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert!(create_traditional_child_relationship(
-            &path,
-            "child",
-            "grandchild",
-            GENERAL_CHILD_PROFILE,
-            "nested",
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("running assigned sessions cannot launch children"));
+        assert!(
+            create_traditional_child_relationship(
+                &path,
+                "child",
+                "grandchild",
+                GENERAL_CHILD_PROFILE,
+                "nested",
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("running assigned sessions cannot launch children")
+        );
 
         begin_traditional_child_run(
             &path,
@@ -748,14 +750,10 @@ mod tests {
             std::collections::BTreeMap::new(),
         );
         snapshot.behavior = crate::sessions::SessionBehavior::Direct;
-        assert!(create_traditional_child_session(
-            &path,
-            &snapshot,
-            "parent",
-            GENERAL_CHILD_PROFILE,
-            ""
-        )
-        .is_err());
+        assert!(
+            create_traditional_child_session(&path, &snapshot, "parent", GENERAL_CHILD_PROFILE, "")
+                .is_err()
+        );
         assert!(!crate::sessions::session_exists(&path, "atomic-child").unwrap());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -1045,15 +1043,17 @@ mod tests {
                 .unwrap();
             }
         }
-        assert!(begin_traditional_child_run(
-            &path,
-            "child-4",
-            "run-4",
-            TraditionalChildExecutionMode::Background,
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("concurrency limit"));
+        assert!(
+            begin_traditional_child_run(
+                &path,
+                "child-4",
+                "run-4",
+                TraditionalChildExecutionMode::Background,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("concurrency limit")
+        );
         settle_traditional_child_run(
             &path,
             "child-0",

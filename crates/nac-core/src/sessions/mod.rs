@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
-use rusqlite::{params, OptionalExtension};
+use anyhow::{Context, Result, anyhow};
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::light_model::LightModelSettings;
@@ -34,7 +34,7 @@ pub use operation_lease::{
 // Compatibility aliases for callers that have not yet adopted operation-wide naming.
 pub type SessionRunLease = SessionOperationLease;
 pub type SessionRunLeaseError = SessionOperationLeaseError;
-pub use snapshot::{new_snapshot, refresh_snapshot, SessionRunState, SessionRunStateUpdate};
+pub use snapshot::{SessionRunState, SessionRunStateUpdate, new_snapshot, refresh_snapshot};
 
 pub(crate) async fn load_session_async(
     path: PathBuf,
@@ -260,6 +260,8 @@ pub struct SessionSummary {
     pub run_count: u64,
     /// Present when this chat was forked from another session.
     pub forked_from: Option<crate::store::SessionForkOrigin>,
+    /// Present when this chat was continued in the other session type.
+    pub converted_from: Option<crate::store::SessionConvertedOrigin>,
 }
 
 #[derive(Debug)]

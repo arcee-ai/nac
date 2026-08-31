@@ -3,7 +3,7 @@
 
 use super::*;
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 
 use crate::sessions::SessionBehavior;
 

@@ -1,6 +1,6 @@
 use super::*;
-use crate::types::Message;
 use crate::TEST_ENV_LOCK;
+use crate::types::Message;
 
 fn temp_store_path(label: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
@@ -178,13 +178,17 @@ fn unknown_stored_behavior_fails_closed_for_load_and_list() {
     drop(conn);
 
     let load_error = load_session(&store_path, "session").unwrap_err();
-    assert!(load_error
-        .to_string()
-        .contains("unsupported stored session behavior 'future-behavior'"));
+    assert!(
+        load_error
+            .to_string()
+            .contains("unsupported stored session behavior 'future-behavior'")
+    );
     let list_error = list_sessions(&store_path).unwrap_err();
-    assert!(list_error
-        .to_string()
-        .contains("unsupported stored session behavior 'future-behavior'"));
+    assert!(
+        list_error
+            .to_string()
+            .contains("unsupported stored session behavior 'future-behavior'")
+    );
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -304,10 +308,12 @@ fn light_model_round_trips_and_malformed_json_is_a_diagnostic() {
     drop(conn);
     let broken = load_session_config(&store_path, "light").unwrap();
     assert_eq!(broken.light_model, None);
-    assert!(broken
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.starts_with(MALFORMED_LIGHT_MODEL_DIAGNOSTIC)));
+    assert!(
+        broken
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.starts_with(MALFORMED_LIGHT_MODEL_DIAGNOSTIC))
+    );
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -713,27 +719,35 @@ fn listing_and_raw_config_isolate_structurally_invalid_model_rows() {
         .map(|summary| (summary.session_id.clone(), summary))
         .collect::<std::collections::HashMap<_, _>>();
     assert_eq!(by_id["healthy"].model_config_error, None);
-    assert!(by_id["auto"]
-        .model_config_error
-        .as_deref()
-        .unwrap()
-        .contains("auto"));
+    assert!(
+        by_id["auto"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("auto")
+    );
     assert_eq!(by_id["missing"].backend, "");
-    assert!(by_id["missing"]
-        .model_config_error
-        .as_deref()
-        .unwrap()
-        .contains("no backend"));
-    assert!(by_id["effort"]
-        .model_config_error
-        .as_deref()
-        .unwrap()
-        .contains("ultra"));
-    assert!(by_id["headers"]
-        .model_config_error
-        .as_deref()
-        .unwrap()
-        .contains("malformed stored extra headers"));
+    assert!(
+        by_id["missing"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("no backend")
+    );
+    assert!(
+        by_id["effort"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("ultra")
+    );
+    assert!(
+        by_id["headers"]
+            .model_config_error
+            .as_deref()
+            .unwrap()
+            .contains("malformed stored extra headers")
+    );
 
     let raw = load_session_config(&store_path, "headers").unwrap();
     assert_eq!(raw.extra_headers_json.as_deref(), Some("{broken"));
@@ -1196,9 +1210,11 @@ fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
     .unwrap();
 
     // Verify data exists
-    assert!(!crate::store::list_threads(&store_path, "session-del")
-        .unwrap()
-        .is_empty());
+    assert!(
+        !crate::store::list_threads(&store_path, "session-del")
+            .unwrap()
+            .is_empty()
+    );
     assert!(
         crate::store::list_worksets(&store_path, "session-del")
             .unwrap()
@@ -1225,12 +1241,16 @@ fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
     );
 
     // Verify all related rows are gone
-    assert!(crate::store::list_threads(&store_path, "session-del")
-        .unwrap()
-        .is_empty());
-    assert!(crate::store::list_worksets(&store_path, "session-del")
-        .unwrap()
-        .is_empty());
+    assert!(
+        crate::store::list_threads(&store_path, "session-del")
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        crate::store::list_worksets(&store_path, "session-del")
+            .unwrap()
+            .is_empty()
+    );
     assert!(list_sessions(&store_path).unwrap().is_empty());
     assert!(
         crate::store::list_thread_steering(&store_path, "session-del")
@@ -1509,9 +1529,11 @@ fn reorders_groups_independently_and_rejects_conflicts_without_partial_writes() 
             .collect::<Vec<_>>(),
         [("b", 0), ("a", 1)]
     );
-    assert!(pinned
-        .iter()
-        .all(|summary| summary.presentation_version == 2));
+    assert!(
+        pinned
+            .iter()
+            .all(|summary| summary.presentation_version == 2)
+    );
     assert_eq!(pinned[1].title.as_deref(), Some("Alpha"));
 
     let unpinned = reorder_sessions(

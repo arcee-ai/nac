@@ -1,20 +1,17 @@
 import { useMemo } from "react";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  ChatSessionButton,
-  Icon,
-  IconName,
-} from "@/app/atoms";
+import { ChatSessionButton, Icon, IconName } from "@/app/atoms";
 import { GroupLabel } from "@/app/components/projects/GroupLabel";
 import { useNow } from "@/app/hooks/useNow";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { cn } from "@/app/lib/cn";
 import { isActiveRun } from "@/app/lib/format";
 import { groupByRecency } from "@/app/lib/projects";
-import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
+import {
+  sessionBehaviorPresentation,
+  sessionOriginFromRecord,
+  sessionTypeFromBehavior,
+} from "@/app/lib/sessionBehavior";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
 /** Date buckets only shift once a day, so a minute of resolution is plenty. */
@@ -63,7 +60,9 @@ export function ChatSessionList({
   );
 
   if (sessions.length === 0) {
-    return <div className="label-small text-basic-muted px-2 py-1">{emptyLabel}</div>;
+    return (
+      <div className="label-small text-basic-muted px-2 py-1">{emptyLabel}</div>
+    );
   }
 
   return (
@@ -76,56 +75,60 @@ export function ChatSessionList({
               const title = entry.lineage?.description?.trim()
                 ? entry.lineage.description
                 : sessionTitle(entry.summary);
-              const behavior = sessionBehaviorPresentation(entry.summary.behavior);
+              const behavior = sessionBehaviorPresentation(
+                entry.summary.behavior,
+              );
               return (
                 <ChatSessionButton
                   key={entry.summary.session_id}
                   title={title}
-                  badge={behavior.navigationLabel}
+                  sessionType={sessionTypeFromBehavior(entry.summary.behavior)}
+                  origin={sessionOriginFromRecord(
+                    entry.lineage,
+                    entry.summary.forked_from,
+                    entry.summary.converted_from,
+                  )}
                   badgeLabel={behavior.label}
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}
-                  forkedFromTitle={entry.summary.forked_from?.title}
                   isMobile={isMobile}
                   onClick={() => onOpen(entry)}
                   actions={
                     onPin || onRename || onDelete ? (
                       <>
                         {onPin ? (
-                          <Button
-                            variant={ButtonVariant.Ghost}
-                            size={ButtonSize.Small}
-                            content={ButtonContent.Icon}
-                            title={entry.summary.pinned ? "Unpin chat" : "Pin chat"}
-                            aria-label={`${entry.summary.pinned ? "Unpin" : "Pin"} ${title}`}
+                          <ChatRowAction
+                            isMobile={isMobile}
+                            title={
+                              entry.summary.pinned ? "Unpin chat" : "Pin chat"
+                            }
+                            ariaLabel={`${entry.summary.pinned ? "Unpin" : "Pin"} ${title}`}
+                            iconName={
+                              entry.summary.pinned
+                                ? IconName.Unpin
+                                : IconName.Pin
+                            }
                             onClick={() => onPin(entry)}
-                          >
-                            <Icon iconName={entry.summary.pinned ? IconName.Unpin : IconName.Pin} />
-                          </Button>
+                          />
                         ) : null}
                         {onRename ? (
-                          <Button
-                            variant={ButtonVariant.Ghost}
-                            size={ButtonSize.Small}
-                            content={ButtonContent.Icon}
+                          <ChatRowAction
+                            isMobile={isMobile}
                             title="Rename chat"
-                            aria-label={`Rename ${title}`}
+                            ariaLabel={`Rename ${title}`}
+                            iconName={IconName.Edit}
                             onClick={() => onRename(entry)}
-                          >
-                            <Icon iconName={IconName.Edit} />
-                          </Button>
+                          />
                         ) : null}
                         {onDelete ? (
-                          <Button
-                            variant={ButtonVariant.GhostDestructive}
-                            size={ButtonSize.Small}
-                            content={ButtonContent.Icon}
+                          <ChatRowAction
+                            isMobile={isMobile}
                             title="Delete chat"
-                            aria-label={`Delete ${title}`}
+                            ariaLabel={`Delete ${title}`}
+                            iconName={IconName.Trash}
+                            destructive
                             onClick={() => onDelete(entry)}
-                          >
-                            <Icon iconName={IconName.Trash} />
-                          </Button>
+                          />
                         ) : null}
                       </>
                     ) : null
@@ -137,5 +140,39 @@ export function ChatSessionList({
         </div>
       ))}
     </div>
+  );
+}
+
+/** Figma ChatSessionButton actions: 16px desktop, 20px mobile, no Button chrome. */
+function ChatRowAction({
+  isMobile,
+  title,
+  ariaLabel,
+  iconName,
+  destructive = false,
+  onClick,
+}: {
+  isMobile: boolean;
+  title: string;
+  ariaLabel: string;
+  iconName: IconName;
+  destructive?: boolean;
+  onClick: () => void;
+}) {
+  const size = isMobile ? 20 : 16;
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={ariaLabel}
+      className={cn(
+        "flex shrink-0 items-center justify-center rounded-[8px]",
+        isMobile ? "size-5" : "size-4",
+        destructive ? "text-btn-destructive" : "text-btn-secondary",
+      )}
+      onClick={onClick}
+    >
+      <Icon iconName={iconName} size={size} />
+    </button>
   );
 }

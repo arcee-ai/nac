@@ -13,11 +13,11 @@
 
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use super::workspace_diff::validate_workspace_relpath;
-use crate::workspace::{first_stderr_line, GitTarget, WorktreeRead};
+use crate::workspace::{GitTarget, WorktreeRead, first_stderr_line};
 
 /// Enough for any repository a person browses by hand; past this the tree is
 /// unusable as a list anyway.
@@ -106,7 +106,7 @@ pub fn read_file(target: &GitTarget, path: &str) -> Result<WorkspaceFileContent>
                 size,
                 binary: false,
                 too_large: true,
-            })
+            });
         }
         WorktreeRead::Regular {
             bytes: Some(bytes), ..
@@ -127,7 +127,7 @@ pub fn read_file(target: &GitTarget, path: &str) -> Result<WorkspaceFileContent>
                     size,
                     binary: true,
                     too_large: false,
-                })
+                });
             }
         }
     };

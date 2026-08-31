@@ -17,6 +17,7 @@ import {
   StickyInputVariant,
 } from "@/app/atoms";
 import { ChatSessionList } from "@/app/components/projects/ChatSessionList";
+import { NewSessionMenu } from "@/app/components/projects/NewSessionPopover";
 import { ProjectsList } from "@/app/components/projects/ProjectsList";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
@@ -54,6 +55,34 @@ function matchesItem(
   return `${sessionTitle(item.session.summary)} ${item.session.summary.cwd}`
     .toLowerCase()
     .includes(needle);
+}
+
+function MobileNewSessionButton({
+  projectId,
+  onParentClose,
+}: {
+  projectId: string;
+  onParentClose: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <NewSessionMenu
+      projectId={projectId}
+      open={open}
+      onOpenChange={setOpen}
+      onCreated={onParentClose}
+    >
+      <StickyButton
+        variant={ButtonVariant.Secondary}
+        content={ButtonContent.Icon}
+        aria-label="New Session"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Icon iconName={IconName.Add} />
+      </StickyButton>
+    </NewSessionMenu>
+  );
 }
 
 /**
@@ -164,14 +193,7 @@ export function MobileProjectSessionModal({
             aria-label={tab === "chats" ? "Search Sessions" : "Search projects"}
           />
           {tab === "chats" && projectId ? (
-            <StickyButton
-              variant={ButtonVariant.Secondary}
-              content={ButtonContent.Icon}
-              aria-label="New Session"
-              onClick={() => closeAnd(() => void actions.newChat(projectId))}
-            >
-              <Icon iconName={IconName.Add} />
-            </StickyButton>
+            <MobileNewSessionButton projectId={projectId} onParentClose={onClose} />
           ) : null}
           {tab === "projects" ? (
             <>

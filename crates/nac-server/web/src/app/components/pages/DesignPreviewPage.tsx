@@ -37,6 +37,8 @@ import {
   MessageBoxVariant,
   Modal,
   NumberInput,
+  OriginSessionBadge,
+  OriginSessionKind,
   Pagination,
   Popover,
   PopoverPlacement,
@@ -47,6 +49,9 @@ import {
   RangeInput,
   Select,
   SessionAvatar,
+  SessionOrigin,
+  SessionType,
+  SessionTypeAvatar,
   ShimmerLoader,
   Switch,
   TagsSelector,
@@ -54,8 +59,16 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { NewSessionPopover } from "@/app/components/projects/NewSessionPopover";
 
-const SAMPLE_IDS = ["9f2c1ab4", "3de77c01", "b81004ff", "22aa93de", "7c0518ba", "e4419d27"];
+const SAMPLE_IDS = [
+  "9f2c1ab4",
+  "3de77c01",
+  "b81004ff",
+  "22aa93de",
+  "7c0518ba",
+  "e4419d27",
+];
 
 const MODELS = [
   { id: "sonnet", label: "Claude Sonnet", icon: IconName.Brain },
@@ -71,7 +84,28 @@ const SAMPLE_CODE = `pub enum AgentEvent {
         usage: Option<TokenUsage>,
     },
     RunFinished { thread_name: Option<String> },
-}`;
+}}`;
+
+function PreviewChatActions({ mobile = false }: { mobile?: boolean }) {
+  const size = mobile ? 20 : 16;
+  const box = mobile ? "size-5" : "size-4";
+  return (
+    <>
+      {[IconName.Pin, IconName.Edit, IconName.Trash].map((iconName) => (
+        <span
+          key={iconName}
+          className={
+            iconName === IconName.Trash
+              ? `flex ${box} shrink-0 items-center justify-center rounded-[8px] text-btn-destructive`
+              : `flex ${box} shrink-0 items-center justify-center rounded-[8px] text-btn-secondary`
+          }
+        >
+          <Icon iconName={iconName} size={size} />
+        </span>
+      ))}
+    </>
+  );
+}
 
 /**
  * Design-system preview, reachable at `#/design`. It stays after the app shell
@@ -109,14 +143,19 @@ export default function DesignPreviewPage() {
             <Button variant={ButtonVariant.Secondary}>Secondary</Button>
             <Button variant={ButtonVariant.Tertiary}>Tertiary</Button>
             <Button variant={ButtonVariant.Ghost}>Ghost</Button>
-            <Button variant={ButtonVariant.GhostDestructive}>Destructive</Button>
+            <Button variant={ButtonVariant.GhostDestructive}>
+              Destructive
+            </Button>
             <Button variant={ButtonVariant.Primary} loading>
               Loading
             </Button>
             <Button variant={ButtonVariant.Secondary} disabled>
               Disabled
             </Button>
-            <Button variant={ButtonVariant.Secondary} content={ButtonContent.IconLeft}>
+            <Button
+              variant={ButtonVariant.Secondary}
+              content={ButtonContent.IconLeft}
+            >
               <Icon iconName={IconName.Add} />
               With icon
             </Button>
@@ -167,7 +206,10 @@ export default function DesignPreviewPage() {
               onValueChange={setModel}
               placeholder="Pick a model"
             />
-            <Button variant={ButtonVariant.Secondary} onClick={() => setModalOpen(true)}>
+            <Button
+              variant={ButtonVariant.Secondary}
+              onClick={() => setModalOpen(true)}
+            >
               Open modal
             </Button>
           </div>
@@ -183,10 +225,12 @@ export default function DesignPreviewPage() {
               sticky
               content={
                 <>
-                  <div className="label-small text-basic-primary px-2 py-1">Anchored panel</div>
+                  <div className="label-small text-basic-primary px-2 py-1">
+                    Anchored panel
+                  </div>
                   <div className="text-micro text-basic-muted px-2 pb-1">
-                    Closes on Escape or a click outside. On a phone it becomes a bottom sheet
-                    instead.
+                    Closes on Escape or a click outside. On a phone it becomes a
+                    bottom sheet instead.
                   </div>
                 </>
               }
@@ -309,34 +353,222 @@ export default function DesignPreviewPage() {
             ))}
             <div className="flex items-center gap-2">
               <ChatSessionOrphanAvatar />
-              <span className="code code-small text-basic-muted">unassigned</span>
+              <span className="code code-small text-basic-muted">
+                unassigned agent
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <ChatSessionOrphanAvatar sessionType={SessionType.Orchestrator} />
+              <span className="code code-small text-basic-muted">
+                unassigned orchestrator
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <ChatSessionOrphanAvatar origin={SessionOrigin.Fork} running />
+              <span className="code code-small text-basic-muted">
+                unassigned fork running
+              </span>
+            </div>
+          </div>
+        </BoxSurface>
+
+        <BoxSurface title="Session type">
+          <div className="p-4 flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
+              <span className="code code-small text-basic-muted">
+                SessionTypeAvatar
+              </span>
+              <div className="flex flex-wrap items-start gap-4">
+                {(
+                  [
+                    SessionOrigin.User,
+                    SessionOrigin.Fork,
+                    SessionOrigin.Converted,
+                    SessionOrigin.Delegated,
+                    SessionOrigin.DelegatedLocked,
+                  ] as const
+                ).map((origin) => (
+                  <div key={origin} className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <SessionTypeAvatar
+                        sessionType={SessionType.Agent}
+                        origin={origin}
+                      />
+                      <SessionTypeAvatar
+                        sessionType={SessionType.Orchestrator}
+                        origin={origin}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <SessionTypeAvatar
+                        sessionType={SessionType.Agent}
+                        origin={origin}
+                        running
+                      />
+                      <SessionTypeAvatar
+                        sessionType={SessionType.Orchestrator}
+                        origin={origin}
+                        running
+                      />
+                    </div>
+                    <span className="code code-small text-basic-muted">
+                      {origin}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <span className="code code-small text-basic-muted">
+                OriginSessionBadge
+              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                {(
+                  [
+                    OriginSessionKind.Fork,
+                    OriginSessionKind.Converted,
+                    OriginSessionKind.Delegated,
+                    OriginSessionKind.DelegatedLocked,
+                  ] as const
+                ).map((kind) => (
+                  <div key={kind} className="flex items-center gap-1">
+                    <OriginSessionBadge
+                      sessionType={SessionType.Agent}
+                      kind={kind}
+                    />
+                    <OriginSessionBadge
+                      sessionType={SessionType.Orchestrator}
+                      kind={kind}
+                    />
+                    <span className="code code-small text-basic-muted">
+                      {kind}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </BoxSurface>
 
         <BoxSurface title="Project navigation">
           <div className="p-4 flex flex-col gap-6">
-            <div className="flex items-start gap-2">
-              <ChatSessionTab title="Fix the parser" active />
-              <ChatSessionTab title="Rewrite the store layer" />
-              <ChatSessionTab title="Investigating" running />
-              <ChatSessionTab title="Fork: Fix the parser" forkedFromTitle="Fix the parser" />
-              <ChatSessionTab title="Fork running" forkedFromTitle="Fix the parser" running />
+            <div className="flex items-start gap-2 overflow-x-auto [&>*]:shrink-0">
+              <ChatSessionTab
+                title="Fix the parser"
+                active
+                badgeLabel="Agent"
+                avatarDescription="Agent"
+                onDismiss={() => undefined}
+              />
+              <ChatSessionTab
+                title="Rewrite the store layer"
+                sessionType={SessionType.Orchestrator}
+                badgeLabel="Orchestrator"
+                avatarDescription="Orchestrator"
+                onDismiss={() => undefined}
+              />
+              <ChatSessionTab
+                title="Investigating"
+                running
+                badgeLabel="Agent"
+                avatarDescription="Agent"
+              />
+              <ChatSessionTab
+                title="Fork: Fix the parser"
+                origin={SessionOrigin.Fork}
+                badgeLabel="Agent"
+                avatarDescription="Agent. Fork of Fix the parser"
+                onDismiss={() => undefined}
+              />
+              <ChatSessionTab
+                title="Continue in Agent"
+                origin={SessionOrigin.Converted}
+                badgeLabel="Agent"
+                avatarDescription="Agent. Converted from Rewrite the store layer"
+                onDismiss={() => undefined}
+              />
+              <ChatSessionTab
+                title="Delegated worker"
+                origin={SessionOrigin.DelegatedLocked}
+                sessionType={SessionType.Orchestrator}
+                badgeLabel="Orchestrator"
+                avatarDescription="Orchestrator. Created by an Agent"
+                onDismiss={() => undefined}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <span className="code code-small text-basic-muted">
+                NewSessionPopover
+              </span>
+              <div className="flex w-[240px] flex-col gap-2 rounded-[8px] bg-elevation-level-3 px-1 py-2 shadow-2xl">
+                <NewSessionPopover onSelect={() => undefined} />
+              </div>
             </div>
             <div className="flex flex-col gap-1 max-w-[320px]">
-              <ChatSessionButton title="Fix the parser" active />
-              <ChatSessionButton title="Rewrite the store layer" />
-              <ChatSessionButton title="Investigating" running />
-              <ChatSessionButton title="Fork: Fix the parser" forkedFromTitle="Fix the parser" />
-              <ChatSessionButton title="Fork running" forkedFromTitle="Fix the parser" running />
+              <ChatSessionButton
+                title="Fix the parser"
+                active
+                badgeLabel="Agent"
+                actions={<PreviewChatActions />}
+              />
+              <ChatSessionButton
+                title="Rewrite the store layer"
+                sessionType={SessionType.Orchestrator}
+                badgeLabel="Orchestrator"
+                actions={<PreviewChatActions />}
+              />
+              <ChatSessionButton
+                title="Investigating"
+                running
+                badgeLabel="Agent"
+              />
+              <ChatSessionButton
+                title="Fork: Fix the parser"
+                origin={SessionOrigin.Fork}
+                badgeLabel="Agent"
+                actions={<PreviewChatActions />}
+              />
+              <ChatSessionButton
+                title="Delegated worker"
+                origin={SessionOrigin.DelegatedLocked}
+                sessionType={SessionType.Orchestrator}
+                badgeLabel="Orchestrator"
+                running
+                actions={<PreviewChatActions />}
+              />
+            </div>
+            <div className="flex flex-col gap-1 max-w-[320px]">
+              <ChatSessionButton
+                title="Mobile row"
+                isMobile
+                badgeLabel="Agent"
+                actions={<PreviewChatActions mobile />}
+              />
             </div>
             <div className="flex flex-col gap-2 max-w-[320px]">
-              <ForkSessionItem sessionId="14231vsd7897-aaaa" title="Fork: Session title" />
-              <ForkSessionItem sessionId="14231vsd7897-aaaa" title="Fork: Session title" deleted />
+              <ForkSessionItem
+                sessionId="14231vsd7897-aaaa"
+                title="Fork: Session title"
+              />
+              <ForkSessionItem
+                sessionId="14231vsd7897-aaaa"
+                title="Fork: Session title"
+                deleted
+              />
             </div>
             <div className="flex flex-col gap-1 max-w-[320px]">
-              <ProjectButton entityId={SAMPLE_IDS[3]} name="arcee-ai/nac" trailing="4" active />
-              <ProjectButton entityId={SAMPLE_IDS[4]} name="arcee-ai/telos" trailing="1" running />
+              <ProjectButton
+                entityId={SAMPLE_IDS[3]}
+                name="arcee-ai/nac"
+                trailing="4"
+                active
+              />
+              <ProjectButton
+                entityId={SAMPLE_IDS[4]}
+                name="arcee-ai/telos"
+                trailing="1"
+                running
+              />
               <ProjectButton
                 entityId={SAMPLE_IDS[5]}
                 name="Unassigned session"
@@ -457,7 +689,9 @@ export default function DesignPreviewPage() {
             <div className="paragraph-medium text-basic-secondary">
               Paragraph medium on the secondary text token.
             </div>
-            <div className="code code-small text-basic-muted">code-small / IBM Plex Mono</div>
+            <div className="code code-small text-basic-muted">
+              code-small / IBM Plex Mono
+            </div>
           </div>
         </BoxSurface>
       </main>
@@ -468,7 +702,10 @@ export default function DesignPreviewPage() {
         title="Delete session"
         footer={
           <>
-            <Button variant={ButtonVariant.Secondary} onClick={() => setModalOpen(false)}>
+            <Button
+              variant={ButtonVariant.Secondary}
+              onClick={() => setModalOpen(false)}
+            >
               Cancel
             </Button>
             <Button
@@ -480,8 +717,8 @@ export default function DesignPreviewPage() {
           </>
         }
       >
-        This is the shared modal shell: overlay click, Escape and a Tab focus trap all come from the
-        atom.
+        This is the shared modal shell: overlay click, Escape and a Tab focus
+        trap all come from the atom.
       </Modal>
     </div>
   );

@@ -5,6 +5,8 @@ import type {
 } from "@/app/types/api";
 
 export const SNAPSHOT_MESSAGE_LIMIT = 24;
+/** Matches nac-server `MAX_MESSAGE_PAGE_LIMIT`. Agent history backfills at this size. */
+export const SNAPSHOT_HISTORY_LIMIT = 100;
 export const SNAPSHOT_THREAD_EVENT_LIMIT = 50;
 
 export type MessageWindowMerge =
@@ -31,10 +33,14 @@ function validRange(
 export function validMessagesPage(page: MessagesPageResponse): boolean {
   return validRange(page.page, page.messages.length, page.created_at.length);
 }
-export function validSnapshotWindow(snapshot: SessionSnapshotResponse): boolean {
+export function validSnapshotWindow(
+  snapshot: SessionSnapshotResponse,
+): boolean {
   const page = snapshot.message_page;
   const createdAt = snapshot.message_created_at ?? [];
-  return Boolean(page && validRange(page, snapshot.messages.length, createdAt.length));
+  return Boolean(
+    page && validRange(page, snapshot.messages.length, createdAt.length),
+  );
 }
 
 function snapshotRange(snapshot: SessionSnapshotResponse): MessagePageMetadata {
@@ -71,7 +77,11 @@ export function mergeMessageTail(
   const currentPage = snapshotRange(current);
   const currentCreatedAt = snapshotTimes(current);
   if (
-    !validRange(currentPage, current.messages.length, currentCreatedAt.length) ||
+    !validRange(
+      currentPage,
+      current.messages.length,
+      currentCreatedAt.length,
+    ) ||
     incoming.page.end !== incoming.page.total ||
     incoming.page.total < currentPage.total ||
     incoming.page.start > currentPage.end
@@ -100,8 +110,14 @@ export function mergeMessageTail(
     kind: "accepted",
     snapshot: {
       ...current,
-      messages: [...current.messages.slice(0, prefixLength), ...incoming.messages],
-      message_created_at: [...currentCreatedAt.slice(0, prefixLength), ...incoming.created_at],
+      messages: [
+        ...current.messages.slice(0, prefixLength),
+        ...incoming.messages,
+      ],
+      message_created_at: [
+        ...currentCreatedAt.slice(0, prefixLength),
+        ...incoming.created_at,
+      ],
       message_page: {
         ...incoming.page,
         start: currentPage.start,

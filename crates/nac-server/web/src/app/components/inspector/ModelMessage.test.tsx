@@ -80,11 +80,11 @@ describe("transcript topology badge navigation", () => {
         onSelectThread={vi.fn()}
         onSelectWorkset={vi.fn()}
         onContinue={onContinue}
-        continueLabel="Continue in NAC"
+        continueLabel="Continue in Orchestrator"
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Continue in NAC" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue in Orchestrator" }));
     expect(onContinue).toHaveBeenCalledWith(2);
   });
 
@@ -111,7 +111,7 @@ describe("transcript topology badge navigation", () => {
         onRevert={vi.fn()}
         onFork={vi.fn()}
         onContinue={vi.fn()}
-        continueLabel="Continue in NAC"
+        continueLabel="Continue in Orchestrator"
         forks={[
           {
             session_id: "fork-1",
@@ -127,7 +127,7 @@ describe("transcript topology badge navigation", () => {
     expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create fork" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Continue in NAC" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue in Orchestrator" })).toBeNull();
     expect(screen.queryByText("Forked chat")).toBeNull();
     expect(screen.getByRole("button", { name: "Copy message" })).not.toBeNull();
   });

@@ -16,13 +16,25 @@ import {
   Tooltip,
 } from "@/app/atoms";
 import { ChatSessionPopover } from "@/app/components/projects/ChatSessionPopover";
+import { NewSessionMenu } from "@/app/components/projects/NewSessionPopover";
+import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
 import { isActiveRun, NEW_CHAT_TITLE } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
-import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
+import {
+  sessionAvatarTooltipDescription,
+  sessionBehaviorPresentation,
+  sessionOriginDetail,
+  sessionOriginFromRecord,
+  sessionTypeFromBehavior,
+} from "@/app/lib/sessionBehavior";
 import type { DropEdge } from "@/app/lib/sessionOrder";
-import { applyTabOrder, placeIdAt, targetIndexInGroup } from "@/app/lib/sessionOrder";
+import {
+  applyTabOrder,
+  placeIdAt,
+  targetIndexInGroup,
+} from "@/app/lib/sessionOrder";
 import { NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
@@ -33,7 +45,10 @@ import {
   useChatTabOrder,
   useDismissedChatTabs,
 } from "@/app/store/chatTabsStore";
-import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
+import type {
+  ManagedSessionSummary,
+  SessionSummarySnapshot,
+} from "@/app/types/api";
 
 /** Which side of the tab under the pointer the dragged one would land on. */
 function edgeUnderPointer(element: HTMLElement, clientX: number): DropEdge {
@@ -77,8 +92,20 @@ export function ProjectSessionTabs({
   const dismissed = useDismissedChatTabs();
   const tabOrder = useChatTabOrder(projectId);
   const [open, setOpen] = useState(false);
+  const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [dragging, setDragging] = useState<string | null>(null);
-  const [dropAt, setDropAt] = useState<{ sessionId: string; edge: DropEdge } | null>(null);
+  const [dropAt, setDropAt] = useState<{
+    sessionId: string;
+    edge: DropEdge;
+  } | null>(null);
+
+  useKeyboardShortcuts([
+    {
+      keys: NEW_CHAT_KEYS,
+      enabled: Boolean(projectId),
+      onTrigger: () => setNewSessionOpen((value) => !value),
+    },
+  ]);
 
   // Reaching a chat any other way — the popover, the trail, a bookmarked URL —
   // is as much "open it" as clicking its tab, so it earns its place back.
@@ -97,7 +124,7 @@ export function ProjectSessionTabs({
         aria-label="Loading chats"
       >
         {leading}
-        <div className="flex items-start gap-2 flex-1 min-w-0 overflow-x-auto overflow-y-clip [&>*]:shrink-0">
+        <div className="flex items-start gap-2 flex-1 min-w-0 overflow-x-auto overflow-y-clip scrollbar-none [&>*]:shrink-0">
           <ChatSessionTabSkeleton />
           <ChatSessionTabSkeleton />
         </div>
@@ -109,9 +136,15 @@ export function ProjectSessionTabs({
     return (
       <div className="flex h-12 items-center gap-3 px-2 border-b border-b-tertiary">
         {leading}
-        <Icon iconName={IconName.Danger} size={28} className="shrink-0 text-danger-primary" />
+        <Icon
+          iconName={IconName.Danger}
+          size={28}
+          className="shrink-0 text-danger-primary"
+        />
         <div className="flex flex-col flex-1 min-w-0 text-danger-primary">
-          <span className="label-micro truncate">The session is not assigned</span>
+          <span className="label-micro truncate">
+            The session is not assigned
+          </span>
           <span className="text-[10px] leading-[12px] opacity-75 truncate">
             Adding new sessions is unavailable
           </span>
@@ -155,7 +188,8 @@ export function ProjectSessionTabs({
   // transcript with no tab above it reads as belonging to nothing.
   const visible = ordered.filter(
     (entry) =>
-      !dismissed.has(entry.summary.session_id) || entry.summary.session_id === activeSessionId,
+      !dismissed.has(entry.summary.session_id) ||
+      entry.summary.session_id === activeSessionId,
   );
 
   // A single tab has nothing to trade places with.
@@ -184,7 +218,9 @@ export function ProjectSessionTabs({
   // has none, so the list is the place left to land.
   const closeTab = (sessionId: string) => {
     if (sessionId === activeSessionId) {
-      const index = visible.findIndex((entry) => entry.summary.session_id === sessionId);
+      const index = visible.findIndex(
+        (entry) => entry.summary.session_id === sessionId,
+      );
       const next = visible[index + 1] ?? visible[index - 1];
       navigate(next ? routes.session(next.summary.session_id) : routes.list());
     }
@@ -193,23 +229,36 @@ export function ProjectSessionTabs({
 
   return (
     <div className="flex items-center gap-3 px-2 border-b border-b-tertiary">
-      {leading ? <div className="flex items-center shrink-0">{leading}</div> : null}
+      {leading ? (
+        <div className="flex items-center shrink-0">{leading}</div>
+      ) : null}
       {/* Horizontal only: the strip is one row and must never grow taller. */}
-      <div className="flex items-start gap-2 flex-1 min-w-0 overflow-x-auto overflow-y-clip [&>*]:shrink-0">
+      <div className="flex items-start gap-2 flex-1 min-w-0 overflow-x-auto overflow-y-clip scrollbar-none [&>*]:shrink-0">
         {empty ? (
           <ChatSessionTab
             title={NEW_CHAT_TITLE}
             active
-            onClick={() => void projectActions.newChat(projectId)}
+            onClick={() => setNewSessionOpen(true)}
           />
         ) : (
           visible.map((entry) => {
             const sessionId = entry.summary.session_id;
-            const behavior = sessionBehaviorPresentation(entry.summary.behavior);
+            const behavior = sessionBehaviorPresentation(
+              entry.summary.behavior,
+            );
+            const origin = sessionOriginFromRecord(
+              entry.lineage,
+              entry.summary.forked_from,
+              entry.summary.converted_from,
+            );
+            const converted = entry.summary.converted_from;
             return (
               <div
                 key={sessionId}
-                className={cn("relative", dragging === sessionId && "opacity-40")}
+                className={cn(
+                  "relative",
+                  dragging === sessionId && "opacity-40",
+                )}
                 draggable={reorderable}
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = "move";
@@ -224,7 +273,10 @@ export function ProjectSessionTabs({
                   if (!dragging) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
-                  const edge = edgeUnderPointer(event.currentTarget, event.clientX);
+                  const edge = edgeUnderPointer(
+                    event.currentTarget,
+                    event.clientX,
+                  );
                   setDropAt((current) =>
                     current?.sessionId === sessionId && current.edge === edge
                       ? current
@@ -234,7 +286,10 @@ export function ProjectSessionTabs({
                 onDrop={(event) => {
                   if (!dragging) return;
                   event.preventDefault();
-                  dropOn(sessionId, edgeUnderPointer(event.currentTarget, event.clientX));
+                  dropOn(
+                    sessionId,
+                    edgeUnderPointer(event.currentTarget, event.clientX),
+                  );
                 }}
               >
                 {dropAt?.sessionId === sessionId ? (
@@ -251,11 +306,23 @@ export function ProjectSessionTabs({
                 ) : null}
                 <ChatSessionTab
                   title={sessionTitle(entry.summary)}
-                  badge={behavior.navigationLabel}
+                  sessionType={sessionTypeFromBehavior(entry.summary.behavior)}
+                  origin={origin}
                   badgeLabel={behavior.label}
+                  avatarDescription={sessionAvatarTooltipDescription(
+                    behavior.label,
+                    sessionOriginDetail({
+                      origin,
+                      forkedFromTitle: entry.summary.forked_from?.title,
+                      convertedFromTitle: converted?.title,
+                      convertedFromType: converted
+                        ? sessionBehaviorPresentation(converted.source_behavior)
+                            .label
+                        : undefined,
+                    }),
+                  )}
                   active={sessionId === activeSessionId}
                   running={isActiveRun(entry.active_run)}
-                  forkedFromTitle={entry.summary.forked_from?.title}
                   onClick={() => navigate(routes.session(sessionId))}
                   onDismiss={() => closeTab(sessionId)}
                 />
@@ -284,7 +351,9 @@ export function ProjectSessionTabs({
           }
         >
           <Button
-            variant={open ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
+            variant={
+              open ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost
+            }
             size={ButtonSize.Medium}
             content={ButtonContent.Icon}
             aria-label="All chats in this project"
@@ -300,16 +369,26 @@ export function ProjectSessionTabs({
           keyboardShortcuts={NEW_CHAT_KEYS}
           position={Tooltip.Position.BottomLeft}
         >
-          <Button
-            variant={ButtonVariant.Ghost}
-            size={ButtonSize.Medium}
-            content={ButtonContent.Icon}
-            aria-label="Create new session"
-            disabled={empty}
-            onClick={() => void projectActions.newChat(projectId)}
+          <NewSessionMenu
+            projectId={projectId}
+            open={newSessionOpen}
+            onOpenChange={setNewSessionOpen}
           >
-            <Icon iconName={IconName.Add} />
-          </Button>
+            <Button
+              variant={
+                newSessionOpen
+                  ? ButtonVariant.GhostHighlighted
+                  : ButtonVariant.Ghost
+              }
+              size={ButtonSize.Medium}
+              content={ButtonContent.Icon}
+              aria-label="Create new session"
+              aria-expanded={newSessionOpen}
+              onClick={() => setNewSessionOpen((value) => !value)}
+            >
+              <Icon iconName={IconName.Add} />
+            </Button>
+          </NewSessionMenu>
         </Tooltip>
       </div>
     </div>

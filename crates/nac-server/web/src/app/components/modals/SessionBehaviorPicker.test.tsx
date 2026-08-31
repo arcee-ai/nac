@@ -8,7 +8,7 @@ import { SessionBehaviorPicker } from "@/app/components/modals/SessionBehaviorPi
 afterEach(cleanup);
 
 describe("session behavior picker", () => {
-  it("shows Agent and NAC with Agent selected by default", () => {
+  it("shows Agent and Orchestrator with Agent selected by default", () => {
     render(<SessionBehaviorPicker value="direct" onChange={() => {}} />);
 
     expect(screen.getAllByRole("radio")).toHaveLength(2);
@@ -21,21 +21,23 @@ describe("session behavior picker", () => {
     expect(agent.textContent).toMatch(/Default/);
     expect(agent.textContent).toMatch(/persistent coding agent/i);
     expect(agent.textContent).toMatch(/edits files and runs commands directly/i);
-    expect(agent.textContent).toMatch(/fresh-context coding agents and separate NAC sessions/i);
+    expect(agent.textContent).toMatch(
+      /fresh-context coding agents and separate Orchestrator sessions/i,
+    );
 
-    const nac = screen.getByRole("radio", { name: /^NAC /i });
-    expect(nac.textContent).toMatch(/planner/i);
-    expect(nac.textContent).toMatch(/does not edit directly/i);
-    expect(nac.textContent).toMatch(/retained NAC worker threads/i);
-    expect(nac.textContent).toMatch(/Threads and Worksets/i);
+    const orchestrator = screen.getByRole("radio", { name: /^Orchestrator /i });
+    expect(orchestrator.textContent).toMatch(/planner/i);
+    expect(orchestrator.textContent).toMatch(/does not edit directly/i);
+    expect(orchestrator.textContent).toMatch(/retained Orchestrator worker threads/i);
+    expect(orchestrator.textContent).toMatch(/Threads and Worksets/i);
     expect(screen.queryByRole("radio", { name: /Direct \+ NAC/i })).toBeNull();
   });
 
-  it("reports an explicit NAC choice", () => {
+  it("reports an explicit Orchestrator choice", () => {
     const onChange = vi.fn();
     render(<SessionBehaviorPicker value="direct" onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("radio", { name: /^NAC /i }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Orchestrator /i }));
 
     expect(onChange).toHaveBeenCalledWith("orchestrator");
   });
@@ -44,17 +46,17 @@ describe("session behavior picker", () => {
     const onChange = vi.fn();
     const view = render(<SessionBehaviorPicker value="direct" onChange={onChange} />);
     const agent = screen.getByRole("radio", { name: /^Agent /i });
-    const nac = screen.getByRole("radio", { name: /^NAC /i });
+    const orchestrator = screen.getByRole("radio", { name: /^Orchestrator /i });
 
     expect(agent.tabIndex).toBe(0);
-    expect(nac.tabIndex).toBe(-1);
+    expect(orchestrator.tabIndex).toBe(-1);
     agent.focus();
     fireEvent.keyDown(agent, { key: "ArrowRight" });
 
     expect(onChange).toHaveBeenCalledWith("orchestrator");
-    expect(document.activeElement).toBe(nac);
+    expect(document.activeElement).toBe(orchestrator);
 
     view.rerender(<SessionBehaviorPicker value="orchestrator" onChange={onChange} />);
-    expect(nac.tabIndex).toBe(0);
+    expect(orchestrator.tabIndex).toBe(0);
   });
 });

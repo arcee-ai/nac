@@ -11,19 +11,30 @@ import {
   ForkSessionItem,
   Icon,
   IconName,
-  ModelPill,
+  SessionOrigin,
+  SessionType,
+  SessionTypeAvatar,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
-import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
+import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
+import {
+  SnapshotBadge,
+  type FilesPanelLink,
+} from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
 import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
-import { RUN_CANCELLED_MARKER, type ModelTurn } from "@/app/lib/transcript";
+import { partitionAgentTranscript } from "@/app/lib/agentSegments";
+import {
+  RUN_CANCELLED_MARKER,
+  type ModelTurn,
+  type TranscriptBlock,
+} from "@/app/lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -32,7 +43,10 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
  * model is doing rather than what it produced. Once it is over the badge carries
  * how long the model spent on it, whenever the backend timed the call.
  */
-function thoughtsLabel(block: { streaming: boolean; durationMs: number | null }): string {
+function thoughtsLabel(block: {
+  streaming: boolean;
+  durationMs: number | null;
+}): string {
   if (block.streaming) return "Thinking";
   if (block.durationMs == null) return "Thoughts";
   return `Thoughts, ${formatSeconds(block.durationMs)}`;
@@ -50,7 +64,10 @@ function modelCopyText(turn: ModelTurn): string {
 interface ModelMessageProps {
   turn: ModelTurn;
   model: string;
-  /** Draws the spinner ring while this turn is the one still producing output. */
+  /** Agent vs Orchestrator mark beside the model name. */
+  sessionType?: `${SessionType}`;
+  origin?: `${SessionOrigin}`;
+  /** Shimmers the session avatar while this turn is still producing output. */
   active: boolean;
   /**
    * What the run is doing right now. Only the active turn is given it, so the
@@ -62,8 +79,11 @@ interface ModelMessageProps {
   /** Episode key of the thread card the panels are pointing at, if any. */
   selectedThreadEpisode: string | null;
   selectedWorkset: string | null;
+  /** Thoughts & tools group the side panel is pointing at, if any. */
+  selectedAgentSegment?: string | null;
   onSelectThread: (name: string, episodeKey: string) => void;
   onSelectWorkset: (id: string) => void;
+  onSelectAgentSegment?: (id: string) => void;
   /**
    * Snapshot index of the user prompt this model turn answers. Resend and
    * revert address that prompt — same endpoints as the user bubble above.
@@ -109,13 +129,17 @@ interface ModelMessageProps {
 export const ModelMessage = memo(function ModelMessage({
   turn,
   model,
+  sessionType = SessionType.Agent,
+  origin = SessionOrigin.User,
   active,
   activity,
   isLast = false,
   selectedThreadEpisode,
   selectedWorkset,
+  selectedAgentSegment = null,
   onSelectThread,
   onSelectWorkset,
+  onSelectAgentSegment,
   userMessageIndex,
   userText = "",
   onRefresh = null,
@@ -140,9 +164,70 @@ export const ModelMessage = memo(function ModelMessage({
   // already written, so it closes the turn below the snapshot rather than
   // sitting wherever the marker happens to fall between the blocks.
   const cancelled = turn.blocks.some(
-    (block) => block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
+    (block) =>
+      block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
   );
   const isMobile = useIsMobile();
+  const renderTranscriptBlock = (block: TranscriptBlock) => {
+    switch (block.kind) {
+      case "thoughts":
+        // Empty reasoning (e.g. stripped tool-call markup, or a bare
+        // thinking signal with no text) should not leave a hollow badge.
+        if (!block.text.trim()) return null;
+        return (
+          <ChatBadge
+            key={block.key}
+            label={thoughtsLabel(block)}
+            pending={block.streaming}
+            body={block.text}
+          />
+        );
+      case "text":
+        if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
+        return (
+          <Markdown key={block.key} streaming={active}>
+            {block.text}
+          </Markdown>
+        );
+      case "workset":
+        return (
+          <ChatBadge
+            key={block.key}
+            label={
+              block.worksetId
+                ? `Worksets_${block.worksetId}`
+                : block.pending
+                  ? "Defining worksets…"
+                  : "Worksets"
+            }
+            pending={block.pending}
+            active={selectedWorkset === block.worksetId}
+            onClick={() => onSelectWorkset(block.worksetId)}
+          />
+        );
+      case "tool":
+        return (
+          <ChatBadge
+            key={block.key}
+            label={block.pending ? `${block.name}…` : block.name}
+            pending={block.pending}
+          />
+        );
+      case "tool-detail":
+        return <ToolCallDetail key={block.key} tool={block.presentation} />;
+      case "wave":
+        return (
+          <ThreadWave
+            key={block.key}
+            rows={block.rows}
+            selected={selectedThreadEpisode}
+            onSelect={onSelectThread}
+          />
+        );
+      default:
+        return null;
+    }
+  };
   return (
     <div
       className={cn(
@@ -152,8 +237,15 @@ export const ModelMessage = memo(function ModelMessage({
     >
       <div className="flex flex-col flex-grow gap-1 pt-2 md:max-w-[calc(100%-36px)] min-w-0">
         <div className="flex gap-3 items-center mb-4 min-w-0">
-          <ModelPill active={active} />
-          <span className="label-small text-basic-primary truncate">{model}</span>
+          <SessionTypeAvatar
+            sessionType={sessionType}
+            origin={origin}
+            running={active}
+            className="shrink-0"
+          />
+          <span className="label-small text-basic-primary truncate">
+            {model}
+          </span>
           {/* The header carries whichever of the two is available: what the run
               is doing now, or how long it took once it is over. */}
           {active && activity ? (
@@ -176,66 +268,21 @@ export const ModelMessage = memo(function ModelMessage({
             active && "streaming",
           )}
         >
-          {turn.blocks.map((block) => {
-            switch (block.kind) {
-              case "thoughts":
-                // Empty reasoning (e.g. stripped tool-call markup, or a bare
-                // thinking signal with no text) should not leave a hollow badge.
-                if (!block.text.trim()) return null;
-                return (
-                  <ChatBadge
-                    key={block.key}
-                    label={thoughtsLabel(block)}
-                    pending={block.streaming}
-                    body={block.text}
-                  />
-                );
-              case "text":
-                if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
-                return (
-                  <Markdown key={block.key} streaming={active}>
-                    {block.text}
-                  </Markdown>
-                );
-              case "workset":
-                return (
-                  <ChatBadge
-                    key={block.key}
-                    label={
-                      block.worksetId
-                        ? `Worksets_${block.worksetId}`
-                        : block.pending
-                          ? "Defining worksets…"
-                          : "Worksets"
-                    }
-                    pending={block.pending}
-                    active={selectedWorkset === block.worksetId}
-                    onClick={() => onSelectWorkset(block.worksetId)}
-                  />
-                );
-              case "tool":
-                return (
-                  <ChatBadge
-                    key={block.key}
-                    label={block.pending ? `${block.name}…` : block.name}
-                    pending={block.pending}
-                  />
-                );
-              case "tool-detail":
-                return <ToolCallDetail key={block.key} tool={block.presentation} />;
-              case "wave":
-                return (
-                  <ThreadWave
-                    key={block.key}
-                    rows={block.rows}
-                    selected={selectedThreadEpisode}
-                    onSelect={onSelectThread}
-                  />
-                );
-              default:
-                return null;
-            }
-          })}
+          {sessionType === SessionType.Agent
+            ? partitionAgentTranscript(turn).map((item) => {
+                if (item.kind === "group") {
+                  return (
+                    <AgentToolsGroupButton
+                      key={item.group.id}
+                      group={item.group}
+                      active={selectedAgentSegment === item.group.id}
+                      onSelect={onSelectAgentSegment ?? (() => undefined)}
+                    />
+                  );
+                }
+                return renderTranscriptBlock(item.block);
+              })
+            : turn.blocks.map((block) => renderTranscriptBlock(block))}
           {snapshotRevision && filesPanel ? (
             <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
           ) : null}
@@ -255,9 +302,13 @@ export const ModelMessage = memo(function ModelMessage({
                 sessionId={fork.session_id}
                 title={fork.title}
                 deleted={fork.deleted}
-                onOpen={onOpenFork ? () => onOpenFork(fork.session_id) : undefined}
+                onOpen={
+                  onOpenFork ? () => onOpenFork(fork.session_id) : undefined
+                }
                 onDismiss={
-                  onDismissFork && fork.deleted ? () => onDismissFork(fork.session_id) : undefined
+                  onDismissFork && fork.deleted
+                    ? () => onDismissFork(fork.session_id)
+                    : undefined
                 }
               />
             ))}
@@ -281,7 +332,9 @@ export const ModelMessage = memo(function ModelMessage({
               <Tooltip title="Resend" position={TooltipPosition.BottomRight}>
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                  variant={
+                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                  }
                   content={ButtonContent.Icon}
                   aria-label="Resend"
                   disabled={actionsDisabled}
@@ -294,10 +347,15 @@ export const ModelMessage = memo(function ModelMessage({
             ) : null}
 
             {canRevert ? (
-              <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomRight}>
+              <Tooltip
+                title="Revert to this snapshot"
+                position={TooltipPosition.BottomRight}
+              >
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                  variant={
+                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                  }
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
                   disabled={actionsDisabled}
@@ -315,7 +373,9 @@ export const ModelMessage = memo(function ModelMessage({
                 <span className="inline-flex">
                   <Button
                     size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                    variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                    variant={
+                      isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                    }
                     content={ButtonContent.Icon}
                     aria-label="Revert to this snapshot"
                     disabled
@@ -328,10 +388,15 @@ export const ModelMessage = memo(function ModelMessage({
             )}
 
             {!readOnly && onFork != null && forkIndex != null ? (
-              <Tooltip title="Create fork" position={TooltipPosition.BottomRight}>
+              <Tooltip
+                title="Create fork"
+                position={TooltipPosition.BottomRight}
+              >
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                  variant={
+                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                  }
                   content={ButtonContent.Icon}
                   aria-label="Create fork"
                   disabled={actionsDisabled}
@@ -344,10 +409,15 @@ export const ModelMessage = memo(function ModelMessage({
             ) : null}
 
             {!readOnly && !active && onContinue != null && forkIndex != null ? (
-              <Tooltip title={continueLabel} position={TooltipPosition.BottomRight}>
+              <Tooltip
+                title={continueLabel}
+                position={TooltipPosition.BottomRight}
+              >
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
+                  variant={
+                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
+                  }
                   content={ButtonContent.Icon}
                   aria-label={continueLabel}
                   disabled={actionsDisabled}

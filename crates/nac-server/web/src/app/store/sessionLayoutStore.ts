@@ -29,6 +29,8 @@ interface SessionLayoutState {
    * phone dialog header reads this so its title shimmer matches the panel.
    */
   selectedThreadRunning: boolean;
+  /** Agent thoughts/tools group the chat last pointed the Thoughts panel at. */
+  selectedAgentSegment: string | null;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
   /** Revision the panels are looking at, or null for the live working tree. */
@@ -53,6 +55,7 @@ export const sessionLayoutStore = createStore<SessionLayoutState>({
   selectedThread: null,
   selectedThreadEpisode: null,
   selectedThreadRunning: false,
+  selectedAgentSegment: null,
   selectedWorkset: null,
   selectedRevision: null,
   selectedFile: null,
@@ -104,7 +107,10 @@ export function selectThread(
   selectedThreadEpisode: string | null = null,
 ): void {
   if (import.meta.env.DEV) {
-    console.debug("[nac:threads] select", { name: selectedThread, episode: selectedThreadEpisode });
+    console.debug("[nac:threads] select", {
+      name: selectedThread,
+      episode: selectedThreadEpisode,
+    });
   }
   setState({ selectedThread, selectedThreadEpisode });
   if (selectedThread) showSidePanelList(false);
@@ -115,6 +121,11 @@ export function setSelectedThreadRunning(selectedThreadRunning: boolean): void {
   if (getState().selectedThreadRunning !== selectedThreadRunning) {
     setState({ selectedThreadRunning });
   }
+}
+
+export function selectAgentSegment(selectedAgentSegment: string | null): void {
+  setState({ selectedAgentSegment });
+  if (selectedAgentSegment) showSidePanelList(false);
 }
 
 export function selectWorkset(selectedWorkset: string | null): void {
@@ -164,6 +175,7 @@ export function resetSessionSelection(): void {
   setState({
     selectedThread: null,
     selectedThreadEpisode: null,
+    selectedAgentSegment: null,
     selectedWorkset: null,
     selectedRevision: null,
     selectedFile: null,
@@ -181,8 +193,12 @@ export const useSidePanelCollapsed = () => useStore((s) => s.collapsed);
 export const useSidePanelExpanded = () => useStore((s) => s.expanded);
 export const useSidePanelList = () => useStore((s) => s.panelList);
 export const useSelectedThread = () => useStore((s) => s.selectedThread);
-export const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
-export const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
+export const useSelectedThreadEpisode = () =>
+  useStore((s) => s.selectedThreadEpisode);
+export const useSelectedThreadRunning = () =>
+  useStore((s) => s.selectedThreadRunning);
+export const useSelectedAgentSegment = () =>
+  useStore((s) => s.selectedAgentSegment);
 export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
 export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);

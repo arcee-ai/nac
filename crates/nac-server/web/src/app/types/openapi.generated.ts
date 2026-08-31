@@ -752,6 +752,12 @@ export interface components {
     };
     SessionBehavior: "orchestrator" | "direct" | "direct-with-orchestrator";
     SessionClientId: string;
+    SessionConvertedOrigin: {
+      deleted?: boolean;
+      session_id: string;
+      source_behavior: components["schemas"]["SessionBehavior"];
+      title: string;
+    };
     SessionEvent:
       | { event: components["schemas"]["AgentEvent"]; type: "agent" }
       | {
@@ -862,6 +868,7 @@ export interface components {
     SessionSummarySnapshot: {
       backend: string;
       behavior?: components["schemas"]["SessionBehavior"];
+      converted_from?: null | components["schemas"]["SessionConvertedOrigin"];
       created_at: string;
       cwd: string;
       forked_from?: null | components["schemas"]["SessionForkOrigin"];

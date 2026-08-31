@@ -113,7 +113,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("delegated work", () => {
-  it("shows Agent and NAC assignments in one list", () => {
+  it("shows Agent and Orchestrator assignments in one list", () => {
     mount("direct-with-orchestrator");
 
     expect(screen.getByText("Assignments")).toBeTruthy();
@@ -153,7 +153,7 @@ describe("delegated work", () => {
     mount("direct-with-orchestrator");
     const childRow = screen.getByRole("article", { name: "Coding agent: Review permissions" });
     const orchestratorRow = screen.getByRole("article", {
-      name: "NAC orchestrator: Run the compatibility audit",
+      name: "Orchestrator: Run the compatibility audit",
     });
 
     fireEvent.click(within(childRow).getByRole("button", { name: "Steer" }));

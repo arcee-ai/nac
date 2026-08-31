@@ -129,7 +129,7 @@ export function DelegatedWorkView({
           Assignments
         </h3>
         {!enabled ? (
-          <Empty>NAC sessions do not own delegated work.</Empty>
+          <Empty>Orchestrator sessions do not own delegated work.</Empty>
         ) : assignments.isPending ? (
           <div role="status" className="text-small text-basic-secondary">
             Loading delegated work…
@@ -139,7 +139,7 @@ export function DelegatedWorkView({
         ) : rows.length ? (
           rows.map(renderRow)
         ) : (
-          <Empty>None yet. Spawn an Agent or NAC session from this chat.</Empty>
+          <Empty>None yet. Spawn an Agent or Orchestrator session from this chat.</Empty>
         )}
       </section>
       <Modal

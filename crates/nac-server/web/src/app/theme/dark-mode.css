@@ -7,6 +7,14 @@
   --color-bg-accent-tertiary: var(--brand-trans-200);
   --color-bg-accent-inverse: var(--brand-550);
 
+  /* Background / Session type (complementary chips; same in both themes) */
+  --color-bg-session-agent: var(--violet-700);
+  --color-bg-session-orchestrator: var(--teal-800);
+  --color-bg-session-origin-agent: var(--violet-400);
+  --color-bg-session-origin-orchestrator: var(--teal-700);
+  --color-bg-session-origin-agent-locked: var(--violet-100);
+  --color-bg-session-origin-orchestrator-locked: var(--teal-100);
+
   /* Background / Buttons */
   --color-bg-btn-primary: var(--white);
   --color-bg-btn-primary-hovered: var(--gray-50);
@@ -186,6 +194,10 @@
   --color-fill-basic-secondary: var(--white-trans-700);
   --color-fill-basic-tertiary: var(--white-trans-500);
   --color-fill-basic-muted: var(--white-trans-300);
+
+  /* fill / Session type (chips keep a light glyph on dark, dark lock on tint) */
+  --color-fill-session-type: var(--white);
+  --color-fill-session-origin-locked: var(--gray-900);
 
   /* fill / Buttons */
   --color-fill-btn-primary: var(--gray-800);

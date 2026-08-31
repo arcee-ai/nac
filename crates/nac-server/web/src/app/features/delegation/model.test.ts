@@ -70,7 +70,7 @@ describe("delegated-session presentation", () => {
     expect(coding.updatedLabel).not.toBe("");
     expect(managed).toMatchObject({
       kind: "nac-orchestrator",
-      typeLabel: "NAC orchestrator",
+      typeLabel: "Orchestrator",
       modeLabel: "Foreground",
       completionNeedsAttention: false,
     });

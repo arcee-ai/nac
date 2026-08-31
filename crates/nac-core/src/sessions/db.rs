@@ -803,13 +803,18 @@ SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
        s.token_usages_json, COALESCE(s.run_count, 0), s.ssh_port, s.ssh_identity_file,
        sp.project_id, s.behavior,
        fsrc.source_session_id, fsrc.source_title, origin_p.title,
-       origin_s.last_user_prompt, origin_s.session_id
+       origin_s.last_user_prompt, origin_s.session_id,
+       hsrc.source_session_id, hsrc.source_behavior, conv_p.title,
+       conv_s.last_user_prompt, conv_s.session_id
 FROM sessions s
 LEFT JOIN session_presentations p ON p.session_id = s.session_id
 LEFT JOIN session_projects sp ON sp.session_id = s.session_id
 LEFT JOIN session_forks fsrc ON fsrc.fork_session_id = s.session_id
 LEFT JOIN sessions origin_s ON origin_s.session_id = fsrc.source_session_id
 LEFT JOIN session_presentations origin_p ON origin_p.session_id = fsrc.source_session_id
+LEFT JOIN session_handoffs hsrc ON hsrc.target_session_id = s.session_id
+LEFT JOIN sessions conv_s ON conv_s.session_id = hsrc.source_session_id
+LEFT JOIN session_presentations conv_p ON conv_p.session_id = hsrc.source_session_id
 "#;
 
 fn query_session_summary(
@@ -886,6 +891,11 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         fork_origin_title: row.get(24)?,
         fork_origin_prompt: row.get(25)?,
         fork_origin_session_id: row.get(26)?,
+        converted_source_session_id: row.get(27)?,
+        converted_source_behavior: row.get(28)?,
+        converted_origin_title: row.get(29)?,
+        converted_origin_prompt: row.get(30)?,
+        converted_origin_session_id: row.get(31)?,
     })
 }
 
@@ -917,6 +927,11 @@ struct SessionSummaryRow {
     fork_origin_title: Option<String>,
     fork_origin_prompt: Option<String>,
     fork_origin_session_id: Option<String>,
+    converted_source_session_id: Option<String>,
+    converted_source_behavior: Option<String>,
+    converted_origin_title: Option<String>,
+    converted_origin_prompt: Option<String>,
+    converted_origin_session_id: Option<String>,
 }
 
 impl SessionSummaryRow {
@@ -980,6 +995,13 @@ impl SessionSummaryRow {
                 self.fork_origin_title,
                 self.fork_origin_prompt,
                 self.fork_origin_session_id,
+            ),
+            converted_from: crate::store::converted_origin_from_parts(
+                self.converted_source_session_id,
+                self.converted_source_behavior,
+                self.converted_origin_title,
+                self.converted_origin_prompt,
+                self.converted_origin_session_id,
             ),
         })
     }

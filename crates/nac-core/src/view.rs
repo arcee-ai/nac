@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -14,12 +14,12 @@ mod workspace_diff;
 mod workspace_files;
 
 pub use workspace_diff::{
-    revision_file_diff, validate_workspace_relpath, workspace_file_diff, WorkspaceDiffHunk,
-    WorkspaceDiffLine, WorkspaceDiffSection, WorkspaceDiffStage, WorkspaceFileDiff,
+    WorkspaceDiffHunk, WorkspaceDiffLine, WorkspaceDiffSection, WorkspaceDiffStage,
+    WorkspaceFileDiff, revision_file_diff, validate_workspace_relpath, workspace_file_diff,
 };
 pub use workspace_files::{
-    list_files, list_revision_files, open_local_path, read_file, read_revision_file,
-    OpenLocalPathResult, WorkspaceFileContent, WorkspaceFileList,
+    OpenLocalPathResult, WorkspaceFileContent, WorkspaceFileList, list_files, list_revision_files,
+    open_local_path, read_file, read_revision_file,
 };
 
 pub type NumstatPairs = HashMap<String, (Option<u64>, Option<u64>)>;
@@ -81,6 +81,9 @@ pub struct SessionSummarySnapshot {
     /// Present when this chat was forked from another session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forked_from: Option<store::SessionForkOrigin>,
+    /// Present when this chat was continued in the other session type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub converted_from: Option<store::SessionConvertedOrigin>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -249,6 +252,7 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
             total_cost_micros: summary.total_cost_micros,
             run_count: summary.run_count,
             forked_from: summary.forked_from,
+            converted_from: summary.converted_from,
         }
     }
 }

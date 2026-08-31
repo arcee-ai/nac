@@ -165,6 +165,13 @@ const config = {
         "success-tertiary": "var(--color-bg-success-tertiary)",
         "success-inverse": "var(--color-bg-success-inverse)",
 
+        "session-agent": "var(--color-bg-session-agent)",
+        "session-orchestrator": "var(--color-bg-session-orchestrator)",
+        "session-origin-agent": "var(--color-bg-session-origin-agent)",
+        "session-origin-orchestrator": "var(--color-bg-session-origin-orchestrator)",
+        "session-origin-agent-locked": "var(--color-bg-session-origin-agent-locked)",
+        "session-origin-orchestrator-locked": "var(--color-bg-session-origin-orchestrator-locked)",
+
         scrollbar: "var(--color-bg-scrollbar)",
       },
       textColor: {
@@ -233,6 +240,9 @@ const config = {
         "success-secondary": "var(--color-text-success-secondary)",
         "success-tertiary": "var(--color-text-success-tertiary)",
         "success-muted": "var(--color-text-success-muted)",
+
+        "session-type": "var(--color-fill-session-type)",
+        "session-origin-locked": "var(--color-fill-session-origin-locked)",
       },
       borderColor: {
         "accent-primary": "var(--color-border-accent-primary)",

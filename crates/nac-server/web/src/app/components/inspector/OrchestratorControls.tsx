@@ -68,7 +68,7 @@ export function OrchestratorControls({ sessionId, behavior }: OrchestratorContro
   };
   return (
     <>
-      <Tooltip title="Launch NAC orchestrator" position={TooltipPosition.TopCenter}>
+      <Tooltip title="Launch orchestrator" position={TooltipPosition.TopCenter}>
         <Button
           size={ButtonSize.Small}
           variant={
@@ -77,7 +77,7 @@ export function OrchestratorControls({ sessionId, behavior }: OrchestratorContro
               : ButtonVariant.Ghost
           }
           content={ButtonContent.Icon}
-          aria-label="Launch NAC orchestrator"
+          aria-label="Launch orchestrator"
           onClick={() => setOpen(true)}
         >
           <Icon iconName={IconName.Flow} size={16} />
@@ -87,13 +87,13 @@ export function OrchestratorControls({ sessionId, behavior }: OrchestratorContro
         open={open}
         onClose={() => setOpen(false)}
         size={ModalSize.Wide}
-        title="Launch NAC orchestrator"
-        subheader="Start a separate NAC planning session. Browse, steer, continue, and cancel it from Delegated work."
+        title="Launch orchestrator"
+        subheader="Start a separate Orchestrator planning session. Browse, steer, continue, and cancel it from Delegated work."
       >
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-3 rounded-[6px] bg-elevation-level-2 p-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-small font-medium">New NAC orchestrator</div>
+              <div className="text-small font-medium">New orchestrator</div>
             </div>
             <Input
               label="Short description"
@@ -122,7 +122,7 @@ export function OrchestratorControls({ sessionId, behavior }: OrchestratorContro
                 disabled={busy}
                 onClick={() => void submit()}
               >
-                Start NAC orchestrator
+                Start orchestrator
               </Button>
             </div>
           </div>

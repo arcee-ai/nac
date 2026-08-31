@@ -12,7 +12,7 @@ import type { DelegatedCompletionTurn } from "@/app/lib/transcript";
 
 export function DelegatedCompletionEvent({ turn }: { turn: DelegatedCompletionTurn }) {
   const navigate = useNavigate();
-  const type = turn.completion.kind === "coding-agent" ? "Coding agent" : "NAC orchestrator";
+  const type = turn.completion.kind === "coding-agent" ? "Coding agent" : "Orchestrator";
   const variant =
     turn.completion.status === "completed"
       ? ChatSessionMessageVariant.Success

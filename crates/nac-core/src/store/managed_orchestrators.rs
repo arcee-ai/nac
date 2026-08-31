@@ -1,6 +1,6 @@
 use super::*;
 
-use rusqlite::{params, TransactionBehavior};
+use rusqlite::{TransactionBehavior, params};
 
 pub const MAX_RUNNING_MANAGED_ORCHESTRATORS: u64 = 4;
 const MAX_OUTCOME_CHARS: usize = 64 * 1024;
@@ -793,15 +793,17 @@ mod tests {
                 .unwrap();
             }
         }
-        assert!(begin_managed_orchestrator_run(
-            &path,
-            "orchestrator-4",
-            "run-4",
-            ManagedOrchestratorExecutionMode::Foreground,
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("concurrency limit"));
+        assert!(
+            begin_managed_orchestrator_run(
+                &path,
+                "orchestrator-4",
+                "run-4",
+                ManagedOrchestratorExecutionMode::Foreground,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("concurrency limit")
+        );
         settle_managed_orchestrator_run(
             &path,
             "orchestrator-0",

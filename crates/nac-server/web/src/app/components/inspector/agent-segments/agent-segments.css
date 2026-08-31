@@ -1,0 +1,54 @@
+.agent-segment-box .markdown-content,
+.agent-segment-box .markdown-content p,
+.agent-segment-box .markdown-content li,
+.agent-segment-box .markdown-content h1,
+.agent-segment-box .markdown-content h2,
+.agent-segment-box .markdown-content h3,
+.agent-segment-box .markdown-content h4,
+.agent-segment-box .markdown-content h5,
+.agent-segment-box .markdown-content h6,
+.agent-segment-box .markdown-content blockquote,
+.agent-segment-box .markdown-content table {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-basic-tertiary);
+}
+
+.agent-segment-box .markdown-content p,
+.agent-segment-box .markdown-content li {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+
+.agent-segment-box .markdown-content > *:last-child {
+  margin-bottom: 0;
+}
+
+.agent-segment-row-connector {
+  animation: agent-segment-row-connector-fade-in 200ms ease-out;
+}
+
+@keyframes agent-segment-row-connector-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-segment-row-connector {
+    animation: none;
+  }
+}
+
+.agent-segment-code-pre {
+  color: var(--color-text-basic-secondary);
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}

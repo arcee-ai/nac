@@ -319,12 +319,14 @@ fn assert_current_schema(conn: &Connection) {
         .unwrap()
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap();
-    assert!(checkpoint_foreign_keys
-        .iter()
-        .any(|(_, table, from, to, on_delete)| table == "sessions"
-            && from == "session_id"
-            && to == "session_id"
-            && on_delete == "CASCADE"));
+    assert!(
+        checkpoint_foreign_keys
+            .iter()
+            .any(|(_, table, from, to, on_delete)| table == "sessions"
+                && from == "session_id"
+                && to == "session_id"
+                && on_delete == "CASCADE")
+    );
     let self_foreign_keys = checkpoint_foreign_keys
         .iter()
         .filter(|(_, table, _, _, on_delete)| {
@@ -334,12 +336,16 @@ fn assert_current_schema(conn: &Connection) {
         .collect::<Vec<_>>();
     assert_eq!(self_foreign_keys.len(), 2);
     assert_eq!(self_foreign_keys[0].0, self_foreign_keys[1].0);
-    assert!(self_foreign_keys
-        .iter()
-        .any(|(_, from, to)| *from == "session_id" && *to == "session_id"));
-    assert!(self_foreign_keys
-        .iter()
-        .any(|(_, from, to)| { *from == "previous_checkpoint_id" && *to == "id" }));
+    assert!(
+        self_foreign_keys
+            .iter()
+            .any(|(_, from, to)| *from == "session_id" && *to == "session_id")
+    );
+    assert!(
+        self_foreign_keys
+            .iter()
+            .any(|(_, from, to)| { *from == "previous_checkpoint_id" && *to == "id" })
+    );
     let latest_index_exists: bool = conn
         .query_row(
             "SELECT EXISTS(
@@ -663,12 +669,16 @@ fn v22_store_keeps_completion_obligations_on_session_assignments() {
 
     initialize(&path).unwrap();
     let migrated = Connection::open(&path).unwrap();
-    assert!(table_columns(&migrated, "session_assignments")
-        .contains(&"completion_suppressed".to_string()));
+    assert!(
+        table_columns(&migrated, "session_assignments")
+            .contains(&"completion_suppressed".to_string())
+    );
     assert!(!table_present(&migrated, "traditional_children"));
     assert!(!table_present(&migrated, "managed_orchestrators"));
-    assert!(table_columns(&migrated, "session_run_recovery")
-        .contains(&"terminal_disposition".to_string()));
+    assert!(
+        table_columns(&migrated, "session_run_recovery")
+            .contains(&"terminal_disposition".to_string())
+    );
     assert_eq!(
         migrated
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
@@ -1315,32 +1325,36 @@ fn checkpoint_table_enforces_completed_row_constraints() {
         insert_raw_checkpoint(&conn, "summary", -1, &digest, &digest, 1, 0, None, None, 0,)
             .is_err()
     );
-    assert!(insert_raw_checkpoint(
-        &conn,
-        "summary",
-        0,
-        &short_digest,
-        &digest,
-        1,
-        0,
-        None,
-        None,
-        0,
-    )
-    .is_err());
-    assert!(insert_raw_checkpoint(
-        &conn,
-        "summary",
-        0,
-        &digest,
-        &short_digest,
-        1,
-        0,
-        None,
-        None,
-        0,
-    )
-    .is_err());
+    assert!(
+        insert_raw_checkpoint(
+            &conn,
+            "summary",
+            0,
+            &short_digest,
+            &digest,
+            1,
+            0,
+            None,
+            None,
+            0,
+        )
+        .is_err()
+    );
+    assert!(
+        insert_raw_checkpoint(
+            &conn,
+            "summary",
+            0,
+            &digest,
+            &short_digest,
+            1,
+            0,
+            None,
+            None,
+            0,
+        )
+        .is_err()
+    );
     insert_raw_checkpoint(
         &conn,
         "maximum supported counts",
@@ -1367,10 +1381,12 @@ fn checkpoint_table_enforces_completed_row_constraints() {
         (1, 0, None, Some(too_large), 0),
         (1, 0, None, None, too_large),
     ] {
-        assert!(insert_raw_checkpoint(
-            &conn, "summary", 0, &digest, &digest, policy, old, prompt, completion, new,
-        )
-        .is_err());
+        assert!(
+            insert_raw_checkpoint(
+                &conn, "summary", 0, &digest, &digest, policy, old, prompt, completion, new,
+            )
+            .is_err()
+        );
     }
     let row_count: i64 = conn
         .query_row(
@@ -1457,18 +1473,22 @@ fn connection_capacity_enforces_process_store_alias_and_cleanup() {
     let process_error = connect_with_capacity(&store_d, &capacity, wait)
         .err()
         .unwrap();
-    assert!(process_error
-        .to_string()
-        .contains("timed out waiting for SQLite connection capacity"));
+    assert!(
+        process_error
+            .to_string()
+            .contains("timed out waiting for SQLite connection capacity")
+    );
 
     drop(connection_c);
     let alias_a = store_a.parent().unwrap().join(".").join("store.db");
     let store_error = connect_with_capacity(&alias_a, &capacity, wait)
         .err()
         .unwrap();
-    assert!(store_error
-        .to_string()
-        .contains("timed out waiting for SQLite connection capacity"));
+    assert!(
+        store_error
+            .to_string()
+            .contains("timed out waiting for SQLite connection capacity")
+    );
 
     let waiting_capacity = Arc::clone(&capacity);
     let waiting_alias = alias_a.clone();

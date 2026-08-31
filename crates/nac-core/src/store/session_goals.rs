@@ -111,8 +111,7 @@ pub struct UserGoalUpdate {
     pub status: Option<GoalStatus>,
 }
 
-const COLUMNS: &str =
-    "session_id, goal_id, objective, status, token_budget, tokens_used, time_used_ms, \
+const COLUMNS: &str = "session_id, goal_id, objective, status, token_budget, tokens_used, time_used_ms, \
      accounting_run_id, accounting_token_baseline, accounting_started_at_epoch_ms, \
      continuation_run_id, created_at, updated_at, version";
 
@@ -618,17 +617,19 @@ mod tests {
         assert_eq!(paused.objective, "ship safely");
         assert_eq!(paused.token_budget, Some(500));
         assert_eq!(paused.status, GoalStatus::Paused);
-        assert!(update_session_goal_by_user(
-            &path,
-            "direct",
-            &paused.goal_id,
-            first.version,
-            UserGoalUpdate {
-                status: Some(GoalStatus::Active),
-                ..Default::default()
-            }
-        )
-        .is_err());
+        assert!(
+            update_session_goal_by_user(
+                &path,
+                "direct",
+                &paused.goal_id,
+                first.version,
+                UserGoalUpdate {
+                    status: Some(GoalStatus::Active),
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
 
         let complete =
             update_session_goal_by_model(&path, "direct", &paused.goal_id, GoalStatus::Complete)
@@ -706,16 +707,18 @@ mod tests {
             claimed.continuation_run_id.as_deref(),
             Some("continuation-1")
         );
-        assert!(bind_session_goal_run(
-            &path,
-            "direct",
-            &GoalRunBaseline {
-                run_id: "duplicate".into(),
-                ..first.clone()
-            }
-        )
-        .unwrap()
-        .is_none());
+        assert!(
+            bind_session_goal_run(
+                &path,
+                "direct",
+                &GoalRunBaseline {
+                    run_id: "duplicate".into(),
+                    ..first.clone()
+                }
+            )
+            .unwrap()
+            .is_none()
+        );
         let recovered = reconcile_session_goal_run(&path, "direct")
             .unwrap()
             .unwrap();

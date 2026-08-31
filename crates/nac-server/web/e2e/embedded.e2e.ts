@@ -235,66 +235,44 @@ test("renders an unknown primary tool failure safely after reload", async ({
   harness.provider.assertConsumed();
 });
 
-test("asks for immutable behavior on every first and new chat", async ({
+test("creates Agent by default and offers Orchestrator from the new-session popover", async ({
   harness,
   page,
   request,
 }) => {
   const projectId = await createProject(request, harness);
   await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-
-  const behaviorChoices = page.getByRole("radio");
-  await expect(page.getByRole("dialog")).toContainText("New Chat");
-  await expect(behaviorChoices).toHaveCount(2);
-  await expect(behaviorChoices.filter({ hasText: "Agent" }).first()).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
-  await page.getByRole("button", { name: "Close" }).click();
-  await expect(page).toHaveURL(/\/#\/$/);
-
-  // Re-entering an empty project offers the required first chat again; closing
-  // the first offer must not strand the project route behind a loader.
-  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-  await expect(page.getByRole("dialog")).toContainText("New Chat");
-  await expect(behaviorChoices.filter({ hasText: "Agent" }).first()).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
-  await page.getByRole("button", { name: "Create chat" }).click();
   await expect(page).toHaveURL(/\/session\/[^/]+\/delegated$/);
   const agentSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
   expect(agentSessionId).toBeTruthy();
-  await expect(page.getByText("Immutable behavior")).toBeVisible();
   await expect(page.getByText("Agent", { exact: true }).first()).toBeVisible();
   await page.reload();
   await expect(page.getByText("Agent", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Delegated work", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
+  await expect(page.getByText("Assignments", { exact: true })).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Create new session", exact: true }).click();
-  await expect(behaviorChoices.filter({ hasText: "Agent" }).first()).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
-  await page.getByRole("radio", { name: /^NAC / }).click();
-  await page.getByRole("button", { name: "Create chat" }).click();
+  await expect(page.getByRole("button", { name: "New Agent" })).toBeVisible();
+  await expect(page.getByText("Default", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "New Orchestrator" }).click();
   await expect.poll(() => page.url()).not.toContain(`/session/${agentSessionId}/`);
   await expect(page).toHaveURL(/\/session\/[^/]+\/threads$/);
-  await expect(page.getByText("NAC", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Orchestrator", { exact: true }).first()).toBeVisible();
   await page.reload();
-  await expect(page.getByText("NAC", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Orchestrator", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toBeVisible();
   await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
 
   const tabs = page.locator(".chat-session-tab button");
   await expect(tabs.filter({ has: page.getByText("Agent", { exact: true }) })).toHaveCount(1);
-  await expect(tabs.filter({ has: page.getByText("NAC", { exact: true }) })).toHaveCount(1);
+  await expect(tabs.filter({ has: page.getByText("Orchestrator", { exact: true }) })).toHaveCount(
+    1,
+  );
   await tabs.filter({ has: page.getByText("Agent", { exact: true }) }).click();
   await expect(page.getByText("Agent", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
+  await expect(page.getByText("Assignments", { exact: true })).toBeVisible();
 });
 
 test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({
@@ -310,16 +288,8 @@ test("converges concurrent required-first-chat tabs and refreshes deleted owners
       second.goto(`${harness.baseUrl}/#/project/${projectId}`),
     ]);
     await Promise.all([
-      expect(page.getByRole("dialog")).toContainText("New Chat"),
-      expect(second.getByRole("dialog")).toContainText("New Chat"),
-    ]);
-    await Promise.all([
-      page.getByRole("button", { name: "Create chat" }).click(),
-      second.getByRole("button", { name: "Create chat" }).click(),
-    ]);
-    await Promise.all([
-      expect(page).toHaveURL(/\/session\/([^/]+)\/threads$/),
-      expect(second).toHaveURL(/\/session\/([^/]+)\/threads$/),
+      expect(page).toHaveURL(/\/session\/([^/]+)\/delegated$/),
+      expect(second).toHaveURL(/\/session\/([^/]+)\/delegated$/),
     ]);
     const firstSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
     const secondSessionId = second.url().match(/\/session\/([^/]+)\//)?.[1];
@@ -788,13 +758,12 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await orchestratorCompletion.accepted;
 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
-  await expect(page.getByText("Coding agents", { exact: true })).toBeVisible();
-  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
+  await expect(page.getByText("Assignments", { exact: true })).toBeVisible();
   const childRow = page.locator("article").filter({ hasText: "Inspect the child lifecycle" });
   await expect(childRow).toContainText("Coding agent");
   await expect(childRow).toContainText("Completed");
   await childRow.getByRole("button", { name: "Open" }).click();
-  await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/session/${childId}/`));
   await expect(page.getByText("Inspect the child lifecycle", { exact: true })).toBeVisible();
   await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
@@ -817,23 +786,23 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(mobilePanel).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.getByRole("button", { name: "Parent chat" }).click();
+  await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
   const orchestratorRow = page
     .locator("article")
     .filter({ hasText: "Coordinate the compatibility audit" });
-  await expect(orchestratorRow).toContainText("NAC orchestrator");
+  await expect(orchestratorRow).toContainText("Orchestrator");
   await expect(orchestratorRow).toContainText("Running");
   await expect(orchestratorRow.getByRole("button", { name: "Steer" })).toBeVisible();
   await expect(orchestratorRow.getByRole("button", { name: "Cancel" })).toBeVisible();
   orchestratorCompletion.release();
   await expect(orchestratorRow).toContainText("Completed");
-  await expect(page.getByLabel("NAC orchestrator completed")).toContainText(
+  await expect(page.getByLabel("Orchestrator completed")).toContainText(
     "Coordinate the compatibility audit",
   );
   harness.provider.assertConsumed();
   await orchestratorRow.getByRole("button", { name: "Open" }).click();
-  await expect(page.getByText("Managed NAC orchestrator", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/`));
   await expect(page.getByText("Coordinate the compatibility audit", { exact: true })).toBeVisible();
   await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
   await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
@@ -867,6 +836,6 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
   await managedMobilePanel.getByRole("button", { name: "Close" }).click();
   await expect(managedMobilePanel).toBeHidden();
-  await page.getByRole("button", { name: "Parent chat" }).click();
+  await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
 });

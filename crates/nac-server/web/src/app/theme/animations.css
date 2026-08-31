@@ -154,3 +154,28 @@
 .chat-loader-dot:nth-child(3) {
   animation-delay: 0.24s;
 }
+
+/* Session type avatar: running sweep over the 28px chip (Figma SessionAvatar Active). */
+@keyframes session-type-avatar-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+.session-type-avatar-shimmer {
+  overflow: hidden;
+}
+.session-type-avatar-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to left,
+    transparent,
+    var(--color-bg-btn-secondary-highlighted-pressed),
+    transparent
+  );
+  animation: session-type-avatar-shimmer 1.2s ease-in-out infinite;
+}

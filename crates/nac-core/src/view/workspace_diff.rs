@@ -1,7 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 use std::process::Output;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::workspace::{GitTarget, WorktreeRead};

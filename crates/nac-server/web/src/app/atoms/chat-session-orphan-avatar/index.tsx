@@ -1,50 +1,55 @@
 import type React from "react";
 
 import { cn } from "../../lib/cn";
-import Icon, { IconName } from "../icon";
+import SessionTypeAvatar, { SessionOrigin, SessionType } from "../session-type-avatar";
 
-/**
- * The tile scales as a unit: Figma draws a 40px box with a 28px glyph and a 4px
- * corner, and a 24px box with a 16px glyph and a 2px corner. The glyph is 70% of
- * the box, snapped to the 4px grid the icon set is drawn on.
- */
-const glyphSize = (box: number) => Math.round((box * 0.7) / 4) * 4;
-const cornerRadius = (box: number) => Math.round(box / 10);
+/** Figma ChatSessionOrphanAvatar: 40px tile with the 28px session-type mark inside. */
+const TILE = 40;
 
 interface ChatSessionOrphanAvatarProps extends React.HTMLAttributes<HTMLDivElement> {
   size?: number;
-  /** Pulses the glyph while the chat has a run going. */
+  sessionType?: `${SessionType}`;
+  origin?: `${SessionOrigin}`;
+  /** Pulses the type mark while the chat has a run going. */
+  running?: boolean;
+  /** @deprecated Prefer `running`. */
   isRunning?: boolean;
 }
 
 /**
- * Stand-in avatar for a chat that belongs to no project. Projects and assigned
- * chats get an identicon seeded from their id; an unassigned chat has nothing to
- * seed one from that would mean anything, so it gets a neutral chat glyph in a
- * tile of the same footprint.
+ * Avatar for a chat that belongs to no project. The 40px tile matches a
+ * project's identicon footprint; inside it is SessionTypeAvatar (Figma
+ * SessionAvatar), not a generic chat glyph.
  */
 const ChatSessionOrphanAvatar: React.FC<ChatSessionOrphanAvatarProps> = ({
-  size = 40,
+  size = TILE,
+  sessionType = SessionType.Agent,
+  origin = SessionOrigin.User,
+  running = false,
   isRunning = false,
   className = "",
   ...props
-}) => (
-  <div
-    className={cn(
-      "flex items-center justify-center shrink-0",
-      "border border-muted bg-elevation-sublevel-variant-B",
-      className,
-    )}
-    style={{ width: size, height: size, borderRadius: cornerRadius(size) }}
-    aria-hidden="true"
-    {...props}
-  >
-    <Icon
-      iconName={IconName.Chat}
-      size={glyphSize(size)}
-      className={cn("text-basic-secondary", isRunning && "pulse-dim")}
-    />
-  </div>
-);
+}) => {
+  const live = running || isRunning;
+  const scale = size / TILE;
+
+  return (
+    <div
+      className={cn("shrink-0 overflow-clip", className)}
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+      {...props}
+    >
+      <div
+        className="flex size-10 items-center justify-center rounded-[4px] border border-solid border-muted bg-elevation-sublevel-variant-B"
+        style={
+          scale === 1 ? undefined : { transform: `scale(${scale})`, transformOrigin: "top left" }
+        }
+      >
+        <SessionTypeAvatar sessionType={sessionType} origin={origin} running={live} />
+      </div>
+    </div>
+  );
+};
 
 export default ChatSessionOrphanAvatar;

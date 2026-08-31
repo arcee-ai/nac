@@ -42,7 +42,7 @@ function session(
 afterEach(cleanup);
 
 describe("chat session behavior identity", () => {
-  it("shows compact behavior badges with full accessible names in chat lists", () => {
+  it("keeps every behavior identifiable in the chat list", () => {
     const onOpen = vi.fn();
     render(
       <ChatSessionList
@@ -55,14 +55,12 @@ describe("chat session behavior identity", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Plan the release, NAC" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Plan the release, Orchestrator" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fix the parser, Agent" })).toBeTruthy();
     const hybrid = screen.getByRole("button", {
       name: "Coordinate the migration, Agent",
     });
     expect(hybrid).toBeTruthy();
-    expect(screen.getAllByText("NAC")).toHaveLength(1);
-    expect(screen.getAllByText("Agent")).toHaveLength(2);
 
     fireEvent.click(hybrid);
     expect(onOpen).toHaveBeenCalledWith(

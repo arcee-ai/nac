@@ -34,8 +34,7 @@ pub(crate) struct OrchestratorCompactionCheckpoint {
     pub created_at: String,
 }
 
-const CHECKPOINT_COLUMNS: &str =
-    "id, session_id, previous_checkpoint_id, summary, tail_start_message_index, \
+const CHECKPOINT_COLUMNS: &str = "id, session_id, previous_checkpoint_id, summary, tail_start_message_index, \
      source_prefix_sha256, system_policy_sha256, prompt_policy_version, \
      old_context_estimate, summary_prompt_tokens, summary_completion_tokens, \
      new_context_estimate, created_at";
@@ -401,9 +400,11 @@ mod tests {
 
         let session_a = load_orchestrator_compaction_checkpoints(&path, "session-a").unwrap();
         assert_eq!(session_a, vec![parent]);
-        assert!(load_orchestrator_compaction_checkpoints(&path, "session-b")
-            .unwrap()
-            .is_empty());
+        assert!(
+            load_orchestrator_compaction_checkpoints(&path, "session-b")
+                .unwrap()
+                .is_empty()
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -419,9 +420,11 @@ mod tests {
         )
         .unwrap_err();
         assert!(missing_session.to_string().contains("does not exist"));
-        assert!(load_orchestrator_compaction_checkpoints(&path, "missing")
-            .unwrap()
-            .is_empty());
+        assert!(
+            load_orchestrator_compaction_checkpoints(&path, "missing")
+                .unwrap()
+                .is_empty()
+        );
 
         let blank = append_orchestrator_compaction_checkpoint(
             &path,
@@ -429,9 +432,11 @@ mod tests {
         )
         .unwrap_err();
         assert!(blank.to_string().contains("summary is empty"));
-        assert!(load_orchestrator_compaction_checkpoints(&path, "session-a")
-            .unwrap()
-            .is_empty());
+        assert!(
+            load_orchestrator_compaction_checkpoints(&path, "session-a")
+                .unwrap()
+                .is_empty()
+        );
 
         let first = append_orchestrator_compaction_checkpoint(
             &path,
@@ -451,9 +456,11 @@ mod tests {
         );
 
         assert!(crate::sessions::delete_session(&path, "session-a").unwrap());
-        assert!(load_orchestrator_compaction_checkpoints(&path, "session-a")
-            .unwrap()
-            .is_empty());
+        assert!(
+            load_orchestrator_compaction_checkpoints(&path, "session-a")
+                .unwrap()
+                .is_empty()
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -529,12 +536,16 @@ mod tests {
         input.new_context_estimate = crate::MAX_SUPPORTED_TOKEN_COUNT + 1;
 
         let error = append_orchestrator_compaction_checkpoint(&path, &input).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("exceeds supported token maximum"));
-        assert!(load_orchestrator_compaction_checkpoints(&path, "session-a")
-            .unwrap()
-            .is_empty());
+        assert!(
+            error
+                .to_string()
+                .contains("exceeds supported token maximum")
+        );
+        assert!(
+            load_orchestrator_compaction_checkpoints(&path, "session-a")
+                .unwrap()
+                .is_empty()
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

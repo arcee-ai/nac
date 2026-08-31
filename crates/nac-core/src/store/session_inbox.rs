@@ -79,8 +79,7 @@ pub struct SessionInboxRecord {
     pub version: i64,
 }
 
-pub(crate) const INBOX_RECORD_COLUMNS: &str =
-    "id, session_id, delivery, status, content, target_run_id, client_id, \
+pub(crate) const INBOX_RECORD_COLUMNS: &str = "id, session_id, delivery, status, content, target_run_id, client_id, \
      delivered_run_id, created_at, updated_at, delivered_at, cancelled_at, version";
 
 pub(crate) fn row_to_inbox_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionInboxRecord> {
@@ -332,22 +331,26 @@ mod tests {
         assert_eq!(steered.delivery, InboxDelivery::Steer);
         assert_eq!(steered.target_run_id.as_deref(), Some("run"));
         assert_eq!(steered.version, 1);
-        assert!(update_pending_session_inbox_item(
-            &path,
-            "session",
-            item.id,
-            0,
-            InboxDelivery::Queue,
-            None
-        )
-        .is_err());
+        assert!(
+            update_pending_session_inbox_item(
+                &path,
+                "session",
+                item.id,
+                0,
+                InboxDelivery::Queue,
+                None
+            )
+            .is_err()
+        );
 
         let cancelled = cancel_pending_session_inbox_item(&path, "session", item.id, 1).unwrap();
         assert_eq!(cancelled.status, InboxStatus::Cancelled);
         assert_eq!(cancelled.version, 2);
-        assert!(next_pending_session_inbox_item(&path, "session")
-            .unwrap()
-            .is_none());
+        assert!(
+            next_pending_session_inbox_item(&path, "session")
+                .unwrap()
+                .is_none()
+        );
 
         let connection = open_runtime_connection(&path).unwrap();
         connection

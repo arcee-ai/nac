@@ -1395,10 +1395,12 @@ mod tests {
             delivered.iter().map(|record| record.id).collect::<Vec<_>>(),
             vec![steer.id]
         );
-        assert!(writer
-            .append_pending_inbox_steers("session", "run-a", 1)
-            .unwrap()
-            .is_empty());
+        assert!(
+            writer
+                .append_pending_inbox_steers("session", "run-a", 1)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             load_session_inbox_item(&path, "session", steer.id)
                 .unwrap()
@@ -1440,17 +1442,19 @@ mod tests {
             None,
         )
         .unwrap();
-        assert!(writer
-            .append_inbox_run_prompt(
-                "session",
-                2,
-                &Message::User {
-                    content: "different".to_string(),
-                },
-                "run-c",
-                mismatch.id,
-            )
-            .is_err());
+        assert!(
+            writer
+                .append_inbox_run_prompt(
+                    "session",
+                    2,
+                    &Message::User {
+                        content: "different".to_string(),
+                    },
+                    "run-c",
+                    mismatch.id,
+                )
+                .is_err()
+        );
         assert_eq!(writer.read_from("session", 0).unwrap().len(), 2);
         assert_eq!(
             load_session_inbox_item(&path, "session", mismatch.id)
@@ -1752,11 +1756,13 @@ mod tests {
             .unwrap();
         assert_eq!(tail_len, 2);
         assert_eq!(clamped.len(), 1);
-        assert!(writer
-            .read_tail_window("session-a", 2, 2, 4)
-            .unwrap()
-            .1
-            .is_empty());
+        assert!(
+            writer
+                .read_tail_window("session-a", 2, 2, 4)
+                .unwrap()
+                .1
+                .is_empty()
+        );
         assert_eq!(writer.read_tail_window("session-a", 4, 0, 4).unwrap().0, 0);
         assert_eq!(writer.read_tail_window("session-a", 99, 0, 4).unwrap().0, 0);
         assert_eq!(writer.read_tail_window("session-b", 0, 0, 4).unwrap().0, 0);
@@ -1789,9 +1795,11 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        assert!(writer
-            .read_tail_window("session-a", 1, 0, usize::MAX)
-            .is_err());
+        assert!(
+            writer
+                .read_tail_window("session-a", 1, 0, usize::MAX)
+                .is_err()
+        );
         // The extent probe decodes only the last row, so a zero-limit window
         // still succeeds; the gap surfaces only when the window covers it.
         assert_eq!(writer.read_tail_window("session-a", 1, 0, 0).unwrap().0, 3);

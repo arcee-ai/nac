@@ -6,7 +6,7 @@ import SessionAvatar from "../session-avatar";
 
 export enum ProjectButtonVariant {
   Project = "project",
-  /** A session that belongs to no project; it gets a chat glyph, not a project. */
+  /** A session that belongs to no project; it gets the session-type mark, not a project identicon. */
   Orphan = "orphan",
 }
 

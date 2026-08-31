@@ -12129,6 +12129,30 @@
       "SessionClientId": {
         "type": "string"
       },
+      "SessionConvertedOrigin": {
+        "type": "object",
+        "description": "The chat this session was converted from, for tab and list-row marks.",
+        "required": [
+          "session_id",
+          "title",
+          "source_behavior"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "True when the original chat row is gone. The stored title still names it."
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "source_behavior": {
+            "$ref": "#/components/schemas/SessionBehavior"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "SessionEvent": {
         "oneOf": [
           {
@@ -12922,6 +12946,17 @@
           },
           "behavior": {
             "$ref": "#/components/schemas/SessionBehavior"
+          },
+          "converted_from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SessionConvertedOrigin",
+                "description": "Present when this chat was continued in the other session type."
+              }
+            ]
           },
           "created_at": {
             "type": "string"

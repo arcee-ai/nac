@@ -218,9 +218,11 @@ mod tests {
             .unwrap();
         }
 
-        assert!(load_all_thread_events(&path, "session-a", 0)
-            .unwrap()
-            .is_empty());
+        assert!(
+            load_all_thread_events(&path, "session-a", 0)
+                .unwrap()
+                .is_empty()
+        );
         for limit in [1, 24, 100] {
             let events = load_all_thread_events(&path, "session-a", limit).unwrap();
             assert_eq!(events.len(), 2);
@@ -244,10 +246,12 @@ mod tests {
         let other_session = load_all_thread_events(&path, "session-b", 24).unwrap();
         assert_eq!(other_session.len(), 1);
         assert_eq!(other_session["worker-a"].len(), 24);
-        assert!(other_session["worker-a"]
-            .iter()
-            .all(|event| event.session_id == "session-b"
-                && event.event_json.starts_with("other-session-")));
+        assert!(
+            other_session["worker-a"]
+                .iter()
+                .all(|event| event.session_id == "session-b"
+                    && event.event_json.starts_with("other-session-"))
+        );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
