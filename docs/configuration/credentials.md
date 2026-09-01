@@ -28,7 +28,9 @@ records without that field remain `nac-cli`; Managed NAC bootstrap records use
 `managed-nac`. Refresh rotation preserves both the client and any nonsecret
 bootstrap provenance. Managed bootstrap is documented in the
 [Managed NAC host contract](../managed/README.md); it imports into the same
-private file and leaves the interactive commands above as the fallback.
+private file. The interactive commands above remain the fallback for ordinary
+`arcee-auth` use, but their `nac-cli` credentials do not satisfy a
+receipt-bound Managed NAC bootstrap profile.
 
 Both Arcee backends accept only `https` origins on `arcee.ai` or its subdomains with effective port 443. Accepted inference paths are `/`, `/api`, `/api/v1`, and `/api/v1/chat/completions`; all resolve to `/api/v1/chat/completions`. Other hosts and path forms are rejected.
 

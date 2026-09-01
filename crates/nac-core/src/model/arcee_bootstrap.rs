@@ -91,6 +91,12 @@ struct ImportPaths<'a> {
     lock: &'a Path,
 }
 
+struct AuthorizationPaths<'a> {
+    auth: &'a Path,
+    receipt: &'a Path,
+    lock: &'a Path,
+}
+
 /// Import the fixed managed bootstrap input into NAC's normal Arcee store.
 ///
 /// A valid receipt short-circuits before opening the bootstrap mount, which is
@@ -120,22 +126,74 @@ pub fn managed_arcee_auth_storage_root() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("managed Arcee credential path has no parent directory"))
 }
 
-/// Validate the durable nonsecret receipt without consulting the bootstrap
-/// mount. Managed readiness combines this with durable credential validation.
-pub fn validate_managed_arcee_bootstrap_receipt(expected_managed_host_id: &str) -> Result<()> {
-    let expected_host = Uuid::parse_str(expected_managed_host_id)
-        .map_err(|_| anyhow!("managed logical_host_id must be a UUID for managed bootstrap"))?;
+/// Validate one bound durable managed authorization without consulting the
+/// bootstrap mount or making a provider request.
+///
+/// Receipt and credential are read under the same lock used by import and
+/// refresh so readiness can never accept a receipt from one generation with a
+/// credential from another.
+pub fn validate_managed_arcee_authorization(
+    expected_managed_host_id: &str,
+    expected_base_url: &str,
+) -> Result<()> {
+    let auth = arcee_auth_file_path()?;
     let receipt = arcee_managed_bootstrap_receipt_path()?;
     let lock = arcee_auth_lock_path()?;
-    with_credential_lock(&lock, || {
-        match read_receipt(&receipt)? {
-        ReceiptState::Valid(receipt) if receipt.managed_host_id == expected_host => Ok(()),
-        ReceiptState::Valid(_) => bail!(
-            "managed Arcee bootstrap receipt belongs to a different logical host; refusing durable state reuse"
-        ),
-        ReceiptState::Missing => bail!("managed Arcee bootstrap receipt is unavailable"),
-        ReceiptState::Invalid => bail!("managed Arcee bootstrap receipt is invalid"),
-    }
+    validate_authorization_with_paths(
+        expected_managed_host_id,
+        expected_base_url,
+        AuthorizationPaths {
+            auth: &auth,
+            receipt: &receipt,
+            lock: &lock,
+        },
+    )
+}
+
+fn validate_authorization_with_paths(
+    expected_managed_host_id: &str,
+    expected_base_url: &str,
+    paths: AuthorizationPaths<'_>,
+) -> Result<()> {
+    let expected_host = Uuid::parse_str(expected_managed_host_id)
+        .map_err(|_| anyhow!("managed logical_host_id must be a UUID for managed bootstrap"))?;
+    with_credential_lock(paths.lock, || {
+        let receipt = match read_receipt(paths.receipt)? {
+            ReceiptState::Valid(receipt) => receipt,
+            ReceiptState::Missing => bail!("managed Arcee bootstrap receipt is unavailable"),
+            ReceiptState::Invalid => bail!("managed Arcee bootstrap receipt is invalid"),
+        };
+        if receipt.managed_host_id != expected_host {
+            bail!(
+                "managed Arcee bootstrap receipt belongs to a different logical host; refusing durable state reuse"
+            );
+        }
+        if !matches!(receipt.disposition, ReceiptDisposition::Imported) {
+            bail!("managed Arcee bootstrap receipt did not import a usable managed credential");
+        }
+
+        let auth = super::arcee::read_stored_auth_for_base_url_at(paths.auth, expected_base_url)?;
+        if auth.client_id != MANAGED_CLIENT_ID {
+            bail!("durable Arcee credential is not a managed-nac authorization");
+        }
+        let provenance = auth.managed_bootstrap.ok_or_else(|| {
+            anyhow!("durable managed Arcee credential has no bootstrap provenance")
+        })?;
+        if provenance.managed_host_id != expected_host
+            || provenance.managed_host_id != receipt.managed_host_id
+        {
+            bail!("durable managed Arcee credential belongs to a different logical host");
+        }
+        if provenance.bootstrap_id != receipt.bootstrap_id {
+            bail!("durable managed Arcee credential does not match its bootstrap receipt");
+        }
+        if auth.token_type != "bearer"
+            || auth.organization_id.trim().is_empty()
+            || auth.workspace_name.trim().is_empty()
+        {
+            bail!("durable managed Arcee authorization is not structurally valid");
+        }
+        Ok(())
     })
 }
 

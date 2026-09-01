@@ -84,8 +84,10 @@ impl ManagedModelProfile {
         match self.credential_source {
             ManagedModelCredentialSource::MountedApiKey => config.model_credential().map(|_| ()),
             ManagedModelCredentialSource::ManagedBootstrap => {
-                nac_core::model::validate_managed_arcee_bootstrap_receipt(&config.logical_host_id)?;
-                nac_core::model::validate_managed_arcee_auth(&self.endpoint)
+                nac_core::model::validate_managed_arcee_authorization(
+                    &config.logical_host_id,
+                    &self.endpoint,
+                )
             }
         }
     }
