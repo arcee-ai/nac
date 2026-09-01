@@ -254,5 +254,19 @@ fn readiness_checks(
         expected_gid,
         required_tools,
     ));
+    if let Some(model) = manager.managed_model() {
+        if model.credential_source == nac_managed::ManagedModelCredentialSource::ManagedBootstrap {
+            checks.push(match model.credential_ready(managed) {
+                Ok(()) => ReadinessCheck::pass(
+                    "model-credential",
+                    "durable managed model authorization is present",
+                ),
+                Err(error) => ReadinessCheck::fail(
+                    "model-credential",
+                    format!("durable managed model authorization is unavailable: {error}"),
+                ),
+            });
+        }
+    }
     checks
 }

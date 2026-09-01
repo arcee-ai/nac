@@ -35,6 +35,7 @@ fn valid_config(root: &Path) -> ManagedHostConfig {
         model_id: "trinity-large-thinking".to_string(),
         model_endpoint: "https://models.example.test/v1".to_string(),
         model_credential_file: root.join("model-token"),
+        model_credential_source: ManagedModelCredentialSource::MountedApiKey,
         model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
     }
 }
@@ -58,6 +59,10 @@ fn managed_configuration_is_strict_and_structurally_validated() {
     .unwrap();
     let config = ManagedHostConfig::load(&path).unwrap();
     assert_eq!(config.logical_host_id, "host-123");
+    assert_eq!(
+        config.model_credential_source,
+        ManagedModelCredentialSource::MountedApiKey
+    );
 
     std::fs::write(
         &path,
@@ -68,6 +73,32 @@ fn managed_configuration_is_strict_and_structurally_validated() {
         .unwrap_err()
         .to_string()
         .contains("failed to parse"));
+}
+
+#[test]
+fn managed_bootstrap_is_a_strict_explicit_credential_source() {
+    let root = TestDir::new("config-bootstrap");
+    let path = root.0.join("managed.toml");
+    std::fs::write(
+        &path,
+        format!(
+            "version = 1\nlogical_host_id = \"21856443-8ed8-40ab-9036-72e837c99f27\"\npublic_hostname = \"nac.example.test\"\nrepository_root = \"{0}/repositories\"\nstate_root = \"{0}/state\"\nhome_root = \"{0}/home\"\ngithub_client_id = \"Iv1.example\"\nmodel_backend = \"arcee-auth\"\nmodel_id = \"trinity-large-thinking\"\nmodel_endpoint = \"https://api.arcee.ai\"\nmodel_credential_file = \"/run/secrets/nac/bootstrap.json\"\nmodel_credential_source = \"managed-bootstrap\"\n",
+            root.0.display()
+        ),
+    )
+    .unwrap();
+    let config = ManagedHostConfig::load(&path).unwrap();
+    assert_eq!(
+        config.model_credential_source,
+        ManagedModelCredentialSource::ManagedBootstrap
+    );
+    assert!(config.model_credential().is_err());
+
+    let invalid = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("managed-bootstrap", "unknown-source");
+    std::fs::write(&path, invalid).unwrap();
+    assert!(ManagedHostConfig::load(&path).is_err());
 }
 
 #[test]

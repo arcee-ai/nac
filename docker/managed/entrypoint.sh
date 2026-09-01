@@ -24,8 +24,9 @@ if [ ! -f "$managed_config" ] || [ -L "$managed_config" ] || [ ! -r "$managed_co
     exit 78
 fi
 
-# The entrypoint performs only cheap structural checks. /readyz validates the
-# mounted ownership, model credential, tools, store, and command backend.
+# The entrypoint performs only cheap structural checks. The server owns the
+# one-time bootstrap import; /readyz validates durable model authorization,
+# tools, store, and command backend without requiring the bootstrap mount.
 exec /usr/local/bin/nac-web \
     --bind 0.0.0.0:3210 \
     --allow-remote \

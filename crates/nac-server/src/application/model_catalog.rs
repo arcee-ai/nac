@@ -19,7 +19,7 @@ impl<'a> ModelCatalogApplication<'a> {
         else {
             return listing;
         };
-        if config.model_credential().is_err() {
+        if profile.credential_ready(config).is_err() {
             return listing;
         }
         if let Some(provider) = listing

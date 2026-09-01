@@ -318,7 +318,7 @@ impl<'a> SessionCreationApplication<'a> {
                 && model.api_base_url.as_deref() == Some(profile.endpoint.as_str())
                 && matches!(model.api_key_env, OptionalModelOption::Clear);
             if uses_host_profile {
-                model.trusted_api_key_file = Some(profile.credential_file.clone());
+                model.trusted_api_key_file = profile.trusted_api_key_file();
             }
         }
         model.light_model = match request.light_model {
