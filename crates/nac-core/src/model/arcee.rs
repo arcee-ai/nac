@@ -903,21 +903,19 @@ fn read_stored_auth_optional_at(path: &Path) -> Result<Option<StoredArceeAuth>> 
 }
 
 pub(super) fn parse_stored_auth(raw: &str, path: &Path) -> Result<Option<StoredArceeAuth>> {
-    let value: Value = serde_json::from_str(raw).map_err(|error| {
+    let value: Value = serde_json::from_str(raw).map_err(|_| {
         stored_auth_configuration_error(format!(
-            "failed to parse stored Arcee auth in {}: {}",
-            path.display(),
-            error
+            "failed to parse stored Arcee auth in {}",
+            path.display()
         ))
     })?;
     if value.get("type").and_then(Value::as_str) != Some(AUTH_TYPE) {
         return Ok(None);
     }
-    let auth: StoredArceeAuth = serde_json::from_value(value).map_err(|error| {
+    let auth: StoredArceeAuth = serde_json::from_value(value).map_err(|_| {
         stored_auth_configuration_error(format!(
-            "failed to parse stored Arcee auth schema in {}: {}",
-            path.display(),
-            error
+            "failed to parse stored Arcee auth schema in {}",
+            path.display()
         ))
     })?;
     for (field, field_value) in [
@@ -941,11 +939,10 @@ pub(super) fn parse_stored_auth(raw: &str, path: &Path) -> Result<Option<StoredA
             path.display()
         )));
     }
-    validate_stored_base_url(&auth.base_url).map_err(|error| {
+    validate_stored_base_url(&auth.base_url).map_err(|_| {
         stored_auth_configuration_error(format!(
-            "stored Arcee auth in {} has an invalid base_url: {}",
-            path.display(),
-            error
+            "stored Arcee auth in {} has an invalid base_url",
+            path.display()
         ))
     })?;
     Ok(Some(auth))

@@ -90,6 +90,16 @@ impl ManagedModelProfile {
         }
     }
 
+    /// Fail closed before a session uses the durable managed authorization.
+    /// Mounted API-key sessions retain their existing launch-time file check.
+    pub(crate) fn require_durable_authorization(&self, config: &ManagedHostConfig) -> Result<()> {
+        if self.credential_source == ManagedModelCredentialSource::ManagedBootstrap {
+            self.credential_ready(config)
+                .context("durable managed model authorization is unavailable")?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn trusted_api_key_file(&self) -> Option<PathBuf> {
         (self.credential_source == ManagedModelCredentialSource::MountedApiKey)
             .then(|| self.credential_file.clone())

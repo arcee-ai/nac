@@ -747,6 +747,38 @@ fn tampered_stored_base_url_is_rejected() {
 }
 
 #[test]
+fn malformed_stored_auth_diagnostics_never_echo_secret_bearing_values() {
+    let dir = TestDir::new("redacted-invalid-store");
+    let (_, canonical) = dir.paths();
+    let schema_canary = "schema-secret-canary";
+    let raw = json!({
+        "type": AUTH_TYPE,
+        "access_token": "access-secret-canary",
+        "refresh_token": "refresh-secret-canary",
+        "token_type": "bearer",
+        "expires_at_ms": schema_canary,
+        "base_url": "https://api.arcee.ai",
+        "organization_id": "org-1",
+        "workspace_name": "acme"
+    })
+    .to_string();
+    let error = parse_stored_auth(&raw, &canonical).unwrap_err().to_string();
+    assert!(error.contains("failed to parse stored Arcee auth schema"));
+    assert!(!error.contains(schema_canary));
+    assert!(!error.contains("access-secret-canary"));
+    assert!(!error.contains("refresh-secret-canary"));
+
+    let base_canary = "base-secret-canary";
+    let mut auth = stored_auth("access-secret-canary");
+    auth.base_url = format!("https://api.arcee.ai/{base_canary}");
+    let raw = serde_json::to_string(&auth).unwrap();
+    let error = parse_stored_auth(&raw, &canonical).unwrap_err().to_string();
+    assert!(error.contains("invalid base_url"));
+    assert!(!error.contains(base_canary));
+    assert!(!error.contains("access-secret-canary"));
+}
+
+#[test]
 fn stored_auth_round_trips() {
     let auth = stored_auth("jwt-abc");
     let raw = serde_json::to_string(&auth).unwrap();

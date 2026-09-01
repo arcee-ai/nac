@@ -160,7 +160,7 @@ fn receipt_prevents_reconciliation_or_a_new_generation_from_overwriting_rotation
 }
 
 #[test]
-fn retry_repairs_the_credential_then_receipt_crash_window_without_rewrite() {
+fn retry_tombstones_the_durable_generation_not_a_reconciled_mount() {
     let dir = TestDir::new("receipt-recovery");
     let paths = dir.paths();
     write_bootstrap(&paths, BOOTSTRAP_ID);
@@ -173,13 +173,24 @@ fn retry_repairs_the_credential_then_receipt_crash_window_without_rewrite() {
     assert!(paths.auth.exists());
     assert!(!paths.receipt.exists());
     let before = fs::read(&paths.auth).unwrap();
+    let replacement_bootstrap_id = "27062ca7-2fca-49ad-b6c4-fe1e5d9ae6fa";
+    write_bootstrap(&paths, replacement_bootstrap_id);
 
     assert_eq!(
         import(&paths).unwrap(),
         ManagedArceeBootstrapOutcome::RecoveredReceipt
     );
     assert_eq!(fs::read(&paths.auth).unwrap(), before);
-    assert!(paths.receipt.exists());
+    let receipt: Value = serde_json::from_slice(&fs::read(&paths.receipt).unwrap()).unwrap();
+    assert_eq!(receipt["bootstrap_id"], BOOTSTRAP_ID);
+    assert_ne!(receipt["bootstrap_id"], replacement_bootstrap_id);
+    assert_eq!(read_auth(&paths).access_token, ACCESS_TOKEN);
+
+    fs::remove_file(&paths.input).unwrap();
+    assert_eq!(
+        import(&paths).unwrap(),
+        ManagedArceeBootstrapOutcome::AlreadyConsumed
+    );
 }
 
 #[test]
