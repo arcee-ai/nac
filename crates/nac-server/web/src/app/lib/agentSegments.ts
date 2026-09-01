@@ -1,10 +1,6 @@
 import { IconName } from "@/app/atoms/icon";
 import type { ToolPresentation } from "@/app/lib/toolPresentation";
-import type {
-  ModelTurn,
-  TranscriptBlock,
-  TranscriptTurn,
-} from "@/app/lib/transcript";
+import type { ModelTurn, TranscriptBlock, TranscriptTurn } from "@/app/lib/transcript";
 
 /** Consecutive thoughts and tool calls collapsed into one pill tray. */
 export interface AgentToolsGroup {
@@ -58,7 +54,7 @@ const FALLBACK_TOOL_CONFIG: SegmentDisplayConfig = {
 const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
   read: {
     id: "read",
-    icon: IconName.BookOpen,
+    icon: IconName.ReadFile,
     regularLabel: "Read file",
     inProgressLabel: "Reading file…",
   },
@@ -76,13 +72,13 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
   },
   glob: {
     id: "glob",
-    icon: IconName.Folders,
+    icon: IconName.SearchFiles,
     regularLabel: "Find files",
     inProgressLabel: "Finding files…",
   },
   grep: {
     id: "grep",
-    icon: IconName.Search,
+    icon: IconName.SearchFile,
     regularLabel: "Search files",
     inProgressLabel: "Searching files…",
   },
@@ -94,13 +90,13 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
   },
   write_stdin: {
     id: "write_stdin",
-    icon: IconName.Terminal,
-    regularLabel: "Use terminal",
-    inProgressLabel: "Writing to terminal…",
+    icon: IconName.WriteCommand,
+    regularLabel: "Write command",
+    inProgressLabel: "Writing command…",
   },
   read_command_output: {
     id: "read_command_output",
-    icon: IconName.Eye,
+    icon: IconName.ScreenView,
     regularLabel: "Read command output",
     inProgressLabel: "Reading output…",
   },
@@ -124,7 +120,7 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
   },
   get_goal: {
     id: "get_goal",
-    icon: IconName.Flag,
+    icon: IconName.Important,
     regularLabel: "Read goal",
     inProgressLabel: "Reading goal…",
   },
@@ -136,7 +132,7 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
   },
   session_spawn: {
     id: "session_spawn",
-    icon: IconName.People,
+    icon: IconName.Plane,
     regularLabel: "Start session",
     inProgressLabel: "Starting session…",
   },
@@ -148,7 +144,7 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
   },
   session_steer: {
     id: "session_steer",
-    icon: IconName.Coursor,
+    icon: IconName.AddChat,
     regularLabel: "Steer session",
     inProgressLabel: "Steering session…",
   },
@@ -166,11 +162,30 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
   },
   session_cancel: {
     id: "session_cancel",
-    icon: IconName.Stop,
+    icon: IconName.Trash,
     regularLabel: "Cancel session",
     inProgressLabel: "Cancelling session…",
   },
+  workset_define: {
+    id: "workset_define",
+    icon: IconName.Checklist,
+    regularLabel: "Workset",
+    inProgressLabel: "Defining workset…",
+  },
+  thread_delete: {
+    id: "thread_delete",
+    icon: IconName.Trash,
+    regularLabel: "Delete thread",
+    inProgressLabel: "Deleting thread…",
+  },
 };
+
+/** Spawned sessions stay out of the ToolsSegments tray and get their own row. */
+const STANDALONE_TOOL_NAMES = new Set(["session_spawn"]);
+
+export function isStandaloneToolName(name: string): boolean {
+  return STANDALONE_TOOL_NAMES.has(name);
+}
 
 export function getReasoningConfig(): SegmentDisplayConfig {
   return REASONING_CONFIG;
@@ -202,11 +217,25 @@ export function configForSegment(segment: AgentSegment): SegmentDisplayConfig {
   };
 }
 
+function toolNameOf(block: TranscriptBlock): string | null {
+  if (block.kind === "tool-detail") return block.presentation.name;
+  if (block.kind === "tool") return block.name;
+  if (block.kind === "workset") return "workset_define";
+  return null;
+}
+
+function isStandaloneBlock(block: TranscriptBlock): boolean {
+  const name = toolNameOf(block);
+  return name != null && isStandaloneToolName(name);
+}
+
 function isGroupable(block: TranscriptBlock): boolean {
+  if (isStandaloneBlock(block)) return false;
   return (
     block.kind === "thoughts" ||
     block.kind === "tool-detail" ||
-    block.kind === "tool"
+    block.kind === "tool" ||
+    block.kind === "workset"
   );
 }
 
@@ -239,15 +268,129 @@ function segmentFromBlock(block: TranscriptBlock): AgentSegment | null {
       },
     };
   }
+  if (block.kind === "workset") {
+    const label = block.worksetId
+      ? `Worksets_${block.worksetId}`
+      : getSegmentConfig("workset_define").regularLabel;
+    return {
+      kind: "tool",
+      key: block.key,
+      presentation: {
+        callId: block.key,
+        name: "workset_define",
+        label,
+        summary: block.worksetId || null,
+        resultPreview: null,
+        status: block.pending ? "running" : "success",
+        statusLabel: block.pending ? "Running" : "Succeeded",
+      },
+    };
+  }
   return null;
+}
+
+export function standaloneGroupFromBlock(
+  turnKey: string,
+  block: TranscriptBlock,
+): AgentToolsGroup | null {
+  if (!isStandaloneBlock(block)) return null;
+  const segment = segmentFromBlock(block);
+  if (!segment) return null;
+  return {
+    id: `${turnKey}:spawn-${segment.key}`,
+    turnKey,
+    label:
+      segment.kind === "tool"
+        ? (segment.presentation.summary ?? segment.presentation.label)
+        : groupLabel([segment]),
+    segments: [segment],
+    inProgress: toolIsLive(segment),
+    durationMs: null,
+  };
+}
+
+const TOOL_TRAILING: Record<string, string> = {
+  read: "Read",
+  write: "Write",
+  edit: "Edit",
+  glob: "glob",
+  grep: "Grep",
+  exec_command: "Exec",
+  write_stdin: "write",
+  read_command_output: "Read",
+  create_goal: "create",
+  get_goal: "Read",
+  update_goal: "edit",
+  session_status: "Check",
+  session_steer: "Steer",
+  session_read: "Read",
+  session_wait: "Wait",
+  session_cancel: "Delete",
+  session_spawn: "Spawn",
+  workset_define: "Workset",
+  thread_delete: "Delete",
+};
+
+function readyActionListLabel(group: AgentToolsGroup): string {
+  if (group.segments.length === 1 && group.segments[0].kind === "tool") {
+    const segment = group.segments[0];
+    return segment.presentation.summary ?? configForSegment(segment).regularLabel;
+  }
+  const labels = group.segments.map((segment) => configForSegment(segment).regularLabel);
+  if (labels.length === 0) return group.label;
+  if (labels.length === 1) return labels[0];
+  if (labels.length === 2) return `${labels[0]}, ${labels[1]}`;
+  return `${labels[0]}, ${labels[1]} and more`;
+}
+
+export function actionListLabel(group: AgentToolsGroup): string {
+  if (!group.inProgress) return readyActionListLabel(group);
+  if (actionListIsThoughtsOnly(group)) return REASONING_CONFIG.inProgressLabel;
+  if (group.segments.length === 1) return configForSegment(group.segments[0]).inProgressLabel;
+  return `${readyActionListLabel(group)}...`;
+}
+
+const FAILED_TOOL_STATUSES = new Set(["error", "cancelled", "timed-out"]);
+
+export function actionListFailed(group: AgentToolsGroup): boolean {
+  return group.segments.some(
+    (segment) => segment.kind === "tool" && FAILED_TOOL_STATUSES.has(segment.presentation.status),
+  );
+}
+
+export function actionListTrailing(group: AgentToolsGroup): string | undefined {
+  if (group.inProgress || actionListFailed(group)) return undefined;
+  if (actionListIsThoughtsOnly(group)) {
+    if (group.durationMs == null) return undefined;
+    return `${Math.round(group.durationMs / 100) / 10} s`;
+  }
+  const tools = group.segments.filter((segment) => segment.kind === "tool");
+  const thoughts = group.segments.some((segment) => segment.kind === "thinking");
+  if (!thoughts && tools.length === 1) {
+    return TOOL_TRAILING[tools[0].presentation.name];
+  }
+  return String(group.segments.length);
+}
+
+export function actionListIcon(group: AgentToolsGroup): IconName {
+  const tools = group.segments.filter((segment) => segment.kind === "tool");
+  const thoughts = group.segments.some((segment) => segment.kind === "thinking");
+  if (tools.length === 0) return IconName.Brain;
+  if (!thoughts && tools.length === 1) {
+    return configForSegment(tools[0]).icon;
+  }
+  return IconName.MenuHorizontal;
+}
+
+export function actionListIsThoughtsOnly(group: AgentToolsGroup): boolean {
+  return (
+    group.segments.length > 0 && group.segments.every((segment) => segment.kind === "thinking")
+  );
 }
 
 function toolIsLive(segment: AgentSegment): boolean {
   if (segment.kind === "thinking") return segment.streaming;
-  return (
-    segment.presentation.status === "pending" ||
-    segment.presentation.status === "running"
-  );
+  return segment.presentation.status === "pending" || segment.presentation.status === "running";
 }
 
 function groupLabel(segments: AgentSegment[]): string {
@@ -270,11 +413,7 @@ function groupDurationMs(segments: AgentSegment[]): number | null {
   return any ? total : null;
 }
 
-function closeGroup(
-  turnKey: string,
-  seq: number,
-  segments: AgentSegment[],
-): AgentToolsGroup {
+function closeGroup(turnKey: string, seq: number, segments: AgentSegment[]): AgentToolsGroup {
   return {
     id: `${turnKey}:tools-${seq}`,
     turnKey,
@@ -286,9 +425,7 @@ function closeGroup(
 }
 
 /** Collapse consecutive thoughts / tool calls; leave prose and orchestrator cards alone. */
-export function partitionAgentTranscript(
-  turn: ModelTurn,
-): AgentTranscriptItem[] {
+export function partitionAgentTranscript(turn: ModelTurn): AgentTranscriptItem[] {
   const items: AgentTranscriptItem[] = [];
   let pending: AgentSegment[] = [];
   let toolsSeq = 0;
@@ -317,9 +454,7 @@ export function partitionAgentTranscript(
   return items;
 }
 
-export function collectAgentToolsGroups(
-  turns: TranscriptTurn[],
-): AgentToolsGroup[] {
+export function collectAgentToolsGroups(turns: TranscriptTurn[]): AgentToolsGroup[] {
   const groups: AgentToolsGroup[] = [];
   for (const turn of turns) {
     if (turn.kind !== "model") continue;
@@ -340,9 +475,7 @@ export interface ToolsSegmentItem {
   icon: IconName;
 }
 
-export function toolsItemsFromGroup(
-  group: AgentToolsGroup,
-): ToolsSegmentItem[] {
+export function toolsItemsFromGroup(group: AgentToolsGroup): ToolsSegmentItem[] {
   return group.segments.map((segment) => ({
     id: segment.key,
     icon: configForSegment(segment).icon,

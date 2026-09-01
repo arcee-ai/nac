@@ -14,6 +14,7 @@ describe("transcript topology badge navigation", () => {
   it("selects the referenced workset and thread episode", () => {
     const onSelectWorkset = vi.fn();
     const onSelectThread = vi.fn();
+    const onSelectAgentSegment = vi.fn();
     const turn: ModelTurn = {
       kind: "model",
       key: "model-1",
@@ -50,11 +51,12 @@ describe("transcript topology badge navigation", () => {
         selectedWorkset={null}
         onSelectThread={onSelectThread}
         onSelectWorkset={onSelectWorkset}
+        onSelectAgentSegment={onSelectAgentSegment}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Worksets_release" }));
-    expect(onSelectWorkset).toHaveBeenCalledWith("release");
+    expect(onSelectAgentSegment).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /api/i }));
     expect(onSelectThread).toHaveBeenCalledWith("api", "api:0");

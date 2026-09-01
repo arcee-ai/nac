@@ -19,10 +19,7 @@ import {
 } from "@/app/atoms";
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
 import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
-import {
-  SnapshotBadge,
-  type FilesPanelLink,
-} from "@/app/components/inspector/SnapshotBadge";
+import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
 import { cn } from "@/app/lib/cn";
@@ -30,11 +27,7 @@ import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
 import { partitionAgentTranscript } from "@/app/lib/agentSegments";
-import {
-  RUN_CANCELLED_MARKER,
-  type ModelTurn,
-  type TranscriptBlock,
-} from "@/app/lib/transcript";
+import { RUN_CANCELLED_MARKER, type ModelTurn, type TranscriptBlock } from "@/app/lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -43,10 +36,7 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
  * model is doing rather than what it produced. Once it is over the badge carries
  * how long the model spent on it, whenever the backend timed the call.
  */
-function thoughtsLabel(block: {
-  streaming: boolean;
-  durationMs: number | null;
-}): string {
+function thoughtsLabel(block: { streaming: boolean; durationMs: number | null }): string {
   if (block.streaming) return "Thinking";
   if (block.durationMs == null) return "Thoughts";
   return `Thoughts, ${formatSeconds(block.durationMs)}`;
@@ -164,8 +154,7 @@ export const ModelMessage = memo(function ModelMessage({
   // already written, so it closes the turn below the snapshot rather than
   // sitting wherever the marker happens to fall between the blocks.
   const cancelled = turn.blocks.some(
-    (block) =>
-      block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
+    (block) => block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
   );
   const isMobile = useIsMobile();
   const renderTranscriptBlock = (block: TranscriptBlock) => {
@@ -243,9 +232,7 @@ export const ModelMessage = memo(function ModelMessage({
             running={active}
             className="shrink-0"
           />
-          <span className="label-small text-basic-primary truncate">
-            {model}
-          </span>
+          <span className="label-small text-basic-primary truncate">{model}</span>
           {/* The header carries whichever of the two is available: what the run
               is doing now, or how long it took once it is over. */}
           {active && activity ? (
@@ -268,21 +255,19 @@ export const ModelMessage = memo(function ModelMessage({
             active && "streaming",
           )}
         >
-          {sessionType === SessionType.Agent
-            ? partitionAgentTranscript(turn).map((item) => {
-                if (item.kind === "group") {
-                  return (
-                    <AgentToolsGroupButton
-                      key={item.group.id}
-                      group={item.group}
-                      active={selectedAgentSegment === item.group.id}
-                      onSelect={onSelectAgentSegment ?? (() => undefined)}
-                    />
-                  );
-                }
-                return renderTranscriptBlock(item.block);
-              })
-            : turn.blocks.map((block) => renderTranscriptBlock(block))}
+          {partitionAgentTranscript(turn).map((item) => {
+            if (item.kind === "group") {
+              return (
+                <AgentToolsGroupButton
+                  key={item.group.id}
+                  group={item.group}
+                  active={selectedAgentSegment === item.group.id}
+                  onSelect={onSelectAgentSegment ?? (() => undefined)}
+                />
+              );
+            }
+            return renderTranscriptBlock(item.block);
+          })}
           {snapshotRevision && filesPanel ? (
             <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
           ) : null}
@@ -302,13 +287,9 @@ export const ModelMessage = memo(function ModelMessage({
                 sessionId={fork.session_id}
                 title={fork.title}
                 deleted={fork.deleted}
-                onOpen={
-                  onOpenFork ? () => onOpenFork(fork.session_id) : undefined
-                }
+                onOpen={onOpenFork ? () => onOpenFork(fork.session_id) : undefined}
                 onDismiss={
-                  onDismissFork && fork.deleted
-                    ? () => onDismissFork(fork.session_id)
-                    : undefined
+                  onDismissFork && fork.deleted ? () => onDismissFork(fork.session_id) : undefined
                 }
               />
             ))}
@@ -332,9 +313,7 @@ export const ModelMessage = memo(function ModelMessage({
               <Tooltip title="Resend" position={TooltipPosition.BottomRight}>
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                  }
+                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                   content={ButtonContent.Icon}
                   aria-label="Resend"
                   disabled={actionsDisabled}
@@ -347,15 +326,10 @@ export const ModelMessage = memo(function ModelMessage({
             ) : null}
 
             {canRevert ? (
-              <Tooltip
-                title="Revert to this snapshot"
-                position={TooltipPosition.BottomRight}
-              >
+              <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomRight}>
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                  }
+                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
                   disabled={actionsDisabled}
@@ -373,9 +347,7 @@ export const ModelMessage = memo(function ModelMessage({
                 <span className="inline-flex">
                   <Button
                     size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                    variant={
-                      isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                    }
+                    variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                     content={ButtonContent.Icon}
                     aria-label="Revert to this snapshot"
                     disabled
@@ -388,15 +360,10 @@ export const ModelMessage = memo(function ModelMessage({
             )}
 
             {!readOnly && onFork != null && forkIndex != null ? (
-              <Tooltip
-                title="Create fork"
-                position={TooltipPosition.BottomRight}
-              >
+              <Tooltip title="Create fork" position={TooltipPosition.BottomRight}>
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                  }
+                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                   content={ButtonContent.Icon}
                   aria-label="Create fork"
                   disabled={actionsDisabled}
@@ -409,15 +376,10 @@ export const ModelMessage = memo(function ModelMessage({
             ) : null}
 
             {!readOnly && !active && onContinue != null && forkIndex != null ? (
-              <Tooltip
-                title={continueLabel}
-                position={TooltipPosition.BottomRight}
-              >
+              <Tooltip title={continueLabel} position={TooltipPosition.BottomRight}>
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={
-                    isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary
-                  }
+                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                   content={ButtonContent.Icon}
                   aria-label={continueLabel}
                   disabled={actionsDisabled}

@@ -95,6 +95,8 @@ const TOOL_LABELS: Record<string, string> = {
   create_goal: "Create goal",
   get_goal: "Read goal",
   update_goal: "Update goal",
+  workset_define: "Workset",
+  thread_delete: "Delete thread",
   session_spawn: "Start session",
   session_status: "Check session",
   session_steer: "Steer session",

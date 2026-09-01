@@ -18,24 +18,30 @@ import {
   DropdownContent,
   Icon,
   IconName,
-  Loader,
-  LoaderSize,
-  LoaderVariant,
   Select,
   Separator,
   ShimmerLoader,
 } from "@/app/atoms";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { usePagedRows } from "@/app/hooks/usePagedRows";
+import { SegmentDetailList } from "@/app/components/inspector/agent-segments/SegmentDetailList";
 import {
-  PanelEmpty,
-  PanelLoading,
-  PanelRow,
-  PanelSplit,
-} from "@/app/components/inspector/PanelSplit";
+  ActionFilterBar,
+  ActionItemList,
+  ActionTurnHeader,
+} from "@/app/components/inspector/ActionList";
+import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { TaskButton, TaskPill } from "@/app/components/inspector/TaskPreview";
 import { cn } from "@/app/lib/cn";
+import type { ActionFilter, ActionItem } from "@/app/lib/actionsTimeline";
+import {
+  buildActionTimeline,
+  filterActionTimeline,
+  flattenActionItems,
+} from "@/app/lib/actionsTimeline";
+import type { AgentToolsGroup } from "@/app/lib/agentSegments";
 import { Markdown } from "@/app/lib/markdown";
+import { SESSION_PANEL_LABEL } from "@/app/lib/routes";
 import { STICK_TOLERANCE_PX, distanceFromBottom, scrollToBottomInstantly } from "@/app/lib/scroll";
 import {
   groupThreadLog,
@@ -53,9 +59,19 @@ import {
   dispatchActions,
   dispatchThreadName,
   partitionThreadCalls,
+  buildTranscript,
+  withStreamedOutput,
 } from "@/app/lib/transcript";
 import { useThreadEventPages } from "@/app/services/queries";
-import { useLiveThreads, useStreamStatus, type RuntimeThread } from "@/app/store/runtimeStore";
+import {
+  useFinishedToolCalls,
+  useLiveThreads,
+  usePrimaryToolEvents,
+  useStreamReasoning,
+  useStreamStatus,
+  useStreamText,
+  type RuntimeThread,
+} from "@/app/store/runtimeStore";
 import { setSelectedThreadRunning } from "@/app/store/sessionLayoutStore";
 import type {
   AgentEvent,
@@ -708,24 +724,53 @@ function Detail({
   );
 }
 
+const ORCHESTRATOR_FILTERS: readonly ActionFilter[] = ["all", "threads", "tools"];
+
+function extraThreadItem(
+  thread: ThreadSnapshot,
+  state: "running" | "pending" | "done",
+  action: string,
+): Extract<ActionItem, { kind: "thread" }> {
+  return {
+    kind: "thread",
+    id: `extra:${thread.name}`,
+    name: thread.name,
+    episodeKey: thread.name,
+    nested: false,
+    state,
+    action,
+  };
+}
+
 /**
- * Retained workstreams and their episodes, merged with the live SSE state so a
- * running thread shows the commands it is issuing before any episode is
- * persisted — and before the thread itself has a row in the store.
+ * Retained workstreams, thoughts, and workset tools for an Orchestrator
+ * session. Thread command logs stay on the detail pane; reasoning and other
+ * tools use the same segment list as Agent.
  */
 export function ThreadsView({
   snapshot,
   selected,
+  selectedEpisode = null,
+  selectedGroup = null,
   onSelect,
+  onSelectGroup,
 }: {
   snapshot: SessionSnapshotResponse | null;
   /** Thread the chat pointed at, if any. */
   selected: string | null;
-  onSelect: (name: string) => void;
+  selectedEpisode?: string | null;
+  selectedGroup?: string | null;
+  onSelect: (name: string | null, episodeKey?: string | null) => void;
+  onSelectGroup?: (id: string | null) => void;
 }) {
   const liveThreads = useLiveThreads();
   const streamStatus = useStreamStatus();
+  const finishedToolCalls = useFinishedToolCalls();
+  const primaryToolEvents = usePrimaryToolEvents();
+  const streamText = useStreamText();
+  const streamReasoning = useStreamReasoning();
   const [view, setView] = useState<ThreadDetailView>("log");
+  const [filter, setFilter] = useState<ActionFilter>("all");
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
   const activeThreads = snapshot?.active_threads;
   const sessionId = snapshot?.metadata.session_id ?? "";
@@ -841,29 +886,75 @@ export function ThreadsView({
     waveRank,
   ]);
 
-  const selectable = useMemo(
-    () => ordered.filter((thread) => !pendingNames.has(thread.name)),
-    [ordered, pendingNames],
-  );
-  // Pending rows stay unclickable, but the detail pane still has to name one
-  // when the list is not empty — otherwise a reconnect flash shows the empty
-  // copy next to a list that already has threads.
-  const current =
-    ordered.find((thread) => thread.name === selected) ?? selectable[0] ?? ordered[0] ?? null;
-  // A session that fanned out into hundreds of workstreams would otherwise lay
-  // every row out at once, on a panel where only the first screen is ever read.
-  // The thread opened from a message keeps its row whatever the reader has
-  // scrolled to, so the list still shows what the detail pane is about.
-  const currentRow = current ? ordered.findIndex((thread) => thread.name === current.name) : -1;
-  const { visible, hasMore, sentinelRef } = usePagedRows(ordered, {
-    key: sessionId,
-    atLeast: currentRow + 1,
+  const sections = useMemo(() => {
+    const turns = withStreamedOutput(
+      buildTranscript(snapshot, liveThreads, finishedToolCalls, primaryToolEvents),
+      { text: streamText, reasoning: streamReasoning },
+    );
+    return buildActionTimeline(turns);
+  }, [snapshot, liveThreads, finishedToolCalls, primaryToolEvents, streamText, streamReasoning]);
+  const visibleSections = useMemo(() => filterActionTimeline(sections, filter), [sections, filter]);
+  const timelineThreadNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const item of flattenActionItems(sections)) {
+      if (item.kind === "thread") names.add(item.name);
+    }
+    return names;
+  }, [sections]);
+  const extraItems = useMemo(() => {
+    if (filter === "tools") return [];
+    return ordered
+      .filter((thread) => !timelineThreadNames.has(thread.name))
+      .map((thread) =>
+        extraThreadItem(
+          thread,
+          pendingNames.has(thread.name)
+            ? "pending"
+            : runningNames.has(thread.name)
+              ? "running"
+              : "done",
+          actions[thread.name] || thread.latest_action || "",
+        ),
+      );
+  }, [filter, ordered, timelineThreadNames, pendingNames, runningNames, actions]);
+  const listSections = useMemo(() => {
+    if (extraItems.length === 0) return visibleSections;
+    return [
+      {
+        key: "live",
+        number: visibleSections[0]?.number ?? 1,
+        prompt: "",
+        createdAt: null,
+        items: extraItems,
+      },
+      ...visibleSections,
+    ];
+  }, [extraItems, visibleSections]);
+  const listItems = useMemo(() => flattenActionItems(listSections), [listSections]);
+
+  const currentGroup: AgentToolsGroup | null = useMemo(() => {
+    const match = listItems.find(
+      (item) => (item.kind === "group" || item.kind === "spawn") && item.id === selectedGroup,
+    );
+    if (!match || match.kind === "thread") return null;
+    return match.group;
+  }, [listItems, selectedGroup]);
+  const showingGroup = Boolean(selectedGroup && currentGroup && currentGroup.id === selectedGroup);
+  const current = showingGroup
+    ? null
+    : (ordered.find((thread) => thread.name === selected) ?? null);
+  const currentSectionIndex = showingGroup
+    ? listSections.findIndex((section) => section.items.some((item) => item.id === selectedGroup))
+    : listSections.findIndex((section) =>
+        section.items.some((item) => item.kind === "thread" && item.name === current?.name),
+      );
+  const { visible, hasMore, sentinelRef } = usePagedRows(listSections, {
+    key: `${sessionId}:${filter}`,
+    atLeast: currentSectionIndex + 1,
   });
   const live = current ? liveThreads[current.name] : undefined;
   const currentAction = current ? actions[current.name] || current.latest_action || "" : "";
 
-  // Keep the layout store on the thread the detail pane is showing, so the
-  // phone dialog header names that thread instead of the panel label.
   const currentName = current?.name ?? null;
   const currentRunning = Boolean(currentName && runningNames.has(currentName));
   const eventPages = useThreadEventPages(snapshot ? sessionId : null, currentName);
@@ -872,11 +963,18 @@ export function ThreadsView({
     [eventPages.data],
   );
   useEffect(() => {
-    if (!currentName) return;
-    if (selected === currentName) return;
-    if (selected && ordered.some((thread) => thread.name === selected)) return;
-    onSelect(currentName);
-  }, [selected, currentName, ordered, onSelect]);
+    if (selectedGroup) return;
+    if (!selected) return;
+    if (ordered.some((thread) => thread.name === selected)) return;
+    onSelect(null);
+  }, [selected, ordered, onSelect, selectedGroup]);
+  useEffect(() => {
+    if (selectedGroup || selected) return;
+    const first = listItems[0];
+    if (!first) return;
+    if (first.kind === "thread") onSelect(first.name, first.episodeKey);
+    else onSelectGroup?.(first.id);
+  }, [selectedGroup, selected, listItems, onSelect, onSelectGroup]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -918,83 +1016,91 @@ export function ThreadsView({
     return () => setSelectedThreadRunning(false);
   }, [currentRunning]);
 
-  if (!snapshot) return <PanelLoading listTitle="Threads" />;
+  if (!snapshot) return <PanelLoading listTitle={SESSION_PANEL_LABEL.threads} />;
+
+  const threadFlags = (name: string) => {
+    const liveRow = liveThreads[name];
+    const pending = pendingNames.has(name);
+    const running = runningNames.has(name);
+    const lastEpisode = snapshot.thread_episodes?.[name]?.at(-1);
+    const episodeCount = snapshot.thread_episodes?.[name]?.length ?? 0;
+    const cancelled =
+      Boolean(liveRow?.cancelled) ||
+      cancelledNames.has(name) ||
+      lastEpisode?.status === "cancelled" ||
+      (!running && !pending && episodeCount === 0);
+    return {
+      pending,
+      running,
+      cancelled,
+      errored: Boolean(liveRow?.isError),
+    };
+  };
+
+  const pickGroup = (id: string) => {
+    onSelect(null);
+    onSelectGroup?.(id);
+  };
+  const pickThread = (name: string, episodeKey: string) => {
+    onSelectGroup?.(null);
+    onSelect(name, episodeKey);
+  };
 
   return (
     <PanelSplit
-      listTitle="Threads"
-      title={current?.name}
-      titleAction={currentAction ? <TaskButton action={currentAction} /> : null}
-      actions={current ? <ThreadViewSelect view={view} onChange={setView} /> : null}
+      listTitle={SESSION_PANEL_LABEL.threads}
+      title={showingGroup ? currentGroup?.label : current?.name}
+      titleAction={!showingGroup && currentAction ? <TaskButton action={currentAction} /> : null}
+      actions={
+        !showingGroup && current ? <ThreadViewSelect view={view} onChange={setView} /> : null
+      }
+      listToolbar={
+        <ActionFilterBar value={filter} options={ORCHESTRATOR_FILTERS} onChange={setFilter} />
+      }
       list={
-        ordered.length === 0 ? (
+        listSections.length === 0 ? (
           <div className="flex flex-col px-2 pb-4 pt-2 text-micro">
-            <p className="text-basic-tertiary">No threads yet.</p>
+            <p className="text-basic-tertiary">No actions yet.</p>
             <p className="text-basic-muted">Start a conversation to create one.</p>
           </div>
         ) : (
           <>
-            {visible.map((thread) => {
-              const pending = pendingNames.has(thread.name);
-              const running = runningNames.has(thread.name);
-              const live = liveThreads[thread.name];
-              const lastEpisode = snapshot.thread_episodes?.[thread.name]?.at(-1);
-              const episodeCount =
-                snapshot.thread_episodes?.[thread.name]?.length ?? thread.episode_count;
-              const cancelled =
-                Boolean(live?.cancelled) ||
-                cancelledNames.has(thread.name) ||
-                lastEpisode?.status === "cancelled" ||
-                (!running && !pending && episodeCount === 0);
-              const errored = live?.isError;
-              // The task is the only description a thread has, so the row hands
-              // it over on hover rather than making the name stand for it.
-              const task = actions[thread.name] || thread.latest_action || "";
-              return (
-                <PanelRow
-                  key={thread.name}
-                  label={thread.name}
-                  active={thread.name === current?.name}
-                  disabled={pending}
-                  title={pending ? "Waiting on source threads" : task || undefined}
-                  icon={
-                    pending ? (
-                      <Icon
-                        iconName={IconName.Timelaps}
-                        size={16}
-                        className="shrink-0 [&>path]:!fill-basic-muted"
-                      />
-                    ) : running ? (
-                      <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
-                    ) : cancelled ? (
-                      <Icon
-                        iconName={IconName.Close}
-                        size={16}
-                        className="shrink-0 [&>path]:!fill-basic-muted"
-                      />
-                    ) : (
-                      <Icon
-                        iconName={errored ? IconName.Danger : IconName.CheckCircle}
-                        size={16}
-                        className={cn("shrink-0", errored && "text-error-primary")}
-                      />
-                    )
-                  }
-                  trailing={
-                    <span className="code code-micro text-basic-muted shrink-0">
-                      {snapshot.thread_episodes?.[thread.name]?.length ?? thread.episode_count}
-                    </span>
-                  }
-                  onClick={() => onSelect(thread.name)}
-                />
-              );
-            })}
+            {visible.map((section) => (
+              <div key={section.key} className="flex flex-col w-full">
+                {section.key === "live" &&
+                extraItems.length > 0 &&
+                visibleSections.length === 0 ? null : section.prompt ? (
+                  <ActionTurnHeader section={section} />
+                ) : null}
+                <div className="flex flex-col py-2">
+                  <ActionItemList
+                    items={section.items}
+                    selectedGroupId={showingGroup ? (selectedGroup ?? null) : null}
+                    selectedThreadEpisode={showingGroup ? null : (selectedEpisode ?? selected)}
+                    episodeCount={(name) =>
+                      snapshot.thread_episodes?.[name]?.length ??
+                      threads.find((thread) => thread.name === name)?.episode_count ??
+                      0
+                    }
+                    threadFlags={threadFlags}
+                    onSelectGroup={pickGroup}
+                    onSelectThread={pickThread}
+                  />
+                </div>
+              </div>
+            ))}
             {hasMore ? <div ref={sentinelRef} aria-hidden className="h-px" /> : null}
           </>
         )
       }
     >
-      {current ? (
+      {showingGroup && currentGroup ? (
+        <SegmentDetailList
+          key={currentGroup.id}
+          group={currentGroup}
+          className="flex-1 min-h-0 overflow-auto px-4 py-4 [&>*]:shrink-0"
+        />
+      ) : current ? (
         <Detail
           key={`${sessionId}:${current.name}`}
           thread={current}
@@ -1018,9 +1124,8 @@ export function ThreadsView({
           onViewChange={setView}
         />
       ) : (
-        <PanelEmpty title="No thread selected">
-          Threads contain conversations, command output, and file changes for each task. Select a
-          thread to view its details.
+        <PanelEmpty title="No action selected">
+          Actions include thoughts, worksets, and worker threads. Select a row to view its details.
         </PanelEmpty>
       )}
     </PanelSplit>

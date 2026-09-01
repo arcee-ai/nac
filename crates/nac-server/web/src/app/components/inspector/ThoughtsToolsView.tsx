@@ -1,19 +1,21 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
-import {
-  PanelEmpty,
-  PanelLoading,
-  PanelRow,
-  PanelSplit,
-} from "@/app/components/inspector/PanelSplit";
 import { SegmentDetailList } from "@/app/components/inspector/agent-segments/SegmentDetailList";
-import { usePagedRows } from "@/app/hooks/usePagedRows";
 import {
-  collectAgentToolsGroups,
-  configForSegment,
-  type AgentToolsGroup,
-} from "@/app/lib/agentSegments";
+  ActionFilterBar,
+  ActionItemList,
+  ActionTurnHeader,
+} from "@/app/components/inspector/ActionList";
+import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
+import { usePagedRows } from "@/app/hooks/usePagedRows";
+import type { ActionFilter } from "@/app/lib/actionsTimeline";
+import {
+  buildActionTimeline,
+  filterActionTimeline,
+  flattenActionItems,
+} from "@/app/lib/actionsTimeline";
+import type { AgentToolsGroup } from "@/app/lib/agentSegments";
+import { SESSION_PANEL_LABEL } from "@/app/lib/routes";
 import { buildTranscript, withStreamedOutput } from "@/app/lib/transcript";
 import {
   useFinishedToolCalls,
@@ -23,6 +25,20 @@ import {
   useStreamText,
 } from "@/app/store/runtimeStore";
 import type { SessionSnapshotResponse } from "@/app/types/api";
+
+const AGENT_FILTERS: readonly ActionFilter[] = ["all", "tools", "sessions"];
+
+function selectedGroup(
+  items: ReturnType<typeof flattenActionItems>,
+  selected: string | null,
+): AgentToolsGroup | null {
+  const match =
+    items.find(
+      (item) => (item.kind === "group" || item.kind === "spawn") && item.id === selected,
+    ) ?? items.find((item) => item.kind === "group" || item.kind === "spawn");
+  if (!match || match.kind === "thread") return null;
+  return match.group;
+}
 
 export function ThoughtsToolsView({
   snapshot,
@@ -39,71 +55,74 @@ export function ThoughtsToolsView({
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
   const sessionId = snapshot?.metadata.session_id ?? "";
+  const [filter, setFilter] = useState<ActionFilter>("all");
 
-  const groups = useMemo(() => {
+  const sections = useMemo(() => {
     const turns = withStreamedOutput(
-      buildTranscript(
-        snapshot,
-        liveThreads,
-        finishedToolCalls,
-        primaryToolEvents,
-      ),
+      buildTranscript(snapshot, liveThreads, finishedToolCalls, primaryToolEvents),
       { text: streamText, reasoning: streamReasoning },
     );
-    return collectAgentToolsGroups(turns);
-  }, [
-    snapshot,
-    liveThreads,
-    finishedToolCalls,
-    primaryToolEvents,
-    streamText,
-    streamReasoning,
-  ]);
+    return buildActionTimeline(turns);
+  }, [snapshot, liveThreads, finishedToolCalls, primaryToolEvents, streamText, streamReasoning]);
 
-  const current =
-    groups.find((group) => group.id === selected) ?? groups[0] ?? null;
+  const visibleSections = useMemo(() => filterActionTimeline(sections, filter), [sections, filter]);
+  const items = useMemo(() => flattenActionItems(visibleSections), [visibleSections]);
+  const current = selectedGroup(items, selected);
   const currentRow = current
-    ? groups.findIndex((group) => group.id === current.id)
+    ? visibleSections.findIndex((section) =>
+        section.items.some(
+          (item) => (item.kind === "group" || item.kind === "spawn") && item.id === current.id,
+        ),
+      )
     : -1;
-  const { visible, hasMore, sentinelRef } = usePagedRows(groups, {
-    key: sessionId,
+  const { visible, hasMore, sentinelRef } = usePagedRows(visibleSections, {
+    key: `${sessionId}:${filter}`,
     atLeast: currentRow + 1,
   });
 
   useEffect(() => {
     if (!current) return;
     if (selected === current.id) return;
-    if (selected && groups.some((group) => group.id === selected)) return;
+    if (
+      selected &&
+      items.some((item) => (item.kind === "group" || item.kind === "spawn") && item.id === selected)
+    ) {
+      return;
+    }
     onSelect(current.id);
-  }, [selected, current, groups, onSelect]);
+  }, [selected, current, items, onSelect]);
 
-  if (!snapshot) return <PanelLoading listTitle="Thoughts & Tools" />;
+  if (!snapshot) return <PanelLoading listTitle={SESSION_PANEL_LABEL.thoughts} />;
 
   return (
     <PanelSplit
-      listTitle="Thoughts & Tools"
-      title={current?.label}
+      listTitle={SESSION_PANEL_LABEL.thoughts}
+      title={current ? actionTitle(current) : undefined}
+      listToolbar={<ActionFilterBar value={filter} options={AGENT_FILTERS} onChange={setFilter} />}
       list={
-        groups.length === 0 ? (
+        visibleSections.length === 0 ? (
           <div className="flex flex-col px-2 pb-4 pt-2 text-micro">
-            <p className="text-basic-tertiary">No thoughts or tools yet.</p>
-            <p className="text-basic-muted">
-              They appear here as the agent works.
-            </p>
+            <p className="text-basic-tertiary">No actions yet.</p>
+            <p className="text-basic-muted">They appear here as the agent works.</p>
           </div>
         ) : (
           <>
-            {visible.map((group) => (
-              <ThoughtsToolsRow
-                key={group.id}
-                group={group}
-                active={group.id === current?.id}
-                onSelect={onSelect}
-              />
+            {visible.map((section) => (
+              <div key={section.key} className="flex flex-col w-full">
+                <ActionTurnHeader section={section} />
+                <div className="flex flex-col py-2">
+                  <ActionItemList
+                    items={section.items}
+                    selectedGroupId={current?.id ?? null}
+                    selectedThreadEpisode={null}
+                    episodeCount={() => 0}
+                    onSelectGroup={onSelect}
+                    onSelectThread={() => undefined}
+                  />
+                </div>
+              </div>
             ))}
-            {hasMore ? (
-              <div ref={sentinelRef} aria-hidden className="h-px" />
-            ) : null}
+            {hasMore ? <div ref={sentinelRef} aria-hidden className="h-px" /> : null}
           </>
         )
       }
@@ -115,42 +134,14 @@ export function ThoughtsToolsView({
           className="flex-1 min-h-0 overflow-auto px-4 py-4 [&>*]:shrink-0"
         />
       ) : (
-        <PanelEmpty title="No thoughts or tools yet.">
-          Send a message and the agent will show reasoning and tool calls here.
+        <PanelEmpty title="No actions yet.">
+          Send a message and the agent will show reasoning, tool calls, and spawned sessions here.
         </PanelEmpty>
       )}
     </PanelSplit>
   );
 }
 
-function ThoughtsToolsRow({
-  group,
-  active,
-  onSelect,
-}: {
-  group: AgentToolsGroup;
-  active: boolean;
-  onSelect: (id: string) => void;
-}) {
-  const lead = group.segments[0];
-  const icon = lead ? configForSegment(lead).icon : IconName.Brain;
-  return (
-    <PanelRow
-      label={group.label}
-      active={active}
-      icon={
-        group.inProgress ? (
-          <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} />
-        ) : (
-          <Icon iconName={icon} size={16} className="shrink-0" />
-        )
-      }
-      trailing={
-        <span className="code code-micro text-basic-muted shrink-0">
-          {group.segments.length}
-        </span>
-      }
-      onClick={() => onSelect(group.id)}
-    />
-  );
+function actionTitle(group: AgentToolsGroup): string {
+  return group.label;
 }

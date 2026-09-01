@@ -29,7 +29,7 @@ describe("session behavior picker", () => {
     expect(orchestrator.textContent).toMatch(/planner/i);
     expect(orchestrator.textContent).toMatch(/does not edit directly/i);
     expect(orchestrator.textContent).toMatch(/retained Orchestrator worker threads/i);
-    expect(orchestrator.textContent).toMatch(/Threads and Worksets/i);
+    expect(orchestrator.textContent).toMatch(/Actions and Worksets/i);
     expect(screen.queryByRole("radio", { name: /Direct \+ NAC/i })).toBeNull();
   });
 

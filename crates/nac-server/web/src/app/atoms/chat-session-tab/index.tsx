@@ -4,16 +4,10 @@ import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
 import ShimmerLoader from "../loader/ShimmerLoader";
-import SessionTypeAvatar, {
-  SessionOrigin,
-  SessionType,
-} from "../session-type-avatar";
+import SessionTypeAvatar, { SessionOrigin, SessionType } from "../session-type-avatar";
 import Tooltip from "../tooltip";
 
-interface ChatSessionTabProps extends Omit<
-  React.ButtonHTMLAttributes<HTMLButtonElement>,
-  "title"
-> {
+interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> {
   title: string;
   active?: boolean;
   /** Shimmering title and Active (running) avatar overlay. */
@@ -45,13 +39,14 @@ export function ChatSessionTabSkeleton() {
 
 /**
  * One session in the tab strip above a project's transcript (Figma SessionTab).
- * Fixed 160×44 so the strip's rhythm survives titles of any length. The type
+ * Caps at 160×44 so the strip's rhythm survives titles of any length. The type
  * mark carries identity; origin is the badge on that mark. The underline on
  * the active tab is the selected state. Running is a shimmer on the title and
  * on the avatar, not a selected highlight.
  *
- * Hover, keyboard focus and press reveal the close control and give it room
- * by widening the right padding rather than reserving it.
+ * Hover, keyboard focus and press reveal the close control. Width stays that
+ * of the rest layout: the title truncates to make room instead of the tab
+ * growing toward max-width.
  */
 const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   title,
@@ -74,12 +69,29 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
       ? "text-btn-secondary-disabled"
       : active
         ? "text-btn-secondary-pressed"
-        : "text-btn-secondary group-hover:text-btn-secondary-hovered group-active:text-btn-secondary-pressed";
+        : "text-btn-secondary group-hover:text-btn-secondary-hovered group-hover:group-active:text-btn-secondary-pressed";
+
+  const tabButton = (
+    <>
+      <Tooltip
+        title={title}
+        description={avatarDescription ?? badgeLabel}
+        position={Tooltip.Position.BottomCenter}
+        sticky
+        className="shrink-0"
+      >
+        <SessionTypeAvatar sessionType={sessionType} origin={origin} running={running} />
+      </Tooltip>
+      <span className={cn("label-small min-w-0 flex-1 truncate text-left", titleClass)}>
+        {title}
+      </span>
+    </>
+  );
 
   return (
     <div
       className={cn(
-        "chat-session-tab group relative flex h-[44px] w-[160px] max-w-[160px] shrink-0 items-center rounded-tl-[4px] rounded-tr-[4px]",
+        "chat-session-tab group relative inline-flex h-[44px] max-w-[160px] min-w-0 shrink-0 items-center overflow-hidden rounded-tl-[4px] rounded-tr-[4px]",
         "has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-4 has-[:focus-visible]:outline-[var(--blue-500)]",
         disabled
           ? "bg-btn-ghost"
@@ -89,42 +101,29 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
         className,
       )}
     >
+      {onDismiss ? (
+        <div
+          className="invisible pointer-events-none flex h-full min-w-0 items-center gap-2 overflow-hidden pt-[2px] pb-1 pl-2 pr-4"
+          aria-hidden
+        >
+          <span className="size-[28px] shrink-0" />
+          <span className="label-small whitespace-nowrap">{title}</span>
+        </div>
+      ) : null}
       <button
         type={type}
         disabled={disabled}
-        aria-label={
-          ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)
-        }
+        aria-label={ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)}
         aria-current={active ? "page" : undefined}
         className={cn(
-          "flex h-full min-w-0 w-full items-center gap-2 pt-[2px] pb-1 pl-2 focus-visible:outline-none",
+          "flex h-full min-w-0 items-center gap-2 pt-[2px] pb-1 pl-2 focus-visible:outline-none",
           onDismiss
-            ? "pr-4 group-hover:pr-10 group-has-[:focus-visible]:pr-10 group-active:pr-10"
+            ? "absolute inset-0 w-full pr-4 group-hover:pr-10 group-has-[:focus-visible]:pr-10 group-active:pr-10"
             : "pr-4",
         )}
         {...props}
       >
-        <Tooltip
-          title={title}
-          description={avatarDescription ?? badgeLabel}
-          position={Tooltip.Position.BottomCenter}
-          sticky
-          className="shrink-0"
-        >
-          <SessionTypeAvatar
-            sessionType={sessionType}
-            origin={origin}
-            running={running}
-          />
-        </Tooltip>
-        <span
-          className={cn(
-            "label-small min-w-0 flex-1 truncate text-left",
-            titleClass,
-          )}
-        >
-          {title}
-        </span>
+        {tabButton}
       </button>
       {onDismiss ? (
         <Button
@@ -138,7 +137,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
             event.stopPropagation();
             onDismiss();
           }}
-          className="absolute top-[9px] right-2 shrink-0 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto group-active:opacity-100 group-active:pointer-events-auto"
+          className="absolute top-[9px] right-2 z-10 shrink-0 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto group-active:opacity-100 group-active:pointer-events-auto"
         >
           <Icon iconName={IconName.Close} size={16} />
         </Button>

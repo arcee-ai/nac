@@ -262,7 +262,7 @@ test("creates Agent by default and offers Orchestrator from the new-session popo
   await expect(page.getByText("Orchestrator", { exact: true }).first()).toBeVisible();
   await page.reload();
   await expect(page.getByText("Orchestrator", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Threads", { exact: true })).toBeVisible();
+  await expect(page.getByText("Actions", { exact: true })).toBeVisible();
   await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
 
   const tabs = page.locator(".chat-session-tab button");
@@ -805,11 +805,14 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/`));
   await expect(page.getByText("Coordinate the compatibility audit", { exact: true })).toBeVisible();
   await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Actions" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Worksets" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Worksets_managed-release" }).click();
+  await expect(
+    page.getByRole("button", { name: /Worksets_managed-release|Thoughts & tools/ }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "Worksets" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/worksets$`));
   await expect(
     page.getByText("Verify the managed transcript topology", { exact: true }),
@@ -827,7 +830,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Open panel" }).click();
   const managedMobilePanel = page.getByRole("dialog");
-  await expect(managedMobilePanel.getByRole("tab", { name: "Threads" })).toBeVisible();
+  await expect(managedMobilePanel.getByRole("tab", { name: "Actions" })).toBeVisible();
   await expect(managedMobilePanel.getByRole("tab", { name: "Files" })).toBeVisible();
   await expect(managedMobilePanel.getByRole("tab", { name: "Worksets" })).toBeVisible();
   await expect(managedMobilePanel.getByRole("tab", { name: "History" })).toBeVisible();

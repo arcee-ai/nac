@@ -36,13 +36,11 @@ import {
   useSelectedAgentSegment,
   useSelectedRevision,
   useSelectedThread,
+  useSelectedThreadEpisode,
   useSelectedWorkset,
   useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
-import type {
-  SessionSnapshotResponse,
-  WorkspaceSnapshot,
-} from "@/app/types/api";
+import type { SessionSnapshotResponse, WorkspaceSnapshot } from "@/app/types/api";
 
 interface SessionSideBoxProps {
   sessionId: string;
@@ -67,11 +65,7 @@ function FooterChip({
         compact ? "pl-1 pr-1" : "pl-1 pr-3",
       )}
     >
-      <Icon
-        iconName={iconName}
-        size={16}
-        color="var(--color-fill-basic-tertiary)"
-      />
+      <Icon iconName={iconName} size={16} color="var(--color-fill-basic-tertiary)" />
       <span
         className={cn(
           "label-micro text-basic-tertiary truncate",
@@ -96,10 +90,7 @@ function FooterChip({
 function SideBoxProgress({ sessionId }: { sessionId: string }) {
   const fetching = useSessionFetching(sessionId);
   return (
-    <ProgressLoader
-      active={fetching}
-      className="absolute bottom-[-1px] left-0 right-0 z-[1]"
-    />
+    <ProgressLoader active={fetching} className="absolute bottom-[-1px] left-0 right-0 z-[1]" />
   );
 }
 
@@ -123,9 +114,7 @@ function SideBoxFooter({
   // A revision reports its own totals, which the panel has already fetched.
   const changes = useWorkspaceRevisionChanges(sessionId, revision);
   const totals =
-    revision == null
-      ? workspace
-      : (changes.data ?? { total_additions: 0, total_deletions: 0 });
+    revision == null ? workspace : (changes.data ?? { total_additions: 0, total_deletions: 0 });
   const additions = totals?.total_additions ?? 0;
   const deletions = totals?.total_deletions ?? 0;
 
@@ -136,34 +125,13 @@ function SideBoxFooter({
         compact ? "px-2 gap-1" : "px-4",
       )}
     >
-      <div
-        className={cn(
-          "flex flex-1 min-w-0 items-center",
-          compact ? "gap-1" : "gap-[10px]",
-        )}
-      >
-        {repo ? (
-          <FooterChip
-            iconName={IconName.Folder}
-            label={repo}
-            compact={compact}
-          />
-        ) : null}
-        {branch && !readOnly ? (
-          <BranchPicker sessionId={sessionId} branch={branch} />
-        ) : null}
+      <div className={cn("flex flex-1 min-w-0 items-center", compact ? "gap-1" : "gap-[10px]")}>
+        {repo ? <FooterChip iconName={IconName.Folder} label={repo} compact={compact} /> : null}
+        {branch && !readOnly ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
         {branch && readOnly ? (
-          <FooterChip
-            iconName={IconName.Scheme}
-            label={branch}
-            compact={compact}
-          />
+          <FooterChip iconName={IconName.Scheme} label={branch} compact={compact} />
         ) : null}
-        <RevisionPicker
-          sessionId={sessionId}
-          selected={revision}
-          onSelect={selectRevision}
-        />
+        <RevisionPicker sessionId={sessionId} selected={revision} onSelect={selectRevision} />
       </div>
       {additions || deletions ? (
         <div className="flex items-center gap-2 shrink-0 code code-small">
@@ -176,27 +144,22 @@ function SideBoxFooter({
 }
 
 /**
- * The left half of the session screen: one box with the Threads / Files /
+ * The left half of the session screen: one box with the Actions / Files /
  * Worksets panels, sized by the shared layout store. On a phone the panels are
  * the body of the modal box that SessionPage puts them in, and its chrome —
  * header, bottom bar — belongs to the dialog rather than to this box.
  */
-export function SessionSideBox({
-  sessionId,
-  snapshot,
-  panel,
-  onPanelChange,
-}: SessionSideBoxProps) {
+export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: SessionSideBoxProps) {
   const expanded = useSidePanelExpanded();
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   const selectedThread = useSelectedThread();
+  const selectedThreadEpisode = useSelectedThreadEpisode();
   const selectedAgentSegment = useSelectedAgentSegment();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
   const behavior = snapshot?.metadata.behavior ?? "orchestrator";
-  const direct =
-    behavior === "direct" || behavior === "direct-with-orchestrator";
+  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const panelPolicy = sessionPanelPolicy(
     behavior,
     snapshot?.lineage?.kind,
@@ -208,8 +171,7 @@ export function SessionSideBox({
   // History belongs to the phone's bottom bar: a wide box reaches revisions
   // through its footer chip, so a link to that panel lands on the default one.
   const active =
-    widePanels.includes(panel) ||
-    (isMobile && panelPolicy.mobilePanels.includes(panel))
+    widePanels.includes(panel) || (isMobile && panelPolicy.mobilePanels.includes(panel))
       ? panel
       : panelPolicy.defaultPanel;
 
@@ -234,25 +196,20 @@ export function SessionSideBox({
         <DelegatedWorkView sessionId={sessionId} behavior={behavior} />
       ) : null}
       {active === "worksets" ? (
-        <WorksetsView
-          snapshot={snapshot}
-          selected={selectedWorkset}
-          onSelect={selectWorkset}
-        />
+        <WorksetsView snapshot={snapshot} selected={selectedWorkset} onSelect={selectWorkset} />
       ) : null}
       {active === "threads" ? (
         <ThreadsView
           snapshot={snapshot}
           selected={selectedThread}
+          selectedEpisode={selectedThreadEpisode}
+          selectedGroup={selectedAgentSegment}
           onSelect={selectThread}
+          onSelectGroup={selectAgentSegment}
         />
       ) : null}
       {active === "history" ? (
-        <HistoryView
-          sessionId={sessionId}
-          selected={selectedRevision}
-          onSelect={selectRevision}
-        />
+        <HistoryView sessionId={sessionId} selected={selectedRevision} onSelect={selectRevision} />
       ) : null}
     </>
   );

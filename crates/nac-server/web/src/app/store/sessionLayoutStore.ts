@@ -112,7 +112,11 @@ export function selectThread(
       episode: selectedThreadEpisode,
     });
   }
-  setState({ selectedThread, selectedThreadEpisode });
+  setState(
+    selectedThread
+      ? { selectedThread, selectedThreadEpisode, selectedAgentSegment: null }
+      : { selectedThread, selectedThreadEpisode },
+  );
   if (selectedThread) showSidePanelList(false);
 }
 
@@ -124,7 +128,11 @@ export function setSelectedThreadRunning(selectedThreadRunning: boolean): void {
 }
 
 export function selectAgentSegment(selectedAgentSegment: string | null): void {
-  setState({ selectedAgentSegment });
+  setState(
+    selectedAgentSegment
+      ? { selectedAgentSegment, selectedThread: null, selectedThreadEpisode: null }
+      : { selectedAgentSegment },
+  );
   if (selectedAgentSegment) showSidePanelList(false);
 }
 
@@ -193,12 +201,9 @@ export const useSidePanelCollapsed = () => useStore((s) => s.collapsed);
 export const useSidePanelExpanded = () => useStore((s) => s.expanded);
 export const useSidePanelList = () => useStore((s) => s.panelList);
 export const useSelectedThread = () => useStore((s) => s.selectedThread);
-export const useSelectedThreadEpisode = () =>
-  useStore((s) => s.selectedThreadEpisode);
-export const useSelectedThreadRunning = () =>
-  useStore((s) => s.selectedThreadRunning);
-export const useSelectedAgentSegment = () =>
-  useStore((s) => s.selectedAgentSegment);
+export const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
+export const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
+export const useSelectedAgentSegment = () => useStore((s) => s.selectedAgentSegment);
 export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
 export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);

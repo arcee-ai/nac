@@ -44,9 +44,9 @@ server remains the source of business truth and wire schemas.
 - `components/modals/ConfigurationsPanel.tsx` and `SettingsModal.tsx` keep the
   existing dense configuration forms whose field validation and save ordering
   are exercised as one workflow. Managed-host panels do not belong there.
-- `components/inspector/ThreadsView.tsx` keeps orchestrator thread/workset
-  navigation and episode rendering together. Direct-child and managed-host
-  workflows remain separate features.
+- `components/inspector/ThreadsView.tsx` keeps the orchestrator Actions list
+  (thoughts/tools plus retained worker threads) and episode rendering together.
+  Direct-child and managed-host workflows remain separate features.
 
 These existing UI owners may exceed 800 lines because splitting their tightly
 coupled local form/view state would scatter one workflow. Do not add unrelated
