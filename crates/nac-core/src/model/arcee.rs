@@ -866,7 +866,7 @@ pub(super) fn read_stored_auth_for_base_url(expected_base_url: &str) -> Result<S
     read_stored_auth_for_base_url_at(&arcee_auth_file_path()?, expected_base_url)
 }
 
-fn read_stored_auth_for_base_url_at(
+pub(super) fn read_stored_auth_for_base_url_at(
     path: &Path,
     expected_base_url: &str,
 ) -> Result<StoredArceeAuth> {

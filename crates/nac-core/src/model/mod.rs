@@ -63,7 +63,7 @@ pub use api_key_store::{list_stored_api_keys, remove_api_key, store_api_key, Sto
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
 pub use arcee_bootstrap::{
     import_managed_arcee_bootstrap, managed_arcee_auth_storage_root,
-    validate_managed_arcee_bootstrap_receipt, ManagedArceeBootstrapOutcome,
+    validate_managed_arcee_authorization, ManagedArceeBootstrapOutcome,
     MANAGED_ARCEE_BOOTSTRAP_PATH,
 };
 pub use backend::{
@@ -219,22 +219,6 @@ pub async fn run_arcee_auth_action(action: ArceeAuthAction) -> Result<()> {
         ArceeAuthAction::Status => arcee_auth_status(),
         ArceeAuthAction::Logout => arcee_auth_logout(),
     }
-}
-
-/// Validate the durable Arcee credential for a managed profile without making
-/// a provider request or exposing any credential value.
-pub fn validate_managed_arcee_auth(expected_base_url: &str) -> Result<()> {
-    let auth = arcee::read_stored_auth_for_base_url(expected_base_url)
-        .map_err(classify_stored_arcee_auth_error)?;
-    if auth.token_type != "bearer"
-        || auth.organization_id.trim().is_empty()
-        || auth.workspace_name.trim().is_empty()
-    {
-        return Err(model_configuration_error(
-            "stored Arcee authorization is not structurally valid",
-        ));
-    }
-    Ok(())
 }
 
 /// A provider that authenticates from a browser login rather than an API key.

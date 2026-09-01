@@ -56,6 +56,14 @@ impl OwnedPaths {
             lock: &self.lock,
         }
     }
+
+    fn authorization(&self) -> AuthorizationPaths<'_> {
+        AuthorizationPaths {
+            auth: &self.auth,
+            receipt: &self.receipt,
+            lock: &self.lock,
+        }
+    }
 }
 
 const HOST_ID: &str = "21856443-8ed8-40ab-9036-72e837c99f27";
@@ -99,6 +107,10 @@ fn import(paths: &OwnedPaths) -> Result<ManagedArceeBootstrapOutcome> {
     import_with_paths(HOST_ID, paths.borrowed(), || Ok(()))
 }
 
+fn validate(paths: &OwnedPaths) -> Result<()> {
+    validate_authorization_with_paths(HOST_ID, "https://api.arcee.ai", paths.authorization())
+}
+
 fn read_auth(paths: &OwnedPaths) -> StoredArceeAuth {
     let raw = fs::read_to_string(&paths.auth).unwrap();
     parse_stored_auth(&raw, &paths.auth).unwrap().unwrap()
@@ -135,6 +147,7 @@ fn first_import_is_durable_and_restart_does_not_need_the_mount() {
         import(&paths).unwrap(),
         ManagedArceeBootstrapOutcome::AlreadyConsumed
     );
+    validate(&paths).unwrap();
 }
 
 #[test]
@@ -157,6 +170,7 @@ fn receipt_prevents_reconciliation_or_a_new_generation_from_overwriting_rotation
     let reopened = read_auth(&paths);
     assert_eq!(reopened.access_token, "rotated-access-canary");
     assert_eq!(reopened.refresh_token, "rotated-refresh-canary");
+    validate(&paths).unwrap();
 }
 
 #[test]
@@ -191,6 +205,7 @@ fn retry_tombstones_the_durable_generation_not_a_reconciled_mount() {
         import(&paths).unwrap(),
         ManagedArceeBootstrapOutcome::AlreadyConsumed
     );
+    validate(&paths).unwrap();
 }
 
 #[test]
@@ -216,6 +231,10 @@ fn existing_valid_and_corrupt_credentials_are_preserved_and_tombstoned() {
     );
     assert_eq!(fs::read(&valid_paths.auth).unwrap(), before);
     assert_eq!(read_auth(&valid_paths).client_id, LEGACY_CLIENT_ID);
+    let error = validate(&valid_paths).unwrap_err().to_string();
+    assert!(error.contains("did not import a usable managed credential"));
+    assert!(!error.contains("legacy-access"));
+    assert_eq!(fs::read(&valid_paths.auth).unwrap(), before);
 
     let corrupt_dir = TestDir::new("existing-corrupt");
     let corrupt_paths = corrupt_dir.paths();
@@ -230,6 +249,107 @@ fn existing_valid_and_corrupt_credentials_are_preserved_and_tombstoned() {
     assert!(!format!("{outcome:?}").contains("corrupt-secret-canary"));
     assert_eq!(fs::read(&corrupt_paths.auth).unwrap(), corrupt);
     assert!(corrupt_paths.receipt.exists());
+    let error = validate(&corrupt_paths).unwrap_err().to_string();
+    assert!(error.contains("did not import a usable managed credential"));
+    assert!(!error.contains("corrupt-secret-canary"));
+    assert_eq!(fs::read(&corrupt_paths.auth).unwrap(), corrupt);
+}
+
+#[test]
+fn bound_validation_rejects_every_receipt_and_provenance_mismatch() {
+    let dir = TestDir::new("bound-validation");
+    let paths = dir.paths();
+    write_bootstrap(&paths, BOOTSTRAP_ID);
+    import(&paths).unwrap();
+    validate(&paths).unwrap();
+    let original_auth = fs::read(&paths.auth).unwrap();
+    let original_receipt = fs::read(&paths.receipt).unwrap();
+
+    let assert_redacted = |error: anyhow::Error| {
+        let error = error.to_string();
+        assert!(!error.contains(ACCESS_TOKEN));
+        assert!(!error.contains(REFRESH_TOKEN));
+        error
+    };
+
+    write_private(&paths.receipt, b"{invalid-receipt-secret-canary");
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("receipt is invalid"));
+    assert!(!error.contains("invalid-receipt-secret-canary"));
+
+    let mut receipt: Value = serde_json::from_slice(&original_receipt).unwrap();
+    receipt["version"] = json!(2);
+    write_private(&paths.receipt, serde_json::to_vec(&receipt).unwrap());
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("receipt is invalid"));
+
+    receipt = serde_json::from_slice(&original_receipt).unwrap();
+    receipt["client_id"] = json!("nac-cli");
+    write_private(&paths.receipt, serde_json::to_vec(&receipt).unwrap());
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("receipt is invalid"));
+
+    receipt = serde_json::from_slice(&original_receipt).unwrap();
+    receipt["managed_host_id"] = json!("1fcb247b-c246-4210-89b0-bb0655441163");
+    write_private(&paths.receipt, serde_json::to_vec(&receipt).unwrap());
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("different logical host"));
+
+    receipt = serde_json::from_slice(&original_receipt).unwrap();
+    receipt["bootstrap_id"] = json!("27062ca7-2fca-49ad-b6c4-fe1e5d9ae6fa");
+    write_private(&paths.receipt, serde_json::to_vec(&receipt).unwrap());
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("does not match its bootstrap receipt"));
+    write_private(&paths.receipt, &original_receipt);
+
+    let mut auth = read_auth(&paths);
+    auth.client_id = LEGACY_CLIENT_ID.to_string();
+    write_stored_auth_to_path(&paths.auth, &auth).unwrap();
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("not a managed-nac authorization"));
+
+    auth = read_auth_from_bytes(&original_auth, &paths.auth);
+    auth.managed_bootstrap = None;
+    write_stored_auth_to_path(&paths.auth, &auth).unwrap();
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("no bootstrap provenance"));
+
+    auth = read_auth_from_bytes(&original_auth, &paths.auth);
+    auth.managed_bootstrap.as_mut().unwrap().managed_host_id =
+        Uuid::parse_str("1fcb247b-c246-4210-89b0-bb0655441163").unwrap();
+    write_stored_auth_to_path(&paths.auth, &auth).unwrap();
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("different logical host"));
+
+    auth = read_auth_from_bytes(&original_auth, &paths.auth);
+    auth.managed_bootstrap.as_mut().unwrap().bootstrap_id =
+        Uuid::parse_str("27062ca7-2fca-49ad-b6c4-fe1e5d9ae6fa").unwrap();
+    write_stored_auth_to_path(&paths.auth, &auth).unwrap();
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("does not match its bootstrap receipt"));
+
+    auth = read_auth_from_bytes(&original_auth, &paths.auth);
+    auth.token_type = "Bearer".to_string();
+    write_stored_auth_to_path(&paths.auth, &auth).unwrap();
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("not structurally valid"));
+
+    write_private(&paths.auth, &original_auth);
+    let error = assert_redacted(
+        validate_authorization_with_paths(HOST_ID, "https://app.arcee.ai", paths.authorization())
+            .unwrap_err(),
+    );
+    assert!(error.contains("endpoint origin"));
+
+    fs::remove_file(&paths.auth).unwrap();
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("not configured"));
+}
+
+fn read_auth_from_bytes(raw: &[u8], path: &Path) -> StoredArceeAuth {
+    parse_stored_auth(std::str::from_utf8(raw).unwrap(), path)
+        .unwrap()
+        .unwrap()
 }
 
 #[test]
@@ -237,7 +357,7 @@ fn strict_validation_rejects_unknown_fields_mismatch_and_secret_echo() {
     let dir = TestDir::new("strict-invalid");
     let paths = dir.paths();
     let mut value = bootstrap_value(BOOTSTRAP_ID);
-    value["unknown"] = json!(true);
+    value["host_incarnation_id"] = json!("079be3ba-a485-46d5-9ec6-7aa5edaa6645");
     write_private(&paths.input, serde_json::to_vec(&value).unwrap());
     let error = import(&paths).unwrap_err().to_string();
     assert!(error.contains("strict v1"));

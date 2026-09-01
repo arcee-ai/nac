@@ -23,6 +23,9 @@ rotation and receipt semantics while preserving legacy and interactive auth.
 - Managed composition, image contract, smoke coverage, and documentation are
   committed as `e5c830c7857d3bcb20458c624b4e431429e18d19`
   (`feat(managed): compose durable Arcee bootstrap`).
+- The first bounded-review safety slice is committed as
+  `878867926a9cb3a253b695dda3dd1a0fbd3a1f53` (`fix(managed): fail closed on
+  durable auth corruption`).
 
 ## Settled implementation choices
 
@@ -63,6 +66,20 @@ resolved with owner-level regression coverage:
 
 No further review loop was started, per the bounded-review requirement.
 
+## Provenance-binding follow-up
+
+Parent review found that independently validating a receipt and a parseable
+credential allowed a `preserved_existing` receipt to coexist with a legacy
+`nac-cli` credential and satisfy managed admission. The follow-up fix validates
+both durable records under the shared Arcee lock and requires an `imported` v1
+`managed-nac` receipt bound to a `managed-nac` credential whose retained host
+and bootstrap provenance matches exactly. Preserved, legacy, missing, corrupt,
+revoked, and mismatched states now fail closed for managed readiness, catalog,
+create, and resume without changing the stored credential.
+
+Strict bootstrap v1 still rejects unknown keys, including
+`host_incarnation_id`; that field is not part of NAC's settled v1 contract.
+
 ## Completion state
 
 - Core import, refresh rotation, restart/reconciliation behavior, provider-
@@ -80,16 +97,22 @@ No further review loop was started, per the bounded-review requirement.
 - `cargo test --locked -p nac-core model::arcee` — PASS (44 tests; includes
   bootstrap and refresh concurrency owner coverage).
 - `make crate-check CRATE=nac-core` — PASS.
-- `make crate-test CRATE=nac-core` — PASS (1175 passed, 9 expected ignored;
+- `make crate-test CRATE=nac-core` — PASS (1176 passed, 9 expected ignored;
   doc tests pass).
 - `make crate-check CRATE=nac-managed` — PASS.
 - `make crate-test CRATE=nac-managed` — PASS (20 passed; doc tests pass).
 - `make crate-check CRATE=nac-server` — PASS.
-- `make crate-test CRATE=nac-server` — PASS (155 library + 23 binary tests;
+- `make crate-test CRATE=nac-server` — PASS (156 library + 23 binary tests;
   doc tests pass).
 - `cargo test --locked -p nac-server
   managed_bootstrap_corruption_blocks_create_and_resume_without_secret_echo`
   — PASS.
+- `cargo test --locked -p nac-core model::arcee_bootstrap -- --nocapture` —
+  PASS (10 tests; includes bound receipt/provenance mismatch coverage and
+  redacted rejection of an unknown `host_incarnation_id`).
+- `cargo test --locked -p nac-server
+  managed_preserved_legacy_auth_is_tombstoned_but_never_authorized
+  -- --nocapture` — PASS.
 - `make test-durability` — PASS.
 - `make test-managed-image-contract` — PASS.
 - `make test-source-size` — PASS (836 tracked human-source files).

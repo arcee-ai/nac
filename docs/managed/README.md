@@ -125,10 +125,17 @@ ArceeFM business identity and must equal `logical_host_id`; `bootstrap_id`
 identifies one credential generation. A durable receipt consumes that
 generation even when an existing valid or corrupt credential is preserved.
 NAC never replays it and never automatically replaces any existing canonical
-credential. A crash after the credential write but before its receipt is
+credential. Preservation receipts are deliberately not ready: managed catalog,
+session creation, and resume require an `imported` receipt and a stored
+`managed-nac` credential whose retained host and bootstrap IDs match that
+receipt exactly. Receipt and credential are checked together under the normal
+Arcee lock. A crash after the credential write but before its receipt is
 repaired from nonsecret provenance on retry without rewriting the credential.
-Local logout removes only the credential; the receipt remains a tombstone, so
-the existing interactive **Sign in with Arcee** flow is the repair path.
+Local logout or provider revocation removes the usable credential while the
+receipt remains a tombstone, so the managed profile fails closed. The existing
+interactive **Sign in with Arcee** flow remains available for ordinary
+`arcee-auth` use or after an operator deliberately changes credential source;
+its `nac-cli` credential cannot impersonate a managed bootstrap generation.
 
 ArceeFM alone mints and revokes the grant. NAC receives no Kubernetes,
 service-account, or provisioning credential and exposes no bootstrap HTTP
@@ -146,7 +153,7 @@ a separate credential-injecting broker.
 - `GET /healthz` proves only that the server event loop responds. It is always
   credential-free and does not touch external services.
 - `GET /readyz` checks the store, exact durable paths and ownership, durable
-  model credential/receipt structure (or the compatible mounted API key),
+  bound model credential/receipt provenance (or the compatible mounted API key),
   required tool inventory, and an environment-cleared safe local-command probe.
   It makes no live model request and does not require a consumed bootstrap
   mount. GitHub connection and generic-secret presence are intentionally not
@@ -209,8 +216,9 @@ Automated tests use local GitHub/Git doubles and production-embedded browser
 API doubles. A real staging demonstration additionally requires the
 platform-owned ECR/OIDC inputs, controller and PVC contract, gateway owner
 authentication, allowed egress, stable hostname, and revocable Arcee managed
-grant. On staging, validate one server-minted bootstrap and one interactive
-repair authorization, repository and
+grant. On staging, validate one server-minted bootstrap, fail-closed logout or
+revocation behavior, and the independent interactive fallback after an explicit
+credential-source change, plus repository and
 branch discovery, clone, HTTPS Git push (including a safe workflow-file change
 in a disposable repository), `gh` use, process/pod restart, and same-volume
 rescheduling. Those external checks do not weaken or replace the local NAC
