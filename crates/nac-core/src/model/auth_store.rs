@@ -1,5 +1,4 @@
-use anyhow::{anyhow, Context, Result};
-use std::fs;
+use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
 pub(crate) use nac_credential_store::{
@@ -17,23 +16,22 @@ pub(super) fn arcee_auth_file_path() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("could not determine NAC_HOME or HOME for Arcee auth storage"))
 }
 
-fn arcee_auth_lock_path() -> Result<PathBuf> {
+pub(super) fn arcee_auth_lock_path() -> Result<PathBuf> {
     crate::paths::nac_home_dir()
         .map(|dir| dir.join("arcee_auth.json.lock"))
         .ok_or_else(|| anyhow!("could not determine NAC_HOME or HOME for Arcee auth storage"))
 }
 
-fn acquire_arcee_auth_lock() -> Result<FileLock> {
-    acquire_credential_lock(&arcee_auth_lock_path()?)
+pub(super) fn arcee_managed_bootstrap_receipt_path() -> Result<PathBuf> {
+    crate::paths::nac_home_dir()
+        .map(|dir| dir.join("arcee_managed_bootstrap_receipt.json"))
+        .ok_or_else(|| {
+            anyhow!("could not determine NAC_HOME or HOME for managed Arcee bootstrap storage")
+        })
 }
 
-pub(super) fn try_acquire_arcee_auth_lock() -> Result<Option<FileLock>> {
-    let path = arcee_auth_lock_path()?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    FileLock::try_acquire(&path)
+fn acquire_arcee_auth_lock() -> Result<FileLock> {
+    acquire_credential_lock(&arcee_auth_lock_path()?)
 }
 
 pub(super) fn with_arcee_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
@@ -41,14 +39,6 @@ pub(super) fn with_arcee_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> 
     let result = operation();
     drop(lock);
     result
-}
-
-pub(super) fn read_arcee_auth_string() -> Result<Option<String>> {
-    read_auth_string_from_path(&arcee_auth_file_path()?)
-}
-
-pub(super) fn write_arcee_auth_string(raw: &str) -> Result<()> {
-    write_auth_string_to_path(&arcee_auth_file_path()?, raw)
 }
 
 #[cfg(test)]

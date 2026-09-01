@@ -1,6 +1,6 @@
 use super::auth_store::{
-    arcee_auth_file_path, read_arcee_auth_string, read_auth_bytes_from_path,
-    try_acquire_arcee_auth_lock, with_arcee_auth_lock, write_arcee_auth_string, FileLock,
+    arcee_auth_file_path, arcee_auth_lock_path, read_auth_bytes_from_path,
+    read_auth_string_from_path, with_arcee_auth_lock, write_auth_string_to_path, FileLock,
 };
 use super::*;
 use anyhow::Context;
@@ -8,9 +8,11 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
-const CLIENT_ID: &str = "nac-cli";
-const AUTH_TYPE: &str = "arcee_device_token";
+pub(super) const LEGACY_CLIENT_ID: &str = "nac-cli";
+pub(super) const MANAGED_CLIENT_ID: &str = "managed-nac";
+pub(super) const AUTH_TYPE: &str = "arcee_device_token";
 const CANONICAL_AUTH_SERVICE_BASE_URL: &str = "https://api.arcee.ai";
 const DEFAULT_INTERVAL_SECS: u64 = 5;
 const DEFAULT_DEVICE_EXPIRES_IN_SECS: u64 = 900;
@@ -285,20 +287,50 @@ pub(super) fn models_url(base_url: &str) -> Result<Url> {
     Ok(url)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct StoredArceeAuth {
     #[serde(rename = "type")]
-    auth_type: String,
+    pub(super) auth_type: String,
     pub(super) access_token: String,
-    refresh_token: String,
-    token_type: String,
-    expires_at_ms: u64,
+    pub(super) refresh_token: String,
+    pub(super) token_type: String,
+    pub(super) expires_at_ms: u64,
     pub(super) base_url: String,
-    organization_id: String,
-    workspace_name: String,
+    pub(super) organization_id: String,
+    pub(super) workspace_name: String,
+    #[serde(default = "legacy_client_id")]
+    pub(super) client_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) managed_bootstrap: Option<ManagedBootstrapProvenance>,
 }
 
-#[derive(Debug, Deserialize)]
+impl std::fmt::Debug for StoredArceeAuth {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("StoredArceeAuth")
+            .field("auth_type", &self.auth_type)
+            .field("token_type", &self.token_type)
+            .field("expires_at_ms", &self.expires_at_ms)
+            .field("base_url", &self.base_url)
+            .field("organization_id", &self.organization_id)
+            .field("workspace_name", &self.workspace_name)
+            .field("client_id", &self.client_id)
+            .field("managed_bootstrap", &self.managed_bootstrap)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct ManagedBootstrapProvenance {
+    pub(super) bootstrap_id: Uuid,
+    pub(super) managed_host_id: Uuid,
+}
+
+fn legacy_client_id() -> String {
+    LEGACY_CLIENT_ID.to_string()
+}
+
+#[derive(Deserialize)]
 struct TokenSuccess {
     access_token: String,
     refresh_token: String,
@@ -309,21 +341,44 @@ struct TokenSuccess {
     workspace_name: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct RefreshSuccess {
-    access_token: String,
-    refresh_token: Option<String>,
-    token_type: Option<String>,
-    expires_in: Option<u64>,
+impl std::fmt::Debug for TokenSuccess {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TokenSuccess")
+            .field("token_type", &self.token_type)
+            .field("expires_in", &self.expires_in)
+            .field("base_url", &self.base_url)
+            .field("organization_id", &self.organization_id)
+            .field("workspace_name", &self.workspace_name)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Deserialize)]
+pub(super) struct RefreshSuccess {
+    pub(super) access_token: String,
+    pub(super) refresh_token: Option<String>,
+    pub(super) token_type: Option<String>,
+    pub(super) expires_in: Option<u64>,
+}
+
+impl std::fmt::Debug for RefreshSuccess {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RefreshSuccess")
+            .field("has_rotated_refresh_token", &self.refresh_token.is_some())
+            .field("token_type", &self.token_type)
+            .field("expires_in", &self.expires_in)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug)]
-enum RefreshOutcome {
+pub(super) enum RefreshOutcome {
     Success(RefreshSuccess),
     Revoked,
 }
 
-#[derive(Debug)]
 struct DeviceCode {
     device_code: String,
     user_code: String,
@@ -332,8 +387,18 @@ struct DeviceCode {
     expires_in_secs: u64,
 }
 
+impl std::fmt::Debug for DeviceCode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DeviceCode")
+            .field("interval_secs", &self.interval_secs)
+            .field("expires_in_secs", &self.expires_in_secs)
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Clone)]
-struct ArceeAuthService {
+pub(super) struct ArceeAuthService {
     base_url: String,
 }
 
@@ -350,7 +415,7 @@ impl ArceeAuthService {
     }
 
     #[cfg(test)]
-    fn for_test(base_url: &str) -> Self {
+    pub(super) fn for_test(base_url: &str) -> Self {
         let parsed = Url::parse(base_url).expect("test auth service URL must be absolute");
         assert!(matches!(parsed.scheme(), "http" | "https"));
         Self {
@@ -571,6 +636,8 @@ fn stored_auth_from_token_success(success: TokenSuccess) -> Result<StoredArceeAu
         base_url: success.base_url,
         organization_id: success.organization_id,
         workspace_name: success.workspace_name,
+        client_id: LEGACY_CLIENT_ID.to_string(),
+        managed_bootstrap: None,
     })
 }
 
@@ -590,10 +657,10 @@ fn refresh_gate() -> &'static tokio::sync::Mutex<()> {
 /// it polls the non-blocking file lock and yields between attempts. The server
 /// rotates the refresh token on every call, so two nac processes refreshing at
 /// once could invalidate each other's tokens; this serializes them.
-async fn acquire_refresh_lock() -> Result<FileLock> {
+async fn acquire_refresh_lock(lock_path: &Path) -> Result<FileLock> {
     let started = now_ms();
     loop {
-        if let Some(lock) = try_acquire_arcee_auth_lock()? {
+        if let Some(lock) = nac_credential_store::try_acquire_credential_lock(lock_path)? {
             return Ok(lock);
         }
         if now_ms().saturating_sub(started) >= REFRESH_LOCK_TIMEOUT_MS {
@@ -640,28 +707,54 @@ async fn refresh_locked(
     expected_base_url: &str,
     should_refresh: impl Fn(&StoredArceeAuth) -> bool,
 ) -> Result<String> {
+    let service = ArceeAuthService::canonical()?;
+    let auth_path = arcee_auth_file_path()?;
+    let lock_path = arcee_auth_lock_path()?;
+    refresh_locked_with(
+        client,
+        expected_base_url,
+        should_refresh,
+        &service,
+        &auth_path,
+        &lock_path,
+    )
+    .await
+}
+
+async fn refresh_locked_with(
+    client: &Client,
+    expected_base_url: &str,
+    should_refresh: impl Fn(&StoredArceeAuth) -> bool,
+    service: &ArceeAuthService,
+    auth_path: &Path,
+    lock_path: &Path,
+) -> Result<String> {
     let _gate = refresh_gate().lock().await;
-    let _lock = acquire_refresh_lock().await?;
-    let auth = read_stored_auth_for_base_url(expected_base_url)?;
+    let _lock = acquire_refresh_lock(lock_path).await?;
+    let auth = read_stored_auth_for_base_url_at(auth_path, expected_base_url)?;
     if !should_refresh(&auth) {
         return Ok(auth.access_token);
     }
-    Ok(refresh_and_store_auth(client, auth).await?.access_token)
+    Ok(refresh_and_store_auth_at(client, service, auth_path, auth)
+        .await?
+        .access_token)
 }
 
-async fn refresh_and_store_auth(
+async fn refresh_and_store_auth_at(
     client: &Client,
+    service: &ArceeAuthService,
+    auth_path: &Path,
     current: StoredArceeAuth,
 ) -> Result<StoredArceeAuth> {
-    let service = ArceeAuthService::canonical()?;
-    match request_token_refresh(client, &service, &current.refresh_token).await? {
+    match request_token_refresh(client, service, &current.refresh_token, &current.client_id).await?
+    {
         RefreshOutcome::Success(refreshed) => {
             let updated = stored_auth_from_refresh(current, refreshed);
-            write_stored_auth(&updated)?;
+            write_stored_auth_at(auth_path, &updated)?;
             Ok(updated)
         }
         RefreshOutcome::Revoked => {
-            let _ = remove_auth_path(&arcee_auth_file_path()?);
+            let _ = remove_auth_path(auth_path);
             Err(stored_auth_configuration_error(
                 "Arcee authorization was revoked or expired; run `nac arcee-auth login` again.",
             ))
@@ -669,7 +762,7 @@ async fn refresh_and_store_auth(
     }
 }
 
-fn stored_auth_from_refresh(
+pub(super) fn stored_auth_from_refresh(
     current: StoredArceeAuth,
     refreshed: RefreshSuccess,
 ) -> StoredArceeAuth {
@@ -687,20 +780,23 @@ fn stored_auth_from_refresh(
         base_url: current.base_url,
         organization_id: current.organization_id,
         workspace_name: current.workspace_name,
+        client_id: current.client_id,
+        managed_bootstrap: current.managed_bootstrap,
     }
 }
 
-async fn request_token_refresh(
+pub(super) async fn request_token_refresh(
     client: &Client,
     service: &ArceeAuthService,
     refresh_token: &str,
+    client_id: &str,
 ) -> Result<RefreshOutcome> {
     let url = service.device_refresh_url();
     let response = client
         .post(&url)
         .header("Content-Type", "application/json")
         .header("User-Agent", user_agent())
-        .json(&json!({ "refresh_token": refresh_token, "client_id": CLIENT_ID }))
+        .json(&json!({ "refresh_token": refresh_token, "client_id": client_id }))
         .send()
         .await
         .context("failed to refresh Arcee access token")?;
@@ -766,8 +862,21 @@ pub(super) fn read_stored_auth() -> Result<StoredArceeAuth> {
         })
 }
 
-fn read_stored_auth_for_base_url(expected_base_url: &str) -> Result<StoredArceeAuth> {
-    let auth = read_stored_auth()?;
+pub(super) fn read_stored_auth_for_base_url(expected_base_url: &str) -> Result<StoredArceeAuth> {
+    read_stored_auth_for_base_url_at(&arcee_auth_file_path()?, expected_base_url)
+}
+
+fn read_stored_auth_for_base_url_at(
+    path: &Path,
+    expected_base_url: &str,
+) -> Result<StoredArceeAuth> {
+    let auth = read_stored_auth_optional_at(path)
+        .map_err(classify_stored_auth_data_error)?
+        .ok_or_else(|| {
+            stored_auth_configuration_error(
+                "Arcee auth is not configured. Run `nac arcee-auth login` to sign in.",
+            )
+        })?;
     let expected_url = validate_approved_base_url(expected_base_url)?;
     let stored_url = validate_stored_base_url(&auth.base_url)?;
     if expected_url.origin() != stored_url.origin() {
@@ -782,14 +891,18 @@ fn read_stored_auth_for_base_url(expected_base_url: &str) -> Result<StoredArceeA
 
 fn read_stored_auth_optional() -> Result<Option<StoredArceeAuth>> {
     let path = arcee_auth_file_path()?;
-    let raw = match read_arcee_auth_string()? {
+    read_stored_auth_optional_at(&path)
+}
+
+fn read_stored_auth_optional_at(path: &Path) -> Result<Option<StoredArceeAuth>> {
+    let raw = match read_auth_string_from_path(path)? {
         Some(raw) => raw,
         None => return Ok(None),
     };
-    parse_stored_auth(&raw, &path)
+    parse_stored_auth(&raw, path)
 }
 
-fn parse_stored_auth(raw: &str, path: &Path) -> Result<Option<StoredArceeAuth>> {
+pub(super) fn parse_stored_auth(raw: &str, path: &Path) -> Result<Option<StoredArceeAuth>> {
     let value: Value = serde_json::from_str(raw).map_err(|error| {
         stored_auth_configuration_error(format!(
             "failed to parse stored Arcee auth in {}: {}",
@@ -819,6 +932,15 @@ fn parse_stored_auth(raw: &str, path: &Path) -> Result<Option<StoredArceeAuth>> 
             )));
         }
     }
+    if !matches!(
+        auth.client_id.as_str(),
+        LEGACY_CLIENT_ID | MANAGED_CLIENT_ID
+    ) {
+        return Err(stored_auth_configuration_error(format!(
+            "stored Arcee auth in {} has an unsupported client_id",
+            path.display()
+        )));
+    }
     validate_stored_base_url(&auth.base_url).map_err(|error| {
         stored_auth_configuration_error(format!(
             "stored Arcee auth in {} has an invalid base_url: {}",
@@ -830,10 +952,14 @@ fn parse_stored_auth(raw: &str, path: &Path) -> Result<Option<StoredArceeAuth>> 
 }
 
 fn write_stored_auth(auth: &StoredArceeAuth) -> Result<()> {
+    write_stored_auth_at(&arcee_auth_file_path()?, auth)
+}
+
+fn write_stored_auth_at(path: &Path, auth: &StoredArceeAuth) -> Result<()> {
     validate_stored_base_url(&auth.base_url)
         .context("refusing to store Arcee credentials with an invalid base_url")?;
     let raw = serde_json::to_string_pretty(auth).context("failed to serialize Arcee auth")?;
-    write_arcee_auth_string(&raw)
+    write_auth_string_to_path(path, &raw)
 }
 
 async fn request_device_code(client: &Client, service: &ArceeAuthService) -> Result<DeviceCode> {
@@ -842,7 +968,7 @@ async fn request_device_code(client: &Client, service: &ArceeAuthService) -> Res
         .post(&url)
         .header("Content-Type", "application/json")
         .header("User-Agent", user_agent())
-        .json(&json!({ "client_id": CLIENT_ID }))
+        .json(&json!({ "client_id": LEGACY_CLIENT_ID }))
         .send()
         .await
         .context("failed to request Arcee device code")?;
@@ -933,7 +1059,7 @@ where
             .post(&url)
             .header("Content-Type", "application/json")
             .header("User-Agent", user_agent())
-            .json(&json!({ "device_code": device.device_code, "client_id": CLIENT_ID }))
+            .json(&json!({ "device_code": device.device_code, "client_id": LEGACY_CLIENT_ID }))
             .send()
             .await
             .context("failed to poll Arcee device authorization")?;
