@@ -20,6 +20,9 @@ rotation and receipt semantics while preserving legacy and interactive auth.
 - Core auth/bootstrap is committed as
   `8a70815752fbe7cb6049ee4706928b4915f8fe43` (`feat(core): import managed
   Arcee credentials durably`).
+- Managed composition, image contract, smoke coverage, and documentation are
+  committed as `e5c830c7857d3bcb20458c624b4e431429e18d19`
+  (`feat(managed): compose durable Arcee bootstrap`).
 
 ## Settled implementation choices
 
@@ -41,30 +44,60 @@ rotation and receipt semantics while preserving legacy and interactive auth.
   identity to validate, and overloading the stable logical host identity is
   forbidden.
 
-## Work in progress
+## Final review disposition
 
-1. Add provider-neutral managed credential-source configuration and server
-   composition/readiness/catalog behavior.
-2. Update managed image contract, docs/ADR, and production-equivalent smoke
-   coverage.
-3. Commit the green integration slice, run broad verification, and request one bounded final
-   independent review of the exact candidate.
+One bounded independent review inspected the exact two-commit candidate ending
+at `e5c830c7857d3bcb20458c624b4e431429e18d19`. It found three issues, all now
+resolved with owner-level regression coverage:
+
+1. Stored-auth schema and base-URL diagnostics no longer include parser details
+   that can echo attacker-controlled secret-bearing values.
+2. Managed-profile creation and resume fail closed when the durable receipt or
+   credential is invalid. Credential matching is backend/endpoint based, so a
+   valid managed authorization remains independent from the configured default
+   model.
+3. Receipt crash recovery consults the durable credential provenance before the
+   current bootstrap mount. If generation A was stored before a crash and the
+   mount reconciles to generation B, NAC records A's receipt without rewriting
+   the credential or falsely consuming B.
+
+No further review loop was started, per the bounded-review requirement.
+
+## Completion state
+
+- Core import, refresh rotation, restart/reconciliation behavior, provider-
+  neutral configuration, managed startup/catalog/readiness/session admission,
+  image contract, smoke assertions, and documentation are implemented.
+- Legacy stored auth and interactive `arcee-auth` remain compatible.
+- No API/OpenAPI shape or web source changed; contract and committed asset drift
+  checks are green.
+- The final reviewed safety slice is included in the implementation history;
+  no unrelated/local-only state was encountered.
 
 ## Verification ledger
 
 - `make setup` — PASS (2026-09-01)
-- `cargo test --locked -p nac-core model::arcee` — PASS (43 tests; includes
+- `cargo test --locked -p nac-core model::arcee` — PASS (44 tests; includes
   bootstrap and refresh concurrency owner coverage).
 - `make crate-check CRATE=nac-core` — PASS.
-- `make crate-test CRATE=nac-core` — PASS (1174 passed, 9 expected ignored;
+- `make crate-test CRATE=nac-core` — PASS (1175 passed, 9 expected ignored;
   doc tests pass).
 - `make crate-check CRATE=nac-managed` — PASS.
 - `make crate-test CRATE=nac-managed` — PASS (20 passed; doc tests pass).
 - `make crate-check CRATE=nac-server` — PASS.
-- `make crate-test CRATE=nac-server` — PASS (154 library + 23 binary tests;
+- `make crate-test CRATE=nac-server` — PASS (155 library + 23 binary tests;
   doc tests pass).
+- `cargo test --locked -p nac-server
+  managed_bootstrap_corruption_blocks_create_and_resume_without_secret_echo`
+  — PASS.
+- `make test-durability` — PASS.
 - `make test-managed-image-contract` — PASS.
-- `make test-source-size` — PASS (833 tracked human-source files).
+- `make test-source-size` — PASS (836 tracked human-source files).
+- `make test-e2e` — PASS (18 production-embedded Playwright tests).
+- `make ci` — PASS after the final review fixes. This includes repository
+  formatting, workspace clippy, workspace Rust tests, 245 web tests, generated
+  OpenAPI/type drift checks, web lint/typecheck/build, committed asset drift,
+  source size, and the managed image contract.
 
 ## Known coverage gaps
 

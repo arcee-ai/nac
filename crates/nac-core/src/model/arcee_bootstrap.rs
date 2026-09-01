@@ -162,69 +162,79 @@ fn import_with_paths(
             ReceiptState::Missing => {}
         }
 
+        let existing = read_existing_auth(paths.auth);
+        if let ExistingAuthState::Recoverable(provenance) = &existing {
+            if provenance.managed_host_id != expected_host {
+                bail!(
+                    "managed Arcee credential belongs to a different logical host; refusing durable state reuse"
+                );
+            }
+            write_receipt(
+                paths.receipt,
+                BootstrapReceipt {
+                    version: RECEIPT_VERSION,
+                    bootstrap_id: provenance.bootstrap_id,
+                    managed_host_id: provenance.managed_host_id,
+                    client_id: MANAGED_CLIENT_ID.to_string(),
+                    disposition: ReceiptDisposition::Imported,
+                },
+            )?;
+            return Ok(ManagedArceeBootstrapOutcome::RecoveredReceipt);
+        }
+
         let payload = read_bootstrap(paths.input, expected_host)?;
-        let receipt = BootstrapReceipt {
+        let mut receipt = BootstrapReceipt {
             version: RECEIPT_VERSION,
             bootstrap_id: payload.bootstrap_id,
             managed_host_id: payload.managed_host_id,
             client_id: MANAGED_CLIENT_ID.to_string(),
             disposition: ReceiptDisposition::Imported,
         };
-
-        let existing = match read_auth_bytes_from_path(paths.auth) {
-            Ok(existing) => existing,
-            Err(_) => {
-                write_receipt(
-                    paths.receipt,
-                    BootstrapReceipt {
-                        disposition: ReceiptDisposition::PreservedInvalid,
-                        ..receipt
-                    },
-                )?;
-                return Ok(ManagedArceeBootstrapOutcome::InvalidCredentialPreserved);
+        match existing {
+            ExistingAuthState::Invalid => {
+                receipt.disposition = ReceiptDisposition::PreservedInvalid;
+                write_receipt(paths.receipt, receipt)?;
+                Ok(ManagedArceeBootstrapOutcome::InvalidCredentialPreserved)
             }
-        };
-        if let Some(raw) = existing {
-            return preserve_existing(paths.auth, paths.receipt, raw, payload, receipt);
+            ExistingAuthState::Valid | ExistingAuthState::Recoverable(_) => {
+                receipt.disposition = ReceiptDisposition::PreservedExisting;
+                write_receipt(paths.receipt, receipt)?;
+                Ok(ManagedArceeBootstrapOutcome::ExistingCredentialPreserved)
+            }
+            ExistingAuthState::Missing => {
+                let auth = stored_auth_from_payload(payload);
+                write_stored_auth_to_path(paths.auth, &auth)?;
+                after_credential_write()?;
+                write_receipt(paths.receipt, receipt)?;
+                Ok(ManagedArceeBootstrapOutcome::Imported)
+            }
         }
-
-        let auth = stored_auth_from_payload(payload);
-        write_stored_auth_to_path(paths.auth, &auth)?;
-        after_credential_write()?;
-        write_receipt(paths.receipt, receipt)?;
-        Ok(ManagedArceeBootstrapOutcome::Imported)
     })
 }
 
-fn preserve_existing(
-    auth_path: &Path,
-    receipt_path: &Path,
-    raw: Vec<u8>,
-    payload: BootstrapPayload,
-    mut receipt: BootstrapReceipt,
-) -> Result<ManagedArceeBootstrapOutcome> {
+enum ExistingAuthState {
+    Missing,
+    Valid,
+    Recoverable(ManagedBootstrapProvenance),
+    Invalid,
+}
+
+fn read_existing_auth(path: &Path) -> ExistingAuthState {
+    let raw = match read_auth_bytes_from_path(path) {
+        Ok(Some(raw)) => raw,
+        Ok(None) => return ExistingAuthState::Missing,
+        Err(_) => return ExistingAuthState::Invalid,
+    };
     let parsed = String::from_utf8(raw)
         .ok()
-        .and_then(|raw| parse_stored_auth(&raw, auth_path).ok().flatten());
-    let Some(existing) = parsed else {
-        receipt.disposition = ReceiptDisposition::PreservedInvalid;
-        write_receipt(receipt_path, receipt)?;
-        return Ok(ManagedArceeBootstrapOutcome::InvalidCredentialPreserved);
-    };
-    if existing.client_id == MANAGED_CLIENT_ID
-        && existing.managed_bootstrap.as_ref()
-            == Some(&ManagedBootstrapProvenance {
-                bootstrap_id: payload.bootstrap_id,
-                managed_host_id: payload.managed_host_id,
-            })
-    {
-        write_receipt(receipt_path, receipt)?;
-        return Ok(ManagedArceeBootstrapOutcome::RecoveredReceipt);
+        .and_then(|raw| parse_stored_auth(&raw, path).ok().flatten());
+    match parsed {
+        Some(auth) => match (auth.client_id.as_str(), auth.managed_bootstrap) {
+            (MANAGED_CLIENT_ID, Some(provenance)) => ExistingAuthState::Recoverable(provenance),
+            _ => ExistingAuthState::Valid,
+        },
+        None => ExistingAuthState::Invalid,
     }
-
-    receipt.disposition = ReceiptDisposition::PreservedExisting;
-    write_receipt(receipt_path, receipt)?;
-    Ok(ManagedArceeBootstrapOutcome::ExistingCredentialPreserved)
 }
 
 fn stored_auth_from_payload(payload: BootstrapPayload) -> StoredArceeAuth {

@@ -255,6 +255,39 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
     .expect("managed session manager")
 }
 
+fn test_managed_bootstrap_manager(root: &std::path::Path) -> SessionManager {
+    let state_root = root.join("nac-home");
+    let repository_root = root.join("repositories");
+    let home_root = root.join("managed-home");
+    for path in [&state_root, &repository_root, &home_root] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    let managed_host = nac_managed::ManagedHostConfig {
+        version: nac_managed::MANAGED_CONFIG_VERSION,
+        logical_host_id: "21856443-8ed8-40ab-9036-72e837c99f27".to_string(),
+        owner: Some("owner@example.test".to_string()),
+        public_hostname: "nac.example.test".to_string(),
+        repository_root,
+        state_root,
+        home_root,
+        github_client_id: "Iv1.test".to_string(),
+        model_backend: "arcee-auth".to_string(),
+        model_id: "trinity-large-thinking".to_string(),
+        model_endpoint: "https://api.arcee.ai".to_string(),
+        model_credential_file: PathBuf::from(nac_core::model::MANAGED_ARCEE_BOOTSTRAP_PATH),
+        model_credential_source: nac_managed::ManagedModelCredentialSource::ManagedBootstrap,
+        model_credential_environment_names: Vec::new(),
+    };
+    managed_host.validate().unwrap();
+    SessionManager::new(ServerOptions {
+        root_cwd: root.to_path_buf(),
+        store_path: Some(root.join("store.db")),
+        worker_executable: None,
+        managed_host: Some(managed_host),
+    })
+    .expect("managed bootstrap session manager")
+}
+
 fn poison_operation_lease_directory(root: &std::path::Path) -> PathBuf {
     let lock_dir = root.join("store.db.run-locks");
     std::fs::write(&lock_dir, b"not a directory").expect("poison operation lease directory");

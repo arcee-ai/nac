@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use nac_core::{
     runtime::{self, NacConfig},
     session_service::SessionService,
@@ -25,11 +25,17 @@ impl<'a> SessionAttachmentApplication<'a> {
             return Ok(runtime::ResumeModelOptions::default());
         };
         let snapshot = sessions::load_session(&self.manager.inner.store_path, session_id)?;
-        Ok(if profile.matches_session(&snapshot) {
-            profile.resume_options()
-        } else {
-            runtime::ResumeModelOptions::default()
-        })
+        if !profile.matches_session(&snapshot) {
+            return Ok(runtime::ResumeModelOptions::default());
+        }
+        let managed = self
+            .manager
+            .managed_host()
+            .ok_or_else(|| anyhow!("managed model profile is missing its host configuration"))?;
+        profile
+            .require_durable_authorization(managed)
+            .context("refusing to resume session without managed model authorization")?;
+        Ok(profile.resume_options())
     }
 
     pub(crate) fn new(manager: &'a SessionManager) -> Self {
