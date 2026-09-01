@@ -472,6 +472,11 @@ impl SessionManager {
             .as_ref()
             .map(application::managed::ManagedModelProfile::from_config)
             .transpose()?;
+        if let (Some(managed), Some(model)) =
+            (options.managed_host.as_ref(), managed_model.as_ref())
+        {
+            model.initialize(managed)?;
+        }
 
         let managed_clones = options
             .managed_host

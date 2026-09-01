@@ -26,6 +26,17 @@ pub const MAX_HOST_SECRETS: usize = 128;
 pub const MAX_HOST_SECRET_VALUE_BYTES: usize = 32 * 1024;
 pub const MAX_HOST_SECRET_TOTAL_BYTES: usize = 128 * 1024;
 
+/// Provider-neutral source for the managed model credential.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ManagedModelCredentialSource {
+    /// A read-only mounted API-key string, preserving the original contract.
+    #[default]
+    MountedApiKey,
+    /// A one-time provider-owned bundle imported into writable durable state.
+    ManagedBootstrap,
+}
+
 /// Structurally validated, nonsecret controller-to-NAC host configuration.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +53,8 @@ pub struct ManagedHostConfig {
     pub model_id: String,
     pub model_endpoint: String,
     pub model_credential_file: PathBuf,
+    #[serde(default)]
+    pub model_credential_source: ManagedModelCredentialSource,
     #[serde(default)]
     pub model_credential_environment_names: Vec<String>,
 }
@@ -112,6 +125,9 @@ impl ManagedHostConfig {
     /// Read the operator-mounted model credential without copying it into NAC
     /// storage or exporting it to the process/command environment.
     pub fn model_credential(&self) -> Result<String> {
+        if self.model_credential_source != ManagedModelCredentialSource::MountedApiKey {
+            bail!("managed model credential is not sourced from a mounted API key");
+        }
         let value = read_mounted_credential_string(&self.model_credential_file)?
             .ok_or_else(|| anyhow!("managed model credential file is unavailable"))?;
         let value = value.trim().to_string();

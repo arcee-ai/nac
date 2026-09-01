@@ -242,6 +242,7 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
         model_id: "trinity-large-thinking".to_string(),
         model_endpoint: "https://api.arcee.ai/api/v1".to_string(),
         model_credential_file: root.join("model-token"),
+        model_credential_source: nac_managed::ManagedModelCredentialSource::MountedApiKey,
         model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
     };
     managed_host.validate().unwrap();

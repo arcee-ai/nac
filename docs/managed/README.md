@@ -39,11 +39,12 @@ Mount these paths with the stated ownership:
 
 | Path | Lifetime | Contents |
 | --- | --- | --- |
-| `/var/lib/nac` | durable | SQLite store, managed auth, GitHub tokens, host secrets |
+| `/var/lib/nac` | durable | SQLite store, imported model auth and receipt, GitHub tokens, host secrets |
 | `/repositories` | durable | repository checkouts |
 | `/home/nac` | durable | Git identity, caches, owner-installed tools |
 | `/etc/nac/managed.toml` | read-only config | nonsecret host contract |
-| configured model credential file | read-only secret | host-scoped model credential |
+| `/run/secrets/nac/bootstrap.json` | read-only bootstrap | one managed Arcee credential generation; not required after import |
+| configured mounted API-key file | read-only secret | compatible API-key credential source |
 | `/tmp` | ephemeral writable | temporary files |
 | `/run/nac` | ephemeral writable | process runtime files |
 
@@ -65,39 +66,91 @@ nac-web --bind 0.0.0.0:3210 --allow-remote --no-open \
 
 Version 1 uses a strict TOML document. Values below are examples; platform must
 provide the actual host identity, DNS name, GitHub App client ID, model
-endpoint, and credential mount.
+endpoint, and credential mount. Managed Arcee bootstrap uses an ArceeFM-
+allocated UUID as the stable `logical_host_id`/`managed_host_id`:
 
 ```toml
 version = 1
-logical_host_id = "nac-owner-01"
+logical_host_id = "21856443-8ed8-40ab-9036-72e837c99f27"
 owner = "owner@example.com"
 public_hostname = "nac-owner-01.example.com"
 repository_root = "/repositories"
 state_root = "/var/lib/nac"
 home_root = "/home/nac"
 github_client_id = "Iv1.example"
-model_backend = "arcee-api"
+model_backend = "arcee-auth"
 model_id = "trinity-large-thinking"
-model_endpoint = "https://api.arcee.ai/api/v1"
-model_credential_file = "/var/lib/nac/model-credential"
-model_credential_environment_names = ["ARCEE_API_KEY"]
+model_endpoint = "https://api.arcee.ai"
+model_credential_file = "/run/secrets/nac/bootstrap.json"
+model_credential_source = "managed-bootstrap"
 ```
 
-The model credential file must be a nonblank, finite regular file with no access
-for other users. It may be owned by `10001:10001`, or root-owned and readable by
-runtime group `10001` for a Kubernetes Secret projection; symlinks are rejected.
-It is mounted read-only and is not a generic host secret
-and is not copied into command environments. GitHub access and refresh tokens
-remain owner-only NAC state and are never returned by the status APIs.
+`model_credential_source` defaults to `mounted-api-key`, preserving existing
+managed configurations. That source requires an API-key backend and a nonblank,
+finite regular file with no access for other users. It may be owned by
+`10001:10001`, or root-owned and readable by runtime group `10001`; symlinks are
+rejected. The file is mounted read-only, is not a generic host secret, and is
+not copied into command environments.
+
+`managed-bootstrap` requires `model_backend = "arcee-auth"`, the exact bootstrap
+path above, and `NAC_HOME` equal to `state_root` (the image fixes both to
+`/var/lib/nac`). The controller must project the single Secret key with a
+Kubernetes `subPath` mount so the final path is a regular file, not a projected
+volume symlink. NAC reads it with `O_NOFOLLOW`, imports under the normal Arcee
+credential lock, writes the credential and a separate nonsecret receipt
+atomically, then uses only writable durable state. Reconciliation may leave or
+replace the input, and the mount may disappear on later starts; none can
+overwrite a locally rotated credential.
+
+The strict v1 JSON object has exactly these fields (no extras):
+
+```json
+{
+  "version": 1,
+  "bootstrap_id": "4712bc5e-30d5-421a-b416-8291d9f7d8f9",
+  "managed_host_id": "21856443-8ed8-40ab-9036-72e837c99f27",
+  "client_id": "managed-nac",
+  "access_token": "<secret>",
+  "refresh_token": "<secret>",
+  "access_token_expires_at": "2030-01-02T03:04:05Z",
+  "token_type": "bearer",
+  "inference_base_url": "https://api.arcee.ai",
+  "organization_id": "<nonsecret Arcee organization id>",
+  "workspace": "<nonsecret workspace name>"
+}
+```
+
+Both IDs are UUIDs with distinct meanings: `managed_host_id` is the stable
+ArceeFM business identity and must equal `logical_host_id`; `bootstrap_id`
+identifies one credential generation. A durable receipt consumes that
+generation even when an existing valid or corrupt credential is preserved.
+NAC never replays it and never automatically replaces any existing canonical
+credential. A crash after the credential write but before its receipt is
+repaired from nonsecret provenance on retry without rewriting the credential.
+Local logout removes only the credential; the receipt remains a tombstone, so
+the existing interactive **Sign in with Arcee** flow is the repair path.
+
+ArceeFM alone mints and revokes the grant. NAC receives no Kubernetes,
+service-account, or provisioning credential and exposes no bootstrap HTTP
+endpoint. The grant authorizes all Arcee models entitled to its organization;
+`model_id` remains only the independent deployment default. GitHub access and
+refresh tokens remain owner-only NAC state and are never returned by status
+APIs.
+
+Managed v0 does not claim isolation from a fully compromised NAC process: that
+process must read and use its model credential. A stronger boundary would need
+a separate credential-injecting broker.
 
 ## Probes and shutdown
 
 - `GET /healthz` proves only that the server event loop responds. It is always
   credential-free and does not touch external services.
-- `GET /readyz` checks the store, exact mounted paths and ownership, model
-  credential structure, required tool inventory, and an environment-cleared
-  safe local-command probe. GitHub connection and generic-secret presence are
-  intentionally not readiness requirements.
+- `GET /readyz` checks the store, exact durable paths and ownership, durable
+  model credential/receipt structure (or the compatible mounted API key),
+  required tool inventory, and an environment-cleared safe local-command probe.
+  It makes no live model request and does not require a consumed bootstrap
+  mount. GitHub connection and generic-secret presence are intentionally not
+  readiness requirements.
 - `GET /managed/status` is owner-facing and exists only in managed mode. It
   reports host/version/schema metadata, counts, GitHub state, and readiness
   details without credential values.
@@ -125,12 +178,13 @@ Use `make managed-image` when only a local build is wanted. The smoke target
 builds before testing unless `MANAGED_IMAGE_SKIP_BUILD=1` is supplied for an
 already-built image.
 
-The smoke builds the exact `linux/amd64` image, initializes credential-free
-fake managed inputs, runs with a read-only root, waits for health/readiness,
-checks the tool inventory and non-root identity, verifies that status does not
-leak its canary credential, sends SIGTERM and requires exit zero, then restarts
-with the same volumes and proves durable files remain. It never contacts a real
-GitHub App, model endpoint, or AWS account.
+The smoke builds the exact `linux/amd64` image, initializes a fake strict
+bootstrap, runs with a read-only root, waits for health/readiness, checks the
+tool inventory and non-root identity, and verifies that status and logs do not
+leak its canary tokens. It then models a rotated durable token, reconciles the
+original bootstrap without overwriting that state, and finally restarts with no
+bootstrap mount. It never contacts a real GitHub App, model endpoint, ArceeFM,
+or AWS account.
 
 ## Publication
 
@@ -154,8 +208,9 @@ application tag. Platform must deploy by immutable digest.
 Automated tests use local GitHub/Git doubles and production-embedded browser
 API doubles. A real staging demonstration additionally requires the
 platform-owned ECR/OIDC inputs, controller and PVC contract, gateway owner
-authentication, allowed egress, stable hostname, and revocable Arcee model
-credential. On staging, validate one real device authorization, repository and
+authentication, allowed egress, stable hostname, and revocable Arcee managed
+grant. On staging, validate one server-minted bootstrap and one interactive
+repair authorization, repository and
 branch discovery, clone, HTTPS Git push (including a safe workflow-file change
 in a disposable repository), `gh` use, process/pod restart, and same-volume
 rescheduling. Those external checks do not weaken or replace the local NAC

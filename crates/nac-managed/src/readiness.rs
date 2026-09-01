@@ -8,7 +8,7 @@ use std::process::Command;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::configuration::ManagedHostConfig;
+use crate::configuration::{ManagedHostConfig, ManagedModelCredentialSource};
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -44,7 +44,7 @@ pub fn host_checks(
     expected_gid: u32,
     required_tools: &[&str],
 ) -> Vec<ReadinessCheck> {
-    vec![
+    let mut checks = vec![
         path_check(
             "state-root",
             &managed.state_root,
@@ -58,10 +58,16 @@ pub fn host_checks(
             expected_gid,
         ),
         path_check("home-root", &managed.home_root, expected_uid, expected_gid),
-        model_credential_check(&managed.model_credential_file, expected_uid, expected_gid),
         runtime_tools_check(required_tools),
         command_probe(&managed.repository_root),
-    ]
+    ];
+    if managed.model_credential_source == ManagedModelCredentialSource::MountedApiKey {
+        checks.insert(
+            3,
+            model_credential_check(&managed.model_credential_file, expected_uid, expected_gid),
+        );
+    }
+    checks
 }
 
 fn path_check(
