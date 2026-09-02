@@ -98,7 +98,19 @@ function newestFirstActionItems(items: ActionItem[]): ActionItem[] {
   }
   if (current.length > 0) units.push(current);
   units.reverse();
-  return units.flat();
+  return units.flatMap(newestFirstUnit);
+}
+
+/** Newest row first; drop the nested gutter when the parent is no longer above. */
+function newestFirstUnit(unit: ActionItem[]): ActionItem[] {
+  const reversed = [...unit].reverse();
+  return reversed.map((item, index) => {
+    if (item.kind !== "thread" || !item.nested) return item;
+    const parentAbove = reversed
+      .slice(0, index)
+      .some((row) => row.kind === "group" || row.kind === "workset");
+    return parentAbove ? item : { ...item, nested: false };
+  });
 }
 
 function threadItem(thread: TranscriptThread, nested: boolean): ActionItem {

@@ -37,6 +37,41 @@ export function applyTabOrder(
   return [...fresh, ...placed];
 }
 
+/**
+ * Spawned chats sit immediately to the right of the parent that created them.
+ * Newest child of a parent is closest to it; grandchildren follow their own
+ * parent the same way. A child whose parent is not on the strip stays put.
+ */
+export function placeSpawnsAfterParents(
+  entries: ManagedSessionSummary[],
+): ManagedSessionSummary[] {
+  const present = new Set(entries.map((entry) => entry.summary.session_id));
+  const children = new Map<string, ManagedSessionSummary[]>();
+  const roots: ManagedSessionSummary[] = [];
+  for (const entry of entries) {
+    const parentId = entry.lineage?.parent_session_id;
+    if (parentId && present.has(parentId)) {
+      const bucket = children.get(parentId);
+      if (bucket) bucket.push(entry);
+      else children.set(parentId, [entry]);
+    } else {
+      roots.push(entry);
+    }
+  }
+  const result: ManagedSessionSummary[] = [];
+  const emitted = new Set<string>();
+  const emit = (entry: ManagedSessionSummary): void => {
+    const id = entry.summary.session_id;
+    if (emitted.has(id)) return;
+    emitted.add(id);
+    result.push(entry);
+    for (const child of children.get(id) ?? []) emit(child);
+  };
+  for (const entry of roots) emit(entry);
+  for (const entry of entries) emit(entry);
+  return result;
+}
+
 export function compareSortOrder(a: SessionSummarySnapshot, b: SessionSummarySnapshot): number {
   return (
     (a.sort_order ?? 0) - (b.sort_order ?? 0) ||

@@ -112,6 +112,22 @@ export function pruneChatTabs(sessionIds: Iterable<string>, projectIds: Iterable
   });
 }
 
+/**
+ * Horizontal offset of the project's tab strip. Kept off the persisted
+ * record because SessionPage remounts per chat (`key={sessionId}`), and the
+ * strip is furniture of the project — jumping back to the first tab would
+ * throw away a scroll the user just made.
+ */
+const stripScroll = new Map<string, number>();
+
+export function readChatTabStripScroll(projectId: string): number {
+  return stripScroll.get(projectId) ?? 0;
+}
+
+export function writeChatTabStripScroll(projectId: string, scrollLeft: number): void {
+  stripScroll.set(projectId, scrollLeft);
+}
+
 export const useDismissedChatTabs = () => useStore((state) => state.dismissed);
 
 const NO_ORDER: readonly string[] = [];

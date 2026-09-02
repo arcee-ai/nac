@@ -16,6 +16,10 @@ import {
 } from "@/app/lib/agentSegments";
 import { cn } from "@/app/lib/cn";
 import { sessionIdFromPath } from "@/app/lib/routes";
+import {
+  GLOB_EMPTY_RESULT_LABEL,
+  isEmptyGlobResultPreview,
+} from "@/app/lib/toolPresentation";
 import { toWorkspaceRelativePath } from "@/app/lib/workspaceLink";
 import { queryKeys } from "@/app/services/queries";
 import type { SessionSnapshotResponse } from "@/app/types/api";
@@ -160,17 +164,49 @@ function parseLooseGlobObject(chunk: string): unknown {
 
 function globEntryFromUnknown(entry: unknown): GlobEntry[] {
   if (!entry || typeof entry !== "object") return [];
-  const path = "path" in entry && typeof entry.path === "string" ? entry.path : "";
+  const path =
+    "path" in entry && typeof entry.path === "string" ? entry.path : "";
   if (!path) return [];
   const kind =
     "kind" in entry && entry.kind === "directory" ? "directory" : "file";
   return [{ kind, path }];
 }
 
+function globQueryBox(
+  segment: Extract<AgentSegment, { kind: "tool" }>,
+): SidebarBoxContent | null {
+  if (!segment.presentation.summary) return null;
+  return {
+    kind: "code",
+    key: `${segment.key}-input`,
+    content: segment.presentation.summary,
+    accent: "info",
+  };
+}
+
 function globFileBoxes(
   segment: Extract<AgentSegment, { kind: "tool" }>,
   hostRoots: Array<string | null | undefined>,
 ): { boxes: SidebarBoxContent[]; copyText: string } | null {
+  const query = globQueryBox(segment);
+  if (isEmptyGlobResultPreview(segment.presentation.resultPreview)) {
+    const boxes: SidebarBoxContent[] = [];
+    if (query) boxes.push(query);
+    boxes.push({
+      kind: "muted",
+      key: `${segment.key}-empty`,
+      content: GLOB_EMPTY_RESULT_LABEL,
+    });
+    return {
+      boxes,
+      copyText: [
+        query ? `Query:\n${segment.presentation.summary}` : "",
+        GLOB_EMPTY_RESULT_LABEL,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+  }
   const resolved = parseGlobEntries(segment.presentation.resultPreview).flatMap(
     (entry) => {
       const path =
@@ -183,14 +219,7 @@ function globFileBoxes(
   const shown = resolved.slice(0, MAX_GLOB_FILES);
   const more = resolved.length - shown.length;
   const boxes: SidebarBoxContent[] = [];
-  if (segment.presentation.summary) {
-    boxes.push({
-      kind: "code",
-      key: `${segment.key}-input`,
-      content: segment.presentation.summary,
-      accent: "info",
-    });
-  }
+  if (query) boxes.push(query);
   boxes.push(
     ...shown.map((entry, index) => ({
       kind: "file" as const,
@@ -205,7 +234,9 @@ function globFileBoxes(
   return {
     boxes,
     copyText: [
-      segment.presentation.summary ? `Query:\n${segment.presentation.summary}` : "",
+      segment.presentation.summary
+        ? `Query:\n${segment.presentation.summary}`
+        : "",
       resolved.map((entry) => entry.path).join("\n"),
     ]
       .filter(Boolean)
@@ -217,7 +248,7 @@ function itemsFromGroup(
   group: AgentToolsGroup,
   hostRoots: Array<string | null | undefined>,
 ): SegmentDetailItem[] {
-  return group.segments.map((segment) => {
+  return [...group.segments].reverse().map((segment) => {
     const { boxes, copyText } = boxesForSegment(segment, hostRoots);
     const live =
       segment.kind === "thinking"
@@ -247,7 +278,9 @@ export function SegmentDetailList({
   const client = useQueryClient();
   const sessionId = sessionIdFromPath(location.pathname);
   const snapshot = sessionId
-    ? client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(sessionId))
+    ? client.getQueryData<SessionSnapshotResponse>(
+        queryKeys.sessionSnapshot(sessionId),
+      )
     : undefined;
   const hostRoots = useMemo(
     () => [
@@ -261,7 +294,10 @@ export function SegmentDetailList({
       snapshot?.metadata.cwd,
     ],
   );
-  const items = useMemo(() => itemsFromGroup(group, hostRoots), [group, hostRoots]);
+  const items = useMemo(
+    () => itemsFromGroup(group, hostRoots),
+    [group, hostRoots],
+  );
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollTo = useActionSegmentScroll();
 
@@ -298,7 +334,6 @@ export function SegmentDetailList({
       </div>
     );
   }
-  const penultimateIndex = items.length - 2;
   return (
     <div ref={rootRef} className={className}>
       {items.map((item, index) => (
@@ -306,7 +341,7 @@ export function SegmentDetailList({
           key={item.key}
           item={item}
           isLast={index === items.length - 1}
-          animateConnector={group.inProgress && index === penultimateIndex}
+          animateConnector={group.inProgress && index === 0}
         />
       ))}
     </div>

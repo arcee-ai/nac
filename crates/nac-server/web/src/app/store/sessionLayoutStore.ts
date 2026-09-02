@@ -44,6 +44,12 @@ interface SessionLayoutState {
    * git reports as changed.
    */
   fileListing: FileListing;
+  /**
+   * Active run the Actions list is following, or null when no run is live.
+   * A click in the list (or a chat card) locks follow until the next run.
+   */
+  actionsFollowRunId: string | null;
+  actionsFollowLocked: boolean;
 }
 
 export type FileListing = "tree" | "changed";
@@ -61,6 +67,8 @@ export const sessionLayoutStore = createStore<SessionLayoutState>({
   selectedFile: null,
   toggledFolders: new Set(),
   fileListing: "tree",
+  actionsFollowRunId: null,
+  actionsFollowLocked: false,
 });
 
 const { getState, setState, useStore } = sessionLayoutStore;
@@ -105,6 +113,7 @@ export function revealSidePanel(asDialog = false): void {
 export function selectThread(
   selectedThread: string | null,
   selectedThreadEpisode: string | null = null,
+  opts?: { follow?: boolean },
 ): void {
   if (import.meta.env.DEV) {
     console.debug("[nac:threads] select", {
@@ -117,7 +126,7 @@ export function selectThread(
       ? { selectedThread, selectedThreadEpisode, selectedAgentSegment: null }
       : { selectedThread, selectedThreadEpisode },
   );
-  if (selectedThread) showSidePanelList(false);
+  if (selectedThread && !opts?.follow) showSidePanelList(false);
 }
 
 /** Drive the phone dialog title shimmer from the Threads detail pane. */
@@ -127,9 +136,12 @@ export function setSelectedThreadRunning(selectedThreadRunning: boolean): void {
   }
 }
 
-export function selectAgentSegment(selectedAgentSegment: string | null): void {
+export function selectAgentSegment(
+  selectedAgentSegment: string | null,
+  opts?: { follow?: boolean },
+): void {
   if (getState().selectedAgentSegment === selectedAgentSegment) {
-    if (selectedAgentSegment) showSidePanelList(false);
+    if (selectedAgentSegment && !opts?.follow) showSidePanelList(false);
     return;
   }
   setState(
@@ -137,12 +149,44 @@ export function selectAgentSegment(selectedAgentSegment: string | null): void {
       ? { selectedAgentSegment, selectedThread: null, selectedThreadEpisode: null }
       : { selectedAgentSegment },
   );
-  if (selectedAgentSegment) showSidePanelList(false);
+  if (selectedAgentSegment && !opts?.follow) showSidePanelList(false);
 }
 
-export function selectWorkset(selectedWorkset: string | null): void {
+export function selectWorkset(selectedWorkset: string | null, opts?: { follow?: boolean }): void {
   setState({ selectedWorkset });
-  if (selectedWorkset) showSidePanelList(false);
+  if (selectedWorkset && !opts?.follow) showSidePanelList(false);
+}
+
+/**
+ * Bind Actions follow to this run. A new run starts following again. A lock
+ * taken on this same run (a chat click before the Actions panel recorded the
+ * id) stays; a leftover lock from idle browsing or a previous run does not.
+ */
+export function noteLiveActionRun(runId: string | null): void {
+  const { actionsFollowRunId, actionsFollowLocked } = getState();
+  if (actionsFollowRunId === runId) return;
+  if (!runId) {
+    setState({ actionsFollowRunId: null, actionsFollowLocked: false });
+    return;
+  }
+  const keepLock = actionsFollowLocked && actionsFollowRunId === runId;
+  setState({ actionsFollowRunId: runId, actionsFollowLocked: keepLock });
+}
+
+/**
+ * Pin Actions to the row the reader just opened, until the next run.
+ * Clicks with no live run are ignored so they cannot block the next follow.
+ */
+export function lockLiveActionFollow(runId?: string | null): void {
+  const nextRun = runId ?? getState().actionsFollowRunId;
+  if (!nextRun) return;
+  if (getState().actionsFollowLocked && getState().actionsFollowRunId === nextRun) {
+    return;
+  }
+  setState({
+    actionsFollowRunId: nextRun,
+    actionsFollowLocked: true,
+  });
 }
 
 /** Point the panels at a captured revision, or back at the working tree. */
@@ -194,6 +238,8 @@ export function resetSessionSelection(): void {
     toggledFolders: new Set(),
     panelList: false,
     selectedThreadRunning: false,
+    actionsFollowRunId: null,
+    actionsFollowLocked: false,
   });
 }
 
@@ -213,3 +259,5 @@ export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);
 export const useToggledFolders = () => useStore((s) => s.toggledFolders);
 export const useFileListing = () => useStore((s) => s.fileListing);
+export const useActionsFollowLocked = () => useStore((s) => s.actionsFollowLocked);
+export const useActionsFollowRunId = () => useStore((s) => s.actionsFollowRunId);

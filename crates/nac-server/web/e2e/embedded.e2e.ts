@@ -23,7 +23,9 @@ test("serves the production-embedded application and hashed assets", async ({
   expect(html.ok()).toBe(true);
   expect(html.headers()["cache-control"]).toContain("no-cache");
   const source = await html.text();
-  const assetPath = source.match(/(?:src|href)="(\/assets\/dist\/assets\/[^"]+)"/)?.[1];
+  const assetPath = source.match(
+    /(?:src|href)="(\/assets\/dist\/assets\/[^"]+)"/,
+  )?.[1];
   expect(assetPath).toBeTruthy();
   const asset = await request.get(`${harness.baseUrl}${assetPath}`);
   expect(asset.ok()).toBe(true);
@@ -31,7 +33,9 @@ test("serves the production-embedded application and hashed assets", async ({
 
   await page.goto(harness.baseUrl);
   await expect(page.getByText("No projects yet")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Get Started/i })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Get Started/i }),
+  ).toBeVisible();
 });
 
 test("runs a direct session through the loopback scripted Responses provider", async ({
@@ -49,9 +53,12 @@ test("runs a direct session through the loopback scripted Responses provider", a
     { kind: "text", text: "production embedded response" },
   );
   const sessionId = await createDirectSession(request, harness);
-  const submitted = await request.post(`${harness.baseUrl}/sessions/${sessionId}/runs`, {
-    data: { prompt: "E2E_MODEL_TOKEN" },
-  });
+  const submitted = await request.post(
+    `${harness.baseUrl}/sessions/${sessionId}/runs`,
+    {
+      data: { prompt: "E2E_MODEL_TOKEN" },
+    },
+  );
   expect(submitted.status()).toBe(202);
   await harness.provider.waitForRequestCount(1);
   await waitForRunIdle(request, harness, sessionId);
@@ -63,7 +70,10 @@ test("runs a direct session through the loopback scripted Responses provider", a
     (entry) => entry.matchedStep === "direct-text",
   );
   expect(modelRequest?.headers.authorization).toBe("Bearer nac-e2e-dummy-only");
-  expect(modelRequest?.body).toMatchObject({ model: "gpt-5.6-sol", store: false });
+  expect(modelRequest?.body).toMatchObject({
+    model: "gpt-5.6-sol",
+    store: false,
+  });
 });
 
 test.describe("with an isolated Exa credential", () => {
@@ -83,9 +93,12 @@ test.describe("with an isolated Exa credential", () => {
       { kind: "text", text: "web retrieval is available" },
     );
     const sessionId = await createDirectSession(request, harness);
-    const submitted = await request.post(`${harness.baseUrl}/sessions/${sessionId}/runs`, {
-      data: { prompt: "E2E_EXA_ENABLED" },
-    });
+    const submitted = await request.post(
+      `${harness.baseUrl}/sessions/${sessionId}/runs`,
+      {
+        data: { prompt: "E2E_EXA_ENABLED" },
+      },
+    );
     expect(submitted.status()).toBe(202);
     await harness.provider.waitForRequestCount(1);
     await waitForRunIdle(request, harness, sessionId);
@@ -103,7 +116,10 @@ test("round-trips a native tool result through the scripted Responses provider",
   page,
   request,
 }) => {
-  await fs.writeFile(path.join(harness.runRoot, "workspace", "fixture.txt"), "E2E_FILE_BODY\n");
+  await fs.writeFile(
+    path.join(harness.runRoot, "workspace", "fixture.txt"),
+    "E2E_FILE_BODY\n",
+  );
   harness.provider.enqueue(
     "request-read",
     { token: "E2E_TOOL_TOKEN", requiredTools: ["read"] },
@@ -121,9 +137,12 @@ test("round-trips a native tool result through the scripted Responses provider",
   );
 
   const sessionId = await createDirectSession(request, harness);
-  const submitted = await request.post(`${harness.baseUrl}/sessions/${sessionId}/runs`, {
-    data: { prompt: "E2E_TOOL_TOKEN" },
-  });
+  const submitted = await request.post(
+    `${harness.baseUrl}/sessions/${sessionId}/runs`,
+    {
+      data: { prompt: "E2E_TOOL_TOKEN" },
+    },
+  );
   expect(submitted.status()).toBe(202);
   await harness.provider.waitForRequestCount(2);
   await waitForRunIdle(request, harness, sessionId);
@@ -180,7 +199,9 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
     await waitForRunIdle(request, harness, sessionId);
     await expect(card).toContainText("Succeeded");
     await expect(card).toContainText("ALL1_TOOL_COMPLETE");
-    await expect(page.getByText(`${behavior} rich tool complete`)).toBeVisible();
+    await expect(
+      page.getByText(`${behavior} rich tool complete`),
+    ).toBeVisible();
 
     await page.reload();
     const reloaded = page.locator(`[data-tool-call-id="${callId}"]`);
@@ -219,7 +240,9 @@ test("renders an unknown primary tool failure safely after reload", async ({
   );
   const sessionId = await createDirectSession(request, harness);
   await page.goto(`${harness.baseUrl}/#/session/${sessionId}/actions`);
-  await page.getByRole("combobox", { name: "Message" }).fill("ALL1_UNKNOWN_TOKEN");
+  await page
+    .getByRole("combobox", { name: "Message" })
+    .fill("ALL1_UNKNOWN_TOKEN");
   await page.getByRole("button", { name: "Send" }).click();
   await harness.provider.waitForRequestCount(2);
   await waitForRunIdle(request, harness, sessionId);
@@ -227,11 +250,19 @@ test("renders an unknown primary tool failure safely after reload", async ({
   const card = page.locator('[data-tool-call-id="all1-unknown"]');
   await expect(card).toContainText("MCP · Dangerous tool");
   await expect(card).toContainText("Failed");
-  await expect(page.locator("body")).not.toContainText("RAW_SECRET_MUST_NOT_RENDER");
-  await expect(page.locator("body")).not.toContainText("UNBOUNDED_RAW_BODY_MUST_NOT_RENDER");
+  await expect(page.locator("body")).not.toContainText(
+    "RAW_SECRET_MUST_NOT_RENDER",
+  );
+  await expect(page.locator("body")).not.toContainText(
+    "UNBOUNDED_RAW_BODY_MUST_NOT_RENDER",
+  );
   await page.reload();
-  await expect(page.locator('[data-tool-call-id="all1-unknown"]')).toContainText("Failed");
-  await expect(page.locator('[data-tool-call-id="all1-unknown"]')).toHaveCount(1);
+  await expect(
+    page.locator('[data-tool-call-id="all1-unknown"]'),
+  ).toContainText("Failed");
+  await expect(page.locator('[data-tool-call-id="all1-unknown"]')).toHaveCount(
+    1,
+  );
   harness.provider.assertConsumed();
 });
 
@@ -250,31 +281,48 @@ test("creates Agent by default and offers Orchestrator from the new-session popo
   await expect(page.getByText("Agent", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("tab", { name: "Actions" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
-  await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Spawn Sessions" })).toBeVisible();
+  await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(
+    0,
+  );
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Create new session", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Create new session", exact: true })
+    .click();
   await expect(page.getByRole("button", { name: "New Agent" })).toBeVisible();
   await expect(page.getByText("Default", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "New Orchestrator" }).click();
-  await expect.poll(() => page.url()).not.toContain(`/session/${agentSessionId}/`);
-  await expect(page).toHaveURL(/\/session\/[^/]+\/threads$/);
-  await expect(page.getByText("Orchestrator", { exact: true }).first()).toBeVisible();
+  await expect
+    .poll(() => page.url())
+    .not.toContain(`/session/${agentSessionId}/`);
+  await expect(page).toHaveURL(/\/session\/[^/]+\/actions$/);
+  await expect(
+    page.getByText("Orchestrator", { exact: true }).first(),
+  ).toBeVisible();
   await page.reload();
-  await expect(page.getByText("Orchestrator", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByText("Orchestrator", { exact: true }).first(),
+  ).toBeVisible();
   await expect(page.getByText("Actions", { exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
   await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
 
   const tabs = page.locator(".chat-session-tab button");
-  await expect(tabs.filter({ has: page.getByText("Agent", { exact: true }) })).toHaveCount(1);
-  await expect(tabs.filter({ has: page.getByText("Orchestrator", { exact: true }) })).toHaveCount(
-    1,
-  );
+  await expect(
+    tabs.filter({ has: page.getByText("Agent", { exact: true }) }),
+  ).toHaveCount(1);
+  await expect(
+    tabs.filter({ has: page.getByText("Orchestrator", { exact: true }) }),
+  ).toHaveCount(1);
   await tabs.filter({ has: page.getByText("Agent", { exact: true }) }).click();
   await expect(page.getByText("Agent", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("tab", { name: "Actions" })).toBeVisible();
-  await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Spawn Sessions" })).toBeVisible();
+  await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(
+    0,
+  );
 });
 
 test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({
@@ -304,7 +352,9 @@ test("converges concurrent required-first-chat tabs and refreshes deleted owners
     expect(sessions.ok()).toBe(true);
     expect((await sessions.json()) as unknown[]).toHaveLength(1);
 
-    const deleted = await request.delete(`${harness.baseUrl}/projects/${projectId}`);
+    const deleted = await request.delete(
+      `${harness.baseUrl}/projects/${projectId}`,
+    );
     expect(deleted.ok()).toBe(true);
     await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
     await expect(page).toHaveURL(/\/#\/$/);
@@ -347,13 +397,20 @@ test("steers an active direct run from the ordinary composer", async ({
   await boundary.accepted;
   await composer.fill("change course safely");
   await page.getByRole("button", { name: "Steer active run" }).click();
-  await expect(page.getByLabel("Pending messages")).toContainText("change course safely");
+  await expect(page.getByLabel("Pending messages")).toContainText(
+    "change course safely",
+  );
 
-  const pending = await request.get(`${harness.baseUrl}/sessions/${sessionId}/inbox`);
+  const pending = await request.get(
+    `${harness.baseUrl}/sessions/${sessionId}/inbox`,
+  );
   expect(pending.ok()).toBe(true);
   expect(await pending.json()).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ delivery: "steer", prompt: "change course safely" }),
+      expect.objectContaining({
+        delivery: "steer",
+        prompt: "change course safely",
+      }),
     ]),
   );
   boundary.release();
@@ -363,7 +420,9 @@ test("steers an active direct run from the ordinary composer", async ({
   const steeredRequest = harness.provider.requests.find(
     (entry) => entry.matchedStep === "steered-continuation",
   );
-  expect(JSON.stringify(steeredRequest?.body)).toContain("change course safely");
+  expect(JSON.stringify(steeredRequest?.body)).toContain(
+    "change course safely",
+  );
 });
 
 test("queues, edits, cancels pending input, and stops an active direct run", async ({
@@ -398,7 +457,9 @@ test("queues, edits, cancels pending input, and stops an active direct run", asy
 
   await page.getByRole("button", { name: "Stop run" }).click();
   await waitForRunIdle(request, harness, sessionId);
-  const inbox = await request.get(`${harness.baseUrl}/sessions/${sessionId}/inbox`);
+  const inbox = await request.get(
+    `${harness.baseUrl}/sessions/${sessionId}/inbox`,
+  );
   expect(inbox.ok()).toBe(true);
   expect(await inbox.json()).toEqual([
     expect.objectContaining({
@@ -431,15 +492,22 @@ test("interprets literal goal commands before launching goal continuation", asyn
   await composer.press("Enter");
   await expect
     .poll(async () => {
-      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+      const response = await request.get(
+        `${harness.baseUrl}/sessions/${sessionId}/goal`,
+      );
       if (!response.ok()) return null;
-      return ((await response.json()) as { objective?: string } | null)?.objective ?? null;
+      return (
+        ((await response.json()) as { objective?: string } | null)?.objective ??
+        null
+      );
     })
     .toBe("ship the embedded MVP");
   await continuation.accepted;
   expect(harness.provider.requests).toHaveLength(1);
   expect(harness.provider.requests[0]?.matchedStep).toBe("goal-continuation");
-  expect(JSON.stringify(harness.provider.requests[0]?.body)).toContain("<nac_goal_continuation");
+  expect(JSON.stringify(harness.provider.requests[0]?.body)).toContain(
+    "<nac_goal_continuation",
+  );
 
   // The run attaches durable accounting after goal creation. Reload so the
   // versioned controls exercise the current post-attachment record.
@@ -449,21 +517,27 @@ test("interprets literal goal commands before launching goal continuation", asyn
   await page.getByRole("button", { name: "Pause" }).click();
   await expect
     .poll(async () => {
-      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+      const response = await request.get(
+        `${harness.baseUrl}/sessions/${sessionId}/goal`,
+      );
       return ((await response.json()) as { status?: string } | null)?.status;
     })
     .toBe("paused");
   await page.getByRole("button", { name: "Resume" }).click();
   await expect
     .poll(async () => {
-      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+      const response = await request.get(
+        `${harness.baseUrl}/sessions/${sessionId}/goal`,
+      );
       return ((await response.json()) as { status?: string } | null)?.status;
     })
     .toBe("active");
   await page.getByRole("button", { name: "Clear" }).click();
   await expect
     .poll(async () => {
-      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+      const response = await request.get(
+        `${harness.baseUrl}/sessions/${sessionId}/goal`,
+      );
       return await response.json();
     })
     .toBeNull();
@@ -503,7 +577,9 @@ test("replaces a completed durable goal from the production dialog", async ({
   await composer.press("Enter");
   await original.accepted;
 
-  const currentResponse = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+  const currentResponse = await request.get(
+    `${harness.baseUrl}/sessions/${sessionId}/goal`,
+  );
   const current = (await currentResponse.json()) as {
     goal_id: string;
   };
@@ -528,7 +604,9 @@ test("replaces a completed durable goal from the production dialog", async ({
   await waitForRunIdle(request, harness, sessionId);
   await expect
     .poll(async () => {
-      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+      const response = await request.get(
+        `${harness.baseUrl}/sessions/${sessionId}/goal`,
+      );
       return ((await response.json()) as { status?: string } | null)?.status;
     })
     .toBe("complete");
@@ -540,18 +618,29 @@ test("replaces a completed durable goal from the production dialog", async ({
     replacement,
   );
 
-  await expect(page.getByRole("button", { name: "Goal: complete" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Goal: complete" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Goal: complete" }).click();
-  await page.getByPlaceholder("Describe the concrete outcome").fill("replacement objective");
+  await page
+    .getByPlaceholder("Describe the concrete outcome")
+    .fill("replacement objective");
   await page.getByRole("button", { name: "Replace and start" }).click();
   await replacement.accepted;
   await expect
     .poll(async () => {
-      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
-      return (await response.json()) as { goal_id?: string; objective?: string } | null;
+      const response = await request.get(
+        `${harness.baseUrl}/sessions/${sessionId}/goal`,
+      );
+      return (await response.json()) as {
+        goal_id?: string;
+        objective?: string;
+      } | null;
     })
     .toMatchObject({ objective: "replacement objective" });
-  const replacedResponse = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
+  const replacedResponse = await request.get(
+    `${harness.baseUrl}/sessions/${sessionId}/goal`,
+  );
   const replaced = (await replacedResponse.json()) as { goal_id: string };
   expect(replaced.goal_id).not.toBe(current.goal_id);
   await page.getByRole("button", { name: "Close" }).click();
@@ -612,21 +701,33 @@ test.skip("shows live background delegated work, terminal events, cancellation, 
   const parentId = await createSession(request, harness, "direct");
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
   const launch = async (description: string, prompt: string) => {
-    const response = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
-      data: { profile: "general", description, prompt, background: true },
-    });
+    const response = await request.post(
+      `${harness.baseUrl}/sessions/${parentId}/children`,
+      {
+        data: { profile: "general", description, prompt, background: true },
+      },
+    );
     expect(response.ok()).toBe(true);
     return (await response.json()) as { child_session_id: string };
   };
-  const successChild = await launch("Background success", "E2E_BACKGROUND_SUCCESS");
+  const successChild = await launch(
+    "Background success",
+    "E2E_BACKGROUND_SUCCESS",
+  );
   await success.accepted;
   await launch("Background cancellation", "E2E_BACKGROUND_CANCEL");
   await cancelled.accepted;
   await launch("Background failure", "E2E_BACKGROUND_FAILURE");
 
-  const successRow = page.locator("article").filter({ hasText: "Background success" });
-  const cancelRow = page.locator("article").filter({ hasText: "Background cancellation" });
-  const failureRow = page.locator("article").filter({ hasText: "Background failure" });
+  const successRow = page
+    .locator("article")
+    .filter({ hasText: "Background success" });
+  const cancelRow = page
+    .locator("article")
+    .filter({ hasText: "Background cancellation" });
+  const failureRow = page
+    .locator("article")
+    .filter({ hasText: "Background failure" });
   await expect(successRow).toContainText("Running");
   await expect(cancelRow).toContainText("Running");
   await expect(successRow.getByRole("button", { name: "Steer" })).toBeVisible();
@@ -637,23 +738,42 @@ test.skip("shows live background delegated work, terminal events, cancellation, 
 
   success.release();
   await expect(successRow).toContainText("Completed");
-  await expect(page.getByLabel("Coding agent completed")).toContainText("Background success");
-  await expect(page.getByLabel("Coding agent failed")).toContainText("Background failure");
-  await expect(page.getByLabel("Coding agent cancelled")).toContainText("Background cancellation");
+  await expect(page.getByLabel("Coding agent completed")).toContainText(
+    "Background success",
+  );
+  await expect(page.getByLabel("Coding agent failed")).toContainText(
+    "Background failure",
+  );
+  await expect(page.getByLabel("Coding agent cancelled")).toContainText(
+    "Background cancellation",
+  );
   await expect(page.getByRole("button", { name: "Resend" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Revert to this snapshot" }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(
+    0,
+  );
 
   await successRow.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("textbox", { name: "Continuation prompt" }).fill("E2E_GENERATION_TWO");
-  await page.getByRole("dialog").getByRole("button", { name: "Continue", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Continuation prompt" })
+    .fill("E2E_GENERATION_TWO");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Continue", exact: true })
+    .click();
   await continued.accepted;
   await expect(successRow).toContainText("Running");
   await expect(successRow).toContainText("Generation 2");
   continued.release();
   await expect(successRow).toContainText("Completed");
-  await expect(page.getByLabel("Coding agent completed").last()).toContainText("Generation 2");
-  await expect(page.getByRole("button", { name: "Open exact transcript" }).last()).toBeVisible();
+  await expect(page.getByLabel("Coding agent completed").last()).toContainText(
+    "Generation 2",
+  );
+  await expect(
+    page.getByRole("button", { name: "Open exact transcript" }).last(),
+  ).toBeVisible();
   expect(successChild.child_session_id).toBeTruthy();
   harness.provider.assertConsumed();
 });
@@ -689,10 +809,12 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
           {
             title: "Verify managed panels",
             scope: "web session UI",
-            description: "Create one retained worker episode for panel navigation.",
+            description:
+              "Create one retained worker episode for panel navigation.",
             role: "verification",
             depends_on: [],
-            acceptance: "The managed transcript exposes its own thread and workset.",
+            acceptance:
+              "The managed transcript exposes its own thread and workset.",
           },
         ],
       },
@@ -724,21 +846,33 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   );
   harness.provider.enqueue(
     "orchestrator-parent-observation",
-    { token: "Coordinate the compatibility audit", afterStep: "orchestrator-completion" },
+    {
+      token: "Coordinate the compatibility audit",
+      afterStep: "orchestrator-completion",
+    },
     { kind: "text", text: "managed completion acknowledged" },
   );
-  const parentId = await createSession(request, harness, "direct-with-orchestrator");
-  const childResponse = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
-    data: {
-      profile: "general",
-      description: "Inspect the child lifecycle",
-      prompt: "E2E_CHILD_TOKEN",
-      background: false,
+  const parentId = await createSession(
+    request,
+    harness,
+    "direct-with-orchestrator",
+  );
+  const childResponse = await request.post(
+    `${harness.baseUrl}/sessions/${parentId}/children`,
+    {
+      data: {
+        profile: "general",
+        description: "Inspect the child lifecycle",
+        prompt: "E2E_CHILD_TOKEN",
+        background: false,
+      },
+      timeout: 15_000,
     },
-    timeout: 15_000,
-  });
+  );
   expect(childResponse.ok()).toBe(true);
-  const childId = ((await childResponse.json()) as { child_session_id?: string }).child_session_id;
+  const childId = (
+    (await childResponse.json()) as { child_session_id?: string }
+  ).child_session_id;
   expect(childId).toBeTruthy();
 
   const orchestratorResponse = await request.post(
@@ -761,15 +895,23 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
 
   await page.goto(`${harness.baseUrl}/#/session/${childId}/files`);
   await expect(page).toHaveURL(new RegExp(`/session/${childId}/`));
-  await expect(page.getByText("Inspect the child lifecycle", { exact: true })).toBeVisible();
-  await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
+  await expect(
+    page.getByText("Inspect the child lifecycle", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/delegated transcript is read-only/i),
+  ).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /goal/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Commit", exact: true }),
+  ).toHaveCount(0);
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(
+    0,
+  );
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Open panel" }).click();
@@ -777,9 +919,15 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(mobilePanel).toBeVisible();
   await expect(mobilePanel.getByRole("tab", { name: "Files" })).toBeVisible();
   await expect(mobilePanel.getByRole("tab", { name: "History" })).toBeVisible();
-  await expect(mobilePanel.getByRole("tab", { name: "Threads" })).toHaveCount(0);
-  await expect(mobilePanel.getByRole("tab", { name: "Worksets" })).toHaveCount(0);
-  await expect(mobilePanel.getByRole("tab", { name: "Delegated" })).toHaveCount(0);
+  await expect(mobilePanel.getByRole("tab", { name: "Threads" })).toHaveCount(
+    0,
+  );
+  await expect(mobilePanel.getByRole("tab", { name: "Worksets" })).toHaveCount(
+    0,
+  );
+  await expect(mobilePanel.getByRole("tab", { name: "Delegated" })).toHaveCount(
+    0,
+  );
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
   await mobilePanel.getByRole("button", { name: "Close" }).click();
   await expect(mobilePanel).toBeHidden();
@@ -787,48 +935,84 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/actions`);
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/actions$`));
-  await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(
+    0,
+  );
   orchestratorCompletion.release();
   await expect(page.getByLabel("Orchestrator completed")).toContainText(
     "Coordinate the compatibility audit",
   );
   harness.provider.assertConsumed();
-  await page.goto(`${harness.baseUrl}/#/session/${orchestratorId}/threads`);
+  await page.goto(`${harness.baseUrl}/#/session/${orchestratorId}/actions`);
   await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/`));
-  await expect(page.getByText("Coordinate the compatibility audit", { exact: true })).toBeVisible();
-  await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
+  await expect(
+    page.getByText("Coordinate the compatibility audit", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/delegated transcript is read-only/i),
+  ).toBeVisible();
   await expect(page.getByRole("tab", { name: "Actions" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Worksets" })).toBeVisible();
-  await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(
+    0,
+  );
 
   await expect(
-    page.getByRole("button", { name: /Worksets_managed-release|Thoughts & tools/ }),
+    page.getByRole("button", {
+      name: /Worksets_managed-release|Thoughts & tools/,
+    }),
   ).toBeVisible();
   await page.getByRole("tab", { name: "Worksets" }).click();
-  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/worksets$`));
+  await expect(page).toHaveURL(
+    new RegExp(`/session/${orchestratorId}/worksets$`),
+  );
   await expect(
     page.getByText("Verify the managed transcript topology", { exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: /managed-ui/i }).click();
-  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/threads$`));
-  await expect(page.getByText("managed worker completed", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(
+    new RegExp(`/session/${orchestratorId}/threads$`),
+  );
+  await expect(
+    page.getByText("managed worker completed", { exact: true }),
+  ).toBeVisible();
 
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Commit", exact: true }),
+  ).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Resend" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Revert to this snapshot" }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(
+    0,
+  );
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Open panel" }).click();
   const managedMobilePanel = page.getByRole("dialog");
-  await expect(managedMobilePanel.getByRole("tab", { name: "Actions" })).toBeVisible();
-  await expect(managedMobilePanel.getByRole("tab", { name: "Files" })).toBeVisible();
-  await expect(managedMobilePanel.getByRole("tab", { name: "Worksets" })).toBeVisible();
-  await expect(managedMobilePanel.getByRole("tab", { name: "History" })).toBeVisible();
+  await expect(
+    managedMobilePanel.getByRole("tab", { name: "Actions" }),
+  ).toBeVisible();
+  await expect(
+    managedMobilePanel.getByRole("tab", { name: "Threads" }),
+  ).toBeVisible();
+  await expect(
+    managedMobilePanel.getByRole("tab", { name: "Files" }),
+  ).toBeVisible();
+  await expect(
+    managedMobilePanel.getByRole("tab", { name: "Worksets" }),
+  ).toBeVisible();
+  await expect(
+    managedMobilePanel.getByRole("tab", { name: "History" }),
+  ).toBeVisible();
   await managedMobilePanel.getByRole("tab", { name: "History" }).click();
-  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/history$`));
+  await expect(page).toHaveURL(
+    new RegExp(`/session/${orchestratorId}/history$`),
+  );
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
   await managedMobilePanel.getByRole("button", { name: "Close" }).click();
   await expect(managedMobilePanel).toBeHidden();

@@ -1,17 +1,16 @@
 import { memo } from "react";
 
 import {
-  Button,
-  ButtonContent,
   ButtonSize,
   ButtonVariant,
   CopyButton,
   Icon,
   IconName,
-  Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { MessageActionIcon } from "@/app/components/inspector/MessageActionIcon";
 import { cn } from "@/app/lib/cn";
+import { DELEGATED_READONLY_HINT } from "@/app/lib/sessionBehavior";
 import { perfRender } from "@/app/lib/perfDebug";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -46,8 +45,10 @@ interface UserMessageProps {
   onRevert?: ((messageIndex: number, text: string) => void) | null;
   /** Disable destructive / network actions while a run is in flight. */
   actionsDisabled?: boolean;
-  /** Parent-owned delegated transcripts expose copy/time but no mutation affordances. */
+  /** Parent-owned or frozen delegated turns keep mutation actions visible but inert. */
   readOnly?: boolean;
+  /** Why mutation actions are locked. Shown on disabled action tooltips. */
+  readOnlyReason?: string | null;
   /** Inert copy of the bubble: no hover actions. */
   preview?: boolean;
 }
@@ -63,11 +64,16 @@ export const UserMessage = memo(function UserMessage({
   onRevert = null,
   actionsDisabled = false,
   readOnly = false,
+  readOnlyReason = null,
   preview = false,
 }: UserMessageProps) {
   perfRender("UserMessage");
-  const canRefresh = !readOnly && onRefresh != null && messageIndex != null;
-  const canRevert = !readOnly && onRevert != null && messageIndex != null;
+  const lockHint = readOnly
+    ? (readOnlyReason ?? DELEGATED_READONLY_HINT)
+    : undefined;
+  const actionLocked = actionsDisabled || readOnly;
+  const showResend = readOnly || (onRefresh != null && messageIndex != null);
+  const canRevert = onRevert != null && messageIndex != null;
   const isMobile = useIsMobile();
   return (
     <div className="group/user-msg flex flex-col items-end w-full max-w-full pt-4 pb-8">
@@ -86,7 +92,11 @@ export const UserMessage = memo(function UserMessage({
           className="flex items-center gap-1 pt-1.5 pr-1 label-micro text-basic-tertiary"
           title="Skill content was expanded into the prompt sent to the agent"
         >
-          <Icon iconName={IconName.Bolt} size={12} color="var(--color-fill-basic-tertiary)" />
+          <Icon
+            iconName={IconName.Bolt}
+            size={12}
+            color="var(--color-fill-basic-tertiary)"
+          />
           <span>
             {invokedSkills.length === 1 ? "Skill" : "Skills"} expanded:{" "}
             {invokedSkills.map((name) => `$${name}`).join(", ")}
@@ -112,55 +122,40 @@ export const UserMessage = memo(function UserMessage({
             </span>
           ) : null}
 
-          {canRefresh ? (
-            <Tooltip title="Resend" position={TooltipPosition.BottomLeft}>
-              <Button
-                size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                content={ButtonContent.Icon}
-                aria-label="Resend"
-                disabled={actionsDisabled}
-                onClick={() => onRefresh(messageIndex)}
-                className="md:!h-4 md:!min-h-4 md:!p-0"
-              >
-                <Icon iconName={IconName.Refresh} size={16} />
-              </Button>
-            </Tooltip>
+          {showResend ? (
+            <MessageActionIcon
+              title="Resend"
+              disabled={actionLocked || messageIndex == null}
+              disabledReason={lockHint}
+              position={TooltipPosition.BottomLeft}
+              isMobile={isMobile}
+              onClick={
+                messageIndex != null && onRefresh
+                  ? () => onRefresh(messageIndex)
+                  : undefined
+              }
+            >
+              <Icon iconName={IconName.Refresh} size={16} />
+            </MessageActionIcon>
           ) : null}
 
-          {canRevert ? (
-            <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomLeft}>
-              <Button
-                size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                content={ButtonContent.Icon}
-                aria-label="Revert to this snapshot"
-                disabled={actionsDisabled}
-                onClick={() => onRevert(messageIndex, text)}
-                className="md:!h-4 md:!min-h-4 md:!p-0"
-              >
-                <Icon iconName={IconName.TurnLeft} size={16} />
-              </Button>
-            </Tooltip>
-          ) : readOnly ? null : (
-            <Tooltip
-              title="This message is not in the transcript yet"
-              position={TooltipPosition.BottomLeft}
-            >
-              <span className="inline-flex">
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                  content={ButtonContent.Icon}
-                  aria-label="Revert to this snapshot"
-                  disabled
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.TurnLeft} size={16} />
-                </Button>
-              </span>
-            </Tooltip>
-          )}
+          <MessageActionIcon
+            title="Revert to this snapshot"
+            disabled={actionLocked || !canRevert}
+            disabledReason={
+              lockHint ??
+              (canRevert ? null : "This message is not in the transcript yet")
+            }
+            position={TooltipPosition.BottomLeft}
+            isMobile={isMobile}
+            onClick={
+              onRevert != null && messageIndex != null
+                ? () => onRevert(messageIndex, text)
+                : undefined
+            }
+          >
+            <Icon iconName={IconName.TurnLeft} size={16} />
+          </MessageActionIcon>
 
           <CopyButton
             value={text}

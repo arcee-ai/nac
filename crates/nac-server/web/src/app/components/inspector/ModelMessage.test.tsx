@@ -22,7 +22,12 @@ describe("transcript topology badge navigation", () => {
       durationMs: 25,
       messageIndex: 1,
       blocks: [
-        { kind: "workset", key: "workset-1", worksetId: "release", pending: false },
+        {
+          kind: "workset",
+          key: "workset-1",
+          worksetId: "release",
+          pending: false,
+        },
         {
           kind: "wave",
           key: "wave-1",
@@ -88,11 +93,13 @@ describe("transcript topology badge navigation", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Continue in Orchestrator" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue in Orchestrator" }),
+    );
     expect(onContinue).toHaveBeenCalledWith(2);
   });
 
-  it("keeps parent-owned transcripts free of mutation affordances", () => {
+  it("keeps parent-owned mutation actions visible and disabled", () => {
     const turn: ModelTurn = {
       kind: "model",
       key: "model-1",
@@ -129,11 +136,29 @@ describe("transcript topology badge navigation", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Create fork" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Continue in Orchestrator" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Resend" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Revert to this snapshot" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Create fork" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Continue in Orchestrator" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
     expect(screen.queryByText("Forked chat")).toBeNull();
-    expect(screen.getByRole("button", { name: "Copy message" })).not.toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "Copy message" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
   });
 });

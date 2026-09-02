@@ -10,7 +10,7 @@ vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => false }));
 afterEach(cleanup);
 
 describe("UserMessage", () => {
-  it("keeps parent-owned transcripts free of mutation affordances", () => {
+  it("keeps parent-owned mutation actions visible and disabled", () => {
     render(
       <UserMessage
         text="Delegated prompt"
@@ -21,8 +21,18 @@ describe("UserMessage", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Copy message" })).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Resend" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Revert to this snapshot" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Copy message" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
   });
 });

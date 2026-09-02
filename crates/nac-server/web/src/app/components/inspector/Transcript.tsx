@@ -25,6 +25,7 @@ import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
+import { useLiveActionFollow } from "@/app/hooks/useLiveActionFollow";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
@@ -32,11 +33,17 @@ import { cn } from "@/app/lib/cn";
 import {
   assignmentIsOpen,
   actionsPanel,
+  DELEGATED_READONLY_HINT,
+  FROZEN_DELEGATED_TURN_HINT,
   isAgentBehavior,
   sessionTypeFromBehavior,
 } from "@/app/lib/sessionBehavior";
 import { RevertModal } from "@/app/components/modals/RevertModal";
-import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
+import {
+  displayPromptFromMessageText,
+  formatStoreTime,
+  invokedSkillNames,
+} from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import { routes, type SessionPanel } from "@/app/lib/routes";
@@ -59,6 +66,7 @@ import {
   useWorkspaceRevisions,
 } from "@/app/services/queries";
 import {
+  lockLiveActionFollow,
   selectAgentSegment,
   selectFile,
   selectRevision,
@@ -101,7 +109,11 @@ interface TranscriptProps {
   errorNotice?: ErrorNotice | null;
 }
 
-export function TranscriptRecoveryNotice({ warning }: { warning?: string | null }) {
+export function TranscriptRecoveryNotice({
+  warning,
+}: {
+  warning?: string | null;
+}) {
   if (!warning) return null;
   return (
     <ChatSessionMessage
@@ -164,6 +176,8 @@ export function Transcript({
   const selectedWorkset = useSelectedWorkset();
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
+  const liveRunId = snapshot?.active_run?.run_id ?? null;
+  useLiveActionFollow(liveRunId);
   const toast = useToast();
   const navigate = useNavigate();
   const backend = snapshot?.metadata.backend ?? null;
@@ -178,12 +192,13 @@ export function Transcript({
   const dismissFork = useDismissSessionFork();
   const olderMessages = useLoadOlderMessages(sessionId);
   const { data: revisions } = useWorkspaceRevisions(sessionId);
-  const { scrollRef, contentRef, showJumpButton, jumpToLatest, followLatest } = useStickToBottom({
-    resetKey: sessionId,
-    // Intentionally not keyed on running / active_run / message count: those
-    // used to instant-snap on Send and bounce on Stop. Growth/shrink observers
-    // keep the bottom edge; followLatest(300) covers the send glide.
-  });
+  const { scrollRef, contentRef, showJumpButton, jumpToLatest, followLatest } =
+    useStickToBottom({
+      resetKey: sessionId,
+      // Intentionally not keyed on running / active_run / message count: those
+      // used to instant-snap on Send and bounce on Stop. Growth/shrink observers
+      // keep the bottom edge; followLatest(300) covers the send glide.
+    });
   const prependAnchor = useRef<{ height: number; top: number } | null>(null);
   const hadPending = useRef(false);
   const sendFollowReady = useRef(false);
@@ -223,13 +238,20 @@ export function Transcript({
   const snapshotTurns = useMemo(
     () =>
       perfTime("buildTranscript", () =>
-        buildTranscript(snapshot, liveThreads, finishedToolCalls, primaryToolEvents),
+        buildTranscript(
+          snapshot,
+          liveThreads,
+          finishedToolCalls,
+          primaryToolEvents,
+        ),
       ),
     [snapshot, liveThreads, finishedToolCalls, primaryToolEvents],
   );
   // Prefer the live active_run copy; fall back to the optimistic prompt set at
   // Send so the bubble is already above the model pill before the round-trip.
-  const submitted = running ? snapshot?.active_run?.submitted_user_message : undefined;
+  const submitted = running
+    ? snapshot?.active_run?.submitted_user_message
+    : undefined;
   const pendingText = submitted
     ? displayPromptFromMessageText(submitted.content)
     : (optimisticPrompt ?? "");
@@ -240,7 +262,9 @@ export function Transcript({
   // kind: everything the run produces lands after the prompt it answers, so
   // once that prompt is in the snapshot the copy is a duplicate no matter how
   // many model turns have piled up on top of it.
-  const showPending = Boolean(pendingText && lastUserText(snapshotTurns) !== pendingText);
+  const showPending = Boolean(
+    pendingText && lastUserText(snapshotTurns) !== pendingText,
+  );
   useLayoutEffect(() => {
     hadPending.current = false;
     sendFollowReady.current = false;
@@ -268,7 +292,8 @@ export function Transcript({
   // A stream that had to open a turn of its own is answering a prompt the
   // snapshot has not caught up with, so the optimistic bubble moves into the
   // list with it instead of being rendered under the whole thing.
-  const streamingTurn = showPending && turns[turns.length - 1]?.key === STREAMING_TURN_KEY;
+  const streamingTurn =
+    showPending && turns[turns.length - 1]?.key === STREAMING_TURN_KEY;
   perfMark("transcript:turns", {
     fields: { turns: turns.length, streamChars: streamText.length },
     throttleMs: 1000,
@@ -306,10 +331,19 @@ export function Transcript({
             id: sessionId,
             messageIdx,
           });
-          pushLocalEvent("run", `▶ resent: ${response.display_prompt.slice(0, 80)}`);
+          pushLocalEvent(
+            "run",
+            `▶ resent: ${response.display_prompt.slice(0, 80)}`,
+          );
         } catch (err) {
-          pushLocalEvent("error", `resend failed: ${errorMessage(toRunError(err))}`, true);
-          toast.error(`Failed to resend: ${humanErrorText(toRunError(err), backend)}`);
+          pushLocalEvent(
+            "error",
+            `resend failed: ${errorMessage(toRunError(err))}`,
+            true,
+          );
+          toast.error(
+            `Failed to resend: ${humanErrorText(toRunError(err), backend)}`,
+          );
         }
       })();
     },
@@ -335,11 +369,21 @@ export function Transcript({
           });
           navigate(routes.session(response.session_id));
         } catch (err) {
-          toast.error(`Failed to continue: ${humanErrorText(toRunError(err), backend)}`);
+          toast.error(
+            `Failed to continue: ${humanErrorText(toRunError(err), backend)}`,
+          );
         }
       })();
     },
-    [actionsBusy, backend, continueInOther, continueTargetBehavior, navigate, sessionId, toast],
+    [
+      actionsBusy,
+      backend,
+      continueInOther,
+      continueTargetBehavior,
+      navigate,
+      sessionId,
+      toast,
+    ],
   );
 
   const fork = forkSession.mutateAsync;
@@ -351,7 +395,9 @@ export function Transcript({
           const response = await fork({ id: sessionId, messageIdx });
           navigate(routes.session(response.session_id));
         } catch (err) {
-          toast.error(`Failed to create fork: ${humanErrorText(toRunError(err), backend)}`);
+          toast.error(
+            `Failed to create fork: ${humanErrorText(toRunError(err), backend)}`,
+          );
         }
       })();
     },
@@ -372,7 +418,9 @@ export function Transcript({
         { id: sessionId, forkId },
         {
           onError: (err) => {
-            toast.error(`Failed to dismiss fork: ${humanErrorText(toRunError(err), backend)}`);
+            toast.error(
+              `Failed to dismiss fork: ${humanErrorText(toRunError(err), backend)}`,
+            );
           },
         },
       );
@@ -395,7 +443,10 @@ export function Transcript({
   const readOnly = assignmentOpen;
   // A revision is captured per finished run, so each model turn carries what
   // its own run changed instead of one running total for the whole checkout.
-  const turnRevisions = useMemo(() => revisionsByTurn(turns, revisions), [turns, revisions]);
+  const turnRevisions = useMemo(
+    () => revisionsByTurn(turns, revisions),
+    [turns, revisions],
+  );
 
   useEffect(() => {
     if (!showPending && optimisticPrompt) {
@@ -411,31 +462,36 @@ export function Transcript({
   // stream opened, so Send glided twice (user bubble, then the min-height hop).
   const lastTurn = turns[turns.length - 1];
   const liveTurn =
-    running && lastTurn?.kind === "model" && (!showPending || lastTurn.key === STREAMING_TURN_KEY);
+    running &&
+    lastTurn?.kind === "model" &&
+    (!showPending || lastTurn.key === STREAMING_TURN_KEY);
   // Keep the avatar under the optimistic bubble too; otherwise it only appears
   // when `running` flips and the layout jumps.
   const showModelPending = (running || showPending) && !liveTurn;
 
   const focusThread = useCallback(
     (name: string, episodeKey: string) => {
+      lockLiveActionFollow(liveRunId);
       selectThread(name, episodeKey);
       onFocusPanel("threads");
     },
-    [onFocusPanel],
+    [liveRunId, onFocusPanel],
   );
   const focusWorkset = useCallback(
     (id: string) => {
+      lockLiveActionFollow(liveRunId);
       selectWorkset(id);
       onFocusPanel("worksets");
     },
-    [onFocusPanel],
+    [liveRunId, onFocusPanel],
   );
   const focusAgentSegment = useCallback(
     (id: string) => {
+      lockLiveActionFollow(liveRunId);
       selectAgentSegment(id);
       onFocusPanel(actionsPanel(snapshot?.metadata.behavior));
     },
-    [onFocusPanel, snapshot?.metadata.behavior],
+    [liveRunId, onFocusPanel, snapshot?.metadata.behavior],
   );
   // Opening a snapshot points the panel at that run's revision rather than at
   // the working tree: the run is what the badge describes, and the tree has
@@ -466,7 +522,14 @@ export function Transcript({
       onOpenFile: focusRevisionFile,
       onOpenPanel: focusRevision,
     }),
-    [sessionId, panel, selectedFile, selectedRevision, focusRevisionFile, focusRevision],
+    [
+      sessionId,
+      panel,
+      selectedFile,
+      selectedRevision,
+      focusRevisionFile,
+      focusRevision,
+    ],
   );
 
   // A session nobody has written to yet offers starter prompts in place of the
@@ -474,16 +537,23 @@ export function Transcript({
   // Emptiness is measured in turns rather than in the message page: every
   // session opens with a system prompt, which the page counts and the
   // transcript does not show.
-  const showInitialPrompts = Boolean(snapshot && turns.length === 0 && !running && !showPending);
+  const showInitialPrompts = Boolean(
+    snapshot && turns.length === 0 && !running && !showPending,
+  );
 
   const runError = error && !running ? error : null;
   // Prefer the session notice when both fire; a broken config already explains
   // why the run could not continue.
-  const notice = errorNotice ?? (runError && !authErrorSuppressed ? toNotice(runError) : null);
+  const notice =
+    errorNotice ??
+    (runError && !authErrorSuppressed ? toNotice(runError) : null);
 
   // Nothing is worth revealing before the snapshot lands, unless the reason it
   // never will is the notice standing in its place.
-  const revealed = useTranscriptReveal(sessionId, Boolean(snapshot) || errorNotice !== null);
+  const revealed = useTranscriptReveal(
+    sessionId,
+    Boolean(snapshot) || errorNotice !== null,
+  );
   // A load ends in a fade; a reveal that only turns the loader off would flash
   // the gap between the two. Sliding the whole tree in and out of view on the
   // same duration crossfades them instead.
@@ -528,7 +598,14 @@ export function Transcript({
           </div>
         </div>
       ) : null}
-      <div ref={scrollRef} className={cn("h-full overflow-auto", fade, !revealed && "invisible")}>
+      <div
+        ref={scrollRef}
+        className={cn(
+          "h-full overflow-auto [overflow-anchor:none]",
+          fade,
+          !revealed && "invisible",
+        )}
+      >
         {/* The phone has the fixed top bar over this scroll region, so its
             first message has to clear it. Wider layouts put the tab strip
             between the two, and only need breathing room under it. */}
@@ -553,7 +630,10 @@ export function Transcript({
                 {olderMessages.isPending ? "Loading…" : "Load older"}
               </Button>
               {olderMessages.isError ? (
-                <div role="alert" className="flex items-center gap-2 text-basic-muted label-small">
+                <div
+                  role="alert"
+                  className="flex items-center gap-2 text-basic-muted label-small"
+                >
                   <span>Couldn’t load older messages.</span>
                   <Button
                     variant={ButtonVariant.Ghost}
@@ -575,18 +655,29 @@ export function Transcript({
               }
               if (turn.kind === "user") {
                 const taskFrozen =
-                  turn.messageIndex != null && turn.messageIndex < frozenMessageCount;
+                  turn.messageIndex != null &&
+                  turn.messageIndex < frozenMessageCount;
                 const mutateLocked = readOnly || taskFrozen;
+                const mutateLockReason = readOnly
+                  ? DELEGATED_READONLY_HINT
+                  : taskFrozen
+                    ? FROZEN_DELEGATED_TURN_HINT
+                    : null;
                 return (
                   <UserMessage
                     key={turn.key}
                     text={turn.text}
                     invokedSkills={turn.invokedSkills}
-                    timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
+                    timestamp={
+                      turn.createdAt ? formatStoreTime(turn.createdAt) : null
+                    }
                     messageIndex={turn.messageIndex}
                     actionsDisabled={actionsBusy}
                     readOnly={mutateLocked}
-                    onRefresh={!mutateLocked && refreshIndex === index ? resend : null}
+                    readOnlyReason={mutateLockReason}
+                    onRefresh={
+                      !mutateLocked && refreshIndex === index ? resend : null
+                    }
                     onRevert={mutateLocked ? null : openRevert}
                   />
                 );
@@ -595,7 +686,10 @@ export function Transcript({
               // Resend / revert on a model turn address the user prompt it
               // answered — same messageIdx as the bubble above.
               let precedingUserIndex: number | null = null;
-              let precedingUser: Extract<TranscriptTurn, { kind: "user" }> | null = null;
+              let precedingUser: Extract<
+                TranscriptTurn,
+                { kind: "user" }
+              > | null = null;
               for (let prior = index - 1; prior >= 0; prior -= 1) {
                 const candidate = turns[prior];
                 if (candidate?.kind === "delegated-completion") break;
@@ -607,11 +701,17 @@ export function Transcript({
               }
 
               const lastIsThisRun =
-                index === turns.length - 1 && !(showPending && turn.key !== STREAMING_TURN_KEY);
+                index === turns.length - 1 &&
+                !(showPending && turn.key !== STREAMING_TURN_KEY);
               const taskFrozen =
                 precedingUser?.messageIndex != null &&
                 precedingUser.messageIndex < frozenMessageCount;
               const mutateLocked = readOnly || taskFrozen;
+              const mutateLockReason = readOnly
+                ? DELEGATED_READONLY_HINT
+                : taskFrozen
+                  ? FROZEN_DELEGATED_TURN_HINT
+                  : null;
               const row = (
                 <ModelMessage
                   key={running && lastIsThisRun ? STREAMING_TURN_KEY : turn.key}
@@ -624,10 +724,16 @@ export function Transcript({
                   // made Send shrink-then-grow a frame later.
                   isLast={lastIsThisRun && !showModelPending}
                   activity={running && lastIsThisRun ? activity : undefined}
-                  selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
-                  selectedWorkset={panel === "worksets" ? selectedWorkset : null}
+                  selectedThreadEpisode={
+                    panel === "threads" ? selectedThreadEpisode : null
+                  }
+                  selectedWorkset={
+                    panel === "worksets" ? selectedWorkset : null
+                  }
                   selectedAgentSegment={
-                    panel === "actions" || panel === "threads" ? selectedAgentSegment : null
+                    panel === "actions" || panel === "threads"
+                      ? selectedAgentSegment
+                      : null
                   }
                   onSelectThread={focusThread}
                   onSelectWorkset={focusWorkset}
@@ -636,6 +742,7 @@ export function Transcript({
                   userText={precedingUser?.text}
                   actionsDisabled={actionsBusy}
                   readOnly={mutateLocked}
+                  readOnlyReason={mutateLockReason}
                   onRefresh={
                     !mutateLocked &&
                     precedingUserIndex != null &&
@@ -651,7 +758,8 @@ export function Transcript({
                     readOnly
                       ? []
                       : (snapshot?.forks ?? []).filter(
-                          (entry) => entry.source_message_idx === turn.messageIndex,
+                          (entry) =>
+                            entry.source_message_idx === turn.messageIndex,
                         )
                   }
                   onOpenFork={openFork}
@@ -671,7 +779,11 @@ export function Transcript({
               // above the answer to it rather than after it.
               return streamingTurn && turn.key === STREAMING_TURN_KEY ? (
                 <Fragment key={turn.key}>
-                  <UserMessage text={pendingText} invokedSkills={pendingSkills} pending />
+                  <UserMessage
+                    text={pendingText}
+                    invokedSkills={pendingSkills}
+                    pending
+                  />
                   {row}
                 </Fragment>
               ) : (
@@ -681,7 +793,11 @@ export function Transcript({
           </PerfProfiler>
 
           {showPending && !streamingTurn ? (
-            <UserMessage text={pendingText} invokedSkills={pendingSkills} pending />
+            <UserMessage
+              text={pendingText}
+              invokedSkills={pendingSkills}
+              pending
+            />
           ) : null}
 
           {/* Before the first assistant message or stream delta lands, keep the
@@ -701,10 +817,14 @@ export function Transcript({
               sessionType={sessionType}
               active
               isLast
-              selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
+              selectedThreadEpisode={
+                panel === "threads" ? selectedThreadEpisode : null
+              }
               selectedWorkset={panel === "worksets" ? selectedWorkset : null}
               selectedAgentSegment={
-                panel === "actions" || panel === "threads" ? selectedAgentSegment : null
+                panel === "actions" || panel === "threads"
+                  ? selectedAgentSegment
+                  : null
               }
               onSelectThread={focusThread}
               onSelectWorkset={focusWorkset}
@@ -723,7 +843,9 @@ export function Transcript({
             </ChatSessionMessage>
           ) : null}
 
-          <TranscriptRecoveryNotice warning={snapshot?.transcript_recovery_warning} />
+          <TranscriptRecoveryNotice
+            warning={snapshot?.transcript_recovery_warning}
+          />
         </div>
       </div>
 

@@ -24,21 +24,27 @@ import {
 } from "@/app/atoms";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { usePagedRows } from "@/app/hooks/usePagedRows";
+import { useLiveActionFollow } from "@/app/hooks/useLiveActionFollow";
 import { SegmentDetailList } from "@/app/components/inspector/agent-segments/SegmentDetailList";
 import { ChildTranscriptPreview } from "@/app/components/inspector/ChildTranscriptPreview";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
 import {
-  ActionFilterBar,
   ActionItemList,
+  ActionListEmpty,
   ActionTurnHeader,
+  actionFilterEmptyCopy,
 } from "@/app/components/inspector/ActionList";
-import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
+import {
+  PanelEmpty,
+  PanelLoading,
+  PanelRow,
+  PanelSplit,
+} from "@/app/components/inspector/PanelSplit";
 import { TaskButton, TaskPill } from "@/app/components/inspector/TaskPreview";
 import { cn } from "@/app/lib/cn";
-import type { ActionFilter, ActionItem } from "@/app/lib/actionsTimeline";
+import type { ActionItem } from "@/app/lib/actionsTimeline";
 import {
   buildActionTimeline,
-  filterActionTimeline,
   flattenActionItems,
   liveTurnOriginKey,
 } from "@/app/lib/actionsTimeline";
@@ -46,7 +52,11 @@ import type { AgentToolsGroup } from "@/app/lib/agentSegments";
 import { groupIsSpawn } from "@/app/lib/spawnSession";
 import { Markdown } from "@/app/lib/markdown";
 import { SESSION_PANEL_LABEL } from "@/app/lib/routes";
-import { STICK_TOLERANCE_PX, distanceFromBottom, scrollToBottomInstantly } from "@/app/lib/scroll";
+import {
+  STICK_TOLERANCE_PX,
+  distanceFromBottom,
+  scrollToBottomInstantly,
+} from "@/app/lib/scroll";
 import {
   groupThreadLog,
   mergeThreadLog,
@@ -67,7 +77,6 @@ import {
   withStreamedOutput,
 } from "@/app/lib/transcript";
 import { useThreadEventPages } from "@/app/services/queries";
-import { useActionFilter } from "@/app/store/actionFilterStore";
 import {
   useFinishedToolCalls,
   useLiveThreads,
@@ -77,7 +86,14 @@ import {
   useStreamText,
   type RuntimeThread,
 } from "@/app/store/runtimeStore";
-import { selectWorkset, setSelectedThreadRunning, useSelectedWorkset } from "@/app/store/sessionLayoutStore";
+import {
+  lockLiveActionFollow,
+  selectAgentSegment,
+  selectThread,
+  selectWorkset,
+  setSelectedThreadRunning,
+  useSelectedWorkset,
+} from "@/app/store/sessionLayoutStore";
 import type {
   AgentEvent,
   EpisodeSnapshot,
@@ -200,7 +216,11 @@ const ToolCallView = memo(function ToolCallView({
         // rather than as urgent — a "File not found" is a plain fact about the
         // path in it.
         <p className="pl-4 pt-0.5 code code-small whitespace-pre-wrap break-words text-basic-tertiary">
-          <span className={entry.isError ? "text-error-primary" : "text-success-primary"}>
+          <span
+            className={
+              entry.isError ? "text-error-primary" : "text-success-primary"
+            }
+          >
             {`${entry.isError ? "✕" : "✓"} `}
           </span>
           {entry.resultPreview}
@@ -213,15 +233,25 @@ const ToolCallView = memo(function ToolCallView({
 /**
  * A line the worker printed that is not a tool call — its plain log output.
  */
-const StandaloneView = memo(function StandaloneView({ entry }: { entry: StandaloneLine }) {
+const StandaloneView = memo(function StandaloneView({
+  entry,
+}: {
+  entry: StandaloneLine;
+}) {
   return (
     <p className="pt-1 code code-small whitespace-pre-wrap break-words text-basic-tertiary">
       {entry.mark ? (
-        <span className={entry.isError ? "text-error-primary" : "text-success-primary"}>
+        <span
+          className={
+            entry.isError ? "text-error-primary" : "text-success-primary"
+          }
+        >
           {`${entry.mark} `}
         </span>
       ) : null}
-      {entry.name ? <span className="text-basic-primary">{`${entry.name}: `}</span> : null}
+      {entry.name ? (
+        <span className="text-basic-primary">{`${entry.name}: `}</span>
+      ) : null}
       {entry.body}
     </p>
   );
@@ -238,7 +268,8 @@ const LogEntryView = memo(function LogEntryView({
   entry: LogEntry;
   running: boolean;
 }) {
-  if (entry.kind === "tool_call") return <ToolCallView entry={entry} running={running} />;
+  if (entry.kind === "tool_call")
+    return <ToolCallView entry={entry} running={running} />;
   return <StandaloneView entry={entry} />;
 });
 
@@ -259,7 +290,13 @@ const FAILED_EPISODE_BADGE: FailedEpisodeBadgeMap = {
  * the prompt is already one click away under the panel's own Task control.
  * Each tab owns its open state so several can be read at once.
  */
-function EpisodeTab({ episode, index }: { episode: EpisodeSnapshot; index: number }) {
+function EpisodeTab({
+  episode,
+  index,
+}: {
+  episode: EpisodeSnapshot;
+  index: number;
+}) {
   const [expanded, setExpanded] = useState(false);
   const isMobile = useIsMobile();
   const failure = FAILED_EPISODE_BADGE[episode.status];
@@ -280,12 +317,20 @@ function EpisodeTab({ episode, index }: { episode: EpisodeSnapshot; index: numbe
         <span className={`shrink-0 ${labelClass} text-basic-primary`}>
           {`Episode ${index + 1}`}
         </span>
-        {failure ? <Badge text={failure.label} color={failure.color} className="shrink-0" /> : null}
+        {failure ? (
+          <Badge
+            text={failure.label}
+            color={failure.color}
+            className="shrink-0"
+          />
+        ) : null}
       </button>
       <DropdownContent isOpen={expanded} className="w-full">
         <div className="flex flex-col pl-1 pr-1 md:pl-3 md:pr-2 pt-2 pb-6">
           {episode.content.trim() ? (
-            <Markdown className="text-basic-primary">{episode.content}</Markdown>
+            <Markdown className="text-basic-primary">
+              {episode.content}
+            </Markdown>
           ) : (
             <p className="label-small text-basic-muted">
               {failure
@@ -349,7 +394,9 @@ function LogScroller({
       <div className="pb-[128px] md:pb-4">
         {entries.map((entry) => (
           <LogEntryView
-            key={entry.kind === "tool_call" ? `call-${entry.callId}` : entry.key}
+            key={
+              entry.kind === "tool_call" ? `call-${entry.callId}` : entry.key
+            }
             entry={entry}
             running={running}
           />
@@ -366,7 +413,9 @@ function LogScroller({
           </div>
         ) : null}
         {!entries.length && !running && !loading ? (
-          <p className="pt-4 code code-small text-basic-muted">No commands recorded.</p>
+          <p className="pt-4 code code-small text-basic-muted">
+            No commands recorded.
+          </p>
         ) : null}
       </div>
     </div>
@@ -403,9 +452,14 @@ function LogPane({
   const scrollRef = useRef<HTMLDivElement>(null);
   const stuckRef = useRef(true);
   const entries = useMemo(() => groupThreadLog(lines), [lines]);
-  const thinking = useMemo(() => threadIsThinking(running, lines), [running, lines]);
+  const thinking = useMemo(
+    () => threadIsThinking(running, lines),
+    [running, lines],
+  );
   const firstEntryKey =
-    entries[0]?.kind === "tool_call" ? `call-${entries[0].callId}` : (entries[0]?.key ?? null);
+    entries[0]?.kind === "tool_call"
+      ? `call-${entries[0].callId}`
+      : (entries[0]?.key ?? null);
 
   useLayoutEffect(() => {
     const anchor = prependAnchor.current;
@@ -471,7 +525,9 @@ function LogPane({
             ) : null}
             {historyError ? (
               <>
-                <span className="text-micro text-error-primary">{historyError}</span>
+                <span className="text-micro text-error-primary">
+                  {historyError}
+                </span>
                 <Button
                   size={ButtonSize.Small}
                   variant={ButtonVariant.Ghost}
@@ -513,7 +569,12 @@ function Episodes({
     );
   }
   return (
-    <div className={cn("flex flex-col flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0", className)}>
+    <div
+      className={cn(
+        "flex flex-col flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0",
+        className,
+      )}
+    >
       <div className="pb-[128px] md:pb-4 flex flex-col">
         {episodes.map((episode, index) => (
           <div key={episode.id} className="flex flex-col">
@@ -563,7 +624,9 @@ function ViewPills({
           <Button
             className="w-full"
             size={ButtonSize.Medium}
-            variant={view === name ? ButtonVariant.Primary : ButtonVariant.Secondary}
+            variant={
+              view === name ? ButtonVariant.Primary : ButtonVariant.Secondary
+            }
             aria-pressed={view === name}
             onClick={() => onChange(name)}
           >
@@ -598,7 +661,9 @@ function ViewSwitcher({
         <Button
           key={name}
           size={ButtonSize.Small}
-          variant={view === name ? ButtonVariant.Primary : ButtonVariant.Secondary}
+          variant={
+            view === name ? ButtonVariant.Primary : ButtonVariant.Secondary
+          }
           className="!rounded-full"
           aria-pressed={view === name}
           onClick={() => onChange(name)}
@@ -672,7 +737,10 @@ function Detail({
 }) {
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
-  const log = useMemo(() => mergeThreadLog(persistedThreadLog(events), liveLog), [events, liveLog]);
+  const log = useMemo(
+    () => mergeThreadLog(persistedThreadLog(events), liveLog),
+    [events, liveLog],
+  );
 
   // The floating phone pills sit over the top of this column, so the body has
   // to clear them.
@@ -699,7 +767,9 @@ function Detail({
     return (
       <div className="relative flex flex-col flex-1 min-h-0 min-w-0">
         {body}
-        {isMobile ? <ViewPills view={view} action={action} onChange={onViewChange} /> : null}
+        {isMobile ? (
+          <ViewPills view={view} action={action} onChange={onViewChange} />
+        ) : null}
       </div>
     );
   }
@@ -719,17 +789,19 @@ function Detail({
             </span>
             {action ? <TaskButton action={action} /> : null}
           </div>
-          <span className="code code-micro text-basic-muted truncate">{thread.updated_at}</span>
+          <span className="code code-micro text-basic-muted truncate">
+            {thread.updated_at}
+          </span>
         </div>
         <ViewSwitcher view={view} onChange={onViewChange} />
-        <span className="shrink-0 text-micro text-basic-muted">{episodes.length} ep</span>
+        <span className="shrink-0 text-micro text-basic-muted">
+          {episodes.length} ep
+        </span>
       </div>
       {body}
     </div>
   );
 }
-
-const ORCHESTRATOR_FILTERS: readonly ActionFilter[] = ["all", "threads", "tools", "worksets"];
 
 function extraThreadItem(
   thread: ThreadSnapshot,
@@ -748,12 +820,13 @@ function extraThreadItem(
 }
 
 /**
- * Retained workstreams, thoughts, and workset tools for an Orchestrator
- * session. Thread command logs stay on the detail pane; reasoning and other
- * tools use the same segment list as Agent.
+ * Orchestrator Actions timeline (all rows) and the Threads list tab.
+ * Thread command logs stay on the detail pane; reasoning and other tools use
+ * the same segment list as Agent.
  */
 export function ThreadsView({
   snapshot,
+  scope = "timeline",
   selected,
   selectedEpisode = null,
   selectedGroup = null,
@@ -761,6 +834,8 @@ export function ThreadsView({
   onSelectGroup,
 }: {
   snapshot: SessionSnapshotResponse | null;
+  /** Timeline is the Actions tab; threads is the plain worker list. */
+  scope?: "timeline" | "threads";
   /** Thread the chat pointed at, if any. */
   selected: string | null;
   selectedEpisode?: string | null;
@@ -776,12 +851,20 @@ export function ThreadsView({
   const streamReasoning = useStreamReasoning();
   const selectedWorkset = useSelectedWorkset();
   const [view, setView] = useState<ThreadDetailView>("log");
-  const [filter, setFilter] = useActionFilter("orchestrator", ORCHESTRATOR_FILTERS);
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
   const activeThreads = snapshot?.active_threads;
   const sessionId = snapshot?.metadata.session_id ?? "";
-  const waveRank = useMemo(() => waveRankByName(snapshot?.messages), [snapshot?.messages]);
-  const actions = useMemo(() => dispatchActions(snapshot?.messages ?? []), [snapshot?.messages]);
+  const runId = snapshot?.active_run?.run_id ?? null;
+  const liveFollowing = useLiveActionFollow(runId);
+  const following = scope === "timeline" && liveFollowing;
+  const waveRank = useMemo(
+    () => waveRankByName(snapshot?.messages),
+    [snapshot?.messages],
+  );
+  const actions = useMemo(
+    () => dispatchActions(snapshot?.messages ?? []),
+    [snapshot?.messages],
+  );
   const cancelledNames = useMemo(
     () => cancelledThreadNames(snapshot?.messages ?? []),
     [snapshot?.messages],
@@ -805,7 +888,8 @@ export function ThreadsView({
   // Switching tabs resets live thread state before SSE catches up. Until then
   // every `active_threads` name would look pending and the detail pane would
   // claim nothing is selected even though the list already has rows.
-  const streamSettling = streamStatus === "connecting" || streamStatus === "reconnecting";
+  const streamSettling =
+    streamStatus === "connecting" || streamStatus === "reconnecting";
 
   // Backend pre-marks every name in a DAG batch as active. Only
   // `thread_started` means the worker is actually running; the rest are
@@ -866,7 +950,10 @@ export function ThreadsView({
         extras.add(name);
       }
     }
-    const rows = [...threads, ...[...extras].map((name) => pendingThread(name, sessionId))];
+    const rows = [
+      ...threads,
+      ...[...extras].map((name) => pendingThread(name, sessionId)),
+    ];
     const kindOf = (name: string): ListKind => {
       if (pendingNames.has(name)) return "pending";
       if (runningNames.has(name)) return "running";
@@ -874,9 +961,11 @@ export function ThreadsView({
     };
     // Stable sort: later DAG waves (and pending) float up; done sinks.
     return rows.sort((a, b) => {
-      const kindDiff = LIST_KIND_ORDER[kindOf(a.name)] - LIST_KIND_ORDER[kindOf(b.name)];
+      const kindDiff =
+        LIST_KIND_ORDER[kindOf(a.name)] - LIST_KIND_ORDER[kindOf(b.name)];
       if (kindDiff !== 0) return kindDiff;
-      const rankDiff = (waveRank.get(b.name) ?? -1) - (waveRank.get(a.name) ?? -1);
+      const rankDiff =
+        (waveRank.get(b.name) ?? -1) - (waveRank.get(a.name) ?? -1);
       if (rankDiff !== 0) return rankDiff;
       return 0;
     });
@@ -894,13 +983,28 @@ export function ThreadsView({
 
   const sections = useMemo(() => {
     const turns = withStreamedOutput(
-      buildTranscript(snapshot, liveThreads, finishedToolCalls, primaryToolEvents),
+      buildTranscript(
+        snapshot,
+        liveThreads,
+        finishedToolCalls,
+        primaryToolEvents,
+      ),
       { text: streamText, reasoning: streamReasoning },
     );
-    const live = Boolean(snapshot?.active_run) || Boolean(streamText) || Boolean(streamReasoning);
+    const live =
+      Boolean(snapshot?.active_run) ||
+      Boolean(streamText) ||
+      Boolean(streamReasoning);
     return buildActionTimeline(turns, liveTurnOriginKey(turns, live));
-  }, [snapshot, liveThreads, finishedToolCalls, primaryToolEvents, streamText, streamReasoning]);
-  const visibleSections = useMemo(() => filterActionTimeline(sections, filter), [sections, filter]);
+  }, [
+    snapshot,
+    liveThreads,
+    finishedToolCalls,
+    primaryToolEvents,
+    streamText,
+    streamReasoning,
+  ]);
+  const visibleSections = sections;
   const timelineThreadNames = useMemo(() => {
     const names = new Set<string>();
     for (const item of flattenActionItems(sections)) {
@@ -909,7 +1013,7 @@ export function ThreadsView({
     return names;
   }, [sections]);
   const extraItems = useMemo(() => {
-    if (filter === "tools" || filter === "worksets") return [];
+    if (scope === "threads") return [];
     return ordered
       .filter((thread) => !timelineThreadNames.has(thread.name))
       .map((thread) =>
@@ -923,7 +1027,14 @@ export function ThreadsView({
           actions[thread.name] || thread.latest_action || "",
         ),
       );
-  }, [filter, ordered, timelineThreadNames, pendingNames, runningNames, actions]);
+  }, [
+    scope,
+    ordered,
+    timelineThreadNames,
+    pendingNames,
+    runningNames,
+    actions,
+  ]);
   const listSections = useMemo(() => {
     if (extraItems.length === 0) return visibleSections;
     return [
@@ -937,58 +1048,150 @@ export function ThreadsView({
       ...visibleSections,
     ];
   }, [extraItems, visibleSections]);
-  const listItems = useMemo(() => flattenActionItems(listSections), [listSections]);
+  const listItems = useMemo(
+    () => flattenActionItems(listSections),
+    [listSections],
+  );
+  const followed = following ? listItems[0] : undefined;
+  const activeGroupId = following
+    ? followed && followed.kind !== "thread"
+      ? followed.id
+      : null
+    : (selectedGroup ?? null);
+  const activeThreadName = following
+    ? followed?.kind === "thread"
+      ? followed.name
+      : null
+    : selected;
+  const activeThreadEpisode = following
+    ? followed?.kind === "thread"
+      ? followed.episodeKey
+      : null
+    : (selectedEpisode ?? selected);
 
   const currentGroup: AgentToolsGroup | null = useMemo(() => {
     const match = listItems.find(
-      (item) => (item.kind === "group" || item.kind === "spawn") && item.id === selectedGroup,
+      (item) =>
+        (item.kind === "group" || item.kind === "spawn") &&
+        item.id === activeGroupId,
     );
-    if (!match || match.kind === "thread" || match.kind === "workset") return null;
+    if (!match || match.kind === "thread" || match.kind === "workset")
+      return null;
     return match.group;
-  }, [listItems, selectedGroup]);
+  }, [listItems, activeGroupId]);
   const currentWorkset = useMemo(() => {
-    const match = listItems.find((item) => item.kind === "workset" && item.id === selectedGroup);
+    const match = listItems.find(
+      (item) => item.kind === "workset" && item.id === activeGroupId,
+    );
     return match?.kind === "workset" ? match : null;
-  }, [listItems, selectedGroup]);
-  const showingGroup = Boolean(selectedGroup && currentGroup && currentGroup.id === selectedGroup);
-  const showingWorkset = Boolean(currentWorkset);
-  const spawn = showingGroup && currentGroup != null && groupIsSpawn(currentGroup);
-  const current = showingGroup || showingWorkset
-    ? null
-    : (ordered.find((thread) => thread.name === selected) ?? null);
+  }, [listItems, activeGroupId]);
+  const showingGroup =
+    scope === "timeline" &&
+    Boolean(activeGroupId && currentGroup && currentGroup.id === activeGroupId);
+  const showingWorkset = scope === "timeline" && Boolean(currentWorkset);
+  const spawn =
+    showingGroup && currentGroup != null && groupIsSpawn(currentGroup);
+  const current =
+    showingGroup || showingWorkset
+      ? null
+      : (ordered.find((thread) => thread.name === activeThreadName) ?? null);
   const currentSectionIndex =
     showingGroup || showingWorkset
-      ? listSections.findIndex((section) => section.items.some((item) => item.id === selectedGroup))
+      ? listSections.findIndex((section) =>
+          section.items.some((item) => item.id === activeGroupId),
+        )
       : listSections.findIndex((section) =>
-          section.items.some((item) => item.kind === "thread" && item.name === current?.name),
+          section.items.some(
+            (item) => item.kind === "thread" && item.name === current?.name,
+          ),
         );
   const { visible, hasMore, sentinelRef } = usePagedRows(listSections, {
-    key: `${sessionId}:${filter}`,
+    key: sessionId,
     atLeast: currentSectionIndex + 1,
   });
   const live = current ? liveThreads[current.name] : undefined;
-  const currentAction = current ? actions[current.name] || current.latest_action || "" : "";
+  const currentAction = current
+    ? actions[current.name] || current.latest_action || ""
+    : "";
 
   const currentName = current?.name ?? null;
   const currentRunning = Boolean(currentName && runningNames.has(currentName));
-  const eventPages = useThreadEventPages(snapshot ? sessionId : null, currentName);
+  const eventPages = useThreadEventPages(
+    snapshot ? sessionId : null,
+    currentName,
+  );
   const pagedEvents = useMemo(
-    () => (eventPages.data ? mergeThreadEventPages(eventPages.data.pages) : undefined),
+    () =>
+      eventPages.data
+        ? mergeThreadEventPages(eventPages.data.pages)
+        : undefined,
     [eventPages.data],
   );
   useEffect(() => {
+    if (scope === "threads") {
+      if (!selected) return;
+      if (ordered.some((thread) => thread.name === selected)) return;
+      onSelect(null);
+      return;
+    }
+    if (following) {
+      const newest = listItems[0];
+      if (!newest) return;
+      if (newest.kind === "thread") {
+        if (
+          selected === newest.name &&
+          (selectedEpisode ?? selected) === newest.episodeKey &&
+          !selectedGroup
+        ) {
+          return;
+        }
+        selectThread(newest.name, newest.episodeKey, { follow: true });
+        return;
+      }
+      if (selectedGroup === newest.id) return;
+      selectAgentSegment(newest.id, { follow: true });
+      if (newest.kind === "workset" && newest.worksetId) {
+        selectWorkset(newest.worksetId, { follow: true });
+      }
+      return;
+    }
     if (selectedGroup) return;
     if (!selected) return;
     if (ordered.some((thread) => thread.name === selected)) return;
     onSelect(null);
-  }, [selected, ordered, onSelect, selectedGroup]);
+  }, [
+    scope,
+    following,
+    listItems,
+    selected,
+    selectedEpisode,
+    selectedGroup,
+    ordered,
+    onSelect,
+  ]);
   useEffect(() => {
+    if (scope === "threads") {
+      if (selected) return;
+      const first = ordered[0];
+      if (first) onSelect(first.name, first.name);
+      return;
+    }
+    if (following) return;
     if (selectedGroup || selected) return;
     const first = listItems[0];
     if (!first) return;
     if (first.kind === "thread") onSelect(first.name, first.episodeKey);
     else onSelectGroup?.(first.id);
-  }, [selectedGroup, selected, listItems, onSelect, onSelectGroup]);
+  }, [
+    scope,
+    following,
+    selectedGroup,
+    selected,
+    ordered,
+    listItems,
+    onSelect,
+    onSelectGroup,
+  ]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -1005,10 +1208,12 @@ export function ThreadsView({
         !(snapshot?.active_threads ?? []).includes(name),
     );
     const droppedGhost =
-      selected && !sessionOwnsThreadName(snapshot, dispatchedNames, liveThreads, selected)
+      selected &&
+      !sessionOwnsThreadName(snapshot, dispatchedNames, liveThreads, selected)
         ? selected
         : null;
-    if (!droppedGhost && extras.length === 0 && orphanEvents.length === 0) return;
+    if (!droppedGhost && extras.length === 0 && orphanEvents.length === 0)
+      return;
     logThreadList({
       session: sessionId,
       selected,
@@ -1022,7 +1227,15 @@ export function ThreadsView({
       active: snapshot?.active_threads ?? [],
       listed: ordered.map((thread) => thread.name),
     });
-  }, [selected, ordered, dispatchedNames, liveThreads, snapshot, sessionId, threads]);
+  }, [
+    selected,
+    ordered,
+    dispatchedNames,
+    liveThreads,
+    snapshot,
+    sessionId,
+    threads,
+  ]);
 
   // Same running bit the detail pane uses — the dialog title shimmer reads it.
   useEffect(() => {
@@ -1030,7 +1243,17 @@ export function ThreadsView({
     return () => setSelectedThreadRunning(false);
   }, [currentRunning]);
 
-  if (!snapshot) return <PanelLoading listTitle={SESSION_PANEL_LABEL.threads} />;
+  if (!snapshot) {
+    return (
+      <PanelLoading
+        listTitle={
+          scope === "threads"
+            ? SESSION_PANEL_LABEL.threads
+            : SESSION_PANEL_LABEL.actions
+        }
+      />
+    );
+  }
 
   const threadFlags = (name: string) => {
     const liveRow = liveThreads[name];
@@ -1052,19 +1275,105 @@ export function ThreadsView({
   };
 
   const pickGroup = (id: string) => {
+    lockLiveActionFollow(runId);
     onSelect(null);
     onSelectGroup?.(id);
     const item = listItems.find((row) => row.id === id);
-    if (item?.kind === "workset" && item.worksetId) selectWorkset(item.worksetId);
+    if (item?.kind === "workset" && item.worksetId)
+      selectWorkset(item.worksetId);
   };
   const pickThread = (name: string, episodeKey: string) => {
+    lockLiveActionFollow(runId);
     onSelectGroup?.(null);
     onSelect(name, episodeKey);
   };
+  const emptyCopy = actionFilterEmptyCopy(
+    scope === "threads" ? "threads" : "all",
+    "orchestrator",
+  );
+  const threadDetail = current ? (
+    <Detail
+      key={`${sessionId}:${current.name}`}
+      thread={current}
+      action={currentAction}
+      episodes={snapshot.thread_episodes?.[current.name] ?? []}
+      events={pagedEvents ?? snapshot.thread_events?.[current.name]}
+      liveLog={live?.log ?? []}
+      running={runningNames.has(current.name)}
+      hasOlder={Boolean(eventPages.hasNextPage)}
+      loadingOlder={eventPages.isFetchingNextPage}
+      loadingInitial={eventPages.isPending}
+      historyError={
+        eventPages.error instanceof Error ? eventPages.error.message : null
+      }
+      onLoadOlder={async () => {
+        await eventPages.fetchNextPage();
+      }}
+      onRetry={async () => {
+        if (eventPages.data) await eventPages.fetchNextPage();
+        else await eventPages.refetch();
+      }}
+      view={view}
+      onViewChange={setView}
+    />
+  ) : null;
+
+  if (scope === "threads") {
+    return (
+      <PanelSplit
+        listTitle={SESSION_PANEL_LABEL.threads}
+        title={current?.name}
+        titleAction={
+          currentAction ? <TaskButton action={currentAction} /> : null
+        }
+        actions={
+          current ? <ThreadViewSelect view={view} onChange={setView} /> : null
+        }
+        list={
+          ordered.length === 0 ? (
+            <ActionListEmpty filter="threads" kind="orchestrator" />
+          ) : (
+            ordered.map((thread) => {
+              const flags = threadFlags(thread.name);
+              const status = flags.pending
+                ? "Pending"
+                : flags.running
+                  ? "Running"
+                  : flags.cancelled
+                    ? "Cancelled"
+                    : flags.errored
+                      ? "Error"
+                      : "Done";
+              return (
+                <PanelRow
+                  key={thread.name}
+                  label={thread.name}
+                  active={thread.name === current?.name}
+                  labelClassName={
+                    flags.running ? "text-shimmer-basic" : undefined
+                  }
+                  trailing={
+                    <span className="code code-micro text-basic-muted shrink-0">
+                      {status}
+                    </span>
+                  }
+                  onClick={() => pickThread(thread.name, thread.name)}
+                />
+              );
+            })
+          )
+        }
+      >
+        {threadDetail ?? (
+          <PanelEmpty title={emptyCopy.title}>{emptyCopy.body}</PanelEmpty>
+        )}
+      </PanelSplit>
+    );
+  }
 
   return (
     <PanelSplit
-      listTitle={SESSION_PANEL_LABEL.threads}
+      listTitle={SESSION_PANEL_LABEL.actions}
       title={
         showingWorkset
           ? currentWorkset?.title
@@ -1082,15 +1391,9 @@ export function ThreadsView({
           <ThreadViewSelect view={view} onChange={setView} />
         ) : null
       }
-      listToolbar={
-        <ActionFilterBar value={filter} options={ORCHESTRATOR_FILTERS} onChange={setFilter} />
-      }
       list={
         listSections.length === 0 ? (
-          <div className="flex flex-col px-2 pb-4 pt-2 text-micro">
-            <p className="text-basic-tertiary">No actions yet.</p>
-            <p className="text-basic-muted">Start a conversation to create one.</p>
-          </div>
+          <ActionListEmpty filter="all" kind="orchestrator" />
         ) : (
           <>
             {visible.map((section) => (
@@ -1103,15 +1406,19 @@ export function ThreadsView({
                 <div className="flex flex-col py-2">
                   <ActionItemList
                     items={section.items}
+                    pinToNewest={following && section.key === visible[0]?.key}
                     selectedGroupId={
-                      showingGroup || showingWorkset ? (selectedGroup ?? null) : null
+                      showingGroup || showingWorkset ? activeGroupId : null
                     }
                     selectedThreadEpisode={
-                      showingGroup || showingWorkset ? null : (selectedEpisode ?? selected)
+                      showingGroup || showingWorkset
+                        ? null
+                        : activeThreadEpisode
                     }
                     episodeCount={(name) =>
                       snapshot.thread_episodes?.[name]?.length ??
-                      threads.find((thread) => thread.name === name)?.episode_count ??
+                      threads.find((thread) => thread.name === name)
+                        ?.episode_count ??
                       0
                     }
                     threadFlags={threadFlags}
@@ -1121,7 +1428,9 @@ export function ThreadsView({
                 </div>
               </div>
             ))}
-            {hasMore ? <div ref={sentinelRef} aria-hidden className="h-px" /> : null}
+            {hasMore ? (
+              <div ref={sentinelRef} aria-hidden className="h-px" />
+            ) : null}
           </>
         )
       }
@@ -1130,42 +1439,30 @@ export function ThreadsView({
         <WorksetsView
           snapshot={snapshot}
           selected={selectedWorkset || currentWorkset?.worksetId || null}
-          onSelect={selectWorkset}
+          onSelect={(id) => {
+            lockLiveActionFollow(runId);
+            selectWorkset(id);
+          }}
         />
       ) : showingGroup && currentGroup && spawn ? (
-        <ChildTranscriptPreview parentSessionId={sessionId} group={currentGroup} />
+        <ChildTranscriptPreview
+          parentSessionId={sessionId}
+          group={currentGroup}
+        />
       ) : showingGroup && currentGroup ? (
         <SegmentDetailList
           key={currentGroup.id}
           group={currentGroup}
           className="flex-1 min-h-0 overflow-auto px-4 py-4 [&>*]:shrink-0"
         />
-      ) : current ? (
-        <Detail
-          key={`${sessionId}:${current.name}`}
-          thread={current}
-          action={currentAction}
-          episodes={snapshot.thread_episodes?.[current.name] ?? []}
-          events={pagedEvents ?? snapshot.thread_events?.[current.name]}
-          liveLog={live?.log ?? []}
-          running={runningNames.has(current.name)}
-          hasOlder={Boolean(eventPages.hasNextPage)}
-          loadingOlder={eventPages.isFetchingNextPage}
-          loadingInitial={eventPages.isPending}
-          historyError={eventPages.error instanceof Error ? eventPages.error.message : null}
-          onLoadOlder={async () => {
-            await eventPages.fetchNextPage();
-          }}
-          onRetry={async () => {
-            if (eventPages.data) await eventPages.fetchNextPage();
-            else await eventPages.refetch();
-          }}
-          view={view}
-          onViewChange={setView}
-        />
+      ) : threadDetail ? (
+        threadDetail
+      ) : listSections.length === 0 ? (
+        <PanelEmpty title={emptyCopy.title}>{emptyCopy.body}</PanelEmpty>
       ) : (
         <PanelEmpty title="No action selected">
-          Actions include thoughts, worksets, and worker threads. Select a row to view its details.
+          Actions include thoughts, worksets, and worker threads. Select a row
+          to view its details.
         </PanelEmpty>
       )}
     </PanelSplit>

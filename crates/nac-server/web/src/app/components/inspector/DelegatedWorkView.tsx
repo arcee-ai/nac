@@ -16,8 +16,14 @@ import {
   type DelegatedSessionPresentation,
 } from "@/app/features/delegation/model";
 import { DelegatedSessionRow } from "@/app/features/delegation/presentation/DelegatedSessionRow";
+import {
+  PanelEmpty,
+  PanelLoading,
+  PanelRow,
+  PanelSplit,
+} from "@/app/components/inspector/PanelSplit";
 import { toRunError } from "@/app/lib/providerError";
-import { routes } from "@/app/lib/routes";
+import { SESSION_PANEL_LABEL, routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
   useCancelSessionSpawn,
@@ -30,7 +36,9 @@ import type { SessionBehavior } from "@/app/types/api";
 function QueryError({ label, retry }: { label: string; retry: () => void }) {
   return (
     <div role="alert" className="rounded-[6px] border border-error-primary p-3">
-      <div className="text-small text-error-primary">{label} could not be loaded.</div>
+      <div className="text-small text-error-primary">
+        {label} could not be loaded.
+      </div>
       <Button
         className="mt-2"
         size={ButtonSize.Small}
@@ -39,14 +47,6 @@ function QueryError({ label, retry }: { label: string; retry: () => void }) {
       >
         Try again
       </Button>
-    </div>
-  );
-}
-
-function Empty({ children }: { children: string }) {
-  return (
-    <div className="rounded-[6px] border border-border-primary p-3 text-small text-basic-tertiary">
-      {children}
     </div>
   );
 }
@@ -64,19 +64,31 @@ export function DelegatedWorkView({
   const cancelSpawn = useCancelSessionSpawn();
   const toast = useToast();
   const navigate = useNavigate();
-  const [selected, setSelected] = useState<DelegatedSessionPresentation | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [promptTarget, setPromptTarget] =
+    useState<DelegatedSessionPresentation | null>(null);
   const [prompt, setPrompt] = useState("");
   const [background, setBackground] = useState(true);
   const rows = (assignments.data ?? []).map(presentSessionAssignment);
+  if (selectedId === null && rows[0]) {
+    setSelectedId(rows[0].id);
+  } else if (
+    selectedId != null &&
+    rows.length > 0 &&
+    !rows.some((row) => row.id === selectedId)
+  ) {
+    setSelectedId(rows[0]?.id ?? null);
+  }
+  const current = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
   const busy = startSpawn.isPending || cancelSpawn.isPending;
 
   const openPrompt = (row: DelegatedSessionPresentation) => {
-    setSelected(row);
+    setPromptTarget(row);
     setPrompt("");
     setBackground(row.modeLabel !== "Foreground");
   };
   const submit = async () => {
-    if (!selected || !prompt.trim()) {
+    if (!promptTarget || !prompt.trim()) {
       toast.error("A continuation or steering prompt is required.");
       return;
     }
@@ -84,79 +96,129 @@ export function DelegatedWorkView({
       await startSpawn.mutateAsync({
         sessionId,
         payload: {
-          behavior: selected.kind === "coding-agent" ? "direct" : "orchestrator",
-          child_session_id: selected.id,
-          description: selected.description,
+          behavior:
+            promptTarget.kind === "coding-agent" ? "direct" : "orchestrator",
+          child_session_id: promptTarget.id,
+          description: promptTarget.description,
           prompt: prompt.trim(),
           background,
         },
       });
-      setSelected(null);
+      setPromptTarget(null);
       setPrompt("");
     } catch (error) {
-      toast.error(`Unable to update delegated work: ${errorMessage(toRunError(error))}`);
+      toast.error(
+        `Unable to update delegated work: ${errorMessage(toRunError(error))}`,
+      );
     }
   };
   const cancel = async (row: DelegatedSessionPresentation) => {
     try {
       await cancelSpawn.mutateAsync({ sessionId, childId: row.id });
     } catch (error) {
-      toast.error(`Unable to cancel delegated work: ${errorMessage(toRunError(error))}`);
+      toast.error(
+        `Unable to cancel delegated work: ${errorMessage(toRunError(error))}`,
+      );
     }
   };
-  const renderRow = (row: DelegatedSessionPresentation) => (
-    <DelegatedSessionRow
-      key={`${row.kind}:${row.id}`}
-      session={row}
-      busy={busy}
-      onOpen={() => navigate(routes.session(row.id))}
-      onPrompt={() => openPrompt(row)}
-      onCancel={() => void cancel(row)}
+
+  const list = !enabled ? (
+    <div className="p-1 label-micro text-basic-muted">
+      Orchestrator sessions do not own delegated work.
+    </div>
+  ) : assignments.isPending ? (
+    <div role="status" className="p-1 text-small text-basic-secondary">
+      Loading spawn sessions…
+    </div>
+  ) : assignments.isError ? (
+    <QueryError
+      label="Spawn sessions"
+      retry={() => void assignments.refetch()}
     />
+  ) : rows.length === 0 ? (
+    <div className="p-1 label-micro text-basic-muted">
+      None yet. Spawn an Agent or Orchestrator session from this chat.
+    </div>
+  ) : (
+    rows.map((row) => (
+      <PanelRow
+        key={`${row.kind}:${row.id}`}
+        label={row.description}
+        active={row.id === current?.id}
+        trailing={
+          <span className="code code-micro text-basic-muted shrink-0">
+            {row.statusLabel}
+          </span>
+        }
+        onClick={() => setSelectedId(row.id)}
+      />
+    ))
   );
 
+  if (!enabled) {
+    return (
+      <PanelSplit listTitle={SESSION_PANEL_LABEL.delegated} list={list}>
+        <PanelEmpty>
+          Orchestrator sessions do not own delegated work.
+        </PanelEmpty>
+      </PanelSplit>
+    );
+  }
+
+  if (assignments.isPending && !assignments.data) {
+    return <PanelLoading listTitle={SESSION_PANEL_LABEL.delegated} />;
+  }
+
   return (
-    <div className="flex flex-1 flex-col gap-5 overflow-auto p-3">
-      <div>
-        <h2 className="header-small text-basic-primary">Delegated work</h2>
-        <p className="mt-1 text-small text-basic-secondary">
-          Live parent-owned work. Open a read-only transcript, steer a running session, continue a
-          finished generation, or cancel active work here.
-        </p>
-      </div>
-      <section aria-labelledby="delegated-work-heading" className="flex flex-col gap-2">
-        <h3 id="delegated-work-heading" className="tag-label uppercase text-basic-secondary">
-          Assignments
-        </h3>
-        {!enabled ? (
-          <Empty>Orchestrator sessions do not own delegated work.</Empty>
-        ) : assignments.isPending ? (
-          <div role="status" className="text-small text-basic-secondary">
-            Loading delegated work…
+    <>
+      <PanelSplit
+        listTitle={SESSION_PANEL_LABEL.delegated}
+        title={current?.description}
+        list={list}
+      >
+        {current ? (
+          <div className="flex flex-col flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0">
+            <DelegatedSessionRow
+              session={current}
+              busy={busy}
+              onOpen={() => navigate(routes.session(current.id))}
+              onPrompt={() => openPrompt(current)}
+              onCancel={() => void cancel(current)}
+            />
           </div>
-        ) : assignments.isError ? (
-          <QueryError label="Delegated work" retry={() => void assignments.refetch()} />
-        ) : rows.length ? (
-          rows.map(renderRow)
         ) : (
-          <Empty>None yet. Spawn an Agent or Orchestrator session from this chat.</Empty>
+          <PanelEmpty title="No spawn sessions yet.">
+            They appear here as the agent starts them.
+          </PanelEmpty>
         )}
-      </section>
+      </PanelSplit>
       <Modal
-        open={selected != null}
-        onClose={() => setSelected(null)}
+        open={promptTarget != null}
+        onClose={() => setPromptTarget(null)}
         size={ModalSize.Wide}
         title={
-          selected ? `${selected.canSteer ? "Steer" : "Continue"} ${selected.description}` : ""
+          promptTarget
+            ? `${promptTarget.canSteer ? "Steer" : "Continue"} ${promptTarget.description}`
+            : ""
         }
         subheader={
-          selected ? `${selected.typeLabel} · generation ${selected.generation}` : undefined
+          promptTarget
+            ? `${promptTarget.typeLabel} · generation ${promptTarget.generation}`
+            : undefined
         }
       >
         <div className="flex flex-col gap-4">
           <TextArea
-            label={selected?.canSteer ? "Steering message" : "Continuation prompt"}
-            aria-label={selected?.canSteer ? "Steering message" : "Continuation prompt"}
+            label={
+              promptTarget?.canSteer
+                ? "Steering message"
+                : "Continuation prompt"
+            }
+            aria-label={
+              promptTarget?.canSteer
+                ? "Steering message"
+                : "Continuation prompt"
+            }
             textAreaSize={TextAreaSize.Medium}
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
@@ -164,7 +226,11 @@ export function DelegatedWorkView({
           />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <label className="flex items-center gap-2 text-small text-basic-secondary">
-              <Switch checked={background} disabled={busy} onChange={setBackground} />
+              <Switch
+                checked={background}
+                disabled={busy}
+                onChange={setBackground}
+              />
               Run in background
             </label>
             <Button
@@ -173,11 +239,11 @@ export function DelegatedWorkView({
               disabled={busy}
               onClick={() => void submit()}
             >
-              {selected?.canSteer ? "Send steering" : "Continue"}
+              {promptTarget?.canSteer ? "Send steering" : "Continue"}
             </Button>
           </div>
         </div>
       </Modal>
-    </div>
+    </>
   );
 }

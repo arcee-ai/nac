@@ -27,8 +27,10 @@ function ActionTooltip({
   children: React.ReactNode;
 }) {
   return (
-    <Tooltip title={title} position={TooltipPosition.TopCenter}>
-      <span className="inline-flex">{children}</span>
+    <Tooltip title={title} position={TooltipPosition.TopCenter} className="flex h-6 shrink-0">
+      <span className="flex size-6 shrink-0 items-center justify-center">
+        {children}
+      </span>
     </Tooltip>
   );
 }
@@ -51,7 +53,7 @@ function ActionIconButton({
   return (
     <ActionTooltip title={title}>
       <Button
-        className="size-6"
+        className="size-6 shrink-0"
         size={ButtonSize.Small}
         variant={variant}
         content={ButtonContent.Icon}
@@ -84,7 +86,7 @@ const ChildSessionActionButtons: React.FC<ChildSessionActionButtonsProps> = ({
   return (
     <div
       className={cn(
-        "flex h-6 shrink-0 items-center overflow-clip rounded-[4px] bg-elevation-level-3 shadow-md",
+        "flex h-6 max-h-6 min-h-6 w-fit flex-none items-center overflow-clip rounded-[4px] bg-elevation-level-3 shadow-md",
         live && "gap-1",
         className,
       )}

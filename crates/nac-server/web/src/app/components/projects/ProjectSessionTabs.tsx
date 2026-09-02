@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -33,6 +33,7 @@ import type { DropEdge } from "@/app/lib/sessionOrder";
 import {
   applyTabOrder,
   placeIdAt,
+  placeSpawnsAfterParents,
   targetIndexInGroup,
 } from "@/app/lib/sessionOrder";
 import { NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
@@ -40,10 +41,12 @@ import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
   dismissChatTab,
+  readChatTabStripScroll,
   restoreChatTab,
   setChatTabOrder,
   useChatTabOrder,
   useDismissedChatTabs,
+  writeChatTabStripScroll,
 } from "@/app/store/chatTabsStore";
 import type {
   ManagedSessionSummary,
@@ -91,6 +94,7 @@ export function ProjectSessionTabs({
   const sessionTitle = useSessionTitle();
   const dismissed = useDismissedChatTabs();
   const tabOrder = useChatTabOrder(projectId);
+  const stripRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -116,6 +120,15 @@ export function ProjectSessionTabs({
   useEffect(() => {
     restoreChatTab(activeSessionId);
   }, [activeSessionId]);
+
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    if (!strip || !projectId) return undefined;
+    strip.scrollLeft = readChatTabStripScroll(projectId);
+    return () => {
+      writeChatTabStripScroll(projectId, strip.scrollLeft);
+    };
+  }, [projectId]);
 
   // Unassigned is a fact about a loaded chat. A missing summary is just a gap
   // — first paint, or the list dropping this id before the router leaves it —
@@ -186,7 +199,7 @@ export function ProjectSessionTabs({
 
   // Closed tabs keep their place in the arrangement, so reopening one puts it
   // back where the user left it rather than at the front.
-  const ordered = applyTabOrder(sessions, tabOrder);
+  const ordered = placeSpawnsAfterParents(applyTabOrder(sessions, tabOrder));
 
   // The chat on screen keeps its tab whatever the user did with it, because a
   // transcript with no tab above it reads as belonging to nothing.
@@ -237,7 +250,13 @@ export function ProjectSessionTabs({
         <div className="flex items-center shrink-0">{leading}</div>
       ) : null}
       {/* Horizontal only: the strip is one row and must never grow taller. */}
-      <div className="flex items-start gap-2 flex-1 min-w-0 overflow-x-auto overflow-y-clip scrollbar-none [&>*]:shrink-0">
+      <div
+        ref={stripRef}
+        className="flex items-start gap-2 flex-1 min-w-0 overflow-x-auto overflow-y-clip scrollbar-none [&>*]:shrink-0"
+        onScroll={(event) => {
+          writeChatTabStripScroll(projectId, event.currentTarget.scrollLeft);
+        }}
+      >
         {empty ? (
           <ChatSessionTab
             title={NEW_AGENT_TITLE}

@@ -1,8 +1,6 @@
 import { memo } from "react";
 
 import {
-  Button,
-  ButtonContent,
   ButtonSize,
   ButtonVariant,
   ChatSessionMessage,
@@ -13,12 +11,16 @@ import {
   IconName,
   SessionType,
   SessionTypeAvatar,
-  Tooltip,
+  sessionTypeIconName,
   TooltipPosition,
 } from "@/app/atoms";
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
+import { MessageActionIcon } from "@/app/components/inspector/MessageActionIcon";
 import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
-import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
+import {
+  SnapshotBadge,
+  type FilesPanelLink,
+} from "@/app/components/inspector/SnapshotBadge";
 import { SpawnedSessionCard } from "@/app/components/inspector/SpawnedSessionCard";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
@@ -26,8 +28,16 @@ import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
-import { partitionAgentTranscript, turnOriginKey } from "@/app/lib/agentSegments";
-import { RUN_CANCELLED_MARKER, type ModelTurn, type TranscriptBlock } from "@/app/lib/transcript";
+import { DELEGATED_READONLY_HINT } from "@/app/lib/sessionBehavior";
+import {
+  partitionAgentTranscript,
+  turnOriginKey,
+} from "@/app/lib/agentSegments";
+import {
+  RUN_CANCELLED_MARKER,
+  type ModelTurn,
+  type TranscriptBlock,
+} from "@/app/lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -36,7 +46,10 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
  * model is doing rather than what it produced. Once it is over the badge carries
  * how long the model spent on it, whenever the backend timed the call.
  */
-function thoughtsLabel(block: { streaming: boolean; durationMs: number | null }): string {
+function thoughtsLabel(block: {
+  streaming: boolean;
+  durationMs: number | null;
+}): string {
   if (block.streaming) return "Thinking";
   if (block.durationMs == null) return "Thoughts";
   return `Thoughts, ${formatSeconds(block.durationMs)}`;
@@ -99,8 +112,10 @@ interface ModelMessageProps {
   onDismissFork?: (forkId: string) => void;
   /** Disable destructive / network actions while a run is in flight. */
   actionsDisabled?: boolean;
-  /** Parent-owned delegated transcripts expose copy but no mutation affordances. */
+  /** Parent-owned or frozen delegated turns keep mutation actions visible but inert. */
   readOnly?: boolean;
+  /** Why mutation actions are locked. Shown on disabled action tooltips. */
+  readOnlyReason?: string | null;
   /**
    * The revision captured for the run behind this turn, when that run changed
    * anything. Absent on a turn whose run is still going, was cancelled, or
@@ -144,21 +159,30 @@ export const ModelMessage = memo(function ModelMessage({
   onDismissFork,
   actionsDisabled = false,
   readOnly = false,
+  readOnlyReason = null,
   snapshotRevision = null,
   filesPanel = null,
   preview = false,
   spawnParentSessionId,
 }: ModelMessageProps) {
   perfRender("ModelMessage");
-  const canRefresh = !readOnly && onRefresh != null && userMessageIndex != null;
-  const canRevert = !readOnly && onRevert != null && userMessageIndex != null;
+  const lockHint = readOnly
+    ? (readOnlyReason ?? DELEGATED_READONLY_HINT)
+    : undefined;
+  const actionLocked = actionsDisabled || readOnly;
+  const showResend =
+    readOnly || (onRefresh != null && userMessageIndex != null);
+  const canRevert = onRevert != null && userMessageIndex != null;
   const forkIndex = turn.messageIndex;
+  const showFork = readOnly || (onFork != null && forkIndex != null);
+  const showContinue = readOnly || (onContinue != null && forkIndex != null);
   const copyText = modelCopyText(turn);
   // The stop applies to the whole turn, including the files its runs had
   // already written, so it closes the turn below the snapshot rather than
   // sitting wherever the marker happens to fall between the blocks.
   const cancelled = turn.blocks.some(
-    (block) => block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
+    (block) =>
+      block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
   );
   const isMobile = useIsMobile();
   const renderTranscriptBlock = (block: TranscriptBlock) => {
@@ -196,7 +220,9 @@ export const ModelMessage = memo(function ModelMessage({
             pending={block.pending}
             active={selectedWorkset === block.worksetId}
             onClick={() => {
-              onSelectAgentSegment?.(`${turnOriginKey(turn)}:workset-${block.key}`);
+              onSelectAgentSegment?.(
+                `${turnOriginKey(turn)}:workset-${block.key}`,
+              );
               onSelectWorkset(block.worksetId);
             }}
           />
@@ -233,8 +259,14 @@ export const ModelMessage = memo(function ModelMessage({
     >
       <div className="flex flex-col flex-grow gap-1 pt-2 md:max-w-[calc(100%-36px)] min-w-0">
         <div className="flex gap-3 items-center mb-4 min-w-0">
-          <SessionTypeAvatar sessionType={sessionType} running={active} className="shrink-0" />
-          <span className="label-small text-basic-primary truncate">{model}</span>
+          <SessionTypeAvatar
+            sessionType={sessionType}
+            running={active}
+            className="shrink-0"
+          />
+          <span className="label-small text-basic-primary truncate">
+            {model}
+          </span>
           {/* The header carries whichever of the two is available: what the run
               is doing now, or how long it took once it is over. */}
           {active && activity ? (
@@ -302,9 +334,13 @@ export const ModelMessage = memo(function ModelMessage({
                 sessionId={fork.session_id}
                 title={fork.title}
                 deleted={fork.deleted}
-                onOpen={onOpenFork ? () => onOpenFork(fork.session_id) : undefined}
+                onOpen={
+                  onOpenFork ? () => onOpenFork(fork.session_id) : undefined
+                }
                 onDismiss={
-                  onDismissFork && fork.deleted ? () => onDismissFork(fork.session_id) : undefined
+                  onDismissFork && fork.deleted
+                    ? () => onDismissFork(fork.session_id)
+                    : undefined
                 }
               />
             ))}
@@ -324,86 +360,80 @@ export const ModelMessage = memo(function ModelMessage({
               "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
             )}
           >
-            {canRefresh ? (
-              <Tooltip title="Resend" position={TooltipPosition.BottomRight}>
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                  content={ButtonContent.Icon}
-                  aria-label="Resend"
-                  disabled={actionsDisabled}
-                  onClick={() => onRefresh(userMessageIndex)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.Refresh} size={16} />
-                </Button>
-              </Tooltip>
-            ) : null}
-
-            {canRevert ? (
-              <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomRight}>
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                  content={ButtonContent.Icon}
-                  aria-label="Revert to this snapshot"
-                  disabled={actionsDisabled}
-                  onClick={() => onRevert(userMessageIndex, userText)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.TurnLeft} size={16} />
-                </Button>
-              </Tooltip>
-            ) : readOnly ? null : (
-              <Tooltip
-                title="This message is not in the transcript yet"
+            {showResend ? (
+              <MessageActionIcon
+                title="Resend"
+                disabled={actionLocked || userMessageIndex == null}
+                disabledReason={lockHint}
                 position={TooltipPosition.BottomRight}
+                isMobile={isMobile}
+                onClick={
+                  userMessageIndex != null && onRefresh
+                    ? () => onRefresh(userMessageIndex)
+                    : undefined
+                }
               >
-                <span className="inline-flex">
-                  <Button
-                    size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                    variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                    content={ButtonContent.Icon}
-                    aria-label="Revert to this snapshot"
-                    disabled
-                    className="md:!h-4 md:!min-h-4 md:!p-0"
-                  >
-                    <Icon iconName={IconName.TurnLeft} size={16} />
-                  </Button>
-                </span>
-              </Tooltip>
-            )}
-
-            {!readOnly && onFork != null && forkIndex != null ? (
-              <Tooltip title="Create fork" position={TooltipPosition.BottomRight}>
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                  content={ButtonContent.Icon}
-                  aria-label="Create fork"
-                  disabled={actionsDisabled}
-                  onClick={() => onFork(forkIndex)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.Scheme} size={16} />
-                </Button>
-              </Tooltip>
+                <Icon iconName={IconName.Refresh} size={16} />
+              </MessageActionIcon>
             ) : null}
 
-            {!readOnly && !active && onContinue != null && forkIndex != null ? (
-              <Tooltip title={continueLabel} position={TooltipPosition.BottomRight}>
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                  content={ButtonContent.Icon}
-                  aria-label={continueLabel}
-                  disabled={actionsDisabled}
-                  onClick={() => onContinue(forkIndex)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.ArrowRight} size={16} />
-                </Button>
-              </Tooltip>
+            <MessageActionIcon
+              title="Revert to this snapshot"
+              disabled={actionLocked || !canRevert}
+              disabledReason={
+                lockHint ??
+                (canRevert ? null : "This message is not in the transcript yet")
+              }
+              position={TooltipPosition.BottomRight}
+              isMobile={isMobile}
+              onClick={
+                onRevert != null && userMessageIndex != null
+                  ? () => onRevert(userMessageIndex, userText)
+                  : undefined
+              }
+            >
+              <Icon iconName={IconName.TurnLeft} size={16} />
+            </MessageActionIcon>
+
+            {showFork ? (
+              <MessageActionIcon
+                title="Create fork"
+                disabled={actionLocked || forkIndex == null}
+                disabledReason={lockHint}
+                position={TooltipPosition.BottomRight}
+                isMobile={isMobile}
+                onClick={
+                  forkIndex != null && onFork
+                    ? () => onFork(forkIndex)
+                    : undefined
+                }
+              >
+                <Icon iconName={IconName.Scheme} size={16} />
+              </MessageActionIcon>
+            ) : null}
+
+            {showContinue ? (
+              <MessageActionIcon
+                title={continueLabel}
+                disabled={actionLocked || forkIndex == null}
+                disabledReason={lockHint}
+                position={TooltipPosition.BottomRight}
+                isMobile={isMobile}
+                onClick={
+                  forkIndex != null && onContinue
+                    ? () => onContinue(forkIndex)
+                    : undefined
+                }
+              >
+                <Icon
+                  iconName={sessionTypeIconName(
+                    sessionType === SessionType.Orchestrator
+                      ? SessionType.Agent
+                      : SessionType.Orchestrator,
+                  )}
+                  size={16}
+                />
+              </MessageActionIcon>
             ) : null}
 
             <CopyButton

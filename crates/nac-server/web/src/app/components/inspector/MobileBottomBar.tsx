@@ -3,9 +3,9 @@ import { cn } from "@/app/lib/cn";
 import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
 
 const TAB = {
-  threads: { label: "Actions", iconName: IconName.Flow },
+  threads: { label: "Threads", iconName: IconName.Flow },
   actions: { label: "Actions", iconName: IconName.Brain },
-  delegated: { label: "Delegated", iconName: IconName.People },
+  delegated: { label: "Spawn Sessions", iconName: IconName.Plane },
   files: { label: "Files", iconName: IconName.Folders },
   worksets: { label: "Worksets", iconName: IconName.Checklist },
   history: { label: "History", iconName: IconName.History },

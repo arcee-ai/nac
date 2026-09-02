@@ -175,6 +175,14 @@ const StepByStepRows = memo(
   (prev, next) => areStepByStepStepListsContentEqual(prev.steps, next.steps),
 );
 
+function measureOverflow(outer: HTMLElement, inner: HTMLElement): number {
+  const styles = getComputedStyle(outer);
+  const padTop = parseFloat(styles.paddingTop) || 0;
+  const padBottom = parseFloat(styles.paddingBottom) || 0;
+  const available = outer.clientHeight - padTop - padBottom;
+  return Math.max(0, inner.offsetHeight - available);
+}
+
 function StepByStepDisplayer({
   steps,
   faded = false,
@@ -182,27 +190,58 @@ function StepByStepDisplayer({
 }: StepByStepDisplayerProps) {
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<number | null>(null);
+  const pinned = useRef(false);
   const [translateY, setTranslateY] = useState(0);
+  const [allowMotion, setAllowMotion] = useState(false);
 
-  const recomputeTranslate = (): void => {
+  const pinToBottom = (animate: boolean): void => {
     const outer = outerRef.current;
     const inner = innerRef.current;
     if (!outer || !inner) return;
-    const styles = getComputedStyle(outer);
-    const padTop = parseFloat(styles.paddingTop) || 0;
-    const padBottom = parseFloat(styles.paddingBottom) || 0;
-    const available = outer.clientHeight - padTop - padBottom;
-    const overflow = Math.max(0, inner.offsetHeight - available);
-    setTranslateY(-overflow);
+    const next = -measureOverflow(outer, inner);
+    if (!animate) {
+      setTranslateY(next);
+      return;
+    }
+    if (frameRef.current !== null) return;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      const liveOuter = outerRef.current;
+      const liveInner = innerRef.current;
+      if (!liveOuter || !liveInner) return;
+      setTranslateY(-measureOverflow(liveOuter, liveInner));
+    });
   };
 
   useLayoutEffect(() => {
-    recomputeTranslate();
+    if (pinned.current) return;
+    pinToBottom(false);
+    pinned.current = true;
   }, [steps.length]);
 
   useEffect(() => {
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => recomputeTranslate());
+    if (!pinned.current) return undefined;
+    setAllowMotion(true);
+    pinToBottom(true);
+    return () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+    };
+  }, [steps]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      if (!pinned.current) {
+        pinToBottom(false);
+        pinned.current = true;
+        return;
+      }
+      pinToBottom(true);
+    });
     if (innerRef.current) observer.observe(innerRef.current);
     if (outerRef.current) observer.observe(outerRef.current);
     return () => observer.disconnect();
@@ -218,10 +257,12 @@ function StepByStepDisplayer({
     >
       <div
         ref={innerRef}
-        className={`flex flex-col gap-1.5 ${faded ? "pointer-events-none opacity-0" : "opacity-100"}`}
+        className={`flex shrink-0 flex-col gap-1.5 ${faded ? "pointer-events-none opacity-0" : "opacity-100"}`}
         style={{
           transform: `translateY(${translateY}px)`,
-          transition: `transform ${STEP_FADE_MS}ms ease-out, opacity ${STEP_FADE_MS}ms ease-out`,
+          transition: allowMotion
+            ? `transform ${STEP_FADE_MS}ms ease-out, opacity ${STEP_FADE_MS}ms ease-out`
+            : `opacity ${STEP_FADE_MS}ms ease-out`,
         }}
         aria-hidden={faded || undefined}
       >

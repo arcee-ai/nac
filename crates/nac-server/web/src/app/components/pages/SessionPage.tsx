@@ -25,7 +25,6 @@ import {
 } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { parseStoreTime } from "@/app/lib/format";
-import { listableSessions } from "@/app/lib/projects";
 import { perfRender } from "@/app/lib/perfDebug";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -240,7 +239,7 @@ export default function SessionPage() {
   // tick than the cache update.
   const projectId = (entry ? entry.summary.project_id : heldProjectId) ?? null;
   const projectSessions = projectId
-    ? listableSessions(allSessions)
+    ? allSessions
         .filter((session) => session.summary.project_id === projectId)
         .sort(
           (a, b) =>

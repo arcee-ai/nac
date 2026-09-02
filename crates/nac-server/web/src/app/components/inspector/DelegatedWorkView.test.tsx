@@ -1,7 +1,15 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -79,11 +87,21 @@ function mount(behavior: "direct" | "direct-with-orchestrator", seed = true) {
       removeListener: () => {},
       dispatchEvent: () => false,
     }) as MediaQueryList;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   if (seed) {
-    client.setQueryData(queryKeys.sessionSpawns("parent"), [child, orchestrator]);
+    client.setQueryData(queryKeys.sessionSpawns("parent"), [
+      child,
+      orchestrator,
+    ]);
   }
   render(
     <QueryClientProvider client={client}>
@@ -110,20 +128,34 @@ beforeEach(() => {
   startSpawn.mockReset().mockResolvedValue(child);
   cancelSpawn.mockReset().mockResolvedValue({ ...child, status: "cancelled" });
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("delegated work", () => {
   it("shows Agent and Orchestrator assignments in one list", () => {
     mount("direct-with-orchestrator");
 
-    expect(screen.getByText("Assignments")).toBeTruthy();
-    expect(screen.getByText("Review permissions")).toBeTruthy();
-    expect(screen.getByText("Running")).toBeTruthy();
+    expect(
+      screen.getByRole("article", { name: "Coding agent: Review permissions" }),
+    ).toBeTruthy();
     expect(screen.getByText("Generation 2")).toBeTruthy();
-    expect(screen.getByText("Run the compatibility audit")).toBeTruthy();
-    expect(screen.getByText("Completed")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Run the compatibility audit/ }),
+    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Run the compatibility audit/ }),
+    );
+    expect(
+      screen.getByRole("article", {
+        name: "Orchestrator: Run the compatibility audit",
+      }),
+    ).toBeTruthy();
     expect(screen.getByText("done")).toBeTruthy();
-    expect(screen.getByText("Completion delivered to this parent")).toBeTruthy();
+    expect(
+      screen.getByText("Completion delivered to this parent"),
+    ).toBeTruthy();
     expect(screen.queryByText("Coding agents")).toBeNull();
     expect(screen.queryByText("NAC orchestrators")).toBeNull();
   });
@@ -131,35 +163,49 @@ describe("delegated work", () => {
   it("navigates from a delegated row to its transcript", () => {
     mount("direct");
 
-    const childRow = screen.getByRole("article", { name: "Coding agent: Review permissions" });
+    const childRow = screen.getByRole("article", {
+      name: "Coding agent: Review permissions",
+    });
     fireEvent.click(within(childRow).getByRole("button", { name: "Open" }));
-    expect(screen.getByTestId("location").textContent).toBe("/session/child-1/threads");
+    expect(screen.getByTestId("location").textContent).toBe(
+      "/session/child-1/actions",
+    );
     expect(screen.getByText("Run the compatibility audit")).toBeTruthy();
   });
 
   it("keeps a recoverable retry entry point after a relationship-list failure", async () => {
-    listSpawns.mockRejectedValueOnce(new Error("temporary failure")).mockResolvedValue([child]);
+    listSpawns
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValue([child]);
     mount("direct", false);
 
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "Delegated work could not be loaded",
+      "Spawn sessions could not be loaded",
     );
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(screen.getByText("Review permissions")).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("article", {
+          name: "Coding agent: Review permissions",
+        }),
+      ).toBeTruthy(),
+    );
     expect(listSpawns).toHaveBeenCalledTimes(2);
   });
 
   it("routes steering, continuation, and cancellation through the unified spawn API", async () => {
     mount("direct-with-orchestrator");
-    const childRow = screen.getByRole("article", { name: "Coding agent: Review permissions" });
-    const orchestratorRow = screen.getByRole("article", {
-      name: "Orchestrator: Run the compatibility audit",
+    const childRow = screen.getByRole("article", {
+      name: "Coding agent: Review permissions",
     });
 
     fireEvent.click(within(childRow).getByRole("button", { name: "Steer" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Steering message" }), {
-      target: { value: "Check the remembered grant." },
-    });
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Steering message" }),
+      {
+        target: { value: "Check the remembered grant." },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Send steering" }));
     await waitFor(() =>
       expect(startSpawn).toHaveBeenCalledWith("parent", {
@@ -171,14 +217,38 @@ describe("delegated work", () => {
       }),
     );
 
-    fireEvent.click(within(childRow).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(cancelSpawn).toHaveBeenCalledWith("parent", "child-1"));
+    fireEvent.click(
+      within(
+        screen.getByRole("article", {
+          name: "Coding agent: Review permissions",
+        }),
+      ).getByRole("button", { name: "Cancel" }),
+    );
+    await waitFor(() =>
+      expect(cancelSpawn).toHaveBeenCalledWith("parent", "child-1"),
+    );
 
-    fireEvent.click(within(orchestratorRow).getByRole("button", { name: "Continue" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Continuation prompt" }), {
-      target: { value: "Run the next audit generation." },
+    fireEvent.click(
+      screen.getByRole("button", { name: /Run the compatibility audit/ }),
+    );
+    const orchestratorRow = screen.getByRole("article", {
+      name: "Orchestrator: Run the compatibility audit",
     });
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Continue" }));
+
+    fireEvent.click(
+      within(orchestratorRow).getByRole("button", { name: "Continue" }),
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Continuation prompt" }),
+      {
+        target: { value: "Run the next audit generation." },
+      },
+    );
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Continue",
+      }),
+    );
     await waitFor(() =>
       expect(startSpawn).toHaveBeenCalledWith("parent", {
         behavior: "orchestrator",
@@ -192,7 +262,9 @@ describe("delegated work", () => {
 
   it("renders cache-driven polling transitions without a page refresh", async () => {
     const client = mount("direct");
-    const row = screen.getByRole("article", { name: "Coding agent: Review permissions" });
+    const row = screen.getByRole("article", {
+      name: "Coding agent: Review permissions",
+    });
     expect(within(row).getByRole("status").textContent).toBe("Running");
 
     act(() => {
@@ -208,7 +280,9 @@ describe("delegated work", () => {
     });
 
     await waitFor(() =>
-      expect(within(row).getByText("Completed").getAttribute("role")).toBe("status"),
+      expect(within(row).getByText("Completed").getAttribute("role")).toBe(
+        "status",
+      ),
     );
     expect(within(row).getByText("The permissions audit passed.")).toBeTruthy();
     expect(within(row).getByRole("button", { name: "Continue" })).toBeTruthy();

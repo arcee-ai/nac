@@ -37,7 +37,10 @@ import {
   type ResolvedCatalogModel,
 } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
-import { assignmentIsOpen } from "@/app/lib/sessionBehavior";
+import {
+  assignmentIsOpen,
+  DELEGATED_READONLY_HINT,
+} from "@/app/lib/sessionBehavior";
 import {
   displayPromptFromMessageText,
   ENV_SSH,
@@ -703,7 +706,8 @@ export function ChatInputBox({
 
   const runGoalCommand = useCallback(
     async (text: string) => {
-      if (!direct) throw new Error("Durable goals are available only in direct chats");
+      if (!direct)
+        throw new Error("Durable goals are available only in direct chats");
       let goal = goalQuery.data;
       if (goal === undefined) {
         const result = await goalQuery.refetch();
@@ -742,7 +746,10 @@ export function ChatInputBox({
           "An unfinished durable goal already exists; use /goal edit or /goal clear first",
         );
       }
-      await createGoal.mutateAsync({ sessionId, payload: { objective: argument } });
+      await createGoal.mutateAsync({
+        sessionId,
+        payload: { objective: argument },
+      });
     },
     [clearGoal, createGoal, direct, goalQuery, sessionId, updateGoal],
   );
@@ -803,7 +810,9 @@ export function ChatInputBox({
             await runGoalCommand(prompt);
             clearField();
           } catch (error) {
-            toast.error(`Goal command failed: ${humanErrorText(toRunError(error))}`);
+            toast.error(
+              `Goal command failed: ${humanErrorText(toRunError(error))}`,
+            );
           }
           return;
         }
@@ -1269,10 +1278,7 @@ export function ChatInputBox({
       <>
         {permissionOpener}
         <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
-          <span className="flex-1">
-            This delegated transcript is read-only. Continue, steer, or cancel it
-            from its parent chat.
-          </span>
+          <span className="flex-1">{DELEGATED_READONLY_HINT}</span>
           {settingsButton}
         </div>
       </>
@@ -1379,7 +1385,11 @@ export function ChatInputBox({
           {/* A phone's settings glyph lives in the pill instead. */}
           {isMobile ? null : settingsButton}
 
-          <GoalControls sessionId={sessionId} behavior={behavior} openRequest={goalOpenRequest} />
+          <GoalControls
+            sessionId={sessionId}
+            behavior={behavior}
+            openRequest={goalOpenRequest}
+          />
           <ChildControls sessionId={sessionId} behavior={behavior} />
 
           {/* The model name is the first thing a narrow column gives up; the

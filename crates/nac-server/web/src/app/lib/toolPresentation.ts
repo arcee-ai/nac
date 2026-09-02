@@ -1,4 +1,9 @@
-import type { AgentEvent, Message, SessionSnapshotResponse, ToolCall } from "@/app/types/api";
+import type {
+  AgentEvent,
+  Message,
+  SessionSnapshotResponse,
+  ToolCall,
+} from "@/app/types/api";
 
 export type ToolPresentationStatus =
   | "pending"
@@ -42,7 +47,9 @@ function toolResultRecord(
   if (typeof content === "string") return { text: content, hasImage: false };
   return {
     text: content
-      .map((part) => (part.type === "text" ? part.text : `[Image: ${part.image.mime_type}]`))
+      .map((part) =>
+        part.type === "text" ? part.text : `[Image: ${part.image.mime_type}]`,
+      )
       .join("\n\n"),
     hasImage: content.some((part) => part.type === "image"),
   };
@@ -74,7 +81,10 @@ export function assistantTurnCancelled(
     const message = messages[index];
     if (message.role === "tool") continue;
     if (message.role === "assistant") {
-      return typeof message.content === "string" && message.content.trim() === cancellationMarker;
+      return (
+        typeof message.content === "string" &&
+        message.content.trim() === cancellationMarker
+      );
     }
     return false;
   }
@@ -116,7 +126,8 @@ const STATUS_LABELS: Record<ToolPresentationStatus, string> = {
 };
 
 const CANCELLED_MARKER = "[tool call cancelled by user]";
-const INTERRUPTED_MARKER = "Tool execution was interrupted; no result was recorded.";
+const INTERRUPTED_MARKER =
+  "Tool execution was interrupted; no result was recorded.";
 const NAME_LIMIT = 160;
 const PREVIEW_LIMIT = 180;
 
@@ -152,7 +163,8 @@ function statusFromFinished(event: ToolFinished): ToolPresentationStatus {
   if (event.command_status === "timed_out") return "timed-out";
   if (event.command_status === "cancelled") return "cancelled";
   if (event.command_status === "spawn_error") return "error";
-  if (event.is_error || (event.exit_code != null && event.exit_code !== 0)) return "error";
+  if (event.is_error || (event.exit_code != null && event.exit_code !== 0))
+    return "error";
   return "success";
 }
 
@@ -161,10 +173,16 @@ function statusFromFinished(event: ToolFinished): ToolPresentationStatus {
  * win, so an SSE finish can settle a durable start and the canonical snapshot
  * can replace the overlay without changing semantic identity.
  */
-export function indexToolEvents(events: AgentEvent[]): Map<string, ToolEventPair> {
+export function indexToolEvents(
+  events: AgentEvent[],
+): Map<string, ToolEventPair> {
   const byCall = new Map<string, ToolEventPair>();
   for (const event of events) {
-    if (event.type !== "tool_call_started" && event.type !== "tool_call_finished") continue;
+    if (
+      event.type !== "tool_call_started" &&
+      event.type !== "tool_call_finished"
+    )
+      continue;
     if (event.thread_name) continue;
     const pair = byCall.get(event.call_id) ?? {};
     if (event.type === "tool_call_started") pair.started = event;
@@ -179,16 +197,22 @@ function parseCallArguments(call: ToolCall): Record<string, unknown> | null {
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return null;
     return parsed as Record<string, unknown>;
   } catch {
     return null;
   }
 }
 
-function argumentString(obj: Record<string, unknown>, key: string): string | null {
+function argumentString(
+  obj: Record<string, unknown>,
+  key: string,
+): string | null {
   const value = obj[key];
-  return typeof value === "string" ? bounded(value, PREVIEW_LIMIT) || null : null;
+  return typeof value === "string"
+    ? bounded(value, PREVIEW_LIMIT) || null
+    : null;
 }
 
 /**
@@ -209,7 +233,8 @@ function summaryFromCallArguments(name: string, call: ToolCall): string | null {
     case "grep":
       return argumentString(obj, "pattern");
     case "exec_command": {
-      const command = argumentString(obj, "cmd") ?? argumentString(obj, "command");
+      const command =
+        argumentString(obj, "cmd") ?? argumentString(obj, "command");
       if (command) return command;
       const workdir = argumentString(obj, "workdir");
       return workdir ? `(in ${workdir})` : null;
@@ -219,7 +244,9 @@ function summaryFromCallArguments(name: string, call: ToolCall): string | null {
       if (!sessionId) return null;
       const chars = obj.chars;
       const inputChars = typeof chars === "string" ? chars.length : 0;
-      return inputChars === 0 ? `→ ${sessionId}` : `→ ${sessionId} (${inputChars} input chars)`;
+      return inputChars === 0
+        ? `→ ${sessionId}`
+        : `→ ${sessionId} (${inputChars} input chars)`;
     }
     case "read_command_output":
       return argumentString(obj, "output_id");
@@ -232,7 +259,10 @@ function summaryFromCallArguments(name: string, call: ToolCall): string | null {
     case "update_goal":
       return argumentString(obj, "status");
     case "session_spawn":
-      return argumentString(obj, "description") ?? argumentString(obj, "child_session_id");
+      return (
+        argumentString(obj, "description") ??
+        argumentString(obj, "child_session_id")
+      );
     case "session_status":
     case "session_read":
     case "session_wait":
@@ -242,7 +272,8 @@ function summaryFromCallArguments(name: string, call: ToolCall): string | null {
     case "thread": {
       const threadName = argumentString(obj, "name");
       const action = argumentString(obj, "action");
-      if (threadName && action) return bounded(`${threadName}: ${action}`, PREVIEW_LIMIT) || null;
+      if (threadName && action)
+        return bounded(`${threadName}: ${action}`, PREVIEW_LIMIT) || null;
       return threadName;
     }
     case "thread_read":
@@ -265,12 +296,33 @@ function summaryFromCallArguments(name: string, call: ToolCall): string | null {
 }
 
 /** File contents stay out; glob needs the structured entries JSON to list paths. */
-function resultPreviewFromToolBody(name: string, resultText: string | null): string | null {
+function resultPreviewFromToolBody(
+  name: string,
+  resultText: string | null,
+): string | null {
   if (!resultText) return null;
   if (name === "read" || name === "write" || name === "edit") return null;
   if (name === "glob") return resultText.trim() || null;
   return bounded(resultText, PREVIEW_LIMIT) || null;
 }
+
+/** True when glob returned a parsed payload with zero matches. */
+export function isEmptyGlobResultPreview(
+  preview: string | null | undefined,
+): boolean {
+  if (!preview) return false;
+  try {
+    const parsed: unknown = JSON.parse(preview);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return false;
+    const entries = (parsed as { entries?: unknown }).entries;
+    return Array.isArray(entries) && entries.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+export const GLOB_EMPTY_RESULT_LABEL = "No files found";
 
 export function presentToolCall({
   call,
@@ -290,11 +342,18 @@ export function presentToolCall({
   active: boolean;
   turnCancelled: boolean;
 }): ToolPresentation {
-  const rawName = events?.started?.name ?? events?.finished?.name ?? call.function?.name ?? "tool";
+  const rawName =
+    events?.started?.name ??
+    events?.finished?.name ??
+    call.function?.name ??
+    "tool";
   const name = bounded(rawName, NAME_LIMIT) || "tool";
   let status: ToolPresentationStatus;
   if (events?.finished) status = statusFromFinished(events.finished);
-  else if (resultText?.startsWith(CANCELLED_MARKER) || (turnCancelled && !hasResult)) {
+  else if (
+    resultText?.startsWith(CANCELLED_MARKER) ||
+    (turnCancelled && !hasResult)
+  ) {
     status = "cancelled";
   } else if (resultText?.trim() === INTERRUPTED_MARKER) status = "interrupted";
   else if (hasResult) status = "success";
@@ -308,8 +367,10 @@ export function presentToolCall({
       : bounded(events?.finished?.content_preview, PREVIEW_LIMIT) ||
         resultPreviewFromToolBody(name, resultText);
   if (!resultPreview && resultHasImage) resultPreview = "Image result";
-  if (!resultPreview && status === "cancelled") resultPreview = "No result was retained.";
-  if (!resultPreview && status === "interrupted") resultPreview = "No result was recorded.";
+  if (!resultPreview && status === "cancelled")
+    resultPreview = "No result was retained.";
+  if (!resultPreview && status === "interrupted")
+    resultPreview = "No result was recorded.";
 
   const summary =
     bounded(events?.started?.key_arg_preview, PREVIEW_LIMIT) ||

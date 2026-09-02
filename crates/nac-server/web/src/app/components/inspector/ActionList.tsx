@@ -1,13 +1,10 @@
 import {
-  ButtonSize,
-  ButtonVariant,
   DropdownContent,
   Icon,
   IconName,
   Loader,
   LoaderSize,
   LoaderVariant,
-  Select,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import {
@@ -43,45 +40,57 @@ import {
   useExpandedActionGroupId,
 } from "@/app/lib/actionExpand";
 
-const FILTER_LABEL: Record<ActionFilter, string> = {
-  all: "All actions",
-  threads: "Threads",
-  tools: "Thoughts & tools",
-  sessions: "Sessions",
-  worksets: "Worksets",
-};
+export function actionFilterEmptyCopy(
+  filter: ActionFilter,
+  kind: "agent" | "orchestrator",
+): { title: string; body: string } {
+  switch (filter) {
+    case "sessions":
+      return {
+        title: "No sessions yet.",
+        body: "They appear here as the agent starts them.",
+      };
+    case "threads":
+      return {
+        title: "No threads yet.",
+        body: "They appear here as the orchestrator assigns work.",
+      };
+    case "worksets":
+      return {
+        title: "No worksets yet.",
+        body: "They appear here as the orchestrator defines them.",
+      };
+    case "tools":
+      return {
+        title: "No thoughts or tools yet.",
+        body:
+          kind === "orchestrator"
+            ? "They appear here as the orchestrator works."
+            : "They appear here as the agent works.",
+      };
+    default:
+      return {
+        title: "No actions yet.",
+        body:
+          kind === "orchestrator"
+            ? "Start a conversation to create one."
+            : "They appear here as the agent works.",
+      };
+  }
+}
 
-export function ActionFilterBar({
-  value,
-  options,
-  onChange,
+export function ActionListEmpty({
+  filter,
+  kind,
 }: {
-  value: ActionFilter;
-  options: readonly ActionFilter[];
-  onChange: (value: ActionFilter) => void;
+  filter: ActionFilter;
+  kind: "agent" | "orchestrator";
 }) {
+  const copy = actionFilterEmptyCopy(filter, kind);
   return (
-    <div className="flex items-center gap-3 shrink-0 border-b border-muted bg-elevation-level-1 pl-3 pr-2 py-2">
-      <span className="flex-1 min-w-0 label-micro text-basic-primary">
-        Show:
-      </span>
-      <Select
-        size={ButtonSize.Small}
-        variant={ButtonVariant.Secondary}
-        value={value}
-        items={options.map((id) => ({ id, label: FILTER_LABEL[id] }))}
-        onValueChange={(id) => {
-          if (
-            id === "all" ||
-            id === "threads" ||
-            id === "tools" ||
-            id === "sessions" ||
-            id === "worksets"
-          ) {
-            onChange(id);
-          }
-        }}
-      />
+    <div className="flex flex-col px-2 pb-4 pt-2 text-micro">
+      <p className="text-basic-tertiary">{copy.title}</p>
+      <p className="text-basic-muted">{copy.body}</p>
     </div>
   );
 }
@@ -246,7 +255,7 @@ export function ActionGroupRow({
           inert={!expanded || undefined}
         >
           <div className="flex flex-col gap-0 pl-4">
-            {item.group.segments.map((segment) => {
+            {[...item.group.segments].reverse().map((segment) => {
               const config = configForSegment(segment);
               return (
                 <ActionListButton
@@ -283,7 +292,7 @@ export function ActionSpawnRow({
     <div data-action-anchor={item.id} className="[overflow-anchor:auto]">
       <ActionListButton
         label={item.title}
-        trailing={failed || item.group.inProgress ? undefined : "Spawn"}
+        trailing={failed || item.group.inProgress ? undefined : "Session"}
         icon={icon}
         running={item.group.inProgress}
         failed={failed}
@@ -441,12 +450,14 @@ export function ActionItemList({
   selectedThreadEpisode,
   episodeCount,
   threadFlags,
+  pinToNewest = false,
   onSelectGroup,
   onSelectThread,
 }: {
   items: readonly ActionItem[];
   selectedGroupId: string | null;
   selectedThreadEpisode: string | null;
+  pinToNewest?: boolean;
   episodeCount: (name: string) => number;
   threadFlags?: (name: string) => {
     pending: boolean;
@@ -474,6 +485,17 @@ export function ActionItemList({
       scroller,
     };
   };
+
+  const newestId = items[0]?.id;
+  useLayoutEffect(() => {
+    if (!pinToNewest || !newestId) return;
+    const el = document.querySelector(
+      `[data-action-anchor="${CSS.escape(newestId)}"]`,
+    );
+    if (!(el instanceof HTMLElement)) return;
+    const scroller = nearestScrollParent(el);
+    if (scroller) scroller.scrollTop = 0;
+  }, [pinToNewest, newestId]);
 
   useEffect(() => {
     if (selectedGroupId === prevSelected.current) return;

@@ -7,10 +7,16 @@ import { cn } from "@/app/lib/cn";
 export type SidebarBoxAccent = "info" | "error";
 
 export type SidebarBoxContent =
-  | { kind: "markdown"; key: string; content: string; accent?: SidebarBoxAccent }
+  | {
+      kind: "markdown";
+      key: string;
+      content: string;
+      accent?: SidebarBoxAccent;
+    }
   | { kind: "code"; key: string; content: string; accent?: SidebarBoxAccent }
   | { kind: "file"; key: string; path: string; directory?: boolean }
-  | { kind: "more"; key: string; count: number };
+  | { kind: "more"; key: string; count: number }
+  | { kind: "muted"; key: string; content: string };
 
 function boxTextClass(accent: SidebarBoxAccent | undefined): string {
   if (accent === "error") return "text-error-primary";
@@ -35,6 +41,11 @@ export function SegmentDetailBox({
       </span>
     );
   }
+  if (box.kind === "muted") {
+    return (
+      <span className="label-micro text-basic-muted px-2">{box.content}</span>
+    );
+  }
 
   return (
     <div
@@ -45,7 +56,10 @@ export function SegmentDetailBox({
     >
       {box.kind === "code" ? (
         <pre
-          className={cn("agent-segment-code-pre code-small", boxTextClass(box.accent))}
+          className={cn(
+            "agent-segment-code-pre code-small",
+            boxTextClass(box.accent),
+          )}
         >
           <code>{box.content}</code>
         </pre>

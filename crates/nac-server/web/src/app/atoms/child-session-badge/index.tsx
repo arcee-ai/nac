@@ -58,100 +58,100 @@ const ChildSessionBadge: React.FC<ChildSessionBadgeProps> = ({
 
   return (
     <div
-      role={inert || missing ? undefined : "group"}
-      tabIndex={inert || missing ? -1 : 0}
-      aria-current={active && !inert ? "true" : undefined}
-      aria-disabled={missing || undefined}
-      aria-label={missing ? "No chat found" : title}
-      onClick={inert ? undefined : activate}
-      onKeyDown={
-        inert
-          ? undefined
-          : (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                activate();
-              }
-            }
-      }
-      className={cn(
-        "group/spawn-card relative flex w-full max-w-[320px] bg-elevation-level-2 flex-col overflow-clip rounded-[4px] text-left shadow-convex",
-        missing
-          ? "cursor-default bg-btn-ghost"
-          : running
-            ? inert
-              ? "bg-btn-ghost-highlighted"
-              : "cursor-pointer bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered active:bg-btn-ghost-highlighted-pressed"
-            : inert
-              ? "bg-btn-ghost"
-              : "cursor-pointer bg-btn-ghost hover:bg-btn-ghost-hovered active:bg-btn-ghost-pressed",
-        active &&
-          !inert &&
-          "outline outline-2 outline-offset-0 outline-[var(--blue-500)]",
-        className,
-      )}
+      className={`${active ? "border-l-primary" : "border-l-tertiary"} my-8 pl-4 border-l-2`}
     >
-      <div className="flex w-full items-center gap-[10px] p-2">
-        {missing ? (
-          <span className="flex size-7 shrink-0 items-center justify-center">
-            <Icon
-              iconName={IconName.Close}
-              size={20}
-              color="var(--color-fill-basic-muted)"
+      <div
+        role={inert || missing ? undefined : "group"}
+        tabIndex={inert || missing ? -1 : 0}
+        aria-current={active && !inert ? "true" : undefined}
+        aria-disabled={missing || undefined}
+        aria-label={missing ? "No chat found" : title}
+        onClick={inert ? undefined : activate}
+        onKeyDown={
+          inert
+            ? undefined
+            : (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  activate();
+                }
+              }
+        }
+        className={cn(
+          "group/spawn-card relative flex w-full max-w-[320px] flex-col overflow-clip rounded-[4px] bg-elevation-level-1 text-left shadow-convex outline-none [&>*]:shrink-0",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-[var(--blue-500)]",
+          missing || inert ? "cursor-default" : "cursor-pointer",
+          className,
+        )}
+      >
+        <div className="flex h-11 w-full shrink-0 items-center gap-[10px] px-2">
+          {missing ? (
+            <span className="flex size-7 shrink-0 items-center justify-center">
+              <Icon
+                iconName={IconName.Close}
+                size={20}
+                color="var(--color-fill-basic-muted)"
+              />
+            </span>
+          ) : (
+            <SessionTypeAvatar
+              className="size-7 shrink-0"
+              sessionType={sessionType}
+              running={running}
             />
-          </span>
-        ) : (
-          <SessionTypeAvatar sessionType={sessionType} running={running} />
-        )}
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate label-small",
-            missing
-              ? "text-basic-muted"
-              : running
-                ? "text-shimmer-basic"
-                : "text-basic-primary",
           )}
-        >
-          {missing ? "No chat found" : title}
-        </span>
-        {missing || inert ? null : (
-          <ChildSessionActionButtons
+          <span
             className={cn(
-              "opacity-0 pointer-events-none transition-opacity",
-              "group-hover/spawn-card:opacity-100 group-hover/spawn-card:pointer-events-auto",
-              "group-focus-within/spawn-card:opacity-100 group-focus-within/spawn-card:pointer-events-auto",
-              active && "opacity-100 pointer-events-auto",
+              "min-w-0 flex-1 truncate label-small leading-5",
+              missing
+                ? "text-basic-muted"
+                : running
+                  ? "text-shimmer-basic"
+                  : "text-basic-primary",
             )}
-            state={running ? "running" : "ready"}
-            busy={busy}
-            canOpen={canOpen}
-            onPause={onPause}
-            onPlay={onPlay}
-            onStop={onStop}
-            onOpen={onOpen}
-          />
-        )}
-      </div>
-      {peek.length ? (
-        <div className="flex h-12 w-full flex-col items-start justify-end overflow-clip">
-          <div className="flex w-full flex-col p-2 text-micro text-basic-tertiary">
+          >
+            {missing ? "No chat found" : title}
+          </span>
+          {missing || inert ? null : (
+            <ChildSessionActionButtons
+              className={cn(
+                "flex-none",
+                "opacity-0 pointer-events-none transition-opacity",
+                "group-hover/spawn-card:opacity-100 group-hover/spawn-card:pointer-events-auto",
+                "group-focus-within/spawn-card:opacity-100 group-focus-within/spawn-card:pointer-events-auto",
+                active && "opacity-100 pointer-events-auto",
+              )}
+              state={running ? "running" : "ready"}
+              busy={busy}
+              canOpen={canOpen}
+              onPause={onPause}
+              onPlay={onPlay}
+              onStop={onStop}
+              onOpen={onOpen}
+            />
+          )}
+        </div>
+        {peek.length ? (
+          <div className="flex w-full shrink-0 flex-col px-2 pb-2">
             {peek.map((line, index) => {
               const fade =
                 LINE_OPACITY[LINE_OPACITY.length - peek.length + index] ??
                 "opacity-100";
               return (
-                <p
+                <div
                   key={`${index}:${line}`}
-                  className={cn("w-full truncate", fade)}
+                  className={cn(
+                    "h-4 w-full truncate text-basic-tertiary !text-[12px] !leading-4",
+                    fade,
+                  )}
                 >
                   {line}
-                </p>
+                </div>
               );
             })}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 };
