@@ -313,12 +313,17 @@ impl<'a> SessionCreationApplication<'a> {
             request.extra_headers,
         )?;
         if let Some(profile) = self.manager.managed_model() {
-            let uses_host_profile = model.backend == Some(profile.backend)
-                && model.api_model.as_deref() == Some(profile.model_id.as_str())
+            let uses_host_credentials = model.backend == Some(profile.backend)
                 && model.api_base_url.as_deref() == Some(profile.endpoint.as_str())
                 && matches!(model.api_key_env, OptionalModelOption::Clear);
-            if uses_host_profile {
-                model.trusted_api_key_file = Some(profile.credential_file.clone());
+            if uses_host_credentials {
+                let managed = self.manager.managed_host().ok_or_else(|| {
+                    anyhow!("managed model profile is missing its host configuration")
+                })?;
+                profile
+                    .require_durable_authorization(managed)
+                    .map_err(request_configuration_error_from)?;
+                model.trusted_api_key_file = profile.trusted_api_key_file();
             }
         }
         model.light_model = match request.light_model {

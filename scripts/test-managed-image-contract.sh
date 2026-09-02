@@ -31,11 +31,17 @@ require_literal "$dockerfile" '/var/lib/nac'
 require_literal "$dockerfile" '/repositories'
 require_literal "$dockerfile" '/home/nac'
 require_literal "$dockerfile" '/run/nac'
+require_literal "$dockerfile" '/run/secrets/nac'
 
 require_literal "$entrypoint" '--bind 0.0.0.0:3210'
 require_literal "$entrypoint" '--allow-remote'
 require_literal "$entrypoint" '--store-path /var/lib/nac/nac.sqlite3'
 require_literal "$entrypoint" '--managed-config "$managed_config"'
+require_literal "$entrypoint" 'without requiring the bootstrap mount'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_credential_source = \"managed-bootstrap\"'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" '/run/secrets/nac/bootstrap.json'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'start_container without-bootstrap'
+require_literal "$repo_root/docker/managed/fixtures/bootstrap.json" '"client_id": "managed-nac"'
 if grep -Eq '(^|[[:space:]])(sudo|su)([[:space:]]|$)' "$dockerfile" "$entrypoint"; then
     fail 'image or entrypoint grants an escalation command'
 fi

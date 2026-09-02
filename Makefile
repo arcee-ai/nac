@@ -8,6 +8,8 @@ MANAGED_IMAGE ?= nac-managed:local
 
 DEV_BIND ?= 127.0.0.1:3210
 DEV_URL ?= http://$(DEV_BIND)/
+DEV_STORE_PATH ?=
+DEMO_STORE_PATH ?= $(HOME)/.config/nac/dev.db
 
 ifeq ($(shell uname -s),Darwin)
 BROWSER_OPEN ?= open
@@ -15,7 +17,7 @@ else
 BROWSER_OPEN ?= xdg-open
 endif
 
-export DEV_BIND DEV_URL BROWSER_OPEN
+export DEV_BIND DEV_URL DEV_STORE_PATH BROWSER_OPEN
 
 
 # Matches the location used by scripts/install.sh ($(INSTALL_ROOT)/bin).
@@ -56,7 +58,12 @@ dev:
 			printf 'error: NAC is already responding at %s\n' "$$DEV_URL"; \
 			exit 1; \
 		fi; \
-		$(CARGO) run --locked -p $(PKG) --bin $(BIN) -- --bind "$$DEV_BIND" & \
+		if [ -n "$$DEV_STORE_PATH" ]; then \
+			set -- --store-path "$$DEV_STORE_PATH"; \
+		else \
+			set --; \
+		fi; \
+		$(CARGO) run --locked -p $(PKG) --bin $(BIN) -- --bind "$$DEV_BIND" "$$@" & \
 		server_pid=$$!; \
 		trap 'kill "$$server_pid" 2>/dev/null || true' EXIT; \
 		trap 'exit 130' INT TERM; \
@@ -70,10 +77,10 @@ dev:
 		"$$BROWSER_OPEN" "$$DEV_URL" || exit $$?; \
 		wait "$$server_pid"
 
-## Rebuild the committed production bundle, then run the real embedded app
+## Rebuild the production bundle, then run with an isolated development store
 demo:
 	npm --prefix $(WEB_DIR) run build
-	$(MAKE) dev
+	$(MAKE) dev DEV_STORE_PATH="$(DEMO_STORE_PATH)"
 
 ## Build the nac-web binary (release)
 release:
@@ -215,7 +222,7 @@ help:
 		'  setup        Install locked Rust/web dependencies and Playwright Chromium' \
 		'  build        Build nac-web (debug) [default]' \
 		'  dev          Build and run nac-web, then open it in the default browser' \
-		'  demo         Rebuild production assets, then run the embedded app' \
+		'  demo         Rebuild production assets and run with ~/.config/nac/dev.db' \
 		'  release      Build nac-web (release)' \
 		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
 		'  ci           Run formatting, lint, and test gates' \

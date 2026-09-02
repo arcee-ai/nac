@@ -38,6 +38,7 @@ mod anthropic;
 mod anthropic_stream;
 mod api_key_store;
 mod arcee;
+mod arcee_bootstrap;
 pub(crate) mod auth_store;
 mod backend;
 mod catalog;
@@ -60,6 +61,11 @@ mod types;
 
 pub use api_key_store::{list_stored_api_keys, remove_api_key, store_api_key, StoredApiKeySummary};
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
+pub use arcee_bootstrap::{
+    import_managed_arcee_bootstrap, managed_arcee_auth_storage_root,
+    validate_managed_arcee_authorization, ManagedArceeBootstrapOutcome,
+    MANAGED_ARCEE_BOOTSTRAP_PATH,
+};
 pub use backend::{
     validate_backend_api_key_env, validate_caller_supplied_base_url,
     validate_model_reasoning_effort,

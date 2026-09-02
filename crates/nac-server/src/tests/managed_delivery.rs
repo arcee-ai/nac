@@ -213,6 +213,195 @@ async fn managed_host_supplies_default_model_and_mounted_credential() {
 }
 
 #[tokio::test]
+async fn managed_preserved_legacy_auth_is_tombstoned_but_never_authorized() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_preserved_legacy_auth");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_arcee_auth(&nac_home, "https://api.arcee.ai");
+    let auth_path = nac_home.join("arcee_auth.json");
+    let original_auth = std::fs::read(&auth_path).unwrap();
+    write_managed_credential(
+        &nac_home.join("arcee_managed_bootstrap_receipt.json"),
+        serde_json::json!({
+            "version": 1,
+            "bootstrap_id": "4712bc5e-30d5-421a-b416-8291d9f7d8f9",
+            "managed_host_id": "21856443-8ed8-40ab-9036-72e837c99f27",
+            "client_id": "managed-nac",
+            "disposition": "preserved_existing"
+        })
+        .to_string(),
+    );
+    let manager = test_managed_bootstrap_manager(&root);
+
+    let create_error = manager
+        .create_session(CreateSessionRequest::default())
+        .await
+        .expect_err("a preserved nac-cli credential must not authorize managed creation");
+    let create_error = format!("{create_error:#}");
+    assert!(
+        create_error.contains("did not import a usable managed credential"),
+        "{create_error}"
+    );
+    assert!(!create_error.contains("arcee-access-server-test"));
+    assert!(sessions::list_sessions(&root.join("store.db"))
+        .unwrap()
+        .is_empty());
+
+    let snapshot = sessions::new_snapshot(
+        "preserved-legacy-resume".to_string(),
+        root.clone(),
+        "another-entitled-arcee-model".to_string(),
+        "https://api.arcee.ai".to_string(),
+        BackendKind::ArceeAuth,
+        None,
+        None,
+        None,
+        Vec::new(),
+        None,
+        BTreeMap::new(),
+    );
+    sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
+    let resume_error = match manager.attach_session("preserved-legacy-resume").await {
+        Ok(_) => panic!("a preserved nac-cli credential must not authorize managed resume"),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(resume_error.contains("did not import a usable managed credential"));
+    assert!(!resume_error.contains("arcee-refresh-server-test"));
+
+    let app = router(manager);
+    let listing = response_json(get_response(app.clone(), "/models", None).await).await;
+    let arcee = listing["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|provider| provider["id"] == "arcee-auth")
+        .unwrap();
+    assert_eq!(arcee["auth_status"], "no_credential");
+    assert_eq!(arcee["auth_hint"], serde_json::Value::Null);
+
+    let status = response_json(get_response(app, "/managed/status", None).await).await;
+    assert_eq!(status["model_ready"], false);
+    assert!(!status.to_string().contains("arcee-access-server-test"));
+    assert_eq!(std::fs::read(&auth_path).unwrap(), original_auth);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn managed_bootstrap_corruption_blocks_create_and_resume_without_secret_echo() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_bootstrap_fail_closed");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_arcee_auth(&nac_home, "https://api.arcee.ai");
+    let receipt_canary = "receipt-secret-canary";
+    write_managed_credential(
+        &nac_home.join("arcee_managed_bootstrap_receipt.json"),
+        format!(r#"{{"refresh_token":"{receipt_canary}""#),
+    );
+    let manager = test_managed_bootstrap_manager(&root);
+
+    let create_error = manager
+        .create_session(CreateSessionRequest {
+            cwd: Some(root.clone()),
+            model: RequestField::Value("another-entitled-arcee-model".to_string()),
+            base_url: RequestField::Value("https://api.arcee.ai".to_string()),
+            backend: RequestField::Value("arcee-auth".to_string()),
+            api_key_env: RequestField::Null,
+            ..CreateSessionRequest::default()
+        })
+        .await
+        .expect_err("an invalid receipt must block managed session creation");
+    let create_error = format!("{create_error:#}");
+    assert!(
+        create_error.contains("receipt is invalid"),
+        "{create_error}"
+    );
+    assert!(!create_error.contains(receipt_canary));
+    assert!(sessions::list_sessions(&root.join("store.db"))
+        .unwrap()
+        .is_empty());
+
+    let snapshot = sessions::new_snapshot(
+        "managed-resume".to_string(),
+        root.clone(),
+        "another-entitled-arcee-model".to_string(),
+        "https://api.arcee.ai".to_string(),
+        BackendKind::ArceeAuth,
+        None,
+        None,
+        None,
+        Vec::new(),
+        None,
+        BTreeMap::new(),
+    );
+    sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
+    let resume_error = match manager.attach_session("managed-resume").await {
+        Ok(_) => panic!("an invalid receipt must block managed session resume"),
+        Err(error) => error,
+    };
+    let resume_error = format!("{resume_error:#}");
+    assert!(
+        resume_error.contains("receipt is invalid"),
+        "{resume_error}"
+    );
+    assert!(!resume_error.contains(receipt_canary));
+
+    write_managed_credential(
+        &nac_home.join("arcee_managed_bootstrap_receipt.json"),
+        serde_json::json!({
+            "version": 1,
+            "bootstrap_id": "4712bc5e-30d5-421a-b416-8291d9f7d8f9",
+            "managed_host_id": "21856443-8ed8-40ab-9036-72e837c99f27",
+            "client_id": "managed-nac",
+            "disposition": "imported"
+        })
+        .to_string(),
+    );
+    let auth_canary = "auth-schema-secret-canary";
+    write_managed_credential(
+        &nac_home.join("arcee_auth.json"),
+        serde_json::json!({
+            "type": "arcee_device_token",
+            "access_token": "access-secret-canary",
+            "refresh_token": "refresh-secret-canary",
+            "token_type": "bearer",
+            "expires_at_ms": auth_canary,
+            "base_url": "https://api.arcee.ai",
+            "organization_id": "org-server-test",
+            "workspace_name": "server-test"
+        })
+        .to_string(),
+    );
+    let auth_error = manager
+        .create_session(CreateSessionRequest::default())
+        .await
+        .expect_err("a malformed durable credential must block managed creation");
+    let auth_error = format!("{auth_error:#}");
+    assert!(auth_error.contains("failed to parse stored Arcee auth schema"));
+    for canary in [auth_canary, "access-secret-canary", "refresh-secret-canary"] {
+        assert!(!auth_error.contains(canary));
+    }
+
+    let status = response_json(get_response(router(manager), "/managed/status", None).await).await;
+    assert_eq!(status["model_ready"], false);
+    let status = status.to_string();
+    for canary in [
+        receipt_canary,
+        auth_canary,
+        "access-secret-canary",
+        "refresh-secret-canary",
+    ] {
+        assert!(!status.contains(canary));
+    }
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn managed_github_status_is_metadata_only_and_unmanaged_hosts_fail_closed() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("managed_github_status");

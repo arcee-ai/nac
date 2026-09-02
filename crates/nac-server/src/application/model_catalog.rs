@@ -19,17 +19,22 @@ impl<'a> ModelCatalogApplication<'a> {
         else {
             return listing;
         };
-        if config.model_credential().is_err() {
-            return listing;
-        }
         if let Some(provider) = listing
             .providers
             .iter_mut()
             .find(|provider| provider.id == profile.backend)
         {
-            provider.auth_status = AuthStatus::Ready;
-            provider.auth_hint = None;
-            provider.default_base_url = Some(profile.endpoint.clone());
+            if profile.credential_ready(config).is_ok() {
+                provider.auth_status = AuthStatus::Ready;
+                provider.auth_hint = None;
+                provider.default_base_url = Some(profile.endpoint.clone());
+            } else {
+                // Generic catalog probing treats any parseable Arcee login as
+                // ready. Managed bootstrap requires a receipt-bound managed-nac
+                // generation, so explicitly mask legacy or mismatched state.
+                provider.auth_status = AuthStatus::NoCredential;
+                provider.auth_hint = None;
+            }
         }
         listing
     }

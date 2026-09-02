@@ -6,6 +6,7 @@ across features. User-visible behavior remains documented under the topical
 
 - [0001 — Dependency boundaries](0001-dependency-boundaries.md)
 - [0002 — Generated API contract](0002-generated-api-contract.md)
+- [0003 — Managed Arcee bootstrap ownership and durability](0003-managed-arcee-bootstrap.md)
 
 Design proposals (not current product behavior):
 

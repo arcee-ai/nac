@@ -23,6 +23,15 @@ nac-web arcee-auth logout
 
 The login control plane is fixed at `https://api.arcee.ai`, using `/app/v1/device/code` and `/app/v1/device/token`; environment variables cannot redirect it. The login response supplies the approved Arcee inference origin. `status` shows its workspace, organization, base URL, and credential path without printing the key.
 
+Stored Arcee credentials carry the client identity used for refresh. Existing
+records without that field remain `nac-cli`; Managed NAC bootstrap records use
+`managed-nac`. Refresh rotation preserves both the client and any nonsecret
+bootstrap provenance. Managed bootstrap is documented in the
+[Managed NAC host contract](../managed/README.md); it imports into the same
+private file. The interactive commands above remain the fallback for ordinary
+`arcee-auth` use, but their `nac-cli` credentials do not satisfy a
+receipt-bound Managed NAC bootstrap profile.
+
 Both Arcee backends accept only `https` origins on `arcee.ai` or its subdomains with effective port 443. Accepted inference paths are `/`, `/api`, `/api/v1`, and `/api/v1/chat/completions`; all resolve to `/api/v1/chat/completions`. Other hosts and path forms are rejected.
 
 A managed login is selected explicitly in the dashboard's model picker (or with a per-session `backend = "arcee-auth"` override): the Trinity model ids collide with `arcee-api` in the catalog, and a collision resolves to the non-managed provider. The managed session's base URL defaults to `https://api.arcee.ai/api/v1`.

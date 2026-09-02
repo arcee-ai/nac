@@ -33,33 +33,34 @@ state_volume="$suffix-state"
 repository_volume="$suffix-repositories"
 home_volume="$suffix-home"
 config_volume="$suffix-config"
-credential_volume="$suffix-model-credential"
+bootstrap_volume="$suffix-bootstrap"
 ready_file="${TMPDIR:-/tmp}/$suffix-ready.json"
+log_file="${TMPDIR:-/tmp}/$suffix-logs.txt"
 
 cleanup() {
-    rm -f "$ready_file"
+    rm -f "$ready_file" "$log_file"
     "$container_runtime" rm -f "$container_name" >/dev/null 2>&1 || true
     "$container_runtime" volume rm \
         "$state_volume" "$repository_volume" "$home_volume" "$config_volume" \
-        "$credential_volume" \
+        "$bootstrap_volume" \
         >/dev/null 2>&1 || true
 }
 trap cleanup EXIT HUP INT TERM
 
-for volume in "$state_volume" "$repository_volume" "$home_volume" "$config_volume" "$credential_volume"; do
+for volume in "$state_volume" "$repository_volume" "$home_volume" "$config_volume" "$bootstrap_volume"; do
     "$container_runtime" volume create "$volume" >/dev/null
 done
 
-fixture='managed-image-smoke-model-credential'
 "$container_runtime" run --rm \
     --entrypoint /bin/sh \
     --user 0:0 \
-    --volume "$credential_volume:/run/secrets/model" \
+    --volume "$bootstrap_volume:/run/secrets/nac" \
+    --volume "$repo_root/docker/managed/fixtures/bootstrap.json:/fixture/bootstrap.json:ro" \
     "$image" -ceu '
         umask 077
-        printf "%s\n" "managed-image-smoke-model-credential" > /run/secrets/model/credential
-        chown 10001:10001 /run/secrets/model/credential
-        chmod 0400 /run/secrets/model/credential
+        cp /fixture/bootstrap.json /run/secrets/nac/bootstrap.json
+        chown 0:10001 /run/secrets/nac/bootstrap.json
+        chmod 0440 /run/secrets/nac/bootstrap.json
     '
 
 "$container_runtime" run --rm \
@@ -73,18 +74,18 @@ fixture='managed-image-smoke-model-credential'
         umask 077
         printf "%s\n" \
             "version = 1" \
-            "logical_host_id = \"managed-image-smoke\"" \
+            "logical_host_id = \"21856443-8ed8-40ab-9036-72e837c99f27\"" \
             "owner = \"smoke@example.test\"" \
             "public_hostname = \"managed-smoke.test\"" \
             "repository_root = \"/repositories\"" \
             "state_root = \"/var/lib/nac\"" \
             "home_root = \"/home/nac\"" \
             "github_client_id = \"Iv1.smoke\"" \
-            "model_backend = \"arcee-api\"" \
+            "model_backend = \"arcee-auth\"" \
             "model_id = \"trinity-large-thinking\"" \
-            "model_endpoint = \"https://models.example.test/v1\"" \
-            "model_credential_file = \"/run/secrets/model/credential\"" \
-            "model_credential_environment_names = [\"ARCEE_API_KEY\"]" \
+            "model_endpoint = \"https://api.arcee.ai\"" \
+            "model_credential_file = \"/run/secrets/nac/bootstrap.json\"" \
+            "model_credential_source = \"managed-bootstrap\"" \
             > /etc/nac/managed.toml
         printf "%s\n" durable > /var/lib/nac/restart-canary
         printf "%s\n" durable > /repositories/restart-canary
@@ -97,6 +98,12 @@ fail() {
 }
 
 start_container() {
+    bootstrap_mount=${1:-with-bootstrap}
+    if [ "$bootstrap_mount" = with-bootstrap ]; then
+        set -- --volume "$bootstrap_volume:/run/secrets/nac:ro"
+    else
+        set --
+    fi
     "$container_runtime" run --detach \
         --name "$container_name" \
         --read-only \
@@ -106,7 +113,7 @@ start_container() {
         --volume "$repository_volume:/repositories" \
         --volume "$home_volume:/home/nac" \
         --volume "$config_volume:/etc/nac:ro" \
-        --volume "$credential_volume:/run/secrets/model:ro" \
+        "$@" \
         --tmpfs /tmp:rw,noexec,nosuid,nodev,uid=10001,gid=10001,mode=1777 \
         --tmpfs /run/nac:rw,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0755 \
         "$image" >/dev/null
@@ -135,7 +142,7 @@ wait_until_ready() {
     fail 'container did not become ready within 60 seconds'
 }
 
-start_container
+start_container with-bootstrap
 port=$(wait_until_ready)
 
 "$container_runtime" exec "$container_name" /bin/sh -ceu '
@@ -154,9 +161,13 @@ port=$(wait_until_ready)
     test "$(cat /var/lib/nac/restart-canary)" = durable
     test "$(cat /repositories/restart-canary)" = durable
     test "$(cat /home/nac/restart-canary)" = durable
-    test "$(cat /run/secrets/model/credential)" = managed-image-smoke-model-credential
-    if printf "%s\n" overwritten > /run/secrets/model/credential 2>/dev/null; then
-        echo "model credential mount unexpectedly accepted a write" >&2
+    test -f /run/secrets/nac/bootstrap.json
+    test ! -L /run/secrets/nac/bootstrap.json
+    test -f /var/lib/nac/arcee_auth.json
+    test -f /var/lib/nac/arcee_managed_bootstrap_receipt.json
+    jq -e '.client_id == "managed-nac" and .managed_bootstrap.bootstrap_id == "4712bc5e-30d5-421a-b416-8291d9f7d8f9"' /var/lib/nac/arcee_auth.json >/dev/null
+    if printf "%s\n" overwritten > /run/secrets/nac/bootstrap.json 2>/dev/null; then
+        echo "bootstrap mount unexpectedly accepted a write" >&2
         exit 1
     fi
 '
@@ -171,20 +182,55 @@ curl -fsS --noproxy '*' --connect-timeout 1 --max-time 5 \
 status_json=$(curl -fsS --noproxy '*' --connect-timeout 1 --max-time 5 \
     -H 'Host: managed-smoke.test' "http://127.0.0.1:$port/managed/status")
 printf '%s' "$status_json" | grep -F '"ready":true' >/dev/null || fail 'managed status is not ready'
-if printf '%s' "$status_json" | grep -F "$fixture" >/dev/null; then
-    fail 'managed status disclosed the model credential fixture'
-fi
+bootstrap_access=$(jq -r '.access_token' "$repo_root/docker/managed/fixtures/bootstrap.json")
+bootstrap_refresh=$(jq -r '.refresh_token' "$repo_root/docker/managed/fixtures/bootstrap.json")
+case "$status_json" in
+    *"$bootstrap_access"*|*"$bootstrap_refresh"*) fail 'managed status disclosed bootstrap credentials' ;;
+esac
+"$container_runtime" logs "$container_name" >"$log_file" 2>&1
+log_contents=$(cat "$log_file")
+case "$log_contents" in
+    *"$bootstrap_access"*|*"$bootstrap_refresh"*) fail 'managed logs disclosed bootstrap credentials' ;;
+esac
 
 "$container_runtime" stop --time 25 "$container_name" >/dev/null
 exit_code=$($container_runtime inspect --format '{{.State.ExitCode}}' "$container_name")
 [ "$exit_code" -eq 0 ] || fail "SIGTERM shutdown exited with status $exit_code"
 "$container_runtime" rm "$container_name" >/dev/null
 
-start_container
+# Model a persisted refresh-token rotation, then reconcile the original
+# bootstrap mount. Startup must preserve the rotated writable record.
+"$container_runtime" run --rm \
+    --entrypoint /bin/sh \
+    --user 0:0 \
+    --volume "$state_volume:/var/lib/nac" \
+    "$image" -ceu '
+        jq ".access_token += \"-rotated\" | .refresh_token += \"-rotated\"" \
+            /var/lib/nac/arcee_auth.json > /var/lib/nac/arcee_auth.json.next
+        chown 10001:10001 /var/lib/nac/arcee_auth.json.next
+        chmod 0600 /var/lib/nac/arcee_auth.json.next
+        mv /var/lib/nac/arcee_auth.json.next /var/lib/nac/arcee_auth.json
+    '
+
+start_container with-bootstrap
 port=$(wait_until_ready)
 curl -fsS --noproxy '*' --connect-timeout 1 --max-time 5 \
     "http://127.0.0.1:$port/readyz" >/dev/null
-"$container_runtime" exec "$container_name" test -f /var/lib/nac/restart-canary
+"$container_runtime" exec "$container_name" /bin/sh -ceu '
+    test -f /var/lib/nac/restart-canary
+    jq -e ".access_token | endswith(\"-rotated\")" /var/lib/nac/arcee_auth.json >/dev/null
+    jq -e ".refresh_token | endswith(\"-rotated\")" /var/lib/nac/arcee_auth.json >/dev/null
+'
+"$container_runtime" stop --time 25 "$container_name" >/dev/null
+"$container_runtime" rm "$container_name" >/dev/null
+
+# The receipt must make a later steady-state restart independent of the
+# bootstrap volume altogether.
+start_container without-bootstrap
+port=$(wait_until_ready)
+curl -fsS --noproxy '*' --connect-timeout 1 --max-time 5 \
+    "http://127.0.0.1:$port/readyz" >/dev/null
+"$container_runtime" exec "$container_name" test ! -e /run/secrets/nac/bootstrap.json
 "$container_runtime" stop --time 25 "$container_name" >/dev/null
 
 printf '%s\n' 'managed image smoke: ok'
