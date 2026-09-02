@@ -11,17 +11,47 @@
 .agent-segment-box .markdown-content table {
   font-size: 12px;
   line-height: 16px;
-  color: var(--color-text-basic-tertiary);
+  color: var(--color-text-basic-secondary);
+}
+.agent-segment-box .markdown-content code {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--color-text-basic-primary);
 }
 
 .agent-segment-box .markdown-content p,
 .agent-segment-box .markdown-content li {
   margin-top: 0;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.agent-segment-box .markdown-content li {
+  margin-left: 20px;
+}
+
+.agent-segment-box .chat-response ol li::marker {
+  color: var(--color-text-basic-secondary);
+  font-weight: 400;
 }
 
 .agent-segment-box .markdown-content > *:last-child {
   margin-bottom: 0;
+}
+
+.agent-segment-box-error .markdown-content,
+.agent-segment-box-error .markdown-content p,
+.agent-segment-box-error .markdown-content li,
+.agent-segment-box-error .markdown-content h1,
+.agent-segment-box-error .markdown-content h2,
+.agent-segment-box-error .markdown-content h3,
+.agent-segment-box-error .markdown-content h4,
+.agent-segment-box-error .markdown-content h5,
+.agent-segment-box-error .markdown-content h6,
+.agent-segment-box-error .markdown-content blockquote,
+.agent-segment-box-error .markdown-content table {
+  color: var(--color-text-error-primary);
+}
+.agent-segment-box-error .markdown-content code {
+  color: var(--color-text-error-primary);
 }
 
 .agent-segment-row-connector {
@@ -44,7 +74,6 @@
 }
 
 .agent-segment-code-pre {
-  color: var(--color-text-basic-secondary);
   background: transparent;
   padding: 0;
   margin: 0;

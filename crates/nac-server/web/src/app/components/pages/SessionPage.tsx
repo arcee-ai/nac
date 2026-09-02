@@ -30,10 +30,10 @@ import { perfRender } from "@/app/lib/perfDebug";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
 import {
-  DEFAULT_SESSION_PANEL,
   isSessionPanel,
   routes,
   SESSION_PANEL_LABEL,
+  sessionPanelFromPath,
   type SessionPanel,
 } from "@/app/lib/routes";
 import {
@@ -149,7 +149,7 @@ export default function SessionPage() {
     snapshot?.lineage?.assignment_status,
   );
   const sessionPanels = panelPolicy.mobilePanels;
-  const requestedPanel = isSessionPanel(panel) ? panel : DEFAULT_SESSION_PANEL;
+  const requestedPanel = sessionPanelFromPath(panel);
   const effectivePanel = sessionPanels.includes(requestedPanel)
     ? requestedPanel
     : panelPolicy.defaultPanel;
@@ -179,8 +179,8 @@ export default function SessionPage() {
   }
 
   if (!id) return <Navigate to={routes.list()} replace />;
-  if (!isSessionPanel(panel)) {
-    return <Navigate to={routes.session(id, DEFAULT_SESSION_PANEL)} replace />;
+  if (panel !== requestedPanel) {
+    return <Navigate to={routes.session(id, requestedPanel)} replace />;
   }
 
   const configError = entry?.summary.model_config_error;
@@ -381,8 +381,8 @@ export default function SessionPage() {
                   >
                     {effectivePanel === "threads"
                       ? (currentThreadName ?? SESSION_PANEL_LABEL.threads)
-                      : effectivePanel === "thoughts"
-                        ? SESSION_PANEL_LABEL.thoughts
+                      : effectivePanel === "actions"
+                        ? SESSION_PANEL_LABEL.actions
                         : effectivePanel === "worksets"
                           ? (selectedWorkset ??
                             snapshot?.worksets.items[0]?.id ??

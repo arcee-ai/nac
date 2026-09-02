@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 
 import { SegmentDetailList } from "@/app/components/inspector/agent-segments/SegmentDetailList";
+import { ChildTranscriptPreview } from "@/app/components/inspector/ChildTranscriptPreview";
 import {
   ActionFilterBar,
   ActionItemList,
@@ -13,10 +14,13 @@ import {
   buildActionTimeline,
   filterActionTimeline,
   flattenActionItems,
+  liveTurnOriginKey,
 } from "@/app/lib/actionsTimeline";
 import type { AgentToolsGroup } from "@/app/lib/agentSegments";
+import { groupIsSpawn } from "@/app/lib/spawnSession";
 import { SESSION_PANEL_LABEL } from "@/app/lib/routes";
 import { buildTranscript, withStreamedOutput } from "@/app/lib/transcript";
+import { useActionFilter } from "@/app/store/actionFilterStore";
 import {
   useFinishedToolCalls,
   useLiveThreads,
@@ -25,6 +29,7 @@ import {
   useStreamText,
 } from "@/app/store/runtimeStore";
 import type { SessionSnapshotResponse } from "@/app/types/api";
+
 
 const AGENT_FILTERS: readonly ActionFilter[] = ["all", "tools", "sessions"];
 
@@ -36,7 +41,7 @@ function selectedGroup(
     items.find(
       (item) => (item.kind === "group" || item.kind === "spawn") && item.id === selected,
     ) ?? items.find((item) => item.kind === "group" || item.kind === "spawn");
-  if (!match || match.kind === "thread") return null;
+  if (!match || match.kind === "thread" || match.kind === "workset") return null;
   return match.group;
 }
 
@@ -55,19 +60,21 @@ export function ThoughtsToolsView({
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
   const sessionId = snapshot?.metadata.session_id ?? "";
-  const [filter, setFilter] = useState<ActionFilter>("all");
+  const [filter, setFilter] = useActionFilter("agent", AGENT_FILTERS);
 
   const sections = useMemo(() => {
     const turns = withStreamedOutput(
       buildTranscript(snapshot, liveThreads, finishedToolCalls, primaryToolEvents),
       { text: streamText, reasoning: streamReasoning },
     );
-    return buildActionTimeline(turns);
+    const live = Boolean(snapshot?.active_run) || Boolean(streamText) || Boolean(streamReasoning);
+    return buildActionTimeline(turns, liveTurnOriginKey(turns, live));
   }, [snapshot, liveThreads, finishedToolCalls, primaryToolEvents, streamText, streamReasoning]);
 
   const visibleSections = useMemo(() => filterActionTimeline(sections, filter), [sections, filter]);
   const items = useMemo(() => flattenActionItems(visibleSections), [visibleSections]);
   const current = selectedGroup(items, selected);
+  const spawn = current != null && groupIsSpawn(current);
   const currentRow = current
     ? visibleSections.findIndex((section) =>
         section.items.some(
@@ -92,12 +99,12 @@ export function ThoughtsToolsView({
     onSelect(current.id);
   }, [selected, current, items, onSelect]);
 
-  if (!snapshot) return <PanelLoading listTitle={SESSION_PANEL_LABEL.thoughts} />;
+  if (!snapshot) return <PanelLoading listTitle={SESSION_PANEL_LABEL.actions} />;
 
   return (
     <PanelSplit
-      listTitle={SESSION_PANEL_LABEL.thoughts}
-      title={current ? actionTitle(current) : undefined}
+      listTitle={SESSION_PANEL_LABEL.actions}
+      title={current && !spawn ? actionTitle(current) : undefined}
       listToolbar={<ActionFilterBar value={filter} options={AGENT_FILTERS} onChange={setFilter} />}
       list={
         visibleSections.length === 0 ? (
@@ -127,7 +134,9 @@ export function ThoughtsToolsView({
         )
       }
     >
-      {current ? (
+      {current && spawn ? (
+        <ChildTranscriptPreview parentSessionId={sessionId} group={current} />
+      ) : current ? (
         <SegmentDetailList
           key={current.id}
           group={current}

@@ -17,9 +17,9 @@
 .chat-response :not(pre) > code {
   padding: 0.0625rem 0.25rem;
   border-radius: 4px;
-  background: var(--color-bg-elevation-sublevel-variant-B);
+  background: var(--color-bg-btn-secondary-highlighted-hovered);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.8125rem;
+  font-size: 13px;
   /* Inline code has no scroller of its own, so a long identifier or path has
      to break rather than push the transcript sideways on a narrow screen. */
   overflow-wrap: anywhere;

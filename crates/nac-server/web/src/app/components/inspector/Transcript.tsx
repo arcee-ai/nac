@@ -23,7 +23,6 @@ import {
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
-import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -34,7 +33,6 @@ import {
   assignmentIsOpen,
   actionsPanel,
   isAgentBehavior,
-  sessionOriginFromRecord,
   sessionTypeFromBehavior,
 } from "@/app/lib/sessionBehavior";
 import { RevertModal } from "@/app/components/modals/RevertModal";
@@ -392,12 +390,6 @@ export function Transcript({
   const sessionType = sessionTypeFromBehavior(snapshot?.metadata.behavior);
   const isAgent = isAgentBehavior(snapshot?.metadata.behavior);
   const hasOlderMessages = snapshot?.message_page?.has_older === true;
-  const currentSummary = snapshot?.sessions.find((entry) => entry.session_id === sessionId);
-  const sessionOrigin = sessionOriginFromRecord(
-    snapshot?.lineage,
-    currentSummary?.forked_from,
-    currentSummary?.converted_from,
-  );
   const assignmentOpen = assignmentIsOpen(snapshot?.lineage?.assignment_status);
   const frozenMessageCount = snapshot?.lineage?.frozen_message_count ?? 0;
   const readOnly = assignmentOpen;
@@ -579,7 +571,7 @@ export function Transcript({
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {
               if (turn.kind === "delegated-completion") {
-                return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
+                return null;
               }
               if (turn.kind === "user") {
                 const taskFrozen =
@@ -622,11 +614,10 @@ export function Transcript({
               const mutateLocked = readOnly || taskFrozen;
               const row = (
                 <ModelMessage
-                  key={turn.key}
+                  key={running && lastIsThisRun ? STREAMING_TURN_KEY : turn.key}
                   turn={turn}
                   model={model}
                   sessionType={sessionType}
-                  origin={sessionOrigin}
                   active={running && lastIsThisRun}
                   // Pending model chrome below the optimistic bubble is the
                   // visual last row; leaving min-height on the previous reply
@@ -636,7 +627,7 @@ export function Transcript({
                   selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
                   selectedWorkset={panel === "worksets" ? selectedWorkset : null}
                   selectedAgentSegment={
-                    panel === "thoughts" || panel === "threads" ? selectedAgentSegment : null
+                    panel === "actions" || panel === "threads" ? selectedAgentSegment : null
                   }
                   onSelectThread={focusThread}
                   onSelectWorkset={focusWorkset}
@@ -671,6 +662,7 @@ export function Transcript({
                       : null
                   }
                   filesPanel={filesPanel}
+                  spawnParentSessionId={sessionId}
                 />
               );
 
@@ -700,19 +692,19 @@ export function Transcript({
               turn={{
                 kind: "model",
                 key: "model-pending",
+                originKey: "model-pending",
                 blocks: [],
                 durationMs: null,
                 messageIndex: null,
               }}
               model={model}
               sessionType={sessionType}
-              origin={sessionOrigin}
               active
               isLast
               selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
               selectedWorkset={panel === "worksets" ? selectedWorkset : null}
               selectedAgentSegment={
-                panel === "thoughts" || panel === "threads" ? selectedAgentSegment : null
+                panel === "actions" || panel === "threads" ? selectedAgentSegment : null
               }
               onSelectThread={focusThread}
               onSelectWorkset={focusWorkset}

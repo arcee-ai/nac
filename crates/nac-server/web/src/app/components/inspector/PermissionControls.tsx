@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 
 import {
   Button,
@@ -7,29 +8,31 @@ import {
   ButtonVariant,
   Icon,
   IconName,
-  Modal,
-  ModalSize,
-  Tooltip,
-  TooltipPosition,
 } from "@/app/atoms";
+import { isAgentBehavior } from "@/app/lib/sessionBehavior";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { toRunError } from "@/app/lib/providerError";
+import { useSessionActions } from "@/app/providers/SessionActionsProvider";
+import { api } from "@/app/services/api";
 import {
+  queryKeys,
   useDeletePermissionGrant,
   useReplyPermission,
   useSessionPermissions,
+  useTraditionalChildren,
 } from "@/app/services/queries";
 import type {
   PermissionGrantRecord,
   PermissionReply,
   PermissionRequest,
+  PermissionStateResponse,
   SessionBehavior,
 } from "@/app/types/api";
 
-interface PermissionControlsProps {
+interface PermissionPanelProps {
   sessionId: string;
-  behavior: SessionBehavior | null;
-  label?: string;
+  behavior: SessionBehavior | null | undefined;
+  heading?: string;
 }
 
 function requestIdentity(requests: PermissionRequest[]): string {
@@ -68,32 +71,43 @@ function GrantRow({
   );
 }
 
-/** Direct-session permission prompt and remembered-grant manager. */
-export function PermissionControls({
+function usePermissionAskIdentity(sessionId: string, behavior: SessionBehavior | null) {
+  const direct = isAgentBehavior(behavior);
+  const childrenQuery = useTraditionalChildren(sessionId, direct);
+  const childIds = (childrenQuery.data ?? [])
+    .filter((child) => child.status === "running")
+    .map((child) => child.child_session_id);
+  const watchedIds = direct ? [sessionId, ...childIds] : [];
+  const queries = useQueries({
+    queries: watchedIds.map((id) => ({
+      queryKey: queryKeys.sessionPermissions(id),
+      queryFn: ({ signal }: { signal?: AbortSignal }) => api.getPermissions(id, signal),
+      enabled: direct,
+      staleTime: Infinity,
+      retry: false,
+    })),
+  });
+  const requests = queries.flatMap(
+    (query) => (query.data as PermissionStateResponse | undefined)?.requests ?? [],
+  );
+  return { direct, identity: requestIdentity(requests), pending: requests.length > 0 };
+}
+
+/** Direct-session permission prompt and remembered-grant manager for session settings. */
+export function PermissionPanel({
   sessionId,
   behavior,
-  label = "Permissions",
-}: PermissionControlsProps) {
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  heading = "Permissions",
+}: PermissionPanelProps) {
+  const direct = isAgentBehavior(behavior);
   const permissions = useSessionPermissions(sessionId, direct);
   const replyPermission = useReplyPermission();
   const deleteGrant = useDeletePermissionGrant();
   const toast = useToast();
   const requests = permissions.data?.requests ?? [];
   const grants = permissions.data?.grants ?? [];
-  const [manuallyOpen, setManuallyOpen] = useState(false);
-  const [dismissedRequests, setDismissedRequests] = useState("");
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [deletingGrant, setDeletingGrant] = useState<string | null>(null);
-  const identity = requestIdentity(requests);
-  // Each newly observed ask gets one automatic presentation. Closing the
-  // dialog records that exact request set; a later request changes the
-  // identity and opens it again without effect-driven state synchronization.
-  const open = manuallyOpen || Boolean(identity && identity !== dismissedRequests);
-  const close = () => {
-    setDismissedRequests(identity);
-    setManuallyOpen(false);
-  };
 
   if (!direct) return null;
 
@@ -109,7 +123,6 @@ export function PermissionControls({
         requestId: active.id,
         reply: choice,
       });
-      if (requests.length === 1) close();
     } catch (error) {
       toast.error(`Unable to answer permission request: ${errorMessage(toRunError(error))}`);
     } finally {
@@ -129,135 +142,139 @@ export function PermissionControls({
     }
   };
 
-  const badge = requests.length
-    ? ` (${requests.length})`
-    : grants.length
-      ? ` (${grants.length})`
-      : "";
-
   return (
-    <>
-      <Tooltip title={label} position={TooltipPosition.TopCenter}>
-        <Button
-          size={ButtonSize.Small}
-          variant={requests.length ? ButtonVariant.GhostHighlightedAccent : ButtonVariant.Ghost}
-          content={ButtonContent.Icon}
-          aria-label={`${label}${badge}`}
-          onClick={() => setManuallyOpen(true)}
-        >
-          <Icon iconName={requests.length ? IconName.Important : IconName.Lock} size={16} />
-        </Button>
-      </Tooltip>
-
-      <Modal
-        open={open}
-        onClose={close}
-        size={ModalSize.Wide}
-        title={active ? "Permission required" : "Permissions"}
-        subheader={
-          active
+    <section className="flex flex-col gap-4" aria-label={heading}>
+      <div>
+        <div className="label-small text-basic-primary">{heading}</div>
+        <p className="mt-1 text-micro text-basic-muted">
+          {active
             ? `${active.tool} is paused before execution.`
-            : "Remembered access for this session."
-        }
-        footer={
-          active ? (
-            <div className="flex w-full flex-wrap justify-end gap-2">
-              <Button
-                variant={ButtonVariant.SecondaryDestructive}
-                loading={replyingTo === active.id && replyPermission.variables?.reply === "reject"}
-                disabled={replyingTo !== null}
-                onClick={() => void reply("reject")}
-              >
-                Reject
-              </Button>
-              <Button
-                variant={ButtonVariant.Secondary}
-                loading={replyingTo === active.id && replyPermission.variables?.reply === "once"}
-                disabled={replyingTo !== null}
-                onClick={() => void reply("once")}
-              >
-                Allow once
-              </Button>
-              <Button
-                variant={ButtonVariant.Primary}
-                loading={replyingTo === active.id && replyPermission.variables?.reply === "always"}
-                disabled={replyingTo !== null || !rememberable}
-                title={
-                  rememberable
-                    ? "Remember the server-derived narrow access pattern"
-                    : "This operation has no safe reusable permission pattern"
-                }
-                onClick={() => void reply("always")}
-              >
-                Always allow
-              </Button>
-            </div>
-          ) : undefined
-        }
-      >
-        {permissions.isPending ? (
-          <div className="py-6 text-center text-small text-basic-secondary">
-            Loading permissions…
-          </div>
-        ) : permissions.isError ? (
-          <div className="rounded-[4px] bg-error-secondary p-3 text-small text-error-primary">
-            Permissions could not be loaded. The run remains fail-closed.
-          </div>
-        ) : (
-          <div className="flex flex-col gap-5">
-            {active ? (
-              <section aria-label="Requested access">
-                <div className="mb-2 tag-label uppercase text-basic-tertiary">Requested access</div>
-                <div className="flex flex-col gap-2">
-                  {active.resources.map((resource, index) => (
-                    <div
-                      key={`${resource.action}:${resource.resource}:${index}`}
-                      className="rounded-[4px] bg-elevation-level-2 px-3 py-2"
-                    >
-                      <div className="tag-label uppercase text-basic-secondary">
-                        {resource.action}
-                      </div>
-                      <div className="mt-1 break-words text-small text-basic-primary">
-                        {resource.display}
-                      </div>
-                      {resource.save_resource ? (
-                        <div className="mt-2 break-all code code-small text-basic-tertiary">
-                          Always: {resource.save_resource}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-                {requests.length > 1 ? (
-                  <div className="mt-2 text-small text-basic-secondary">
-                    {requests.length - 1} more request{requests.length === 2 ? "" : "s"} waiting.
-                  </div>
-                ) : null}
-              </section>
-            ) : null}
+            : "Remembered access for this session. A paused tool waits here."}
+        </p>
+      </div>
 
-            <section aria-label="Remembered permissions">
-              <div className="mb-2 tag-label uppercase text-basic-tertiary">
-                Remembered for this session
+      {permissions.isPending ? (
+        <div className="py-4 text-center text-small text-basic-secondary">Loading permissions…</div>
+      ) : permissions.isError ? (
+        <div className="rounded-[4px] bg-error-secondary p-3 text-small text-error-primary">
+          Permissions could not be loaded. The run remains fail-closed.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-5">
+          {active ? (
+            <div aria-label="Requested access">
+              <div className="mb-2 tag-label uppercase text-basic-tertiary">Requested access</div>
+              <div className="flex flex-col gap-2">
+                {active.resources.map((resource, index) => (
+                  <div
+                    key={`${resource.action}:${resource.resource}:${index}`}
+                    className="rounded-[4px] bg-elevation-level-2 px-3 py-2"
+                  >
+                    <div className="tag-label uppercase text-basic-secondary">{resource.action}</div>
+                    <div className="mt-1 break-words text-small text-basic-primary">
+                      {resource.display}
+                    </div>
+                    {resource.save_resource ? (
+                      <div className="mt-2 break-all code code-small text-basic-tertiary">
+                        Always: {resource.save_resource}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
               </div>
-              {grants.length ? (
-                <div className="flex flex-col gap-2">
-                  {grants.map((grant) => (
-                    <GrantRow
-                      key={grant.id}
-                      grant={grant}
-                      deleting={deletingGrant === grant.id}
-                      onDelete={() => void forget(grant)}
-                    />
-                  ))}
+              {requests.length > 1 ? (
+                <div className="mt-2 text-small text-basic-secondary">
+                  {requests.length - 1} more request{requests.length === 2 ? "" : "s"} waiting.
                 </div>
-              ) : (
-                <div className="text-small text-basic-secondary">No remembered permissions.</div>
-              )}
-            </section>
+              ) : null}
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <Button
+                  variant={ButtonVariant.SecondaryDestructive}
+                  loading={replyingTo === active.id && replyPermission.variables?.reply === "reject"}
+                  disabled={replyingTo !== null}
+                  onClick={() => void reply("reject")}
+                >
+                  Reject
+                </Button>
+                <Button
+                  variant={ButtonVariant.Secondary}
+                  loading={replyingTo === active.id && replyPermission.variables?.reply === "once"}
+                  disabled={replyingTo !== null}
+                  onClick={() => void reply("once")}
+                >
+                  Allow once
+                </Button>
+                <Button
+                  variant={ButtonVariant.Primary}
+                  loading={
+                    replyingTo === active.id && replyPermission.variables?.reply === "always"
+                  }
+                  disabled={replyingTo !== null || !rememberable}
+                  title={
+                    rememberable
+                      ? "Remember the server-derived narrow access pattern"
+                      : "This operation has no safe reusable permission pattern"
+                  }
+                  onClick={() => void reply("always")}
+                >
+                  Always allow
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          <div aria-label="Remembered permissions">
+            <div className="mb-2 tag-label uppercase text-basic-tertiary">
+              Remembered for this session
+            </div>
+            {grants.length ? (
+              <div className="flex flex-col gap-2">
+                {grants.map((grant) => (
+                  <GrantRow
+                    key={grant.id}
+                    grant={grant}
+                    deleting={deletingGrant === grant.id}
+                    onDelete={() => void forget(grant)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-small text-basic-secondary">No remembered permissions.</div>
+            )}
           </div>
-        )}
-      </Modal>
-    </>
+        </div>
+      )}
+    </section>
   );
+}
+
+/**
+ * Opens session settings when a new permission ask arrives, including asks
+ * from running child agents that surface on the parent chat.
+ */
+export function PermissionSettingsOpener({
+  sessionId,
+  behavior,
+}: {
+  sessionId: string;
+  behavior: SessionBehavior | null;
+}) {
+  const actions = useSessionActions();
+  const { direct, identity } = usePermissionAskIdentity(sessionId, behavior);
+  const opened = useRef("");
+
+  useEffect(() => {
+    if (!direct || !identity || identity === opened.current) return;
+    opened.current = identity;
+    actions.settings(sessionId);
+  }, [actions, direct, identity, sessionId]);
+
+  return null;
+}
+
+export function usePermissionAskPending(
+  sessionId: string,
+  behavior: SessionBehavior | null,
+): boolean {
+  return usePermissionAskIdentity(sessionId, behavior).pending;
 }

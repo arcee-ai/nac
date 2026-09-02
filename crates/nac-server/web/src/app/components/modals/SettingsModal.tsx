@@ -24,6 +24,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { SshBadge } from "@/app/components/SshBadge";
+import { PermissionPanel } from "@/app/components/inspector/PermissionControls";
 import {
   ConfigurationsPanel,
   type LaunchModelSelection,
@@ -59,6 +60,7 @@ import {
   useSessionConfig,
   useSessionSnapshot,
   useSessionSummary,
+  useTraditionalChildren,
   useUpdateConfig,
   useUpdatePresentation,
 } from "@/app/services/queries";
@@ -72,6 +74,7 @@ import type {
   SshTarget,
 } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { isAgentBehavior } from "@/app/lib/sessionBehavior";
 
 function headersToText(headers: Record<string, string>): string {
   return Object.keys(headers).length === 0 ? "" : JSON.stringify(headers, null, 2);
@@ -192,8 +195,10 @@ export function SettingsModal({
   // must not mount before /config settles — a light model arriving later
   // would leave the form on Single and a save would clear dual mode.
   if (!initial || !entry || isLoading) {
+    const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
     return (
       <SettingsShell open={open} onClose={onClose}>
+        {id ? <PermissionPanel sessionId={id} behavior={behavior} /> : null}
         <p className="text-basic-muted text-micro">
           {isLoading || isSummaryLoading
             ? "Loading session configuration…"
@@ -243,6 +248,8 @@ function SettingsForm({
   const createModelConfig = useCreateModelConfig();
   const [openingSummary] = useState(summary);
   const updatePresentation = useUpdatePresentation();
+  const childrenQuery = useTraditionalChildren(id, isAgentBehavior(openingSummary.behavior));
+  const runningChildren = (childrenQuery.data ?? []).filter((child) => child.status === "running");
 
   const initialTitle = openingSummary.title ?? "";
   const [title, setTitle] = useState(initialTitle);
@@ -507,6 +514,21 @@ function SettingsForm({
       }
     >
       <div className="flex flex-col gap-6 [&>*]:shrink-0">
+        {isAgentBehavior(openingSummary.behavior) ? (
+          <>
+            <PermissionPanel sessionId={id} behavior={openingSummary.behavior} />
+            {runningChildren.map((child) => (
+              <PermissionPanel
+                key={child.child_session_id}
+                sessionId={child.child_session_id}
+                behavior="direct"
+                heading={`Permissions · ${child.description}`}
+              />
+            ))}
+            <Separator />
+          </>
+        ) : null}
+
         {diagnostics.length > 0 ? (
           <div className="rounded-[4px] border border-error-muted bg-error-tertiary p-3 text-micro text-error-primary">
             <div className="label-small mb-1">Repair required</div>

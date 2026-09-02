@@ -4,6 +4,7 @@
 import type {
   ActiveRunSnapshot,
   ManagedSessionSummary,
+  SessionBehavior,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
   TokenUsage,
@@ -155,8 +156,28 @@ export function formatSeconds(ms: number | null | undefined): string {
   return `${(Math.round(ms / 10) / 100).toFixed(2)}s`;
 }
 
-/** What a session is called until something in it can name it. */
+/** Fallback for an untitled chat whose type was never recorded. */
 export const NEW_CHAT_TITLE = "New Session";
+export const NEW_AGENT_TITLE = "New Agent";
+export const NEW_ORCHESTRATOR_TITLE = "New Orchestrator";
+
+const PLACEHOLDER_SESSION_TITLE = /^(New Session|New Agent|New Orchestrator)( \d+)?$/;
+
+/** Display name for an empty chat of this type, before anyone names it. */
+export function untitledSessionTitle(behavior: SessionBehavior | null | undefined): string {
+  if (behavior === "direct" || behavior === "direct-with-orchestrator") {
+    return NEW_AGENT_TITLE;
+  }
+  if (behavior === "orchestrator") {
+    return NEW_ORCHESTRATOR_TITLE;
+  }
+  return NEW_CHAT_TITLE;
+}
+
+/** True when `title` is only the empty-chat placeholder, numbered or not. */
+export function isPlaceholderSessionTitle(title: string): boolean {
+  return PLACEHOLDER_SESSION_TITLE.test(title);
+}
 
 /** A chat nobody has named and nobody has said anything in yet. */
 export function isUntitledSession(summary: SessionSummarySnapshot | null | undefined): boolean {
@@ -165,14 +186,23 @@ export function isUntitledSession(summary: SessionSummarySnapshot | null | undef
   return !(summary.last_user_prompt ?? "").trim();
 }
 
+const AUTO_SESSION_TITLE_CHARS = 30;
+
+/** First 30 characters of the prompt; longer prompts get a trailing "...". */
+export function autoSessionTitleFromPrompt(prompt: string): string {
+  const chars = [...prompt];
+  if (chars.length <= AUTO_SESSION_TITLE_CHARS) return prompt;
+  return `${chars.slice(0, AUTO_SESSION_TITLE_CHARS).join("")}...`;
+}
+
 export function displaySessionTitle(summary: SessionSummarySnapshot | null | undefined): string {
   if (!summary) return "";
   if (summary.title != null && summary.title.trim()) {
     return summary.title.trim();
   }
   const prompt = displayPromptFromMessageText(summary.last_user_prompt).trim();
-  if (prompt) return prompt;
-  return NEW_CHAT_TITLE;
+  if (prompt) return autoSessionTitleFromPrompt(prompt);
+  return untitledSessionTitle(summary.behavior);
 }
 
 /**
@@ -189,29 +219,30 @@ export function sessionTitle(
 
 /**
  * Tells the untitled chats apart, since they would otherwise all answer to the
- * same name: the oldest keeps the plain "New Session" and each later one takes
- * the next number.
+ * same name: the oldest of each type keeps the plain placeholder and each later
+ * one takes the next number.
  *
- * Counting restarts per project — and once more over the chats that belong to
- * none — so a project's tab strip reads 1, 2, 3 instead of skipping the numbers
- * another project happened to take. Deleting one does renumber the chats after
- * it, which is the price of naming them by their place rather than storing a
- * name nobody chose.
+ * Counting restarts per project and per type — and once more over the chats
+ * that belong to none — so a project's tab strip reads 1, 2, 3 instead of
+ * skipping the numbers another project or session type happened to take.
+ * Deleting one does renumber the chats after it, which is the price of naming
+ * them by their place rather than storing a name nobody chose.
  *
  * Timestamps are compared as text: the store writes them zero-padded and in
  * UTC, so they sort correctly without being parsed into dates first.
  */
 export function numberUntitledSessions(sessions: ManagedSessionSummary[]): Map<string, string> {
   const names = new Map<string, string>();
-  const takenPerProject = new Map<string, number>();
+  const takenPerBucket = new Map<string, number>();
   const untitled = sessions
     .filter((entry) => isUntitledSession(entry.summary))
     .sort((a, b) => a.summary.created_at.localeCompare(b.summary.created_at));
   for (const { summary } of untitled) {
-    const project = summary.project_id ?? "";
-    const taken = takenPerProject.get(project) ?? 0;
-    takenPerProject.set(project, taken + 1);
-    names.set(summary.session_id, taken === 0 ? NEW_CHAT_TITLE : `${NEW_CHAT_TITLE} ${taken}`);
+    const base = untitledSessionTitle(summary.behavior);
+    const bucket = `${summary.project_id ?? ""}:${base}`;
+    const taken = takenPerBucket.get(bucket) ?? 0;
+    takenPerBucket.set(bucket, taken + 1);
+    names.set(summary.session_id, taken === 0 ? base : `${base} ${taken}`);
   }
   return names;
 }

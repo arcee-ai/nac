@@ -32,7 +32,7 @@ describe("session behavior presentation", () => {
       topLevel: expect.stringMatching(/persistent coding agent/i),
       editsDirectly: true,
       delegation: expect.stringMatching(/separate Orchestrator sessions/i),
-      inspection: expect.stringMatching(/Actions and Delegated work/i),
+      inspection: expect.stringMatching(/Actions show reasoning/i),
     });
     expect(sessionBehaviorPresentation("direct-with-orchestrator")).toMatchObject({
       id: "direct-with-orchestrator",
@@ -58,9 +58,9 @@ describe("session panel policy", () => {
     });
     for (const behavior of ["direct", "direct-with-orchestrator"] satisfies SessionBehavior[]) {
       expect(sessionPanelPolicy(behavior, null)).toEqual({
-        widePanels: ["thoughts", "delegated", "files"],
-        mobilePanels: ["thoughts", "delegated", "files", "history"],
-        defaultPanel: "thoughts",
+        widePanels: ["actions", "files"],
+        mobilePanels: ["actions", "files", "history"],
+        defaultPanel: "actions",
         readOnly: false,
       });
     }
@@ -80,9 +80,9 @@ describe("session panel policy", () => {
   it("treats settled traditional children as ordinary Agent chats", () => {
     for (const behavior of ["direct", "direct-with-orchestrator"] satisfies SessionBehavior[]) {
       expect(sessionPanelPolicy(behavior, "traditional-child", "completed")).toEqual({
-        widePanels: ["thoughts", "delegated", "files"],
-        mobilePanels: ["thoughts", "delegated", "files", "history"],
-        defaultPanel: "thoughts",
+        widePanels: ["actions", "files"],
+        mobilePanels: ["actions", "files", "history"],
+        defaultPanel: "actions",
         readOnly: false,
       });
     }

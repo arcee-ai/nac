@@ -11,7 +11,6 @@ import {
   ForkSessionItem,
   Icon,
   IconName,
-  SessionOrigin,
   SessionType,
   SessionTypeAvatar,
   Tooltip,
@@ -20,13 +19,14 @@ import {
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
 import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
 import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
+import { SpawnedSessionCard } from "@/app/components/inspector/SpawnedSessionCard";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
 import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
-import { partitionAgentTranscript } from "@/app/lib/agentSegments";
+import { partitionAgentTranscript, turnOriginKey } from "@/app/lib/agentSegments";
 import { RUN_CANCELLED_MARKER, type ModelTurn, type TranscriptBlock } from "@/app/lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -56,7 +56,6 @@ interface ModelMessageProps {
   model: string;
   /** Agent vs Orchestrator mark beside the model name. */
   sessionType?: `${SessionType}`;
-  origin?: `${SessionOrigin}`;
   /** Shimmers the session avatar while this turn is still producing output. */
   active: boolean;
   /**
@@ -110,6 +109,10 @@ interface ModelMessageProps {
   snapshotRevision?: WorkspaceRevision | null;
   /** Where a click on the snapshot or one of its files should land. */
   filesPanel?: FilesPanelLink | null;
+  /** Inert copy: no hover actions, forks, or spawn controls. */
+  preview?: boolean;
+  /** Parent session that owns `session_spawn` cards in this turn. */
+  spawnParentSessionId?: string;
 }
 
 /**
@@ -120,7 +123,6 @@ export const ModelMessage = memo(function ModelMessage({
   turn,
   model,
   sessionType = SessionType.Agent,
-  origin = SessionOrigin.User,
   active,
   activity,
   isLast = false,
@@ -144,6 +146,8 @@ export const ModelMessage = memo(function ModelMessage({
   readOnly = false,
   snapshotRevision = null,
   filesPanel = null,
+  preview = false,
+  spawnParentSessionId,
 }: ModelMessageProps) {
   perfRender("ModelMessage");
   const canRefresh = !readOnly && onRefresh != null && userMessageIndex != null;
@@ -191,7 +195,10 @@ export const ModelMessage = memo(function ModelMessage({
             }
             pending={block.pending}
             active={selectedWorkset === block.worksetId}
-            onClick={() => onSelectWorkset(block.worksetId)}
+            onClick={() => {
+              onSelectAgentSegment?.(`${turnOriginKey(turn)}:workset-${block.key}`);
+              onSelectWorkset(block.worksetId);
+            }}
           />
         );
       case "tool":
@@ -226,12 +233,7 @@ export const ModelMessage = memo(function ModelMessage({
     >
       <div className="flex flex-col flex-grow gap-1 pt-2 md:max-w-[calc(100%-36px)] min-w-0">
         <div className="flex gap-3 items-center mb-4 min-w-0">
-          <SessionTypeAvatar
-            sessionType={sessionType}
-            origin={origin}
-            running={active}
-            className="shrink-0"
-          />
+          <SessionTypeAvatar sessionType={sessionType} running={active} className="shrink-0" />
           <span className="label-small text-basic-primary truncate">{model}</span>
           {/* The header carries whichever of the two is available: what the run
               is doing now, or how long it took once it is over. */}
@@ -255,7 +257,7 @@ export const ModelMessage = memo(function ModelMessage({
             active && "streaming",
           )}
         >
-          {partitionAgentTranscript(turn).map((item) => {
+          {partitionAgentTranscript(turn, active).map((item) => {
             if (item.kind === "group") {
               return (
                 <AgentToolsGroupButton
@@ -263,6 +265,19 @@ export const ModelMessage = memo(function ModelMessage({
                   group={item.group}
                   active={selectedAgentSegment === item.group.id}
                   onSelect={onSelectAgentSegment ?? (() => undefined)}
+                />
+              );
+            }
+            if (item.kind === "spawn") {
+              if (!spawnParentSessionId) return null;
+              return (
+                <SpawnedSessionCard
+                  key={item.group.id}
+                  group={item.group}
+                  parentSessionId={spawnParentSessionId}
+                  active={selectedAgentSegment === item.group.id}
+                  inert={preview}
+                  onSelect={onSelectAgentSegment}
                 />
               );
             }
@@ -279,7 +294,7 @@ export const ModelMessage = memo(function ModelMessage({
           ) : null}
         </div>
 
-        {!readOnly && forks.length > 0 ? (
+        {!preview && !readOnly && forks.length > 0 ? (
           <div className="flex flex-col gap-2 pt-4 md:pl-3 [&>*]:shrink-0">
             {forks.map((fork) => (
               <ForkSessionItem
@@ -298,7 +313,7 @@ export const ModelMessage = memo(function ModelMessage({
 
         {/* Same resend / revert endpoints as the user bubble above — they always
             address that prompt. Hidden while this turn is still streaming. */}
-        {!active ? (
+        {!preview && !active ? (
           <div
             className={cn(
               "flex items-center justify-start gap-3 pt-4 md:pl-3",

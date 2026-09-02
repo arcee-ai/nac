@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PermissionControls } from "@/app/components/inspector/PermissionControls";
+import { PermissionPanel } from "@/app/components/inspector/PermissionControls";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
@@ -57,7 +57,7 @@ function mount(state: PermissionStateResponse) {
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ToastProvider>
-          <PermissionControls sessionId={SESSION_ID} behavior="direct" />
+          <PermissionPanel sessionId={SESSION_ID} behavior="direct" />
         </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -89,7 +89,7 @@ describe("direct permission controls", () => {
   it("opens a new request and sends the explicit always reply", async () => {
     mount(pendingState());
 
-    expect(screen.getByRole("dialog").textContent).toContain("cargo test");
+    expect(screen.getByLabelText("Requested access").textContent).toContain("cargo test");
     expect(screen.getByRole("button", { name: "Always allow" }).hasAttribute("disabled")).toBe(
       false,
     );
@@ -125,7 +125,9 @@ describe("direct permission controls", () => {
     ];
     mount(state);
 
-    expect(screen.getByRole("dialog").textContent).toContain('"rm -rf important<RET>"');
+    expect(screen.getByLabelText("Requested access").textContent).toContain(
+      '"rm -rf important<RET>"',
+    );
     expect(screen.getByRole("button", { name: "Always allow" }).hasAttribute("disabled")).toBe(
       true,
     );
@@ -139,13 +141,13 @@ describe("direct permission controls", () => {
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <ToastProvider>
-            <PermissionControls sessionId={SESSION_ID} behavior="orchestrator" />
+            <PermissionPanel sessionId={SESSION_ID} behavior="orchestrator" />
           </ToastProvider>
         </MemoryRouter>
       </QueryClientProvider>,
     );
 
-    expect(screen.queryByRole("button", { name: /^Permissions/ })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Permissions" })).toBeNull();
     expect(fakes.getPermissions).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,8 +14,6 @@ import type { TraditionalChildRecord } from "@/app/types/api";
 const SESSION_ID = "direct-session";
 const fakes = {
   list: vi.fn(),
-  start: vi.fn(),
-  cancel: vi.fn(),
 };
 
 class SilentEventSource {
@@ -26,8 +24,6 @@ class SilentEventSource {
 }
 
 vi.spyOn(api, "listTraditionalChildren").mockImplementation((...args) => fakes.list(...args));
-vi.spyOn(api, "startTraditionalChild").mockImplementation((...args) => fakes.start(...args));
-vi.spyOn(api, "cancelTraditionalChild").mockImplementation((...args) => fakes.cancel(...args));
 
 function child(status: TraditionalChildRecord["status"] = "running"): TraditionalChildRecord {
   return {
@@ -78,8 +74,6 @@ function mount(children: TraditionalChildRecord[] = []) {
 beforeEach(() => {
   vi.stubGlobal("EventSource", SilentEventSource);
   fakes.list.mockReset().mockResolvedValue([]);
-  fakes.start.mockReset().mockImplementation(async () => child());
-  fakes.cancel.mockReset().mockImplementation(async () => child("cancelled"));
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
     media: "",
@@ -98,29 +92,15 @@ afterEach(() => {
 });
 
 describe("traditional child controls", () => {
-  it("starts the visible general profile in background mode", async () => {
+  it("does not expose a composer launch control", () => {
     mount();
-    fireEvent.click(screen.getByRole("button", { name: "Launch coding agent" }));
-    const [description, prompt] = screen.getAllByRole("textbox");
-    fireEvent.change(description, { target: { value: "Review persistence" } });
-    fireEvent.change(prompt, { target: { value: "Inspect the store and run focused tests." } });
-    fireEvent.click(screen.getByRole("button", { name: "Start coding agent" }));
-
-    await waitFor(() =>
-      expect(fakes.start).toHaveBeenCalledWith(SESSION_ID, {
-        profile: "general",
-        description: "Review persistence",
-        prompt: "Inspect the store and run focused tests.",
-        background: true,
-      }),
-    );
+    expect(screen.queryByRole("button", { name: "Launch coding agent" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start coding agent" })).toBeNull();
   });
 
-  it("keeps the control launch-only while preserving running permission bridges", async () => {
+  it("keeps running permission bridges without a launch surface", () => {
     mount([child()]);
-    expect(screen.getByRole("button", { name: "Permissions for Review persistence" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Launch coding agent" }));
-    expect(screen.getByRole("dialog").textContent).not.toContain("generation 1");
-    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Launch coding agent" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

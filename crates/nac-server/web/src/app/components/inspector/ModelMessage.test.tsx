@@ -18,6 +18,7 @@ describe("transcript topology badge navigation", () => {
     const turn: ModelTurn = {
       kind: "model",
       key: "model-1",
+      originKey: "model-1",
       durationMs: 25,
       messageIndex: 1,
       blocks: [
@@ -67,6 +68,7 @@ describe("transcript topology badge navigation", () => {
     const turn: ModelTurn = {
       kind: "model",
       key: "model-1",
+      originKey: "model-1",
       durationMs: 25,
       messageIndex: 2,
       blocks: [{ kind: "text", key: "text-1", text: "Ready to hand off" }],
@@ -94,6 +96,7 @@ describe("transcript topology badge navigation", () => {
     const turn: ModelTurn = {
       kind: "model",
       key: "model-1",
+      originKey: "model-1",
       durationMs: 25,
       messageIndex: 1,
       blocks: [{ kind: "text", key: "text-1", text: "Read-only result" }],

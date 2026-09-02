@@ -72,7 +72,7 @@ export function matchesShortcut(event: KeyboardEvent, keys: string[]): boolean {
 export const NEW_PROJECT_KEYS = [MOD, "shift", "o"];
 
 /**
- * Starts a chat in the open project. Deliberately the same chord as
+ * Starts an Agent chat in the open project. Deliberately the same chord as
  * `NEW_PROJECT_KEYS`: the two never apply at once, so "make me a new one" stays
  * one gesture whose meaning follows whatever the page is showing.
  */

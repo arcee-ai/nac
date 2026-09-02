@@ -37,24 +37,25 @@ export function cloneIsRunning(operation: ManagedCloneOperation | null): boolean
 type ManagedModelHostStatus = Pick<ManagedHostStatus, "model" | "model_ready">;
 
 export function managedModelPick(status: ManagedModelHostStatus | null): CatalogPick | null {
-  return status
-    ? {
-        backend: status.model.backend,
-        model: status.model.id,
-        baseUrl: status.model.endpoint,
-      }
-    : null;
+  const model = status?.model;
+  if (!model) return null;
+  return {
+    backend: model.backend,
+    model: model.id,
+    baseUrl: model.endpoint,
+  };
 }
 
 export function matchesManagedModelPick(
   status: ManagedModelHostStatus | null,
   pick: CatalogPick | null,
 ): boolean {
+  const model = status?.model;
   return Boolean(
     pick &&
-    status &&
-    pick.backend === status.model.backend &&
-    pick.model === status.model.id &&
-    pick.baseUrl === status.model.endpoint,
+    model &&
+    pick.backend === model.backend &&
+    pick.model === model.id &&
+    pick.baseUrl === model.endpoint,
   );
 }

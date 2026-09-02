@@ -26,6 +26,7 @@ export interface SegmentDetailItem {
   durationMs?: number | null;
   copyText: string;
   boxes: SidebarBoxContent[];
+  failed?: boolean;
 }
 
 export function SegmentDetailRow({
@@ -39,23 +40,32 @@ export function SegmentDetailRow({
 }) {
   const isActive = item.state === ToolCallLabelState.Active;
   return (
-    <div className="flex gap-2 items-start w-full">
+    <div
+      className="flex gap-2 items-start w-full scroll-mt-2"
+      data-segment-key={item.key}
+    >
       <div className="flex flex-col items-center self-stretch shrink-0">
         <ToolPill
           size={ToolPillSize.Small}
           icon={item.config.icon}
-          state={isActive ? ToolPillState.Active : ToolPillState.Default}
+          state={
+            isActive
+              ? ToolPillState.Active
+              : item.failed
+                ? ToolPillState.Error
+                : ToolPillState.Default
+          }
         />
         {!isLast ? (
           <div
-            className={`flex-1 min-h-0 w-px bg-[var(--color-border-accent-primary)]${
+            className={`flex-1 min-h-0 w-px bg-[var(--color-border-tertiary)]${
               animateConnector ? " agent-segment-row-connector" : ""
             }`}
           />
         ) : null}
       </div>
       <div className="flex flex-col flex-1 min-w-0 gap-2 pb-8">
-        <div className="flex gap-2 items-center w-full">
+        <div className="flex gap-2 items-center w-full h-7">
           <ToolCallLabel
             config={item.config}
             state={item.state}

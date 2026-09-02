@@ -25,6 +25,8 @@ import {
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { usePagedRows } from "@/app/hooks/usePagedRows";
 import { SegmentDetailList } from "@/app/components/inspector/agent-segments/SegmentDetailList";
+import { ChildTranscriptPreview } from "@/app/components/inspector/ChildTranscriptPreview";
+import { WorksetsView } from "@/app/components/inspector/WorksetsView";
 import {
   ActionFilterBar,
   ActionItemList,
@@ -38,8 +40,10 @@ import {
   buildActionTimeline,
   filterActionTimeline,
   flattenActionItems,
+  liveTurnOriginKey,
 } from "@/app/lib/actionsTimeline";
 import type { AgentToolsGroup } from "@/app/lib/agentSegments";
+import { groupIsSpawn } from "@/app/lib/spawnSession";
 import { Markdown } from "@/app/lib/markdown";
 import { SESSION_PANEL_LABEL } from "@/app/lib/routes";
 import { STICK_TOLERANCE_PX, distanceFromBottom, scrollToBottomInstantly } from "@/app/lib/scroll";
@@ -63,6 +67,7 @@ import {
   withStreamedOutput,
 } from "@/app/lib/transcript";
 import { useThreadEventPages } from "@/app/services/queries";
+import { useActionFilter } from "@/app/store/actionFilterStore";
 import {
   useFinishedToolCalls,
   useLiveThreads,
@@ -72,7 +77,7 @@ import {
   useStreamText,
   type RuntimeThread,
 } from "@/app/store/runtimeStore";
-import { setSelectedThreadRunning } from "@/app/store/sessionLayoutStore";
+import { selectWorkset, setSelectedThreadRunning, useSelectedWorkset } from "@/app/store/sessionLayoutStore";
 import type {
   AgentEvent,
   EpisodeSnapshot,
@@ -724,7 +729,7 @@ function Detail({
   );
 }
 
-const ORCHESTRATOR_FILTERS: readonly ActionFilter[] = ["all", "threads", "tools"];
+const ORCHESTRATOR_FILTERS: readonly ActionFilter[] = ["all", "threads", "tools", "worksets"];
 
 function extraThreadItem(
   thread: ThreadSnapshot,
@@ -769,8 +774,9 @@ export function ThreadsView({
   const primaryToolEvents = usePrimaryToolEvents();
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
+  const selectedWorkset = useSelectedWorkset();
   const [view, setView] = useState<ThreadDetailView>("log");
-  const [filter, setFilter] = useState<ActionFilter>("all");
+  const [filter, setFilter] = useActionFilter("orchestrator", ORCHESTRATOR_FILTERS);
   const threads = useMemo(() => snapshot?.threads ?? [], [snapshot]);
   const activeThreads = snapshot?.active_threads;
   const sessionId = snapshot?.metadata.session_id ?? "";
@@ -891,7 +897,8 @@ export function ThreadsView({
       buildTranscript(snapshot, liveThreads, finishedToolCalls, primaryToolEvents),
       { text: streamText, reasoning: streamReasoning },
     );
-    return buildActionTimeline(turns);
+    const live = Boolean(snapshot?.active_run) || Boolean(streamText) || Boolean(streamReasoning);
+    return buildActionTimeline(turns, liveTurnOriginKey(turns, live));
   }, [snapshot, liveThreads, finishedToolCalls, primaryToolEvents, streamText, streamReasoning]);
   const visibleSections = useMemo(() => filterActionTimeline(sections, filter), [sections, filter]);
   const timelineThreadNames = useMemo(() => {
@@ -902,7 +909,7 @@ export function ThreadsView({
     return names;
   }, [sections]);
   const extraItems = useMemo(() => {
-    if (filter === "tools") return [];
+    if (filter === "tools" || filter === "worksets") return [];
     return ordered
       .filter((thread) => !timelineThreadNames.has(thread.name))
       .map((thread) =>
@@ -936,18 +943,25 @@ export function ThreadsView({
     const match = listItems.find(
       (item) => (item.kind === "group" || item.kind === "spawn") && item.id === selectedGroup,
     );
-    if (!match || match.kind === "thread") return null;
+    if (!match || match.kind === "thread" || match.kind === "workset") return null;
     return match.group;
   }, [listItems, selectedGroup]);
+  const currentWorkset = useMemo(() => {
+    const match = listItems.find((item) => item.kind === "workset" && item.id === selectedGroup);
+    return match?.kind === "workset" ? match : null;
+  }, [listItems, selectedGroup]);
   const showingGroup = Boolean(selectedGroup && currentGroup && currentGroup.id === selectedGroup);
-  const current = showingGroup
+  const showingWorkset = Boolean(currentWorkset);
+  const spawn = showingGroup && currentGroup != null && groupIsSpawn(currentGroup);
+  const current = showingGroup || showingWorkset
     ? null
     : (ordered.find((thread) => thread.name === selected) ?? null);
-  const currentSectionIndex = showingGroup
-    ? listSections.findIndex((section) => section.items.some((item) => item.id === selectedGroup))
-    : listSections.findIndex((section) =>
-        section.items.some((item) => item.kind === "thread" && item.name === current?.name),
-      );
+  const currentSectionIndex =
+    showingGroup || showingWorkset
+      ? listSections.findIndex((section) => section.items.some((item) => item.id === selectedGroup))
+      : listSections.findIndex((section) =>
+          section.items.some((item) => item.kind === "thread" && item.name === current?.name),
+        );
   const { visible, hasMore, sentinelRef } = usePagedRows(listSections, {
     key: `${sessionId}:${filter}`,
     atLeast: currentSectionIndex + 1,
@@ -1040,6 +1054,8 @@ export function ThreadsView({
   const pickGroup = (id: string) => {
     onSelect(null);
     onSelectGroup?.(id);
+    const item = listItems.find((row) => row.id === id);
+    if (item?.kind === "workset" && item.worksetId) selectWorkset(item.worksetId);
   };
   const pickThread = (name: string, episodeKey: string) => {
     onSelectGroup?.(null);
@@ -1049,10 +1065,22 @@ export function ThreadsView({
   return (
     <PanelSplit
       listTitle={SESSION_PANEL_LABEL.threads}
-      title={showingGroup ? currentGroup?.label : current?.name}
-      titleAction={!showingGroup && currentAction ? <TaskButton action={currentAction} /> : null}
+      title={
+        showingWorkset
+          ? currentWorkset?.title
+          : showingGroup && !spawn
+            ? currentGroup?.label
+            : current?.name
+      }
+      titleAction={
+        !showingGroup && !showingWorkset && currentAction ? (
+          <TaskButton action={currentAction} />
+        ) : null
+      }
       actions={
-        !showingGroup && current ? <ThreadViewSelect view={view} onChange={setView} /> : null
+        !showingGroup && !showingWorkset && current ? (
+          <ThreadViewSelect view={view} onChange={setView} />
+        ) : null
       }
       listToolbar={
         <ActionFilterBar value={filter} options={ORCHESTRATOR_FILTERS} onChange={setFilter} />
@@ -1075,8 +1103,12 @@ export function ThreadsView({
                 <div className="flex flex-col py-2">
                   <ActionItemList
                     items={section.items}
-                    selectedGroupId={showingGroup ? (selectedGroup ?? null) : null}
-                    selectedThreadEpisode={showingGroup ? null : (selectedEpisode ?? selected)}
+                    selectedGroupId={
+                      showingGroup || showingWorkset ? (selectedGroup ?? null) : null
+                    }
+                    selectedThreadEpisode={
+                      showingGroup || showingWorkset ? null : (selectedEpisode ?? selected)
+                    }
                     episodeCount={(name) =>
                       snapshot.thread_episodes?.[name]?.length ??
                       threads.find((thread) => thread.name === name)?.episode_count ??
@@ -1094,7 +1126,15 @@ export function ThreadsView({
         )
       }
     >
-      {showingGroup && currentGroup ? (
+      {showingWorkset ? (
+        <WorksetsView
+          snapshot={snapshot}
+          selected={selectedWorkset || currentWorkset?.worksetId || null}
+          onSelect={selectWorkset}
+        />
+      ) : showingGroup && currentGroup && spawn ? (
+        <ChildTranscriptPreview parentSessionId={sessionId} group={currentGroup} />
+      ) : showingGroup && currentGroup ? (
         <SegmentDetailList
           key={currentGroup.id}
           group={currentGroup}

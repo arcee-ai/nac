@@ -13,7 +13,6 @@ import {
 } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { FilesView } from "@/app/components/inspector/FilesView";
-import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { HistoryView } from "@/app/components/inspector/HistoryView";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThoughtsToolsView } from "@/app/components/inspector/ThoughtsToolsView";
@@ -185,15 +184,12 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
           readOnly={delegatedTranscript}
         />
       ) : null}
-      {active === "thoughts" && direct ? (
+      {active === "actions" && direct ? (
         <ThoughtsToolsView
           snapshot={snapshot}
           selected={selectedAgentSegment}
           onSelect={selectAgentSegment}
         />
-      ) : null}
-      {active === "delegated" && direct && !delegatedTranscript ? (
-        <DelegatedWorkView sessionId={sessionId} behavior={behavior} />
       ) : null}
       {active === "worksets" ? (
         <WorksetsView snapshot={snapshot} selected={selectedWorkset} onSelect={selectWorkset} />

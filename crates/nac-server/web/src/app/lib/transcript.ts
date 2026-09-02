@@ -103,6 +103,13 @@ export interface UserTurn {
 export interface ModelTurn {
   kind: "model";
   key: string;
+  /**
+   * First assistant message of this turn. `key` follows the latest message so a
+   * prepended history page keeps the same React row; this stays put as new tool
+   * rounds append, so thoughts/tools groups and the live bubble do not remount.
+   * Absent on fixtures that only set `key`.
+   */
+  originKey?: string;
   blocks: TranscriptBlock[];
   /** How long the run behind this turn took, once it finished. */
   durationMs: number | null;
@@ -528,6 +535,7 @@ export function withStreamedOutput(
     : {
         kind: "model",
         key: STREAMING_TURN_KEY,
+        originKey: STREAMING_TURN_KEY,
         blocks: [],
         durationMs: null,
         messageIndex: null,
@@ -649,6 +657,7 @@ export function buildTranscript(
       current = {
         kind: "model",
         key: `model-${absoluteIndex}`,
+        originKey: `model-${absoluteIndex}`,
         blocks: [],
         durationMs: null,
         messageIndex: absoluteIndex,

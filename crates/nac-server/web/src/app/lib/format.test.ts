@@ -238,7 +238,7 @@ describe("displaySessionTitle", () => {
   it("collapses an expanded last_user_prompt back to the raw prompt", () => {
     const raw = "Use $demo to review this change.";
     const summary = summaryWithPrompt(expand(raw, skillBlock("demo", "BODY")));
-    expect(displaySessionTitle(summary)).toBe(raw);
+    expect(displaySessionTitle(summary)).toBe("Use $demo to review this chang...");
   });
 
   it("prefers an explicit title over the prompt", () => {

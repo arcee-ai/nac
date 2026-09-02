@@ -52,7 +52,14 @@ export const ToolCallDetail = memo(function ToolCallDetail({ tool }: { tool: Too
         </span>
       </div>
       {tool.resultPreview ? (
-        <p className="code code-small mt-1 min-w-0 break-all pl-5 text-basic-tertiary">
+        <p
+          className={cn(
+            "code code-small mt-1 min-w-0 break-all pl-5",
+            tool.status === "error" || tool.resultPreview.startsWith("Error:")
+              ? "text-error-primary"
+              : "text-basic-tertiary",
+          )}
+        >
           {tool.resultPreview}
         </p>
       ) : null}

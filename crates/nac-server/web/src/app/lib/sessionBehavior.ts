@@ -1,4 +1,4 @@
-import { NEW_CHAT_TITLE } from "@/app/lib/format";
+import { isPlaceholderSessionTitle } from "@/app/lib/format";
 import type { SessionPanel } from "@/app/lib/routes";
 import type { SessionBehavior, SessionLineage } from "@/app/types/api";
 
@@ -25,7 +25,7 @@ const AGENT_PRESENTATION: SessionBehaviorPresentation = {
   editsDirectly: true,
   editing: "The top-level agent edits files and runs commands directly.",
   delegation: "It can launch fresh-context coding agents and separate Orchestrator sessions.",
-  inspection: "Actions and Delegated work show reasoning, tool calls, and spawned sessions.",
+  inspection: "Actions show reasoning, tool calls, and spawned sessions.",
   hint: "A persistent coding agent that edits files and runs commands itself. Best for hands-on implementation, debugging, and iterating in one conversation.",
 };
 
@@ -80,9 +80,9 @@ const ORCHESTRATOR_PANELS: SessionPanelPolicy = {
 };
 
 const DIRECT_PANELS: SessionPanelPolicy = {
-  widePanels: ["thoughts", "delegated", "files"],
-  mobilePanels: ["thoughts", "delegated", "files", "history"],
-  defaultPanel: "thoughts",
+  widePanels: ["actions", "files"],
+  mobilePanels: ["actions", "files", "history"],
+  defaultPanel: "actions",
   readOnly: false,
 };
 
@@ -147,7 +147,7 @@ export function sessionOriginDetail(options: {
     case "converted": {
       const source = options.convertedFromTitle?.trim();
       const typeLabel = options.convertedFromType?.trim();
-      if (source && source !== NEW_CHAT_TITLE) return `Converted from ${source}`;
+      if (source && !isPlaceholderSessionTitle(source)) return `Converted from ${source}`;
       if (typeLabel) return `Converted from ${typeLabel}`;
       return "Converted from another session type";
     }
@@ -191,5 +191,5 @@ export function sessionPanelPolicy(
 
 /** Side-box tab that now hosts the Actions list for this session type. */
 export function actionsPanel(behavior: SessionBehavior | null | undefined): SessionPanel {
-  return isAgentBehavior(behavior) ? "thoughts" : "threads";
+  return isAgentBehavior(behavior) ? "actions" : "threads";
 }

@@ -1,19 +1,37 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
 
 import SegmentDetailRow, {
   type SegmentDetailItem,
 } from "@/app/components/inspector/agent-segments/SegmentDetailRow";
 import type { SidebarBoxContent } from "@/app/components/inspector/agent-segments/SegmentDetailBox";
+import { useActionSegmentScroll } from "@/app/lib/actionExpand";
 import {
   configForSegment,
+  toolSegmentFailed,
   ToolCallLabelState,
   type AgentSegment,
   type AgentToolsGroup,
 } from "@/app/lib/agentSegments";
 import { cn } from "@/app/lib/cn";
+import { sessionIdFromPath } from "@/app/lib/routes";
+import { toWorkspaceRelativePath } from "@/app/lib/workspaceLink";
+import { queryKeys } from "@/app/services/queries";
+import type { SessionSnapshotResponse } from "@/app/types/api";
 import "./agent-segments.css";
 
-function boxesForSegment(segment: AgentSegment): {
+function outputAccent(segment: AgentSegment): "error" | undefined {
+  if (segment.kind !== "tool") return undefined;
+  if (segment.presentation.status === "error") return "error";
+  if (segment.presentation.resultPreview?.startsWith("Error:")) return "error";
+  return undefined;
+}
+
+function boxesForSegment(
+  segment: AgentSegment,
+  hostRoots: Array<string | null | undefined>,
+): {
   boxes: SidebarBoxContent[];
   copyText: string;
 } {
@@ -24,12 +42,29 @@ function boxesForSegment(segment: AgentSegment): {
       copyText: segment.text,
     };
   }
+  if (
+    segment.presentation.name === "read" ||
+    segment.presentation.name === "write" ||
+    segment.presentation.name === "edit"
+  ) {
+    const files = readFileBoxes(segment, hostRoots);
+    if (files) return files;
+  }
+  if (segment.presentation.name === "glob") {
+    const glob = globFileBoxes(segment, hostRoots);
+    if (glob) return glob;
+  }
   const boxes: SidebarBoxContent[] = [];
   if (segment.presentation.summary) {
     boxes.push({
       kind: "code",
       key: `${segment.key}-input`,
       content: segment.presentation.summary,
+      accent:
+        segment.presentation.name === "exec_command" ||
+        segment.presentation.name === "glob"
+          ? "info"
+          : undefined,
     });
   }
   if (segment.presentation.resultPreview) {
@@ -37,6 +72,7 @@ function boxesForSegment(segment: AgentSegment): {
       kind: "markdown",
       key: `${segment.key}-output`,
       content: segment.presentation.resultPreview,
+      accent: outputAccent(segment),
     });
   }
   return {
@@ -54,9 +90,135 @@ function boxesForSegment(segment: AgentSegment): {
   };
 }
 
-function itemsFromGroup(group: AgentToolsGroup): SegmentDetailItem[] {
+function readFileBoxes(
+  segment: Extract<AgentSegment, { kind: "tool" }>,
+  hostRoots: Array<string | null | undefined>,
+): { boxes: SidebarBoxContent[]; copyText: string } | null {
+  const summary = segment.presentation.summary;
+  const preview = segment.presentation.resultPreview;
+  const path =
+    toWorkspaceRelativePath(summary, hostRoots) ??
+    toWorkspaceRelativePath(preview, hostRoots);
+  if (!path) return null;
+  const boxes: SidebarBoxContent[] = [
+    { kind: "file", key: `${segment.key}-file`, path },
+  ];
+  if (preview && toWorkspaceRelativePath(preview, hostRoots) == null) {
+    boxes.push({
+      kind: "markdown",
+      key: `${segment.key}-output`,
+      content: preview,
+      accent: outputAccent(segment),
+    });
+  }
+  return { boxes, copyText: path };
+}
+
+const MAX_GLOB_FILES = 3;
+
+interface GlobEntry {
+  kind: "file" | "directory";
+  path: string;
+}
+
+function unescapeJsonString(value: string): string {
+  try {
+    return JSON.parse(`"${value}"`) as string;
+  } catch {
+    return value.replace(/\\"/g, '"');
+  }
+}
+
+function parseGlobEntries(preview: string | null): GlobEntry[] {
+  if (!preview) return [];
+  try {
+    const parsed = JSON.parse(preview) as { entries?: unknown };
+    if (Array.isArray(parsed.entries)) {
+      return parsed.entries.flatMap((entry) => globEntryFromUnknown(entry));
+    }
+  } catch {
+    // Preview is a bounded snippet, so the JSON is often truncated.
+  }
+  const entries: GlobEntry[] = [];
+  const objectRe = /\{[^{}]+\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = objectRe.exec(preview)) !== null) {
+    entries.push(...globEntryFromUnknown(parseLooseGlobObject(match[0])));
+  }
+  return entries;
+}
+
+function parseLooseGlobObject(chunk: string): unknown {
+  const pathMatch = /"path"\s*:\s*"((?:\\.|[^"\\])*)"/.exec(chunk);
+  const kindMatch = /"kind"\s*:\s*"(directory|file)"/.exec(chunk);
+  if (!pathMatch) return null;
+  return {
+    path: unescapeJsonString(pathMatch[1]),
+    kind: kindMatch?.[1] ?? "file",
+  };
+}
+
+function globEntryFromUnknown(entry: unknown): GlobEntry[] {
+  if (!entry || typeof entry !== "object") return [];
+  const path = "path" in entry && typeof entry.path === "string" ? entry.path : "";
+  if (!path) return [];
+  const kind =
+    "kind" in entry && entry.kind === "directory" ? "directory" : "file";
+  return [{ kind, path }];
+}
+
+function globFileBoxes(
+  segment: Extract<AgentSegment, { kind: "tool" }>,
+  hostRoots: Array<string | null | undefined>,
+): { boxes: SidebarBoxContent[]; copyText: string } | null {
+  const resolved = parseGlobEntries(segment.presentation.resultPreview).flatMap(
+    (entry) => {
+      const path =
+        toWorkspaceRelativePath(entry.path, hostRoots) ??
+        (entry.path.startsWith("/") ? null : entry.path.replace(/^\.\//, ""));
+      return path ? [{ kind: entry.kind, path }] : [];
+    },
+  );
+  if (resolved.length === 0) return null;
+  const shown = resolved.slice(0, MAX_GLOB_FILES);
+  const more = resolved.length - shown.length;
+  const boxes: SidebarBoxContent[] = [];
+  if (segment.presentation.summary) {
+    boxes.push({
+      kind: "code",
+      key: `${segment.key}-input`,
+      content: segment.presentation.summary,
+      accent: "info",
+    });
+  }
+  boxes.push(
+    ...shown.map((entry, index) => ({
+      kind: "file" as const,
+      key: `${segment.key}-file-${index}`,
+      path: entry.path,
+      directory: entry.kind === "directory",
+    })),
+  );
+  if (more > 0) {
+    boxes.push({ kind: "more", key: `${segment.key}-more`, count: more });
+  }
+  return {
+    boxes,
+    copyText: [
+      segment.presentation.summary ? `Query:\n${segment.presentation.summary}` : "",
+      resolved.map((entry) => entry.path).join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  };
+}
+
+function itemsFromGroup(
+  group: AgentToolsGroup,
+  hostRoots: Array<string | null | undefined>,
+): SegmentDetailItem[] {
   return group.segments.map((segment) => {
-    const { boxes, copyText } = boxesForSegment(segment);
+    const { boxes, copyText } = boxesForSegment(segment, hostRoots);
     const live =
       segment.kind === "thinking"
         ? segment.streaming
@@ -69,6 +231,7 @@ function itemsFromGroup(group: AgentToolsGroup): SegmentDetailItem[] {
       durationMs: segment.kind === "thinking" ? segment.durationMs : null,
       copyText,
       boxes,
+      failed: toolSegmentFailed(segment),
     };
   });
 }
@@ -80,7 +243,49 @@ export function SegmentDetailList({
   group: AgentToolsGroup;
   className?: string;
 }) {
-  const items = useMemo(() => itemsFromGroup(group), [group]);
+  const location = useLocation();
+  const client = useQueryClient();
+  const sessionId = sessionIdFromPath(location.pathname);
+  const snapshot = sessionId
+    ? client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(sessionId))
+    : undefined;
+  const hostRoots = useMemo(
+    () => [
+      snapshot?.workspace?.host_root,
+      snapshot?.metadata.workspace_host_path,
+      snapshot?.metadata.cwd,
+    ],
+    [
+      snapshot?.workspace?.host_root,
+      snapshot?.metadata.workspace_host_path,
+      snapshot?.metadata.cwd,
+    ],
+  );
+  const items = useMemo(() => itemsFromGroup(group, hostRoots), [group, hostRoots]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const scrollTo = useActionSegmentScroll();
+
+  useEffect(() => {
+    if (!scrollTo) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const el = root.querySelector(
+      `[data-segment-key="${CSS.escape(scrollTo.key)}"]`,
+    );
+    if (!(el instanceof HTMLElement)) return;
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const marginTop =
+      Number.parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+    const top =
+      root.scrollTop +
+      el.getBoundingClientRect().top -
+      root.getBoundingClientRect().top -
+      marginTop;
+    root.scrollTo({ top, behavior: reduced ? "auto" : "smooth" });
+  }, [scrollTo]);
+
   if (items.length === 0) {
     return (
       <div
@@ -95,7 +300,7 @@ export function SegmentDetailList({
   }
   const penultimateIndex = items.length - 2;
   return (
-    <div className={className}>
+    <div ref={rootRef} className={className}>
       {items.map((item, index) => (
         <SegmentDetailRow
           key={item.key}

@@ -48,6 +48,8 @@ interface UserMessageProps {
   actionsDisabled?: boolean;
   /** Parent-owned delegated transcripts expose copy/time but no mutation affordances. */
   readOnly?: boolean;
+  /** Inert copy of the bubble: no hover actions. */
+  preview?: boolean;
 }
 
 /** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
@@ -61,6 +63,7 @@ export const UserMessage = memo(function UserMessage({
   onRevert = null,
   actionsDisabled = false,
   readOnly = false,
+  preview = false,
 }: UserMessageProps) {
   perfRender("UserMessage");
   const canRefresh = !readOnly && onRefresh != null && messageIndex != null;
@@ -91,7 +94,7 @@ export const UserMessage = memo(function UserMessage({
         </div>
       ) : null}
 
-      {!pending ? (
+      {!preview && !pending ? (
         <div
           className={cn(
             "flex items-center justify-end gap-3 pt-3",

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   Button,
@@ -17,12 +25,17 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
-import { PermissionControls } from "@/app/components/inspector/PermissionControls";
-import { GoalControls } from "@/app/components/inspector/GoalControls";
+import {
+  PermissionSettingsOpener,
+  usePermissionAskPending,
+} from "@/app/components/inspector/PermissionControls";
 import { ChildControls } from "@/app/components/inspector/ChildControls";
-import { OrchestratorControls } from "@/app/components/inspector/OrchestratorControls";
+import { GoalControls } from "@/app/components/inspector/GoalControls";
 import { SshBadge } from "@/app/components/SshBadge";
-import { resolveCatalogModel, type ResolvedCatalogModel } from "@/app/lib/catalog";
+import {
+  resolveCatalogModel,
+  type ResolvedCatalogModel,
+} from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { assignmentIsOpen } from "@/app/lib/sessionBehavior";
 import {
@@ -124,7 +137,9 @@ function submittedSlashCommand(
   const argumentsText = nameEnd === -1 ? "" : body.slice(nameEnd).trim();
   return (
     definitions.find(
-      (definition) => definition.name === name && (definition.accepts_arguments || !argumentsText),
+      (definition) =>
+        definition.name === name &&
+        (definition.accepts_arguments || !argumentsText),
     ) ?? null
   );
 }
@@ -216,7 +231,12 @@ function StatBadge({
 }) {
   return (
     <Tooltip title={title} position={TooltipPosition.TopCenter}>
-      <div className={cn("flex items-center gap-[2px] py-1 whitespace-nowrap", className)}>
+      <div
+        className={cn(
+          "flex items-center gap-[2px] py-1 whitespace-nowrap",
+          className,
+        )}
+      >
         {prefix ? (
           <span className={labelClassName}>{prefix}</span>
         ) : showIcon && iconName ? (
@@ -256,7 +276,11 @@ function contextGauge(used: number | null, resolved: ResolvedCatalogModel) {
  * Message field plus the run status bar that replaced the old metrics grid:
  * model, environment, cumulative token usage and the run timer.
  */
-export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) {
+export function ChatInputBox({
+  sessionId,
+  snapshot,
+  entry,
+}: ChatInputBoxProps) {
   perfRender("ChatInputBox");
   const [value, setValue] = useState("");
   // Async submission must only clear the prompt it actually sent. A user can
@@ -273,12 +297,19 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   // A phone keeps the message on one truncated line until the field is focused,
   // then grows the pill over the transcript.
   const [focused, setFocused] = useState(false);
-  const [selection, setSelection] = useState<TextSelection>({ start: 0, end: 0 });
-  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
+  const [selection, setSelection] = useState<TextSelection>({
+    start: 0,
+    end: 0,
+  });
+  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(
+    null,
+  );
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   // The pointer's row is held apart from the keyboard's so that leaving the list
   // takes the highlight with it instead of stranding it on the last row crossed.
-  const [hoveredSuggestion, setHoveredSuggestion] = useState<number | null>(null);
+  const [hoveredSuggestion, setHoveredSuggestion] = useState<number | null>(
+    null,
+  );
   const collapsed = isMobile && !focused;
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
   const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
@@ -291,8 +322,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const createInboxItem = useCreateInboxItem();
   const updateInboxItem = useUpdateInboxItem();
   const cancelInboxItem = useCancelInboxItem();
-  const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const behavior =
+    entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
+  const direct =
+    behavior === "direct" || behavior === "direct-with-orchestrator";
   const readOnly = assignmentIsOpen(
     entry?.lineage?.assignment_status ?? snapshot?.lineage?.assignment_status,
   );
@@ -308,7 +341,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     isError: commandsFailed,
     refetch: refetchCommands,
   } = useSlashCommands();
-  const { data: skillDefinitions, isError: skillsFailed } = useSessionSkills(sessionId);
+  const { data: skillDefinitions, isError: skillsFailed } =
+    useSessionSkills(sessionId);
   const ref = useRef<HTMLTextAreaElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const completionCaretRef = useRef<number | null>(null);
@@ -326,22 +360,33 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   useEffect(() => {
     liftSessionSpend(tokenUsage(snapshot));
   }, [snapshot]);
-  const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
+  const metrics = runMetrics(
+    snapshot,
+    entry,
+    running || stopping ? runUsage : null,
+    sessionSpend,
+  );
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
   const catalog = useModelCatalog();
   const persistedUsage = tokenUsage(snapshot);
   // A fork inherits context but not spend, so the gauge must not depend on
   // billed usage being present.
-  const contextTokens = metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
+  const contextTokens =
+    metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
   const context = contextGauge(
     contextTokens,
-    resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
+    resolveCatalogModel(
+      catalog.data,
+      snapshot?.metadata?.backend,
+      metrics.model,
+    ),
   );
   const now = useNow(1000, running);
   const runStartedAt = useRunStartedAt();
   const lastElapsedMs = useLastElapsedMs();
   // Stop freezes the clock at click; Stopping must not keep adding cleanup time.
-  const liveElapsed = running && runStartedAt != null ? Math.max(0, now - runStartedAt) : null;
+  const liveElapsed =
+    running && runStartedAt != null ? Math.max(0, now - runStartedAt) : null;
   const elapsedMs = liveElapsed ?? lastElapsedMs ?? metrics.lastResponseMs;
 
   const sshTarget = sshTargetFromSummary(entry?.summary);
@@ -349,6 +394,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const connectSsh = useSshConnect();
   const isSsh = sessionEnvLabel(entry?.summary) === ENV_SSH;
 
+  const permissionPending = usePermissionAskPending(sessionId, behavior);
   const runningDirect = running && direct && !readOnly;
   const mutationPending =
     submitRun.isPending ||
@@ -361,23 +407,37 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     clearGoal.isPending;
   const busy = mutationPending || stopping || (running && !runningDirect);
   const canSend = Boolean(value.trim()) && !busy;
-  const pendingInbox = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
+  const pendingInbox = (inboxQuery.data ?? []).filter(
+    (item) => item.status === "pending",
+  );
   const changeInboxDelivery = async (
     itemId: number,
     expectedVersion: number,
     delivery: InboxDelivery,
   ) => {
     try {
-      await updateInboxItem.mutateAsync({ sessionId, itemId, expectedVersion, delivery });
+      await updateInboxItem.mutateAsync({
+        sessionId,
+        itemId,
+        expectedVersion,
+        delivery,
+      });
     } catch (error) {
-      toast.error(`Unable to change pending message: ${errorMessage(toRunError(error))}`);
+      toast.error(
+        `Unable to change pending message: ${errorMessage(toRunError(error))}`,
+      );
     }
   };
-  const cancelPendingInbox = async (itemId: number, expectedVersion: number) => {
+  const cancelPendingInbox = async (
+    itemId: number,
+    expectedVersion: number,
+  ) => {
     try {
       await cancelInboxItem.mutateAsync({ sessionId, itemId, expectedVersion });
     } catch (error) {
-      toast.error(`Unable to cancel pending message: ${errorMessage(toRunError(error))}`);
+      toast.error(
+        `Unable to cancel pending message: ${errorMessage(toRunError(error))}`,
+      );
     }
   };
 
@@ -437,7 +497,13 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     );
   }, [commandDefinitions, commandQuery, direct]);
   const skillQuery = useMemo(
-    () => skillReferenceQuery(value, selection.start, selection.end, skillDefinitions ?? []),
+    () =>
+      skillReferenceQuery(
+        value,
+        selection.start,
+        selection.end,
+        skillDefinitions ?? [],
+      ),
     [selection, skillDefinitions, value],
   );
   const pendingSkillQuery = useMemo(() => {
@@ -456,7 +522,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       end: selection.end,
     };
   }, [commandQuery, selection, skillDefinitions, value]);
-  const suggestionKind = commandQuery ? "slash" : skillQuery || pendingSkillQuery ? "skill" : null;
+  const suggestionKind = commandQuery
+    ? "slash"
+    : skillQuery || pendingSkillQuery
+      ? "skill"
+      : null;
   const options = useMemo<SuggestionOption[]>(() => {
     if (suggestionKind === "slash") {
       return filteredCommands.map((definition) => ({
@@ -490,17 +560,26 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           )
         : null;
   const suggestionsOpen =
-    focused && suggestionKind !== null && currentSuggestionIdentity !== dismissedSuggestion;
+    focused &&
+    suggestionKind !== null &&
+    currentSuggestionIdentity !== dismissedSuggestion;
   // A narrower query can leave the keyboard's highlight past the last row.
-  const keyboardSuggestion = Math.min(activeSuggestion, Math.max(options.length - 1, 0));
+  const keyboardSuggestion = Math.min(
+    activeSuggestion,
+    Math.max(options.length - 1, 0),
+  );
   // What Tab and Enter would take, which is whatever is lit: the pointer
   // outranks the keyboard while it is in the list.
   const suggestionIndex =
     hoveredSuggestion !== null && hoveredSuggestion < options.length
       ? hoveredSuggestion
       : keyboardSuggestion;
-  const selectedSuggestion = suggestionsOpen ? options[suggestionIndex] : undefined;
-  const activeOptionId = selectedSuggestion ? `${listboxId}-option-${suggestionIndex}` : undefined;
+  const selectedSuggestion = suggestionsOpen
+    ? options[suggestionIndex]
+    : undefined;
+  const activeOptionId = selectedSuggestion
+    ? `${listboxId}-option-${suggestionIndex}`
+    : undefined;
   const preserveSuggestionFocus = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       if (selectedSuggestion) event.preventDefault();
@@ -541,7 +620,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         const reference = `$${option.definition.name}`;
         completed = `${value.slice(0, skillQuery.start)}${reference}${value.slice(skillQuery.end)}`;
         caret = skillQuery.start + reference.length;
-        dismissed = suggestionIdentity("skill", completed, skillQuery.start, caret);
+        dismissed = suggestionIdentity(
+          "skill",
+          completed,
+          skillQuery.start,
+          caret,
+        );
       }
       if (completed === value) {
         completionCaretRef.current = null;
@@ -564,7 +648,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     [skillDefinitions, value],
   );
   const mirrorActive =
-    !history.active && skillSegments.some((segment) => segment.skillName !== null);
+    !history.active &&
+    skillSegments.some((segment) => segment.skillName !== null);
 
   useLayoutEffect(() => {
     const textarea = ref.current;
@@ -693,15 +778,23 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           }
         }
 
-        const command = definitions ? submittedSlashCommand(text, definitions) : null;
+        const command = definitions
+          ? submittedSlashCommand(text, definitions)
+          : null;
         if (command?.command === "compact") {
           try {
             await compactSession.mutateAsync(sessionId);
             pushLocalEvent("compaction", "▶ compacting context…");
             clearField();
           } catch (error) {
-            pushLocalEvent("error", `compact failed: ${errorMessage(toRunError(error))}`, true);
-            toast.error(`Failed to compact: ${humanErrorText(toRunError(error), backend)}`);
+            pushLocalEvent(
+              "error",
+              `compact failed: ${errorMessage(toRunError(error))}`,
+              true,
+            );
+            toast.error(
+              `Failed to compact: ${humanErrorText(toRunError(error), backend)}`,
+            );
           }
           return;
         }
@@ -729,8 +822,14 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           }
           clearField();
         } catch (error) {
-          pushLocalEvent("error", `submit failed: ${errorMessage(toRunError(error))}`, true);
-          toast.error(`Failed to send: ${humanErrorText(toRunError(error), backend)}`);
+          pushLocalEvent(
+            "error",
+            `submit failed: ${errorMessage(toRunError(error))}`,
+            true,
+          );
+          toast.error(
+            `Failed to send: ${humanErrorText(toRunError(error), backend)}`,
+          );
         }
       } finally {
         submitInFlight.current = false;
@@ -756,7 +855,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   // A starter prompt goes out on its own; it is already a whole instruction,
   // and the field is where it would otherwise have to be confirmed.
-  useEffect(() => consumePromptRequests((prompt) => void submit(prompt)), [submit]);
+  useEffect(
+    () => consumePromptRequests((prompt) => void submit(prompt)),
+    [submit],
+  );
 
   const stop = useCallback(async () => {
     await actions.stopRun(sessionId);
@@ -769,28 +871,46 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         // bar it sits in elsewhere has room for the 24px square only.
         className={isMobile ? "btn-round" : undefined}
         size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-        variant={ButtonVariant.Ghost}
+        variant={
+          permissionPending
+            ? ButtonVariant.GhostHighlightedAccent
+            : ButtonVariant.Ghost
+        }
         content={ButtonContent.Icon}
-        aria-label="Session settings"
+        aria-label={
+          permissionPending
+            ? "Session settings (permission required)"
+            : "Session settings"
+        }
         onClick={() => actions.settings(sessionId)}
       >
         <Icon iconName={IconName.Gear} size={isMobile ? undefined : 16} />
       </Button>
     </Tooltip>
   );
+  const permissionOpener = (
+    <PermissionSettingsOpener sessionId={sessionId} behavior={behavior} />
+  );
 
-  const stoppingRun = running && !runningDirect;
-  const sendIcon = <Icon iconName={stoppingRun || stopping ? IconName.Stop : IconName.Plane} />;
+  // Orchestrator Send is Stop for the whole run. Agent Send stays Steer
+  // while the field has text; an empty field reuses the same control as
+  // Stop so the toolbar does not grow a second cancel label.
+  const sendStopsRun = running && (!runningDirect || !value.trim());
+  const sendIcon = (
+    <Icon
+      iconName={sendStopsRun || stopping ? IconName.Stop : IconName.ArrowTop}
+    />
+  );
   const sendLabel = stopping
     ? "Stopping run"
-    : stoppingRun
+    : sendStopsRun
       ? "Stop run"
       : runningDirect
         ? "Steer active run"
         : "Send";
-  const sendType = stoppingRun || stopping ? "button" : "submit";
-  const sendDisabled = stopping || (!stoppingRun && !canSend);
-  const onSend = stoppingRun && !stopping ? () => void stop() : undefined;
+  const sendType = sendStopsRun || stopping ? "button" : "submit";
+  const sendDisabled = stopping || (!sendStopsRun && !canSend);
+  const onSend = sendStopsRun && !stopping ? () => void stop() : undefined;
 
   const sendButton = isMobile ? (
     <StickyButton
@@ -854,7 +974,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       )}
     >
       <div className="relative flex-1 min-w-0">
-        <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        <span
+          className="sr-only"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           {suggestionStatus}
         </span>
         {mirrorActive && !collapsed ? (
@@ -957,7 +1082,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                 dismissSuggestions();
                 return;
               }
-              if ((event.key === "ArrowDown" || event.key === "ArrowUp") && options.length) {
+              if (
+                (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+                options.length
+              ) {
                 event.preventDefault();
                 // From the lit row, so the keyboard carries on from where the
                 // pointer left the highlight rather than jumping back to its
@@ -975,7 +1103,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                 completeSuggestion(selectedSuggestion);
                 return;
               }
-              if (event.key === "Enter" && (selectedSuggestion || suggestionKind === "slash")) {
+              if (
+                event.key === "Enter" &&
+                (selectedSuggestion || suggestionKind === "slash")
+              ) {
                 event.preventDefault();
                 if (selectedSuggestion) completeSuggestion(selectedSuggestion);
                 return;
@@ -992,7 +1123,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         {history.active ? (
           <>
             <span id={previewHelpId} className="sr-only">
-              Press Tab to take this prompt, Escape to leave it, or start typing to dismiss it
+              Press Tab to take this prompt, Escape to leave it, or start typing
+              to dismiss it
             </span>
             {/* The preview is drawn here rather than left to the native
                 placeholder, which cannot be measured — this way the key that
@@ -1006,7 +1138,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           </>
         ) : null}
         {collapsed ? (
-          <div className="absolute inset-0 flex items-center px-4 cursor-text" onClick={focusEnd}>
+          <div
+            className="absolute inset-0 flex items-center px-4 cursor-text"
+            onClick={focusEnd}
+          >
             <span
               className={cn(
                 "w-full truncate text-medium",
@@ -1063,11 +1198,15 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             // keeps the highlight the keyboard put on the first row.
             onPointerMove={() => setHoveredSuggestion(index)}
             onPointerLeave={() =>
-              setHoveredSuggestion((current) => (current === index ? null : current))
+              setHoveredSuggestion((current) =>
+                current === index ? null : current,
+              )
             }
             onClick={() => completeSuggestion(option)}
           >
-            <span className="code code-small shrink-0 text-basic-primary">{option.name}</span>
+            <span className="code code-small shrink-0 text-basic-primary">
+              {option.name}
+            </span>
             <span
               className={cn(
                 "min-w-0 flex-1 text-small text-basic-secondary",
@@ -1079,7 +1218,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           </button>
         ))
       ) : (
-        <div className="px-3 py-2 text-small text-basic-secondary">No matching commands</div>
+        <div className="px-3 py-2 text-small text-basic-secondary">
+          No matching commands
+        </div>
       )}
     </div>
   );
@@ -1103,32 +1244,38 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   if (!ownershipKnown) {
     return (
-      <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
-        <span className="flex-1">Loading session controls…</span>
-        {running && (
-          <Button
-            size={ButtonSize.Small}
-            variant={ButtonVariant.GhostDestructive}
-            content={ButtonContent.Text}
-            aria-label="Stop run"
-            onClick={() => void stop()}
-          >
-            Stop
-          </Button>
-        )}
-      </div>
+      <>
+        {permissionOpener}
+        <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
+          <span className="flex-1">Loading session controls…</span>
+          {running && (
+            <Button
+              size={ButtonSize.Small}
+              variant={ButtonVariant.GhostDestructive}
+              content={ButtonContent.Text}
+              aria-label="Stop run"
+              onClick={() => void stop()}
+            >
+              Stop
+            </Button>
+          )}
+        </div>
+      </>
     );
   }
 
   if (readOnly) {
     return (
-      <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
-        <span className="flex-1">
-          This delegated transcript is read-only. Continue, steer, or cancel it from its parent
-          chat.
-        </span>
-        <PermissionControls sessionId={sessionId} behavior={behavior} />
-      </div>
+      <>
+        {permissionOpener}
+        <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
+          <span className="flex-1">
+            This delegated transcript is read-only. Continue, steer, or cancel it
+            from its parent chat.
+          </span>
+          {settingsButton}
+        </div>
+      </>
     );
   }
 
@@ -1152,6 +1299,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         void submit();
       }}
     >
+      {permissionOpener}
       {isMobile ? (
         <div className="flex items-end gap-2">
           {fieldWithSuggestions}
@@ -1163,13 +1311,17 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
       {pendingInbox.length ? (
         <div className="flex flex-col gap-2" aria-label="Pending messages">
-          <div className="tag-label uppercase text-basic-secondary">Pending messages</div>
+          <div className="tag-label uppercase text-basic-secondary">
+            Pending messages
+          </div>
           {pendingInbox.map((item) => (
             <div
               key={item.id}
               className="flex flex-wrap items-center gap-2 rounded-[4px] border border-border-primary px-3 py-2"
             >
-              <span className="tag-label text-accent-primary">{item.delivery}</span>
+              <span className="tag-label text-accent-primary">
+                {item.delivery}
+              </span>
               <span className="min-w-0 flex-1 truncate text-small text-basic-primary">
                 {item.prompt}
               </span>
@@ -1213,35 +1365,22 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       >
         <div className="flex flex-1 min-w-0 flex-wrap items-center gap-y-1 gap-x-4">
           {runningDirect ? (
-            <>
-              <Button
-                type="button"
-                size={ButtonSize.Small}
-                variant={ButtonVariant.Secondary}
-                disabled={!canSend}
-                onClick={() => void submit(value, "queue")}
-              >
-                Queue Next
-              </Button>
-              <Button
-                type="button"
-                size={ButtonSize.Small}
-                variant={ButtonVariant.GhostDestructive}
-                disabled={mutationPending}
-                onClick={() => void stop()}
-              >
-                Stop run
-              </Button>
-            </>
+            <Button
+              type="button"
+              size={ButtonSize.Small}
+              variant={ButtonVariant.Secondary}
+              disabled={!canSend}
+              onClick={() => void submit(value, "queue")}
+            >
+              Queue Next
+            </Button>
           ) : null}
 
           {/* A phone's settings glyph lives in the pill instead. */}
           {isMobile ? null : settingsButton}
 
-          <PermissionControls sessionId={sessionId} behavior={behavior} />
           <GoalControls sessionId={sessionId} behavior={behavior} openRequest={goalOpenRequest} />
           <ChildControls sessionId={sessionId} behavior={behavior} />
-          <OrchestratorControls sessionId={sessionId} behavior={behavior} />
 
           {/* The model name is the first thing a narrow column gives up; the
               same switch lives in the session settings the gear opens. */}
@@ -1291,7 +1430,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                   {metrics.usage.cache_read_tokens > 0 ? (
                     <StatBadge
                       prefix="C"
-                      value={formatTokensCompact(metrics.usage.cache_read_tokens)}
+                      value={formatTokensCompact(
+                        metrics.usage.cache_read_tokens,
+                      )}
                       className="text-info-secondary opacity-75"
                       title="Cache read tokens"
                       labelClassName="tag-label"
@@ -1341,7 +1482,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               ) : (
                 <Icon iconName={IconName.History} size={16} />
               )}
-              <span className="block w-[40px] text-center">{formatClock(elapsedMs)}</span>
+              <span className="block w-[40px] text-center">
+                {formatClock(elapsedMs)}
+              </span>
             </div>
           </Tooltip>
         </div>

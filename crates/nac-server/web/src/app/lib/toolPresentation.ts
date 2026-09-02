@@ -15,9 +15,9 @@ export interface ToolPresentation {
   name: string;
   /** Product vocabulary shown as the primary label. */
   label: string;
-  /** Backend-owned bounded key argument; never reconstructed from raw arguments. */
+  /** Bounded key argument from the started event, or a known-key fallback when that event is missing. */
   summary: string | null;
-  /** Backend-owned bounded result preview; never the durable raw tool body. */
+  /** Bounded result preview; glob uses the structured entries JSON from the tool message. */
   resultPreview: string | null;
   status: ToolPresentationStatus;
   statusLabel: string;
@@ -174,6 +174,104 @@ export function indexToolEvents(events: AgentEvent[]): Map<string, ToolEventPair
   return byCall;
 }
 
+function parseCallArguments(call: ToolCall): Record<string, unknown> | null {
+  const raw = call.function?.arguments;
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function argumentString(obj: Record<string, unknown>, key: string): string | null {
+  const value = obj[key];
+  return typeof value === "string" ? bounded(value, PREVIEW_LIMIT) || null : null;
+}
+
+/**
+ * Known non-secret argument keys, matching nac-core `key_arg_preview`. Used
+ * only when the snapshot window dropped the tool's started event.
+ */
+function summaryFromCallArguments(name: string, call: ToolCall): string | null {
+  if (name === "get_goal") return "current goal";
+  const obj = parseCallArguments(call);
+  if (!obj) return null;
+  switch (name) {
+    case "read":
+    case "write":
+    case "edit":
+      return argumentString(obj, "path");
+    case "glob":
+      return argumentString(obj, "pattern") ?? argumentString(obj, "root");
+    case "grep":
+      return argumentString(obj, "pattern");
+    case "exec_command": {
+      const command = argumentString(obj, "cmd") ?? argumentString(obj, "command");
+      if (command) return command;
+      const workdir = argumentString(obj, "workdir");
+      return workdir ? `(in ${workdir})` : null;
+    }
+    case "write_stdin": {
+      const sessionId = argumentString(obj, "session_id");
+      if (!sessionId) return null;
+      const chars = obj.chars;
+      const inputChars = typeof chars === "string" ? chars.length : 0;
+      return inputChars === 0 ? `→ ${sessionId}` : `→ ${sessionId} (${inputChars} input chars)`;
+    }
+    case "read_command_output":
+      return argumentString(obj, "output_id");
+    case "web_search":
+      return argumentString(obj, "query");
+    case "web_fetch":
+      return argumentString(obj, "url");
+    case "create_goal":
+      return argumentString(obj, "objective");
+    case "update_goal":
+      return argumentString(obj, "status");
+    case "session_spawn":
+      return argumentString(obj, "description") ?? argumentString(obj, "child_session_id");
+    case "session_status":
+    case "session_read":
+    case "session_wait":
+    case "session_cancel":
+    case "session_steer":
+      return argumentString(obj, "child_session_id");
+    case "thread": {
+      const threadName = argumentString(obj, "name");
+      const action = argumentString(obj, "action");
+      if (threadName && action) return bounded(`${threadName}: ${action}`, PREVIEW_LIMIT) || null;
+      return threadName;
+    }
+    case "thread_read":
+    case "thread_delete":
+      return argumentString(obj, "name");
+    case "threads":
+    case "workset_list":
+      return "list";
+    case "workset_define": {
+      const id = argumentString(obj, "id");
+      const goal = argumentString(obj, "goal");
+      if (id && goal) return bounded(`${id}: ${goal}`, PREVIEW_LIMIT) || null;
+      return id;
+    }
+    case "workset_read":
+      return argumentString(obj, "id");
+    default:
+      return null;
+  }
+}
+
+/** File contents stay out; glob needs the structured entries JSON to list paths. */
+function resultPreviewFromToolBody(name: string, resultText: string | null): string | null {
+  if (!resultText) return null;
+  if (name === "read" || name === "write" || name === "edit") return null;
+  if (name === "glob") return resultText.trim() || null;
+  return bounded(resultText, PREVIEW_LIMIT) || null;
+}
+
 export function presentToolCall({
   call,
   events,
@@ -186,7 +284,7 @@ export function presentToolCall({
   call: ToolCall;
   events?: ToolEventPair;
   hasResult: boolean;
-  /** Used only for fixed cancellation/interruption markers, never displayed. */
+  /** Tool-result message body; used for cancel markers and as a fallback preview. */
   resultText: string | null;
   resultHasImage: boolean;
   active: boolean;
@@ -204,16 +302,24 @@ export function presentToolCall({
   else if (active) status = "pending";
   else status = "interrupted";
 
-  let resultPreview = bounded(events?.finished?.content_preview, PREVIEW_LIMIT) || null;
+  let resultPreview =
+    name === "glob" && resultText?.trim()
+      ? resultText
+      : bounded(events?.finished?.content_preview, PREVIEW_LIMIT) ||
+        resultPreviewFromToolBody(name, resultText);
   if (!resultPreview && resultHasImage) resultPreview = "Image result";
   if (!resultPreview && status === "cancelled") resultPreview = "No result was retained.";
   if (!resultPreview && status === "interrupted") resultPreview = "No result was recorded.";
+
+  const summary =
+    bounded(events?.started?.key_arg_preview, PREVIEW_LIMIT) ||
+    summaryFromCallArguments(name, call);
 
   return {
     callId: call.id,
     name,
     label: toolLabel(name),
-    summary: bounded(events?.started?.key_arg_preview, PREVIEW_LIMIT) || null,
+    summary,
     resultPreview,
     status,
     statusLabel: STATUS_LABELS[status],

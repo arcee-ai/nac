@@ -128,6 +128,10 @@ export function setSelectedThreadRunning(selectedThreadRunning: boolean): void {
 }
 
 export function selectAgentSegment(selectedAgentSegment: string | null): void {
+  if (getState().selectedAgentSegment === selectedAgentSegment) {
+    if (selectedAgentSegment) showSidePanelList(false);
+    return;
+  }
   setState(
     selectedAgentSegment
       ? { selectedAgentSegment, selectedThread: null, selectedThreadEpisode: null }

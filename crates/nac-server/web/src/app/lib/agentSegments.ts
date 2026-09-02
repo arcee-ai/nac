@@ -1,6 +1,11 @@
 import { IconName } from "@/app/atoms/icon";
+import { formatSeconds } from "@/app/lib/format";
 import type { ToolPresentation } from "@/app/lib/toolPresentation";
-import type { ModelTurn, TranscriptBlock, TranscriptTurn } from "@/app/lib/transcript";
+import type {
+  ModelTurn,
+  TranscriptBlock,
+  TranscriptTurn,
+} from "@/app/lib/transcript";
 
 /** Consecutive thoughts and tool calls collapsed into one pill tray. */
 export interface AgentToolsGroup {
@@ -28,6 +33,7 @@ export type AgentSegment =
 
 export type AgentTranscriptItem =
   | { kind: "group"; group: AgentToolsGroup }
+  | { kind: "spawn"; group: AgentToolsGroup }
   | { kind: "block"; block: TranscriptBlock };
 
 export interface SegmentDisplayConfig {
@@ -234,8 +240,7 @@ function isGroupable(block: TranscriptBlock): boolean {
   return (
     block.kind === "thoughts" ||
     block.kind === "tool-detail" ||
-    block.kind === "tool" ||
-    block.kind === "workset"
+    block.kind === "tool"
   );
 }
 
@@ -304,7 +309,7 @@ export function standaloneGroupFromBlock(
         ? (segment.presentation.summary ?? segment.presentation.label)
         : groupLabel([segment]),
     segments: [segment],
-    inProgress: toolIsLive(segment),
+    inProgress: segmentIsLive(segment),
     durationMs: null,
   };
 }
@@ -331,12 +336,19 @@ const TOOL_TRAILING: Record<string, string> = {
   thread_delete: "Delete",
 };
 
+function uniqueInOrder(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+}
+
 function readyActionListLabel(group: AgentToolsGroup): string {
-  if (group.segments.length === 1 && group.segments[0].kind === "tool") {
-    const segment = group.segments[0];
-    return segment.presentation.summary ?? configForSegment(segment).regularLabel;
-  }
-  const labels = group.segments.map((segment) => configForSegment(segment).regularLabel);
+  const labels = uniqueInOrder(
+    group.segments.map((segment) => configForSegment(segment).regularLabel),
+  );
   if (labels.length === 0) return group.label;
   if (labels.length === 1) return labels[0];
   if (labels.length === 2) return `${labels[0]}, ${labels[1]}`;
@@ -346,26 +358,45 @@ function readyActionListLabel(group: AgentToolsGroup): string {
 export function actionListLabel(group: AgentToolsGroup): string {
   if (!group.inProgress) return readyActionListLabel(group);
   if (actionListIsThoughtsOnly(group)) return REASONING_CONFIG.inProgressLabel;
-  if (group.segments.length === 1) return configForSegment(group.segments[0]).inProgressLabel;
+  if (group.segments.length === 1)
+    return configForSegment(group.segments[0]).inProgressLabel;
   return `${readyActionListLabel(group)}...`;
 }
 
-const FAILED_TOOL_STATUSES = new Set(["error", "cancelled", "timed-out"]);
+/** Action list row: thoughts duration sits in the label, not the trailing badge. */
+export function actionButtonLabel(group: AgentToolsGroup): string {
+  const label = actionListLabel(group);
+  if (group.inProgress || !actionListIsThoughtsOnly(group)) return label;
+  const duration = formatSeconds(group.durationMs);
+  return duration ? `${label}, ${duration}` : label;
+}
 
-export function actionListFailed(group: AgentToolsGroup): boolean {
-  return group.segments.some(
-    (segment) => segment.kind === "tool" && FAILED_TOOL_STATUSES.has(segment.presentation.status),
+const FAILED_TOOL_STATUSES = new Set([
+  "error",
+  "cancelled",
+  "timed-out",
+  "interrupted",
+]);
+
+export function toolSegmentFailed(segment: AgentSegment): boolean {
+  return (
+    segment.kind === "tool" &&
+    FAILED_TOOL_STATUSES.has(segment.presentation.status)
   );
 }
 
+export function actionListFailed(group: AgentToolsGroup): boolean {
+  return group.segments.some(toolSegmentFailed);
+}
+
 export function actionListTrailing(group: AgentToolsGroup): string | undefined {
-  if (group.inProgress || actionListFailed(group)) return undefined;
-  if (actionListIsThoughtsOnly(group)) {
-    if (group.durationMs == null) return undefined;
-    return `${Math.round(group.durationMs / 100) / 10} s`;
+  if (group.inProgress || actionListIsThoughtsOnly(group)) {
+    return undefined;
   }
   const tools = group.segments.filter((segment) => segment.kind === "tool");
-  const thoughts = group.segments.some((segment) => segment.kind === "thinking");
+  const thoughts = group.segments.some(
+    (segment) => segment.kind === "thinking",
+  );
   if (!thoughts && tools.length === 1) {
     return TOOL_TRAILING[tools[0].presentation.name];
   }
@@ -373,24 +404,49 @@ export function actionListTrailing(group: AgentToolsGroup): string | undefined {
 }
 
 export function actionListIcon(group: AgentToolsGroup): IconName {
+  if (actionListIsSegmentsGroup(group)) return IconName.MenuHorizontal;
   const tools = group.segments.filter((segment) => segment.kind === "tool");
-  const thoughts = group.segments.some((segment) => segment.kind === "thinking");
   if (tools.length === 0) return IconName.Brain;
-  if (!thoughts && tools.length === 1) {
-    return configForSegment(tools[0]).icon;
-  }
-  return IconName.MenuHorizontal;
+  return configForSegment(tools[0]).icon;
+}
+
+/**
+ * A tools-group row that collapses several thoughts/tools into one button.
+ * Single-tool and thoughts-only rows are not this type and have no children.
+ */
+export function actionListIsSegmentsGroup(group: AgentToolsGroup): boolean {
+  const tools = group.segments.filter((segment) => segment.kind === "tool");
+  const thoughts = group.segments.some(
+    (segment) => segment.kind === "thinking",
+  );
+  if (tools.length === 0) return false;
+  return thoughts || tools.length > 1;
 }
 
 export function actionListIsThoughtsOnly(group: AgentToolsGroup): boolean {
   return (
-    group.segments.length > 0 && group.segments.every((segment) => segment.kind === "thinking")
+    group.segments.length > 0 &&
+    group.segments.every((segment) => segment.kind === "thinking")
   );
 }
 
-function toolIsLive(segment: AgentSegment): boolean {
+export function segmentIsLive(segment: AgentSegment): boolean {
   if (segment.kind === "thinking") return segment.streaming;
-  return segment.presentation.status === "pending" || segment.presentation.status === "running";
+  return (
+    segment.presentation.status === "pending" ||
+    segment.presentation.status === "running"
+  );
+}
+
+/** Nested action-list row under an expanded tools group. */
+export function actionChildLabel(segment: AgentSegment): string {
+  const config = configForSegment(segment);
+  if (segmentIsLive(segment)) return config.inProgressLabel;
+  if (segment.kind === "thinking") {
+    const duration = formatSeconds(segment.durationMs);
+    return duration ? `${config.regularLabel}, ${duration}` : config.regularLabel;
+  }
+  return config.regularLabel;
 }
 
 function groupLabel(segments: AgentSegment[]): string {
@@ -413,28 +469,41 @@ function groupDurationMs(segments: AgentSegment[]): number | null {
   return any ? total : null;
 }
 
-function closeGroup(turnKey: string, seq: number, segments: AgentSegment[]): AgentToolsGroup {
+function closeGroup(
+  originKey: string,
+  seq: number,
+  segments: AgentSegment[],
+  liveTail: boolean,
+): AgentToolsGroup {
   return {
-    id: `${turnKey}:tools-${seq}`,
-    turnKey,
+    id: `${originKey}:tools-${seq}`,
+    turnKey: originKey,
     label: groupLabel(segments),
     segments,
-    inProgress: segments.some(toolIsLive),
+    inProgress: liveTail || segments.some(segmentIsLive),
     durationMs: groupDurationMs(segments),
   };
 }
 
+export function turnOriginKey(turn: ModelTurn): string {
+  return turn.originKey || turn.key;
+}
+
 /** Collapse consecutive thoughts / tool calls; leave prose and orchestrator cards alone. */
-export function partitionAgentTranscript(turn: ModelTurn): AgentTranscriptItem[] {
+export function partitionAgentTranscript(
+  turn: ModelTurn,
+  live = false,
+): AgentTranscriptItem[] {
   const items: AgentTranscriptItem[] = [];
+  const originKey = turnOriginKey(turn);
   let pending: AgentSegment[] = [];
   let toolsSeq = 0;
 
-  const flush = () => {
+  const flush = (liveTail = false) => {
     if (pending.length === 0) return;
     items.push({
       kind: "group",
-      group: closeGroup(turn.key, toolsSeq, pending),
+      group: closeGroup(originKey, toolsSeq, pending, liveTail),
     });
     toolsSeq += 1;
     pending = [];
@@ -443,6 +512,11 @@ export function partitionAgentTranscript(turn: ModelTurn): AgentTranscriptItem[]
   for (const block of turn.blocks) {
     if (!isGroupable(block)) {
       flush();
+      const spawn = standaloneGroupFromBlock(originKey, block);
+      if (spawn) {
+        items.push({ kind: "spawn", group: spawn });
+        continue;
+      }
       items.push({ kind: "block", block });
       continue;
     }
@@ -450,16 +524,18 @@ export function partitionAgentTranscript(turn: ModelTurn): AgentTranscriptItem[]
     if (!segment) continue;
     pending.push(segment);
   }
-  flush();
+  flush(live);
   return items;
 }
 
-export function collectAgentToolsGroups(turns: TranscriptTurn[]): AgentToolsGroup[] {
+export function collectAgentToolsGroups(
+  turns: TranscriptTurn[],
+): AgentToolsGroup[] {
   const groups: AgentToolsGroup[] = [];
   for (const turn of turns) {
     if (turn.kind !== "model") continue;
     for (const item of partitionAgentTranscript(turn)) {
-      if (item.kind === "group") groups.push(item.group);
+      if (item.kind === "group" || item.kind === "spawn") groups.push(item.group);
     }
   }
   return groups;
@@ -473,12 +549,16 @@ export enum ToolCallLabelState {
 export interface ToolsSegmentItem {
   id: string;
   icon: IconName;
+  failed?: boolean;
 }
 
-export function toolsItemsFromGroup(group: AgentToolsGroup): ToolsSegmentItem[] {
+export function toolsItemsFromGroup(
+  group: AgentToolsGroup,
+): ToolsSegmentItem[] {
   return group.segments.map((segment) => ({
     id: segment.key,
     icon: configForSegment(segment).icon,
+    failed: toolSegmentFailed(segment),
   }));
 }
 
@@ -495,9 +575,9 @@ export function visibleToolsItems(
 
 export const MAX_PILLS_DESKTOP = 8;
 export const MAX_PILLS_MOBILE = 4;
-export const COUPLER_WIDTH_PX = 12;
+export const COUPLER_WIDTH_PX = 8;
 export const PILL_SIZE_MEDIUM_PX = 36;
-export const PILL_SIZE_SMALL_PX = 24;
-export const PILL_SLOT_PX = COUPLER_WIDTH_PX + PILL_SIZE_MEDIUM_PX;
+export const PILL_SIZE_SMALL_PX = 28;
+export const PILL_SLOT_PX = COUPLER_WIDTH_PX + PILL_SIZE_SMALL_PX;
 export const PILL_LINGER_MS = 350;
 export const PILL_TRANSITION_MS = 300;

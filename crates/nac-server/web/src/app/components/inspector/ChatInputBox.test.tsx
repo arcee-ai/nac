@@ -564,7 +564,7 @@ describe("direct inbox and goal journeys", () => {
     );
     expect(screen.getByText(/delegated transcript is read-only/i)).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: "Message" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Session settings" })).toBeTruthy();
   });
 
   it("preserves a steer drafted while the initial run submission settles", async () => {
@@ -607,7 +607,7 @@ describe("direct inbox and goal journeys", () => {
     expect(textarea.value).toBe("");
   });
 
-  it("offers Queue Next and a separate direct-run stop action", async () => {
+  it("offers Queue Next and turns empty-field Send into Stop", async () => {
     syncRunFromSnapshot({
       run_id: "run-live",
       prompt_preview: "working",
@@ -615,11 +615,14 @@ describe("direct inbox and goal journeys", () => {
     });
     const textarea = composer({ behavior: "direct" });
     type(textarea, "follow-up work");
+    expect(screen.getByRole("button", { name: "Steer active run" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Queue Next" }));
     await waitFor(() =>
       expect(fakes.createInboxItem).toHaveBeenCalledWith("session", "queue", "follow-up work"),
     );
+    await waitFor(() => expect(textarea.value).toBe(""));
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy();
   });
 

@@ -1,6 +1,5 @@
 import React, { useId } from "react";
 import { cn } from "../../lib/cn";
-import { LoaderSize } from "./index";
 
 /** Stroke colour for the arc; mirrors `LoaderVariant` but as a stroke class. */
 export enum CircularLoaderVariant {
@@ -10,7 +9,7 @@ export enum CircularLoaderVariant {
 }
 
 interface CircularLoaderProps extends React.HTMLAttributes<HTMLDivElement> {
-  size?: LoaderSize;
+  size?: number;
   variant?: CircularLoaderVariant;
   strokeWidth?: number;
 }
@@ -20,12 +19,11 @@ interface CircularLoaderProps extends React.HTMLAttributes<HTMLDivElement> {
  * glyph-based `Loader` reads as too heavy.
  */
 const CircularLoader: React.FC<CircularLoaderProps> & {
-  Size: typeof LoaderSize;
   Variant: typeof CircularLoaderVariant;
 } = ({
-  size = LoaderSize.Medium,
+  size = 24,
   variant = CircularLoaderVariant.Neutral,
-  strokeWidth = 2,
+  strokeWidth = 1,
   className = "",
   ...props
 }) => {
@@ -36,7 +34,10 @@ const CircularLoader: React.FC<CircularLoaderProps> & {
   const radius = 12 - strokeWidth / 2;
 
   return (
-    <div className={cn("inline-flex w-fit h-fit animate-spin", className)} {...props}>
+    <div
+      className={cn("inline-flex w-fit h-fit animate-spin", className)}
+      {...props}
+    >
       <svg
         width={size - 2}
         height={size - 2}
@@ -51,7 +52,13 @@ const CircularLoader: React.FC<CircularLoaderProps> & {
           </linearGradient>
           <mask id={maskId} maskUnits="userSpaceOnUse">
             <rect x="0" y="0" width="12" height="24" fill="white" />
-            <rect x="12" y="0" width="12" height="24" fill={`url(#${gradientId})`} />
+            <rect
+              x="12"
+              y="0"
+              width="12"
+              height="24"
+              fill={`url(#${gradientId})`}
+            />
           </mask>
         </defs>
         <circle
@@ -69,7 +76,6 @@ const CircularLoader: React.FC<CircularLoaderProps> & {
   );
 };
 
-CircularLoader.Size = LoaderSize;
 CircularLoader.Variant = CircularLoaderVariant;
 
 export default CircularLoader;

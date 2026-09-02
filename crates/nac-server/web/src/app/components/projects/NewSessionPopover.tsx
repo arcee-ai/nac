@@ -43,9 +43,13 @@ export function NewSessionPopover({
             className="!gap-2"
             onClick={() => onSelect(option.id)}
           >
-            <SessionTypeAvatar sessionType={agent ? SessionType.Agent : SessionType.Orchestrator} />
+            <SessionTypeAvatar
+              sessionType={agent ? SessionType.Agent : SessionType.Orchestrator}
+            />
             <span className="flex min-w-0 flex-1 items-center gap-1">
-              <span className="label-small min-w-0 truncate">{option.createLabel}</span>
+              <span className="label-small min-w-0 truncate">
+                {option.createLabel}
+              </span>
               <span
                 className="inline-flex shrink-0 [&_.icon]:!h-4 [&_.icon]:!w-4 [&_.icon]:!min-h-4 [&_.icon]:!min-w-4 [&_svg]:!h-4 [&_svg]:!w-4"
                 onClick={(event) => event.stopPropagation()}
@@ -55,7 +59,11 @@ export function NewSessionPopover({
                   title={option.label}
                   description={option.hint}
                   size={HoverHintSize.Small}
-                  position={TooltipPosition.TopCenter}
+                  position={
+                    agent
+                      ? TooltipPosition.TopLeft
+                      : TooltipPosition.BottomLeft
+                  }
                 />
               </span>
             </span>

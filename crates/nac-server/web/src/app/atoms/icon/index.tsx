@@ -1,4 +1,4 @@
-import type React from "react";
+import React, { useId } from "react";
 import { iconPaths } from "./icon-paths";
 
 // Enums
@@ -8,6 +8,7 @@ export enum IconName {
   Publish = "publish",
   Toolbox = "toolbox",
   Play = "play",
+  Pause = "pause",
   Add = "add",
   Chat = "chat",
   AddChat = "addChat",
@@ -158,6 +159,11 @@ interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
   /** CSS color for the glyph. Stylesheets can still override it via `fill`. */
   color?: string;
   size?: number;
+  /**
+   * Same tokens and timing as `text-shimmer-basic`. `background-clip: text`
+   * cannot paint an SVG path (`fill: currentColor` would go transparent).
+   */
+  shimmer?: boolean;
 }
 
 const DEFAULT_VIEW_BOX = "0 0 24 24";
@@ -223,9 +229,11 @@ const Icon: React.FC<IconProps> & { Name: typeof IconName } = ({
   size = 20,
   className = "",
   style,
+  shimmer = false,
   ...props
 }) => {
   const { d, viewBox } = getGlyph(iconName);
+  const gradientId = `icon-shimmer-${useId().replace(/:/g, "")}`;
   return (
     <svg
       className={`icon ${className}`}
@@ -234,10 +242,43 @@ const Icon: React.FC<IconProps> & { Name: typeof IconName } = ({
       viewBox={viewBox}
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      style={color ? { color, ...style } : style}
+      style={color && !shimmer ? { color, ...style } : style}
       {...props}
     >
-      <path d={d} fill="currentColor" />
+      {shimmer ? (
+        <defs>
+          <linearGradient
+            id={gradientId}
+            gradientUnits="objectBoundingBox"
+            x1="-1"
+            y1="0"
+            x2="1"
+            y2="0"
+          >
+            <stop
+              offset="0%"
+              stopColor="var(--color-text-basic-secondary)"
+            />
+            <stop
+              offset="50%"
+              stopColor="var(--color-text-basic-muted)"
+            />
+            <stop
+              offset="100%"
+              stopColor="var(--color-text-basic-secondary)"
+            />
+            <animateTransform
+              attributeName="gradientTransform"
+              type="translate"
+              from="-1 0"
+              to="1 0"
+              dur="2s"
+              repeatCount="indefinite"
+            />
+          </linearGradient>
+        </defs>
+      ) : null}
+      <path d={d} fill={shimmer ? `url(#${gradientId})` : "currentColor"} />
     </svg>
   );
 };

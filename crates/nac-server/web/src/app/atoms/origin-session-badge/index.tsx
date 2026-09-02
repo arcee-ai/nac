@@ -17,46 +17,48 @@ const KIND_ICON: Record<OriginSessionKind, IconName> = {
   [OriginSessionKind.DelegatedLocked]: IconName.Lock,
 };
 
+const KIND_FROM_ORIGIN: Record<string, OriginSessionKind> = {
+  fork: OriginSessionKind.Fork,
+  converted: OriginSessionKind.Converted,
+  delegated: OriginSessionKind.Delegated,
+  "delegated-locked": OriginSessionKind.DelegatedLocked,
+};
+
+/** Origin chip for a session origin other than the user-created default. */
+export function originKindFromOrigin(
+  origin: string | undefined,
+): OriginSessionKind | undefined {
+  return origin ? KIND_FROM_ORIGIN[origin] : undefined;
+}
+
 interface OriginSessionBadgeProps {
-  /** Colours the chip for the parent session type. */
-  sessionType?: "agent" | "orchestrator";
   kind: OriginSessionKind;
   className?: string;
 }
 
 /**
- * 16px origin chip on a session-type avatar (Figma OriginSessionBadge).
- * Fork / Converted / Delegated sit on the saturated complementary; a locked
- * delegation uses the tinted chip and a dark lock.
+ * 16px origin chip (Figma OriginSessionBadge). Fork / Converted / Delegated
+ * sit on the sublevel surface; a locked delegation inverts to the primary
+ * button fill.
  */
 const OriginSessionBadge: React.FC<OriginSessionBadgeProps> = ({
-  sessionType = "agent",
   kind,
   className = "",
 }) => {
   const locked = kind === OriginSessionKind.DelegatedLocked;
-  const agent = sessionType === "agent";
 
   return (
     <div
       className={cn(
-        "flex size-4 items-center justify-center overflow-clip rounded-[4px] shadow-md",
+        "flex size-4 shrink-0 items-center justify-center overflow-clip rounded-[4px] shadow-md",
         locked
-          ? agent
-            ? "bg-session-origin-agent-locked"
-            : "bg-session-origin-orchestrator-locked"
-          : agent
-            ? "bg-session-origin-agent"
-            : "bg-session-origin-orchestrator",
+          ? "bg-btn-primary text-btn-primary"
+          : "bg-elevation-sublevel-variant-B text-basic-tertiary",
         className,
       )}
       aria-hidden
     >
-      <Icon
-        iconName={KIND_ICON[kind]}
-        size={12}
-        className={locked ? "text-session-origin-locked" : "text-session-type"}
-      />
+      <Icon iconName={KIND_ICON[kind]} size={12} />
     </div>
   );
 };

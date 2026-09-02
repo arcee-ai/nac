@@ -130,3 +130,13 @@ export function presentSessionAssignment(
     outcome: failure ?? report ?? changes ?? verification,
   };
 }
+
+/** API description is a 120-character list label, not a second prompt. */
+const ASSIGNMENT_LABEL_MAX = 120;
+
+/** First line of the spawn prompt, clipped to the stored description limit. */
+export function assignmentLabelFromPrompt(prompt: string): string {
+  const line = prompt.trim().split(/\r?\n/, 1)[0]?.trim() ?? "";
+  if (line.length <= ASSIGNMENT_LABEL_MAX) return line;
+  return line.slice(0, ASSIGNMENT_LABEL_MAX).trimEnd();
+}

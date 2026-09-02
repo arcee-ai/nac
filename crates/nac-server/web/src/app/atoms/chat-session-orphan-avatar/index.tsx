@@ -1,6 +1,7 @@
 import type React from "react";
 
 import { cn } from "../../lib/cn";
+import OriginSessionBadge, { originKindFromOrigin } from "../origin-session-badge";
 import SessionTypeAvatar, { SessionOrigin, SessionType } from "../session-type-avatar";
 
 /** Figma ChatSessionOrphanAvatar: 40px tile with the 28px session-type mark inside. */
@@ -19,7 +20,7 @@ interface ChatSessionOrphanAvatarProps extends React.HTMLAttributes<HTMLDivEleme
 /**
  * Avatar for a chat that belongs to no project. The 40px tile matches a
  * project's identicon footprint; inside it is SessionTypeAvatar (Figma
- * SessionAvatar), not a generic chat glyph.
+ * SessionAvatar). Origin is OriginSessionBadge on the tile, not on the mark.
  */
 const ChatSessionOrphanAvatar: React.FC<ChatSessionOrphanAvatarProps> = ({
   size = TILE,
@@ -32,6 +33,7 @@ const ChatSessionOrphanAvatar: React.FC<ChatSessionOrphanAvatarProps> = ({
 }) => {
   const live = running || isRunning;
   const scale = size / TILE;
+  const originKind = originKindFromOrigin(origin);
 
   return (
     <div
@@ -41,12 +43,15 @@ const ChatSessionOrphanAvatar: React.FC<ChatSessionOrphanAvatarProps> = ({
       {...props}
     >
       <div
-        className="flex size-10 items-center justify-center rounded-[4px] border border-solid border-muted bg-elevation-sublevel-variant-B"
+        className="relative flex size-10 items-center justify-center rounded-[4px] border border-solid border-muted bg-elevation-sublevel-variant-B"
         style={
           scale === 1 ? undefined : { transform: `scale(${scale})`, transformOrigin: "top left" }
         }
       >
-        <SessionTypeAvatar sessionType={sessionType} origin={origin} running={live} />
+        <SessionTypeAvatar sessionType={sessionType} running={live} />
+        {originKind ? (
+          <OriginSessionBadge kind={originKind} className="absolute right-0 bottom-0" />
+        ) : null}
       </div>
     </div>
   );

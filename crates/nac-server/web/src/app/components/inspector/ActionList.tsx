@@ -1,6 +1,7 @@
 import {
   ButtonSize,
   ButtonVariant,
+  DropdownContent,
   Icon,
   IconName,
   Loader,
@@ -9,14 +10,24 @@ import {
   Select,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
-import type { ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 
 import {
+  actionButtonLabel,
+  actionChildLabel,
   actionListFailed,
   actionListIcon,
-  actionListLabel,
+  actionListIsSegmentsGroup,
   actionListTrailing,
   configForSegment,
+  segmentIsLive,
+  toolSegmentFailed,
 } from "@/app/lib/agentSegments";
 import type {
   ActionFilter,
@@ -24,12 +35,20 @@ import type {
   ActionTurnSection,
 } from "@/app/lib/actionsTimeline";
 import { formatStoreTime } from "@/app/lib/format";
+import {
+  collapseActionGroup,
+  expandActionGroup,
+  focusActionSegment,
+  toggleActionGroup,
+  useExpandedActionGroupId,
+} from "@/app/lib/actionExpand";
 
 const FILTER_LABEL: Record<ActionFilter, string> = {
   all: "All actions",
   threads: "Threads",
   tools: "Thoughts & tools",
   sessions: "Sessions",
+  worksets: "Worksets",
 };
 
 export function ActionFilterBar({
@@ -56,7 +75,8 @@ export function ActionFilterBar({
             id === "all" ||
             id === "threads" ||
             id === "tools" ||
-            id === "sessions"
+            id === "sessions" ||
+            id === "worksets"
           ) {
             onChange(id);
           }
@@ -85,6 +105,16 @@ export function ActionTurnHeader({ section }: { section: ActionTurnSection }) {
   );
 }
 
+function nearestScrollParent(el: HTMLElement | null): HTMLElement | null {
+  let node: HTMLElement | null = el?.parentElement ?? null;
+  while (node) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
 function ActionListButton({
   label,
   trailing,
@@ -94,8 +124,11 @@ function ActionListButton({
   pending = false,
   active = false,
   disabled = false,
+  expanded,
+  controls,
   title,
   onClick,
+  preventFocusScroll = false,
 }: {
   label: string;
   trailing?: string;
@@ -105,8 +138,11 @@ function ActionListButton({
   pending?: boolean;
   active?: boolean;
   disabled?: boolean;
+  expanded?: boolean;
+  controls?: string;
   title?: string;
-  onClick?: () => void;
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+  preventFocusScroll?: boolean;
 }) {
   return (
     <button
@@ -114,6 +150,15 @@ function ActionListButton({
       disabled={disabled}
       title={title}
       aria-pressed={active}
+      aria-expanded={expanded}
+      aria-controls={controls}
+      onMouseDown={
+        preventFocusScroll
+          ? (event) => {
+              event.preventDefault();
+            }
+          : undefined
+      }
       onClick={onClick}
       className={cn(
         "flex w-full min-w-0 items-center gap-1 h-9 px-2 py-1 rounded-[4px] disabled:opacity-100",
@@ -165,23 +210,60 @@ function ActionListButton({
 export function ActionGroupRow({
   item,
   active,
+  expanded,
   onSelect,
+  onSelectSegment,
 }: {
   item: Extract<ActionItem, { kind: "group" }>;
   active: boolean;
-  onSelect: (id: string) => void;
+  expanded: boolean;
+  onSelect: (id: string, event: MouseEvent<HTMLButtonElement>) => void;
+  onSelectSegment: (groupId: string, segmentKey: string) => void;
 }) {
-  const failed = actionListFailed(item.group);
+  const expandable = actionListIsSegmentsGroup(item.group);
+  const panelId = `${item.id}-segments`;
   return (
-    <ActionListButton
-      label={actionListLabel(item.group)}
-      trailing={actionListTrailing(item.group)}
-      icon={actionListIcon(item.group)}
-      running={item.group.inProgress}
-      failed={failed}
-      active={active}
-      onClick={() => onSelect(item.id)}
-    />
+    <div
+      data-action-anchor={item.id}
+      className="flex flex-col w-full [overflow-anchor:auto]"
+    >
+      <ActionListButton
+        label={actionButtonLabel(item.group)}
+        trailing={actionListTrailing(item.group)}
+        icon={actionListIcon(item.group)}
+        running={item.group.inProgress}
+        active={active}
+        expanded={expandable ? expanded : undefined}
+        controls={expandable ? panelId : undefined}
+        onClick={(event) => onSelect(item.id, event)}
+      />
+      {expandable ? (
+        <DropdownContent
+          id={panelId}
+          isOpen={expanded}
+          className="w-full [overflow-anchor:none]"
+          aria-hidden={!expanded}
+          inert={!expanded || undefined}
+        >
+          <div className="flex flex-col gap-0 pl-4">
+            {item.group.segments.map((segment) => {
+              const config = configForSegment(segment);
+              return (
+                <ActionListButton
+                  key={segment.key}
+                  label={actionChildLabel(segment)}
+                  icon={config.icon}
+                  running={segmentIsLive(segment)}
+                  failed={toolSegmentFailed(segment)}
+                  preventFocusScroll
+                  onClick={() => onSelectSegment(item.id, segment.key)}
+                />
+              );
+            })}
+          </div>
+        </DropdownContent>
+      ) : null}
+    </div>
   );
 }
 
@@ -192,21 +274,46 @@ export function ActionSpawnRow({
 }: {
   item: Extract<ActionItem, { kind: "spawn" }>;
   active: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const lead = item.group.segments[0];
   const icon = lead ? configForSegment(lead).icon : IconName.Plane;
   const failed = actionListFailed(item.group);
   return (
-    <ActionListButton
-      label={item.title}
-      trailing={failed || item.group.inProgress ? undefined : "Spawn"}
-      icon={icon}
-      running={item.group.inProgress}
-      failed={failed}
-      active={active}
-      onClick={() => onSelect(item.id)}
-    />
+    <div data-action-anchor={item.id} className="[overflow-anchor:auto]">
+      <ActionListButton
+        label={item.title}
+        trailing={failed || item.group.inProgress ? undefined : "Spawn"}
+        icon={icon}
+        running={item.group.inProgress}
+        failed={failed}
+        active={active}
+        onClick={(event) => onSelect(item.id, event)}
+      />
+    </div>
+  );
+}
+
+export function ActionWorksetRow({
+  item,
+  active,
+  onSelect,
+}: {
+  item: Extract<ActionItem, { kind: "workset" }>;
+  active: boolean;
+  onSelect: (id: string, event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <div data-action-anchor={item.id} className="[overflow-anchor:auto]">
+      <ActionListButton
+        label={item.title}
+        trailing={item.pending ? undefined : "Workset"}
+        icon={IconName.Checklist}
+        running={item.pending}
+        active={active}
+        onClick={(event) => onSelect(item.id, event)}
+      />
+    </div>
   );
 }
 
@@ -227,48 +334,62 @@ export function ActionThreadRow({
   running?: boolean;
   cancelled?: boolean;
   errored?: boolean;
-  onSelect: (name: string, episodeKey: string) => void;
+  onSelect: (
+    name: string,
+    episodeKey: string,
+    event: MouseEvent<HTMLButtonElement>,
+  ) => void;
 }) {
   const failed = Boolean(cancelled || errored);
   return (
-    <ActionListButton
-      label={item.name}
-      trailing={`Thread, ${episodeCount}`}
-      icon={IconName.Chat}
-      running={running && !failed}
-      failed={failed}
-      pending={pending}
-      active={active}
-      disabled={pending}
-      title={pending ? "Waiting on source threads" : item.action || undefined}
-      onClick={() => onSelect(item.name, item.episodeKey)}
-    />
+    <div data-action-anchor={item.id} className="[overflow-anchor:auto]">
+      <ActionListButton
+        label={item.name}
+        trailing={`Thread, ${episodeCount}`}
+        icon={IconName.Chat}
+        running={running && !failed}
+        failed={failed}
+        pending={pending}
+        active={active}
+        disabled={pending}
+        title={pending ? "Waiting on source threads" : item.action || undefined}
+        onClick={(event) => onSelect(item.name, item.episodeKey, event)}
+      />
+    </div>
   );
 }
 
-function renderItem(
-  item: ActionItem,
-  args: {
-    selectedGroupId: string | null;
-    selectedThreadEpisode: string | null;
-    episodeCount: (name: string) => number;
-    threadFlags?: (name: string) => {
-      pending: boolean;
-      running: boolean;
-      cancelled: boolean;
-      errored: boolean;
-    };
-    onSelectGroup: (id: string) => void;
-    onSelectThread: (name: string, episodeKey: string) => void;
-  },
-) {
+interface ActionListHandlers {
+  selectedGroupId: string | null;
+  selectedThreadEpisode: string | null;
+  expandedGroupId: string | null;
+  episodeCount: (name: string) => number;
+  threadFlags?: (name: string) => {
+    pending: boolean;
+    running: boolean;
+    cancelled: boolean;
+    errored: boolean;
+  };
+  onSelectGroup: (id: string, event: MouseEvent<HTMLButtonElement>) => void;
+  onSelectSpawn: (id: string, event: MouseEvent<HTMLButtonElement>) => void;
+  onSelectThread: (
+    name: string,
+    episodeKey: string,
+    event: MouseEvent<HTMLButtonElement>,
+  ) => void;
+  onSelectSegment: (groupId: string, segmentKey: string) => void;
+}
+
+function renderItem(item: ActionItem, args: ActionListHandlers) {
   if (item.kind === "group") {
     return (
       <ActionGroupRow
         key={item.id}
         item={item}
         active={args.selectedGroupId === item.id}
+        expanded={args.expandedGroupId === item.id}
         onSelect={args.onSelectGroup}
+        onSelectSegment={args.onSelectSegment}
       />
     );
   }
@@ -278,7 +399,17 @@ function renderItem(
         key={item.id}
         item={item}
         active={args.selectedGroupId === item.id}
-        onSelect={args.onSelectGroup}
+        onSelect={args.onSelectSpawn}
+      />
+    );
+  }
+  if (item.kind === "workset") {
+    return (
+      <ActionWorksetRow
+        key={item.id}
+        item={item}
+        active={args.selectedGroupId === item.id}
+        onSelect={args.onSelectSpawn}
       />
     );
   }
@@ -326,13 +457,100 @@ export function ActionItemList({
   onSelectGroup: (id: string) => void;
   onSelectThread: (name: string, episodeKey: string) => void;
 }) {
-  const args = {
+  const expandedGroupId = useExpandedActionGroupId();
+  const prevSelected = useRef<string | null | undefined>(undefined);
+  const pendingAnchor = useRef<{
+    id: string;
+    top: number;
+    scroller: HTMLElement;
+  } | null>(null);
+
+  const rememberAnchor = (id: string, el: HTMLElement) => {
+    const scroller = nearestScrollParent(el);
+    if (!scroller) return;
+    pendingAnchor.current = {
+      id,
+      top: el.getBoundingClientRect().top,
+      scroller,
+    };
+  };
+
+  useEffect(() => {
+    if (selectedGroupId === prevSelected.current) return;
+    prevSelected.current = selectedGroupId;
+    const selected = items.find((item) => item.id === selectedGroupId);
+    if (
+      selected?.kind === "group" &&
+      actionListIsSegmentsGroup(selected.group)
+    ) {
+      expandActionGroup(selected.id);
+    } else {
+      collapseActionGroup();
+    }
+  }, [items, selectedGroupId]);
+
+  useLayoutEffect(() => {
+    const pending = pendingAnchor.current;
+    if (!pending) return;
+    pendingAnchor.current = null;
+    const el = pending.scroller.querySelector(
+      `[data-action-anchor="${CSS.escape(pending.id)}"]`,
+    );
+    if (!(el instanceof HTMLElement)) return;
+    pending.scroller.scrollTop += el.getBoundingClientRect().top - pending.top;
+  }, [expandedGroupId]);
+
+  const handleSelectGroup = (
+    id: string,
+    event: MouseEvent<HTMLButtonElement>,
+  ) => {
+    rememberAnchor(id, event.currentTarget);
+    const selected = items.find((item) => item.id === id);
+    if (
+      selected?.kind === "group" &&
+      actionListIsSegmentsGroup(selected.group)
+    ) {
+      toggleActionGroup(id);
+    } else {
+      collapseActionGroup();
+    }
+    onSelectGroup(id);
+  };
+
+  const handleSelectSpawn = (
+    id: string,
+    event: MouseEvent<HTMLButtonElement>,
+  ) => {
+    rememberAnchor(id, event.currentTarget);
+    collapseActionGroup();
+    onSelectGroup(id);
+  };
+
+  const handleSelectThread = (
+    name: string,
+    episodeKey: string,
+    event: MouseEvent<HTMLButtonElement>,
+  ) => {
+    rememberAnchor(episodeKey, event.currentTarget);
+    collapseActionGroup();
+    onSelectThread(name, episodeKey);
+  };
+
+  const handleSelectSegment = (groupId: string, segmentKey: string) => {
+    focusActionSegment(segmentKey);
+    onSelectGroup(groupId);
+  };
+
+  const args: ActionListHandlers = {
     selectedGroupId,
     selectedThreadEpisode,
+    expandedGroupId,
     episodeCount,
     threadFlags,
-    onSelectGroup,
-    onSelectThread,
+    onSelectGroup: handleSelectGroup,
+    onSelectSpawn: handleSelectSpawn,
+    onSelectThread: handleSelectThread,
+    onSelectSegment: handleSelectSegment,
   };
   const nodes: ReactNode[] = [];
   let nested: ActionItem[] = [];

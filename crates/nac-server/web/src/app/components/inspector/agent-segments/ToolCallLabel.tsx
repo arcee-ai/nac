@@ -9,19 +9,21 @@ export function ToolCallLabel({
   config,
   state = ToolCallLabelState.Default,
   durationMs,
+  activeText,
   className,
 }: {
   config: SegmentDisplayConfig;
   state?: ToolCallLabelState;
   durationMs?: number | null;
+  activeText?: string;
   className?: string;
 }) {
   const isActive = state === ToolCallLabelState.Active;
   if (isActive) {
     return (
       <div className={cn("flex items-center gap-2 min-w-0", className)}>
-        <span className="truncate min-w-0 text-shimmer-accent label-small">
-          {config.inProgressLabel}
+        <span className="truncate min-w-0 text-shimmer-basic label-micro">
+          {activeText || config.inProgressLabel}
         </span>
       </div>
     );
@@ -29,7 +31,7 @@ export function ToolCallLabel({
   const duration = formatSeconds(durationMs);
   return (
     <div className={cn("flex items-center gap-2", className)}>
-      <span className="text-accent-primary shrink-0 whitespace-nowrap label-small">
+      <span className="text-basic-primary shrink-0 whitespace-nowrap label-micro">
         {config.regularLabel}
         {duration ? `, ${duration}` : ""}
       </span>

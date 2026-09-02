@@ -20,7 +20,7 @@ import { NewSessionMenu } from "@/app/components/projects/NewSessionPopover";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
-import { isActiveRun, NEW_CHAT_TITLE } from "@/app/lib/format";
+import { isActiveRun, NEW_AGENT_TITLE } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
 import {
   sessionAvatarTooltipDescription,
@@ -103,7 +103,11 @@ export function ProjectSessionTabs({
     {
       keys: NEW_CHAT_KEYS,
       enabled: Boolean(projectId),
-      onTrigger: () => setNewSessionOpen((value) => !value),
+      onTrigger: () => {
+        if (!projectId) return;
+        setNewSessionOpen(false);
+        void projectActions.newChat(projectId);
+      },
     },
   ]);
 
@@ -236,7 +240,7 @@ export function ProjectSessionTabs({
       <div className="flex items-start gap-2 flex-1 min-w-0 overflow-x-auto overflow-y-clip scrollbar-none [&>*]:shrink-0">
         {empty ? (
           <ChatSessionTab
-            title={NEW_CHAT_TITLE}
+            title={NEW_AGENT_TITLE}
             active
             onClick={() => setNewSessionOpen(true)}
           />
@@ -365,7 +369,7 @@ export function ProjectSessionTabs({
           </Button>
         </Popover>
         <Tooltip
-          title="New Session"
+          title="New Agent"
           keyboardShortcuts={NEW_CHAT_KEYS}
           position={Tooltip.Position.BottomLeft}
         >

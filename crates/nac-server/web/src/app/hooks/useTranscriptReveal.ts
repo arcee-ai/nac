@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useIsFetching } from "@tanstack/react-query";
 
 import { useMarkdownReady } from "@/app/hooks/useMarkdownReady";
@@ -15,8 +15,8 @@ const REVEAL_DEADLINE_MS = 1500;
  * Whether the transcript is ready to be shown, as opposed to still being
  * assembled behind a loader.
  *
- * A conversation arrives in pieces — the snapshot, the chunk that turns its text
- * into prose, then a read per turn for the files that turn's run wrote — and
+ * A conversation arrives in pieces: the snapshot, the chunk that turns its text
+ * into prose, then a read per turn for the files that turn's run wrote, and
  * every piece lands in its own paint. Revealing on the first of them shows the
  * messages as raw source, without their snapshots, and then rewrites them in
  * place; this holds the whole thing back until there is nothing left to add.
@@ -25,9 +25,9 @@ const REVEAL_DEADLINE_MS = 1500;
  * transcript that is already on screen, and hiding it again for that would be a
  * flicker rather than a load.
  *
- * None of it applies to a conversation that is already in hand. Switching
- * between chats a few times would otherwise mean waiting behind the same rows
- * over and over for a transcript the cache could have drawn at once.
+ * A conversation already in the cache is shown in the same render as the tab
+ * switch. Waiting a frame (or a microtask) would fade the transcript out and
+ * flash the loader even though there is nothing to assemble.
  */
 export function useTranscriptReveal(
   sessionId: string,
@@ -39,33 +39,22 @@ export function useTranscriptReveal(
   // changes included, so this covers the reads that only start once the
   // messages are in the tree without having to name them one by one.
   const fetching = useIsFetching({ queryKey: queryKeys.sessionRoot(sessionId) });
-  // Held as the session it belongs to, so switching sessions closes the gate in
-  // the same render as the switch rather than a paint later.
-  const [shown, setShown] = useState<string | null>(null);
-  const opened = useRef<string | null>(null);
-  const cached = useRef(false);
+  const [shown, setShown] = useState<string | null>(() =>
+    hasContent ? sessionId : null,
+  );
+  const [openId, setOpenId] = useState(sessionId);
+
+  // Adjust during render so a cached return never commits a hidden frame.
+  // React discards that render and retries with the new state.
+  if (openId !== sessionId) {
+    setOpenId(sessionId);
+    setShown(hasContent ? sessionId : null);
+  }
+
   const revealed = shown === sessionId;
 
   useEffect(() => {
-    // Whether the chat was already in hand the moment it was opened, which is
-    // what tells apart a load from a return to somewhere the user has been.
-    if (opened.current !== sessionId) {
-      opened.current = sessionId;
-      cached.current = hasContent;
-    }
     if (revealed || !hasContent || !markdownReady) return undefined;
-    // A cached chat waits for nothing — what is being refetched around it only
-    // updates a conversation that is already drawn — and least of all for a
-    // frame it would spend blank.
-    if (cached.current) {
-      let cancelled = false;
-      queueMicrotask(() => {
-        if (!cancelled) setShown(sessionId);
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
     if (fetching > 0) return undefined;
     // Two frames: the first paints the prose and the rows whose reads have just
     // landed, the second hands over a transcript that is already complete.

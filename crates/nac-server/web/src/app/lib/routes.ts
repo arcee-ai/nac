@@ -6,9 +6,9 @@
 // Order is also the tab order in the side box.
 export const SESSION_PANELS = [
   "threads",
-  "thoughts",
-  "delegated",
+  "actions",
   "files",
+  "delegated",
   "worksets",
   "history",
 ] as const;
@@ -19,12 +19,17 @@ export type SessionPanel = (typeof SESSION_PANELS)[number];
 // name so links that are already out there still land on it.
 export const SESSION_PANEL_LABEL = {
   threads: "Actions",
-  thoughts: "Actions",
+  actions: "Actions",
   delegated: "Delegated work",
   files: "Files",
   worksets: "Worksets",
   history: "History",
 } satisfies Record<SessionPanel, string>;
+
+/** Bookmarks that still use the Agent Actions path from before `/actions`. */
+const SESSION_PANEL_ALIASES: Record<string, SessionPanel> = {
+  thoughts: "actions",
+};
 
 /**
  * Panels the wide side box tabs between. A wide box carries the revisions in
@@ -38,6 +43,11 @@ export function isSessionPanel(value: string | undefined): value is SessionPanel
   // SAFETY: the cast only widens the readonly tuple to a mutable array for
   // `includes`; no element is ever written through it.
   return (SESSION_PANELS as readonly string[]).includes(value ?? "");
+}
+
+export function sessionPanelFromPath(value: string | undefined): SessionPanel {
+  if (value && value in SESSION_PANEL_ALIASES) return SESSION_PANEL_ALIASES[value];
+  return isSessionPanel(value) ? value : DEFAULT_SESSION_PANEL;
 }
 
 export const routes = {

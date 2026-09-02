@@ -9,7 +9,6 @@ import Icon, { IconName } from "../icon";
 import CircularLoader, {
   CircularLoaderVariant,
 } from "../loader/CircularLoader";
-import { LoaderSize } from "../loader";
 
 export enum ToolPillSize {
   Medium = "medium",
@@ -19,6 +18,7 @@ export enum ToolPillSize {
 export enum ToolPillState {
   Default = "default",
   Active = "active",
+  Error = "error",
 }
 
 const sizeContainerPx: Record<ToolPillSize, number> = {
@@ -31,9 +31,9 @@ const sizeIconPx: Record<ToolPillSize, number> = {
   [ToolPillSize.Small]: 16,
 };
 
-const sizeLoaderSize: Record<ToolPillSize, LoaderSize> = {
-  [ToolPillSize.Medium]: LoaderSize.Large,
-  [ToolPillSize.Small]: LoaderSize.Small,
+const sizeLoaderPx: Record<ToolPillSize, number> = {
+  [ToolPillSize.Medium]: PILL_SIZE_MEDIUM_PX,
+  [ToolPillSize.Small]: PILL_SIZE_SMALL_PX,
 };
 
 interface ToolPillProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -54,15 +54,15 @@ const pillContainerClasses = (
 ) =>
   cn(
     "relative inline-flex items-center justify-center rounded-full shrink-0 overflow-hidden",
-    size === ToolPillSize.Medium ? "border-2" : "border",
-    isActive ? "border-transparent" : "border-accent-primary",
+    size === ToolPillSize.Medium ? "border" : "border",
+    isActive ? "border-transparent" : "border-tertiary",
     className,
   );
 
 const PillGradient: React.FC = () => (
   <div
     aria-hidden
-    className="absolute inset-0 rounded-full bg-gradient-to-b from-[var(--brand-trans-500)] to-transparent [html.light_&]:bg-gradient-to-t"
+    className="absolute inset-0 rounded-full bg-gradient-to-b from-[var(--white-trans-200)] to-transparent [html.light_&]:bg-gradient-to-t"
   />
 );
 
@@ -74,6 +74,7 @@ const ToolPill: React.FC<ToolPillProps> = ({
   ...props
 }) => {
   const isActive = state === ToolPillState.Active;
+  const isError = state === ToolPillState.Error;
   return (
     <div
       className={pillContainerClasses(isActive, className, size)}
@@ -82,15 +83,19 @@ const ToolPill: React.FC<ToolPillProps> = ({
     >
       {!isActive && <PillGradient />}
       <Icon
-        iconName={icon}
+        iconName={isError ? IconName.Close : icon}
         size={sizeIconPx[size]}
-        color="var(--color-fill-accent-primary)"
-        className="relative"
+        className={cn(
+          "relative",
+          isError
+            ? "[&>path]:!fill-error-primary"
+            : "[&>path]:!fill-basic-primary",
+        )}
       />
       {isActive ? (
         <CircularLoader
-          size={sizeLoaderSize[size]}
-          variant={CircularLoaderVariant.Brand}
+          size={sizeLoaderPx[size]}
+          variant={CircularLoaderVariant.Neutral}
           className="absolute inset-0 m-auto"
         />
       ) : null}
@@ -112,8 +117,8 @@ const ToolPillOverflow: React.FC<ToolPillOverflowProps> = ({
     <PillGradient />
     <span
       className={cn(
-        "relative text-btn-accent tracking-tight",
-        count >= 10 ? "label-micro" : "label-small",
+        "relative text-basic-primary tracking-tight",
+        count >= 10 ? "text-micro text-[10px] leading-[12px]" : "text-micro",
       )}
     >
       +{count}
