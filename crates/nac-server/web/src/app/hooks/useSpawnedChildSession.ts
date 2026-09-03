@@ -84,31 +84,42 @@ export function useSpawnedChildSession(
     }
   }, [cancelSpawn, childId, parentSessionId, toast]);
 
+  const send = useCallback(
+    async (prompt: string) => {
+      if (!childId) return false;
+      const text = prompt.trim();
+      if (!text) return false;
+      try {
+        await startSpawn.mutateAsync({
+          sessionId: parentSessionId,
+          payload: {
+            behavior: assignment?.child_behavior ?? "direct",
+            child_session_id: childId,
+            description: assignment?.description || group?.label || "Spawned session",
+            prompt: text,
+            background: true,
+          },
+        });
+        return true;
+      } catch (error) {
+        toast.error(`Unable to send to spawned session: ${errorMessage(toRunError(error))}`);
+        return false;
+      }
+    },
+    [
+      assignment?.child_behavior,
+      assignment?.description,
+      childId,
+      group?.label,
+      parentSessionId,
+      startSpawn,
+      toast,
+    ],
+  );
+
   const play = useCallback(async () => {
-    if (!childId) return;
-    try {
-      await startSpawn.mutateAsync({
-        sessionId: parentSessionId,
-        payload: {
-          behavior: assignment?.child_behavior ?? "direct",
-          child_session_id: childId,
-          description: assignment?.description || group?.label || "Spawned session",
-          prompt: "Continue.",
-          background: true,
-        },
-      });
-    } catch (error) {
-      toast.error(`Unable to continue delegated work: ${errorMessage(toRunError(error))}`);
-    }
-  }, [
-    assignment?.child_behavior,
-    assignment?.description,
-    childId,
-    group?.label,
-    parentSessionId,
-    startSpawn,
-    toast,
-  ]);
+    await send("Continue.");
+  }, [send]);
 
   const open = useCallback(() => {
     if (!childId) return;
@@ -128,6 +139,7 @@ export function useSpawnedChildSession(
     busy,
     pause,
     play,
+    send,
     stop,
     open,
   };
