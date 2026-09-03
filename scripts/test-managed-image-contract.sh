@@ -40,6 +40,8 @@ require_literal "$entrypoint" '--managed-config "$managed_config"'
 require_literal "$entrypoint" 'without requiring the bootstrap mount'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_credential_source = \"managed-bootstrap\"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" '/run/secrets/nac/bootstrap.json'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assert_bootstrap_required'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'kill --signal KILL'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'start_container without-bootstrap'
 require_literal "$repo_root/docker/managed/fixtures/bootstrap.json" '"client_id": "managed-nac"'
 if grep -Eq '(^|[[:space:]])(sudo|su)([[:space:]]|$)' "$dockerfile" "$entrypoint"; then
