@@ -20,6 +20,7 @@ import {
   buildActionTimeline,
   flattenActionItems,
   liveTurnOriginKey,
+  remapStreamedGroupId,
 } from "@/app/lib/actionsTimeline";
 import type { AgentToolsGroup } from "@/app/lib/agentSegments";
 import { groupIsSpawn } from "@/app/lib/spawnSession";
@@ -33,6 +34,7 @@ import {
   useFinishedToolCalls,
   useLiveThreads,
   usePrimaryToolEvents,
+  useRunning,
   useStreamReasoning,
   useStreamText,
 } from "@/app/store/runtimeStore";
@@ -43,12 +45,13 @@ function selectedGroup(
   selected: string | null,
   newest: ActionItem | undefined,
 ): AgentToolsGroup | null {
+  const target = remapStreamedGroupId(items, selected) ?? selected;
   const match = newest
     ? newest
     : (items.find(
         (item) =>
           (item.kind === "group" || item.kind === "spawn") &&
-          item.id === selected,
+          item.id === target,
       ) ??
       items.find((item) => item.kind === "group" || item.kind === "spawn"));
   if (!match || match.kind === "thread" || match.kind === "workset")
@@ -73,6 +76,7 @@ export function ThoughtsToolsView({
   const sessionId = snapshot?.metadata.session_id ?? "";
   const runId = snapshot?.active_run?.run_id ?? null;
   const following = useLiveActionFollow(runId);
+  const running = useRunning(sessionId);
 
   const sections = useMemo(() => {
     const turns = withStreamedOutput(
@@ -84,10 +88,10 @@ export function ThoughtsToolsView({
       ),
       { text: streamText, reasoning: streamReasoning },
     );
-    const live =
-      Boolean(snapshot?.active_run) ||
-      Boolean(streamText) ||
-      Boolean(streamReasoning);
+    // Taken from the run rather than from the buffers: they outlive the run so
+    // the rows they feed survive until the snapshot lands, and reading them
+    // here would keep marking the trailing group as still working.
+    const live = Boolean(snapshot?.active_run) || running;
     return buildActionTimeline(turns, liveTurnOriginKey(turns, live));
   }, [
     snapshot,
@@ -96,6 +100,7 @@ export function ThoughtsToolsView({
     primaryToolEvents,
     streamText,
     streamReasoning,
+    running,
   ]);
 
   const items = useMemo(() => flattenActionItems(sections), [sections]);

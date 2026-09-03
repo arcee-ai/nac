@@ -442,14 +442,17 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
       return "snapshot";
     case "run_completed":
       // The run's own answer is the authoritative version of whatever the
-      // stream last held, so it takes over until the snapshot lands. The run
-      // outlives every worker it dispatched, so a thread still marked running
-      // here only means its own finish event never arrived.
+      // stream last held, so it takes over until the snapshot lands. This event
+      // carries no such copy of the reasoning, and the reasoning is the only
+      // thing holding a thoughts group on the Actions list until the committed
+      // message arrives, so the buffer stays: dropping it here empties the turn
+      // of groups and unmounts the row the reader is on. The run outlives every
+      // worker it dispatched, so a thread still marked running here only means
+      // its own finish event never arrived.
       setState((state) => ({
         running: false,
         activity: "",
         streamText: event.response,
-        streamReasoning: "",
         streamSettled: true,
         cancelArmed: false,
         lastElapsedMs: freezeElapsed(state, event.duration_ms ?? null),

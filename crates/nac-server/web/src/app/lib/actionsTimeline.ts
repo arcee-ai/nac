@@ -3,7 +3,14 @@ import {
   turnOriginKey,
   type AgentToolsGroup,
 } from "@/app/lib/agentSegments";
-import type { ThreadState, TranscriptBlock, TranscriptThread, TranscriptTurn, UserTurn } from "@/app/lib/transcript";
+import {
+  STREAMING_TURN_KEY,
+  type ThreadState,
+  type TranscriptBlock,
+  type TranscriptThread,
+  type TranscriptTurn,
+  type UserTurn,
+} from "@/app/lib/transcript";
 
 export type ActionFilter = "all" | "threads" | "tools" | "sessions" | "worksets";
 
@@ -201,6 +208,28 @@ export function liveTurnOriginKey(
     if (turn?.kind === "model") return turnOriginKey(turn);
   }
   return null;
+}
+
+/**
+ * Re-address a row that was selected while its turn was still only a stream.
+ * Such a turn is keyed by `STREAMING_TURN_KEY`, and committing its message
+ * renames the same group after the message index, so the stored id stops
+ * matching anything. Without this the panel falls back to the first row it can
+ * find — an older turn — and silently leaves the run the reader was watching.
+ */
+export function remapStreamedGroupId(
+  items: readonly ActionItem[],
+  selected: string | null,
+): string | null {
+  if (!selected?.startsWith(`${STREAMING_TURN_KEY}:`)) return null;
+  const suffix = selected.slice(STREAMING_TURN_KEY.length);
+  const committed = items.find(
+    (item) =>
+      (item.kind === "group" || item.kind === "spawn") &&
+      item.id !== selected &&
+      item.id.endsWith(suffix),
+  );
+  return committed?.id ?? null;
 }
 
 export function actionItemMatches(
