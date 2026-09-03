@@ -23,12 +23,6 @@ on:
       - Cargo.lock
       - crates/**
   workflow_dispatch:
-    inputs:
-      ref:
-        description: Git ref to build and publish
-        required: true
-        default: main
-        type: string
 
 permissions:
   contents: read
@@ -46,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 1
       - id: candidate
         name: Resolve immutable candidate
@@ -116,75 +110,3 @@ jobs:
           MANAGED_IMAGE: nac-managed-smoke:${{ needs.prepare.outputs.short_sha }}
           MANAGED_IMAGE_SKIP_BUILD: "1"
         run: sh scripts/smoke-managed-image.sh
-
-  publish:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs: [prepare, contract, quality, build-smoke]
-    runs-on: ubuntu-latest
-    environment: dev
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-      - name: Validate dev publication inputs
-        shell: bash
-        env:
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          OIDC_ROLE_TO_ASSUME: ${{ secrets.OIDC_ROLE_TO_ASSUME }}
-          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          ECR_CACHE_REPOSITORY: ${{ vars.ECR_CACHE_REPOSITORY }}
-        run: |
-          for name in AWS_REGION OIDC_ROLE_TO_ASSUME ECR_REPOSITORY ECR_CACHE_REPOSITORY; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Managed NAC dev environment is missing $name"
-              exit 1
-            fi
-          done
-      - name: Configure AWS credentials through OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: ${{ vars.AWS_REGION }}
-          role-to-assume: ${{ secrets.OIDC_ROLE_TO_ASSUME }}
-      - id: ecr
-        name: Sign in to ECR
-        uses: aws-actions/amazon-ecr-login@v2
-      - uses: docker/setup-buildx-action@v3
-      - id: metadata
-        name: Compose immutable image reference
-        shell: bash
-        env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          tag="$REGISTRY/$REPOSITORY:sha-$CANDIDATE_SHA-run-$RUN_ID-attempt-$RUN_ATTEMPT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      - id: publish
-        name: Publish exact linux/amd64 image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/managed/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.metadata.outputs.tag }}
-          cache-from: type=registry,ref=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_CACHE_REPOSITORY }}:buildcache
-          cache-to: type=registry,ref=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_CACHE_REPOSITORY }}:buildcache,mode=max
-          provenance: mode=max
-          sbom: true
-      - name: Record immutable publication
-        env:
-          IMAGE: ${{ steps.metadata.outputs.tag }}
-          DIGEST: ${{ steps.publish.outputs.digest }}
-        run: |
-          {
-            echo "### Managed NAC image"
-            echo
-            echo "- Image: \`$IMAGE\`"
-            echo "- Digest: \`$DIGEST\`"
-          } >> "$GITHUB_STEP_SUMMARY"

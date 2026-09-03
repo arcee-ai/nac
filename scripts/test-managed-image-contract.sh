@@ -49,14 +49,12 @@ if grep -Eq '(^|[[:space:]])(sudo|su)([[:space:]]|$)' "$dockerfile" "$entrypoint
 fi
 
 require_literal "$workflow" 'platforms: linux/amd64'
-require_literal "$workflow" 'provenance: mode=max'
-require_literal "$workflow" 'sbom: true'
-require_literal "$workflow" 'environment: dev'
-require_literal "$workflow" 'OIDC_ROLE_TO_ASSUME'
-require_literal "$workflow" 'ECR_CACHE_REPOSITORY'
+require_literal "$workflow" 'push: false'
+require_literal "$workflow" 'provenance: false'
+require_literal "$workflow" 'sbom: false'
 require_literal "$workflow" 'run: make ci'
-if grep -Eq '^[[:space:]]*tags:.*(:latest|:dev)([,[:space:]]|$)' "$workflow"; then
-    fail 'publication workflow contains a mutable latest/dev image tag'
+if grep -Eq '(id-token:[[:space:]]*write|aws-actions/|amazon-ecr|ECR_|push:[[:space:]]*true|environment:[[:space:]]*dev)' "$workflow"; then
+    fail 'public repository workflow must remain build-and-smoke only'
 fi
 
 printf '%s\n' 'managed image contract: ok'
