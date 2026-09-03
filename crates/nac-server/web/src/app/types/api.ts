@@ -194,6 +194,7 @@ export type InboxDelivery = ApiSchema<"InboxDelivery">;
 export type InboxStatus = ApiSchema<"InboxStatus">;
 
 export type InboxItem = ApiSchema<"InboxItemResponse">;
+export type ReorderInboxItemsRequest = ApiSchema<"ReorderInboxItemsRequest">;
 
 export type TraditionalChildStatus = ApiSchema<"TraditionalChildStatus">;
 

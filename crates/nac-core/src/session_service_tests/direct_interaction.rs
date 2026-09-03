@@ -826,6 +826,7 @@ async fn direct_inbox_pending_items_are_versioned_editable_and_cancellable() {
             queued.id,
             queued.version,
             crate::store::InboxDelivery::Steer,
+            None,
         )
         .await
         .unwrap();
@@ -849,70 +850,52 @@ async fn direct_inbox_pending_items_are_versioned_editable_and_cancellable() {
 }
 
 #[tokio::test]
-async fn direct_inbox_steer_is_consumed_at_the_next_model_boundary() {
+async fn direct_inbox_steer_interrupts_the_active_run_and_starts_a_successor() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
-    let (request_started_tx, request_started_rx) = std::sync::mpsc::channel();
-    let (release_tx, release_rx) = std::sync::mpsc::channel();
-    let server = ScriptedServer::start_observed(
-            vec![
-                ScriptedResponse::json(
-                    "200 OK",
-                    serde_json::json!({
-                        "status": "completed",
-                        "output": [{
-                            "type": "function_call",
-                            "call_id": "call-1",
-                            "name": "unknown_alpha",
-                            "arguments": "{}"
-                        }],
-                        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
-                    })
-                    .to_string(),
-                ),
-                ScriptedResponse::json(
-                    "200 OK",
-                    serde_json::json!({
-                        "status": "completed",
-                        "output": [{"type": "message", "content": [{"type": "output_text", "text": "steered done"}]}],
-                        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
-                    })
-                    .to_string(),
-                ),
-            ],
-            move |index, _request| {
-                if index == 0 {
-                    request_started_tx.send(()).unwrap();
-                    release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-                }
-            },
-        );
+    let completed = serde_json::json!({
+        "status": "completed",
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": "done"}]}],
+        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+    })
+    .to_string();
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json("200 OK", completed.clone()),
+        ScriptedResponse::json("200 OK", completed),
+    ]);
     let client = ModelClient::new_for_test_server(server.base_url.clone());
     let session_id = "session-direct-steer";
     let (parts, store_path) =
-        test_direct_active_service("direct_steer_boundary", session_id, client);
+        test_direct_active_service("direct_steer_interrupt", session_id, client);
     let service = parts.service;
-    service
-        .enqueue_direct_input(crate::store::InboxDelivery::Queue, "initial prompt", None)
+    let active = service.try_begin_run(None, "initial prompt").unwrap();
+    service.set_run_task(&active.run_id, tokio::spawn(async {}));
+    let older = service
+        .enqueue_direct_input(crate::store::InboxDelivery::Queue, "older queued", None)
         .await
         .unwrap();
-    tokio::task::spawn_blocking(move || {
-        request_started_rx
-            .recv_timeout(Duration::from_secs(5))
-            .unwrap()
-    })
-    .await
-    .unwrap();
-    let steer = service
+    let chosen = service
         .enqueue_direct_input(
-            crate::store::InboxDelivery::Steer,
+            crate::store::InboxDelivery::Queue,
             "change course at the boundary",
             None,
         )
         .await
         .unwrap();
-    assert!(steer.target_run_id.is_some());
-    release_tx.send(()).unwrap();
+    let steered = service
+        .update_direct_inbox_item(
+            chosen.id,
+            chosen.version,
+            crate::store::InboxDelivery::Steer,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(steered.delivery, crate::store::InboxDelivery::Steer);
+    assert_ne!(
+        steered.delivered_run_id.as_deref(),
+        Some(active.run_id.as_str())
+    );
 
     tokio::time::timeout(Duration::from_secs(5), async {
         while service.has_active_operation()
@@ -926,17 +909,22 @@ async fn direct_inbox_steer_is_consumed_at_the_next_model_boundary() {
         }
     })
     .await
-    .expect("steered run should finish");
+    .expect("successor runs should finish");
     let requests = server.finish();
     assert_eq!(requests.len(), 2);
     let first_body = String::from_utf8_lossy(&requests[0].body);
     let second_body = String::from_utf8_lossy(&requests[1].body);
-    assert!(!first_body.contains("change course at the boundary"));
-    assert!(second_body.contains("change course at the boundary"));
+    assert!(first_body.contains("change course at the boundary"));
+    assert!(!first_body.contains("older queued"));
+    assert!(second_body.contains("older queued"));
 
     let inbox = service.list_direct_inbox().unwrap();
     assert_eq!(inbox.len(), 2);
-    assert_eq!(inbox[0].delivered_run_id, inbox[1].delivered_run_id);
+    assert_eq!(inbox[0].id, chosen.id);
+    assert_eq!(inbox[0].status, crate::store::InboxStatus::Delivered);
+    assert_eq!(inbox[1].id, older.id);
+    assert_eq!(inbox[1].status, crate::store::InboxStatus::Delivered);
+    assert_ne!(inbox[0].delivered_run_id, inbox[1].delivered_run_id);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 

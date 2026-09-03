@@ -4678,6 +4678,89 @@
         }
       }
     },
+    "/sessions/{session_id}/inbox/order": {
+      "put": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "put_sessions_session_id_inbox_order",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderInboxItemsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InboxItemResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/inbox/{item_id}": {
       "delete": {
         "tags": [
@@ -11328,6 +11411,21 @@
           }
         }
       },
+      "ReorderInboxItemsRequest": {
+        "type": "object",
+        "required": [
+          "item_ids"
+        ],
+        "properties": {
+          "item_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        }
+      },
       "ReorderProjectsRequest": {
         "type": "object",
         "required": [
@@ -14177,6 +14275,12 @@
           "expected_version": {
             "type": "integer",
             "format": "int64"
+          },
+          "prompt": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

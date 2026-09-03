@@ -22,11 +22,11 @@ pub use delivery::contracts::{
     ManagedSessionSummary, MessageCycleMetadata, MessagePageMetadata, MessagesPageResponse,
     MessagesQuery, OrchestratorSteeringRequest, OrchestratorSteeringResponse,
     PermissionStateResponse, ProviderModelList, ProviderModelsRequest, RecentEventsResponse,
-    ReplayBoundaryEvent, ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest,
-    SessionLineageKind, SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse,
-    SshBrowseRequest, StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
-    ThreadSteeringRequest, ThreadSteeringResponse, UpdateConfigRequest, UpdateGoalRequest,
-    UpdateInboxItemRequest,
+    ReorderInboxItemsRequest, ReplayBoundaryEvent, ReplayGapEvent, ReplyPermissionRequest,
+    RequestField, SandboxRequest, SessionLineageKind, SessionLineageSnapshot, SessionSnapshotQuery,
+    SessionSnapshotResponse, SshBrowseRequest, StoreInfo, SubmitPromptRequest,
+    SubmitPromptResponse, ThreadEventsQuery, ThreadSteeringRequest, ThreadSteeringResponse,
+    UpdateConfigRequest, UpdateGoalRequest, UpdateInboxItemRequest,
 };
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
@@ -1042,8 +1042,19 @@ impl SessionManager {
                 application::sessions::UpdateInboxItem {
                     expected_version: request.expected_version,
                     delivery: request.delivery,
+                    prompt: request.prompt,
                 },
             )
+            .await
+    }
+
+    pub async fn reorder_direct_inbox_items(
+        &self,
+        session_id: &str,
+        request: ReorderInboxItemsRequest,
+    ) -> Result<Vec<SessionInboxRecord>> {
+        self.session_intents()
+            .reorder_inbox_items(session_id, &request.item_ids)
             .await
     }
 

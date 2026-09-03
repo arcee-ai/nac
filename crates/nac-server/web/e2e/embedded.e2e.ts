@@ -396,20 +396,23 @@ test("steers an active direct run from the ordinary composer", async ({
   await page.getByRole("button", { name: "Send" }).click();
   await boundary.accepted;
   await composer.fill("change course safely");
-  await page.getByRole("button", { name: "Steer active run" }).click();
-  await expect(page.getByLabel("Pending messages")).toContainText(
+  await page.getByRole("button", { name: "Queue message" }).click();
+  await expect(page.getByLabel("Queued (1)")).toContainText(
     "change course safely",
   );
+  await page.getByRole("button", { name: "Steer now" }).click();
+  await expect(page.getByLabel("Queued (1)")).toHaveCount(0);
 
-  const pending = await request.get(
+  const inbox = await request.get(
     `${harness.baseUrl}/sessions/${sessionId}/inbox`,
   );
-  expect(pending.ok()).toBe(true);
-  expect(await pending.json()).toEqual(
+  expect(inbox.ok()).toBe(true);
+  expect(await inbox.json()).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
         delivery: "steer",
         prompt: "change course safely",
+        status: "delivered",
       }),
     ]),
   );
@@ -446,14 +449,12 @@ test("queues, edits, cancels pending input, and stops an active direct run", asy
   await boundary.accepted;
 
   await composer.fill("queued follow-up");
-  await page.getByRole("button", { name: "Queue Next" }).click();
-  const pending = page.getByLabel("Pending messages");
-  await expect(pending).toContainText("queue");
+  await page.getByRole("button", { name: "Queue message" }).click();
+  const pending = page.getByLabel("Queued (1)");
   await expect(pending).toContainText("queued follow-up");
-  await pending.getByRole("button", { name: "Change to steer" }).click();
-  await expect(pending).toContainText("steer");
-  await pending.getByRole("button", { name: "Cancel" }).click();
-  await expect(page.getByLabel("Pending messages")).toHaveCount(0);
+  await pending.hover();
+  await pending.getByRole("button", { name: "Remove from queue" }).click();
+  await expect(page.getByLabel("Queued (1)")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Stop run" }).click();
   await waitForRunIdle(request, harness, sessionId);
@@ -463,7 +464,7 @@ test("queues, edits, cancels pending input, and stops an active direct run", asy
   expect(inbox.ok()).toBe(true);
   expect(await inbox.json()).toEqual([
     expect.objectContaining({
-      delivery: "steer",
+      delivery: "queue",
       prompt: "queued follow-up",
       status: "cancelled",
     }),

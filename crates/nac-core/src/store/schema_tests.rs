@@ -216,6 +216,7 @@ fn assert_current_schema(conn: &Connection) {
             "delivered_at",
             "cancelled_at",
             "version",
+            "queue_order",
         ]
     );
     assert_eq!(
@@ -498,6 +499,7 @@ fn v17_store_adds_the_durable_session_inbox() {
             "delivered_at",
             "cancelled_at",
             "version",
+            "queue_order",
         ]
     );
     assert_eq!(

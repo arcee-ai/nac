@@ -31,6 +31,7 @@ import {
 } from "@/app/components/inspector/PermissionControls";
 import { ChildControls } from "@/app/components/inspector/ChildControls";
 import { GoalControls } from "@/app/components/inspector/GoalControls";
+import { QueuedMessages } from "@/app/components/inspector/QueuedMessages";
 import { SshBadge } from "@/app/components/SshBadge";
 import {
   resolveCatalogModel,
@@ -74,6 +75,7 @@ import {
   useSessionInbox,
   useSshConnect,
   useSessionSkills,
+  useReorderInboxItems,
   useSubmitRun,
   useSlashCommands,
   useUpdateGoal,
@@ -100,6 +102,7 @@ import type {
   SkillCatalogEntry,
   SlashCommandDefinition,
   InboxDelivery,
+  InboxItem,
   ManagedSessionSummary,
   SessionSnapshotResponse,
 } from "@/app/types/api";
@@ -325,6 +328,7 @@ export function ChatInputBox({
   const createInboxItem = useCreateInboxItem();
   const updateInboxItem = useUpdateInboxItem();
   const cancelInboxItem = useCancelInboxItem();
+  const reorderInboxItems = useReorderInboxItems();
   const behavior =
     entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
   const direct =
@@ -405,6 +409,7 @@ export function ChatInputBox({
     createInboxItem.isPending ||
     updateInboxItem.isPending ||
     cancelInboxItem.isPending ||
+    reorderInboxItems.isPending ||
     createGoal.isPending ||
     updateGoal.isPending ||
     clearGoal.isPending;
@@ -440,6 +445,31 @@ export function ChatInputBox({
     } catch (error) {
       toast.error(
         `Unable to cancel pending message: ${errorMessage(toRunError(error))}`,
+      );
+    }
+  };
+  const saveInboxPrompt = async (item: InboxItem, prompt: string) => {
+    try {
+      await updateInboxItem.mutateAsync({
+        sessionId,
+        itemId: item.id,
+        expectedVersion: item.version,
+        delivery: item.delivery,
+        prompt,
+      });
+    } catch (error) {
+      toast.error(
+        `Unable to edit queued message: ${errorMessage(toRunError(error))}`,
+      );
+      throw error;
+    }
+  };
+  const reorderPendingInbox = async (itemIds: number[]) => {
+    try {
+      await reorderInboxItems.mutateAsync({ sessionId, itemIds });
+    } catch (error) {
+      toast.error(
+        `Unable to reorder queued messages: ${errorMessage(toRunError(error))}`,
       );
     }
   };
@@ -822,7 +852,7 @@ export function ChatInputBox({
         }
         try {
           if (runningDirect || requestedDelivery) {
-            const delivery = requestedDelivery ?? "steer";
+            const delivery = requestedDelivery ?? "queue";
             await createInboxItem.mutateAsync({ sessionId, delivery, prompt });
             pushLocalEvent("steering", `▶ ${delivery}: ${prompt.slice(0, 80)}`);
           } else {
@@ -901,9 +931,9 @@ export function ChatInputBox({
     <PermissionSettingsOpener sessionId={sessionId} behavior={behavior} />
   );
 
-  // Orchestrator Send is Stop for the whole run. Agent Send stays Steer
-  // while the field has text; an empty field reuses the same control as
-  // Stop so the toolbar does not grow a second cancel label.
+  // Orchestrator Send is Stop for the whole run. Agent Send enqueues while
+  // the field has text; an empty field reuses the same control as Stop so
+  // the toolbar does not grow a second cancel label.
   const sendStopsRun = running && (!runningDirect || !value.trim());
   const sendIcon = (
     <Icon
@@ -915,7 +945,7 @@ export function ChatInputBox({
     : sendStopsRun
       ? "Stop run"
       : runningDirect
-        ? "Steer active run"
+        ? "Queue message"
         : "Send";
   const sendType = sendStopsRun || stopping ? "button" : "submit";
   const sendDisabled = stopping || (!sendStopsRun && !canSend);
@@ -1286,25 +1316,40 @@ export function ChatInputBox({
   }
 
   return (
-    <form
-      className={cn(
-        "flex flex-col",
-        isMobile
-          ? "gap-3 px-4 pt-8 pb-8"
-          : isTablet
-            ? "gap-3 px-2 pt-2 pb-4 rounded-[12px] bg-elevation-level-1 shadow-2xl"
-            : "gap-4 p-4 rounded-[8px] bg-elevation-level-1 shadow-2xl",
-      )}
+    <div
+      className={cn("flex flex-col gap-1", isMobile && "px-4 pt-8 pb-8")}
       style={isMobile ? GROUND_FADE_UP : undefined}
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (selectedSuggestion) {
-          completeSuggestion(selectedSuggestion);
-          return;
-        }
-        void submit();
-      }}
     >
+      {pendingInbox.length ? (
+        <QueuedMessages
+          items={pendingInbox}
+          disabled={mutationPending}
+          onSteer={(item) =>
+            void changeInboxDelivery(item.id, item.version, "steer")
+          }
+          onDelete={(item) => void cancelPendingInbox(item.id, item.version)}
+          onSavePrompt={saveInboxPrompt}
+          onReorder={(itemIds) => void reorderPendingInbox(itemIds)}
+        />
+      ) : null}
+      <form
+        className={cn(
+          "flex flex-col",
+          isMobile
+            ? "gap-3"
+            : isTablet
+              ? "gap-3 px-2 pt-2 pb-4 rounded-[12px] bg-elevation-level-1 shadow-2xl"
+              : "gap-4 p-4 rounded-[8px] bg-elevation-level-1 shadow-2xl",
+        )}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (selectedSuggestion) {
+            completeSuggestion(selectedSuggestion);
+            return;
+          }
+          void submit();
+        }}
+      >
       {permissionOpener}
       {isMobile ? (
         <div className="flex items-end gap-2">
@@ -1314,51 +1359,6 @@ export function ChatInputBox({
       ) : (
         fieldWithSuggestions
       )}
-
-      {pendingInbox.length ? (
-        <div className="flex flex-col gap-2" aria-label="Pending messages">
-          <div className="tag-label uppercase text-basic-secondary">
-            Pending messages
-          </div>
-          {pendingInbox.map((item) => (
-            <div
-              key={item.id}
-              className="flex flex-wrap items-center gap-2 rounded-[4px] border border-border-primary px-3 py-2"
-            >
-              <span className="tag-label text-accent-primary">
-                {item.delivery}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-small text-basic-primary">
-                {item.prompt}
-              </span>
-              <Button
-                type="button"
-                size={ButtonSize.Small}
-                variant={ButtonVariant.Ghost}
-                disabled={mutationPending}
-                onClick={() =>
-                  void changeInboxDelivery(
-                    item.id,
-                    item.version,
-                    item.delivery === "steer" ? "queue" : "steer",
-                  )
-                }
-              >
-                Change to {item.delivery === "steer" ? "queue" : "steer"}
-              </Button>
-              <Button
-                type="button"
-                size={ButtonSize.Small}
-                variant={ButtonVariant.GhostDestructive}
-                disabled={mutationPending}
-                onClick={() => void cancelPendingInbox(item.id, item.version)}
-              >
-                Cancel
-              </Button>
-            </div>
-          ))}
-        </div>
-      ) : null}
 
       {/* The status line wraps rather than letting its `shrink-0` chips run
           into each other once the chat column is narrow. */}
@@ -1370,18 +1370,6 @@ export function ChatInputBox({
         )}
       >
         <div className="flex flex-1 min-w-0 flex-wrap items-center gap-y-1 gap-x-4">
-          {runningDirect ? (
-            <Button
-              type="button"
-              size={ButtonSize.Small}
-              variant={ButtonVariant.Secondary}
-              disabled={!canSend}
-              onClick={() => void submit(value, "queue")}
-            >
-              Queue Next
-            </Button>
-          ) : null}
-
           {/* A phone's settings glyph lives in the pill instead. */}
           {isMobile ? null : settingsButton}
 
@@ -1499,6 +1487,7 @@ export function ChatInputBox({
           </Tooltip>
         </div>
       </div>
-    </form>
+      </form>
+    </div>
   );
 }

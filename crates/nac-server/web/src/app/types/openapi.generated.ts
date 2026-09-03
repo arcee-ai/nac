@@ -627,6 +627,7 @@ export interface components {
       events: components["schemas"]["SessionEventEnvelope"][];
     };
     RegenerateSessionRequest: { message_idx: number };
+    ReorderInboxItemsRequest: { item_ids: number[] };
     ReorderProjectsRequest: {
       expected_versions: Record<string, number>;
       pinned: boolean;
@@ -1084,6 +1085,7 @@ export interface components {
     UpdateInboxItemRequest: {
       delivery: components["schemas"]["InboxDelivery"];
       expected_version: number;
+      prompt?: string | null;
     };
     UpdateMcpServerRequest: {
       args?: components["schemas"]["RequestField_Vec_Vec_String"];

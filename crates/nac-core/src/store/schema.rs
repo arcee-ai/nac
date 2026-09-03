@@ -488,6 +488,14 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
         "TEXT CHECK (terminal_disposition IN ('completed', 'cancelled'))",
     )?;
     create_session_inbox_table(&transaction)?;
+    // Pending drain order. Legacy rows keep 0, so ORDER BY queue_order, id
+    // stays insertion order until the user rearranges the live queue.
+    ensure_column(
+        &transaction,
+        "session_inbox",
+        "queue_order",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (queue_order >= 0)",
+    )?;
     create_permission_grants_table(&transaction)?;
     create_session_goals_table(&transaction)?;
     create_session_forks_table(&transaction)?;
@@ -1309,6 +1317,7 @@ fn create_session_inbox_table(conn: &Connection) -> Result<()> {
              delivered_at TEXT,
              cancelled_at TEXT,
              version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+             queue_order INTEGER NOT NULL DEFAULT 0 CHECK (queue_order >= 0),
              CHECK (delivery = 'steer' OR target_run_id IS NULL),
              CHECK (
                  (status = 'pending' AND delivered_run_id IS NULL AND delivered_at IS NULL AND cancelled_at IS NULL)
