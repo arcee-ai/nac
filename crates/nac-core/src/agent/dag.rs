@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use tokio::task::JoinSet;
 
@@ -30,7 +30,10 @@ pub(crate) struct DagExecContext {
 ///    `(original_index, tool_call_id, tool_name, args_str)`
 /// 3. `Vec<(usize, String, String, ToolResult)>` — parse errors for malformed
 ///    thread calls as `(original_index, tool_call_id, args_str, error_result)`
-#[allow(clippy::type_complexity)]
+#[expect(
+    clippy::type_complexity,
+    reason = "the tuple preserves the three semantic partitions without a public wrapper type"
+)]
 pub(crate) fn partition_tool_calls(
     tool_calls: Vec<ToolCall>,
     runtime: &ToolRuntime,
@@ -48,7 +51,7 @@ pub(crate) fn partition_tool_calls(
         let name = tool_call.function.name;
         let args_str = tool_call.function.arguments;
 
-        if name == "thread" {
+        if name == "thread" && runtime.allows_tool("thread") {
             let args: serde_json::Value = match serde_json::from_str(&args_str) {
                 Ok(value) => value,
                 Err(error) => {
@@ -58,8 +61,7 @@ pub(crate) fn partition_tool_calls(
                         args_str,
                         ToolResult {
                             content: (format!(
-                                "Error: failed to parse tool arguments for '{}': {}",
-                                name, error
+                                "Error: failed to parse tool arguments for '{name}': {error}"
                             ))
                             .into(),
                             is_error: true,
@@ -276,6 +278,10 @@ pub(crate) fn spawn_non_thread_into(
             key_arg_preview: None,
             args_detail: Some(tool_args_detail(&args_str)),
         });
+        let call_context = tools::kernel::ToolCallContext {
+            call_id: Some(tool_call_id.clone()),
+            thread_name: thread_name.clone(),
+        };
 
         join_set.spawn(async move {
             let parsed_args = match serde_json::from_str::<serde_json::Value>(&args_str) {
@@ -288,8 +294,7 @@ pub(crate) fn spawn_non_thread_into(
                         tool_name.clone(),
                         ToolResult {
                             content: (format!(
-                                "Error: failed to parse tool arguments for '{}': {}",
-                                tool_name, error
+                                "Error: failed to parse tool arguments for '{tool_name}': {error}"
                             ))
                             .into(),
                             is_error: true,
@@ -297,7 +302,14 @@ pub(crate) fn spawn_non_thread_into(
                     );
                 }
             };
-            let result = tools::execute_tool(&tool_name, parsed_args, &runtime, &client).await;
+            let result = tools::execute_tool_with_context(
+                &tool_name,
+                parsed_args,
+                &runtime,
+                &client,
+                &call_context,
+            )
+            .await;
             (index, None, tool_call_id, tool_name, result)
         });
     }
@@ -346,7 +358,7 @@ pub(crate) async fn execute_with_dag(
     // at the end — unmarking a thread that was already active from a prior
     // turn would clobber its mutual-exclusion guarantee.
     let mut failed_indices: HashSet<usize> = HashSet::new();
-    let mut marked_by_us: HashMap<String, (String, String)> = HashMap::new();
+    let mut marked_by_us: BTreeMap<String, (String, String)> = BTreeMap::new();
     for (i, dispatch) in thread_dispatches.iter().enumerate() {
         if thread::mark_thread_active(
             &runtime,
@@ -550,7 +562,7 @@ pub(crate) async fn execute_with_dag(
                                     "unknown".to_string(),
                                     "unknown".to_string(),
                                     ToolResult {
-                                        content: format!("Tool task panicked: {}", error).into(),
+                                        content: format!("Tool task panicked: {error}").into(),
                                         is_error: true,
                                     },
                                 ));
@@ -592,17 +604,14 @@ pub(crate) async fn execute_with_dag(
                 Some(Err(error)) => {
                     // A task panicked.  Mark all remaining in-flight thread
                     // dispatches as failed so dependents are skipped.
-                    for &dispatch_idx in in_flight.iter() {
-                        failed_indices.insert(dispatch_idx);
-                    }
-                    in_flight.clear();
+                    failed_indices.extend(in_flight.drain());
 
                     all_results.push((
                         usize::MAX,
                         "unknown".to_string(),
                         "unknown".to_string(),
                         ToolResult {
-                            content: (format!("Tool task panicked: {}", error)).into(),
+                            content: (format!("Tool task panicked: {error}")).into(),
                             is_error: true,
                         },
                     ));
@@ -634,7 +643,7 @@ pub(crate) async fn execute_with_dag(
                     "unknown".to_string(),
                     "unknown".to_string(),
                     ToolResult {
-                        content: (format!("Tool task panicked: {}", error)).into(),
+                        content: (format!("Tool task panicked: {error}")).into(),
                         is_error: true,
                     },
                 ));

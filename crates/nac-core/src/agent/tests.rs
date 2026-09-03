@@ -18,6 +18,175 @@ fn worker_prompt_prefers_native_workspace_discovery() {
 }
 
 #[test]
+fn direct_prompt_treats_permission_denial_as_no_execution() {
+    let prompt = render_direct_system_prompt("/workspace")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(prompt.contains("permission-denied tool result means the"));
+    assert!(prompt.contains("operation did not execute"));
+    assert!(prompt.contains("do not evade the policy through a different tool"));
+    assert!(prompt.contains("headless run fails closed"));
+}
+
+#[test]
+fn direct_prompt_keeps_model_goal_authority_narrow() {
+    let prompt = render_direct_system_prompt("/workspace")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(prompt.contains("create_goal only when the user explicitly asks"));
+    assert!(prompt.contains("complete only when the objective is genuinely achieved"));
+    assert!(prompt.contains("Use blocked only at a genuine impasse"));
+    assert!(prompt.contains("cannot pause, resume, clear"));
+    assert!(prompt.contains("Explicit user cancellation pauses it"));
+}
+
+#[test]
+fn direct_topologies_expose_exact_capability_boundaries() {
+    let root =
+        std::env::temp_dir().join(format!("nac_child_tool_boundary_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let store_path = root.join("store.db");
+    for session_id in ["parent", "child", "delegating"] {
+        let mut snapshot = crate::sessions::new_snapshot(
+            session_id.to_string(),
+            root.clone(),
+            "test-model".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            crate::model::BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            std::collections::BTreeMap::new(),
+        );
+        snapshot.behavior = if session_id == "delegating" {
+            crate::sessions::SessionBehavior::DirectWithOrchestrator
+        } else {
+            crate::sessions::SessionBehavior::Direct
+        };
+        crate::sessions::create_session(&store_path, &snapshot).unwrap();
+    }
+    crate::store::create_traditional_child_relationship(
+        &store_path,
+        "parent",
+        "child",
+        crate::store::GENERAL_CHILD_PROFILE,
+        "review the implementation",
+    )
+    .unwrap();
+
+    let build = |session_id: &str| {
+        Agent::with_config(
+            ModelClient::new_for_test(),
+            AgentConfig {
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
+                mode: AgentMode::Direct,
+                session_behavior: None,
+                store_path: store_path.clone(),
+                session_id: Some(session_id.to_string()),
+                orchestrator_compaction_threshold: None,
+                initial_messages: Vec::new(),
+                thread_name: None,
+                dispatch_id: None,
+                event_sink: EventSink::none(),
+                workspace_cwd: root.clone(),
+                config_cwd: root.clone(),
+                working_directory: root.display().to_string(),
+                worker_executable: None,
+                sandbox: None,
+                ssh: None,
+                mcp: None,
+                skills: None,
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+                light_client: None,
+                permission_rules: Vec::new(),
+            },
+        )
+        .unwrap()
+    };
+
+    let mut parent = build("parent");
+    let mut child = build("child");
+    let mut delegating = build("delegating");
+    let names = |agent: &Agent| {
+        agent
+            .tool_definitions_for_test()
+            .iter()
+            .map(|definition| definition.function.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        names(&parent),
+        crate::tools::DIRECT_TOOL_NAMES.map(str::to_string)
+    );
+    assert_eq!(
+        names(&child),
+        crate::tools::WORKER_TOOL_NAMES.map(str::to_string)
+    );
+    assert_eq!(
+        names(&delegating),
+        crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.map(str::to_string)
+    );
+    let capability_names = |definitions: Vec<ToolDefinition>| {
+        definitions
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        capability_names(parent.model_request_capabilities_for_test(None)),
+        crate::tools::DIRECT_TOOL_NAMES
+    );
+    let parent_web =
+        capability_names(parent.model_request_capabilities_for_test(Some("direct-exa-canary")));
+    assert_eq!(
+        &parent_web[..crate::tools::DIRECT_TOOL_NAMES.len()],
+        crate::tools::DIRECT_TOOL_NAMES
+    );
+    assert_eq!(
+        &parent_web[crate::tools::DIRECT_TOOL_NAMES.len()..],
+        crate::tools::WEB_TOOL_NAMES
+    );
+    assert_eq!(
+        capability_names(child.model_request_capabilities_for_test(Some("child-exa-canary"))),
+        crate::tools::WORKER_TOOL_NAMES
+    );
+    let delegating_web = capability_names(
+        delegating.model_request_capabilities_for_test(Some("delegating-exa-canary")),
+    );
+    assert_eq!(
+        &delegating_web[..crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()],
+        crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES
+    );
+    assert_eq!(
+        &delegating_web[crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()..],
+        crate::tools::WEB_TOOL_NAMES
+    );
+    assert!(matches!(
+        child.messages.first(),
+        Some(Message::System { content })
+            if content.contains("traditional child coding agent")
+                && content.contains("review the implementation")
+    ));
+    assert!(matches!(
+        delegating.messages.first(),
+        Some(Message::System { content })
+            if content.contains("Managed orchestration")
+                && content.contains("separate durable NAC orchestrator sessions")
+    ));
+
+    drop(parent);
+    drop(child);
+    drop(delegating);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn restore_messages_refreshes_leading_system_prompt() {
     let client = ModelClient::new_for_test();
     let mut agent = Agent::with_config(
@@ -25,6 +194,7 @@ fn restore_messages_refreshes_leading_system_prompt() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Orchestrator,
+            session_behavior: None,
             store_path: crate::store::default_store_path(),
             session_id: None,
             orchestrator_compaction_threshold: None,
@@ -44,6 +214,7 @@ fn restore_messages_refreshes_leading_system_prompt() {
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .expect("agent config must be valid");
@@ -88,6 +259,54 @@ fn exec_command_result_preview_uses_structured_previews() {
     };
 
     assert_eq!(preview_tool_result("exec_command", &result), "line two...");
+}
+
+#[test]
+fn key_argument_preview_is_family_aware_and_fail_closed() {
+    for (name, args, expected) in [
+        ("read", r#"{"path":"src/lib.rs"}"#, "src/lib.rs"),
+        ("glob", r#"{"pattern":"**/*.rs"}"#, "**/*.rs"),
+        ("grep", r#"{"pattern":"AgentEvent"}"#, "AgentEvent"),
+        ("web_search", r#"{"query":"NAC docs"}"#, "NAC docs"),
+        (
+            "orchestrator_launch",
+            r#"{"description":"Audit storage","prompt":"SECRET_PROMPT"}"#,
+            "Audit storage",
+        ),
+        (
+            "subagent",
+            r#"{"description":"Review tests","prompt":"SECRET_PROMPT"}"#,
+            "Review tests",
+        ),
+        (
+            "mcp__linear__linear_read_issue",
+            r#"{"name":"ALL-1","authorization":"SECRET_HEADER"}"#,
+            "ALL-1",
+        ),
+    ] {
+        assert_eq!(key_arg_preview(name, Some(args), args), expected);
+    }
+
+    assert_eq!(
+        key_arg_preview(
+            "write_stdin",
+            Some(r#"{"session_id":"term-1","chars":"SECRET_STDIN"}"#),
+            "ignored"
+        ),
+        "→ term-1 (12 input chars)"
+    );
+    assert_eq!(
+        key_arg_preview(
+            "unknown_tool",
+            Some(r#"{"password":"SECRET_VALUE"}"#),
+            "SECRET_RAW_PREVIEW"
+        ),
+        ""
+    );
+    assert_eq!(
+        key_arg_preview("read", Some("malformed SECRET_VALUE"), "SECRET_RAW_PREVIEW"),
+        ""
+    );
 }
 
 #[test]
@@ -219,6 +438,7 @@ fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode,
+                session_behavior: None,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
                 orchestrator_compaction_threshold: None,
@@ -238,6 +458,7 @@ fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 light_client: None,
+                permission_rules: Vec::new(),
             },
         )
         .expect("agent config must be valid")
@@ -326,6 +547,7 @@ async fn multi_row_steering_ack_failure_rolls_back_messages_and_retries_once() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
+            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some("session".to_string()),
             orchestrator_compaction_threshold: None,
@@ -345,6 +567,7 @@ async fn multi_row_steering_ack_failure_rolls_back_messages_and_retries_once() {
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .unwrap();
@@ -445,6 +668,7 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Orchestrator,
+            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some("session".to_string()),
             orchestrator_compaction_threshold: None,
@@ -464,6 +688,7 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .unwrap();
@@ -580,6 +805,7 @@ async fn cancelled_image_result_still_emits_finished_event() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
+            session_behavior: None,
             store_path: root.join("store.db"),
             session_id: None,
             orchestrator_compaction_threshold: None,
@@ -599,6 +825,7 @@ async fn cancelled_image_result_still_emits_finished_event() {
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .unwrap();

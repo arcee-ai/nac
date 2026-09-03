@@ -25,9 +25,14 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::tools::{
-    remote_file_lock_busy, ThreadCancellation, ToolResult, ToolRuntime,
-    REMOTE_FILE_LOCK_RETRY_INTERVAL,
+    remote_file_lock_busy, ToolResult, ToolRuntime, REMOTE_FILE_LOCK_RETRY_INTERVAL,
 };
+
+#[path = "mutation_remote.rs"]
+mod remote;
+pub(crate) use remote::execute_remote;
+#[cfg(test)]
+use remote::REMOTE_MUTATION_SCRIPT;
 
 const FILE_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(1);
 pub(crate) const MAX_READ_OUTPUT_BYTES: usize = 30_000;
@@ -334,7 +339,6 @@ pub(crate) fn read_error(path: &str, error: io::Error) -> ToolResult {
     error_tool_result(MutationError::io(path, error))
 }
 
-#[cfg(test)]
 pub(crate) async fn edit_local(
     path: PathBuf,
     path_display: String,
@@ -348,31 +352,27 @@ pub(crate) async fn edit_local(
             expected_revision,
             edits,
         },
-        None,
     )
     .await
 }
 
-pub(crate) async fn edit_local_cancellable(
+pub(crate) async fn edit_local_bound(
     path: PathBuf,
     path_display: String,
     expected_revision: String,
     edits: Vec<EditSpec>,
-    cancellation: &ThreadCancellation,
 ) -> ToolResult {
-    mutate_local(
+    mutate_local_bound(
         path,
         path_display,
         MutationRequest::Edit {
             expected_revision,
             edits,
         },
-        Some(cancellation),
     )
     .await
 }
 
-#[cfg(test)]
 pub(crate) async fn write_local(
     path: PathBuf,
     path_display: String,
@@ -386,37 +386,32 @@ pub(crate) async fn write_local(
             expected_revision,
             content,
         },
-        None,
     )
     .await
 }
 
-pub(crate) async fn write_local_cancellable(
+pub(crate) async fn write_local_bound(
     path: PathBuf,
     path_display: String,
     content: String,
     expected_revision: Option<String>,
-    cancellation: &ThreadCancellation,
 ) -> ToolResult {
-    mutate_local(
+    mutate_local_bound(
         path,
         path_display,
         MutationRequest::Write {
             expected_revision,
             content,
         },
-        Some(cancellation),
     )
     .await
 }
-
-pub(crate) async fn edit_mounted_cancellable(
+pub(crate) async fn edit_mounted(
     root: PathBuf,
     relative: PathBuf,
     path_display: String,
     expected_revision: String,
     edits: Vec<EditSpec>,
-    cancellation: &ThreadCancellation,
 ) -> ToolResult {
     mutate_mounted(
         root,
@@ -426,12 +421,10 @@ pub(crate) async fn edit_mounted_cancellable(
             expected_revision,
             edits,
         },
-        Some(cancellation),
     )
     .await
 }
 
-#[cfg(test)]
 pub(crate) async fn write_mounted(
     root: PathBuf,
     relative: PathBuf,
@@ -447,32 +440,14 @@ pub(crate) async fn write_mounted(
             expected_revision,
             content,
         },
-        None,
     )
     .await
 }
 
-pub(crate) async fn write_mounted_cancellable(
-    root: PathBuf,
-    relative: PathBuf,
-    path_display: String,
-    content: String,
-    expected_revision: Option<String>,
-    cancellation: &ThreadCancellation,
-) -> ToolResult {
-    mutate_mounted(
-        root,
-        relative,
-        path_display,
-        MutationRequest::Write {
-            expected_revision,
-            content,
-        },
-        Some(cancellation),
-    )
-    .await
-}
-
+#[expect(
+    clippy::expect_used,
+    reason = "one reserved and validated image part remains within ToolContent limits"
+)]
 pub(crate) fn read_opened_file(
     mut file: File,
     path_display: String,
@@ -610,13 +585,8 @@ enum MutationRequest {
     },
 }
 
-async fn mutate_local(
-    path: PathBuf,
-    path_display: String,
-    request: MutationRequest,
-    cancellation: Option<&ThreadCancellation>,
-) -> ToolResult {
-    let target = match tokio::task::spawn_blocking(move || resolve_target_path(&path)).await {
+async fn mutate_local(path: PathBuf, path_display: String, request: MutationRequest) -> ToolResult {
+    let bound = match tokio::task::spawn_blocking(move || resolve_target_path(&path)).await {
         Ok(Ok(path)) => path,
         Ok(Err(error)) => return error_tool_result(MutationError::io(&path_display, error)),
         Err(error) => {
@@ -626,19 +596,47 @@ async fn mutate_local(
             ))
         }
     };
-    let lock = match acquire_path_lock(&target, cancellation).await {
-        Ok(lock) => lock,
-        Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
-    };
-    match tokio::task::spawn_blocking(move || mutate_locked(target, path_display, request, lock))
-        .await
+    mutate_local_bound(bound, path_display, request).await
+}
+
+async fn mutate_local_bound(
+    path: PathBuf,
+    path_display: String,
+    request: MutationRequest,
+) -> ToolResult {
+    #[cfg(test)]
+    wait_at_bound_local_open_gate(&path);
+    #[cfg(unix)]
     {
-        Ok(Ok(result)) => success_tool_result(&result),
-        Ok(Err(error)) => error_tool_result(error),
-        Err(error) => error_tool_result(MutationError::precondition(
-            "io_error",
-            format!("file mutation task failed: {error}"),
-        )),
+        let relative = match path.strip_prefix(Path::new("/")) {
+            Ok(relative) if !relative.as_os_str().is_empty() => relative.to_path_buf(),
+            _ => {
+                return argument_error(format!(
+                    "safe local file mutations require an absolute file path: {path_display}"
+                ))
+            }
+        };
+        mutate_mounted(PathBuf::from("/"), relative, path_display, request).await
+    }
+    #[cfg(not(unix))]
+    {
+        let target = path;
+        let lock = match acquire_path_lock(&target).await {
+            Ok(lock) => lock,
+            Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
+        };
+        match tokio::task::spawn_blocking(move || {
+            mutate_locked(target, path_display, request, lock)
+        })
+        .await
+        {
+            Ok(Ok(result)) => success_tool_result(&result),
+            Ok(Err(error)) => error_tool_result(error),
+            Err(error) => error_tool_result(MutationError::precondition(
+                "io_error",
+                format!("file mutation task failed: {error}"),
+            )),
+        }
     }
 }
 
@@ -647,7 +645,6 @@ async fn mutate_mounted(
     relative: PathBuf,
     path_display: String,
     request: MutationRequest,
-    cancellation: Option<&ThreadCancellation>,
 ) -> ToolResult {
     #[cfg(unix)]
     {
@@ -662,7 +659,7 @@ async fn mutate_mounted(
             Ok(root) => lexical_normalize(&root.join(&relative)),
             Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
         };
-        let lock = match acquire_path_lock(&identity, cancellation).await {
+        let lock = match acquire_path_lock(&identity).await {
             Ok(lock) => lock,
             Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
         };
@@ -777,6 +774,8 @@ fn open_parent_beneath(
         match open_directory_at(&directory, &name) {
             Ok(next) => directory = next,
             Err(error) if error.kind() == io::ErrorKind::NotFound && create_parents => {
+                // SAFETY: `directory` is a live directory descriptor and
+                // `name` is a NUL-terminated relative component without `/`.
                 let created = unsafe { libc::mkdirat(directory.as_raw_fd(), name.as_ptr(), 0o777) };
                 if created == -1 {
                     let error = io::Error::last_os_error();
@@ -807,6 +806,8 @@ fn c_string(bytes: &[u8]) -> io::Result<CString> {
 
 #[cfg(unix)]
 fn open_directory_at(directory: &File, name: &CString) -> io::Result<File> {
+    // SAFETY: `directory` is a live descriptor and `name` is a NUL-terminated
+    // relative component; the flags request a no-follow directory descriptor.
     let descriptor = unsafe {
         libc::openat(
             directory.as_raw_fd(),
@@ -817,11 +818,15 @@ fn open_directory_at(directory: &File, name: &CString) -> io::Result<File> {
     if descriptor == -1 {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: the successful `openat` result is a new owned descriptor that
+    // has not been wrapped or closed elsewhere.
     Ok(unsafe { File::from_raw_fd(descriptor) })
 }
 
 #[cfg(unix)]
 fn open_target_at(directory: &File, name: &CString) -> io::Result<Option<File>> {
+    // SAFETY: `directory` is a live descriptor and `name` is a NUL-terminated
+    // relative component; `O_NOFOLLOW` prevents a final symlink traversal.
     let descriptor = unsafe {
         libc::openat(
             directory.as_raw_fd(),
@@ -837,6 +842,8 @@ fn open_target_at(directory: &File, name: &CString) -> io::Result<Option<File>> 
             Err(error)
         };
     }
+    // SAFETY: the successful `openat` result is a new owned descriptor that
+    // has not been wrapped or closed elsewhere.
     Ok(Some(unsafe { File::from_raw_fd(descriptor) }))
 }
 
@@ -852,6 +859,8 @@ fn publish_at(
 ) -> Result<(), MutationError> {
     let temp_name = c_string(format!(".nac-mutation-{}.tmp", Uuid::new_v4()).as_bytes())
         .map_err(|error| MutationError::io(path_display, error))?;
+    // SAFETY: `directory` is a live descriptor and `temp_name` is a
+    // NUL-terminated relative component; exclusive creation yields a new fd.
     let descriptor = unsafe {
         libc::openat(
             directory.as_raw_fd(),
@@ -863,6 +872,8 @@ fn publish_at(
     if descriptor == -1 {
         return Err(MutationError::io(path_display, io::Error::last_os_error()));
     }
+    // SAFETY: the successful exclusive `openat` result is a new owned
+    // descriptor that has not been wrapped or closed elsewhere.
     let mut temp = unsafe { File::from_raw_fd(descriptor) };
     let mut cleanup = AtTempCleanup::new(
         directory
@@ -889,6 +900,8 @@ fn publish_at(
     wait_at_publish_gate(_identity);
 
     if metadata.is_some() {
+        // SAFETY: both names are live NUL-terminated relative components and
+        // both directory arguments are the same live directory descriptor.
         let result = unsafe {
             libc::renameat(
                 directory.as_raw_fd(),
@@ -902,6 +915,8 @@ fn publish_at(
         }
         cleanup.disarm();
     } else {
+        // SAFETY: both names are live NUL-terminated relative components and
+        // both directory arguments are the same live directory descriptor.
         let result = unsafe {
             libc::linkat(
                 directory.as_raw_fd(),
@@ -919,6 +934,8 @@ fn publish_at(
                 Err(MutationError::io(path_display, error))
             };
         }
+        // SAFETY: `directory` remains live and `temp_name` is the
+        // NUL-terminated temporary entry just linked into its final location.
         let removed = unsafe { libc::unlinkat(directory.as_raw_fd(), temp_name.as_ptr(), 0) };
         if removed == -1 {
             return Err(MutationError::committed(
@@ -960,6 +977,8 @@ impl AtTempCleanup {
 impl Drop for AtTempCleanup {
     fn drop(&mut self) {
         if self.armed {
+            // SAFETY: the cleanup object owns a live directory descriptor and
+            // a NUL-terminated relative name; unlink failure is best-effort.
             unsafe {
                 libc::unlinkat(self.directory.as_raw_fd(), self.name.as_ptr(), 0);
             }
@@ -967,6 +986,7 @@ impl Drop for AtTempCleanup {
     }
 }
 
+#[cfg(any(test, not(unix)))]
 fn mutate_locked(
     target: PathBuf,
     path_display: String,
@@ -1164,6 +1184,45 @@ struct PublishGate {
 }
 
 #[cfg(test)]
+static BOUND_LOCAL_OPEN_GATES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, PublishGate>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+#[cfg(test)]
+pub(crate) fn gate_before_bound_local_open(
+    path: PathBuf,
+) -> (
+    std::sync::mpsc::Receiver<()>,
+    std::sync::mpsc::SyncSender<()>,
+) {
+    let (entered_sender, entered_receiver) = std::sync::mpsc::sync_channel(1);
+    let (release_sender, release_receiver) = std::sync::mpsc::sync_channel(1);
+    BOUND_LOCAL_OPEN_GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(
+            path,
+            PublishGate {
+                entered: entered_sender,
+                release: release_receiver,
+            },
+        );
+    (entered_receiver, release_sender)
+}
+
+#[cfg(test)]
+fn wait_at_bound_local_open_gate(path: &Path) {
+    let gate = BOUND_LOCAL_OPEN_GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(path);
+    if let Some(gate) = gate {
+        let _ = gate.entered.send(());
+        let _ = gate.release.recv();
+    }
+}
+
+#[cfg(test)]
 static PUBLISH_GATES: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<PathBuf, PublishGate>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -1202,6 +1261,7 @@ fn wait_at_publish_gate(path: &Path) {
     }
 }
 
+#[cfg(any(test, not(unix)))]
 fn publish(
     target: &Path,
     old_bytes: Option<&[u8]>,
@@ -1278,15 +1338,23 @@ fn publish(
 // `mode_t` is `u16` on macOS and `u32` on Linux; the explicit casts keep
 // `MetadataExt::mode()` arithmetic portable across both CI targets.
 #[cfg(unix)]
-#[allow(clippy::unnecessary_cast)]
+#[allow(
+    clippy::unnecessary_cast,
+    reason = "libc mode-bit types vary by Unix target and the contract requires u32"
+)]
 const SET_USER_ID_MODE_BIT: u32 = libc::S_ISUID as u32;
 
 #[cfg(unix)]
-#[allow(clippy::unnecessary_cast)]
+#[allow(
+    clippy::unnecessary_cast,
+    reason = "libc mode-bit types vary by Unix target and the contract requires u32"
+)]
 const SET_GROUP_ID_MODE_BIT: u32 = libc::S_ISGID as u32;
 
 #[cfg(unix)]
 fn preserve_metadata(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
+    // SAFETY: `file` is a live descriptor and the uid/gid values came directly
+    // from filesystem metadata; `fchown` takes no pointers.
     let result = unsafe { libc::fchown(file.as_raw_fd(), metadata.uid(), metadata.gid()) };
     if result == -1 {
         let error = io::Error::last_os_error();
@@ -1299,6 +1367,8 @@ fn preserve_metadata(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
         // either principal necessarily changes with the inode.
         let current = file.metadata()?;
         if current.gid() != metadata.gid() {
+            // SAFETY: `file` is live, uid::MAX means preserve the current uid,
+            // and the requested gid came from filesystem metadata.
             let result =
                 unsafe { libc::fchown(file.as_raw_fd(), libc::uid_t::MAX, metadata.gid()) };
             if result == -1 {
@@ -1326,10 +1396,12 @@ fn preserve_metadata(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
     file.set_permissions(metadata.permissions())
 }
 
+#[cfg(any(test, not(unix)))]
 struct TempCleanup {
     path: Option<PathBuf>,
 }
 
+#[cfg(any(test, not(unix)))]
 impl TempCleanup {
     fn new(path: PathBuf) -> Self {
         Self { path: Some(path) }
@@ -1340,6 +1412,7 @@ impl TempCleanup {
     }
 }
 
+#[cfg(any(test, not(unix)))]
 impl Drop for TempCleanup {
     fn drop(&mut self) {
         if let Some(path) = self.path.take() {
@@ -1348,10 +1421,7 @@ impl Drop for TempCleanup {
     }
 }
 
-async fn acquire_path_lock(
-    target: &Path,
-    cancellation: Option<&ThreadCancellation>,
-) -> io::Result<File> {
+async fn acquire_path_lock(target: &Path) -> io::Result<File> {
     let target = target.to_path_buf();
     let file = tokio::task::spawn_blocking(move || {
         let lock_path = lock_path(&target)?;
@@ -1360,30 +1430,10 @@ async fn acquire_path_lock(
     .await
     .map_err(|error| io::Error::other(format!("file-lock task failed: {error}")))??;
     loop {
-        if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
-            return Err(io::Error::new(
-                io::ErrorKind::Interrupted,
-                "file mutation cancelled",
-            ));
-        }
         match FileExt::try_lock_exclusive(&file) {
             Ok(()) => return Ok(file),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                tokio::select! {
-                    _ = tokio::time::sleep(FILE_LOCK_POLL_INTERVAL) => {}
-                    _ = async {
-                        if let Some(cancellation) = cancellation {
-                            cancellation.cancelled().await;
-                        } else {
-                            std::future::pending::<()>().await;
-                        }
-                    } => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Interrupted,
-                            "file mutation cancelled",
-                        ));
-                    }
-                }
+                tokio::time::sleep(FILE_LOCK_POLL_INTERVAL).await;
             }
             Err(error) => return Err(error),
         }
@@ -1392,6 +1442,7 @@ async fn acquire_path_lock(
 
 fn lock_path(target: &Path) -> io::Result<PathBuf> {
     #[cfg(unix)]
+    // SAFETY: `geteuid` has no arguments or memory preconditions.
     let suffix = unsafe { libc::geteuid() }.to_string();
     #[cfg(not(unix))]
     let suffix = "user".to_string();
@@ -1420,6 +1471,7 @@ fn secure_lock_directory(path: &Path) -> io::Result<()> {
     }
     #[cfg(unix)]
     {
+        // SAFETY: `geteuid` has no arguments or memory preconditions.
         if metadata.uid() != unsafe { libc::geteuid() } {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -1450,6 +1502,7 @@ fn secure_open_lock(path: &Path) -> io::Result<File> {
     }
     #[cfg(unix)]
     {
+        // SAFETY: `geteuid` has no arguments or memory preconditions.
         if metadata.uid() != unsafe { libc::geteuid() }
             || metadata.nlink() != 1
             || metadata.mode() & 0o077 != 0
@@ -1463,7 +1516,7 @@ fn secure_open_lock(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-fn resolve_target_path(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn resolve_target_path(path: &Path) -> io::Result<PathBuf> {
     let absolute = if path.is_absolute() {
         lexical_normalize(path)
     } else {
@@ -1510,1528 +1563,6 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     normalized
 }
 
-pub(crate) const REMOTE_MUTATION_SCRIPT: &str = r#"
-import posix
-import sys
-
-# Python 3.10 and earlier do not guarantee that isolated mode removes the
-# working directory from sys.path. Remove every common spelling before any
-# non-builtin import so workspace modules cannot shadow the standard library.
-_nac_cwd = posix.getcwd()
-sys.path = [entry for entry in sys.path if entry not in ("", ".", _nac_cwd)]
-del _nac_cwd
-
-import base64
-import difflib
-import fcntl
-import hashlib
-import json
-import os
-import stat
-from pathlib import Path
-import tempfile
-import uuid
-
-BUSY = "NAC_FILE_LOCK_BUSY"
-
-def rev(data):
-    return "sha256:" + hashlib.sha256(data).hexdigest()
-
-def emit(value, code=0):
-    print(json.dumps(value, ensure_ascii=False, indent=2))
-    raise SystemExit(code)
-
-def fail(kind, message, **extra):
-    value = {"error": kind, "message": message, "committed": False}
-    value.update(extra)
-    emit(value, 2)
-def uncaught_error(error_type, error, traceback):
-    if isinstance(error, PermissionError):
-        kind = "permission_denied"
-    elif isinstance(error, FileNotFoundError):
-        kind = "not_found"
-    else:
-        kind = "io_error"
-    print(json.dumps({
-        "error": kind,
-        "message": str(error),
-        "committed": False,
-    }, ensure_ascii=False, indent=2))
-
-sys.excepthook = uncaught_error
-
-
-def normalize(text):
-    return text.replace("\r\n", "\n")
-
-def lf_lines(text):
-    if not text:
-        return []
-    parts = text.split("\n")
-    lines = [part + "\n" for part in parts[:-1]]
-    if parts[-1]:
-        lines.append(parts[-1])
-    return lines
-
-def decode(data, path):
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        fail("io_error", f"file is not valid UTF-8 and cannot be edited: {path}: {exc}")
-    bom = text.startswith("\ufeff")
-    if bom:
-        text = text[1:]
-    newline = "\r\n" if "\r\n" in text and text.find("\r\n") <= text.find("\n") else "\n"
-    return bom, newline, text, normalize(text)
-
-def original_offset(original, normalized_offset):
-    original_index = 0
-    normalized_index = 0
-    while normalized_index < normalized_offset:
-        if original.startswith("\r\n", original_index):
-            original_index += 2
-        else:
-            original_index += 1
-        normalized_index += 1
-    return original_index
-
-def changed_ranges(old, new):
-    matcher = difflib.SequenceMatcher(
-        a=lf_lines(old),
-        b=lf_lines(new),
-        autojunk=False,
-    )
-    ranges = []
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "equal":
-            continue
-        ranges.append({
-            "old_start": i1 + 1,
-            "old_end": i2 if i2 > i1 else i1,
-            "new_start": j1 + 1,
-            "new_end": j2 if j2 > j1 else j1,
-        })
-    return ranges
-
-def unified_diff(old, new, path):
-    records = difflib.unified_diff(
-        lf_lines(old),
-        lf_lines(new),
-        fromfile="a/" + path,
-        tofile="b/" + path,
-        n=3,
-    )
-    output = []
-    for record in records:
-        output.append(record)
-        if not record.endswith(("\n", "\r")):
-            output.append("\n\\ No newline at end of file\n")
-    return "".join(output)
-
-def result(path, old, new, old_revision):
-    old_text = old.decode("utf-8", errors="replace")
-    new_text = new.decode("utf-8", errors="replace")
-    return {
-        "path": path,
-        "old_revision": old_revision,
-        "new_revision": rev(new),
-        "changed_ranges": changed_ranges(old_text, new_text),
-        "diff": unified_diff(old_text, new_text, path),
-    }
-
-def lock_target(path):
-    resolved = Path(path).expanduser().resolve(strict=False)
-    lock_dir = Path(tempfile.gettempdir()) / f"nac-file-locks-{os.geteuid()}"
-    lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    lock_dir_stat = os.lstat(lock_dir)
-    if not stat.S_ISDIR(lock_dir_stat.st_mode) or lock_dir_stat.st_uid != os.geteuid() or lock_dir_stat.st_mode & 0o077:
-        fail("permission_denied", f"NAC file-lock directory has unsafe ownership or mode: {lock_dir}")
-    key = hashlib.sha256(os.fsencode(str(resolved))).hexdigest()
-    lock_path = lock_dir / (key + ".lock")
-    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
-    lock_file = os.fdopen(descriptor, "r+b", buffering=0)
-    lock_stat = os.fstat(lock_file.fileno())
-    if lock_stat.st_uid != os.geteuid() or lock_stat.st_nlink != 1 or lock_stat.st_mode & 0o077:
-        fail("permission_denied", f"NAC file lock has unsafe ownership, mode, or link count: {lock_path}")
-    try:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        print(BUSY)
-        raise SystemExit(75)
-    return resolved, lock_file
-
-def default_creation_mode():
-    mask = os.umask(0)
-    os.umask(mask)
-    return 0o666 & ~mask
-
-def publish(
-    path,
-    old_exists,
-    new,
-    old_stat,
-    output,
-    fail_before_publish=False,
-    fail_after_publish=False,
-):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_name = tempfile.mkstemp(prefix=".nac-mutation-", suffix=".tmp", dir=path.parent)
-    temp_path = Path(temp_name)
-    published = False
-    try:
-        with os.fdopen(descriptor, "wb", closefd=True) as target:
-            if old_stat is not None:
-                try:
-                    os.fchown(target.fileno(), old_stat.st_uid, old_stat.st_gid)
-                except PermissionError:
-                    current_stat = os.fstat(target.fileno())
-                    # A replaceable file can have an owner the caller cannot assign.
-                    # Preserve its group when possible and clear affected special bits.
-                    if current_stat.st_gid != old_stat.st_gid:
-                        try:
-                            os.fchown(target.fileno(), -1, old_stat.st_gid)
-                        except PermissionError:
-                            pass
-                current_stat = os.fstat(target.fileno())
-                mode = stat.S_IMODE(old_stat.st_mode)
-                if current_stat.st_uid != old_stat.st_uid:
-                    mode &= ~stat.S_ISUID
-                if current_stat.st_gid != old_stat.st_gid:
-                    mode &= ~stat.S_ISGID
-                os.fchmod(target.fileno(), mode)
-            else:
-                os.fchmod(target.fileno(), default_creation_mode())
-            target.write(new)
-            target.flush()
-            os.fsync(target.fileno())
-        if fail_before_publish:
-            raise OSError("injected failure before publication")
-        if old_exists:
-            os.replace(temp_path, path)
-        else:
-            try:
-                os.link(temp_path, path)
-            except FileExistsError:
-                fail("already_exists", f"file already exists: {path}; expected_revision null only creates a missing file — read the file and retry write with its revision")
-        published = True
-        try:
-            if fail_after_publish:
-                raise OSError("injected failure after publication")
-            if not old_exists:
-                temp_path.unlink()
-            directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-        except OSError as exc:
-            emit({
-                "error": "io_error",
-                "message": f"mutation committed for {path}, but durability could not be confirmed: {exc}",
-                "committed": True,
-                "new_revision": output["new_revision"],
-                "durability": "uncertain",
-            }, 2)
-    finally:
-        if not published:
-            try:
-                temp_path.unlink()
-            except FileNotFoundError:
-                pass
-
-payload = json.load(sys.stdin)
-original_path = payload["path"]
-operation = payload["operation"]
-if operation == "read":
-    path = Path(payload["resolved_path"]).expanduser()
-    try:
-        with path.open("rb") as source:
-            header = source.read(32)
-            extension = path.suffix.lower()
-            supported_extension = extension in (".png", ".jpg", ".jpeg", ".jpe", ".jfif", ".gif", ".webp")
-            # Transport-only parity with image::guess_format; Rust validates the returned bytes.
-            image_signature = (
-                header.startswith(b"\x89PNG\r\n\x1a\n")
-                or header.startswith(b"\xff\xd8\xff")
-                or header.startswith(b"GIF87a")
-                or header.startswith(b"GIF89a")
-                or (len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WEBP")
-                or header.startswith((b"MM\x00*", b"II*\x00", b"DDS ", b"BM", b"\x00\x00\x01\x00"))
-                or header.startswith((b"\x23?RADIANCE", b"\x76\x2f\x31\x01", b"qoif", b"farbfeld"))
-                or header.startswith((b"P1", b"P2", b"P3", b"P4", b"P5", b"P6", b"P7"))
-                or (len(header) >= 12 and header[:2] == b"\x00\x00" and header[4:12] == b"ftypavif")
-            )
-            if supported_extension or image_signature:
-                if not payload.get("image_read", False):
-                    fail("unsupported_image", f"the selected model cannot view image files: {original_path}")
-                image_limit = 20 * 1024 * 1024
-                if path.stat().st_size > image_limit:
-                    fail("image_limit_exceeded", f"image exceeds the {image_limit} byte limit: {original_path}")
-                source.seek(0)
-                data = source.read(image_limit + 1)
-                if len(data) > image_limit:
-                    fail("image_limit_exceeded", f"image exceeds the {image_limit} byte limit: {original_path}")
-                emit({"image_data": base64.b64encode(data).decode("ascii")})
-            source.seek(0)
-            data = source.read()
-    except FileNotFoundError:
-        fail("not_found", f"file not found: {original_path}")
-    if b"\0" in data[:8192]:
-        fail("io_error", f"binary file cannot be read as text: {original_path}")
-    text = data.decode("utf-8", errors="replace")
-    if text.startswith("\ufeff"):
-        text = text[1:]
-    text = normalize(text)
-    lines = lf_lines(text)
-    offset = min(payload["offset"], len(lines))
-    selected_end = min(offset + payload["limit"], len(lines))
-    content_parts = []
-    content_bytes = 0
-    end = offset
-    truncated = False
-    for line in lines[offset:selected_end]:
-        encoded_line = line.encode("utf-8")
-        if content_bytes + len(encoded_line) <= 30000:
-            content_parts.append(line)
-            content_bytes += len(encoded_line)
-            end += 1
-            continue
-        if end == offset:
-            content_parts.append(encoded_line[:30000].decode("utf-8", errors="ignore"))
-            end += 1
-            truncated = True
-        break
-    emit({
-        "path": original_path,
-        "revision": rev(data),
-        "start_line": offset + 1,
-        "end_line": end if end > offset else offset,
-        "content": "".join(content_parts),
-        "next_offset": end if end < len(lines) else None,
-        "truncated": truncated,
-    })
-
-path, lock_file = lock_target(payload["resolved_path"])
-try:
-    try:
-        old = path.read_bytes()
-        old_stat = path.stat()
-    except FileNotFoundError:
-        old = None
-        old_stat = None
-    expected = payload.get("expected_revision")
-    if operation == "edit":
-        if old is None:
-            fail("not_found", f"file not found: {original_path}")
-        current = rev(old)
-        if expected != current:
-            fail("stale_revision", f"stale revision for {original_path}; read again", current_revision=current)
-        bom, newline, original, normalized = decode(old, original_path)
-        spans = []
-        edits = payload["edits"]
-        if not edits:
-            fail("old_text_not_found", "edit requires at least one replacement")
-        for edit in edits:
-            needle = normalize(edit["old_text"])
-            if not needle:
-                fail("old_text_not_found", "old_text must not be empty")
-            count = normalized.count(needle)
-            if count == 0:
-                fail("old_text_not_found", f"old_text not found in {original_path}")
-            if count > 1:
-                fail("old_text_not_unique", f"old_text appears {count} times in {original_path}")
-            start = normalized.index(needle)
-            spans.append((start, start + len(needle), normalize(edit["new_text"])))
-        spans.sort(key=lambda item: item[0])
-        for left, right in zip(spans, spans[1:]):
-            if left[1] > right[0]:
-                fail("overlapping_edits", f"edit ranges overlap in {original_path}")
-        for start, end, replacement in reversed(spans):
-            start = original_offset(original, start)
-            end = original_offset(original, end)
-            original = original[:start] + replacement.replace("\n", newline) + original[end:]
-        if bom:
-            original = "\ufeff" + original
-        new = original.encode("utf-8")
-    elif operation == "write":
-        if expected is None:
-            if old is not None:
-                fail(
-                    "already_exists",
-                    f"file already exists: {original_path}; expected_revision null only creates a missing file — read the file and retry write with its revision",
-                    current_revision=rev(old),
-                )
-        else:
-            if old is None:
-                fail("not_found", f"file not found: {original_path}")
-            current = rev(old)
-            if expected != current:
-                fail("stale_revision", f"stale revision for {original_path}; read again", current_revision=current)
-        new = payload["content"].encode("utf-8")
-    else:
-        fail("io_error", f"unknown mutation operation: {operation}")
-    output = result(original_path, old or b"", new, rev(old) if old is not None else None)
-    publish(
-        path,
-        old is not None,
-        new,
-        old_stat,
-        output,
-        payload.get("_test_fail_before_publish", False),
-        payload.get("_test_fail_after_publish", False),
-    )
-    emit(output)
-finally:
-    lock_file.close()
-"#;
-
-pub(crate) async fn execute_remote(payload: Value, runtime: &ToolRuntime) -> ToolResult {
-    let args = vec![
-        "-I".to_string(),
-        "-c".to_string(),
-        REMOTE_MUTATION_SCRIPT.to_string(),
-    ];
-    let input = match serde_json::to_vec(&payload) {
-        Ok(input) => input,
-        Err(error) => {
-            return error_tool_result(MutationError::precondition(
-                "io_error",
-                format!("failed to serialize remote file operation: {error}"),
-            ))
-        }
-    };
-    let path_display = payload
-        .get("path")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    loop {
-        match runtime.backend.exec("python3", &args, Some(&input)).await {
-            Ok(output) if remote_file_lock_busy(&output) => {
-                tokio::time::sleep(REMOTE_FILE_LOCK_RETRY_INTERVAL).await;
-            }
-            Ok(output) => {
-                let content = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if content.is_empty() {
-                    return error_tool_result(MutationError::precondition(
-                        "io_error",
-                        format!(
-                            "remote file operation produced no result: {}",
-                            String::from_utf8_lossy(&output.stderr).trim()
-                        ),
-                    ));
-                }
-                if output.status.success() {
-                    if let Ok(value) = serde_json::from_str::<Value>(&content) {
-                        if let Some(encoded) = value.get("image_data").and_then(Value::as_str) {
-                            let reservation =
-                                match reserve_image_memory(encoded.len().div_ceil(4) * 3) {
-                                    Ok(reservation) => reservation,
-                                    Err(error) => {
-                                        return error_tool_result(MutationError::precondition(
-                                            error.code(),
-                                            error.message(),
-                                        ))
-                                    }
-                                };
-                            let bytes = match BASE64.decode(encoded.as_bytes()) {
-                                Ok(bytes) => bytes,
-                                Err(_) => {
-                                    return error_tool_result(MutationError::precondition(
-                                        "invalid_image",
-                                        "remote image result is not valid base64",
-                                    ))
-                                }
-                            };
-                            let image_path = path_display.clone();
-                            let image = match tokio::task::spawn_blocking(move || {
-                                ToolImage::validate_reserved(
-                                    bytes,
-                                    Some(Path::new(&image_path)),
-                                    None,
-                                    reservation,
-                                )
-                            })
-                            .await
-                            {
-                                Ok(Ok(image)) => image,
-                                Ok(Err(error)) => {
-                                    return error_tool_result(MutationError::precondition(
-                                        error.code(),
-                                        error.message(),
-                                    ))
-                                }
-                                Err(error) => {
-                                    return error_tool_result(MutationError::precondition(
-                                        "invalid_image",
-                                        format!("remote image validation task failed: {error}"),
-                                    ))
-                                }
-                            };
-                            let content =
-                                ToolContent::from_parts(vec![ToolContentPart::Image(image)])
-                                    .expect("one validated image is within result limits");
-                            return ToolResult {
-                                content,
-                                is_error: false,
-                            };
-                        }
-                    }
-                }
-                return ToolResult {
-                    content: content.into(),
-                    is_error: !output.status.success(),
-                };
-            }
-            Err(error) => {
-                return error_tool_result(MutationError::precondition(
-                    "io_error",
-                    format!("remote file operation failed: {error}"),
-                ))
-            }
-        }
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_png() -> Vec<u8> {
-        use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
-        use std::io::Cursor;
-
-        let source = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(2, 2, Rgba([1, 2, 3, 255])));
-        let mut encoded = Cursor::new(Vec::new());
-        source.write_to(&mut encoded, ImageFormat::Png).unwrap();
-        encoded.into_inner()
-    }
-
-    struct RestorePath(Option<std::ffi::OsString>);
-
-    impl Drop for RestorePath {
-        fn drop(&mut self) {
-            unsafe {
-                match self.0.take() {
-                    Some(path) => std::env::set_var("PATH", path),
-                    None => std::env::remove_var("PATH"),
-                }
-            }
-        }
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn mounted_reads_preserve_validated_image_content() {
-        let root = std::env::temp_dir().join(format!("nac-mounted-image-{}", Uuid::new_v4()));
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("fixture.png"), test_png()).unwrap();
-
-        let result = read_mounted(
-            root.clone(),
-            PathBuf::from("fixture.png"),
-            "fixture.png".to_string(),
-            0,
-            10,
-            true,
-        )
-        .await;
-        assert!(!result.is_error, "{}", result.content);
-        assert!(matches!(
-            result.content.parts().unwrap(),
-            [ToolContentPart::Image(image)] if image.mime_type().as_str() == "image/png"
-        ));
-
-        let rejected = read_mounted(
-            root.clone(),
-            PathBuf::from("fixture.png"),
-            "fixture.png".to_string(),
-            0,
-            10,
-            false,
-        )
-        .await;
-        assert!(rejected.is_error);
-        assert!(rejected.content.contains("unsupported_image"));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn revision_hashes_complete_bytes() {
-        assert_eq!(
-            revision(b"\xef\xbb\xbfline\r\n"),
-            "sha256:54a87ac536597128c9da6728f82567e5c08ed5f33c69366eec7136066cdab44b"
-        );
-    }
-
-    #[test]
-    fn oversized_line_is_explicitly_truncated_without_quadratic_rebuilds() {
-        let mut bytes = vec![b'a'; MAX_READ_OUTPUT_BYTES + 100];
-        bytes.extend_from_slice(b"\nnext\n");
-        let result = read_result("fixture.txt".into(), &bytes, 0, 20).unwrap();
-        assert_eq!(result.content.len(), MAX_READ_OUTPUT_BYTES);
-        assert!(result.truncated);
-        assert_eq!(result.end_line, 1);
-        assert_eq!(result.next_offset, Some(1));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn metadata_preservation_does_not_require_recreating_a_foreign_owner() {
-        let dir = std::env::temp_dir().join(format!("nac-metadata-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        let file = File::create(&path).unwrap();
-        let foreign_metadata = fs::metadata("/dev/null").unwrap();
-
-        preserve_metadata(&file, &foreign_metadata).unwrap();
-
-        let published_metadata = file.metadata().unwrap();
-        assert_eq!(
-            published_metadata.mode() & 0o7777,
-            foreign_metadata.mode() & 0o7777
-        );
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn batched_edits_match_one_original_and_preserve_crlf_bom() {
-        let old = b"\xef\xbb\xbffirst = 1\r\nsecond = 1\r\n";
-        let new = apply_edits(
-            "fixture.txt",
-            old,
-            &[
-                EditSpec {
-                    old_text: "first = 1".into(),
-                    new_text: "first = 2".into(),
-                },
-                EditSpec {
-                    old_text: "second = 1".into(),
-                    new_text: "second = 2\nthird = 3".into(),
-                },
-            ],
-        )
-        .unwrap();
-        assert_eq!(new, b"\xef\xbb\xbffirst = 2\r\nsecond = 2\r\nthird = 3\r\n");
-    }
-
-    #[test]
-    fn edit_preserves_untouched_mixed_line_endings() {
-        let old = b"alpha\r\nbeta\ngamma\r\n";
-        let new = apply_edits(
-            "fixture.txt",
-            old,
-            &[EditSpec {
-                old_text: "beta".into(),
-                new_text: "changed".into(),
-            }],
-        )
-        .unwrap();
-        assert_eq!(new, b"alpha\r\nchanged\ngamma\r\n");
-    }
-
-    #[test]
-    fn overlapping_edits_are_rejected() {
-        let error = apply_edits(
-            "fixture.txt",
-            b"abcdef",
-            &[
-                EditSpec {
-                    old_text: "abcd".into(),
-                    new_text: "x".into(),
-                },
-                EditSpec {
-                    old_text: "cdef".into(),
-                    new_text: "y".into(),
-                },
-            ],
-        )
-        .unwrap_err();
-        assert_eq!(error.error, "overlapping_edits");
-    }
-
-    #[tokio::test]
-    async fn stale_edit_preserves_original() {
-        let dir = std::env::temp_dir().join(format!("nac-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        fs::write(&path, "before").unwrap();
-        let result = edit_local(
-            path.clone(),
-            "file.txt".into(),
-            revision(b"different"),
-            vec![EditSpec {
-                old_text: "before".into(),
-                new_text: "after".into(),
-            }],
-        )
-        .await;
-        assert!(result.is_error);
-        assert!(
-            result.content.contains("stale_revision"),
-            "{}",
-            result.content
-        );
-        assert_eq!(fs::read(&path).unwrap(), b"before");
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[tokio::test]
-    async fn create_only_never_overwrites() {
-        let dir = std::env::temp_dir().join(format!("nac-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        let first = write_local(path.clone(), "file.txt".into(), "first".into(), None).await;
-        let second = write_local(path.clone(), "file.txt".into(), "second".into(), None).await;
-        assert!(!first.is_error);
-        assert!(second.is_error);
-        assert!(second.content.contains("already_exists"));
-        assert_eq!(fs::read(&path).unwrap(), b"first");
-        let _ = fs::remove_dir_all(dir);
-    }
-    #[tokio::test]
-    async fn concurrent_create_only_calls_have_one_winner() {
-        let dir = std::env::temp_dir().join(format!("nac-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        let first = write_local(path.clone(), "file.txt".into(), "first".into(), None);
-        let second = write_local(path.clone(), "file.txt".into(), "second".into(), None);
-        let (first, second) = tokio::join!(first, second);
-        assert_ne!(first.is_error, second.is_error);
-        let loser = if first.is_error { &first } else { &second };
-        assert!(
-            loser.content.contains("already_exists"),
-            "{}",
-            loser.content
-        );
-        let content = fs::read_to_string(&path).unwrap();
-        assert!(content == "first" || content == "second");
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[tokio::test]
-    async fn failure_after_temp_sync_preserves_original_and_cleans_temp() {
-        let dir = std::env::temp_dir().join(format!("nac-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        fs::write(&path, "before").unwrap();
-        fail_once_before_publish(&path.canonicalize().unwrap());
-        let result = write_local(
-            path.clone(),
-            "file.txt".into(),
-            "after".into(),
-            Some(revision(b"before")),
-        )
-        .await;
-        assert!(result.is_error);
-        assert!(result.content.contains("injected failure"));
-        assert_eq!(fs::read(&path).unwrap(), b"before");
-        let temp_count = fs::read_dir(&dir)
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".nac-mutation-")
-            })
-            .count();
-        assert_eq!(temp_count, 0);
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn mounted_mutation_never_follows_a_swapped_parent_symlink() {
-        use std::os::unix::fs::symlink;
-
-        let dir = std::env::temp_dir().join(format!("nac-mounted-mutation-{}", Uuid::new_v4()));
-        let root = dir.join("mount");
-        let outside = dir.join("outside");
-        fs::create_dir_all(&root).unwrap();
-        fs::create_dir_all(&outside).unwrap();
-        symlink(&outside, root.join("escape")).unwrap();
-        let result = write_mounted(
-            root,
-            PathBuf::from("escape/file.txt"),
-            "escape/file.txt".into(),
-            "forbidden".into(),
-            None,
-        )
-        .await;
-        assert!(result.is_error);
-        assert!(!outside.join("file.txt").exists());
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn mounted_revisioned_write_does_not_create_parents_for_a_missing_target() {
-        let root = std::env::temp_dir().join(format!("nac-mounted-mutation-{}", Uuid::new_v4()));
-        fs::create_dir_all(&root).unwrap();
-        let result = write_mounted(
-            root.clone(),
-            PathBuf::from("missing/nested/file.txt"),
-            "missing/nested/file.txt".into(),
-            "replacement".into(),
-            Some(revision(b"before")),
-        )
-        .await;
-        assert!(result.is_error);
-        assert!(result.content.contains("not_found"), "{}", result.content);
-        assert!(!root.join("missing").exists());
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[tokio::test]
-    async fn concurrent_same_revision_edits_serialize_and_one_goes_stale() {
-        let dir = std::env::temp_dir().join(format!("nac-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        fs::write(&path, "value = 1\n").unwrap();
-        let expected = revision(b"value = 1\n");
-        let first = edit_local(
-            path.clone(),
-            "file.txt".into(),
-            expected.clone(),
-            vec![EditSpec {
-                old_text: "value = 1".into(),
-                new_text: "value = 2".into(),
-            }],
-        );
-        let second = edit_local(
-            path.clone(),
-            "file.txt".into(),
-            expected,
-            vec![EditSpec {
-                old_text: "value = 1".into(),
-                new_text: "value = 3".into(),
-            }],
-        );
-        let (first, second) = tokio::join!(first, second);
-        assert_ne!(first.is_error, second.is_error);
-        let stale = if first.is_error { &first } else { &second };
-        assert!(
-            stale.content.contains("stale_revision"),
-            "{}",
-            stale.content
-        );
-        let content = fs::read_to_string(&path).unwrap();
-        assert!(content == "value = 2\n" || content == "value = 3\n");
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[tokio::test]
-    async fn aborting_awaiter_does_not_release_inflight_mutation_lock() {
-        let dir = std::env::temp_dir().join(format!("nac-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        fs::write(&path, "before").unwrap();
-        let target = path.canonicalize().unwrap();
-        let (entered, release) = gate_before_publish(target);
-        let first_path = path.clone();
-        let first = tokio::spawn(async move {
-            write_local(
-                first_path,
-                "file.txt".into(),
-                "first".into(),
-                Some(revision(b"before")),
-            )
-            .await
-        });
-        tokio::task::spawn_blocking(move || entered.recv().unwrap())
-            .await
-            .unwrap();
-        first.abort();
-        let second_path = path.clone();
-        let mut second = tokio::spawn(async move {
-            write_local(
-                second_path,
-                "file.txt".into(),
-                "second".into(),
-                Some(revision(b"before")),
-            )
-            .await
-        });
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut second)
-                .await
-                .is_err(),
-            "contender acquired the lock while the cancelled awaiter's I/O was live"
-        );
-        release.send(()).unwrap();
-        let second = second.await.unwrap();
-        assert!(second.is_error);
-        assert!(
-            second.content.contains("stale_revision"),
-            "{}",
-            second.content
-        );
-        assert_eq!(fs::read(&path).unwrap(), b"first");
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[tokio::test]
-    async fn cancellation_stops_a_mutation_waiting_for_the_path_lock() {
-        let dir = std::env::temp_dir().join(format!("nac-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        fs::write(&path, "before").unwrap();
-        let target = path.canonicalize().unwrap();
-        let (entered, release) = gate_before_publish(target);
-        let first_path = path.clone();
-        let first = tokio::spawn(async move {
-            write_local(
-                first_path,
-                "file.txt".into(),
-                "first".into(),
-                Some(revision(b"before")),
-            )
-            .await
-        });
-        tokio::task::spawn_blocking(move || entered.recv().unwrap())
-            .await
-            .unwrap();
-
-        let cancellation = ThreadCancellation::default();
-        let second_cancellation = cancellation.clone();
-        let second_path = path.clone();
-        let second = tokio::spawn(async move {
-            write_local_cancellable(
-                second_path,
-                "file.txt".into(),
-                "second".into(),
-                Some(revision(b"before")),
-                &second_cancellation,
-            )
-            .await
-        });
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        cancellation.cancel();
-        let second = tokio::time::timeout(Duration::from_secs(1), second)
-            .await
-            .expect("cancelled mutation remained blocked")
-            .unwrap();
-        assert!(second.is_error);
-
-        release.send(()).unwrap();
-        assert!(!first.await.unwrap().is_error);
-        assert_eq!(fs::read(&path).unwrap(), b"first");
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn mutation_process_helper() {
-        let Some(target) = std::env::var_os("NAC_TEST_MUTATION_TARGET") else {
-            return;
-        };
-        let ready = PathBuf::from(std::env::var_os("NAC_TEST_MUTATION_READY").unwrap());
-        let target = PathBuf::from(target);
-        let resolved = target.canonicalize().unwrap();
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let lock = runtime
-            .block_on(acquire_path_lock(&resolved, None))
-            .unwrap();
-        fs::write(&ready, b"ready").unwrap();
-        std::thread::sleep(Duration::from_millis(100));
-        mutate_locked(
-            resolved,
-            "file.txt".into(),
-            MutationRequest::Write {
-                expected_revision: Some(revision(b"before")),
-                content: "child".into(),
-            },
-            lock,
-        )
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn cross_process_mutations_serialize_and_stale_loser_cannot_continue() {
-        use std::process::{Command, Stdio};
-
-        let dir = std::env::temp_dir().join(format!("nac-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        let ready = dir.join("ready");
-        fs::write(&path, "before").unwrap();
-        let mut child = Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "tools::mutation::tests::mutation_process_helper",
-                "--nocapture",
-            ])
-            .env("NAC_TEST_MUTATION_TARGET", &path)
-            .env("NAC_TEST_MUTATION_READY", &ready)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        for _ in 0..200 {
-            if ready.exists() {
-                break;
-            }
-            assert!(
-                child.try_wait().unwrap().is_none(),
-                "mutation helper exited early"
-            );
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(
-            ready.exists(),
-            "mutation helper never acquired its sidecar lock"
-        );
-        let loser = write_local(
-            path.clone(),
-            "file.txt".into(),
-            "parent".into(),
-            Some(revision(b"before")),
-        )
-        .await;
-        assert!(child.wait().unwrap().success());
-        assert!(loser.is_error);
-        assert!(
-            loser.content.contains("stale_revision"),
-            "{}",
-            loser.content
-        );
-        assert_eq!(fs::read(&path).unwrap(), b"child");
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[cfg(unix)]
-    #[tokio::test(flavor = "current_thread")]
-    #[allow(clippy::await_holding_lock)]
-    async fn non_mounted_podman_backend_runs_revisioned_create_and_edit() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let _environment = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let original_path = std::env::var_os("PATH");
-        let _restore = RestorePath(original_path.clone());
-        let dir = std::env::temp_dir().join(format!("nac-fake-podman-{}", Uuid::new_v4()));
-        let bin = dir.join("bin");
-        let workspace = dir.join("workspace");
-        fs::create_dir_all(&bin).unwrap();
-        fs::create_dir_all(&workspace).unwrap();
-        let fake_podman = bin.join("podman");
-        fs::write(
-            &fake_podman,
-            "#!/bin/sh\nshift\ncwd='.'\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --workdir) cwd=$2; shift 2 ;;\n    --env) export \"$2\"; shift 2 ;;\n    -i|-t) shift ;;\n    *) shift; break ;;\n  esac\ndone\ncd \"$cwd\" || exit 125\nexec \"$@\"\n",
-        )
-        .unwrap();
-        fs::set_permissions(&fake_podman, fs::Permissions::from_mode(0o755)).unwrap();
-        let mut paths = vec![bin.clone()];
-        if let Some(path) = original_path.as_ref() {
-            paths.extend(std::env::split_paths(path));
-        }
-        unsafe {
-            std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
-        }
-        let sandbox = crate::sandbox::SandboxSession::new_for_test(crate::sandbox::SandboxSpec {
-            workdir: workspace.clone(),
-            shm_size: Some("0".to_string()),
-            ..Default::default()
-        });
-        let mut runtime = crate::tools::test_runtime();
-        runtime.workspace_cwd = workspace.clone();
-        runtime.backend = crate::sandbox::execution_backend_from_sandbox(Some(sandbox), &workspace);
-        let create = crate::tools::write::execute(
-            json!({
-                "path":"file.txt",
-                "content":"alpha = 1\nbeta = 1\n",
-                "expected_revision":null
-            }),
-            &runtime,
-        )
-        .await;
-        assert!(!create.is_error, "{}", create.content);
-        let read = crate::tools::read::execute(json!({"path":"file.txt"}), &runtime, false).await;
-        assert!(!read.is_error, "{}", read.content);
-        let read_value: Value =
-            serde_json::from_str(read.content.as_text().expect("text tool result")).unwrap();
-        let edit = crate::tools::edit::execute(
-            json!({
-                "path":"file.txt",
-                "expected_revision":read_value["revision"],
-                "edits":[
-                    {"old_text":"alpha = 1", "new_text":"alpha = 2"},
-                    {"old_text":"beta = 1", "new_text":"beta = 2"}
-                ]
-            }),
-            &runtime,
-        )
-        .await;
-        assert!(!edit.is_error, "{}", edit.content);
-        assert_eq!(
-            fs::read_to_string(workspace.join("file.txt")).unwrap(),
-            "alpha = 2\nbeta = 2\n"
-        );
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[cfg(unix)]
-    #[tokio::test(flavor = "current_thread")]
-    #[allow(clippy::await_holding_lock)]
-    async fn ssh_execution_backend_discovers_revision_and_runs_batched_edit() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let _environment = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let original_path = std::env::var_os("PATH");
-        let _restore = RestorePath(original_path.clone());
-        let dir = std::env::temp_dir().join(format!("nac-fake-ssh-{}", Uuid::new_v4()));
-        let bin = dir.join("bin");
-        let workspace = dir.join("workspace");
-        fs::create_dir_all(&bin).unwrap();
-        fs::create_dir_all(&workspace).unwrap();
-        let fake_ssh = bin.join("ssh");
-        fs::write(
-            &fake_ssh,
-            "#!/bin/sh\ncommand=''\nfor argument in \"$@\"; do command=$argument; done\nexec /bin/sh -c \"$command\"\n",
-        )
-        .unwrap();
-        fs::set_permissions(&fake_ssh, fs::Permissions::from_mode(0o755)).unwrap();
-        let mut paths = vec![bin.clone()];
-        if let Some(path) = original_path.as_ref() {
-            paths.extend(std::env::split_paths(path));
-        }
-        unsafe {
-            std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
-        }
-        fs::write(workspace.join("file.txt"), "alpha = 1\nbeta = 1\n").unwrap();
-        let mut runtime = crate::tools::test_runtime();
-        runtime.workspace_cwd = workspace.clone();
-        runtime.backend = crate::sandbox::ExecutionBackend::Ssh(crate::sandbox::SshBackend::new(
-            "fake-host".into(),
-            workspace.clone(),
-        ))
-        .into();
-        fs::write(workspace.join("fixture.png"), test_png()).unwrap();
-        let image =
-            crate::tools::read::execute(json!({"path":"fixture.png"}), &runtime, true).await;
-        assert!(!image.is_error, "{}", image.content);
-        assert!(matches!(
-            image.content.parts().unwrap(),
-            [ToolContentPart::Image(image)] if image.mime_type().as_str() == "image/png"
-        ));
-        fs::write(workspace.join("unsupported.bmp"), b"BMunsupported").unwrap();
-        let unsupported =
-            crate::tools::read::execute(json!({"path":"unsupported.bmp"}), &runtime, true).await;
-        assert!(unsupported.is_error);
-        assert!(unsupported.content.contains("invalid_image"));
-        fs::write(
-            workspace.join("difflib.py"),
-            "raise RuntimeError('workspace module imported')\n",
-        )
-        .unwrap();
-        let read = crate::tools::read::execute(json!({"path":"file.txt"}), &runtime, false).await;
-        assert!(!read.is_error, "{}", read.content);
-        let read_value: Value =
-            serde_json::from_str(read.content.as_text().expect("text tool result")).unwrap();
-        let edit = crate::tools::edit::execute(
-            json!({
-                "path":"file.txt",
-                "expected_revision":read_value["revision"],
-                "edits":[
-                    {"old_text":"alpha = 1", "new_text":"alpha = 2"},
-                    {"old_text":"beta = 1", "new_text":"beta = 2"}
-                ]
-            }),
-            &runtime,
-        )
-        .await;
-        assert!(!edit.is_error, "{}", edit.content);
-        assert_eq!(
-            fs::read_to_string(workspace.join("file.txt")).unwrap(),
-            "alpha = 2\nbeta = 2\n"
-        );
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn remote_read_matches_local_lf_only_pagination() {
-        use std::process::{Command, Stdio};
-
-        let dir = std::env::temp_dir().join(format!("nac-remote-read-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        let bytes = "first\ronly\u{2028}same\nsecond\r\nthird".as_bytes();
-        fs::write(&path, bytes).unwrap();
-        let local = read_result("file.txt".into(), bytes, 1, 2).unwrap();
-        let payload = json!({
-            "operation": "read",
-            "path": "file.txt",
-            "resolved_path": path,
-            "offset": 1,
-            "limit": 2
-        });
-
-        let remote = run_python_protocol(&payload, &mut Command::new("python3"), Stdio::piped());
-        assert!(
-            remote.status.success(),
-            "{}",
-            String::from_utf8_lossy(&remote.stderr)
-        );
-        let remote: Value = serde_json::from_slice(&remote.stdout).unwrap();
-        assert_eq!(remote["content"], local.content);
-        assert_eq!(remote["start_line"], local.start_line);
-        assert_eq!(remote["end_line"], local.end_line);
-        assert_eq!(remote["next_offset"], json!(local.next_offset));
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn remote_protocol_removes_workspace_from_import_path_without_safe_path_support() {
-        use std::process::{Command, Stdio};
-
-        let workspace =
-            std::env::temp_dir().join(format!("nac-remote-import-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&workspace).unwrap();
-        let path = workspace.join("file.txt");
-        fs::write(&path, b"safe\n").unwrap();
-        for module in [
-            "difflib.py",
-            "fcntl.py",
-            "hashlib.py",
-            "json.py",
-            "os.py",
-            "pathlib.py",
-            "stat.py",
-            "tempfile.py",
-            "uuid.py",
-        ] {
-            fs::write(
-                workspace.join(module),
-                "raise RuntimeError('workspace module imported')\n",
-            )
-            .unwrap();
-        }
-        let payload = json!({
-            "operation": "read",
-            "path": "file.txt",
-            "resolved_path": path,
-            "offset": 0,
-            "limit": 20
-        });
-        let mut child = Command::new("python3")
-            .args(["-c", REMOTE_MUTATION_SCRIPT])
-            .current_dir(&workspace)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(&serde_json::to_vec(&payload).unwrap())
-            .unwrap();
-        let output = child.wait_with_output().unwrap();
-        assert!(
-            output.status.success(),
-            "stdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(value["content"], "safe\n");
-        let _ = fs::remove_dir_all(workspace);
-    }
-
-    #[test]
-    fn remote_protocol_reads_and_applies_a_batched_edit() {
-        use std::process::{Command, Stdio};
-
-        let dir = std::env::temp_dir().join(format!("nac-remote-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        fs::write(&path, b"\xef\xbb\xbfalpha = 1\r\nbeta = 1\r\n").unwrap();
-        let read_payload = json!({
-            "operation": "read",
-            "path": "file.txt",
-            "resolved_path": path,
-            "offset": 0,
-            "limit": 20
-        });
-        let read = run_python_protocol(&read_payload, &mut Command::new("python3"), Stdio::piped());
-        assert!(
-            read.status.success(),
-            "{}",
-            String::from_utf8_lossy(&read.stderr)
-        );
-        let read_value: Value = serde_json::from_slice(&read.stdout).unwrap();
-        let edit_payload = json!({
-            "operation": "edit",
-            "path": "file.txt",
-            "resolved_path": path,
-            "expected_revision": read_value["revision"],
-            "edits": [
-                {"old_text": "alpha = 1", "new_text": "alpha = 2"},
-                {"old_text": "beta = 1", "new_text": "beta = 2\nthird = 3"}
-            ]
-        });
-        let edit = run_python_protocol(&edit_payload, &mut Command::new("python3"), Stdio::piped());
-        assert!(
-            edit.status.success(),
-            "{}",
-            String::from_utf8_lossy(&edit.stderr)
-        );
-        let edit_value: Value = serde_json::from_slice(&edit.stdout).unwrap();
-        assert_eq!(
-            edit_value["new_revision"],
-            revision(b"\xef\xbb\xbfalpha = 2\r\nbeta = 2\r\nthird = 3\r\n")
-        );
-        assert_eq!(
-            fs::read(&path).unwrap(),
-            b"\xef\xbb\xbfalpha = 2\r\nbeta = 2\r\nthird = 3\r\n"
-        );
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn remote_edit_preserves_untouched_mixed_line_endings() {
-        use std::process::{Command, Stdio};
-
-        let dir = std::env::temp_dir().join(format!("nac-remote-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        let old = b"alpha\r\nbeta\ngamma\r\n";
-        fs::write(&path, old).unwrap();
-        let payload = json!({
-            "operation": "edit",
-            "path": "file.txt",
-            "resolved_path": path,
-            "expected_revision": revision(old),
-            "edits": [{"old_text": "beta", "new_text": "changed"}]
-        });
-        let output = run_python_protocol(&payload, &mut Command::new("python3"), Stdio::piped());
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(fs::read(&path).unwrap(), b"alpha\r\nchanged\ngamma\r\n");
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn remote_metadata_preservation_does_not_require_recreating_a_foreign_owner() {
-        use std::os::unix::fs::{MetadataExt, PermissionsExt};
-        use std::process::Command;
-
-        let foreign_metadata = fs::metadata("/dev/null").unwrap();
-        if foreign_metadata.uid() == unsafe { libc::geteuid() } {
-            return;
-        }
-        let dir = std::env::temp_dir().join(format!("nac-remote-metadata-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        fs::write(&path, b"before").unwrap();
-        let definitions = REMOTE_MUTATION_SCRIPT
-            .split_once("payload = json.load(sys.stdin)")
-            .unwrap()
-            .0;
-        let script = format!(
-            "{definitions}\npath = Path(sys.argv[1])\nold_stat = os.stat('/dev/null')\n\
-             publish(path, True, b'after', old_stat, {{'new_revision': rev(b'after')}})\n"
-        );
-
-        let output = Command::new("python3")
-            .args(["-I", "-c", &script])
-            .arg(&path)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "stdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(fs::read(&path).unwrap(), b"after");
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
-            foreign_metadata.mode() & 0o7777
-        );
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn remote_create_uses_normal_umask_filtered_permissions() {
-        use std::os::unix::fs::PermissionsExt;
-        use std::process::{Command, Stdio};
-
-        let dir = std::env::temp_dir().join(format!("nac-remote-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let probe = dir.join("probe.txt");
-        fs::write(&probe, b"").unwrap();
-        let expected_mode = fs::metadata(&probe).unwrap().permissions().mode() & 0o777;
-        let path = dir.join("created.txt");
-        let payload = json!({
-            "operation": "write",
-            "path": "created.txt",
-            "resolved_path": path,
-            "expected_revision": null,
-            "content": "created\n"
-        });
-        let output = run_python_protocol(&payload, &mut Command::new("python3"), Stdio::piped());
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            expected_mode
-        );
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn remote_result_reports_final_newline_only_changes() {
-        use std::process::{Command, Stdio};
-
-        let dir = std::env::temp_dir().join(format!("nac-remote-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        fs::write(&path, b"line").unwrap();
-        let payload = json!({
-            "operation": "write",
-            "path": "file.txt",
-            "resolved_path": path,
-            "expected_revision": revision(b"line"),
-            "content": "line\n"
-        });
-        let output = run_python_protocol(&payload, &mut Command::new("python3"), Stdio::piped());
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert!(!value["changed_ranges"].as_array().unwrap().is_empty());
-        assert!(value["diff"]
-            .as_str()
-            .unwrap()
-            .contains("\\ No newline at end of file"));
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn remote_post_publication_failure_reports_committed_revision() {
-        use std::process::{Command, Stdio};
-
-        let dir = std::env::temp_dir().join(format!("nac-remote-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        let payload = json!({
-            "operation": "write",
-            "path": "file.txt",
-            "resolved_path": path,
-            "expected_revision": null,
-            "content": "created",
-            "_test_fail_after_publish": true
-        });
-        let output = run_python_protocol(&payload, &mut Command::new("python3"), Stdio::piped());
-        assert!(!output.status.success());
-        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(value["committed"], true);
-        assert_eq!(value["new_revision"], revision(b"created"));
-        assert_eq!(fs::read(&path).unwrap(), b"created");
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn remote_failure_before_publish_preserves_original_and_cleans_temp() {
-        let dir = std::env::temp_dir().join(format!("nac-remote-mutation-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        fs::write(&path, b"before").unwrap();
-        let payload = json!({
-            "operation": "write",
-            "path": "file.txt",
-            "resolved_path": path,
-            "expected_revision": revision(b"before"),
-            "content": "after",
-            "_test_fail_before_publish": true
-        });
-        let output = run_python_protocol(
-            &payload,
-            &mut std::process::Command::new("python3"),
-            std::process::Stdio::piped(),
-        );
-        assert!(!output.status.success());
-        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(value["error"], "io_error");
-        assert_eq!(fs::read(&path).unwrap(), b"before");
-        let temp_count = fs::read_dir(&dir)
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".nac-mutation-")
-            })
-            .count();
-        assert_eq!(temp_count, 0);
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn worker_definitions_advertise_revisioned_batched_contract() {
-        let definitions = crate::tools::worker_tool_definitions(false);
-        let edit = definitions
-            .iter()
-            .find(|definition| definition.function.name == "edit")
-            .unwrap();
-        assert_eq!(
-            edit.function.parameters["required"],
-            json!(["path", "expected_revision", "edits"])
-        );
-        assert_eq!(
-            edit.function.parameters["properties"]["edits"]["type"],
-            "array"
-        );
-        let write = definitions
-            .iter()
-            .find(|definition| definition.function.name == "write")
-            .unwrap();
-        assert_eq!(
-            write.function.parameters["required"],
-            json!(["path", "content", "expected_revision"])
-        );
-        assert_eq!(
-            write.function.parameters["properties"]["expected_revision"]["type"],
-            json!(["string", "null"])
-        );
-    }
-
-    fn run_python_protocol(
-        payload: &Value,
-        command: &mut std::process::Command,
-        stdin: std::process::Stdio,
-    ) -> std::process::Output {
-        command
-            .arg("-I")
-            .arg("-c")
-            .arg(REMOTE_MUTATION_SCRIPT)
-            .stdin(stdin)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        let mut child = command.spawn().unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(&serde_json::to_vec(payload).unwrap())
-            .unwrap();
-        child.wait_with_output().unwrap()
-    }
-}
+#[path = "mutation_tests.rs"]
+mod tests;

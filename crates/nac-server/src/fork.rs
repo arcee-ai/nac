@@ -117,6 +117,17 @@ impl SessionManager {
         {
             return Err(ForkSessionError::NotFound);
         }
+        if self
+            .session_lineage(session_id)
+            .map_err(|error| report_failure(session_id, "verify primary ownership", &error))?
+            .is_some()
+        {
+            // Delegated sessions are intentionally indistinguishable from an
+            // unknown id at public generic-work boundaries. Their parent owns
+            // every continuation, cancellation, deletion, and conversation
+            // derivation operation.
+            return Err(ForkSessionError::NotFound);
+        }
 
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
@@ -132,6 +143,13 @@ impl SessionManager {
         if !self
             .persisted_operation_session_exists(session_id)
             .map_err(|error| report_failure(session_id, "recheck persisted session", &error))?
+        {
+            return Err(ForkSessionError::NotFound);
+        }
+        if self
+            .session_lineage(session_id)
+            .map_err(|error| report_failure(session_id, "recheck primary ownership", &error))?
+            .is_some()
         {
             return Err(ForkSessionError::NotFound);
         }
@@ -219,6 +237,7 @@ fn persist_fork(
         .iter()
         .filter(|message| is_visible_response(message))
         .count();
+    let source_behavior = source.behavior;
     // Never-fold: the blob is the system head; the copied conversation is
     // this session's transcript log, so revert/resend can target it.
     let blob_len = leading_system_len(&prefix);
@@ -236,6 +255,10 @@ fn persist_fork(
         source.extra_headers,
     );
     fork.project_id = source.project_id;
+    // Session behavior is immutable identity. A conversation fork starts a
+    // new independent lifecycle, but it remains the same kind of top-level
+    // agent rather than silently reverting direct sessions to orchestrator.
+    fork.behavior = source_behavior;
     fork.light_model = source.light_model;
     fork.orchestrator_compaction_threshold = source.orchestrator_compaction_threshold;
     if let Some(spec) = fork.sandbox_spec.as_mut() {
@@ -378,7 +401,7 @@ fn is_visible_response(message: &Message) -> bool {
     matches!(
         message,
         Message::Assistant { tool_calls, .. }
-            if tool_calls.as_ref().is_none_or(|tool_calls| tool_calls.is_empty())
+            if tool_calls.as_ref().is_none_or(Vec::is_empty)
     )
 }
 
@@ -457,4 +480,144 @@ pub(crate) async fn dismiss_handler(
 ) -> Result<StatusCode, DismissForkError> {
     manager.dismiss_session_fork(&session_id, &fork_id)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use nac_core::model::BackendKind;
+
+    use super::*;
+
+    fn assistant(content: &str) -> Message {
+        Message::Assistant {
+            content: Some(content.to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
+        }
+    }
+
+    #[test]
+    fn persisted_fork_preserves_behavior_but_not_source_spend() {
+        let root = std::env::temp_dir().join(format!("nac-fork-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("store.db");
+        store::initialize(&store_path).unwrap();
+        let messages = vec![
+            Message::System {
+                content: "direct policy".to_string(),
+            },
+            Message::User {
+                content: "change the code".to_string(),
+            },
+            assistant("done"),
+        ];
+        let mut source = sessions::new_snapshot(
+            "source".to_string(),
+            root.clone(),
+            "model".to_string(),
+            "https://example.invalid/v1".to_string(),
+            BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            messages.clone(),
+            None,
+            BTreeMap::new(),
+        );
+        source.behavior = sessions::SessionBehavior::Direct;
+        source.token_usages = vec![Some(Default::default())];
+        let usage = source.token_usages[0].as_mut().unwrap();
+        usage.input_tokens = 100;
+        usage.output_tokens = 25;
+        usage.orchestrator_context_tokens = 42;
+        usage.cost.total = 777;
+        let mut unattributed = usage.clone();
+        unattributed.input_tokens = 9;
+        unattributed.output_tokens = 0;
+        unattributed.orchestrator_context_tokens = 0;
+        unattributed.cost = Default::default();
+        source.unattributed_token_usage = Some(unattributed);
+        sessions::create_session(&store_path, &source).unwrap();
+
+        persist_fork(
+            &store_path,
+            "source",
+            "fork",
+            messages.clone(),
+            messages.len(),
+            2,
+        )
+        .unwrap();
+
+        let fork = sessions::load_session(&store_path, "fork").unwrap();
+        assert_eq!(fork.behavior, sessions::SessionBehavior::Direct);
+        assert_eq!(fork.messages.len(), 1);
+        assert!(matches!(
+            fork.messages.as_slice(),
+            [Message::System { content }] if content == "direct policy"
+        ));
+        let inherited_tail = store::TranscriptLogWriter::new(&store_path)
+            .unwrap()
+            .read_tail_from("fork", 1)
+            .unwrap();
+        assert_eq!(
+            inherited_tail
+                .iter()
+                .map(|(idx, _)| *idx)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert!(matches!(
+            inherited_tail.as_slice(),
+            [
+                (_, Message::User { content: prompt }),
+                (_, Message::Assistant { content: Some(response), .. })
+            ] if prompt == "change the code" && response == "done"
+        ));
+        assert!(fork.unattributed_token_usage.is_none());
+        let inherited_context = fork.token_usages.last().unwrap().as_ref().unwrap();
+        assert_eq!(inherited_context.orchestrator_context_tokens, 42);
+        assert_eq!(inherited_context.billable_tokens(), 0);
+        assert_eq!(inherited_context.cost.total, 0);
+
+        let links = store::list_session_forks(&store_path, "source").unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].session_id, "fork");
+        let summary = sessions::list_sessions(&store_path)
+            .unwrap()
+            .into_iter()
+            .find(|summary| summary.session_id == "fork")
+            .unwrap();
+        assert_eq!(
+            summary.forked_from.unwrap().session_id,
+            "source".to_string()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fork_target_must_be_an_assistant_turn() {
+        let messages = vec![
+            Message::User {
+                content: "question".to_string(),
+            },
+            assistant("answer"),
+            Message::Tool {
+                tool_call_id: "tool".to_string(),
+                content: "result".into(),
+            },
+        ];
+        assert!(matches!(
+            fork_end_index(&messages, 0),
+            Err(ForkSessionError::Rejected(_))
+        ));
+        assert_eq!(fork_end_index(&messages, 1).unwrap(), 2);
+    }
 }

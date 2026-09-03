@@ -236,7 +236,7 @@ pub(super) fn write_sidecar(path: &Path, sidecar: &OverlaySidecar) {
             }
         }
         Err(error) => {
-            eprintln!("nac: model catalog: failed to serialize overlay etag sidecar: {error}")
+            eprintln!("nac: model catalog: failed to serialize overlay etag sidecar: {error}");
         }
     }
 }
@@ -341,7 +341,7 @@ pub(crate) async fn refresh_overlay_once(url: &str, timeout: Duration) -> Refres
         .headers()
         .get(reqwest::header::ETAG)
         .and_then(|value| value.to_str().ok())
-        .map(|value| value.to_string());
+        .map(std::string::ToString::to_string);
     let body = match response.text().await {
         Ok(body) => body,
         Err(error) => {
@@ -497,7 +497,10 @@ struct ModelsDevTierSelector {
 /// missing or explicitly incompatible IDs remain absent so a successful
 /// provider snapshot can retire them. Total payload parse failure is the only
 /// hard error (nothing is written then).
-#[allow(clippy::type_complexity)]
+#[expect(
+    clippy::type_complexity,
+    reason = "the tuple keeps mapped providers, review warnings, and source count distinct"
+)]
 pub(super) fn map_models_dev(
     api_json: &str,
     baseline: &ModelCatalog,
@@ -689,7 +692,7 @@ fn map_credential_env_var(
         return None;
     }
     let Some(first) = env.as_array().and_then(|env| env.first()) else {
-        if env.as_array().is_some_and(|env| env.is_empty()) {
+        if env.as_array().is_some_and(std::vec::Vec::is_empty) {
             return None;
         }
         warnings.push(format!(
@@ -742,7 +745,10 @@ fn map_model(
     id: &str,
     model: &ModelsDevModel,
 ) -> Result<GeneratedModel, String> {
-    debug_assert!(is_agent_compatible(model));
+    debug_assert!(
+        is_agent_compatible(model),
+        "catalog overlay mapping requires an agent-compatible model"
+    );
     // For known models (exact match or dated-snapshot family), inherit all
     // fields from the baseline — the generator's overrides.toml is
     // authoritative over models.dev for context_window, max_tokens, cost,

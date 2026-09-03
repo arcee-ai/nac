@@ -87,9 +87,9 @@ pub fn read_file(target: &GitTarget, path: &str) -> Result<WorkspaceFileContent>
     // A symlink is reported as what it is and never read through, so a link
     // pointing outside the repository cannot serve its contents from here.
     let bytes = match target.read_worktree(&repo_root, &relpath, MAX_FILE_BYTES)? {
-        WorktreeRead::Missing => bail!("file not found: '{}'", relpath),
+        WorktreeRead::Missing => bail!("file not found: '{relpath}'"),
         WorktreeRead::NotRegular | WorktreeRead::Symlink { .. } => {
-            bail!("invalid path: '{}' is not a regular file", relpath)
+            bail!("invalid path: '{relpath}' is not a regular file")
         }
         // Reaching a file through a symlinked directory lands outside the
         // repository just as following a link would, and is refused for the
@@ -177,16 +177,16 @@ pub fn read_revision_file(
     let object = format!("{commit}:{relpath}");
 
     let Some(kind) = run_git_optional(target, &repo_root, &["cat-file", "-t", &object])? else {
-        bail!("file not found: '{}'", relpath);
+        bail!("file not found: '{relpath}'");
     };
     if String::from_utf8_lossy(&kind).trim() != "blob" {
-        bail!("invalid path: '{}' is not a regular file", relpath);
+        bail!("invalid path: '{relpath}' is not a regular file");
     }
 
     let size = String::from_utf8_lossy(&run_git(target, &repo_root, &["cat-file", "-s", &object])?)
         .trim()
         .parse::<u64>()
-        .with_context(|| format!("cannot measure '{}'", relpath))?;
+        .with_context(|| format!("cannot measure '{relpath}'"))?;
     if size > MAX_FILE_BYTES {
         return Ok(WorkspaceFileContent {
             path: relpath,

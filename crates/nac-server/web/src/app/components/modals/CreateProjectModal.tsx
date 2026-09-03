@@ -30,6 +30,7 @@ import { LightModelSection, type LightSelection } from "@/app/components/modals/
 import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
+import { SessionBehaviorPicker } from "@/app/components/modals/SessionBehaviorPicker";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { resolveCatalogModel } from "@/app/lib/catalog";
@@ -56,7 +57,12 @@ import {
   useSandboxAvailability,
   useStoreInfo,
 } from "@/app/services/queries";
-import type { BackendKind, CreateSessionRequest, SshTarget } from "@/app/types/api";
+import type {
+  BackendKind,
+  CreateSessionRequest,
+  SessionBehavior,
+  SshTarget,
+} from "@/app/types/api";
 
 type Mode = "local" | "ssh" | "sandbox";
 
@@ -116,7 +122,16 @@ export function CreateProjectModal({ open, onClose }: { open: boolean; onClose: 
   const { data: storeInfo } = useStoreInfo();
   const mounted = useExitTransition(open);
   if (!mounted) return null;
-  return <CreateProjectForm open={open} defaultCwd={storeInfo?.root_cwd ?? ""} onClose={onClose} />;
+  return (
+    <CreateProjectForm
+      // The exit transition briefly retains the form after close. Keying the
+      // two phases guarantees a rapid reopen still gets fresh launch defaults.
+      key={open ? "open" : "closing"}
+      open={open}
+      defaultCwd={storeInfo?.root_cwd ?? ""}
+      onClose={onClose}
+    />
+  );
 }
 
 /**
@@ -140,6 +155,7 @@ function CreateProjectForm({
   const createModelConfig = useCreateModelConfig();
 
   const [mode, setMode] = useState<Mode>("local");
+  const [behavior, setBehavior] = useState<SessionBehavior>("orchestrator");
   const [cwd, setCwd] = useState(defaultCwd);
   const [name, setName] = useState("");
   const [reasoning, setReasoning] = useState("");
@@ -338,8 +354,8 @@ function CreateProjectForm({
         backend = record.backend as BackendKind;
         model = record.model;
         baseUrl = record.base_url;
-        apiKeyEnv = record.api_key_env;
-        configuredEffort = record.reasoning_effort;
+        apiKeyEnv = record.api_key_env ?? null;
+        configuredEffort = record.reasoning_effort ?? null;
         defaultModelConfigId = record.config_id;
       } else {
         backend = selection.backend;
@@ -388,6 +404,8 @@ function CreateProjectForm({
     // The location is the project's, so the request must not restate it: the
     // server rejects a project-selected create that also carries a cwd.
     const body: CreateSessionRequest = {
+      behavior,
+      first_chat: true,
       project_id: projectId,
       model,
       base_url: baseUrl,
@@ -490,6 +508,8 @@ function CreateProjectForm({
       }
     >
       <div className="flex flex-col gap-8 md:gap-6 [&>*]:shrink-0">
+        <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+
         <div className="flex flex-col gap-1">
           <FieldLabel label="Environment" hint="Where NAC runs commands and accesses files." />
           <div className="flex items-start gap-3">

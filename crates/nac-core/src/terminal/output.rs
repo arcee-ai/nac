@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,10 @@ pub const DEFAULT_OUTPUT_PAGE_BYTES: usize = 16 * 1024;
 pub const MAX_OUTPUT_PAGE_BYTES: usize = 64 * 1024;
 const OUTPUT_CHUNK_COALESCE_BYTES: usize = 32 * 1024;
 const MAX_RETAINED_CHUNKS_PER_ARTIFACT: usize = 16 * 1024;
+// Artifact records have fixed metadata even when a command emits no bytes.
+// Bound their cardinality independently of the byte quotas so a production-
+// lived direct session cannot grow forever by running zero-output commands.
+const MAX_RETAINED_ARTIFACTS_PER_SESSION: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandOutputLimits {
@@ -127,15 +131,39 @@ pub(crate) struct OutputPreview {
 pub struct OutputRegistry {
     inner: Arc<Mutex<RegistryInner>>,
     limits: CommandOutputLimits,
+    max_artifacts: usize,
+}
+
+/// Pins one output artifact while a command or terminal can still append to
+/// it. Dropping the lease settles the artifact, after which the registry may
+/// evict it to make room for newer output metadata.
+pub struct OutputArtifactLease {
+    registry: OutputRegistry,
+    output_id: String,
+}
+
+impl OutputArtifactLease {
+    pub fn output_id(&self) -> &str {
+        &self.output_id
+    }
+}
+
+impl Drop for OutputArtifactLease {
+    fn drop(&mut self) {
+        self.registry.settle(&self.output_id);
+    }
 }
 
 struct RegistryInner {
     artifacts: HashMap<String, Artifact>,
     retained_bytes: usize,
     next_sequence: u64,
+    next_artifact_sequence: u64,
 }
 
 struct Artifact {
+    created_sequence: u64,
+    active: bool,
     kind: ArtifactKind,
     chunks: VecDeque<OutputChunk>,
     stdout_bytes: u64,
@@ -176,25 +204,72 @@ static NEXT_OUTPUT_ID: AtomicU64 = AtomicU64::new(1);
 
 impl OutputRegistry {
     pub fn new(limits: CommandOutputLimits) -> Result<Self> {
+        Self::with_max_artifacts(limits, MAX_RETAINED_ARTIFACTS_PER_SESSION)
+    }
+
+    fn with_max_artifacts(limits: CommandOutputLimits, max_artifacts: usize) -> Result<Self> {
         let limits = limits.validate()?;
+        if max_artifacts == 0 {
+            return Err(anyhow!("command output artifact limit must be at least 1"));
+        }
         Ok(Self {
             inner: Arc::new(Mutex::new(RegistryInner {
                 artifacts: HashMap::new(),
                 retained_bytes: 0,
                 next_sequence: 1,
+                next_artifact_sequence: 1,
             })),
             limits,
+            max_artifacts,
         })
     }
 
-    pub fn create(&self, kind: ArtifactKind) -> String {
+    #[expect(
+        clippy::expect_used,
+        reason = "a poisoned output registry may contain partially applied quota bookkeeping"
+    )]
+    fn lock_inner(&self) -> MutexGuard<'_, RegistryInner> {
+        self.inner.lock().expect("command output registry poisoned")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_artifact_limit_for_test(
+        limits: CommandOutputLimits,
+        max_artifacts: usize,
+    ) -> Result<Self> {
+        Self::with_max_artifacts(limits, max_artifacts)
+    }
+
+    pub fn create(&self, kind: ArtifactKind) -> Result<OutputArtifactLease> {
         let number = NEXT_OUTPUT_ID.fetch_add(1, Ordering::Relaxed);
         let prefix = match kind {
             ArtifactKind::Command => "cmdout",
             ArtifactKind::Pty => "termout",
         };
         let output_id = format!("{prefix}-{number}");
+        let mut inner = self.lock_inner();
+        if inner.artifacts.len() >= self.max_artifacts {
+            let oldest_id = inner
+                .artifacts
+                .iter()
+                .filter(|(_, artifact)| !artifact.active)
+                .min_by_key(|(_, artifact)| artifact.created_sequence)
+                .map(|(id, _)| id.clone())
+                .ok_or_else(|| {
+                    anyhow!(
+                        "command output artifact limit reached: all {} artifacts are still active",
+                        self.max_artifacts
+                    )
+                })?;
+            if let Some(expired) = inner.artifacts.remove(&oldest_id) {
+                inner.retained_bytes = inner.retained_bytes.saturating_sub(expired.retained_bytes);
+            }
+        }
+        let created_sequence = inner.next_artifact_sequence;
+        inner.next_artifact_sequence = inner.next_artifact_sequence.saturating_add(1);
         let artifact = Artifact {
+            created_sequence,
+            active: true,
             kind,
             chunks: VecDeque::new(),
             stdout_bytes: 0,
@@ -203,12 +278,17 @@ impl OutputRegistry {
             retained_bytes: 0,
             overflowed: false,
         };
-        self.inner
-            .lock()
-            .expect("command output registry poisoned")
-            .artifacts
-            .insert(output_id.clone(), artifact);
-        output_id
+        inner.artifacts.insert(output_id.clone(), artifact);
+        Ok(OutputArtifactLease {
+            registry: self.clone(),
+            output_id,
+        })
+    }
+
+    fn settle(&self, output_id: &str) {
+        if let Some(artifact) = self.lock_inner().artifacts.get_mut(output_id) {
+            artifact.active = false;
+        }
     }
 
     pub fn append(&self, output_id: &str, stream: OutputStream, mut bytes: Vec<u8>) -> Result<()> {
@@ -216,7 +296,7 @@ impl OutputRegistry {
             return Ok(());
         }
         if stream == OutputStream::Combined {
-            let inner = self.inner.lock().expect("command output registry poisoned");
+            let inner = self.lock_inner();
             let artifact = inner
                 .artifacts
                 .get(output_id)
@@ -227,7 +307,7 @@ impl OutputRegistry {
             drop(inner);
         }
 
-        let mut inner = self.inner.lock().expect("command output registry poisoned");
+        let mut inner = self.lock_inner();
         let sequence = inner.next_sequence;
         inner.next_sequence = inner.next_sequence.saturating_add(1);
         let artifact = inner
@@ -327,7 +407,7 @@ impl OutputRegistry {
     }
 
     pub fn stats(&self, output_id: &str) -> Result<ArtifactStats> {
-        let inner = self.inner.lock().expect("command output registry poisoned");
+        let inner = self.lock_inner();
         let artifact = inner
             .artifacts
             .get(output_id)
@@ -356,7 +436,7 @@ impl OutputRegistry {
                 "limit must not exceed {MAX_OUTPUT_PAGE_BYTES} bytes"
             ));
         }
-        let inner = self.inner.lock().expect("command output registry poisoned");
+        let inner = self.lock_inner();
         let artifact = inner
             .artifacts
             .get(output_id)
@@ -405,7 +485,7 @@ impl OutputRegistry {
         output_id: &str,
         max_chars: usize,
     ) -> Result<((String, bool), (String, bool))> {
-        let inner = self.inner.lock().expect("command output registry poisoned");
+        let inner = self.lock_inner();
         let artifact = inner
             .artifacts
             .get(output_id)
@@ -443,7 +523,7 @@ impl OutputRegistry {
         requested_start: u64,
         max_chars: usize,
     ) -> Result<OutputPreview> {
-        let inner = self.inner.lock().expect("command output registry poisoned");
+        let inner = self.lock_inner();
         let artifact = inner
             .artifacts
             .get(output_id)
@@ -463,7 +543,7 @@ impl OutputRegistry {
     }
 
     pub fn clear(&self) {
-        let mut inner = self.inner.lock().expect("command output registry poisoned");
+        let mut inner = self.lock_inner();
         inner.artifacts.clear();
         inner.retained_bytes = 0;
     }
@@ -474,6 +554,15 @@ impl OutputRegistry {
             .lock()
             .expect("command output registry poisoned")
             .retained_bytes
+    }
+
+    #[cfg(test)]
+    pub fn artifact_count(&self) -> usize {
+        self.inner
+            .lock()
+            .expect("command output registry poisoned")
+            .artifacts
+            .len()
     }
 }
 
@@ -607,12 +696,8 @@ fn render_preview(
         .chars()
         .take(head_chars)
         .collect();
-    let tail_reversed: Vec<char> = String::from_utf8_lossy(&tail_source)
-        .chars()
-        .rev()
-        .take(tail_chars)
-        .collect();
-    let tail: String = tail_reversed.into_iter().rev().collect();
+    let tail_source = String::from_utf8_lossy(&tail_source);
+    let tail = char_suffix(&tail_source, tail_chars);
     (
         format!("{head}...\n...[preview truncated from {retained_len} retained bytes]...\n{tail}"),
         true,
@@ -623,9 +708,20 @@ fn truncate_decoded_preview(text: &str, max_chars: usize, retained_len: usize) -
     let head_chars = max_chars / 2;
     let tail_chars = max_chars.saturating_sub(head_chars);
     let head: String = text.chars().take(head_chars).collect();
-    let tail_reversed: Vec<char> = text.chars().rev().take(tail_chars).collect();
-    let tail: String = tail_reversed.into_iter().rev().collect();
+    let tail = char_suffix(text, tail_chars);
     format!("{head}...\n...[preview truncated from {retained_len} retained bytes]...\n{tail}")
+}
+
+fn char_suffix(text: &str, max_chars: usize) -> &str {
+    if max_chars == 0 {
+        return "";
+    }
+    let start = text
+        .char_indices()
+        .rev()
+        .nth(max_chars - 1)
+        .map_or(0, |(index, _)| index);
+    &text[start..]
 }
 
 fn drop_from_artifact(inner: &mut RegistryInner, output_id: &str, bytes: usize) {
@@ -679,16 +775,12 @@ fn prefix_to_unaligned_stream_boundary(artifact: &Artifact) -> Option<usize> {
             continue;
         }
         let first_for_stream = match chunk.stream {
-            OutputStream::Stdout if !saw_stdout => {
+            OutputStream::Stdout | OutputStream::Combined if !saw_stdout => {
                 saw_stdout = true;
                 true
             }
             OutputStream::Stderr if !saw_stderr => {
                 saw_stderr = true;
-                true
-            }
-            OutputStream::Combined if !saw_stdout => {
-                saw_stdout = true;
                 true
             }
             _ => false,
@@ -711,13 +803,12 @@ fn utf8_page_len(bytes: &[u8], target: usize, reaches_end: bool) -> usize {
     }
     let candidate = &bytes[..target.min(bytes.len())];
     match std::str::from_utf8(candidate) {
-        Ok(_) => candidate.len(),
         Err(error) if error.error_len().is_none() && error.valid_up_to() > 0 => error.valid_up_to(),
         Err(error) if error.error_len().is_none() => {
             let extra = bytes[target.min(bytes.len())..].iter().take(3).count();
             (target + extra).min(bytes.len())
         }
-        Err(_) => candidate.len(),
+        Ok(_) | Err(_) => candidate.len(),
     }
 }
 
@@ -768,7 +859,8 @@ mod tests {
             per_session_bytes: 1024,
         })
         .unwrap();
-        let id = registry.create(ArtifactKind::Command);
+        let id = registry.create(ArtifactKind::Command).unwrap();
+        let id = id.output_id().to_string();
         registry
             .append(&id, OutputStream::Stdout, vec![b'x'; 2048])
             .unwrap();
@@ -793,7 +885,8 @@ mod tests {
     #[test]
     fn pages_streams_and_combined_in_observed_order() {
         let registry = OutputRegistry::new(CommandOutputLimits::default()).unwrap();
-        let id = registry.create(ArtifactKind::Command);
+        let id = registry.create(ArtifactKind::Command).unwrap();
+        let id = id.output_id().to_string();
         registry
             .append(&id, OutputStream::Stdout, b"out-1\n".to_vec())
             .unwrap();
@@ -827,7 +920,8 @@ mod tests {
     #[test]
     fn paging_has_no_gaps_or_duplicates_in_any_view() {
         let registry = OutputRegistry::new(CommandOutputLimits::default()).unwrap();
-        let id = registry.create(ArtifactKind::Command);
+        let id = registry.create(ArtifactKind::Command).unwrap();
+        let id = id.output_id().to_string();
         for (stream, bytes) in [
             (OutputStream::Stdout, b"alpha".as_slice()),
             (OutputStream::Stderr, b"BRAVO".as_slice()),
@@ -873,7 +967,8 @@ mod tests {
             per_session_bytes: 12,
         })
         .unwrap();
-        let first = registry.create(ArtifactKind::Command);
+        let first = registry.create(ArtifactKind::Command).unwrap();
+        let first = first.output_id().to_string();
         registry
             .append(&first, OutputStream::Stdout, b"0123456789".to_vec())
             .unwrap();
@@ -884,7 +979,8 @@ mod tests {
         assert_eq!(page.content, "23456789");
         assert!(page.overflowed);
 
-        let second = registry.create(ArtifactKind::Command);
+        let second = registry.create(ArtifactKind::Command).unwrap();
+        let second = second.output_id().to_string();
         registry
             .append(&second, OutputStream::Stderr, b"abcdefgh".to_vec())
             .unwrap();
@@ -905,7 +1001,8 @@ mod tests {
     #[test]
     fn generated_pages_preserve_multibyte_text() {
         let registry = OutputRegistry::new(CommandOutputLimits::default()).unwrap();
-        let id = registry.create(ArtifactKind::Command);
+        let id = registry.create(ArtifactKind::Command).unwrap();
+        let id = id.output_id().to_string();
         registry
             .append(&id, OutputStream::Stdout, "a€b".as_bytes().to_vec())
             .unwrap();
@@ -921,7 +1018,8 @@ mod tests {
     #[test]
     fn preview_budget_counts_unicode_scalars_not_bytes() {
         let registry = OutputRegistry::new(CommandOutputLimits::default()).unwrap();
-        let id = registry.create(ArtifactKind::Command);
+        let id = registry.create(ArtifactKind::Command).unwrap();
+        let id = id.output_id().to_string();
         registry
             .append(&id, OutputStream::Stdout, "éé".as_bytes().to_vec())
             .unwrap();
@@ -933,13 +1031,21 @@ mod tests {
     }
 
     #[test]
+    fn character_suffix_preserves_utf8_boundaries_and_order() {
+        assert_eq!(char_suffix("a€🙂z", 0), "");
+        assert_eq!(char_suffix("a€🙂z", 2), "🙂z");
+        assert_eq!(char_suffix("a€🙂z", 8), "a€🙂z");
+    }
+
+    #[test]
     fn quota_eviction_advances_to_a_utf8_boundary() {
         let registry = OutputRegistry::new(CommandOutputLimits {
             per_command_bytes: 4,
             per_session_bytes: 4,
         })
         .unwrap();
-        let id = registry.create(ArtifactKind::Command);
+        let id = registry.create(ArtifactKind::Command).unwrap();
+        let id = id.output_id().to_string();
         registry
             .append(&id, OutputStream::Stdout, "€€".as_bytes().to_vec())
             .unwrap();
@@ -952,7 +1058,8 @@ mod tests {
     #[test]
     fn tiny_alternating_writes_have_a_bounded_chunk_count() {
         let registry = OutputRegistry::new(CommandOutputLimits::default()).unwrap();
-        let id = registry.create(ArtifactKind::Command);
+        let id = registry.create(ArtifactKind::Command).unwrap();
+        let id = id.output_id().to_string();
         for index in 0..=MAX_RETAINED_CHUNKS_PER_ARTIFACT {
             let stream = if index % 2 == 0 {
                 OutputStream::Stdout
@@ -971,9 +1078,52 @@ mod tests {
     }
 
     #[test]
+    fn zero_output_artifact_metadata_has_a_cardinality_bound() {
+        let registry =
+            OutputRegistry::with_artifact_limit_for_test(CommandOutputLimits::default(), 4)
+                .unwrap();
+        let oldest_lease = registry.create(ArtifactKind::Command).unwrap();
+        let oldest = oldest_lease.output_id().to_string();
+        drop(oldest_lease);
+        let mut newest = oldest.clone();
+        for _ in 0..4 {
+            let lease = registry.create(ArtifactKind::Command).unwrap();
+            newest = lease.output_id().to_string();
+        }
+
+        assert_eq!(registry.artifact_count(), 4);
+        assert!(registry.stats(&oldest).is_err());
+        assert!(registry.stats(&newest).is_ok());
+        assert_eq!(registry.retained_bytes(), 0);
+    }
+
+    #[test]
+    fn active_artifacts_are_pinned_and_full_active_registry_fails_closed() {
+        let registry =
+            OutputRegistry::with_artifact_limit_for_test(CommandOutputLimits::default(), 2)
+                .unwrap();
+        let live = registry.create(ArtifactKind::Pty).unwrap();
+        let live_id = live.output_id().to_string();
+        let settled = registry.create(ArtifactKind::Command).unwrap();
+        let settled_id = settled.output_id().to_string();
+        drop(settled);
+
+        let replacement = registry.create(ArtifactKind::Command).unwrap();
+        assert!(registry.stats(&live_id).is_ok());
+        assert!(registry.stats(&settled_id).is_err());
+        assert!(registry.create(ArtifactKind::Command).is_err());
+
+        drop(replacement);
+        let newest = registry.create(ArtifactKind::Command).unwrap();
+        assert!(registry.stats(&live_id).is_ok());
+        assert!(registry.stats(newest.output_id()).is_ok());
+    }
+
+    #[test]
     fn clear_expires_output_ids() {
         let registry = OutputRegistry::new(CommandOutputLimits::default()).unwrap();
-        let id = registry.create(ArtifactKind::Pty);
+        let id = registry.create(ArtifactKind::Pty).unwrap();
+        let id = id.output_id().to_string();
         registry
             .append(&id, OutputStream::Combined, b"hello".to_vec())
             .unwrap();
@@ -988,7 +1138,8 @@ mod tests {
             per_session_bytes: 5,
         })
         .unwrap();
-        let id = registry.create(ArtifactKind::Command);
+        let id = registry.create(ArtifactKind::Command).unwrap();
+        let id = id.output_id().to_string();
         registry
             .append(&id, OutputStream::Stdout, vec![0xE2])
             .unwrap();

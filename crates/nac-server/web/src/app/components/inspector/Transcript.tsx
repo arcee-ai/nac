@@ -23,6 +23,7 @@ import {
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
+import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -65,8 +66,9 @@ import {
   pushLocalEvent,
   setOptimisticUserPrompt,
   useActivity,
-  useCancelArmed,
   useFinishedToolCalls,
+  usePrimaryToolEvents,
+  useCancelArmed,
   useLiveThreads,
   useOptimisticUserPrompt,
   useRunError,
@@ -112,6 +114,7 @@ export function TranscriptRecoveryNotice({ warning }: { warning?: string | null 
  */
 function resendTargetIndex(turns: TranscriptTurn[]): number | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (turns[index]?.kind === "delegated-completion") return null;
     if (turns[index]?.kind === "user") return index;
   }
   return null;
@@ -121,6 +124,7 @@ function resendTargetIndex(turns: TranscriptTurn[]): number | null {
 function lastUserText(turns: TranscriptTurn[]): string | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
+    if (turn.kind === "delegated-completion") return null;
     if (turn.kind === "user") return turn.text;
   }
   return null;
@@ -137,12 +141,13 @@ export function Transcript({
   onFocusPanel,
   errorNotice = null,
 }: TranscriptProps) {
-  const running = useRunning();
-  const stopping = useCancelArmed();
+  const running = useRunning(sessionId);
+  const stopping = useCancelArmed(sessionId);
   const activity = useActivity();
   const error = useRunError();
   const liveThreads = useLiveThreads();
   const finishedToolCalls = useFinishedToolCalls();
+  const primaryToolEvents = usePrimaryToolEvents();
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
   const optimisticPrompt = useOptimisticUserPrompt();
@@ -207,8 +212,10 @@ export function Transcript({
   // straight back, which is what keeps the memoized rows from re-rendering.
   const snapshotTurns = useMemo(
     () =>
-      perfTime("buildTranscript", () => buildTranscript(snapshot, liveThreads, finishedToolCalls)),
-    [snapshot, liveThreads, finishedToolCalls],
+      perfTime("buildTranscript", () =>
+        buildTranscript(snapshot, liveThreads, finishedToolCalls, primaryToolEvents),
+      ),
+    [snapshot, liveThreads, finishedToolCalls, primaryToolEvents],
   );
   // Prefer the live active_run copy; fall back to the optimistic prompt set at
   // Send so the bubble is already above the model pill before the round-trip.
@@ -339,6 +346,7 @@ export function Transcript({
   const isMobile = useIsMobile();
 
   const model = snapshot?.metadata.model ?? "";
+  const readOnly = snapshot?.lineage != null;
   // A revision is captured per finished run, so each model turn carries what
   // its own run changed instead of one running total for the whole checkout.
   const turnRevisions = useMemo(() => revisionsByTurn(turns, revisions), [turns, revisions]);
@@ -509,6 +517,9 @@ export function Transcript({
 
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {
+              if (turn.kind === "delegated-completion") {
+                return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
+              }
               if (turn.kind === "user") {
                 return (
                   <UserMessage
@@ -518,8 +529,9 @@ export function Transcript({
                     timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
                     messageIndex={turn.messageIndex}
                     actionsDisabled={actionsBusy}
-                    onRefresh={refreshIndex === index ? resend : null}
-                    onRevert={openRevert}
+                    readOnly={readOnly}
+                    onRefresh={!readOnly && refreshIndex === index ? resend : null}
+                    onRevert={readOnly ? null : openRevert}
                   />
                 );
               }
@@ -530,6 +542,7 @@ export function Transcript({
               let precedingUser: Extract<TranscriptTurn, { kind: "user" }> | null = null;
               for (let prior = index - 1; prior >= 0; prior -= 1) {
                 const candidate = turns[prior];
+                if (candidate?.kind === "delegated-completion") break;
                 if (candidate?.kind === "user") {
                   precedingUserIndex = prior;
                   precedingUser = candidate;
@@ -557,16 +570,21 @@ export function Transcript({
                   userMessageIndex={precedingUser?.messageIndex}
                   userText={precedingUser?.text}
                   actionsDisabled={actionsBusy}
+                  readOnly={readOnly}
                   onRefresh={
-                    precedingUserIndex != null && refreshIndex === precedingUserIndex
+                    !readOnly && precedingUserIndex != null && refreshIndex === precedingUserIndex
                       ? resend
                       : null
                   }
-                  onRevert={openRevert}
-                  onFork={createFork}
-                  forks={(snapshot?.forks ?? []).filter(
-                    (entry) => entry.source_message_idx === turn.messageIndex,
-                  )}
+                  onRevert={readOnly ? null : openRevert}
+                  onFork={readOnly ? null : createFork}
+                  forks={
+                    readOnly
+                      ? []
+                      : (snapshot?.forks ?? []).filter(
+                          (entry) => entry.source_message_idx === turn.messageIndex,
+                        )
+                  }
                   onOpenFork={openFork}
                   onDismissFork={dismissForkMarker}
                   snapshotRevision={

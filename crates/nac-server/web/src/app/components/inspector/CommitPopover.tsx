@@ -52,7 +52,7 @@ export function CommitPopover({
   const [message, setMessage] = useState("");
 
   const isMobile = useIsMobile();
-  const running = useRunning();
+  const running = useRunning(sessionId);
   const toast = useToast();
   const commit = useCommitWorkspace(sessionId);
 

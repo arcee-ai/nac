@@ -1,9 +1,10 @@
 use std::{
     ffi::OsString,
-    io::{self, IsTerminal, Write},
+    io::{self, IsTerminal, Read, Write},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     process,
+    sync::Arc,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -52,7 +53,10 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
-#[allow(clippy::large_enum_variant)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Clap owns the closed root command payloads and boxing would complicate derive wiring"
+)]
 enum RootCommand {
     /// Manage ChatGPT credentials used by Codex models
     #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
@@ -68,6 +72,9 @@ enum RootCommand {
 
     #[command(name = "__worker", hide = true)]
     ManagedWorker(ManagedWorkerCli),
+
+    #[command(name = "__github-credential", hide = true)]
+    GitHubCredential(GitHubCredentialCli),
 }
 
 #[derive(Args)]
@@ -115,6 +122,14 @@ struct ServerCli {
     /// Defaults to the running nac-web executable.
     #[arg(long)]
     worker_executable: Option<PathBuf>,
+
+    /// Explicit versioned Managed NAC host configuration document.
+    ///
+    /// Omit this for ordinary NAC. `NAC_MANAGED_CONFIG` is consulted only when
+    /// the flag is absent so managed containers can mount the document without
+    /// changing local defaults.
+    #[arg(long)]
+    managed_config: Option<PathBuf>,
 
     /// Open the dashboard in the default browser after listening.
     ///
@@ -198,6 +213,18 @@ struct UpgradeCli {
 
 #[derive(Args)]
 struct ManagedWorkerCli {
+    /// Internal Managed NAC host-secret root used for per-command snapshots.
+    #[arg(long, hide = true)]
+    managed_secret_root: Option<PathBuf>,
+
+    /// Internal Managed NAC GitHub App client ID for worker command auth.
+    #[arg(long, hide = true, requires = "managed_secret_root")]
+    managed_github_client_id: Option<String>,
+
+    /// Internal persistent owner home used by worker commands.
+    #[arg(long, hide = true, requires = "managed_secret_root")]
+    managed_home_root: Option<PathBuf>,
+
     /// Internal workspace cwd used for managed worker path resolution.
     #[arg(long, hide = true)]
     workspace_cwd: Option<PathBuf>,
@@ -229,6 +256,18 @@ struct ManagedWorkerCli {
 
     #[command(flatten)]
     sandbox: SandboxArgs,
+}
+
+#[derive(Args)]
+struct GitHubCredentialCli {
+    #[arg(long, hide = true)]
+    state_root: PathBuf,
+
+    #[arg(long, hide = true)]
+    client_id: String,
+
+    #[arg(hide = true)]
+    operation: String,
 }
 
 #[derive(clap::Args)]
@@ -326,6 +365,10 @@ struct ModelArgs {
     /// Persisted api_key_env selector snapshot transported to a managed worker.
     #[arg(long = "api-key-env", hide = true)]
     api_key_env: Option<String>,
+
+    /// Trusted operator-mounted API key file transported to a managed worker.
+    #[arg(long = "managed-api-key-file", hide = true)]
+    trusted_api_key_file: Option<PathBuf>,
 
     /// Internal extra headers snapshot transport (JSON object) used by managed workers.
     #[arg(
@@ -426,12 +469,7 @@ struct SandboxArgs {
 async fn main() {
     if let Err(error) = run().await {
         eprintln!("Error: {error:#}");
-        let code = if nac_core::runtime::is_managed_worker_cleanup_incomplete(&error) {
-            nac_core::runtime::MANAGED_WORKER_CLEANUP_INCOMPLETE_EXIT
-        } else {
-            1
-        };
-        process::exit(code);
+        process::exit(1);
     }
 }
 
@@ -440,10 +478,54 @@ async fn run() -> Result<()> {
     match cli.command {
         None => run_server(cli.server).await,
         Some(RootCommand::ManagedWorker(worker)) => run_managed_worker(worker).await,
+        Some(RootCommand::GitHubCredential(helper)) => run_github_credential(helper).await,
         Some(RootCommand::CodexAuth(auth)) => run_codex_auth_cli(auth).await,
         Some(RootCommand::ArceeAuth(auth)) => run_arcee_auth_cli(auth).await,
         Some(RootCommand::Upgrade(upgrade)) => run_upgrade_cli(upgrade).await,
     }
+}
+
+async fn run_github_credential(cli: GitHubCredentialCli) -> Result<()> {
+    if cli.operation != "get" {
+        return Ok(());
+    }
+    let mut input = String::new();
+    io::stdin()
+        .read_to_string(&mut input)
+        .context("failed to read Git credential request")?;
+    if let Some(token) = resolve_github_credential(&cli, &input).await? {
+        println!("username=x-access-token");
+        println!("password={}", token.secret());
+    }
+    Ok(())
+}
+
+async fn resolve_github_credential(
+    cli: &GitHubCredentialCli,
+    input: &str,
+) -> Result<Option<nac_managed::GitHubAccessToken>> {
+    let mut protocol = None;
+    let mut host = None;
+    for line in input.lines() {
+        if let Some((name, value)) = line.split_once('=') {
+            match name {
+                "protocol" => protocol = Some(value),
+                "host" => host = Some(value),
+                _ => {}
+            }
+        }
+    }
+    let github_host = host
+        .and_then(|host| host.split(':').next())
+        .is_some_and(|host| host.eq_ignore_ascii_case("github.com"));
+    if protocol != Some("https") || !github_host {
+        return Ok(None);
+    }
+    let auth = nac_managed::ManagedGitHubAuth::new(&cli.state_root, cli.client_id.clone())?;
+    let token = auth.current_token().await?.ok_or_else(|| {
+        anyhow!("GitHub is not connected; reconnect GitHub before using HTTPS Git")
+    })?;
+    Ok(Some(token))
 }
 
 async fn run_server(cli: ServerCli) -> Result<()> {
@@ -456,10 +538,16 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
     let root_cwd = resolve_project_directory(&launch_cwd, cli.directory.as_deref(), cli.yes)?;
     eprintln!("project: {}", root_cwd.display());
+    let managed_config_path = cli
+        .managed_config
+        .or_else(|| std::env::var_os("NAC_MANAGED_CONFIG").map(PathBuf::from));
+    let managed_host =
+        nac_managed::ManagedHostConfig::load_optional(managed_config_path.as_deref())?;
     let manager = SessionManager::new(ServerOptions {
         root_cwd,
         store_path: cli.store_path,
         worker_executable: cli.worker_executable,
+        managed_host,
     })?;
     // Fire-and-forget models.dev catalog overlay refresh (4h cadence,
     // ETag-revalidated, never on picker/resume/validation paths).
@@ -619,6 +707,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
                 .api_key_env
                 .map(OptionalModelOption::Value)
                 .unwrap_or_default(),
+            trusted_api_key_file: cli.model.trusted_api_key_file,
             extra_headers: cli.model.extra_headers,
             light_model: None,
         },
@@ -644,7 +733,30 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
             identity_file: cli.ssh_identity_file,
         },
     };
-    runtime::run_managed_worker(runtime::build_managed_worker_config(options, &config).await?).await
+    let mut run_config = runtime::build_managed_worker_config(options, &config).await?;
+    let secret_store = cli
+        .managed_secret_root
+        .as_ref()
+        .map(nac_managed::HostSecretStore::new);
+    let github = match (
+        cli.managed_secret_root.as_ref(),
+        cli.managed_github_client_id,
+    ) {
+        (Some(root), Some(client_id)) => {
+            Some(nac_managed::ManagedGitHubAuth::new(root, client_id)?)
+        }
+        (_, None) => None,
+        (None, Some(_)) => unreachable!("clap requires a managed secret root"),
+    };
+    let command_environment = secret_store.map(|secret_store| {
+        Arc::new(nac_managed::ManagedCommandEnvironmentProvider::new(
+            Some(secret_store),
+            github,
+            cli.managed_home_root,
+        )) as Arc<dyn nac_contracts::CommandEnvironmentProvider>
+    });
+    run_config.set_command_environment_provider(command_environment);
+    runtime::run_managed_worker(run_config).await
 }
 fn internal_sandbox_mounts(args: &SandboxArgs) -> Result<Vec<(PathBuf, PathBuf, bool)>> {
     let mut mounts = Vec::new();
@@ -656,14 +768,11 @@ fn internal_sandbox_mounts(args: &SandboxArgs) -> Result<Vec<(PathBuf, PathBuf, 
             let host = PathBuf::from(pair[0].clone());
             let guest = PathBuf::from(pair[1].clone());
             if !host.exists() {
-                return Err(anyhow!(
-                    "invalid mount source '{}': path does not exist",
-                    host.display()
-                ));
+                return Err(anyhow!("mount source '{}' does not exist", host.display()));
             }
             if !guest.is_absolute() {
                 return Err(anyhow!(
-                    "invalid mount target '{}': must be an absolute path inside the sandbox",
+                    "mount target '{}' must be an absolute path inside the sandbox",
                     guest.display()
                 ));
             }
@@ -686,7 +795,7 @@ async fn run_codex_auth_cli(cli: CodexAuthCli) -> Result<()> {
         None => {
             let mut root = Cli::command();
             root.find_subcommand_mut("codex-auth")
-                .expect("codex-auth command must exist")
+                .ok_or_else(|| anyhow!("codex-auth command is missing from the CLI definition"))?
                 .print_help()?;
             println!();
             Ok(())
@@ -715,7 +824,7 @@ async fn run_arcee_auth_cli(cli: ArceeAuthCli) -> Result<()> {
         None => {
             let mut root = Cli::command();
             root.find_subcommand_mut("arcee-auth")
-                .expect("arcee-auth command must exist")
+                .ok_or_else(|| anyhow!("arcee-auth command is missing from the CLI definition"))?
                 .print_help()?;
             println!();
             Ok(())
@@ -1108,6 +1217,59 @@ thread_timeout_secs = 7200
         for (args, expected) in cases {
             assert_eq!(parse_server(args).bind_addr(), expected.parse().unwrap());
         }
+    }
+
+    #[test]
+    fn managed_configuration_is_explicit_and_ordinary_server_cli_remains_unmanaged() {
+        let ordinary = parse_server(&["nac-web"]);
+        assert!(ordinary.managed_config.is_none());
+
+        let managed = parse_server(&["nac-web", "--managed-config", "/etc/nac/managed.toml"]);
+        assert_eq!(
+            managed.managed_config.as_deref(),
+            Some(std::path::Path::new("/etc/nac/managed.toml"))
+        );
+    }
+
+    #[tokio::test]
+    async fn github_credential_helper_is_https_github_scoped_and_returns_the_current_token() {
+        let root = std::env::temp_dir().join(format!(
+            "nac-github-helper-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let auth = nac_managed::ManagedGitHubAuth::new(&root, "Iv1.test").unwrap();
+        auth.store_test_authorization("helper-access-canary", "helper-refresh-canary", u64::MAX)
+            .unwrap();
+        let cli = GitHubCredentialCli {
+            state_root: root.clone(),
+            client_id: "Iv1.test".to_string(),
+            operation: "get".to_string(),
+        };
+
+        let token = resolve_github_credential(
+            &cli,
+            "protocol=https\nhost=github.com\npath=arcee-ai/repo.git\n\n",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(token.secret(), "helper-access-canary");
+        assert!(resolve_github_credential(
+            &cli,
+            "protocol=https\nhost=example.com\npath=arcee-ai/repo.git\n\n"
+        )
+        .await
+        .unwrap()
+        .is_none());
+        assert!(
+            resolve_github_credential(&cli, "protocol=http\nhost=github.com\n\n")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

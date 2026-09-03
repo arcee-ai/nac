@@ -79,7 +79,7 @@ pub fn dispatch_definition(
             for entry in &catalog {
                 description.push_str(&format!("\n- {}: {}", entry.name, entry.description));
                 if let Some(compatibility) = &entry.compatibility {
-                    description.push_str(&format!(" (compatibility: {})", compatibility));
+                    description.push_str(&format!(" (compatibility: {compatibility})"));
                 }
             }
 
@@ -193,6 +193,10 @@ pub fn parse_dispatch_args(
 /// Select the model client a dispatch runs with. A weight is only parsed
 /// when a light model is configured, so `light` routes to it and everything
 /// else runs the orchestrator's own model.
+#[expect(
+    clippy::expect_used,
+    reason = "dispatch parsing accepts light weight only when a light client is configured"
+)]
 pub(crate) fn select_dispatch_client(
     params: &ParsedDispatchParams,
     runtime: &ToolRuntime,
@@ -250,56 +254,26 @@ pub async fn execute_parsed_dispatch(
     // on top of the episode it just wrote.
     let handoff_watermark = read_handoff_watermark(runtime, &session_id, &thread_name).await;
 
-    let worker_runtime = runtime.clone();
-    let worker_client = client.clone();
-    let worker_session_id = session_id.clone();
-    let worker_thread_name = thread_name.clone();
-    let worker_dispatch_id = dispatch_id.clone();
-    let worker_action = action.clone();
-    let worker_source_threads = source_threads.clone();
-    let worker_scheduled_skills = scheduled_skills.clone();
-    let worker = tokio::spawn(async move {
-        let result = run_worker(
-            &worker_runtime,
-            &worker_client,
-            WorkerInvocation {
-                session_id: &worker_session_id,
-                thread_name: &worker_thread_name,
-                dispatch_id: &worker_dispatch_id,
-                action: &worker_action,
-                source_threads: &worker_source_threads,
-                scheduled_skills: &worker_scheduled_skills,
-                timeout_secs,
-            },
-            cancellation,
-        )
-        .await;
-        if let Ok(run) = &result {
-            if let Some(error) = &run.cleanup_error {
-                worker_runtime
-                    .active_threads
-                    .record_cleanup_failure(error.clone());
-            }
-        }
-        close_thread_dispatch(
-            &worker_runtime,
-            &worker_session_id,
-            &worker_thread_name,
-            &worker_dispatch_id,
-        );
-        result
-    });
-    let result = match worker.await {
-        Ok(result) => result,
-        Err(error) => Err(std::io::Error::other(format!(
-            "worker task failed: {error}"
-        ))),
-    };
+    let result = run_worker(
+        runtime,
+        client,
+        WorkerInvocation {
+            session_id: &session_id,
+            thread_name: &thread_name,
+            dispatch_id: &dispatch_id,
+            action: &action,
+            source_threads: &source_threads,
+            scheduled_skills: &scheduled_skills,
+            timeout_secs,
+        },
+        cancellation,
+    )
+    .await;
 
     let run = match result {
         Ok(run) => run,
         Err(error) => {
-            let message = format!("Failed to spawn thread '{}': {}", thread_name, error);
+            let message = format!("Failed to spawn thread '{thread_name}': {error}");
             record_dispatch_failure(
                 runtime,
                 &session_id,
@@ -418,11 +392,10 @@ fn classify_dispatch_failure(
 
     if run.timed_out {
         let mut message = match run.timeout_reason.as_deref() {
-            Some(reason) => format!(
-                "Thread '{}' timed out after {}s.\n{}",
-                thread_name, timeout_secs, reason
-            ),
-            None => format!("Thread '{}' timed out after {}s", thread_name, timeout_secs),
+            Some(reason) => {
+                format!("Thread '{thread_name}' timed out after {timeout_secs}s.\n{reason}")
+            }
+            None => format!("Thread '{thread_name}' timed out after {timeout_secs}s"),
         };
         if let Some(cleanup_error) = &run.cleanup_error {
             message.push('\n');
@@ -565,8 +538,7 @@ pub async fn execute_dispatch(
     if !mark_thread_active(runtime, &thread_name, &dispatch_id) {
         return ToolResult {
             content: (format!(
-                "Thread '{}' is already running; retry after the current dispatch completes.",
-                thread_name
+                "Thread '{thread_name}' is already running; retry after the current dispatch completes."
             ))
             .into(),
             is_error: true,
@@ -592,13 +564,13 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             Ok(Ok(threads)) => threads,
             Ok(Err(error)) => {
                 return ToolResult {
-                    content: (format!("Error listing threads: {}", error)).into(),
+                    content: (format!("Error listing threads: {error}")).into(),
                     is_error: true,
                 }
             }
             Err(join_error) => {
                 return ToolResult {
-                    content: (format!("Internal error listing threads: {}", join_error)).into(),
+                    content: (format!("Internal error listing threads: {join_error}")).into(),
                     is_error: true,
                 }
             }
@@ -618,7 +590,7 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             thread.name, thread.episode_count, thread.created_at, thread.updated_at
         ));
         if let Some(action) = thread.latest_action.as_deref() {
-            output.push_str(&format!(" | last action: {}", action));
+            output.push_str(&format!(" | last action: {action}"));
         }
     }
 
@@ -647,15 +619,12 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
             is_error: false,
         },
         Ok(Err(error)) => ToolResult {
-            content: (format!("Error reading thread '{}': {}", thread_name, error)).into(),
+            content: (format!("Error reading thread '{thread_name}': {error}")).into(),
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: (format!(
-                "Internal error reading thread '{}': {}",
-                thread_name, join_error
-            ))
-            .into(),
+            content: (format!("Internal error reading thread '{thread_name}': {join_error}"))
+                .into(),
             is_error: true,
         },
     }
@@ -674,8 +643,7 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
     if is_thread_active(runtime, &thread_name) {
         return ToolResult {
             content: (format!(
-                "Thread '{}' is currently running; wait for it to finish before deleting it.",
-                thread_name
+                "Thread '{thread_name}' is currently running; wait for it to finish before deleting it."
             ))
             .into(),
             is_error: true,
@@ -688,27 +656,20 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
     match tokio::task::spawn_blocking(move || store::delete_thread(&store_path, &sid, &tname)).await
     {
         Ok(Ok(true)) => ToolResult {
-            content: (format!(
-                "Deleted thread '{}' and its retained episodes.",
-                thread_name
-            ))
-            .into(),
+            content: (format!("Deleted thread '{thread_name}' and its retained episodes.")).into(),
             is_error: false,
         },
         Ok(Ok(false)) => ToolResult {
-            content: (format!("Thread '{}' does not exist in this session.", thread_name)).into(),
+            content: (format!("Thread '{thread_name}' does not exist in this session.")).into(),
             is_error: true,
         },
         Ok(Err(error)) => ToolResult {
-            content: (format!("Error deleting thread '{}': {}", thread_name, error)).into(),
+            content: (format!("Error deleting thread '{thread_name}': {error}")).into(),
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: (format!(
-                "Internal error deleting thread '{}': {}",
-                thread_name, join_error
-            ))
-            .into(),
+            content: (format!("Internal error deleting thread '{thread_name}': {join_error}"))
+                .into(),
             is_error: true,
         },
     }
@@ -756,7 +717,7 @@ fn resolve_scheduled_skills(
     for skill in &skills {
         if !registry.has_skill(skill) {
             return Err(ToolResult {
-                content: (format!("Error: unknown skill '{}'", skill)).into(),
+                content: (format!("Error: unknown skill '{skill}'")).into(),
                 is_error: true,
             });
         }
@@ -767,7 +728,7 @@ fn resolve_scheduled_skills(
 
 fn resolve_thread_timeout_secs(args: &Value, default_timeout_secs: u64) -> u64 {
     args.get("timeout")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .unwrap_or(default_timeout_secs)
         .max(MIN_THREAD_TIMEOUT_SECS)
 }
@@ -1195,7 +1156,7 @@ mod tests {
         assert!(mark_thread_active(&runtime, "worker", "dispatch-a"));
         runtime
             .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "for A")
+            .queue(&runtime.store_path, "test-session", "worker", "for A", None)
             .unwrap()
             .unwrap();
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
@@ -1211,7 +1172,7 @@ mod tests {
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
         let reused = runtime
             .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "for B")
+            .queue(&runtime.store_path, "test-session", "worker", "for B", None)
             .unwrap()
             .unwrap();
         assert_eq!(reused.dispatch_id, "dispatch-b");
@@ -1219,7 +1180,13 @@ mod tests {
         close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-b");
         assert!(runtime
             .active_threads
-            .queue(&runtime.store_path, "test-session", "worker", "too late",)
+            .queue(
+                &runtime.store_path,
+                "test-session",
+                "worker",
+                "too late",
+                None,
+            )
             .unwrap()
             .is_none());
         let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());

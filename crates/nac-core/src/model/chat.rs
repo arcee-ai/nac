@@ -15,56 +15,61 @@ pub(super) fn parse_completions_response(
     let choices = value
         .get("choices")
         .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("No choices in response from {}", url))?;
+        .ok_or_else(|| anyhow!("No choices in response from {url}"))?;
     let choice = choices
         .first()
-        .ok_or_else(|| anyhow!("No choices in response from {}", url))?;
+        .ok_or_else(|| anyhow!("No choices in response from {url}"))?;
     let message = choice
         .get("message")
-        .ok_or_else(|| anyhow!("Response from {} did not include a message", url))?;
+        .ok_or_else(|| anyhow!("Response from {url} did not include a message"))?;
     let tool_calls = match message.get("tool_calls") {
         Some(Value::Array(_)) => Some(
             serde_json::from_value::<Vec<ToolCall>>(message["tool_calls"].clone())
-                .map_err(|e| anyhow!("Failed to parse tool calls from {}: {}", url, e))?,
+                .map_err(|e| anyhow!("Failed to parse tool calls from {url}: {e}"))?,
         ),
         Some(Value::Null) | None => None,
         Some(_) => {
             return Err(anyhow!(
-                "Response from {} included tool_calls in an unsupported format",
-                url
+                "Response from {url} included tool_calls in an unsupported format"
             ))
         }
     };
 
     let usage = value.get("usage").map(|u| {
-        let prompt_tokens = u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let prompt_tokens = u
+            .get("prompt_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         let prompt_details = u.get("prompt_tokens_details");
         let cache_read = u
             .get("cached_tokens")
-            .and_then(|v| v.as_u64())
-            .or_else(|| u.get("prompt_cache_hit_tokens").and_then(|v| v.as_u64()))
+            .and_then(serde_json::Value::as_u64)
+            .or_else(|| {
+                u.get("prompt_cache_hit_tokens")
+                    .and_then(serde_json::Value::as_u64)
+            })
             .or_else(|| {
                 prompt_details
                     .and_then(|details| details.get("cached_tokens"))
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
             })
             .unwrap_or(0);
         let cache_write = u
             .get("cache_write_tokens")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .or_else(|| {
                 prompt_details
                     .and_then(|details| details.get("cache_write_tokens"))
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
             })
             .unwrap_or(0);
         let reasoning_tokens = u
             .get("reasoning_tokens")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .or_else(|| {
                 u.get("completion_tokens_details")
                     .and_then(|d| d.get("reasoning_tokens"))
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
             })
             .unwrap_or(0);
         TokenUsage {
@@ -73,14 +78,14 @@ pub(super) fn parse_completions_response(
                 .saturating_sub(cache_write),
             output_tokens: u
                 .get("completion_tokens")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0),
             cache_read_tokens: cache_read,
             cache_write_tokens: cache_write,
             reasoning_tokens,
             orchestrator_context_tokens: u
                 .get("total_tokens")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0),
             cost: TokenCostMicros::default(),
         }

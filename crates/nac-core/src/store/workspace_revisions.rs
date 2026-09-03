@@ -13,7 +13,9 @@ pub struct WorkspaceRevisionRecord {
     pub run_id: String,
     pub commit_sha: String,
     /// The commit this revision is shown as a change against.
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub base_sha: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub branch: Option<String>,
     /// Prompt that started the run, for telling revisions apart in a list.
     pub label: String,
@@ -26,6 +28,7 @@ pub struct WorkspaceRevisionRecord {
     /// like at this point in the conversation". `None` on rows written before
     /// the column existed.
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub transcript_len: Option<u64>,
 }
 
@@ -138,6 +141,26 @@ pub fn latest_workspace_revision(
              ORDER BY id DESC
              LIMIT 1",
             params![session_id],
+            decode_row,
+        )
+        .optional()?)
+}
+
+pub fn workspace_revision_for_run(
+    path: &Path,
+    session_id: &str,
+    run_id: &str,
+) -> Result<Option<WorkspaceRevisionRecord>> {
+    let conn = open_runtime_connection(path)?;
+    Ok(conn
+        .query_row(
+            "SELECT id, session_id, run_id, commit_sha, base_sha, branch, label,
+                    additions, deletions, changed_files, created_at, transcript_len
+             FROM workspace_revisions
+             WHERE session_id = ?1 AND run_id = ?2
+             ORDER BY id DESC
+             LIMIT 1",
+            params![session_id, run_id],
             decode_row,
         )
         .optional()?)

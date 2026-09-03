@@ -369,7 +369,7 @@ pub(crate) fn current() -> RwLockReadGuard<'static, ModelCatalog> {
     CATALOG
         .get_or_init(|| RwLock::new(ModelCatalog::load()))
         .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Resolve via the process-global catalog. Never fails for unknown models.
@@ -498,7 +498,7 @@ pub(crate) fn reload() {
     let mut catalog = CATALOG
         .get_or_init(|| RwLock::new(ModelCatalog::load()))
         .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *catalog = ModelCatalog::load();
     CATALOG_VERSION.fetch_add(1, Ordering::SeqCst);
 }

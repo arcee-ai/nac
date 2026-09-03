@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
@@ -17,8 +17,11 @@ use crate::types::{Message, ToolCall, ToolDefinition};
 
 mod compaction;
 mod dag;
+mod failed_tool_round;
 pub(crate) mod preview;
+mod prompt_rendering;
 mod tool_exec;
+mod transcript_state;
 
 #[cfg(test)]
 mod compaction_integration_tests;
@@ -34,32 +37,26 @@ pub(crate) const COMPACTION_PROMPT_POLICY_VERSION_FOR_TEST: u32 = compaction::PR
 pub(crate) use compaction::{
     CompactionCompletion, CompactionError, CompactionLifecycle, CompactionResult,
 };
-use compaction::{CompactionState, PreparedProviderView};
+use compaction::{CompactionPolicy, CompactionState, PreparedProviderView};
+use failed_tool_round::failed_tool_round;
 pub(crate) use preview::key_arg_preview;
 use preview::*;
+pub(crate) use prompt_rendering::{
+    render_direct_system_prompt, render_direct_with_orchestrator_system_prompt,
+    render_general_child_system_prompt,
+};
+use prompt_rendering::{render_orchestrator_system_prompt, render_worker_system_prompt};
 use tool_exec::execute_tools_parallel;
+pub(crate) use transcript_state::truncate_incomplete_tool_turn;
+use transcript_state::{
+    acquire_transcript_operation_lease_and_snapshot, append_to_initial_system_message,
+    incomplete_tool_turn_index, missing_tool_result_ids, transcripts_match,
+};
 
 const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
-const WORKER_SYSTEM_PROMPT: &str = include_str!("prompts/nac_worker.md");
-const ORCHESTRATOR_SYSTEM_PROMPT: &str = include_str!("prompts/nac_orchestrator.md");
 pub(crate) const RUN_CANCELLED_MARKER: &str = "[run cancelled by user]";
-
-fn render_worker_system_prompt(working_directory: &str) -> String {
-    let (prefix, suffix) = WORKER_SYSTEM_PROMPT
-        .split_once("{working_directory}")
-        .expect("worker system prompt must contain {working_directory}");
-    format!("{prefix}{working_directory}{suffix}")
-}
-
-fn render_orchestrator_system_prompt(working_directory: &str, thread_timeout_secs: u64) -> String {
-    let (prefix, remainder) = ORCHESTRATOR_SYSTEM_PROMPT
-        .split_once("{working_directory}")
-        .expect("orchestrator system prompt must contain {working_directory}");
-    let (middle, suffix) = remainder
-        .split_once("{thread_timeout_secs}")
-        .expect("orchestrator system prompt must contain {thread_timeout_secs}");
-    format!("{prefix}{working_directory}{middle}{thread_timeout_secs}{suffix}")
-}
+pub(crate) const RUN_FAILED_PARTIAL_MARKER: &str =
+    "[run failed after this partial assistant response]";
 
 /// What a turn that answered with neither prose nor a tool call is asked next.
 ///
@@ -80,71 +77,6 @@ Reply with your answer as ordinary text, or issue the tool call you meant to mak
 /// the orchestrator sees it on the `thread` tool result.
 const REPEATED_TOOL_FAILURE_LIMIT: usize = 3;
 
-fn canonical_tool_arguments(raw: &str) -> String {
-    serde_json::from_str::<serde_json::Value>(raw)
-        .ok()
-        .and_then(|value| serde_json::to_string(&value).ok())
-        .unwrap_or_else(|| raw.to_string())
-}
-
-fn tool_call_arguments<'a>(calls: &'a [ToolCall], call_id: &str) -> &'a str {
-    calls
-        .iter()
-        .find(|call| call.id == call_id)
-        .map(|call| call.function.arguments.as_str())
-        .unwrap_or("")
-}
-
-fn tool_result_error_identity(result: &ToolResult) -> String {
-    let Some(text) = result.content.as_text() else {
-        return "error".to_string();
-    };
-    match serde_json::from_str::<serde_json::Value>(text) {
-        Ok(value) => match value.get("error") {
-            Some(error) => serde_json::to_string(error).unwrap_or_else(|_| error.to_string()),
-            None => serde_json::to_string(&value).unwrap_or_else(|_| text.to_string()),
-        },
-        Err(_) => text.to_string(),
-    }
-}
-
-struct FailedToolRound {
-    signature: String,
-    detail: String,
-}
-
-fn failed_tool_round(
-    calls: &[ToolCall],
-    results: &[(String, String, ToolResult)],
-) -> Option<FailedToolRound> {
-    let mut signature_parts = Vec::new();
-    let mut detail_parts = Vec::new();
-    for (id, name, result) in results {
-        if !result.is_error {
-            continue;
-        }
-        let arguments = tool_call_arguments(calls, id);
-        let error = tool_result_error_identity(result);
-        signature_parts.push(format!(
-            "{name}\t{}\t{error}",
-            canonical_tool_arguments(arguments)
-        ));
-        detail_parts.push(format!(
-            "{name} {} {error}",
-            preview_tool_args(name, arguments)
-        ));
-    }
-    if signature_parts.is_empty() {
-        return None;
-    }
-    signature_parts.sort();
-    detail_parts.sort();
-    Some(FailedToolRound {
-        signature: signature_parts.join("\n"),
-        detail: preview(&detail_parts.join("; "), 400),
-    })
-}
-
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -153,6 +85,9 @@ fn duration_millis(duration: Duration) -> u64 {
 pub enum AgentMode {
     Worker,
     Orchestrator,
+    /// Persistent top-level coding loop. This shares the lower model/tool
+    /// engine with workers but not their bounded dispatch prompt or lifecycle.
+    Direct,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RunPromptCommitStatus {
@@ -163,6 +98,10 @@ pub(crate) enum RunPromptCommitStatus {
 
 pub struct AgentConfig {
     pub mode: AgentMode,
+    /// Authoritative immutable behavior for a persistent top-level session.
+    /// Fresh sessions are constructed before their row exists, so callers
+    /// must not rely on a store reread to distinguish the two direct modes.
+    pub session_behavior: Option<crate::sessions::SessionBehavior>,
     pub store_path: PathBuf,
     pub session_id: Option<String>,
     pub orchestrator_compaction_threshold: Option<u64>,
@@ -186,6 +125,7 @@ pub struct AgentConfig {
     pub command_output_limits: crate::terminal::CommandOutputLimits,
     /// Light worker model client; `None` keeps single-model dispatch.
     pub light_client: Option<Arc<ModelClient>>,
+    pub permission_rules: Vec<crate::permissions::PermissionRule>,
 }
 
 /// Light-model addendum to the orchestrator system prompt: names the light
@@ -205,14 +145,17 @@ pub struct Agent {
     client: ModelClient,
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
+    admission_controlled_tools: bool,
+    direct_primary: bool,
+    web_retrieval_eligible: bool,
     compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
     thread_name: Option<String>,
     steering_dispatch_id: Option<String>,
     appended_steering_ids: HashSet<i64>,
-    /// Orchestrator transcript log sink (DB-direct transcript workset, see
-    /// store/transcript.rs). Present only for orchestrator agents with a
+    /// Top-level transcript log sink (DB-direct transcript workset, see
+    /// store/transcript.rs). Present for persistent primary agents with a
     /// session id — workers (separate `__worker` processes) never log.
     transcript_log: Option<TranscriptLogSink>,
     /// Exclusive upper bound of transcript log rows this process has
@@ -222,6 +165,16 @@ pub struct Agent {
     /// delete them from stale in-memory boundaries (shared-store recovery,
     /// issue #146).
     committed_log_len: u64,
+    /// Start index of a direct-inbox append whose blocking transaction has
+    /// been submitted but whose canonical User rows have not yet been adopted
+    /// into `messages`. Tokio task abort cannot cancel that transaction, so
+    /// terminal normalization must reload rather than delete this exact tail.
+    direct_inbox_append_start: Option<u64>,
+    /// Set before an atomic steering transcript/ack commit is submitted and
+    /// cleared only after its result is adopted. If the run task is aborted,
+    /// cancellation waits on the transcript writer and reloads whichever
+    /// durable outcome actually won.
+    steering_append_pending: bool,
     /// User-facing notice set only when restore repaired a validly encoded
     /// non-contiguous transcript tail.
     transcript_recovery_warning: Option<String>,
@@ -235,6 +188,7 @@ pub struct Agent {
     /// flight. Deltas remain live-only during an ordinary run, but keeping a
     /// local copy lets cancellation commit the text the user already saw.
     partial_stream: StdMutex<ModelStreamDelta>,
+    permission_rules: Vec<crate::permissions::PermissionRule>,
 }
 
 /// Path-backed writer and identity needed to append to the orchestrator
@@ -246,128 +200,66 @@ struct TranscriptLogSink {
     store_path: PathBuf,
 }
 
-fn append_to_initial_system_message(messages: &mut [Message], extra: &str) {
-    if extra.is_empty() {
-        return;
-    }
-    if let Some(Message::System { content }) = messages.first_mut() {
-        content.push_str("\n\n");
-        content.push_str(extra);
-    }
-}
-
-/// Trim a trailing assistant tool-call turn whose tool results never arrived
-/// (a crash or cancel between the assistant message and the tool-result
-/// batch). Shared by the session cancel path and the transcript-log restore
-/// merge, which also removes the matching log tail.
-pub(crate) fn truncate_incomplete_tool_turn(messages: &mut Vec<Message>) {
-    if let Some(index) = incomplete_tool_turn_index(messages) {
-        messages.truncate(index);
-    }
-}
-
-fn incomplete_tool_turn_index(messages: &[Message]) -> Option<usize> {
-    let index = messages.iter().rposition(|message| {
-        matches!(
-            message,
-            Message::Assistant {
-                tool_calls: Some(tool_calls),
-                ..
-            } if !tool_calls.is_empty()
-        )
-    })?;
-    let Message::Assistant {
-        tool_calls: Some(tool_calls),
-        ..
-    } = &messages[index]
-    else {
-        return None;
-    };
-    let expected = tool_calls
-        .iter()
-        .map(|tool_call| tool_call.id.as_str())
-        .collect::<HashSet<_>>();
-    let observed = messages[index + 1..]
-        .iter()
-        .filter_map(|message| match message {
-            Message::Tool { tool_call_id, .. } => Some(tool_call_id.as_str()),
-            _ => None,
-        })
-        .collect::<HashSet<_>>();
-    (!expected.is_subset(&observed)).then_some(index)
-}
-
-fn missing_tool_result_ids(messages: &[Message]) -> Vec<String> {
-    let Some(index) = incomplete_tool_turn_index(messages) else {
-        return Vec::new();
-    };
-    let Message::Assistant {
-        tool_calls: Some(tool_calls),
-        ..
-    } = &messages[index]
-    else {
-        return Vec::new();
-    };
-    let observed = messages[index + 1..]
-        .iter()
-        .filter_map(|message| match message {
-            Message::Tool { tool_call_id, .. } => Some(tool_call_id.as_str()),
-            _ => None,
-        })
-        .collect::<HashSet<_>>();
-    tool_calls
-        .iter()
-        .filter(|tool_call| !observed.contains(tool_call.id.as_str()))
-        .map(|tool_call| tool_call.id.clone())
-        .collect()
-}
-
-fn transcripts_match(left: &[Message], right: &[Message]) -> Result<bool> {
-    Ok(serde_json::to_vec(left)? == serde_json::to_vec(right)?)
-}
-
-async fn acquire_transcript_operation_lease_and_snapshot(
-    store_path: PathBuf,
-    writer: Arc<crate::store::TranscriptLogWriter>,
-    session_id: String,
-) -> Result<(crate::sessions::SessionOperationLease, Vec<Message>)> {
-    tokio::task::spawn_blocking(move || -> Result<_> {
-        let lease = crate::sessions::SessionOperationLease::try_acquire(&store_path, &session_id)
-            .map_err(anyhow::Error::new)?;
-        let messages = writer.read_snapshot_messages(&session_id)?;
-        Ok((lease, messages))
-    })
-    .await
-    .map_err(|error| anyhow!("transcript log operation lease task failed: {error}"))?
-}
-
 impl Agent {
     pub fn with_config(client: ModelClient, config: AgentConfig) -> Result<Self> {
         let client = client.with_prompt_cache_key(config.session_id.clone());
         let cwd = config.working_directory.clone();
         let thread_timeout_secs = config.thread_timeout_secs;
         let mode = config.mode;
-        let compaction = if mode == AgentMode::Orchestrator {
+        let traditional_child = if mode == AgentMode::Direct {
+            config
+                .session_id
+                .as_deref()
+                .map(|session_id| {
+                    crate::store::load_traditional_child(&config.store_path, session_id)
+                })
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        let direct_behavior = if mode == AgentMode::Direct && traditional_child.is_none() {
+            config
+                .session_behavior
+                .or_else(|| {
+                    config.session_id.as_deref().and_then(|session_id| {
+                        crate::sessions::load_session(&config.store_path, session_id)
+                            .ok()
+                            .map(|snapshot| snapshot.behavior)
+                    })
+                })
+                .unwrap_or(crate::sessions::SessionBehavior::Direct)
+        } else {
+            crate::sessions::SessionBehavior::Direct
+        };
+        let compaction = if matches!(mode, AgentMode::Orchestrator | AgentMode::Direct) {
             config.session_id.clone().map(|session_id| {
                 CompactionState::new(
                     config.store_path.clone(),
                     session_id,
                     config.orchestrator_compaction_threshold,
+                    match mode {
+                        AgentMode::Direct => CompactionPolicy::Direct,
+                        AgentMode::Orchestrator => CompactionPolicy::Orchestrator,
+                        AgentMode::Worker => unreachable!("workers do not own compaction state"),
+                    },
                 )
             })
         } else {
             None
         };
-        // Construction-time gate for the transcript log: orchestrator-only,
-        // and only with a session id (mirrors the compaction gate). Worker
-        // agents run in separate `__worker` processes and must never write
-        // `__orchestrator__` transcript rows.
+        // Construction-time gate for the transcript log: persistent primary
+        // agents only, and only with a session id (mirrors the compaction
+        // gate). Workers run in separate `__worker` processes and must never
+        // append top-level transcript rows.
         let transcript_log = match (mode, config.session_id.clone()) {
-            (AgentMode::Orchestrator, Some(session_id)) => Some(TranscriptLogSink {
-                writer: Arc::new(crate::store::TranscriptLogWriter::new(&config.store_path)?),
-                session_id,
-                store_path: config.store_path.clone(),
-            }),
+            (AgentMode::Orchestrator | AgentMode::Direct, Some(session_id)) => {
+                Some(TranscriptLogSink {
+                    writer: Arc::new(crate::store::TranscriptLogWriter::new(&config.store_path)?),
+                    session_id,
+                    store_path: config.store_path.clone(),
+                })
+            }
             _ => None,
         };
 
@@ -386,19 +278,49 @@ impl Agent {
                     config.light_client.as_deref(),
                 ),
             ),
+            AgentMode::Direct => match traditional_child.as_ref() {
+                Some(child) => (
+                    render_general_child_system_prompt(&cwd, &child.description),
+                    tools::worker_tool_definitions(client.supports_image_tool_results()),
+                ),
+                None => (
+                    if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
+                        render_direct_with_orchestrator_system_prompt(&cwd)
+                    } else {
+                        render_direct_system_prompt(&cwd)
+                    },
+                    if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
+                        tools::direct_with_orchestrator_tool_definitions(
+                            client.supports_image_tool_results(),
+                        )
+                    } else {
+                        tools::direct_tool_definitions(client.supports_image_tool_results())
+                    },
+                ),
+            },
         };
-        if let Some(light) = config.light_client.as_deref() {
-            system_prompt.push_str(&light_model_prompt_guidance(light));
+        if config.mode == AgentMode::Orchestrator {
+            if let Some(light) = config.light_client.as_deref() {
+                system_prompt.push_str(&light_model_prompt_guidance(light));
+            }
         }
-        if config.mode == AgentMode::Worker {
+        if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
+        }
+        let web_retrieval_eligible = mode == AgentMode::Direct && traditional_child.is_none();
+        if web_retrieval_eligible
+            && tool_defs.iter().any(|definition| {
+                tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str())
+            })
+        {
+            anyhow::bail!("web_search and web_fetch are reserved first-party capability names");
         }
 
         let mut messages = vec![Message::System {
             content: system_prompt,
         }];
         if let Some(agents_md_message) = config.agents_md_message {
-            if config.mode == AgentMode::Worker {
+            if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
                 append_to_initial_system_message(&mut messages, &agents_md_message);
             } else {
                 messages.push(Message::System {
@@ -420,6 +342,8 @@ impl Agent {
         }
 
         let local_paths = crate::paths::PathContext::new(&config.config_cwd);
+        let workspace_lease_identity =
+            crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
         let backend = crate::sandbox::select_execution_backend(
             config.ssh,
             config.sandbox,
@@ -431,6 +355,21 @@ impl Agent {
                 config.command_output_limits,
             )?,
             AgentMode::Orchestrator => crate::terminal::TerminalManager::new(),
+            AgentMode::Direct => crate::terminal::TerminalManager::for_direct(),
+        };
+        terminal_manager
+            .configure_workspace_authority(config.store_path.clone(), workspace_lease_identity);
+        let allowed_tools = Arc::new(
+            tool_defs
+                .iter()
+                .map(|definition| definition.function.name.clone())
+                .collect(),
+        );
+        let goal_runtime = match (mode, config.session_id.as_ref(), traditional_child.as_ref()) {
+            (AgentMode::Direct, Some(session_id), None) => Some(Arc::new(
+                crate::goals::GoalRuntime::new(config.store_path.clone(), session_id.clone()),
+            )),
+            _ => None,
         };
         // The initial messages are exactly the snapshot blob written at
         // session creation; the log tail starts at this length.
@@ -439,6 +378,9 @@ impl Agent {
             client,
             messages,
             tool_defs,
+            admission_controlled_tools: mode == AgentMode::Direct,
+            direct_primary: mode == AgentMode::Direct,
+            web_retrieval_eligible,
             compaction,
             tool_runtime: ToolRuntime {
                 workspace_cwd: config.workspace_cwd,
@@ -452,11 +394,16 @@ impl Agent {
                 mcp: config.mcp,
                 skills: config.skills,
                 terminal_manager,
-                active_tools: Arc::new(crate::tools::ActiveToolRegistry::default()),
                 command_cancellation: crate::tools::ThreadCancellation::default(),
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
                 light_client: config.light_client,
+                allowed_tools: Some(allowed_tools),
+                permission_broker: None,
+                goal_runtime,
+                command_environment: None,
+                web_credential: None,
+                command_redactions: Arc::new(StdMutex::new(HashMap::new())),
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
@@ -464,11 +411,65 @@ impl Agent {
             appended_steering_ids: HashSet::new(),
             transcript_log,
             committed_log_len,
+            direct_inbox_append_start: None,
+            steering_append_pending: false,
             transcript_recovery_warning: None,
             interrupted_run_recovery: None,
             last_usage: None,
             partial_stream: StdMutex::new(ModelStreamDelta::default()),
+            permission_rules: config.permission_rules,
         })
+    }
+
+    /// Attach an optional process-environment provider after session
+    /// construction. This does not alter the model-visible capability set.
+    pub fn set_command_environment_provider(
+        &mut self,
+        provider: Option<Arc<dyn nac_contracts::CommandEnvironmentProvider>>,
+    ) {
+        self.tool_runtime.command_environment = provider;
+    }
+
+    /// Build one immutable model-request capability view. The Exa credential
+    /// and the tool names are replaced together before the request and the
+    /// resulting runtime is cloned into exactly that response's tool round.
+    fn refresh_model_request_capabilities(&mut self) -> Result<Vec<ToolDefinition>> {
+        let credential = if self.web_retrieval_eligible {
+            crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV)?
+        } else {
+            None
+        };
+        Ok(self.install_model_request_capabilities(credential))
+    }
+
+    fn install_model_request_capabilities(
+        &mut self,
+        credential: Option<String>,
+    ) -> Vec<ToolDefinition> {
+        let credential = credential
+            .filter(|_| self.web_retrieval_eligible)
+            .map(crate::tools::web::ExaCredential::new)
+            .map(Arc::new);
+        let mut definitions = self.tool_defs.clone();
+        if credential.is_some() {
+            definitions.extend(crate::tools::web::definitions());
+        }
+        self.tool_runtime.allowed_tools = Some(Arc::new(
+            definitions
+                .iter()
+                .map(|definition| definition.function.name.clone())
+                .collect(),
+        ));
+        self.tool_runtime.web_credential = credential;
+        definitions
+    }
+
+    #[cfg(test)]
+    fn model_request_capabilities_for_test(
+        &mut self,
+        credential: Option<&str>,
+    ) -> Vec<ToolDefinition> {
+        self.install_model_request_capabilities(credential.map(str::to_string))
     }
 
     #[cfg(test)]
@@ -481,6 +482,7 @@ impl Agent {
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Worker,
+                session_behavior: None,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
                 orchestrator_compaction_threshold: None,
@@ -500,6 +502,7 @@ impl Agent {
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 light_client: None,
+                permission_rules: Vec::new(),
             },
         )
         .expect("default test agent config must be valid")
@@ -526,15 +529,12 @@ impl Agent {
         self.tool_runtime.skills.clone()
     }
 
-    /// Fold in-flight worker spend into `last_usage` so a cancel mid-tools
-    /// still persists the tokens the UI already showed. Zero readings are
-    /// dropped rather than stored as a completed usage.
-    pub(crate) async fn commit_pending_usage(&mut self) {
-        let mut worker_usage = self.tool_runtime.worker_usage.lock().await;
-        let mut accumulated = self.last_usage.take().unwrap_or_default();
-        accumulated.add_cost_saturating(&worker_usage);
-        *worker_usage = TokenUsage::default();
-        self.last_usage = accumulated.has_spend().then_some(accumulated);
+    pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
+        self.tool_runtime.terminal_manager.clone()
+    }
+
+    pub(crate) fn goal_runtime(&self) -> Option<Arc<crate::goals::GoalRuntime>> {
+        self.tool_runtime.goal_runtime.clone()
     }
 
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
@@ -546,14 +546,23 @@ impl Agent {
         prompt: &str,
         run_id: &SessionRunId,
         prompt_commit: watch::Sender<RunPromptCommitStatus>,
+        inbox_item_id: Option<i64>,
     ) -> Result<String> {
-        self.send_inner(prompt, Some((run_id, prompt_commit))).await
+        if let Some(goals) = &self.tool_runtime.goal_runtime {
+            goals.begin_run(run_id.as_str());
+        }
+        self.send_inner(prompt, Some((run_id, prompt_commit, inbox_item_id)))
+            .await
     }
 
     async fn send_inner(
         &mut self,
         prompt: &str,
-        session_run: Option<(&SessionRunId, watch::Sender<RunPromptCommitStatus>)>,
+        session_run: Option<(
+            &SessionRunId,
+            watch::Sender<RunPromptCommitStatus>,
+            Option<i64>,
+        )>,
     ) -> Result<String> {
         self.emit(AgentEvent::RunStarted {
             thread_name: self.thread_name.clone(),
@@ -569,10 +578,13 @@ impl Agent {
             content: prompt.to_string(),
         };
         let prompt_result = match session_run.as_ref() {
-            Some((run_id, _)) => self.push_and_log_run_prompt(prompt_message, run_id).await,
+            Some((run_id, _, inbox_item_id)) => {
+                self.push_and_log_run_prompt(prompt_message, run_id, *inbox_item_id)
+                    .await
+            }
             None => self.push_and_log(prompt_message).await,
         };
-        if let Some((_, prompt_commit)) = session_run {
+        if let Some((_, prompt_commit, _)) = session_run {
             prompt_commit.send_replace(if prompt_result.is_ok() {
                 RunPromptCommitStatus::Committed
             } else {
@@ -584,7 +596,7 @@ impl Agent {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
             });
-            self.tool_runtime.terminal_manager.remove_all().await;
+            self.record_terminal_cleanup_error().await;
             return Err(error);
         }
 
@@ -593,7 +605,7 @@ impl Agent {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
             });
-            self.tool_runtime.terminal_manager.remove_all().await;
+            self.record_terminal_cleanup_error().await;
             return Err(error);
         }
 
@@ -604,13 +616,15 @@ impl Agent {
         let mut repeated_failures = 0usize;
         let mut accumulated_usage = TokenUsage::default();
         loop {
-            self.append_pending_steering_checked().await?;
+            self.append_pending_guidance_checked().await?;
+            let request_tool_defs = self.refresh_model_request_capabilities()?;
             let needs_compaction_view = self
                 .compaction
                 .as_mut()
                 .is_some_and(|compaction| !compaction.is_passthrough(&self.messages));
             let provider_view = if needs_compaction_view {
-                self.prepare_provider_view(&mut accumulated_usage).await
+                self.prepare_provider_view(&mut accumulated_usage, &request_tool_defs)
+                    .await
             } else {
                 PreparedProviderView {
                     messages: self.messages.clone(),
@@ -638,7 +652,7 @@ impl Agent {
                     let mut partial = self
                         .partial_stream
                         .lock()
-                        .expect("partial model stream state");
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     partial.text.push_str(&delta.text);
                     partial.reasoning.push_str(&delta.reasoning);
                 }
@@ -652,7 +666,7 @@ impl Agent {
             .then_some(&push_delta);
             let turn = self
                 .client
-                .send_turn_streaming(provider_view.messages, self.tool_defs.clone(), delta_sink)
+                .send_turn_streaming(provider_view.messages, request_tool_defs, delta_sink)
                 .await;
             // Whatever arrived in the last partial window still belongs on screen.
             deltas.flush();
@@ -669,7 +683,7 @@ impl Agent {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     });
-                    self.tool_runtime.terminal_manager.remove_all().await;
+                    self.record_terminal_cleanup_error().await;
                     return Err(error);
                 }
             };
@@ -686,6 +700,9 @@ impl Agent {
                 usage.replace_context(context);
                 accumulated_usage.replace_context(context);
                 self.last_usage = Some(accumulated_usage.clone());
+                if let Some(goals) = &self.tool_runtime.goal_runtime {
+                    goals.update_usage(&accumulated_usage);
+                }
                 self.emit(AgentEvent::TokenUsageUpdated {
                     thread_name: self.thread_name.clone(),
                     usage,
@@ -708,7 +725,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
 
@@ -739,7 +756,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
             self.clear_partial_stream();
@@ -753,7 +770,7 @@ impl Agent {
             }
 
             if !has_tool_calls {
-                if self.append_pending_steering_checked().await? > 0 {
+                if self.append_pending_guidance_checked().await? > 0 {
                     continue;
                 }
                 let answer = response
@@ -774,7 +791,7 @@ impl Agent {
                                 thread_name: self.thread_name.clone(),
                                 message: error.to_string(),
                             });
-                            self.tool_runtime.terminal_manager.remove_all().await;
+                            self.record_terminal_cleanup_error().await;
                             return Err(error);
                         }
                         continue;
@@ -789,7 +806,7 @@ impl Agent {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     });
-                    self.tool_runtime.terminal_manager.remove_all().await;
+                    self.record_terminal_cleanup_error().await;
                     return Err(error);
                 };
                 self.emit(AgentEvent::AssistantMessage {
@@ -798,10 +815,16 @@ impl Agent {
                     usage: Some(accumulated_usage.clone()),
                 });
                 self.last_usage = Some(accumulated_usage.clone());
+                if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
+                    self.emit(AgentEvent::Error {
+                        thread_name: self.thread_name.clone(),
+                        message: error.to_string(),
+                    });
+                    return Err(error);
+                }
                 self.emit(AgentEvent::RunFinished {
                     thread_name: self.thread_name.clone(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
                 return Ok(content);
             }
 
@@ -816,6 +839,7 @@ impl Agent {
                 self.client.clone(),
                 self.event_sink.clone(),
                 self.thread_name.clone(),
+                self.admission_controlled_tools,
             )
             .await;
             let repeated_identical_failure = match failed_tool_round(&tool_calls, &results) {
@@ -844,18 +868,12 @@ impl Agent {
                 finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
 
             if self.tool_runtime.command_cancellation.is_cancelled() {
-                {
-                    let mut worker_usage = self.tool_runtime.worker_usage.lock().await;
-                    accumulated_usage.add_cost_saturating(&worker_usage);
-                    *worker_usage = TokenUsage::default();
-                }
-                self.last_usage = accumulated_usage.has_spend().then_some(accumulated_usage);
                 let error = anyhow!("worker command cancelled");
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
 
@@ -868,9 +886,10 @@ impl Agent {
                 *wu = TokenUsage::default();
             }
 
-            self.last_usage = accumulated_usage
-                .has_spend()
-                .then_some(accumulated_usage.clone());
+            self.last_usage = Some(accumulated_usage.clone());
+            if let Some(goals) = &self.tool_runtime.goal_runtime {
+                goals.update_usage(&accumulated_usage);
+            }
 
             // Transcript commit point (tool results): the complete parallel
             // batch is logged atomically before any of it enters the
@@ -882,7 +901,7 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
             if repeated_identical_failure {
@@ -897,9 +916,15 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
+        }
+    }
+
+    pub(crate) fn end_goal_run(&self, run_id: &SessionRunId) {
+        if let Some(goals) = &self.tool_runtime.goal_runtime {
+            goals.end_run(run_id.as_str());
         }
     }
 
@@ -907,38 +932,13 @@ impl Agent {
         self.tool_runtime.command_cancellation.clone()
     }
 
-    pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
-        self.tool_runtime.terminal_manager.clone()
-    }
-
-    pub(crate) fn active_tools_handle(&self) -> Arc<crate::tools::ActiveToolRegistry> {
-        Arc::clone(&self.tool_runtime.active_tools)
-    }
-
-    pub(crate) async fn confirm_command_shutdown(&self) -> Result<()> {
-        let one_shot = self
-            .tool_runtime
-            .terminal_manager
-            .wait_for_one_shot_shutdown()
-            .await;
-        self.tool_runtime.active_tools.wait_for_shutdown().await;
-        let sessions = self
-            .tool_runtime
-            .terminal_manager
-            .terminate_sessions()
-            .await;
-        let mut failures = Vec::new();
-        if let Err(error) = one_shot {
-            failures.push(error.to_string());
-        }
-        if let Err(error) = sessions {
-            failures.push(error.to_string());
-        }
-        if failures.is_empty() {
-            Ok(())
-        } else {
-            Err(anyhow!(failures.join("\n")))
-        }
+    /// Install a fresh cancellation scope for one top-level run. Persistent
+    /// direct sessions reuse the agent across turns, so a cancelled command
+    /// token must never poison the next run.
+    pub(crate) fn begin_run_cancellation(&mut self) -> crate::tools::ThreadCancellation {
+        let cancellation = crate::tools::ThreadCancellation::default();
+        self.tool_runtime.command_cancellation = cancellation.clone();
+        cancellation
     }
 
     #[cfg(test)]
@@ -967,8 +967,33 @@ impl Agent {
         self.tool_runtime.event_sink = sink;
     }
 
+    pub(crate) fn configure_permission_broker(
+        &mut self,
+        session_config_version: i64,
+    ) -> Option<Arc<crate::permissions::PermissionBroker>> {
+        if !self.direct_primary {
+            return None;
+        }
+        if let Some(existing) = &self.tool_runtime.permission_broker {
+            return Some(Arc::clone(existing));
+        }
+        let session_id = self.tool_runtime.session_id.clone()?;
+        let backend = crate::permissions::PermissionBackend::from_execution_backend(
+            self.tool_runtime.backend.as_ref(),
+        );
+        let broker = Arc::new(crate::permissions::PermissionBroker::new(
+            self.tool_runtime.store_path.clone(),
+            session_id,
+            backend,
+            session_config_version,
+            self.permission_rules.clone(),
+        ));
+        self.tool_runtime.permission_broker = Some(Arc::clone(&broker));
+        Some(broker)
+    }
+
     pub fn active_threads_handle(&self) -> Arc<crate::tools::ActiveThreadRegistry> {
-        self.tool_runtime.active_threads.clone()
+        Arc::clone(&self.tool_runtime.active_threads)
     }
 
     pub fn set_steering_dispatch_id(&mut self, dispatch_id: Option<String>) {
@@ -981,7 +1006,9 @@ impl Agent {
     /// log through the same writer for store-backed transcript reads (step
     /// 3), so reads and appends stay serialized without retaining a connection.
     pub fn transcript_log_writer(&self) -> Option<Arc<crate::store::TranscriptLogWriter>> {
-        self.transcript_log.as_ref().map(|sink| sink.writer.clone())
+        self.transcript_log
+            .as_ref()
+            .map(|sink| Arc::clone(&sink.writer))
     }
 
     pub(crate) fn transcript_recovery_warning(&self) -> Option<&str> {
@@ -1007,7 +1034,7 @@ impl Agent {
         message: Message,
         run_id: &SessionRunId,
     ) -> Result<()> {
-        self.push_and_log_run_prompt(message, run_id).await
+        self.push_and_log_run_prompt(message, run_id, None).await
     }
 
     /// Restore a stored transcript while keeping the current system prompt.
@@ -1052,7 +1079,7 @@ impl Agent {
         };
         let mut blob_len = messages.len() as u64;
         let mut blob_len_usize = messages.len();
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         if let Some(operation_lease) = operation_lease {
             operation_lease
@@ -1065,7 +1092,7 @@ impl Agent {
         let mut _acquired_operation_lease = None;
         loop {
             let mut tail = {
-                let writer = writer.clone();
+                let writer = Arc::clone(&writer);
                 let session_id = session_id.clone();
                 tokio::task::spawn_blocking(move || writer.read_from(&session_id, blob_len))
                     .await
@@ -1087,7 +1114,7 @@ impl Agent {
             if gap.is_some() && operation_lease.is_none() && _acquired_operation_lease.is_none() {
                 let (lease, refreshed_messages) = acquire_transcript_operation_lease_and_snapshot(
                     sink.store_path.clone(),
-                    writer.clone(),
+                    Arc::clone(&writer),
                     session_id.clone(),
                 )
                 .await?;
@@ -1105,7 +1132,7 @@ impl Agent {
             }
 
             if gap.is_some() {
-                let repair_writer = writer.clone();
+                let repair_writer = Arc::clone(&writer);
                 let repair_session_id = session_id.clone();
                 let (repaired_tail, recovery) = tokio::task::spawn_blocking(move || {
                     repair_writer.read_tail_repairing_gap(&repair_session_id, blob_len)
@@ -1147,7 +1174,7 @@ impl Agent {
             {
                 let (lease, refreshed_messages) = acquire_transcript_operation_lease_and_snapshot(
                     sink.store_path.clone(),
-                    writer.clone(),
+                    Arc::clone(&writer),
                     session_id.clone(),
                 )
                 .await?;
@@ -1170,7 +1197,7 @@ impl Agent {
                 // in the write-once snapshot itself, so rewrite the snapshot
                 // and tail together while the operation lease is held.
                 if merged.len() < blob_len_usize {
-                    let repair_writer = writer.clone();
+                    let repair_writer = Arc::clone(&writer);
                     let repair_session_id = session_id.clone();
                     let repaired_messages = merged.clone();
                     tokio::task::spawn_blocking(move || {
@@ -1232,7 +1259,7 @@ impl Agent {
         operation_lease
             .validate(&sink.store_path, &sink.session_id)
             .map_err(anyhow::Error::new)?;
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
 
         let snapshot_messages = writer.read_snapshot_messages(&session_id)?;
@@ -1325,7 +1352,7 @@ impl Agent {
             return Ok(false);
         };
         let from_idx = self.committed_log_len;
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         let tail = tokio::task::spawn_blocking(move || writer.read_from(&session_id, from_idx))
             .await
@@ -1343,7 +1370,7 @@ impl Agent {
         let Some(sink) = &self.transcript_log else {
             return Ok(());
         };
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         let (snapshot, tail) = tokio::task::spawn_blocking(move || {
             let snapshot = writer.read_snapshot_messages(&session_id)?;
@@ -1395,6 +1422,11 @@ impl Agent {
     /// Both terminal paths treat a normalization error as best-effort: the
     /// next restore re-normalizes the stale tail.
     pub async fn normalize_dangling_tail(&mut self) -> Result<()> {
+        if self.direct_inbox_append_start.take().is_some()
+            || std::mem::take(&mut self.steering_append_pending)
+        {
+            return self.reload_transcript_from_store().await;
+        }
         if self.durable_log_has_rows_past_own_commits().await? {
             return self.reload_transcript_from_store().await;
         }
@@ -1421,7 +1453,14 @@ impl Agent {
     /// path so the chat can retain dispatched thread cards and their persisted
     /// logs while the resulting transcript remains valid provider history.
     pub async fn append_cancellation_marker_preserving_tools(&mut self) -> Result<()> {
-        if self.durable_log_has_rows_past_own_commits().await? {
+        if self.direct_inbox_append_start.take().is_some()
+            || std::mem::take(&mut self.steering_append_pending)
+        {
+            // A direct steer delivery transaction may have committed after
+            // the run task was aborted. Its User row and delivered inbox state
+            // are one durable fact; adopt the row before adding cancellation.
+            self.reload_transcript_from_store().await?;
+        } else if self.durable_log_has_rows_past_own_commits().await? {
             // Shared-store recovery (issue #146): a peer committed rows this
             // agent never saw. Adopt the durable state instead of deleting
             // the peer's committed rows from the stale in-memory length (see
@@ -1442,6 +1481,32 @@ impl Agent {
             })
             .collect::<Vec<_>>();
         self.append_cancellation_tail(missing_results).await
+    }
+
+    /// Preserve provider output that was streamed before a direct run failed.
+    /// Combining the partial text and terminal marker into one assistant
+    /// message keeps usage/timing aligned to one visible failed response.
+    pub async fn normalize_failed_tail_preserving_partial(&mut self) -> Result<()> {
+        self.normalize_dangling_tail().await?;
+        let partial = self.take_partial_stream();
+        if partial.is_empty() {
+            return Ok(());
+        }
+        let content = if partial.text.is_empty() {
+            Some(RUN_FAILED_PARTIAL_MARKER.to_string())
+        } else {
+            Some(format!("{}\n\n{}", partial.text, RUN_FAILED_PARTIAL_MARKER))
+        };
+        self.push_and_log(Message::Assistant {
+            content,
+            reasoning_text: (!partial.reasoning.is_empty()).then_some(partial.reasoning),
+            reasoning_details: None,
+            tool_calls: None,
+            duration_ms: None,
+            model_origin: Some(self.client.model_origin()),
+            reasoning_field: None,
+        })
+        .await
     }
 
     async fn append_cancellation_tail(&mut self, mut messages: Vec<Message>) -> Result<()> {
@@ -1473,7 +1538,7 @@ impl Agent {
         *self
             .partial_stream
             .lock()
-            .expect("partial model stream state") = ModelStreamDelta::default();
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ModelStreamDelta::default();
     }
 
     fn take_partial_stream(&self) -> ModelStreamDelta {
@@ -1481,7 +1546,7 @@ impl Agent {
             &mut *self
                 .partial_stream
                 .lock()
-                .expect("partial model stream state"),
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
         )
     }
 
@@ -1495,7 +1560,7 @@ impl Agent {
         if messages.is_empty() {
             return Ok(());
         }
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         let messages = messages.to_vec();
         let batch_len = messages.len() as u64;
@@ -1539,7 +1604,7 @@ impl Agent {
         let Some(sink) = &self.transcript_log else {
             return Ok(());
         };
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         let message = message.clone();
         // Claim the row at submission, before the await — see
@@ -1578,15 +1643,23 @@ impl Agent {
         &mut self,
         message: Message,
         run_id: &SessionRunId,
+        inbox_item_id: Option<i64>,
     ) -> Result<()> {
         let idx = self.messages.len() as u64;
         if let Some(sink) = &self.transcript_log {
-            let writer = sink.writer.clone();
+            let writer = Arc::clone(&sink.writer);
             let session_id = sink.session_id.clone();
             let stored_message = message.clone();
             let run_id = run_id.to_string();
-            tokio::task::spawn_blocking(move || {
-                writer.append_run_prompt(&session_id, idx, &stored_message, &run_id)
+            tokio::task::spawn_blocking(move || match inbox_item_id {
+                Some(inbox_item_id) => writer.append_inbox_run_prompt(
+                    &session_id,
+                    idx,
+                    &stored_message,
+                    &run_id,
+                    inbox_item_id,
+                ),
+                None => writer.append_run_prompt(&session_id, idx, &stored_message, &run_id),
             })
             .await
             .map_err(|error| anyhow!("run prompt append task failed: {error}"))??;
@@ -1605,11 +1678,62 @@ impl Agent {
         Ok(())
     }
 
-    /// Append the already-staged transcript tail `self.messages[from_idx..]`
-    /// to the log (steering commit point: stage→ack→append).
-    async fn log_transcript_tail(&mut self, from_idx: usize) -> Result<()> {
-        let staged = self.messages[from_idx..].to_vec();
-        self.log_transcript_batch(from_idx as u64, &staged).await
+    /// Commit a proposed steering tail and its delivery statuses in one SQLite
+    /// transaction. The in-memory vector is adopted only after this returns,
+    /// preserving the log-first invariant even if the run is cancelled while
+    /// the blocking transaction is pending.
+    async fn commit_staged_steering(
+        &mut self,
+        from_idx: usize,
+        steering_ids: &[i64],
+        staged: &[Message],
+        session_id: &str,
+        dispatch_id: &str,
+    ) -> Result<()> {
+        let Some(sink) = &self.transcript_log else {
+            return crate::store::acknowledge_thread_steering_batch(
+                &self.tool_runtime.store_path,
+                steering_ids,
+                session_id,
+                dispatch_id,
+            );
+        };
+        if staged.is_empty() {
+            return Ok(());
+        }
+        let writer = Arc::clone(&sink.writer);
+        let sink_session_id = sink.session_id.clone();
+        let dispatch_id = dispatch_id.to_string();
+        let steering_ids = steering_ids.to_vec();
+        let batch_len = staged.len() as u64;
+        let pre_submission_committed = self.committed_log_len;
+        self.committed_log_len = self.committed_log_len.max(from_idx as u64 + batch_len);
+        let staged = staged.to_vec();
+        self.steering_append_pending = true;
+        let joined = tokio::task::spawn_blocking(move || {
+            writer.append_claimed_thread_steering(
+                &sink_session_id,
+                &dispatch_id,
+                &steering_ids,
+                from_idx as u64,
+                &staged,
+            )
+        })
+        .await;
+        self.steering_append_pending = false;
+        let committed =
+            joined.map_err(|error| anyhow!("steering transcript commit task failed: {error}"))?;
+        match committed {
+            Ok(()) => {
+                self.event_sink
+                    .emit_transcript_appended(from_idx as u64 + batch_len);
+                Ok(())
+            }
+            Err(error) => {
+                self.committed_log_len = pre_submission_committed;
+                Err(error)
+            }
+        }
     }
 
     /// Delete log rows with `idx >= from_idx` (crash/cancel normalization).
@@ -1617,7 +1741,7 @@ impl Agent {
         let Some(sink) = &self.transcript_log else {
             return Ok(());
         };
-        let writer = sink.writer.clone();
+        let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
         tokio::task::spawn_blocking(move || writer.delete_from(&session_id, from_idx))
             .await
@@ -1666,57 +1790,41 @@ impl Agent {
 
         let message_checkpoint = self.messages.len();
         let mut staged_ids = Vec::new();
+        let mut staged_messages = Vec::new();
         for record in &records {
-            if self.appended_steering_ids.insert(record.id) {
+            if !self.appended_steering_ids.contains(&record.id) {
                 staged_ids.push(record.id);
                 if thread_name.is_some() {
-                    self.messages.push(Message::User {
+                    staged_messages.push(Message::User {
                         content: format!(
                             "Steering instruction received for this worker thread. Apply it before continuing:\n\n{}",
                             record.instruction
                         ),
                     });
                 } else {
-                    self.messages.push(Message::User {
+                    staged_messages.push(Message::User {
                         content: record.instruction.clone(),
                     });
                 }
             }
         }
 
-        let steering_ids = records.iter().map(|record| record.id).collect::<Vec<_>>();
-        if let Err(error) = crate::store::acknowledge_thread_steering_batch(
-            &store_path,
-            &steering_ids,
+        self.commit_staged_steering(
+            message_checkpoint,
+            &staged_ids,
+            &staged_messages,
             &session_id,
             &dispatch_id,
-        ) {
-            self.messages.truncate(message_checkpoint);
-            for id in &staged_ids {
-                self.appended_steering_ids.remove(id);
-            }
-            return Err(error);
-        }
+        )
+        .await?;
+        self.messages.extend(staged_messages);
+        self.appended_steering_ids
+            .extend(staged_ids.iter().copied());
 
-        // Transcript commit point (steering): stage→ack→append. The staged
-        // messages are appended to the log only after the ack is durable. On
-        // log failure they are truncated from the vec — unlike the
-        // ack-failure path above, the ids stay staged because the ack is
-        // durable: the records keep their delivered status and are never
-        // redelivered. Keeping the messages would break the log-first
-        // invariant (the vec never holds an undurable message): the next
-        // append would use `idx = messages.len()` past the unlogged rows,
-        // leaving a permanent gap in the log that fails the restore merge
-        // and store-backed reads. The acked steering is thereby lost from
-        // the transcript — accepted: a transient echo is not worth a
-        // bricked session, and the durable steering records still show the
-        // delivery.
-        if let Err(error) = self.log_transcript_tail(message_checkpoint).await {
-            self.messages.truncate(message_checkpoint);
-            return Err(error);
-        }
-
-        for record in records {
+        for record in records
+            .into_iter()
+            .filter(|record| staged_ids.contains(&record.id))
+        {
             if let Some(thread_name) = &thread_name {
                 self.emit(AgentEvent::ThreadSteeringDelivered {
                     name: thread_name.clone(),
@@ -1741,9 +1849,82 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 });
-                self.tool_runtime.terminal_manager.remove_all().await;
+                self.record_terminal_cleanup_error().await;
                 Err(error)
             }
+        }
+    }
+
+    async fn append_pending_direct_inbox(&mut self) -> Result<usize> {
+        let Some(sink) = &self.transcript_log else {
+            return Ok(0);
+        };
+        let run_id = self
+            .steering_dispatch_id
+            .clone()
+            .ok_or_else(|| anyhow!("direct inbox delivery requires an active run id"))?;
+        let writer = Arc::clone(&sink.writer);
+        let session_id = sink.session_id.clone();
+        let start_idx = self.messages.len() as u64;
+        let pre_submission_committed = self.committed_log_len;
+        // Claim the possible append before spawn_blocking for the same reason
+        // as ordinary transcript appends: cancellation must recognize a row
+        // that commits after the async task is aborted as this process's row.
+        self.committed_log_len = self.committed_log_len.max(start_idx + 1);
+        self.direct_inbox_append_start = Some(start_idx);
+        let records = tokio::task::spawn_blocking(move || {
+            writer.append_pending_inbox_steers(&session_id, &run_id, start_idx)
+        })
+        .await
+        .map_err(|error| anyhow!("direct inbox append task failed: {error}"))?;
+        let records = match records {
+            Ok(records) => records,
+            Err(error) => {
+                self.direct_inbox_append_start = None;
+                self.committed_log_len = pre_submission_committed;
+                return Err(error);
+            }
+        };
+        if records.is_empty() {
+            self.direct_inbox_append_start = None;
+            self.committed_log_len = pre_submission_committed;
+            return Ok(0);
+        }
+        self.messages
+            .extend(records.iter().map(|record| Message::User {
+                content: record.content.clone(),
+            }));
+        self.committed_log_len = self.messages.len() as u64;
+        self.direct_inbox_append_start = None;
+        self.event_sink
+            .emit_transcript_appended(self.messages.len() as u64);
+        Ok(records.len())
+    }
+
+    async fn append_pending_guidance_checked(&mut self) -> Result<usize> {
+        if self.direct_primary {
+            match self.append_pending_direct_inbox().await {
+                Ok(count) => Ok(count),
+                Err(error) => {
+                    self.emit(AgentEvent::Error {
+                        thread_name: self.thread_name.clone(),
+                        message: error.to_string(),
+                    });
+                    self.record_terminal_cleanup_error().await;
+                    Err(error)
+                }
+            }
+        } else {
+            self.append_pending_steering_checked().await
+        }
+    }
+
+    async fn record_terminal_cleanup_error(&self) {
+        if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
+            self.emit(AgentEvent::Error {
+                thread_name: self.thread_name.clone(),
+                message: format!("terminal cleanup incomplete: {error:#}"),
+            });
         }
     }
 

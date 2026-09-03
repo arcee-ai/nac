@@ -1626,6 +1626,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nac-contracts"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "utoipa",
+]
+
+[[package]]
 name = "nac-core"
 version = "0.1.0"
 dependencies = [
@@ -1642,6 +1651,10 @@ dependencies = [
  "ignore",
  "image",
  "libc",
+ "nac-contracts",
+ "nac-credential-store",
+ "nac-managed",
+ "nac-process",
  "openssh-sftp-client",
  "parking_lot",
  "portable-pty",
@@ -1664,6 +1677,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "nac-credential-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fs2",
+ "libc",
+ "uuid",
+]
+
+[[package]]
+name = "nac-managed"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "nac-contracts",
+ "nac-credential-store",
+ "nac-process",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "toml",
+ "url",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "nac-process"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nac-server"
 version = "0.1.4"
 dependencies = [
@@ -1675,7 +1726,9 @@ dependencies = [
  "futures-core",
  "include_dir",
  "libc",
+ "nac-contracts",
  "nac-core",
+ "nac-managed",
  "rmcp",
  "serde",
  "serde_json",

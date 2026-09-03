@@ -148,6 +148,10 @@ pub struct EffectiveModelSettings {
     pub(crate) base_url: String,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
     pub(crate) api_key_env: Option<String>,
+    /// Trusted operator-mounted credential source. Only its path is
+    /// transported to workers; the credential value never enters argv or the
+    /// command environment.
+    pub(crate) trusted_api_key_file: Option<std::path::PathBuf>,
     pub(crate) extra_headers: std::collections::BTreeMap<String, String>,
     /// Catalog metadata resolved at construction. Drives per-response cost,
     /// effort validation/translation, and api-axis dispatch.
@@ -205,27 +209,27 @@ pub fn resolve_model_base_url(backend: BackendKind, base_url: Option<String>) ->
     let base_url = required_nonblank_setting(base_url, "base_url")?;
     let parsed = Url::parse(&base_url).map_err(|error| {
         model_configuration_error(format!(
-            "invalid model configuration: base_url '{}' is not a valid absolute URL: {}",
-            base_url, error
+            "invalid model configuration: base_url '{base_url}' is not a valid absolute URL: {error}"
         ))
     })?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err(model_configuration_error(format!(
-            "invalid model configuration: base_url '{}' must be an absolute http(s) URL with a host",
-            base_url
+            "invalid model configuration: base_url '{base_url}' must be an absolute http(s) URL with a host"
         )));
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(model_configuration_error(format!(
-            "invalid model configuration: base_url '{}' must not embed userinfo",
-            base_url
+            "invalid model configuration: base_url '{base_url}' must not embed userinfo"
         )));
     }
-    let host = parsed.host().expect("host presence checked above");
+    let host = parsed.host().ok_or_else(|| {
+        model_configuration_error(format!(
+            "invalid model configuration: base_url '{base_url}' must include a host"
+        ))
+    })?;
     if parsed.scheme() == "http" && !allows_plaintext_transport(&host) {
         return Err(model_configuration_error(format!(
-            "invalid model configuration: base_url '{}' requires HTTPS; plaintext HTTP is accepted only for loopback and private-network hosts",
-            base_url
+            "invalid model configuration: base_url '{base_url}' requires HTTPS; plaintext HTTP is accepted only for loopback and private-network hosts"
         )));
     }
     Ok(base_url)
@@ -268,9 +272,31 @@ impl EffectiveModelSettings {
             base_url,
             reasoning_effort,
             api_key_env,
+            trusted_api_key_file: None,
             extra_headers,
             resolved,
         })
+    }
+
+    pub(crate) fn with_trusted_api_key_file(
+        mut self,
+        path: Option<std::path::PathBuf>,
+    ) -> Result<Self> {
+        if path.is_some() {
+            if !super::provider_uses_api_key(self.backend) {
+                return Err(model_configuration_error(format!(
+                    "invalid model configuration: backend '{}' does not accept a trusted API-key file",
+                    self.backend
+                )));
+            }
+            if self.api_key_env.is_some() {
+                return Err(model_configuration_error(
+                    "invalid model configuration: api_key_env and a trusted API-key file are mutually exclusive",
+                ));
+            }
+        }
+        self.trusted_api_key_file = path;
+        Ok(self)
     }
 
     pub fn from_optional(
@@ -334,15 +360,13 @@ impl EffectiveModelSettings {
 fn required_nonblank_setting(value: Option<String>, name: &str) -> Result<String> {
     let value = value.ok_or_else(|| {
         model_configuration_error(format!(
-            "invalid model configuration: required setting '{}' is missing; set it in config.toml or the session settings",
-            name
+            "invalid model configuration: required setting '{name}' is missing; set it in config.toml or the session settings"
         ))
     })?;
     let normalized = value.trim();
     if normalized.is_empty() {
         return Err(model_configuration_error(format!(
-            "invalid model configuration: required setting '{}' must not be blank",
-            name
+            "invalid model configuration: required setting '{name}' must not be blank"
         )));
     }
     Ok(normalized.to_string())
@@ -533,12 +557,6 @@ impl TokenUsage {
             .saturating_add(self.output_tokens)
             .saturating_add(self.cache_read_tokens)
             .saturating_add(self.cache_write_tokens)
-    }
-
-    /// True when this record accounts for billed tokens or a priced cost.
-    /// A default/zero usage is a missing reading, not a completed one.
-    pub(crate) fn has_spend(&self) -> bool {
-        self.billable_tokens() > 0 || self.cost.total > 0
     }
 
     /// Accept a provider context total only when all represented usage fields

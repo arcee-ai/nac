@@ -1,6 +1,6 @@
 # HTTP API
 
-The HTTP contract is generated from the Rust handlers and types in the running `nac-web` process. To review the current state of the aPI, start the server, then use the live docs:
+The HTTP contract is generated from the Rust handlers and types in the running `nac-web` process. To review the current state of the API, start the server, then use the live docs:
 
 ```sh
 nac-web
@@ -42,6 +42,12 @@ same field as a filter. Selection is explicit—NAC never infers a project from
 location field, and an SSH project cannot use sandbox options. Each session
 belongs to at most one project. Project location is immutable.
 
+The web marks the required first chat with `first_chat: true`. This flag
+requires `project_id` and is an idempotent admission: concurrent first-chat
+requests for the same empty project return the same newly created primary
+session. If a primary chat already exists, its snapshot is returned instead.
+Ordinary **New chat** requests omit the flag and always create another session.
+
 `POST /projects/{project_id}/sessions` assigns an already-created session, whose
 `session_id` is the only body field. Membership is written once: a session that
 already belongs to a project returns 409, and so does one whose working
@@ -68,6 +74,85 @@ Project model defaults are copied into a new session, not read live. Later
 project edits affect only later sessions, and resume uses the session snapshot.
 Deleting a saved model configuration still referenced by a project returns
 409 and retains both the configuration and its credentials.
+
+## Direct goals
+
+`GET /sessions/{session_id}/goal` returns the current durable goal or JSON
+`null`. `POST /sessions/{session_id}/goal` creates an active generation from an
+`objective` and optional positive `token_budget`. It fails while another
+unfinished goal exists. `PATCH /sessions/{session_id}/goal/{goal_id}` uses
+`expected_version` for optimistic concurrency and can edit `objective`, set or
+clear `token_budget`, or set a user/system status. `DELETE` on the same path
+takes `expected_version` and clears the goal. These endpoints reject
+orchestrator sessions and delegated traditional children.
+
+Goal responses include the generation ID, six-state status, accumulated
+`tokens_used` and `time_used_ms`, optional budget, current run/continuation
+claim, timestamps, and version. The API accepts `active`, `paused`, `blocked`,
+`usage_limited`, and `budget_limited` as user/system status controls; users
+clear rather than setting `complete`. The model's native `update_goal` tool is
+the path that marks genuine completion or blockage.
+
+Goal creation during a run owned by another NAC process returns `409 Conflict`.
+The server never creates an unbound goal or guesses a cross-process mid-run
+token baseline.
+
+## Session behaviors and direct inbox
+
+`POST /sessions` accepts `behavior` as `orchestrator`, `direct`, or
+`direct-with-orchestrator`. It is persisted and immutable. Omitting it selects
+`orchestrator` for compatibility. Session summaries and detail metadata expose
+the value. A delegated session detail response also includes `lineage` with a
+`traditional-child` or `managed-orchestrator` kind, parent and root session IDs,
+and the immutable relationship description.
+
+Direct parents expose their durable input at `GET /sessions/{session_id}/inbox`
+and `POST /sessions/{session_id}/inbox`. A create body contains `delivery`
+(`steer` or `queue`) and `prompt`. Pending items can change delivery through versioned
+`PATCH /sessions/{session_id}/inbox/{item_id}` or be cancelled with versioned
+`DELETE` on that path. A steer targets the current non-finishing run when one
+exists; otherwise it participates in the same successor queue as ordinary
+queued input. These routes reject orchestrator and delegated-child ownership.
+
+## Traditional child sessions
+
+`GET /sessions/{session_id}/children` lists the durable children of a direct
+parent. `POST` on the same path starts a new `general` child or continues the
+`child_session_id` in the body. The request includes the immutable short
+`description`, a complete `prompt`, and optional `background` (default false).
+A foreground request waits for settlement; a background request returns the
+running relationship immediately.
+
+`GET /sessions/{session_id}/children/{child_session_id}` reads one owned child.
+`POST .../cancel` propagates cancellation to its active generation. Responses
+include generation, run and execution mode, terminal report or failure,
+workspace change and verification summaries when available, the durable parent
+completion inbox ID, timestamps, and version.
+
+These endpoints reject orchestrator parents, grandchildren, mismatched parent
+ownership, changes to a child's profile or description, sandboxed sessions
+without a host-backed shared workspace, and more than four simultaneously
+running children per root parent.
+
+## Managed orchestrator sessions
+
+`GET /sessions/{session_id}/orchestrators` lists orchestrator sessions owned by
+a `direct-with-orchestrator` parent. `POST` on the same path launches a new
+session or continues the optional `orchestrator_session_id`. The request has an
+immutable short `description`, a complete `prompt`, and optional `background`
+(default false). Foreground waits for settlement; background returns the
+running relationship immediately and later delivers one durable parent inbox
+item.
+
+`GET /sessions/{session_id}/orchestrators/{orchestrator_session_id}` reads one
+owned relationship. `POST .../cancel` propagates cancellation to the active
+generation. Responses include status, generation, run and execution mode,
+terminal report or failure, completion inbox ID, timestamps, and version.
+
+The endpoints reject every parent behavior except `direct-with-orchestrator`,
+mismatched ownership, recursive control, changed descriptions, and more than
+four simultaneously running managed orchestrators. Managed sessions always use
+the existing `orchestrator` behavior and its worker topology.
 
 ## Remote access
 

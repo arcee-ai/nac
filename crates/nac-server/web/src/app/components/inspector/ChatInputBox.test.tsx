@@ -10,7 +10,16 @@ import { SessionActionsProvider } from "@/app/providers/SessionActionsProvider";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
-import type { SkillCatalogEntry, SlashCommandDefinition } from "@/app/types/api";
+import { resetRuntime, syncRunFromSnapshot } from "@/app/store/runtimeStore";
+import type {
+  InboxItem,
+  ManagedSessionSummary,
+  SessionBehavior,
+  SessionGoalRecord,
+  SessionSnapshotResponse,
+  SkillCatalogEntry,
+  SlashCommandDefinition,
+} from "@/app/types/api";
 
 // The component runs against the real providers, stores, and api object; the
 // network is replaced by spies on the api methods, delegating to these
@@ -20,6 +29,13 @@ const fakes = {
   listSessionSkills: vi.fn(),
   submitRun: vi.fn(),
   compactSession: vi.fn(),
+  createInboxItem: vi.fn(),
+  updateInboxItem: vi.fn(),
+  cancelInboxItem: vi.fn(),
+  createGoal: vi.fn(),
+  updateGoal: vi.fn(),
+  clearGoal: vi.fn(),
+  cancelActiveRun: vi.fn(),
   getModelCatalog: vi.fn(),
   getStore: vi.fn(),
 };
@@ -30,6 +46,13 @@ vi.spyOn(api, "listSessionSkills").mockImplementation((...args) =>
 );
 vi.spyOn(api, "submitRun").mockImplementation((...args) => fakes.submitRun(...args));
 vi.spyOn(api, "compactSession").mockImplementation((...args) => fakes.compactSession(...args));
+vi.spyOn(api, "createInboxItem").mockImplementation((...args) => fakes.createInboxItem(...args));
+vi.spyOn(api, "updateInboxItem").mockImplementation((...args) => fakes.updateInboxItem(...args));
+vi.spyOn(api, "cancelInboxItem").mockImplementation((...args) => fakes.cancelInboxItem(...args));
+vi.spyOn(api, "createGoal").mockImplementation((...args) => fakes.createGoal(...args));
+vi.spyOn(api, "updateGoal").mockImplementation((...args) => fakes.updateGoal(...args));
+vi.spyOn(api, "clearGoal").mockImplementation((...args) => fakes.clearGoal(...args));
+vi.spyOn(api, "cancelActiveRun").mockImplementation((...args) => fakes.cancelActiveRun(...args));
 vi.spyOn(api, "getModelCatalog").mockImplementation((...args) => fakes.getModelCatalog(...args));
 vi.spyOn(api, "getStore").mockImplementation((...args) => fakes.getStore(...args));
 
@@ -40,14 +63,78 @@ const compactDefinition: SlashCommandDefinition = {
   accepts_arguments: false,
 };
 
+const goalDefinition: SlashCommandDefinition = {
+  command: "goal",
+  name: "goal",
+  description: "Create or control a durable direct-session goal",
+  accepts_arguments: true,
+};
+
+function goal(status: SessionGoalRecord["status"] = "active"): SessionGoalRecord {
+  return {
+    session_id: "session",
+    goal_id: "goal-1",
+    objective: "existing objective",
+    status,
+    token_budget: null,
+    tokens_used: 0,
+    time_used_ms: 0,
+    accounting_run_id: null,
+    accounting_token_baseline: null,
+    accounting_started_at_epoch_ms: null,
+    continuation_run_id: null,
+    created_at: "2026-08-25T00:00:00Z",
+    updated_at: "2026-08-25T00:00:00Z",
+    version: 3,
+  };
+}
+
+function inbox(delivery: InboxItem["delivery"] = "steer"): InboxItem {
+  return {
+    id: 7,
+    session_id: "session",
+    delivery,
+    status: "pending",
+    prompt: "pending instruction",
+    target_run_id: "run-live",
+    client_id: null,
+    delivered_run_id: null,
+    created_at: "2026-08-25T00:00:00Z",
+    updated_at: "2026-08-25T00:00:00Z",
+    delivered_at: null,
+    cancelled_at: null,
+    version: 2,
+  };
+}
+
 /** The slash-command list the next composed editor starts with, if loaded. */
 let commandFixtures: SlashCommandDefinition[] | undefined;
 let skillFixtures: SkillCatalogEntry[] | undefined;
 let mobile = false;
 
-function composer() {
+function composer(
+  {
+    behavior = null,
+    goalState = null,
+    inboxItems = [],
+    lineage = null,
+    entryAvailable = true,
+    snapshotAvailable = false,
+  }: {
+    behavior?: SessionBehavior | null;
+    goalState?: SessionGoalRecord | null;
+    inboxItems?: InboxItem[];
+    lineage?: ManagedSessionSummary["lineage"];
+    entryAvailable?: boolean;
+    snapshotAvailable?: boolean;
+  } = {},
+  expectInput = true,
+) {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity },
+      mutations: { retry: false },
+    },
   });
   if (commandFixtures !== undefined) {
     client.setQueryData(queryKeys.slashCommands, commandFixtures);
@@ -55,17 +142,65 @@ function composer() {
   if (skillFixtures !== undefined) {
     client.setQueryData(queryKeys.sessionSkills("session"), skillFixtures);
   }
+  if (behavior) {
+    client.setQueryData(queryKeys.sessionPermissions("session"), { requests: [], grants: [] });
+    client.setQueryData(queryKeys.sessionGoal("session"), goalState);
+    client.setQueryData(queryKeys.sessionInbox("session"), inboxItems);
+    client.setQueryData(queryKeys.traditionalChildren("session"), []);
+  }
+  const knownEntry: ManagedSessionSummary = {
+    active: false,
+    lineage,
+    summary: {
+      session_id: "session",
+      behavior: behavior ?? "orchestrator",
+      cwd: "/tmp/project",
+      model: "gpt-5.6-sol",
+      backend: "openai-responses",
+      visible_message_count: 0,
+      last_user_prompt: null,
+      sandboxed: false,
+      ssh_host: null,
+      title: null,
+      created_at: "2026-08-25T00:00:00Z",
+      updated_at: "2026-08-25T00:00:00Z",
+      run_count: 0,
+    },
+  };
+  const entry = entryAvailable ? knownEntry : null;
+  const snapshot = snapshotAvailable
+    ? ({
+        metadata: {
+          session_id: "session",
+          behavior: behavior ?? "orchestrator",
+          cwd: "/tmp/project",
+          workspace_host_path: "/tmp/project",
+          store_path: "/tmp/store.db",
+          model: "gpt-5.6-sol",
+          backend: "openai-responses",
+          sandbox_status: "off",
+          agents_md_status: "off",
+        },
+        messages: [],
+        response_timing: {
+          last_response_duration_ms: null,
+          previous_response_duration_ms: null,
+          response_durations_ms: null,
+        },
+      } as unknown as SessionSnapshotResponse)
+    : null;
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ToastProvider>
           <SessionActionsProvider>
-            <ChatInputBox sessionId="session" snapshot={null} entry={null} />
+            <ChatInputBox sessionId="session" snapshot={snapshot} entry={entry} />
           </SessionActionsProvider>
         </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  if (!expectInput) return null as never;
   const textarea = screen.getByRole("combobox", { name: "Message" });
   textarea.focus();
   // SAFETY: the composer renders a single textarea as its combobox input.
@@ -81,8 +216,9 @@ function pending<T>(): Promise<T> {
 }
 
 beforeEach(() => {
+  resetRuntime("session");
   mobile = false;
-  commandFixtures = [compactDefinition];
+  commandFixtures = [compactDefinition, goalDefinition];
   skillFixtures = [
     {
       name: "code-review",
@@ -108,6 +244,31 @@ beforeEach(() => {
     status: "compacted",
     compaction_id: "compaction",
   });
+  fakes.createInboxItem.mockReset().mockImplementation(async (_id, delivery, prompt) => ({
+    ...inbox(delivery),
+    prompt,
+  }));
+  fakes.updateInboxItem
+    .mockReset()
+    .mockImplementation(async (_id, _itemId, _version, delivery) => ({
+      ...inbox(delivery),
+      version: 3,
+    }));
+  fakes.cancelInboxItem.mockReset().mockResolvedValue({
+    ...inbox(),
+    status: "cancelled",
+    version: 3,
+  });
+  fakes.createGoal.mockReset().mockImplementation(async (_id, payload) => ({
+    ...goal(),
+    objective: payload.objective,
+  }));
+  fakes.updateGoal.mockReset().mockImplementation(async (_id, _goalId, payload) => ({
+    ...goal(payload.status ?? "active"),
+    version: 4,
+  }));
+  fakes.clearGoal.mockReset().mockResolvedValue(undefined);
+  fakes.cancelActiveRun.mockReset().mockResolvedValue(undefined);
   fakes.getModelCatalog.mockReset().mockImplementation(() => pending());
   fakes.getStore.mockReset().mockImplementation(() => pending());
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -139,10 +300,23 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  resetRuntime("session");
   vi.unstubAllGlobals();
 });
 
 describe("slash-command suggestions", () => {
+  it("offers goal commands only to direct behaviors", () => {
+    const orchestrator = composer({ behavior: "orchestrator" });
+    type(orchestrator, "/g");
+    expect(screen.getByRole("listbox").textContent).toContain("No matching commands");
+    expect(screen.queryByRole("option", { name: /goal/i })).toBeNull();
+
+    cleanup();
+    const direct = composer({ behavior: "direct" });
+    type(direct, "/g");
+    expect(screen.getByRole("option", { name: /goal/i })).toBeTruthy();
+  });
+
   it("opens from the initial token, filters case-insensitively, and exposes active-option semantics", () => {
     const textarea = composer();
     type(textarea, "  /C");
@@ -196,7 +370,7 @@ describe("slash-command suggestions", () => {
     commandFixtures = [
       compactDefinition,
       {
-        command: "continue",
+        command: "compact",
         name: "continue",
         description: "Continue the session",
         accepts_arguments: false,
@@ -255,7 +429,7 @@ describe("slash-command suggestions", () => {
   it("pointer completion keeps focus and argument commands append one space", () => {
     commandFixtures = [
       {
-        command: "run",
+        command: "goal",
         name: "run",
         description: "Run a workset",
         accepts_arguments: true,
@@ -364,6 +538,186 @@ describe("slash-command suggestions", () => {
     type(ordinaryTextarea, "ordinary prompt");
     fireEvent.keyDown(ordinaryTextarea, { key: "Enter" });
     await waitFor(() => expect(fakes.submitRun).toHaveBeenCalledWith("session", "ordinary prompt"));
+  });
+});
+
+describe("direct inbox and goal journeys", () => {
+  it("fails closed until ownership is known and keeps delegated transcripts non-composable", () => {
+    composer({ entryAvailable: false }, false);
+    expect(screen.getByText("Loading session controls…")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Message" })).toBeNull();
+    cleanup();
+
+    composer(
+      {
+        behavior: "direct",
+        lineage: {
+          kind: "traditional-child",
+          parent_session_id: "parent",
+          root_session_id: "parent",
+          description: "Review ownership",
+        },
+      },
+      false,
+    );
+    expect(screen.getByText(/delegated transcript is read-only/i)).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Message" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy();
+  });
+
+  it("preserves a steer drafted while the initial run submission settles", async () => {
+    const submitted = Promise.withResolvers<{
+      run_id: string;
+      client_id: null;
+      display_prompt: string;
+    }>();
+    fakes.submitRun.mockReturnValue(submitted.promise);
+    const textarea = composer({ behavior: "direct" });
+    type(textarea, "start the run");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(fakes.submitRun).toHaveBeenCalled());
+
+    type(textarea, "drafted steer");
+    submitted.resolve({ run_id: "run-live", client_id: null, display_prompt: "start the run" });
+
+    await waitFor(() => expect(textarea.value).toBe("drafted steer"));
+  });
+
+  it("uses ordinary active-run Send for a durable steer", async () => {
+    syncRunFromSnapshot({
+      run_id: "run-live",
+      prompt_preview: "working",
+      started_at_epoch_ms: Date.now(),
+    });
+    const textarea = composer({ behavior: "direct" });
+    type(textarea, "adjust the implementation");
+
+    fireEvent.click(screen.getByRole("button", { name: "Steer active run" }));
+
+    await waitFor(() =>
+      expect(fakes.createInboxItem).toHaveBeenCalledWith(
+        "session",
+        "steer",
+        "adjust the implementation",
+      ),
+    );
+    expect(fakes.submitRun).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("");
+  });
+
+  it("offers Queue Next and a separate direct-run stop action", async () => {
+    syncRunFromSnapshot({
+      run_id: "run-live",
+      prompt_preview: "working",
+      started_at_epoch_ms: Date.now(),
+    });
+    const textarea = composer({ behavior: "direct" });
+    type(textarea, "follow-up work");
+
+    fireEvent.click(screen.getByRole("button", { name: "Queue Next" }));
+    await waitFor(() =>
+      expect(fakes.createInboxItem).toHaveBeenCalledWith("session", "queue", "follow-up work"),
+    );
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy();
+  });
+
+  it("stops by session identity when the list entry is unavailable", async () => {
+    syncRunFromSnapshot({
+      run_id: "run-live",
+      prompt_preview: "working",
+      started_at_epoch_ms: Date.now(),
+    });
+    composer({ behavior: "direct", entryAvailable: false, snapshotAvailable: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
+
+    await waitFor(() => expect(fakes.cancelActiveRun).toHaveBeenCalledWith("session"));
+  });
+
+  it("keeps Stop available when both ownership projections are unavailable", async () => {
+    syncRunFromSnapshot({
+      run_id: "run-live",
+      prompt_preview: "working",
+      started_at_epoch_ms: Date.now(),
+    });
+    composer({ behavior: "direct", entryAvailable: false, snapshotAvailable: false }, false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
+
+    await waitFor(() => expect(fakes.cancelActiveRun).toHaveBeenCalledWith("session"));
+  });
+
+  it("does not project another session's active run into the visible composer", () => {
+    resetRuntime("other-session");
+    syncRunFromSnapshot({
+      run_id: "run-live",
+      prompt_preview: "working elsewhere",
+      started_at_epoch_ms: Date.now(),
+    });
+    composer({ behavior: "direct", entryAvailable: false, snapshotAvailable: false }, false);
+
+    expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
+  });
+
+  it("shows pending durable input and permits delivery edits and cancellation", async () => {
+    composer({ behavior: "direct", inboxItems: [inbox()] });
+
+    expect(screen.getByLabelText("Pending messages").textContent).toContain("pending instruction");
+    fireEvent.click(screen.getByRole("button", { name: "Change to queue" }));
+    await waitFor(() =>
+      expect(fakes.updateInboxItem).toHaveBeenCalledWith("session", 7, 2, "queue"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(fakes.cancelInboxItem).toHaveBeenCalledWith("session", 7, 3));
+  });
+
+  it("surfaces pending-message edit and cancellation failures", async () => {
+    fakes.updateInboxItem.mockRejectedValueOnce(new Error("edit conflict"));
+    composer({ behavior: "direct", inboxItems: [inbox()] });
+    fireEvent.click(screen.getByRole("button", { name: "Change to queue" }));
+    expect(await screen.findByText(/Unable to change pending message: edit conflict/)).toBeTruthy();
+
+    cleanup();
+    fakes.cancelInboxItem.mockRejectedValueOnce(new Error("cancel conflict"));
+    composer({ behavior: "direct", inboxItems: [inbox()] });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      await screen.findByText(/Unable to cancel pending message: cancel conflict/),
+    ).toBeTruthy();
+  });
+
+  it("implements literal goal creation and controls without sending a model prompt", async () => {
+    const textarea = composer({ behavior: "direct" });
+    type(textarea, "/goal ship the durable slice");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(fakes.createGoal).toHaveBeenCalledWith("session", {
+        objective: "ship the durable slice",
+      }),
+    );
+    expect(fakes.submitRun).not.toHaveBeenCalled();
+
+    cleanup();
+    const pause = composer({ behavior: "direct", goalState: goal() });
+    type(pause, "/goal pause");
+    fireEvent.keyDown(pause, { key: "Enter" });
+    await waitFor(() =>
+      expect(fakes.updateGoal).toHaveBeenCalledWith("session", "goal-1", {
+        expected_version: 3,
+        status: "paused",
+      }),
+    );
+  });
+
+  it("opens the detailed goal editor for /goal edit", async () => {
+    const textarea = composer({ behavior: "direct", goalState: goal() });
+    type(textarea, "/goal edit");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(screen.getAllByText("Durable goal")).toHaveLength(2);
+    expect(screen.getByDisplayValue("existing objective")).toBeTruthy();
   });
 });
 

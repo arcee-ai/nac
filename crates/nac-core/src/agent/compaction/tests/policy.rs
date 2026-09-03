@@ -1,5 +1,5 @@
 use super::super::*;
-use super::{assistant, candidate, state, temp_store_path, user};
+use super::{assistant, candidate, state, state_with_policy, temp_store_path, user};
 
 use sha2::{Digest, Sha256};
 
@@ -31,6 +31,100 @@ fn nac_prompt_matches_approved_bytes_hash_and_text() {
     assert!(NAC_COMPACTION_PROMPT.ends_with(
         "Omit empty sections, routine operations, raw logs, hidden reasoning, low-value IDs, repeated chronology, and unsupported claims.\n"
     ));
+}
+
+#[test]
+fn direct_prompt_matches_approved_bytes_hash_and_text() {
+    const EXPECTED_SHA256: [u8; 32] = [
+        0xf6, 0x98, 0xd5, 0x18, 0x6a, 0x98, 0xa9, 0xe1, 0xe4, 0xc6, 0x04, 0x1e, 0xa3, 0x06, 0x1d,
+        0x02, 0xb7, 0xd8, 0x93, 0xb8, 0xd3, 0xbd, 0xd6, 0x62, 0x1d, 0xe1, 0xa4, 0xf5, 0x5a, 0x9c,
+        0xa4, 0x03,
+    ];
+    assert_eq!(NAC_DIRECT_COMPACTION_PROMPT.len(), 2_704);
+    assert!(NAC_DIRECT_COMPACTION_PROMPT.ends_with('\n'));
+    assert!(!NAC_DIRECT_COMPACTION_PROMPT.ends_with("\n\n"));
+    assert_eq!(
+        Sha256::digest(NAC_DIRECT_COMPACTION_PROMPT.as_bytes())[..],
+        EXPECTED_SHA256
+    );
+    assert!(NAC_DIRECT_COMPACTION_PROMPT.starts_with(
+        "Internal NAC direct-session context-compaction request.\n\nReturn one concise, standalone historical checkpoint"
+    ));
+    assert!(NAC_DIRECT_COMPACTION_PROMPT.contains("## Work completed\n"));
+    assert!(NAC_DIRECT_COMPACTION_PROMPT.contains("## Tools, terminals, and delegated work\n"));
+    assert!(!NAC_DIRECT_COMPACTION_PROMPT.contains("## Orchestration history\n"));
+}
+
+#[test]
+fn direct_and_orchestrator_checkpoints_use_distinct_compatible_policies() {
+    let path = temp_store_path("behavior_policy");
+    store::initialize(&path).unwrap();
+    store::insert_test_session(&path, "session");
+    let messages = vec![user("old"), assistant("answer"), user("current")];
+    let (source, orchestrator_policy) = checkpoint_digests(&messages, 2);
+    let (direct_source, direct_policy) =
+        checkpoint_digests_for_policy(&messages, 2, CompactionPolicy::Direct);
+    assert_eq!(source, direct_source);
+    assert_ne!(orchestrator_policy, direct_policy);
+
+    let orchestrator = append_orchestrator_compaction_checkpoint(
+        &path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: None,
+            summary: installed_summary("orchestrator summary"),
+            tail_start_message_index: 2,
+            source_prefix_sha256: source,
+            system_policy_sha256: orchestrator_policy,
+            prompt_policy_version: PROMPT_POLICY_VERSION,
+            old_context_estimate: 100,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 50,
+        },
+    )
+    .unwrap();
+    let direct = append_orchestrator_compaction_checkpoint(
+        &path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: None,
+            summary: installed_summary("direct summary"),
+            tail_start_message_index: 2,
+            source_prefix_sha256: direct_source,
+            system_policy_sha256: direct_policy,
+            prompt_policy_version: DIRECT_PROMPT_POLICY_VERSION,
+            old_context_estimate: 100,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 50,
+        },
+    )
+    .unwrap();
+
+    let mut orchestrator_state = state(path.clone(), None);
+    orchestrator_state
+        .restore_newest_valid_checkpoint(&messages)
+        .unwrap();
+    assert_eq!(
+        orchestrator_state.active_checkpoint_for_test().unwrap().id,
+        orchestrator.id
+    );
+    let mut direct_state = state_with_policy(path.clone(), None, CompactionPolicy::Direct);
+    direct_state
+        .restore_newest_valid_checkpoint(&messages)
+        .unwrap();
+    assert_eq!(
+        direct_state.active_checkpoint_for_test().unwrap().id,
+        direct.id
+    );
+
+    let direct_candidate = candidate(direct_state.plan(&messages, &[], CompactionReason::Manual));
+    assert!(matches!(
+        direct_candidate.summary_messages.last(),
+        Some(Message::User { content }) if content == NAC_DIRECT_COMPACTION_PROMPT
+    ));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 #[test]
 fn installed_historical_wrapper_is_unchanged() {

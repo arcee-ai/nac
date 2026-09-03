@@ -128,7 +128,7 @@ export function ProjectCardActions({
             <IconAction title="Rename project" icon={IconName.Edit} onClick={onRename} />
           ) : null}
           <IconAction
-            title="Delete project"
+            title="Remove project"
             icon={IconName.Trash}
             variant={ButtonVariant.GhostDestructive}
             onClick={onDelete}

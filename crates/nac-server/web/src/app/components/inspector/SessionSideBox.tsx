@@ -13,19 +13,16 @@ import {
 } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { FilesView } from "@/app/components/inspector/FilesView";
+import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { HistoryView } from "@/app/components/inspector/HistoryView";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useSessionFetching } from "@/app/hooks/useSessionFetching";
-import {
-  DEFAULT_SESSION_PANEL,
-  SESSION_PANEL_LABEL,
-  WIDE_SESSION_PANELS,
-  type SessionPanel,
-} from "@/app/lib/routes";
+import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
+import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useWorkspaceRevisionChanges } from "@/app/services/queries";
 import {
   selectRevision,
@@ -99,12 +96,14 @@ function SideBoxFooter({
   workspace,
   revision,
   compact,
+  readOnly,
 }: {
   sessionId: string;
   workspace: WorkspaceSnapshot | null;
   revision: number | null;
   /** Phone width: the chips give up room so the diff total stays visible. */
   compact: boolean;
+  readOnly: boolean;
 }) {
   const repo = workspace?.repo_label ?? workspace?.workspace_display ?? null;
   const branch = workspace?.branch ?? null;
@@ -124,7 +123,10 @@ function SideBoxFooter({
     >
       <div className={cn("flex flex-1 min-w-0 items-center", compact ? "gap-1" : "gap-[10px]")}>
         {repo ? <FooterChip iconName={IconName.Folder} label={repo} compact={compact} /> : null}
-        {branch ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
+        {branch && !readOnly ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
+        {branch && readOnly ? (
+          <FooterChip iconName={IconName.Scheme} label={branch} compact={compact} />
+        ) : null}
         <RevisionPicker sessionId={sessionId} selected={revision} onSelect={selectRevision} />
       </div>
       {additions || deletions ? (
@@ -150,15 +152,31 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
   const selectedThread = useSelectedThread();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
+  const behavior = snapshot?.metadata.behavior ?? "orchestrator";
+  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const panelPolicy = sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
+  const delegatedTranscript = panelPolicy.readOnly;
+  const widePanels = panelPolicy.widePanels;
 
   // History belongs to the phone's bottom bar: a wide box reaches revisions
   // through its footer chip, so a link to that panel lands on the default one.
-  const active = !isMobile && panel === "history" ? DEFAULT_SESSION_PANEL : panel;
+  const active =
+    widePanels.includes(panel) || (isMobile && panelPolicy.mobilePanels.includes(panel))
+      ? panel
+      : panelPolicy.defaultPanel;
 
   const body = (
     <>
       {active === "files" ? (
-        <FilesView sessionId={sessionId} snapshot={snapshot} revision={selectedRevision} />
+        <FilesView
+          sessionId={sessionId}
+          snapshot={snapshot}
+          revision={selectedRevision}
+          readOnly={delegatedTranscript}
+        />
+      ) : null}
+      {active === "delegated" && direct && !delegatedTranscript ? (
+        <DelegatedWorkView sessionId={sessionId} behavior={behavior} />
       ) : null}
       {active === "worksets" ? (
         <WorksetsView snapshot={snapshot} selected={selectedWorkset} onSelect={selectWorkset} />
@@ -187,7 +205,7 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
       >
         <SideBoxProgress sessionId={sessionId} />
         <div className="flex flex-1 min-w-0 items-center gap-1 " role="tablist">
-          {WIDE_SESSION_PANELS.map((name) => (
+          {widePanels.map((name) => (
             <HorizontalTabsItem
               key={name}
               role="tab"
@@ -242,6 +260,7 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
         workspace={snapshot?.workspace ?? null}
         revision={selectedRevision}
         compact={isTablet}
+        readOnly={delegatedTranscript}
       />
     </div>
   );

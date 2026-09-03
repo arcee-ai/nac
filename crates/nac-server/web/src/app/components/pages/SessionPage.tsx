@@ -16,13 +16,16 @@ import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
+import { SessionIdentity } from "@/app/components/inspector/SessionIdentity";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { ProjectSessionTabs } from "@/app/components/projects/ProjectSessionTabs";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { parseStoreTime } from "@/app/lib/format";
+import { primarySessions } from "@/app/lib/projects";
 import { perfRender } from "@/app/lib/perfDebug";
+import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
 import {
   DEFAULT_SESSION_PANEL,
@@ -72,8 +75,8 @@ function useAutoSshConnect(
   summary:
     | {
         ssh_host: string | null;
-        ssh_port?: number;
-        ssh_identity_file?: string;
+        ssh_port?: number | null;
+        ssh_identity_file?: string | null;
       }
     | null
     | undefined,
@@ -132,11 +135,23 @@ export default function SessionPage() {
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
   useAutoSshConnect(id, entry?.summary);
+  const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator";
+  const panelPolicy = sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
+  const sessionPanels = panelPolicy.mobilePanels;
+  const requestedPanel = isSessionPanel(panel) ? panel : DEFAULT_SESSION_PANEL;
+  const effectivePanel = sessionPanels.includes(requestedPanel)
+    ? requestedPanel
+    : panelPolicy.defaultPanel;
+
+  useEffect(() => {
+    if (!id || !snapshot || !isSessionPanel(panel) || panel === effectivePanel) return;
+    navigate(routes.session(id, effectivePanel), { replace: true });
+  }, [effectivePanel, id, navigate, panel, snapshot]);
   // The phone dialog header shows the selected file's +/- badge; a revision
   // reports its own totals rather than the live workspace ones.
   const revisionChanges = useWorkspaceRevisionChanges(
     id,
-    isMobile && panel === "files" ? selectedRevision : null,
+    isMobile && effectivePanel === "files" ? selectedRevision : null,
   );
 
   useEffect(() => {
@@ -189,10 +204,15 @@ export default function SessionPage() {
   // ThreadsView syncs the open thread's name and running bit into the store so
   // this header stays aligned with the detail pane (including title shimmer).
   const currentThreadName = selectedThread;
-  const threadTitleRunning = panel === "threads" && selectedThreadRunning;
+  const threadTitleRunning = effectivePanel === "threads" && selectedThreadRunning;
 
   const sideBox = (
-    <SessionSideBox sessionId={id} snapshot={snapshot} panel={panel} onPanelChange={goToPanel} />
+    <SessionSideBox
+      sessionId={id}
+      snapshot={snapshot}
+      panel={effectivePanel}
+      onPanelChange={goToPanel}
+    />
   );
 
   // If the open id has just left the list, keep the project's tabs until the
@@ -200,7 +220,7 @@ export default function SessionPage() {
   // tick than the cache update.
   const projectId = (entry ? entry.summary.project_id : heldProjectId) ?? null;
   const projectSessions = projectId
-    ? allSessions
+    ? primarySessions(allSessions)
         .filter((session) => session.summary.project_id === projectId)
         .sort((a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at))
     : [];
@@ -284,11 +304,16 @@ export default function SessionPage() {
           </div>
         )}
 
+        <SessionIdentity
+          behavior={entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null}
+          lineage={snapshot?.lineage ?? null}
+        />
+
         <div className="flex flex-col flex-1 min-h-0 w-full relative">
           <Transcript
             sessionId={id}
             snapshot={snapshot}
-            panel={panel}
+            panel={effectivePanel}
             onFocusPanel={focusPanel}
             errorNotice={errorNotice}
           />
@@ -324,29 +349,29 @@ export default function SessionPage() {
                       threadTitleRunning ? "text-shimmer-basic" : "text-basic-primary",
                     )}
                   >
-                    {panel === "threads"
+                    {effectivePanel === "threads"
                       ? (currentThreadName ?? SESSION_PANEL_LABEL.threads)
-                      : panel === "worksets"
+                      : effectivePanel === "worksets"
                         ? (selectedWorkset ??
                           snapshot?.worksets.items[0]?.id ??
                           SESSION_PANEL_LABEL.worksets)
-                        : panel === "files"
+                        : effectivePanel === "files"
                           ? (selectedFile?.split("/").pop() ??
                             snapshot?.workspace?.changed_files?.[0]?.path.split("/").pop() ??
                             SESSION_PANEL_LABEL.files)
-                          : SESSION_PANEL_LABEL.history}
+                          : SESSION_PANEL_LABEL[effectivePanel]}
                   </span>
                 </div>
-                {panel === "files" ? fileBadge : null}
+                {effectivePanel === "files" ? fileBadge : null}
               </div>
 
-              {snapshot?.workspace?.branch ? (
+              {snapshot?.workspace?.branch && !snapshot.lineage ? (
                 <BranchPicker sessionId={id} branch={snapshot.workspace.branch} />
               ) : null}
             </div>
           }
           headerActions={
-            panel === "history" ? null : (
+            effectivePanel === "history" ? null : (
               <Button
                 size={ButtonSize.Large}
                 variant={ButtonVariant.Ghost}
@@ -364,7 +389,8 @@ export default function SessionPage() {
         >
           <div className="flex flex-col flex-1 min-h-0">{sideBox}</div>
           <MobileBottomBar
-            panel={panel}
+            panel={effectivePanel}
+            panels={sessionPanels}
             onPanelChange={(next) => {
               // A fresh tab opens on the row it already has, not its list.
               showSidePanelList(false);

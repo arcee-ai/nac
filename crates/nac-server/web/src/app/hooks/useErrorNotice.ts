@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 
-import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
+import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
 import { managedAuthProvider } from "@/app/lib/providers";
 import { humanError, type ErrorFix, type RunError } from "@/app/lib/providerError";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";

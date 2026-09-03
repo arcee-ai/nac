@@ -35,10 +35,12 @@ mod transport;
 
 pub use config::{McpServerConfig, McpTransportConfig};
 pub use file_config::{
-    delete_mcp_server_configuration, insert_mcp_server_configuration,
-    list_mcp_server_configurations, load_mcp_server_configuration, mcp_config_path,
-    update_mcp_server_configuration, McpServerConfigurationRecord,
-    McpServerConfigurationStoreError, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
+    acquire_mcp_configuration_write_lease, delete_mcp_server_configuration,
+    insert_mcp_server_configuration, list_mcp_server_configurations, load_mcp_server_configuration,
+    load_mcp_server_configuration_snapshot, mcp_config_path, read_mcp_configuration_consistently,
+    update_mcp_server_configuration, update_mcp_server_configuration_at_revision,
+    McpConfigurationWriteLease, McpServerConfigurationRecord, McpServerConfigurationStoreError,
+    MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
 };
 pub use library::{
     embedded_library_entries, fetch_smithery_library_entries, merge_library_entries,
@@ -89,7 +91,10 @@ pub async fn probe_mcp_server(
         .into_iter()
         .map(|tool| McpProbedTool {
             name: tool.name.to_string(),
-            description: tool.description.as_ref().map(|value| value.to_string()),
+            description: tool
+                .description
+                .as_ref()
+                .map(std::string::ToString::to_string),
         })
         .collect();
     let _ = service.cancel().await;

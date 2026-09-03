@@ -6,9 +6,11 @@ mod agents_md;
 pub mod browser;
 pub mod commands;
 pub mod events;
+mod goals;
 pub mod light_model;
 mod mcp;
 pub mod model;
+pub mod orchestration_control;
 
 /// Named, reusable model setups the launch UI offers instead of asking for a
 /// backend, model and base URL every time.
@@ -44,12 +46,15 @@ pub mod ssh_configurations {
 /// the file when a worker launches.
 pub mod mcp_configurations {
     pub use crate::mcp::{
-        delete_mcp_server_configuration, embedded_library_entries, fetch_smithery_library_entries,
-        insert_mcp_server_configuration, list_mcp_server_configurations,
-        load_mcp_server_configuration, mcp_config_path, merge_library_entries, probe_mcp_server,
-        update_mcp_server_configuration, McpLibraryAuth, McpLibraryEntry, McpProbedTool,
-        McpServerConfig, McpServerConfigurationRecord, McpServerConfigurationStoreError,
-        McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
+        acquire_mcp_configuration_write_lease, delete_mcp_server_configuration,
+        embedded_library_entries, fetch_smithery_library_entries, insert_mcp_server_configuration,
+        list_mcp_server_configurations, load_mcp_server_configuration,
+        load_mcp_server_configuration_snapshot, mcp_config_path, merge_library_entries,
+        probe_mcp_server, update_mcp_server_configuration,
+        update_mcp_server_configuration_at_revision, McpConfigurationWriteLease, McpLibraryAuth,
+        McpLibraryEntry, McpProbedTool, McpServerConfig, McpServerConfigurationRecord,
+        McpServerConfigurationStoreError, McpTransportConfig, MCP_TRANSPORT_STDIO,
+        MCP_TRANSPORT_STREAMABLE_HTTP,
     };
 }
 
@@ -59,9 +64,11 @@ pub mod skill_catalog {
 }
 
 mod paths;
+pub mod permissions;
 mod process;
 pub mod runtime;
 mod sandbox;
+pub use sandbox::{destroy_persisted_container, reconcile_podman_creation_records};
 pub mod session_service;
 pub mod sessions;
 mod skills;
@@ -69,6 +76,8 @@ pub mod store;
 mod terminal;
 mod tool_content;
 mod tools;
+pub use tools::shared_workspace_gate_for;
+pub mod traditional_children;
 pub mod types;
 pub mod upgrade;
 pub mod view;
@@ -91,6 +100,28 @@ pub mod test_support {
 
     pub use fixture_sessions as sessions;
     pub use fixture_store as store;
+
+    pub fn set_default_sandbox_spec(snapshot: &mut crate::sessions::SessionSnapshot) {
+        snapshot.sandbox_spec = Some(crate::sandbox::SandboxSpec::default());
+    }
+
+    pub fn set_sandbox_worktree(
+        snapshot: &mut crate::sessions::SessionSnapshot,
+        repo_root: std::path::PathBuf,
+        path: std::path::PathBuf,
+        fork_point: String,
+    ) {
+        let spec = snapshot
+            .sandbox_spec
+            .get_or_insert_with(crate::sandbox::SandboxSpec::default);
+        spec.worktree = Some(crate::sandbox::SandboxWorktree {
+            scratch_root: path.parent().unwrap_or(repo_root.as_path()).to_path_buf(),
+            repo_root,
+            path,
+            branch: "nac/test-revision-pin".to_string(),
+            fork_point,
+        });
+    }
 }
 
 #[cfg(test)]

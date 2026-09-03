@@ -1,0 +1,16 @@
+[package]
+name = "nac-contracts"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+openapi = ["dep:utoipa"]
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+utoipa = { workspace = true, optional = true }

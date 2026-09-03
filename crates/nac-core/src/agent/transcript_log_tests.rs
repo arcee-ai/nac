@@ -24,13 +24,14 @@ fn transcript_test_agent(
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode,
+            session_behavior: None,
             store_path,
             session_id: session_id.map(str::to_string),
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
             thread_name: match mode {
                 AgentMode::Worker => Some("impl/x".to_string()),
-                AgentMode::Orchestrator => None,
+                AgentMode::Orchestrator | AgentMode::Direct => None,
             },
             dispatch_id: None,
             event_sink: EventSink::none(),
@@ -46,6 +47,7 @@ fn transcript_test_agent(
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .expect("agent config must be valid")
@@ -805,6 +807,57 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
 }
 
 #[tokio::test]
+async fn direct_failure_marks_streamed_partial_output_as_failed_in_the_log() {
+    let store_path = test_store_path("direct_failed_partial");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let mut agent = transcript_test_agent(
+        ModelClient::new_for_test(),
+        store_path.clone(),
+        Some("session"),
+        AgentMode::Direct,
+    );
+    let seeded = vec![
+        Message::System {
+            content: "system".to_string(),
+        },
+        user_message("prompt"),
+    ];
+    crate::store::TranscriptLogWriter::new(&store_path)
+        .unwrap()
+        .append_batch("session", 0, &seeded)
+        .unwrap();
+    agent.messages = seeded;
+    agent.committed_log_len = agent.messages.len() as u64;
+    *agent.partial_stream.lock().unwrap() = ModelStreamDelta {
+        text: "work in progress".to_string(),
+        reasoning: "private reasoning fragment".to_string(),
+    };
+
+    agent
+        .normalize_failed_tail_preserving_partial()
+        .await
+        .unwrap();
+
+    assert_eq!(agent.messages.len(), 3);
+    assert!(matches!(
+        &agent.messages[2],
+        Message::Assistant {
+            content: Some(content),
+            reasoning_text: Some(reasoning),
+            tool_calls,
+            ..
+        } if content == "work in progress\n\n[run failed after this partial assistant response]"
+            && reasoning == "private reasoning fragment"
+            && tool_calls.is_none()
+    ));
+    assert_eq!(read_log(&store_path, "session").len(), 3);
+    assert!(agent.partial_stream.lock().unwrap().is_empty());
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
     let store_path = test_store_path("cancel_straggler");
     crate::store::initialize(&store_path).unwrap();
@@ -851,6 +904,70 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
         "the straggler row must be replaced by the cancellation marker, not duplicated"
     );
 
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn cancellation_adopts_a_committed_single_direct_steer_after_async_abort() {
+    let store_path = test_store_path("cancel_direct_steer_commit");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let seeded = vec![
+        Message::System {
+            content: "system".to_string(),
+        },
+        user_message("prompt"),
+    ];
+    store_snapshot_messages(&store_path, &seeded);
+    let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
+    crate::store::create_session_inbox_item(
+        &store_path,
+        "session",
+        crate::store::InboxDelivery::Steer,
+        "keep this steer",
+        Some("run"),
+        None,
+    )
+    .unwrap();
+    writer
+        .append_pending_inbox_steers("session", "run", seeded.len() as u64)
+        .unwrap();
+
+    // Model the precise post-commit/pre-adoption abort: the blocking writer
+    // committed the User row and delivered inbox state, while the async task
+    // never extended the process-local transcript.
+    let mut agent = transcript_test_agent(
+        ModelClient::new_for_test(),
+        store_path.clone(),
+        Some("session"),
+        AgentMode::Direct,
+    );
+    agent.messages = seeded;
+    agent.committed_log_len = 3;
+    agent.direct_inbox_append_start = Some(2);
+
+    agent
+        .append_cancellation_marker_preserving_tools()
+        .await
+        .unwrap();
+
+    assert_eq!(agent.messages.len(), 4);
+    assert!(matches!(
+        &agent.messages[2],
+        Message::User { content } if content == "keep this steer"
+    ));
+    assert!(matches!(
+        &agent.messages[3],
+        Message::Assistant { content: Some(content), .. }
+            if content == "[run cancelled by user]"
+    ));
+    let inbox = crate::store::list_session_inbox(&store_path, "session").unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].status, crate::store::InboxStatus::Delivered);
+    let log = read_log(&store_path, "session");
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[0].0, 2);
+    assert_eq!(log[1].0, 3);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -1222,7 +1339,7 @@ fn refresh_transcript_under_lease_rejects_a_foreign_lease() {
 }
 
 #[tokio::test]
-async fn steering_log_failure_truncates_the_staged_messages() {
+async fn steering_log_failure_leaves_claim_retryable_without_acknowledgement() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
     let store_path = test_store_path("steering_log_failure");
@@ -1236,7 +1353,7 @@ async fn steering_log_failure_truncates_the_staged_messages() {
         "steer now",
     )
     .unwrap();
-    // Inject the log failure precisely at the post-ack steering append: the
+    // Inject the log failure at the atomic steering transcript/ack commit: the
     // staged message carries the instruction text; the prompt does not.
     let connection = rusqlite::Connection::open(&store_path).unwrap();
     connection
@@ -1274,12 +1391,12 @@ async fn steering_log_failure_truncates_the_staged_messages() {
     assert_eq!(log[0].0, 1);
     assert!(matches!(log[0].1, Message::User { ref content } if content == "current"));
 
-    // The ack is durable: the record stays delivered and is never
-    // redelivered, even though its message left the transcript.
+    // The acknowledgement rolled back with the transcript append. The record
+    // stays claimed by this dispatch and is retryable at the next boundary.
     let records = crate::store::list_thread_steering(&store_path, "session").unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].id, queued.id);
-    assert_eq!(records[0].status, "delivered");
+    assert_eq!(records[0].status, "claimed");
 
     // The next run appends contiguously from the checkpoint — no gap.
     connection
@@ -1289,17 +1406,19 @@ async fn steering_log_failure_truncates_the_staged_messages() {
     let requests = server.finish();
     assert_eq!(requests.len(), 1);
     assert!(
-        !agent.messages.iter().any(|message| matches!(
+        agent.messages.iter().any(|message| matches!(
             message,
             Message::User { content } if content == "steer now"
         )),
-        "the acked steering is not redelivered"
+        "the unacknowledged steering is committed on retry"
     );
     let log = read_log(&store_path, "session");
-    assert_eq!(log.len(), 3);
+    assert_eq!(log.len(), 4);
     assert_eq!(log[1].0, 2);
     assert!(matches!(log[1].1, Message::User { ref content } if content == "next"));
     assert_eq!(log[2].0, 3);
+    assert!(matches!(log[2].1, Message::User { ref content } if content == "steer now"));
+    assert_eq!(log[3].0, 4);
 
     // The restore merge reads the log cleanly (the pre-fix gap failed it
     // loudly and bricked re-attach).
@@ -1313,7 +1432,77 @@ async fn steering_log_failure_truncates_the_staged_messages() {
         )
         .await
         .unwrap();
-    assert_eq!(restored.messages.len(), 4);
+    assert_eq!(restored.messages.len(), 5);
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn cancellation_adopts_result_after_aborting_failed_atomic_steering_commit() {
+    let store_path = test_store_path("steering_abort_failure_adoption");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let queued = crate::store::queue_thread_steering(
+        &store_path,
+        "session",
+        crate::store::ORCHESTRATOR_STEERING_TARGET,
+        "dispatch",
+        "steer while cancelling",
+    )
+    .unwrap();
+    let claimed = crate::store::claim_thread_steering(&store_path, "session", "dispatch").unwrap();
+    assert_eq!(claimed.len(), 1);
+
+    let trigger = rusqlite::Connection::open(&store_path).unwrap();
+    trigger
+        .execute_batch(
+            "CREATE TRIGGER fail_aborted_steering_log_append
+             BEFORE INSERT ON thread_events
+             WHEN NEW.event_json LIKE '%steer while cancelling%'
+             BEGIN
+                 SELECT RAISE(ABORT, 'injected aborted steering failure');
+             END;",
+        )
+        .unwrap();
+    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    store_snapshot_messages(&store_path, &agent.messages);
+    agent
+        .push_and_log_for_test(user_message("current"))
+        .await
+        .unwrap();
+    let blocker = rusqlite::Connection::open(&store_path).unwrap();
+    blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let from_idx = agent.messages.len();
+    let staged = vec![user_message("steer while cancelling")];
+    let ids = vec![queued.id];
+    let mut commit =
+        Box::pin(agent.commit_staged_steering(from_idx, &ids, &staged, "session", "dispatch"));
+    tokio::select! {
+        result = &mut commit => panic!("blocked steering commit completed early: {result:?}"),
+        _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
+    }
+    drop(commit);
+    assert!(agent.steering_append_pending);
+    assert_eq!(agent.messages.len(), from_idx);
+
+    blocker.execute_batch("ROLLBACK").unwrap();
+    agent
+        .append_cancellation_marker_preserving_tools()
+        .await
+        .unwrap();
+    assert!(!agent.steering_append_pending);
+    assert!(agent.messages.iter().all(|message| {
+        !matches!(message, Message::User { content } if content == "steer while cancelling")
+    }));
+    assert!(matches!(
+        agent.messages.last(),
+        Some(Message::Assistant { content: Some(content), .. })
+            if content == crate::agent::RUN_CANCELLED_MARKER
+    ));
+    let records = crate::store::list_thread_steering(&store_path, "session").unwrap();
+    assert_eq!(records[0].status, "claimed");
+    let log = read_log(&store_path, "session");
+    assert_eq!(log.last().unwrap().0 as usize, agent.messages.len() - 1);
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -1367,14 +1556,21 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
         "one live signal per commit point: prompt@1, steering@2, assistant@3, tool batch@4, assistant@5"
     );
 
-    // Live-only: the bus persists nothing for these events — thread_events
-    // holds exactly the five transcript log rows and no event rows.
+    // Transcript append notifications remain live-only. The ALL-1 projection
+    // intentionally persists only the sanitized top-level tool lifecycle so
+    // primary transcript detail survives reload.
     assert_eq!(read_log(&store_path, "session").len(), 5);
-    assert!(
-        crate::store::load_all_thread_events(&store_path, "session", 100)
-            .unwrap()
-            .is_empty()
-    );
+    let thread_events = crate::store::load_all_thread_events(&store_path, "session", 100).unwrap();
+    let primary = thread_events
+        .get(crate::events::PRIMARY_TOOL_EVENT_TARGET)
+        .expect("sanitized primary tool rows should be durable");
+    assert_eq!(primary.len(), 2);
+    assert!(primary
+        .iter()
+        .all(|record| record.event_json.contains("unknown_alpha")));
+    assert!(primary
+        .iter()
+        .all(|record| !record.event_json.contains("args_detail")));
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

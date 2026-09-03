@@ -3,6 +3,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use portable_pty::CommandBuilder as PtyCommandBuilder;
@@ -13,14 +14,13 @@ use uuid::Uuid;
 
 use crate::paths::PathContext;
 
-use super::podman::{
-    parse_published_pid, SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_TIMEOUT, SANDBOX_KILL_WRAPPER,
-    SANDBOX_PIDFILE_READ_TIMEOUT, SANDBOX_PTY_WRAPPER,
-};
+use super::podman::{SANDBOX_EXEC_WRAPPER, SANDBOX_KILL_WRAPPER, SANDBOX_PTY_WRAPPER};
 use super::ssh_command::{
     prepare_control_socket_dir, quoted_program_and_args, remote_command_in_dir, shell_quote,
     shell_quote_path, SshConnection,
 };
+
+const REMOTE_KILL_TIMEOUT: Duration = Duration::from_secs(5);
 
 const SSH_PIDFILE_DIR: &str = "~/.cache/nac/exec";
 
@@ -60,6 +60,9 @@ impl SshBackend {
 
     fn ssh_command(&self, remote_command: &str) -> Command {
         let mut command = Command::new("ssh");
+        for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
+            command.env_remove(name);
+        }
         command.args(self.ssh_args());
         command.arg("--");
         command.arg(&self.connection.host);
@@ -228,48 +231,27 @@ impl SshBackend {
         (command, Some(pidfile))
     }
 
-    pub(crate) async fn read_published_pid(&self, pidfile: &str) -> Result<Option<String>> {
-        let remote = format!("cat -- {}", shell_quote_path(pidfile));
-        let mut command = self.ssh_command(&remote);
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
-        let output = match timeout(SANDBOX_PIDFILE_READ_TIMEOUT, command.output()).await {
-            Ok(Ok(output)) => output,
-            _ => return Ok(None),
-        };
-        if !output.status.success() {
-            return Ok(None);
-        }
-        Ok(parse_published_pid(&String::from_utf8_lossy(
-            &output.stdout,
-        )))
-    }
-
-    pub(crate) async fn terminal_pipe_kill(
-        &self,
-        pidfile: &str,
-        published_pid: Option<&str>,
-    ) -> Result<()> {
-        let remote = ssh_kill_command(pidfile, published_pid);
+    pub(crate) async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
+        let remote = format!(
+            "sh -c {} nac-kill {}",
+            shell_quote(SANDBOX_KILL_WRAPPER),
+            shell_quote_path(pidfile)
+        );
         let mut command = self.ssh_command(&remote);
         command.stdin(Stdio::null());
         command.stdout(Stdio::null());
         command.stderr(Stdio::null());
-        command.kill_on_drop(true);
-        let status = timeout(SANDBOX_KILL_TIMEOUT, command.status())
-            .await
-            .map_err(|_| anyhow::anyhow!("ssh command cleanup timed out"))??;
-        if !status.success() {
-            bail!("ssh command cleanup exited with {status}");
+        match timeout(REMOTE_KILL_TIMEOUT, command.status()).await {
+            Ok(Ok(status)) if status.success() => Ok(()),
+            Ok(Ok(status)) => bail!("SSH command cleanup exited with status {status}"),
+            Ok(Err(error)) => Err(error).context("failed to start SSH command cleanup"),
+            Err(_) => bail!("SSH command cleanup timed out"),
         }
-        Ok(())
     }
 
     pub(crate) fn terminal_pty_command(
         &self,
+        cmd_str: &str,
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, Option<String>) {
@@ -280,7 +262,9 @@ impl SshBackend {
             "-lc".to_string(),
             shell_quote(&ssh_wrapper_script(SANDBOX_PTY_WRAPPER)),
             "nac-pty".to_string(),
+            shell_quote(cmd_str),
             shell_quote_path(&pidfile),
+            "pty".to_string(),
         ];
         let remote = self.remote_command_in_dir(dir, envs, &words);
         let mut cmd = PtyCommandBuilder::new("ssh");
@@ -334,22 +318,9 @@ chmod 700 "$HOME/.cache/nac" "$pidfile_dir" || exit 125
     )
 }
 
-fn ssh_kill_command(pidfile: &str, published_pid: Option<&str>) -> String {
-    [
-        "bash".to_string(),
-        "-lc".to_string(),
-        shell_quote(&ssh_wrapper_script(SANDBOX_KILL_WRAPPER)),
-        "nac-kill".to_string(),
-        shell_quote_path(pidfile),
-        shell_quote(published_pid.unwrap_or("")),
-    ]
-    .join(" ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command as StdCommand;
 
     fn backend() -> SshBackend {
         SshBackend::new("build-box".to_string(), PathBuf::from("/srv/work/project"))
@@ -622,21 +593,5 @@ mod tests {
                 OsString::from("/keys/ci"),
             ]
         );
-    }
-    #[test]
-    fn ssh_kill_creates_pidfile_directory_before_tombstoning() {
-        let home =
-            std::env::temp_dir().join(format!("nac-ssh-kill-{}", uuid::Uuid::new_v4().simple()));
-        let pidfile = home.join(".cache/nac/exec/command.pid");
-        let status = StdCommand::new("sh")
-            .arg("-c")
-            .arg(ssh_kill_command(pidfile.to_str().unwrap(), None))
-            .env("HOME", &home)
-            .status()
-            .unwrap();
-
-        assert!(status.success());
-        assert_eq!(std::fs::read_to_string(&pidfile).unwrap(), "cancelled");
-        let _ = std::fs::remove_dir_all(home);
     }
 }

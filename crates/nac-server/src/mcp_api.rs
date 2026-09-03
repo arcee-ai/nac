@@ -23,6 +23,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ApiError, RequestField, SessionManager};
 
+#[derive(utoipa::ToSchema)]
+#[schema(rename_all = "snake_case")]
+#[allow(
+    dead_code,
+    reason = "OpenAPI owns this enum while runtime validation preserves the existing string DTO"
+)]
+enum McpTransportSchema {
+    Stdio,
+    StreamableHttp,
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct McpLibraryResponse {
     pub entries: Vec<mcp::McpLibraryEntry>,
@@ -34,6 +45,7 @@ pub struct McpLibraryResponse {
 pub struct McpServerView {
     pub name: String,
     pub enabled: bool,
+    #[schema(value_type = McpTransportSchema)]
     pub transport: String,
     pub command: Option<String>,
     pub args: Vec<String>,
@@ -53,6 +65,7 @@ pub struct CreateMcpServerRequest {
     pub name: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[schema(value_type = McpTransportSchema)]
     pub transport: String,
     pub command: Option<String>,
     #[serde(default)]
@@ -299,7 +312,7 @@ async fn refresh_library_cache(
     path = "/mcp_library/servers",
     operation_id = "get_mcp_library_servers",
     tag = "mcp-library",
-    responses((status = 200, description = "Success", body = McpServerList, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+    responses((status = 200, description = "Success", body = McpServerList, content_type = "application/json"), (status = 409, description = "Configuration recovery is required", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
 )]
 pub async fn list_servers_handler(
     State(manager): State<SessionManager>,
@@ -336,7 +349,9 @@ pub async fn create_server_handler(
         library_id: request.library_id,
     };
     let _write = CONFIG_WRITE.lock().await;
-    let record = mcp::insert_mcp_server_configuration(&config_path(&manager)?, configuration)?;
+    let path = config_path(&manager)?;
+    let _cross_process = mcp::acquire_mcp_configuration_write_lease(&path)?;
+    let record = mcp::insert_mcp_server_configuration(&path, configuration)?;
     Ok((StatusCode::CREATED, Json(view(record))))
 }
 
@@ -357,7 +372,8 @@ pub async fn update_server_handler(
     let Json(request) = payload.map_err(ApiError::from)?;
     let path = config_path(&manager)?;
     let _write = CONFIG_WRITE.lock().await;
-    let existing = mcp::load_mcp_server_configuration(&path, &server_name)?;
+    let _cross_process = mcp::acquire_mcp_configuration_write_lease(&path)?;
+    let (existing, revision) = mcp::load_mcp_server_configuration_snapshot(&path, &server_name)?;
 
     let configuration = McpServerConfigurationRecord {
         name: match request.name {
@@ -400,11 +416,16 @@ pub async fn update_server_handler(
         library_id: match request.library_id {
             RequestField::Value(id) => Some(id),
             RequestField::Null => None,
-            RequestField::Omitted => existing.library_id.clone(),
+            RequestField::Omitted => existing.library_id,
         },
     };
 
-    let record = mcp::update_mcp_server_configuration(&path, &server_name, configuration)?;
+    let record = mcp::update_mcp_server_configuration_at_revision(
+        &path,
+        &server_name,
+        configuration,
+        revision,
+    )?;
     Ok(Json(view(record)))
 }
 
@@ -414,14 +435,16 @@ pub async fn update_server_handler(
     operation_id = "delete_mcp_library_servers_server_name",
     tag = "mcp-library",
     params(("server_name" = String, Path)),
-    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+    responses((status = 204, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Configuration recovery is required", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
 )]
 pub async fn delete_server_handler(
     State(manager): State<SessionManager>,
     AxumPath(server_name): AxumPath<String>,
 ) -> Result<StatusCode, ApiError> {
     let _write = CONFIG_WRITE.lock().await;
-    if !mcp::delete_mcp_server_configuration(&config_path(&manager)?, &server_name)? {
+    let path = config_path(&manager)?;
+    let _cross_process = mcp::acquire_mcp_configuration_write_lease(&path)?;
+    if !mcp::delete_mcp_server_configuration(&path, &server_name)? {
         return Err(McpServerConfigurationStoreError::NotFound(server_name).into());
     }
     Ok(StatusCode::NO_CONTENT)
@@ -433,7 +456,7 @@ pub async fn delete_server_handler(
     operation_id = "post_mcp_library_servers_test",
     tag = "mcp-library",
     request_body(content = TestMcpServerRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = TestMcpServerResponse, content_type = "application/json"), (status = 400, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
+    responses((status = 200, description = "Success", body = TestMcpServerResponse, content_type = "application/json"), (status = 400, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Configuration recovery is required", body = crate::ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = crate::ApiErrorBody, content_type = "application/json"))
 )]
 pub async fn test_server_handler(
     State(manager): State<SessionManager>,
@@ -487,7 +510,11 @@ pub async fn test_server_handler(
             // Borrowed secrets end up in the spawned process's environment,
             // so they may only run the command they were stored for.
             if borrowed {
-                let record = stored.as_ref().expect("borrowing requires a stored record");
+                let record = stored.as_ref().ok_or_else(|| {
+                    ApiError::bad_request(
+                        "borrowed environment values require a stored server".to_string(),
+                    )
+                })?;
                 if record.transport != MCP_TRANSPORT_STDIO
                     || record.command.as_deref() != Some(command.as_str())
                     || record.args != args
@@ -526,7 +553,11 @@ pub async fn test_server_handler(
             // Borrowed secrets are sent with the request, so they may only
             // travel to the URL they were stored for.
             if borrowed {
-                let record = stored.as_ref().expect("borrowing requires a stored record");
+                let record = stored.as_ref().ok_or_else(|| {
+                    ApiError::bad_request(
+                        "borrowed header values require a stored server".to_string(),
+                    )
+                })?;
                 if record.transport != MCP_TRANSPORT_STREAMABLE_HTTP
                     || record.url.as_deref() != Some(url.as_str())
                 {
@@ -560,7 +591,9 @@ impl From<McpServerConfigurationStoreError> for ApiError {
     fn from(error: McpServerConfigurationStoreError) -> Self {
         let status = match &error {
             McpServerConfigurationStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
-            McpServerConfigurationStoreError::DuplicateName(_) => StatusCode::CONFLICT,
+            McpServerConfigurationStoreError::DuplicateName(_)
+            | McpServerConfigurationStoreError::ConcurrentModification
+            | McpServerConfigurationStoreError::RecoveryRequired { .. } => StatusCode::CONFLICT,
             McpServerConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
             McpServerConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -571,6 +604,18 @@ impl From<McpServerConfigurationStoreError> for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recoverable_publication_conflicts_remain_http_conflicts() {
+        let error: ApiError = McpServerConfigurationStoreError::RecoveryRequired {
+            config: PathBuf::from("/tmp/config.toml"),
+            preserved: PathBuf::from("/tmp/config.toml.saved.tmp"),
+        }
+        .into();
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(error.message.contains("removes the preserved file"));
+        assert!(error.message.contains("byte-identical"));
+    }
 
     #[test]
     fn references_pass_through_and_literals_are_masked() {

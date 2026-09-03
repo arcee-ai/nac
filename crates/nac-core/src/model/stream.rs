@@ -71,7 +71,10 @@ impl<F: Fn(ModelStreamDelta)> CoalescedDeltas<F> {
 
     pub fn push(&self, delta: ModelStreamDelta) {
         let due = {
-            let mut state = self.state.lock().expect("delta coalescer state");
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             state.pending.absorb(&delta);
             let due = state
                 .last_flush
@@ -92,7 +95,10 @@ impl<F: Fn(ModelStreamDelta)> CoalescedDeltas<F> {
     /// visible text is complete even if the last tokens landed mid-interval.
     pub fn flush(&self) {
         let pending = {
-            let mut state = self.state.lock().expect("delta coalescer state");
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             std::mem::take(&mut state.pending)
         };
         self.emit(pending);

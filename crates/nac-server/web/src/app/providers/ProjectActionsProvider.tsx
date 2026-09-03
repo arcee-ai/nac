@@ -3,10 +3,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { AssignToProjectModal } from "@/app/components/modals/AssignToProjectModal";
 import { CreateProjectModal } from "@/app/components/modals/CreateProjectModal";
+import { NewChatModal } from "@/app/components/modals/NewChatModal";
 import { DeleteProjectModal } from "@/app/components/modals/DeleteProjectModal";
 import { RenameProjectModal } from "@/app/components/modals/RenameProjectModal";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
-import { projectForSessionLocation } from "@/app/lib/projects";
+import { primarySessions, projectForSessionLocation } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_CHAT_KEYS, NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
@@ -14,7 +15,6 @@ import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { pruneChatTabs } from "@/app/store/chatTabsStore";
 import {
   useAssignSessionToProject,
-  useCreateSession,
   useProjects,
   useSessions,
   useToggleProjectPin,
@@ -33,7 +33,7 @@ interface ProjectActions {
   remove: (project: ProjectRecord) => void;
   togglePin: (project: ProjectRecord) => Promise<void>;
   /** Starts a chat inside a project, inheriting its location and defaults. */
-  newChat: (projectId: string) => Promise<void>;
+  newChat: (projectId: string, firstChat?: boolean) => Promise<void>;
 }
 
 const ProjectActionsContext = createContext<ProjectActions | null>(null);
@@ -46,19 +46,19 @@ type ModalKind = "create" | "assign" | "rename" | "delete";
  */
 export function ProjectActionsProvider({ children }: { children: React.ReactNode }) {
   const toast = useToast();
-  const navigate = useNavigate();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const { data: sessions = [], isSuccess: sessionsLoaded } = useSessions();
   const { data: projectList } = useProjects();
   const pin = useToggleProjectPin();
-  const createSession = useCreateSession();
   const assignSession = useAssignSessionToProject();
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [session, setSession] = useState<SessionSummarySnapshot | null>(null);
+  const [newChatProjectId, setNewChatProjectId] = useState<string | null>(null);
+  const [requiredFirstChat, setRequiredFirstChat] = useState(false);
 
   const togglePin = pin.toggle;
-  const startSession = createSession.mutateAsync;
   const adoptSession = assignSession.mutateAsync;
 
   const adopt = useCallback(
@@ -76,20 +76,10 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
     [adoptSession, toast],
   );
 
-  const newChat = useCallback(
-    async (projectId: string) => {
-      try {
-        // Everything else is the project's: sending a cwd or model here would
-        // either be rejected or quietly diverge from its siblings.
-        const snapshot = await startSession({ project_id: projectId });
-        const newId = snapshot.metadata.session_id;
-        if (newId) navigate(routes.session(newId));
-      } catch (error) {
-        toast.error(`Failed to start a chat: ${humanErrorText(toRunError(error))}`);
-      }
-    },
-    [startSession, navigate, toast],
-  );
+  const newChat = useCallback(async (projectId: string, firstChat = false) => {
+    setRequiredFirstChat(firstChat);
+    setNewChatProjectId(projectId);
+  }, []);
 
   const value = useMemo<ProjectActions>(
     () => ({
@@ -165,11 +155,32 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   ]);
 
   const close = () => setModal(null);
+  const closeNewChat = () => {
+    const targetProjectId = newChatProjectId;
+    setNewChatProjectId(null);
+    setRequiredFirstChat(false);
+    // An empty project route has no screen behind this required first-chat
+    // dialog. Closing it must therefore return to the project list rather than
+    // exposing an indefinite loader. Successful creation immediately replaces
+    // this navigation with the new session route.
+    if (
+      targetProjectId &&
+      projectIdFromPath(pathname) === targetProjectId &&
+      !primarySessions(sessions).some((entry) => entry.summary.project_id === targetProjectId)
+    ) {
+      navigate(routes.list(), { replace: true });
+    }
+  };
 
   return (
     <ProjectActionsContext.Provider value={value}>
       {children}
       <CreateProjectModal open={modal === "create"} onClose={close} />
+      <NewChatModal
+        projectId={newChatProjectId}
+        firstChat={requiredFirstChat}
+        onClose={closeNewChat}
+      />
       <AssignToProjectModal open={modal === "assign"} onClose={close} summary={session} />
       <RenameProjectModal open={modal === "rename"} onClose={close} project={project} />
       <DeleteProjectModal open={modal === "delete"} onClose={close} project={project} />

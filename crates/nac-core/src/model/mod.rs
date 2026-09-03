@@ -8,6 +8,12 @@ use url::Url;
 
 use crate::types::{FunctionCall, Message, ModelOrigin, ToolCall, ToolDefinition};
 
+/// Native integration credentials are resolved by NAC and must never enter a
+/// model-controlled process environment. Environment lookup remains available
+/// to the admitting native-tool request snapshot in the NAC process itself.
+pub(crate) const EXA_API_KEY_ENV: &str = "EXA_API_KEY";
+pub(crate) const NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES: &[&str] = &[EXA_API_KEY_ENV];
+
 fn backoff_duration(attempt: usize) -> Duration {
     let base_ms = 200u64;
     let delay_ms = std::cmp::min(base_ms.saturating_mul(1 << attempt), 30_000);
@@ -32,7 +38,8 @@ mod anthropic;
 mod anthropic_stream;
 mod api_key_store;
 mod arcee;
-mod auth_store;
+mod arcee_bootstrap;
+pub(crate) mod auth_store;
 mod backend;
 mod catalog;
 mod chat;
@@ -54,6 +61,11 @@ mod types;
 
 pub use api_key_store::{list_stored_api_keys, remove_api_key, store_api_key, StoredApiKeySummary};
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
+pub use arcee_bootstrap::{
+    import_managed_arcee_bootstrap, managed_arcee_auth_storage_root,
+    validate_managed_arcee_authorization, ManagedArceeBootstrapOutcome,
+    MANAGED_ARCEE_BOOTSTRAP_PATH,
+};
 pub use backend::{
     validate_backend_api_key_env, validate_caller_supplied_base_url,
     validate_model_reasoning_effort,
@@ -61,7 +73,7 @@ pub use backend::{
 pub(crate) use catalog::resolve as resolve_model_metadata;
 pub use catalog::{
     api_listing, provider_for_model, spawn_anthropic_model_refresh, spawn_arcee_model_refresh,
-    spawn_overlay_refresh, ModelListing,
+    spawn_overlay_refresh, AuthStatus, ModelListing,
 };
 pub(crate) use catalog::{Compat, CompletionsThinkingFormat, ModelMetadata, ThinkingLevelMap};
 pub use providers::{
@@ -79,6 +91,27 @@ pub(crate) use redact::{
 /// same lookup the session will.
 pub fn resolve_backend_api_key(backend: BackendKind, api_key_env: Option<&str>) -> Result<String> {
     backend::api_key_for_backend(backend, api_key_env)
+}
+
+/// Resolve an optional named integration credential without requiring a model
+/// backend. A nonblank process environment value wins; blank environment and
+/// stored values are treated as absent so capability composition can omit an
+/// integration silently.
+pub fn resolve_named_api_key(name: &str) -> Result<Option<String>> {
+    if !backend::is_valid_env_name(name) {
+        return Err(anyhow!(
+            "invalid credential name '{name}'; expected [A-Za-z_][A-Za-z0-9_]*"
+        ));
+    }
+    if let Some(value) = std::env::var_os(name) {
+        let value = value
+            .into_string()
+            .map_err(|_| anyhow!("credential environment variable '{name}' is not Unicode"))?;
+        if !value.trim().is_empty() {
+            return Ok(Some(value));
+        }
+    }
+    Ok(api_key_store::read_stored_api_key(name)?.filter(|value| !value.trim().is_empty()))
 }
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
@@ -190,6 +223,8 @@ pub async fn run_arcee_auth_action(action: ArceeAuthAction) -> Result<()> {
 
 /// A provider that authenticates from a browser login rather than an API key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(rename_all = "snake_case"))]
 pub enum ManagedAuthProvider {
     Arcee,
     Codex,

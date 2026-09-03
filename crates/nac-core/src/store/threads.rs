@@ -65,7 +65,7 @@ pub fn load_worker_context(
 
     for source_thread in source_threads {
         let episode = latest_episode(&conn, session_id, source_thread)?
-            .ok_or_else(|| anyhow!("Source thread '{}' has no retained episode", source_thread))?;
+            .ok_or_else(|| anyhow!("Source thread '{source_thread}' has no retained episode"))?;
         source_episodes.push(episode);
     }
 

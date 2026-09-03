@@ -137,7 +137,7 @@ pub enum SandboxBackendType {
 }
 
 impl SandboxBackendType {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             SandboxBackendType::Podman => "podman",
         }
@@ -147,8 +147,7 @@ impl SandboxBackendType {
         match s {
             "podman" => Ok(Self::Podman),
             other => Err(anyhow!(
-                "invalid sandbox backend '{}': expected 'podman'",
-                other
+                "invalid sandbox backend '{other}': expected 'podman'"
             )),
         }
     }
@@ -274,7 +273,10 @@ fn canonicalize_existing(path: &Path) -> Option<PathBuf> {
 }
 
 #[derive(Clone)]
-#[allow(private_interfaces)]
+#[allow(
+    private_interfaces,
+    reason = "the public enum hides backend-specific session implementation details"
+)]
 pub enum SandboxSession {
     Podman(Arc<podman::PodmanSession>),
 }
@@ -292,6 +294,48 @@ impl SandboxSession {
                     spec,
                     session_key,
                     owner,
+                    activity_key,
+                ));
+                inner.ensure_ready().await?;
+                Self::Podman(inner)
+            }
+        };
+        Ok(session)
+    }
+
+    pub(crate) async fn create_for_durable_launch(
+        spec: SandboxSpec,
+        session_key: String,
+        owner: bool,
+        activity_key: String,
+        store_path: PathBuf,
+    ) -> Result<Self> {
+        let session = match spec.backend {
+            SandboxBackendType::Podman => {
+                let inner = Arc::new(podman::PodmanSession::new_for_durable_launch(
+                    spec,
+                    session_key,
+                    owner,
+                    activity_key,
+                    store_path,
+                ));
+                inner.ensure_ready().await?;
+                Self::Podman(inner)
+            }
+        };
+        Ok(session)
+    }
+
+    pub(crate) async fn create_for_durable_resume(
+        spec: SandboxSpec,
+        session_key: String,
+        activity_key: String,
+    ) -> Result<Self> {
+        let session = match spec.backend {
+            SandboxBackendType::Podman => {
+                let inner = Arc::new(podman::PodmanSession::new_for_durable_resume(
+                    spec,
+                    session_key,
                     activity_key,
                 ));
                 inner.ensure_ready().await?;
@@ -320,6 +364,20 @@ impl SandboxSession {
     pub fn spec(&self) -> &SandboxSpec {
         match self {
             Self::Podman(inner) => inner.spec(),
+        }
+    }
+
+    /// Once the durable session row commits, explicit lifecycle deletion owns
+    /// container cleanup. Process shutdown must not erase resumable state.
+    pub(crate) fn retain_for_durable_session(&self) {
+        match self {
+            Self::Podman(inner) => inner.retain_for_durable_session(),
+        }
+    }
+
+    pub(crate) fn disable_drop_cleanup(&self) {
+        match self {
+            Self::Podman(inner) => inner.disable_drop_cleanup(),
         }
     }
 
@@ -375,8 +433,7 @@ impl SandboxSession {
 
         if requested.exists() {
             return Err(anyhow!(
-                "Path '{}' is not mounted into the sandbox. Use /workspace or an explicitly mounted guest path.",
-                path
+                "Path '{path}' is not mounted into the sandbox. Use /workspace or an explicitly mounted guest path."
             ));
         }
 
@@ -429,11 +486,12 @@ impl SandboxSession {
 
     pub fn terminal_pty_command(
         &self,
+        cmd: &str,
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, String) {
         match self {
-            Self::Podman(inner) => inner.terminal_pty_command(cwd, envs),
+            Self::Podman(inner) => inner.terminal_pty_command(cmd, cwd, envs),
         }
     }
 
@@ -448,25 +506,15 @@ impl SandboxSession {
         }
     }
 
-    pub async fn read_published_pid(&self, pidfile: &str) -> Result<Option<String>> {
+    pub async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
         match self {
-            Self::Podman(inner) => inner.read_published_pid(pidfile).await,
-        }
-    }
-
-    pub async fn terminal_pipe_kill(
-        &self,
-        pidfile: &str,
-        published_pid: Option<&str>,
-    ) -> Result<()> {
-        match self {
-            Self::Podman(inner) => inner.terminal_pipe_kill(pidfile, published_pid).await,
+            Self::Podman(inner) => inner.terminal_pipe_kill(pidfile).await,
         }
     }
 
     /// Explicitly destroy the sandbox (container or VM), regardless of
-    /// remaining `Arc` references.  Best-effort and idempotent.  Only
-    /// acts if this session is the owner.
+    /// remaining `Arc` references. Explicit lifecycle cleanup is authoritative
+    /// even when this process attached as an observer.
     pub async fn destroy(&self) -> Result<()> {
         match self {
             Self::Podman(inner) => inner.destroy().await,
@@ -486,28 +534,38 @@ impl SandboxSession {
     }
 }
 
+/// Best-effort recovery cleanup for an owned container whose in-memory owner
+/// was lost in a process crash. Owned top-level containers use the durable
+/// session id as their key, so deletion after restart can still address them.
+pub async fn destroy_persisted_container(session_id: &str) -> Result<()> {
+    podman::destroy_owned_container(session_id).await
+}
+
+/// Reconciles an interrupted fresh Podman launch against the durable session
+/// store before the server begins accepting requests.
+pub async fn reconcile_podman_creation_records(store_path: &Path) -> Result<()> {
+    podman::reconcile_creation_records(store_path).await
+}
+
 pub fn parse_mount_spec(raw: &str, read_only: bool, cwd: &Path) -> Result<MountSpec> {
     let (host_raw, guest_raw) = raw
         .split_once(':')
-        .ok_or_else(|| anyhow!("invalid mount '{}': expected HOST:GUEST", raw))?;
+        .ok_or_else(|| anyhow!("invalid mount '{raw}': expected HOST:GUEST"))?;
 
     if host_raw.is_empty() || guest_raw.is_empty() {
-        return Err(anyhow!("invalid mount '{}': expected HOST:GUEST", raw));
+        return Err(anyhow!("invalid mount '{raw}': expected HOST:GUEST"));
     }
 
     let host = absolutize_host_path(host_raw, cwd)
-        .with_context(|| format!("invalid host path in mount '{}'", raw))?;
+        .with_context(|| format!("invalid host path in mount '{raw}'"))?;
     if !host.exists() {
-        return Err(anyhow!(
-            "invalid mount source '{}': path does not exist",
-            host.display()
-        ));
+        return Err(anyhow!("mount source '{}' does not exist", host.display()));
     }
 
     let guest = PathBuf::from(guest_raw);
     if !guest.is_absolute() {
         return Err(anyhow!(
-            "invalid mount target '{}': must be an absolute path inside the sandbox",
+            "mount target '{}' must be an absolute path inside the sandbox",
             guest.display()
         ));
     }
@@ -576,7 +634,10 @@ fn host_workspace_mounts_from_spec(spec: &SandboxSpec) -> Option<Vec<HostWorkspa
     Some(mounts)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "sandbox construction keeps security-sensitive backend, mount, owner, and network inputs explicit"
+)]
 pub fn build_sandbox_spec(
     backend: SandboxBackendType,
     image: String,
@@ -590,7 +651,7 @@ pub fn build_sandbox_spec(
     let workdir = PathBuf::from(workdir);
     if !workdir.is_absolute() {
         return Err(anyhow!(
-            "invalid sandbox workdir '{}': must be an absolute path",
+            "sandbox workdir '{}' must be an absolute path",
             workdir.display()
         ));
     }

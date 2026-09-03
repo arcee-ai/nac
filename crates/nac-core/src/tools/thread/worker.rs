@@ -13,10 +13,7 @@ use crate::model::{ModelClient, TokenUsage};
 use crate::process::ProcessTreeGuard;
 use crate::tools::{ThreadCancellation, ToolRuntime};
 const CANCEL_ACK_GRACE: Duration = Duration::from_millis(250);
-// Must outlast SANDBOX_KILL_TIMEOUT (5s) plus ACK/reap. Host SIGKILL of the
-// worker tree does not stop Podman/SSH guest groups, so this wait is the
-// cooperative remote-kill window. Stop UI is already optimistic and does
-// not wait on this grace.
+// SSH cleanup can spend five seconds in the kill request; Podman can spend two.
 const COOPERATIVE_CLEANUP_GRACE: Duration = Duration::from_secs(7);
 const READER_DRAIN_GRACE: Duration = Duration::from_millis(100);
 
@@ -110,26 +107,27 @@ impl WorkerTimeoutTrace {
             | AgentEvent::OrchestratorCompactionStarted { .. }
             | AgentEvent::OrchestratorCompactionCompleted { .. }
             | AgentEvent::OrchestratorCompactionSkipped { .. }
-            | AgentEvent::OrchestratorCompactionFailed { .. } => {}
-            AgentEvent::ThreadStarted { .. } | AgentEvent::ThreadFinished { .. } => {}
+            | AgentEvent::OrchestratorCompactionFailed { .. }
+            | AgentEvent::ThreadStarted { .. }
+            | AgentEvent::ThreadFinished { .. } => {}
         }
     }
 
     fn timeout_reason(&self) -> String {
         match &self.location {
             TimeoutLocation::ModelApi { iteration } => format!(
-                "The thread timed out at a call to the model API.\nModel call: iteration {}",
-                iteration
+                "The thread timed out at a call to the model API.\nModel call: iteration {iteration}"
             ),
             TimeoutLocation::ToolCall if !self.active_tool_calls.is_empty() => {
                 if self.active_tool_calls.len() == 1 {
-                    let (call_id, call) = self.active_tool_calls.iter().next().unwrap();
-                    return format!(
-                        "The thread timed out at a tool call.\nTool call: {} {}\narguments: {}",
-                        call.name,
-                        call_id,
-                        call.args_detail.as_deref().unwrap_or("<not captured>")
-                    );
+                    if let Some((call_id, call)) = self.active_tool_calls.iter().next() {
+                        return format!(
+                            "The thread timed out at a tool call.\nTool call: {} {}\narguments: {}",
+                            call.name,
+                            call_id,
+                            call.args_detail.as_deref().unwrap_or("<not captured>")
+                        );
+                    }
                 }
 
                 let mut reason = String::from("The thread timed out at tool calls:");
@@ -137,7 +135,7 @@ impl WorkerTimeoutTrace {
                     reason.push_str(&format!("\n- {} {}", call.name, call_id));
                     match call.args_detail.as_deref() {
                         Some(args_detail) => {
-                            reason.push_str(&format!("\n  arguments: {}", args_detail));
+                            reason.push_str(&format!("\n  arguments: {args_detail}"));
                         }
                         None => reason.push_str("\n  arguments: <not captured>"),
                     }
@@ -169,6 +167,10 @@ pub(super) struct WorkerInvocation<'a> {
     pub(super) timeout_secs: u64,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the header snapshot is a string-to-string map and cannot fail JSON serialization"
+)]
 fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
     command
         .arg("--api-model")
@@ -183,6 +185,9 @@ fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
     }
     if let Some(api_key_env) = client.api_key_env() {
         command.arg("--api-key-env").arg(api_key_env);
+    }
+    if let Some(path) = client.trusted_api_key_file() {
+        command.arg("--managed-api-key-file").arg(path);
     }
 
     // Always transport the snapshot header map, including `{}`, so workers can
@@ -203,26 +208,6 @@ pub(crate) fn worker_model_arguments_for_test(client: &ModelClient) -> Vec<Strin
         .collect()
 }
 
-async fn reap_after_cooperative_worker_exit(
-    process_tree: &mut ProcessTreeGuard,
-    child: &mut tokio::process::Child,
-    status: std::process::ExitStatus,
-) -> Option<String> {
-    process_tree.mark_leader_reaped();
-    let worker_reported_incomplete =
-        status.code() == Some(crate::worker::MANAGED_WORKER_CLEANUP_INCOMPLETE_EXIT);
-    match process_tree.terminate(child).await {
-        Ok(()) if worker_reported_incomplete => {
-            Some("worker command shutdown incomplete".to_string())
-        }
-        Ok(()) => None,
-        Err(error) if worker_reported_incomplete => Some(format!(
-            "worker command shutdown incomplete; worker cleanup incomplete: {error}"
-        )),
-        Err(error) => Some(format!("worker cleanup incomplete: {error}")),
-    }
-}
-
 pub(super) async fn run_worker(
     runtime: &ToolRuntime,
     client: &ModelClient,
@@ -236,6 +221,21 @@ pub(super) async fn run_worker(
         )
     })?;
     let mut command = Command::new(executable);
+    for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
+        command.env_remove(name);
+    }
+    if let Some(provider) = runtime.command_environment.as_ref() {
+        let environment = provider.worker_environment();
+        if let Some(secret_root) = environment.secret_root {
+            command.arg("--managed-secret-root").arg(secret_root);
+        }
+        if let Some(client_id) = environment.github_client_id {
+            command.arg("--managed-github-client-id").arg(client_id);
+        }
+        if let Some(home_root) = environment.home_root {
+            command.arg("--managed-home-root").arg(home_root);
+        }
+    }
     if runtime.backend.workspace_cwd_is_local() {
         command.current_dir(&runtime.workspace_cwd);
     }
@@ -279,10 +279,13 @@ pub(super) async fn run_worker(
     let mut control_stdin = child.stdin.take();
 
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
-    let stderr = child.stderr.take().unwrap();
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| std::io::Error::other("supervised worker stderr pipe is unavailable"))?;
     let event_sink = runtime.event_sink.clone();
     let thread_name_for_logs = invocation.thread_name.to_string();
-    let timeout_trace_for_logs = timeout_trace.clone();
+    let timeout_trace_for_logs = Arc::clone(&timeout_trace);
     let (cancel_ack_tx, mut cancel_ack_rx) = watch::channel(false);
     let reader_shutdown = ThreadCancellation::default();
     let stderr_cancellation = cancellation.clone();
@@ -351,7 +354,10 @@ pub(super) async fn run_worker(
 
     let stdout_cancellation = cancellation.clone();
     let stdout_shutdown = reader_shutdown.clone();
-    let stdout = child.stdout.take().unwrap();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| std::io::Error::other("supervised worker stdout pipe is unavailable"))?;
     let stdout_handle = tokio::spawn(async move {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
@@ -390,7 +396,6 @@ pub(super) async fn run_worker(
         _ = &mut deadline => WaitOutcome::TimedOut,
     };
     let mut cooperatively_cancelled = false;
-    let mut cooperative_cleanup_error = None;
     if matches!(outcome, WaitOutcome::Cancelled) {
         if let Some(mut stdin) = control_stdin.take() {
             let _ = stdin.write_all(b"cancel\n").await;
@@ -408,29 +413,22 @@ pub(super) async fn run_worker(
         };
         if acknowledged {
             if let Ok(wait_result) = timeout(COOPERATIVE_CLEANUP_GRACE, child.wait()).await {
-                let status = wait_result?;
+                wait_result?;
+                process_tree.mark_leader_reaped();
                 cooperatively_cancelled = true;
-                cooperative_cleanup_error =
-                    reap_after_cooperative_worker_exit(&mut process_tree, &mut child, status).await;
             }
         }
     } else if matches!(outcome, WaitOutcome::Exited(_)) {
+        process_tree.mark_leader_reaped();
         if cancellation.is_cancelled() {
-            let status = match std::mem::replace(&mut outcome, WaitOutcome::Cancelled) {
-                WaitOutcome::Exited(wait_result) => wait_result?,
-                _ => unreachable!("checked Exited above"),
-            };
+            outcome = WaitOutcome::Cancelled;
             cooperatively_cancelled = true;
-            cooperative_cleanup_error =
-                reap_after_cooperative_worker_exit(&mut process_tree, &mut child, status).await;
-        } else {
-            process_tree.mark_leader_reaped();
         }
     }
 
     let timed_out = matches!(outcome, WaitOutcome::TimedOut);
     let mut cancelled = matches!(outcome, WaitOutcome::Cancelled);
-    let mut cleanup_error = cooperative_cleanup_error;
+    let mut cleanup_error = None;
     let mut force_reader_shutdown = false;
     if timed_out || (cancelled && !cooperatively_cancelled) {
         match process_tree.terminate(&mut child).await {
@@ -526,6 +524,161 @@ mod tests {
     use crate::TEST_ENV_LOCK;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_credential_worker_process_helper() {
+        let Some(root) = std::env::var_os("NAC_WORKER_NATIVE_CREDENTIAL_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("worker.sh");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s' \"${{EXA_API_KEY-unset}}\" > '{}'\n",
+            root.join("inherited-exa").display()
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.worker_executable = Some(executable);
+        let no_sources = Vec::<String>::new();
+        let no_skills = Vec::<String>::new();
+        let run = run_worker(
+            &runtime,
+            &ModelClient::new_for_test(),
+            WorkerInvocation {
+                session_id: "session",
+                thread_name: "worker",
+                dispatch_id: "dispatch",
+                action: "worker",
+                source_threads: &no_sources,
+                scheduled_skills: &no_skills,
+                timeout_secs: 30,
+            },
+            ThreadCancellation::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(run.exit_code, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_worker_process_does_not_inherit_exa_api_key() {
+        let root = std::env::temp_dir().join(format!(
+            "nac_worker_native_credential_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tools::thread::worker::tests::native_credential_worker_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_WORKER_NATIVE_CREDENTIAL_ROOT", &root)
+            .env("EXA_API_KEY", "exa-worker-environment-canary")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "worker credential helper failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("inherited-exa")).unwrap(),
+            "unset"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn managed_worker_receives_only_the_nonsecret_store_root() {
+        let root =
+            std::env::temp_dir().join(format!("nac_worker_secrets_{}", uuid::Uuid::new_v4()));
+        let state_root = root.join("managed-state");
+        std::fs::create_dir_all(&state_root).unwrap();
+        let executable = root.join("worker.sh");
+        let script = format!(
+            r#"#!/bin/sh
+printf '%s' "${{DEMO_TOKEN-unset}}" > '{root}/inherited-secret'
+printf '%s\n' "$@" > '{root}/argv'
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --managed-secret-root) printf '%s' "$2" > '{root}/secret-root'; shift 2 ;;
+    --managed-github-client-id) printf '%s' "$2" > '{root}/github-client-id'; shift 2 ;;
+    --managed-home-root) printf '%s' "$2" > '{root}/home-root'; shift 2 ;;
+    *) shift ;;
+  esac
+done
+"#,
+            root = root.display()
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let store = nac_managed::HostSecretStore::new(&state_root);
+        store
+            .put("DEMO_TOKEN", "managed-worker-canary-never-in-argv")
+            .unwrap();
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.worker_executable = Some(executable);
+        runtime.command_environment = Some(Arc::new(
+            nac_managed::ManagedCommandEnvironmentProvider::new(
+                Some(store),
+                Some(nac_managed::ManagedGitHubAuth::new(&state_root, "Iv1.test").unwrap()),
+                Some(root.join("managed-home")),
+            ),
+        ));
+        let no_sources = Vec::<String>::new();
+        let no_skills = Vec::<String>::new();
+        let run = run_worker(
+            &runtime,
+            &ModelClient::new_for_test(),
+            WorkerInvocation {
+                session_id: "session",
+                thread_name: "worker",
+                dispatch_id: "dispatch",
+                action: "worker",
+                source_threads: &no_sources,
+                scheduled_skills: &no_skills,
+                timeout_secs: 30,
+            },
+            ThreadCancellation::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(run.exit_code, 0);
+        assert_eq!(
+            std::fs::read_to_string(root.join("secret-root")).unwrap(),
+            state_root.display().to_string()
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("github-client-id")).unwrap(),
+            "Iv1.test"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("home-root")).unwrap(),
+            root.join("managed-home").display().to_string()
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("inherited-secret")).unwrap(),
+            "unset"
+        );
+        assert!(!std::fs::read_to_string(root.join("argv"))
+            .unwrap()
+            .contains("managed-worker-canary-never-in-argv"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[cfg(unix)]
     #[tokio::test]
@@ -559,7 +712,7 @@ wait
         runtime.worker_executable = Some(executable);
         crate::store::initialize(&runtime.store_path).unwrap();
         crate::store::insert_test_session(&runtime.store_path, "session");
-        assert!(runtime.active_threads.begin_run());
+        assert!(runtime.active_threads.begin_run("run-1"));
         assert!(runtime.active_threads.mark("a", "dispatch-a"));
         assert!(runtime.active_threads.mark("b", "dispatch-b"));
         let cancellation_a = runtime.active_threads.start("a", "dispatch-a").unwrap();
@@ -620,7 +773,8 @@ wait
             .expect("managed workers never became ready");
             runtime
                 .active_threads
-                .begin_cancellation(Some((&runtime.store_path, "session")))
+                .cancel_and_drain(Some((&runtime.store_path, "session")))
+                .await
         };
 
         let (worker_a, worker_b, cancellation) =
@@ -987,6 +1141,42 @@ exit 0
             Some(value) => unsafe { std::env::set_var(key_name, value) },
             None => unsafe { std::env::remove_var(key_name) },
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mounted_model_credential_transport_contains_only_the_read_only_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "nac-mounted-model-transport-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let credential = root.join("credential");
+        std::fs::write(&credential, "mounted-secret-value\n").unwrap();
+        std::fs::set_permissions(&credential, std::fs::Permissions::from_mode(0o400)).unwrap();
+
+        let settings = EffectiveModelSettings::new(
+            BackendKind::ArceeApi,
+            "trinity-large-thinking".to_string(),
+            "https://api.arcee.ai/api/v1".to_string(),
+            None,
+            None,
+            BTreeMap::new(),
+        )
+        .unwrap()
+        .with_trusted_api_key_file(Some(credential.clone()))
+        .unwrap();
+        let client = ModelClient::from_effective_settings(settings).unwrap();
+        let args = worker_model_arguments_for_test(&client);
+
+        assert!(args.windows(2).any(|pair| {
+            pair[0] == "--managed-api-key-file" && pair[1] == credential.to_string_lossy()
+        }));
+        assert!(!args.iter().any(|arg| arg == "mounted-secret-value"));
+        assert!(!args.iter().any(|arg| arg == "--api-key-env"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

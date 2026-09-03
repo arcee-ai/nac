@@ -57,10 +57,10 @@ fn file_servers_for_policy(
     let Some(path) = default_config_path(paths) else {
         return (BTreeMap::new(), None);
     };
-    if !path.exists() {
+    if !super::file_config::mcp_configuration_state_exists(&path) {
         return (BTreeMap::new(), None);
     }
-    let raw = match std::fs::read_to_string(&path) {
+    let raw = match super::read_mcp_configuration_consistently(&path) {
         Ok(raw) => raw,
         Err(error) => {
             let reason = format!("could not read config: {error:#}");
@@ -99,6 +99,13 @@ fn file_servers_for_policy(
 }
 
 impl McpRegistry {
+    #[cfg(test)]
+    pub(crate) fn empty_for_test() -> Self {
+        Self {
+            tools: Arc::new(HashMap::new()),
+        }
+    }
+
     /// Loads the configured MCP servers and reports every server that was
     /// skipped and why — including a broken `config.toml`, which is reported
     /// as a single skip named after the config path — so the caller can
@@ -162,8 +169,7 @@ impl McpRegistry {
                 Ok(Err(error)) => {
                     let reason = format!("{error:#}");
                     eprintln!(
-                        "MCP server '{}' is unavailable and will be skipped: {reason}",
-                        server_name
+                        "MCP server '{server_name}' is unavailable and will be skipped: {reason}"
                     );
                     skipped.push(McpSkippedServer {
                         name: server_name,
@@ -176,7 +182,7 @@ impl McpRegistry {
                         "timed out during connect after {}s",
                         MCP_CONNECT_TIMEOUT.as_secs()
                     );
-                    eprintln!("MCP server '{}' {reason} and will be skipped", server_name);
+                    eprintln!("MCP server '{server_name}' {reason} and will be skipped");
                     skipped.push(McpSkippedServer {
                         name: server_name,
                         reason,
@@ -185,38 +191,38 @@ impl McpRegistry {
                 }
             };
 
-            let listed_tools =
-                match timeout(MCP_TOOL_INVENTORY_TIMEOUT, service.list_all_tools()).await {
-                    Ok(Ok(tools)) => tools,
-                    Ok(Err(error)) => {
-                        let reason = format!("{error:#}");
-                        eprintln!(
-                            "MCP server '{}' could not list tools and will be skipped: {reason}",
-                            server_name
+            let listed_tools = match timeout(MCP_TOOL_INVENTORY_TIMEOUT, service.list_all_tools())
+                .await
+            {
+                Ok(Ok(tools)) => tools,
+                Ok(Err(error)) => {
+                    let reason = format!("{error:#}");
+                    eprintln!(
+                            "MCP server '{server_name}' could not list tools and will be skipped: {reason}"
                         );
-                        skipped.push(McpSkippedServer {
-                            name: server_name,
-                            reason,
-                        });
-                        continue;
-                    }
-                    Err(_) => {
-                        let reason = format!(
-                            "timed out while listing tools after {}s",
-                            MCP_TOOL_INVENTORY_TIMEOUT.as_secs()
-                        );
-                        eprintln!("MCP server '{}' {reason} and will be skipped", server_name);
-                        skipped.push(McpSkippedServer {
-                            name: server_name,
-                            reason,
-                        });
-                        continue;
-                    }
-                };
+                    skipped.push(McpSkippedServer {
+                        name: server_name,
+                        reason,
+                    });
+                    continue;
+                }
+                Err(_) => {
+                    let reason = format!(
+                        "timed out while listing tools after {}s",
+                        MCP_TOOL_INVENTORY_TIMEOUT.as_secs()
+                    );
+                    eprintln!("MCP server '{server_name}' {reason} and will be skipped");
+                    skipped.push(McpSkippedServer {
+                        name: server_name,
+                        reason,
+                    });
+                    continue;
+                }
+            };
 
             seen_endpoints.insert(endpoint, server_name.clone());
             let server = Arc::new(McpServer {
-                _service: service.clone(),
+                _service: Arc::clone(&service),
             });
             for tool in listed_tools {
                 let qualified_name = allocate_tool_name(&server_name, &tool.name, &mut seen_names);
@@ -226,7 +232,7 @@ impl McpRegistry {
                     Arc::new(McpToolBinding {
                         tool_name: tool.name.to_string(),
                         definition,
-                        server: server.clone(),
+                        server: Arc::clone(&server),
                     }),
                 );
             }
@@ -253,10 +259,16 @@ impl McpRegistry {
         definitions
     }
 
+    pub(crate) fn tool_definition(&self, name: &str) -> Option<ToolDefinition> {
+        self.tools
+            .get(name)
+            .map(|binding| binding.definition.clone())
+    }
+
     pub async fn call_tool(&self, name: &str, args: Value, image_results: bool) -> ToolResult {
         let Some(binding) = self.tools.get(name) else {
             return ToolResult {
-                content: format!("Error: unknown MCP tool '{}'", name).into(),
+                content: format!("Error: unknown MCP tool '{name}'").into(),
                 is_error: true,
             };
         };
@@ -266,7 +278,7 @@ impl McpRegistry {
             Value::Null => None,
             _ => {
                 return ToolResult {
-                    content: format!("Error: MCP tool '{}' requires object arguments", name).into(),
+                    content: format!("Error: MCP tool '{name}' requires object arguments").into(),
                     is_error: true,
                 }
             }
@@ -284,7 +296,7 @@ impl McpRegistry {
         {
             Ok(Ok(result)) => flatten_tool_result(result, image_results).await,
             Ok(Err(error)) => ToolResult {
-                content: format!("Error calling MCP tool '{}': {}", name, error).into(),
+                content: format!("Error calling MCP tool '{name}': {error}").into(),
                 is_error: true,
             },
             Err(_) => ToolResult {
@@ -301,6 +313,10 @@ impl McpRegistry {
 }
 
 impl ClientHandler for NacMcpClientHandler {
+    #[expect(
+        clippy::expect_used,
+        reason = "the locally constructed MCP capability object matches the protocol schema"
+    )]
     fn get_info(&self) -> ClientInfo {
         let capabilities = if self.roots.is_empty() {
             serde_json::json!({})
@@ -377,7 +393,7 @@ pub(super) fn tool_definition(full_name: &str, server_name: &str, tool: &Tool) -
     let description = tool
         .description
         .as_ref()
-        .map(|value| value.to_string())
+        .map(std::string::ToString::to_string)
         .unwrap_or_else(|| format!("MCP tool '{}' from server '{}'", tool.name, server_name));
     ToolDefinition {
         def_type: "function".to_string(),

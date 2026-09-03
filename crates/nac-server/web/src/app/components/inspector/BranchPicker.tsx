@@ -86,7 +86,7 @@ export function BranchPicker({ sessionId, branch }: { sessionId: string; branch:
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
-  const running = useRunning();
+  const running = useRunning(sessionId);
   const { data, isLoading, error } = useBranches(sessionId, open);
   const switchBranch = useSwitchBranch(sessionId);
 

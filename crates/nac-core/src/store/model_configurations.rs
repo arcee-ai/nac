@@ -207,7 +207,7 @@ pub fn list_model_configurations(
         .map_err(|error| ModelConfigurationStoreError::Store(error.into()))?;
     let records = statement
         .query_map([], row_to_record)
-        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+        .and_then(std::iter::Iterator::collect::<rusqlite::Result<Vec<_>>>)
         .map_err(|error| ModelConfigurationStoreError::Store(error.into()))?;
     Ok(records)
 }

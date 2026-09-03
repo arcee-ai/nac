@@ -29,6 +29,8 @@ pub type NumstatSummary = (NumstatPairs, u64, u64);
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionSummarySnapshot {
     pub session_id: String,
+    #[serde(default)]
+    pub behavior: sessions::SessionBehavior,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     #[cfg_attr(feature = "openapi", schema(value_type = String))]
@@ -41,9 +43,11 @@ pub struct SessionSummarySnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_config_error: Option<String>,
     pub visible_message_count: usize,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub last_user_prompt: Option<String>,
     pub sandboxed: bool,
     /// OpenSSH/freeform target the session runs on; `None` = local session.
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub ssh_host: Option<String>,
     /// Port and key the session was created with, so anything rebuilding the
     /// connection reaches the same machine the same way. Omitted when the
@@ -53,6 +57,7 @@ pub struct SessionSummarySnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_identity_file: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub title: Option<String>,
     #[serde(default)]
     pub pinned: bool,
@@ -86,6 +91,7 @@ pub struct ThreadSnapshot {
     pub created_at: String,
     pub updated_at: String,
     pub episode_count: i64,
+    #[cfg_attr(feature = "openapi", schema(required))]
     pub latest_action: Option<String>,
 }
 
@@ -100,6 +106,10 @@ pub struct EpisodeSnapshot {
     /// `ok` for a retained handoff, otherwise how the dispatch died. Snapshots
     /// written before dispatch outcomes were recorded only held handoffs.
     #[serde(default = "retained_episode_status")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(required, value_type = store::EpisodeStatus)
+    )]
     pub status: String,
     pub created_at: String,
 }
@@ -208,6 +218,7 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
     fn from(summary: sessions::SessionSummary) -> Self {
         Self {
             session_id: summary.session_id,
+            behavior: summary.behavior,
             project_id: summary.project_id,
             cwd: summary.cwd,
             workspace_host_path: summary.workspace_host_path,
@@ -548,7 +559,7 @@ pub fn workspace_snapshot(
         root.as_ref()
             .and_then(|path| path.file_name())
             .and_then(|value| value.to_str())
-            .map(|value| value.to_string())
+            .map(std::string::ToString::to_string)
     });
 
     let status_raw = match run_git(target, &["status", "--porcelain"]) {
@@ -572,7 +583,9 @@ pub fn workspace_snapshot(
 
     let (_, mut file_map) = parse_status_porcelain(&status_raw);
     let (diff_map, total_additions, total_deletions) = parse_numstat_pairs(&diff_raw, &cached_raw);
-    for (path, (additions, deletions)) in diff_map {
+    let mut diff_entries: Vec<_> = diff_map.into_iter().collect();
+    diff_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    for (path, (additions, deletions)) in diff_entries {
         let entry = file_map
             .entry(path.clone())
             .or_insert_with(|| ChangedFileStat {
@@ -622,8 +635,7 @@ pub fn workspace_snapshot(
 /// there is nothing durable to inspect or restore.
 fn unreachable_workspace_message(workspace_display: &str) -> String {
     format!(
-        "workspace '{}' lives only inside the sandbox; mount a working directory to inspect it",
-        workspace_display
+        "workspace '{workspace_display}' lives only inside the sandbox; mount a working directory to inspect it"
     )
 }
 
@@ -651,7 +663,9 @@ pub fn revision_changes(
 
     let mut file_map = parse_name_status(&status_raw);
     let (diff_map, total_additions, total_deletions) = parse_numstat_pairs(&numstat_raw, "");
-    for (path, (additions, deletions)) in diff_map {
+    let mut diff_entries: Vec<_> = diff_map.into_iter().collect();
+    diff_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    for (path, (additions, deletions)) in diff_entries {
         let entry = file_map
             .entry(path.clone())
             .or_insert_with(|| ChangedFileStat {
@@ -914,6 +928,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(snapshot.title, None);
+        assert_eq!(snapshot.behavior, sessions::SessionBehavior::Orchestrator);
         assert!(!snapshot.pinned);
         assert_eq!(snapshot.sort_order, 0);
         assert_eq!(snapshot.presentation_version, 0);

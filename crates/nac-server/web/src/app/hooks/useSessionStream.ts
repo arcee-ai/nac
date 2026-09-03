@@ -163,6 +163,21 @@ export function useSessionStream(sessionId: string | null): void {
       }, RELOAD_DEBOUNCE_MS);
     };
 
+    const refreshPermissions = () => {
+      // Permission state is intentionally infinitely fresh and normally
+      // follows its exact SSE events. Whenever replay continuity is lost, the
+      // only safe substitute is a canonical refetch of the active query.
+      void client.invalidateQueries({
+        queryKey: queryKeys.sessionPermissions(id),
+        exact: true,
+      });
+    };
+
+    const replaceAfterReplayLoss = () => {
+      scheduleSnapshot(true);
+      refreshPermissions();
+    };
+
     const dispose = subscribeToSessionEvents(id, {
       onEnvelope: (envelope) => {
         if (envelope.event.type === "agent" && envelope.event.event.type === "thread_finished") {
@@ -190,6 +205,13 @@ export function useSessionStream(sessionId: string | null): void {
             queryKey: queryKeys.workspaceRevisions(id),
           });
         }
+        if (
+          envelope.event.type === "permission_asked" ||
+          envelope.event.type === "permission_replied" ||
+          envelope.event.type === "permission_dismissed"
+        ) {
+          refreshPermissions();
+        }
       },
       onAssistantDelta: applyAssistantDelta,
       onStatus: setStreamStatus,
@@ -200,11 +222,12 @@ export function useSessionStream(sessionId: string | null): void {
             queryKey: queryKeys.sessionSkills(id),
             exact: true,
           });
+          refreshPermissions();
         }
         epochId = boundary.epoch_id;
       },
-      onReplayGap: () => scheduleSnapshot(true),
-      onLagged: () => scheduleSnapshot(true),
+      onReplayGap: replaceAfterReplayLoss,
+      onLagged: replaceAfterReplayLoss,
     });
 
     return () => {
@@ -218,6 +241,42 @@ export function useSessionStream(sessionId: string | null): void {
       client.removeQueries({ queryKey: queryKeys.threadEventsRoot(id) });
     };
   }, [sessionId, client]);
+}
+
+/**
+ * Keep a delegated child's approval channel live from its parent chat without
+ * applying that child's runtime events to the parent's transcript store.
+ */
+export function useDelegatedPermissionStream(sessionId: string, enabled: boolean): void {
+  const client = useQueryClient();
+
+  useEffect(() => {
+    if (!enabled) return;
+    const refresh = () => {
+      void client.invalidateQueries({
+        queryKey: queryKeys.sessionPermissions(sessionId),
+        exact: true,
+      });
+    };
+    const dispose = subscribeToSessionEvents(sessionId, {
+      onEnvelope: (envelope) => {
+        if (
+          envelope.event.type === "permission_asked" ||
+          envelope.event.type === "permission_replied" ||
+          envelope.event.type === "permission_dismissed"
+        ) {
+          refresh();
+        }
+      },
+      onStatus: (status) => {
+        if (status === "live") refresh();
+      },
+      onReplayBoundary: refresh,
+      onReplayGap: refresh,
+      onLagged: refresh,
+    });
+    return dispose;
+  }, [client, enabled, sessionId]);
 }
 
 /**

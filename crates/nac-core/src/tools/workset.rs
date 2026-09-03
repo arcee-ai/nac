@@ -150,15 +150,15 @@ pub async fn execute_define(args: Value, runtime: &ToolRuntime) -> ToolResult {
         .await
     {
         Ok(Ok(())) => ToolResult {
-            content: (format!("Saved workset '{}' with {} item(s).", id, items_len)).into(),
+            content: (format!("Saved workset '{id}' with {items_len} item(s).")).into(),
             is_error: false,
         },
         Ok(Err(error)) => ToolResult {
-            content: (format!("Error saving workset '{}': {}", id, error)).into(),
+            content: (format!("Error saving workset '{id}': {error}")).into(),
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: (format!("Internal error saving workset '{}': {}", id, join_error)).into(),
+            content: (format!("Internal error saving workset '{id}': {join_error}")).into(),
             is_error: true,
         },
     }
@@ -183,15 +183,15 @@ pub async fn execute_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
             is_error: false,
         },
         Ok(Ok(None)) => ToolResult {
-            content: (format!("Workset '{}' does not exist in this session.", id)).into(),
+            content: (format!("Workset '{id}' does not exist in this session.")).into(),
             is_error: true,
         },
         Ok(Err(error)) => ToolResult {
-            content: (format!("Error reading workset '{}': {}", id, error)).into(),
+            content: (format!("Error reading workset '{id}': {error}")).into(),
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: (format!("Internal error reading workset '{}': {}", id, join_error)).into(),
+            content: (format!("Internal error reading workset '{id}': {join_error}")).into(),
             is_error: true,
         },
     }
@@ -211,11 +211,11 @@ pub async fn execute_list(_args: Value, runtime: &ToolRuntime) -> ToolResult {
             is_error: false,
         },
         Ok(Err(error)) => ToolResult {
-            content: (format!("Error listing worksets: {}", error)).into(),
+            content: (format!("Error listing worksets: {error}")).into(),
             is_error: true,
         },
         Err(join_error) => ToolResult {
-            content: (format!("Internal error listing worksets: {}", join_error)).into(),
+            content: (format!("Internal error listing worksets: {join_error}")).into(),
             is_error: true,
         },
     }
@@ -244,7 +244,7 @@ fn optional_string(args: &Value, key: &str) -> Result<Option<String>, ToolResult
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(value)) => Ok(Some(value.clone())),
         Some(_) => Err(ToolResult {
-            content: (format!("Error: '{}' must be a string", key)).into(),
+            content: (format!("Error: '{key}' must be a string")).into(),
             is_error: true,
         }),
     }
@@ -293,7 +293,7 @@ fn require_item_str(value: &Value, key: &str) -> Result<String, ToolResult> {
         .and_then(Value::as_str)
         .map(ToString::to_string)
         .ok_or_else(|| ToolResult {
-            content: (format!("Error: workset item '{}' is required", key)).into(),
+            content: (format!("Error: workset item '{key}' is required")).into(),
             is_error: true,
         })
 }
@@ -301,13 +301,13 @@ fn require_item_str(value: &Value, key: &str) -> Result<String, ToolResult> {
 fn require_string_array(value: &Value, key: &str) -> Result<Vec<String>, ToolResult> {
     let Some(value) = value.get(key) else {
         return Err(ToolResult {
-            content: (format!("Error: '{}' is required", key)).into(),
+            content: (format!("Error: '{key}' is required")).into(),
             is_error: true,
         });
     };
     let Some(items) = value.as_array() else {
         return Err(ToolResult {
-            content: (format!("Error: '{}' must be an array of strings", key)).into(),
+            content: (format!("Error: '{key}' must be an array of strings")).into(),
             is_error: true,
         });
     };
@@ -315,7 +315,7 @@ fn require_string_array(value: &Value, key: &str) -> Result<Vec<String>, ToolRes
     for item in items {
         let Some(value) = item.as_str() else {
             return Err(ToolResult {
-                content: (format!("Error: '{}' must be an array of strings", key)).into(),
+                content: (format!("Error: '{key}' must be an array of strings")).into(),
                 is_error: true,
             });
         };

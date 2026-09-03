@@ -13,6 +13,7 @@ import type {
   CommitWorkspaceRequest,
   CompactSessionResponse,
   CreateModelConfigurationRequest,
+  CreateGoalRequest,
   CreateProjectRequest,
   CreateSessionRequest,
   DeleteProjectResponse,
@@ -21,11 +22,24 @@ import type {
   DeviceLoginState,
   LaunchModelDefaults,
   LaunchModelDefaultsRequest,
+  InboxDelivery,
+  InboxItem,
   ManagedAuthList,
   ManagedAuthProvider,
   ManagedAuthStatus,
+  ManagedCloneOperation,
+  ManagedGitHubBranchList,
+  ManagedGitHubLoginStarted,
+  ManagedGitHubLoginState,
+  ManagedGitHubRepositoryList,
+  ManagedGitHubStatus,
+  ManagedHostStatus,
+  ManagedSecretList,
+  ManagedSecretSummary,
+  StartManagedCloneRequest,
   GeneratedCredential,
   ManagedSessionSummary,
+  ManagedOrchestratorRecord,
   McpLibraryResponse,
   McpServerList,
   McpServerView,
@@ -38,6 +52,12 @@ import type {
   ModelConfigurationList,
   ModelConfigurationRecord,
   OrchestratorSteeringResponse,
+  PermissionReply,
+  PermissionStateResponse,
+  SessionGoalRecord,
+  StartTraditionalChildRequest,
+  StartManagedOrchestratorRequest,
+  TraditionalChildRecord,
   ProjectList,
   ProjectRecord,
   ProviderModelList,
@@ -71,6 +91,7 @@ import type {
   ThreadEventPage,
   ThreadSteeringResponse,
   UpdateConfigRequest,
+  UpdateGoalRequest,
   UpdateModelConfigurationRequest,
   UpdateProjectRequest,
   UpdateSessionPresentationRequest,
@@ -199,6 +220,66 @@ export const api = {
   health: (signal?: AbortSignal) => request<{ status: string }>("GET", "/health", { signal }),
 
   getStore: (signal?: AbortSignal) => request<StoreInfo>("GET", "/store", { signal }),
+
+  getManagedStatus: (signal?: AbortSignal) =>
+    request<ManagedHostStatus>("GET", "/managed/status", { signal }),
+
+  getManagedGitHub: (signal?: AbortSignal) =>
+    request<ManagedGitHubStatus>("GET", "/managed/github", { signal }),
+
+  startManagedGitHubLogin: () =>
+    request<ManagedGitHubLoginStarted>("POST", "/managed/github/login"),
+
+  pollManagedGitHubLogin: (loginId: string, signal?: AbortSignal) =>
+    request<ManagedGitHubLoginState>(
+      "GET",
+      `/managed/github/login/${encodeURIComponent(loginId)}`,
+      { signal },
+    ),
+
+  cancelManagedGitHubLogin: (loginId: string) =>
+    request<void>("DELETE", `/managed/github/login/${encodeURIComponent(loginId)}`),
+
+  disconnectManagedGitHub: () => request<ManagedGitHubStatus>("DELETE", "/managed/github"),
+
+  listManagedGitHubRepositories: (signal?: AbortSignal) =>
+    request<ManagedGitHubRepositoryList>("GET", "/managed/github/repositories", { signal }),
+
+  listManagedGitHubBranches: (owner: string, repository: string, signal?: AbortSignal) =>
+    request<ManagedGitHubBranchList>(
+      "GET",
+      `/managed/github/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/branches`,
+      { signal },
+    ),
+
+  startManagedClone: (payload: StartManagedCloneRequest) =>
+    request<ManagedCloneOperation>("POST", "/managed/github/clone-operations", {
+      body: payload,
+    }),
+
+  getManagedClone: (operationId: string, signal?: AbortSignal) =>
+    request<ManagedCloneOperation>(
+      "GET",
+      `/managed/github/clone-operations/${encodeURIComponent(operationId)}`,
+      { signal },
+    ),
+
+  cancelManagedClone: (operationId: string) =>
+    request<ManagedCloneOperation>(
+      "DELETE",
+      `/managed/github/clone-operations/${encodeURIComponent(operationId)}`,
+    ),
+
+  listManagedSecrets: (signal?: AbortSignal) =>
+    request<ManagedSecretList>("GET", "/managed/secrets", { signal }),
+
+  putManagedSecret: (name: string, value: string) =>
+    request<ManagedSecretSummary>("PUT", `/managed/secrets/${encodeURIComponent(name)}`, {
+      body: { value },
+    }),
+
+  deleteManagedSecret: (name: string) =>
+    request<void>("DELETE", `/managed/secrets/${encodeURIComponent(name)}`),
 
   // Probing spawns podman subprocesses, so callers query this on demand (the
   // launch form's sandbox mode) rather than on page load.
@@ -438,6 +519,91 @@ export const api = {
 
   getConfig: (id: string, signal?: AbortSignal) =>
     request<RawSessionConfig>("GET", `${sessionPath(id)}/config`, { signal }),
+
+  getPermissions: (id: string, signal?: AbortSignal) =>
+    request<PermissionStateResponse>("GET", `${sessionPath(id)}/permissions`, { signal }),
+
+  replyPermission: (id: string, requestId: string, reply: PermissionReply) =>
+    request<void>("POST", `${sessionPath(id)}/permissions/${encodeURIComponent(requestId)}`, {
+      body: { reply },
+    }),
+
+  deletePermissionGrant: (id: string, grantId: string) =>
+    request<void>("DELETE", `${sessionPath(id)}/permissions/grants/${encodeURIComponent(grantId)}`),
+
+  getGoal: (id: string, signal?: AbortSignal) =>
+    request<SessionGoalRecord | null>("GET", `${sessionPath(id)}/goal`, { signal }),
+
+  createGoal: (id: string, payload: CreateGoalRequest) =>
+    request<SessionGoalRecord>("POST", `${sessionPath(id)}/goal`, { body: payload }),
+
+  updateGoal: (id: string, goalId: string, payload: UpdateGoalRequest) =>
+    request<SessionGoalRecord>("PATCH", `${sessionPath(id)}/goal/${encodeURIComponent(goalId)}`, {
+      body: payload,
+    }),
+
+  clearGoal: (id: string, goalId: string, expectedVersion: number) =>
+    request<void>("DELETE", `${sessionPath(id)}/goal/${encodeURIComponent(goalId)}`, {
+      body: { expected_version: expectedVersion },
+    }),
+
+  listInbox: (id: string, signal?: AbortSignal) =>
+    request<InboxItem[]>("GET", `${sessionPath(id)}/inbox`, { signal }),
+
+  createInboxItem: (id: string, delivery: InboxDelivery, prompt: string) =>
+    request<InboxItem>("POST", `${sessionPath(id)}/inbox`, {
+      body: { delivery, prompt },
+    }),
+
+  updateInboxItem: (id: string, itemId: number, expectedVersion: number, delivery: InboxDelivery) =>
+    request<InboxItem>("PATCH", `${sessionPath(id)}/inbox/${itemId}`, {
+      body: { expected_version: expectedVersion, delivery },
+    }),
+
+  cancelInboxItem: (id: string, itemId: number, expectedVersion: number) =>
+    request<InboxItem>("DELETE", `${sessionPath(id)}/inbox/${itemId}`, {
+      body: { expected_version: expectedVersion },
+    }),
+
+  listTraditionalChildren: (id: string, signal?: AbortSignal) =>
+    request<TraditionalChildRecord[]>("GET", `${sessionPath(id)}/children`, { signal }),
+
+  startTraditionalChild: (id: string, payload: StartTraditionalChildRequest) =>
+    request<TraditionalChildRecord>("POST", `${sessionPath(id)}/children`, { body: payload }),
+
+  getTraditionalChild: (id: string, childId: string, signal?: AbortSignal) =>
+    request<TraditionalChildRecord>(
+      "GET",
+      `${sessionPath(id)}/children/${encodeURIComponent(childId)}`,
+      { signal },
+    ),
+
+  cancelTraditionalChild: (id: string, childId: string) =>
+    request<TraditionalChildRecord>(
+      "POST",
+      `${sessionPath(id)}/children/${encodeURIComponent(childId)}/cancel`,
+    ),
+
+  listManagedOrchestrators: (id: string, signal?: AbortSignal) =>
+    request<ManagedOrchestratorRecord[]>("GET", `${sessionPath(id)}/orchestrators`, { signal }),
+
+  startManagedOrchestrator: (id: string, payload: StartManagedOrchestratorRequest) =>
+    request<ManagedOrchestratorRecord>("POST", `${sessionPath(id)}/orchestrators`, {
+      body: payload,
+    }),
+
+  getManagedOrchestrator: (id: string, orchestratorId: string, signal?: AbortSignal) =>
+    request<ManagedOrchestratorRecord>(
+      "GET",
+      `${sessionPath(id)}/orchestrators/${encodeURIComponent(orchestratorId)}`,
+      { signal },
+    ),
+
+  cancelManagedOrchestrator: (id: string, orchestratorId: string) =>
+    request<ManagedOrchestratorRecord>(
+      "POST",
+      `${sessionPath(id)}/orchestrators/${encodeURIComponent(orchestratorId)}/cancel`,
+    ),
 
   updateConfig: (id: string, payload: UpdateConfigRequest) =>
     request<void>("PATCH", `${sessionPath(id)}/config`, { body: payload }),

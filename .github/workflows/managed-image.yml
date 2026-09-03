@@ -1,0 +1,112 @@
+name: Managed NAC image
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/managed-image.yml
+      - .dockerignore
+      - docker/managed/**
+      - scripts/smoke-managed-image.sh
+      - scripts/test-managed-image-contract.sh
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/managed-image.yml
+      - .dockerignore
+      - docker/managed/**
+      - scripts/smoke-managed-image.sh
+      - scripts/test-managed-image-contract.sh
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: managed-image-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+      short_sha: ${{ steps.candidate.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - id: candidate
+        name: Resolve immutable candidate
+        shell: bash
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${sha:0:12}" >> "$GITHUB_OUTPUT"
+
+  contract:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - name: Check image, entrypoint, smoke, and workflow contracts
+        run: |
+          sh -n docker/managed/entrypoint.sh
+          sh -n scripts/smoke-managed-image.sh
+          sh -n scripts/test-managed-image-contract.sh
+          sh scripts/test-managed-image-contract.sh
+
+  quality:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - name: Install Node LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: crates/nac-server/web/package-lock.json
+      - name: Install frontend dependencies
+        run: npm --prefix crates/nac-server/web ci
+      - name: Run the repository acceptance gates
+        run: make ci
+
+  build-smoke:
+    needs: [prepare, contract, quality]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build exact linux/amd64 image without publication
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/managed/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: nac-managed-smoke:${{ needs.prepare.outputs.short_sha }}
+          provenance: false
+          sbom: false
+      - name: Run credential-independent image smoke
+        env:
+          MANAGED_IMAGE: nac-managed-smoke:${{ needs.prepare.outputs.short_sha }}
+          MANAGED_IMAGE_SKIP_BUILD: "1"
+        run: sh scripts/smoke-managed-image.sh

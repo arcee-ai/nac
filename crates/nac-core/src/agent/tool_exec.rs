@@ -6,11 +6,24 @@ pub(super) async fn execute_tools_parallel(
     client: ModelClient,
     event_sink: EventSink,
     thread_name: Option<String>,
+    admission_controlled: bool,
 ) -> Vec<(String, String, ToolResult)> {
     // 1. Partition tool calls into thread dispatches, non-thread calls, and
     //    parse errors.
     let (thread_dispatches, other_calls, parse_errors) =
         dag::partition_tool_calls(tool_calls, &runtime);
+
+    if admission_controlled && thread_dispatches.is_empty() {
+        return execute_admission_controlled(
+            other_calls,
+            parse_errors,
+            runtime,
+            client,
+            event_sink,
+            thread_name,
+        )
+        .await;
+    }
 
     // 2. If there are no thread dispatches, use the simple path — just spawn
     //    all non-thread calls into a JoinSet, same as the original logic.
@@ -65,6 +78,50 @@ pub(super) async fn execute_tools_parallel(
     .await
 }
 
+type IndexedToolCall = (usize, String, String, String);
+
+fn admission_groups(other_calls: Vec<IndexedToolCall>) -> Vec<Vec<IndexedToolCall>> {
+    let mut groups = Vec::new();
+    let mut parallel = Vec::new();
+    for call in other_calls {
+        let admission = crate::tools::direct_tool_admission(&call.2)
+            .unwrap_or(crate::tools::kernel::ToolAdmission::Exclusive);
+        match admission {
+            crate::tools::kernel::ToolAdmission::Parallel => parallel.push(call),
+            crate::tools::kernel::ToolAdmission::Exclusive => {
+                if !parallel.is_empty() {
+                    groups.push(std::mem::take(&mut parallel));
+                }
+                groups.push(vec![call]);
+            }
+        }
+    }
+    if !parallel.is_empty() {
+        groups.push(parallel);
+    }
+    groups
+}
+
+async fn execute_admission_controlled(
+    other_calls: Vec<IndexedToolCall>,
+    parse_errors: Vec<(usize, String, String, ToolResult)>,
+    runtime: ToolRuntime,
+    client: ModelClient,
+    event_sink: EventSink,
+    thread_name: Option<String>,
+) -> Vec<(String, String, ToolResult)> {
+    let mut all_results = dag::collect_parse_errors(parse_errors, &event_sink, &thread_name);
+    // Consecutive read/discovery calls may overlap. Every exclusive call is a
+    // barrier for all earlier and later calls, preserving model response order
+    // while preventing shell and mutation overlap.
+    for group in admission_groups(other_calls) {
+        all_results.extend(
+            spawn_and_collect_non_thread(group, &runtime, &client, &event_sink, &thread_name).await,
+        );
+    }
+    dag::sort_and_strip_index(all_results)
+}
+
 /// Execute a batch of non-thread tool calls, emitting start/finish events for
 /// each.  Returns `(original_index, tool_call_id, tool_name, ToolResult)` tuples
 /// in completion order — the caller is responsible for sorting.
@@ -106,7 +163,7 @@ async fn spawn_and_collect_non_thread(
                     "unknown".to_string(),
                     "unknown".to_string(),
                     ToolResult {
-                        content: (format!("Tool task panicked: {}", error)).into(),
+                        content: (format!("Tool task panicked: {error}")).into(),
                         is_error: true,
                     },
                 ));
@@ -176,10 +233,10 @@ async fn execute_with_dag_error(
     // Produce error ToolResults for all thread dispatches.
     let error_message = match &dag_err {
         dag::DagError::DuplicateName(name) => {
-            format!("Duplicate thread name '{}' in parallel dispatch", name)
+            format!("Duplicate thread name '{name}' in parallel dispatch")
         }
         dag::DagError::Cycle(desc) => {
-            format!("Circular dependency in thread dispatch: {}", desc)
+            format!("Circular dependency in thread dispatch: {desc}")
         }
     };
 
@@ -241,6 +298,43 @@ mod tests {
         }
     }
 
+    fn indexed(index: usize, name: &str) -> IndexedToolCall {
+        (
+            index,
+            format!("call-{index}"),
+            name.to_string(),
+            "{}".to_string(),
+        )
+    }
+
+    #[test]
+    fn direct_admission_groups_reads_and_barriers_mutations_shell_and_unknowns() {
+        let groups = admission_groups(vec![
+            indexed(0, "read"),
+            indexed(1, "grep"),
+            indexed(2, "write"),
+            indexed(3, "glob"),
+            indexed(4, "exec_command"),
+            indexed(5, "future_tool"),
+            indexed(6, "read_command_output"),
+        ]);
+        let names = groups
+            .iter()
+            .map(|group| group.iter().map(|call| call.2.as_str()).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                vec!["read", "grep"],
+                vec!["write"],
+                vec!["glob"],
+                vec!["exec_command"],
+                vec!["future_tool"],
+                vec!["read_command_output"],
+            ]
+        );
+    }
+
     // ------------------------------------------------------------------
     // Integration tests
     // ------------------------------------------------------------------
@@ -258,7 +352,8 @@ mod tests {
         let client = ModelClient::new_for_test();
         let event_sink = EventSink::none();
 
-        let results = execute_tools_parallel(tool_calls, runtime, client, event_sink, None).await;
+        let results =
+            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
 
         assert_eq!(results.len(), 2);
         // Results should be sorted by original index.
@@ -293,7 +388,8 @@ mod tests {
         let client = ModelClient::new_for_test();
         let event_sink = EventSink::none();
 
-        let results = execute_tools_parallel(tool_calls, runtime, client, event_sink, None).await;
+        let results =
+            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
 
         assert_eq!(results.len(), 4);
         // Sorted by original index.
@@ -327,7 +423,8 @@ mod tests {
         let client = ModelClient::new_for_test();
         let event_sink = EventSink::none();
 
-        let results = execute_tools_parallel(tool_calls, runtime, client, event_sink, None).await;
+        let results =
+            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
 
         assert_eq!(results.len(), 3);
 
@@ -371,7 +468,8 @@ mod tests {
         let client = ModelClient::new_for_test();
         let event_sink = EventSink::none();
 
-        let results = execute_tools_parallel(tool_calls, runtime, client, event_sink, None).await;
+        let results =
+            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|(_, _, r)| r.is_error));
@@ -407,7 +505,8 @@ mod tests {
         let client = ModelClient::new_for_test();
         let event_sink = EventSink::none();
 
-        let results = execute_tools_parallel(tool_calls, runtime, client, event_sink, None).await;
+        let results =
+            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
 
         assert_eq!(results.len(), 4);
 
@@ -446,7 +545,8 @@ mod tests {
         let client = ModelClient::new_for_test();
         let event_sink = EventSink::none();
 
-        let results = execute_tools_parallel(tool_calls, runtime, client, event_sink, None).await;
+        let results =
+            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
 
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, "call_0");

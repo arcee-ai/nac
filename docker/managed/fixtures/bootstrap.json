@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "bootstrap_id": "4712bc5e-30d5-421a-b416-8291d9f7d8f9",
+  "managed_host_id": "21856443-8ed8-40ab-9036-72e837c99f27",
+  "client_id": "managed-nac",
+  "access_token": "managed-image-smoke-access-canary",
+  "refresh_token": "managed-image-smoke-refresh-canary",
+  "access_token_expires_at": "2035-01-02T03:04:05Z",
+  "token_type": "bearer",
+  "inference_base_url": "https://api.arcee.ai",
+  "organization_id": "managed-image-smoke-org",
+  "workspace": "managed-image-smoke-workspace"
+}

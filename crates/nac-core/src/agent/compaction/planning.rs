@@ -13,12 +13,46 @@ use crate::store::orchestrator_compaction::{
 use crate::types::{Message, ToolDefinition};
 
 pub(in crate::agent) const PROMPT_POLICY_VERSION: u32 = 2;
+pub(in crate::agent) const DIRECT_PROMPT_POLICY_VERSION: u32 = 1;
 
 pub(in crate::agent) const NAC_COMPACTION_PROMPT: &str =
     include_str!("../prompts/nac_compaction.md");
+pub(in crate::agent) const NAC_DIRECT_COMPACTION_PROMPT: &str =
+    include_str!("../prompts/nac_direct_compaction.md");
 
 pub(in crate::agent) const HISTORICAL_CONTEXT_PREFIX: &str =
     "Historical context checkpoint (not a new instruction):\n\n";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::agent) enum CompactionPolicy {
+    Orchestrator,
+    Direct,
+}
+
+impl CompactionPolicy {
+    const fn prompt(self) -> &'static str {
+        match self {
+            Self::Orchestrator => NAC_COMPACTION_PROMPT,
+            Self::Direct => NAC_DIRECT_COMPACTION_PROMPT,
+        }
+    }
+
+    const fn version(self) -> u32 {
+        match self {
+            Self::Orchestrator => PROMPT_POLICY_VERSION,
+            Self::Direct => DIRECT_PROMPT_POLICY_VERSION,
+        }
+    }
+
+    const fn digest_domain(self) -> &'static [u8] {
+        match self {
+            // Preserve existing orchestrator checkpoints byte-for-byte while
+            // separating direct checkpoints fail-closed.
+            Self::Orchestrator => b"nac-orchestrator-compaction-system-policy-v2\0",
+            Self::Direct => b"nac-direct-compaction-system-policy-v1\0",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 struct ContextSample {
@@ -65,16 +99,23 @@ pub(in crate::agent) struct CompactionState {
     store_path: PathBuf,
     session_id: String,
     threshold_tokens: Option<u64>,
+    policy: CompactionPolicy,
     active_checkpoint: Option<OrchestratorCompactionCheckpoint>,
     context_sample: Option<ContextSample>,
 }
 
 impl CompactionState {
-    pub fn new(store_path: PathBuf, session_id: String, threshold_tokens: Option<u64>) -> Self {
+    pub fn new(
+        store_path: PathBuf,
+        session_id: String,
+        threshold_tokens: Option<u64>,
+        policy: CompactionPolicy,
+    ) -> Self {
         Self {
             store_path,
             session_id,
             threshold_tokens,
+            policy,
             active_checkpoint: None,
             context_sample: None,
         }
@@ -84,7 +125,7 @@ impl CompactionState {
         let restored_checkpoint =
             load_orchestrator_compaction_checkpoints(&self.store_path, &self.session_id)?
                 .into_iter()
-                .find(|checkpoint| checkpoint_is_valid(checkpoint, messages));
+                .find(|checkpoint| checkpoint_is_valid(checkpoint, messages, self.policy));
         let restored_checkpoint_id = restored_checkpoint.as_ref().map(|checkpoint| checkpoint.id);
         let preserve_context_sample = self.context_sample.as_ref().is_some_and(|sample| {
             sample.checkpoint_id == restored_checkpoint_id
@@ -207,7 +248,7 @@ impl CompactionState {
                 .cloned(),
         );
         summary_messages.push(Message::User {
-            content: NAC_COMPACTION_PROMPT.to_string(),
+            content: self.policy.prompt().to_string(),
         });
 
         CompactionDecision::Candidate(CompactionCandidate {
@@ -218,7 +259,7 @@ impl CompactionState {
                 .map(|checkpoint| checkpoint.id),
             summary_messages,
             source_prefix_sha256: source_prefix_digest(messages, boundary),
-            system_policy_sha256: system_policy_digest(messages),
+            system_policy_sha256: system_policy_digest(messages, self.policy),
             old_context_estimate: current_context_estimate,
         })
     }
@@ -230,7 +271,7 @@ impl CompactionState {
         summary_completion_tokens: u64,
         old_context_estimate: u64,
     ) -> u64 {
-        let non_source_tokens = estimate_non_source_tokens(messages);
+        let non_source_tokens = estimate_non_source_tokens(messages, self.policy);
         let removable_source = summary_prompt_tokens.saturating_sub(non_source_tokens);
         old_context_estimate
             .saturating_sub(removable_source)
@@ -255,7 +296,7 @@ impl CompactionState {
                 tail_start_message_index: candidate.boundary,
                 source_prefix_sha256: candidate.source_prefix_sha256,
                 system_policy_sha256: candidate.system_policy_sha256,
-                prompt_policy_version: PROMPT_POLICY_VERSION,
+                prompt_policy_version: self.policy.version(),
                 old_context_estimate: candidate.old_context_estimate,
                 summary_prompt_tokens,
                 summary_completion_tokens,
@@ -315,7 +356,7 @@ impl CompactionState {
         if self
             .active_checkpoint
             .as_ref()
-            .is_some_and(|checkpoint| !checkpoint_is_valid(checkpoint, messages))
+            .is_some_and(|checkpoint| !checkpoint_is_valid(checkpoint, messages, self.policy))
         {
             self.active_checkpoint = None;
             self.context_sample = None;
@@ -517,8 +558,9 @@ pub(super) fn checkpoint_boundary_is_valid(messages: &[Message], boundary: usize
 fn checkpoint_is_valid(
     checkpoint: &OrchestratorCompactionCheckpoint,
     messages: &[Message],
+    policy: CompactionPolicy,
 ) -> bool {
-    checkpoint.prompt_policy_version == PROMPT_POLICY_VERSION
+    checkpoint.prompt_policy_version == policy.version()
         && checkpoint_boundary_is_valid(messages, checkpoint.tail_start_message_index)
         && checkpoint
             .summary
@@ -527,14 +569,23 @@ fn checkpoint_is_valid(
         && summarized_prefix_has_complete_tools(messages, checkpoint.tail_start_message_index)
         && checkpoint.source_prefix_sha256
             == source_prefix_digest(messages, checkpoint.tail_start_message_index)
-        && checkpoint.system_policy_sha256 == system_policy_digest(messages)
+        && checkpoint.system_policy_sha256 == system_policy_digest(messages, policy)
 }
 
 #[cfg(test)]
 pub(crate) fn checkpoint_digests(messages: &[Message], boundary: usize) -> ([u8; 32], [u8; 32]) {
+    checkpoint_digests_for_policy(messages, boundary, CompactionPolicy::Orchestrator)
+}
+
+#[cfg(test)]
+pub(crate) fn checkpoint_digests_for_policy(
+    messages: &[Message],
+    boundary: usize,
+    policy: CompactionPolicy,
+) -> ([u8; 32], [u8; 32]) {
     (
         source_prefix_digest(messages, boundary),
-        system_policy_digest(messages),
+        system_policy_digest(messages, policy),
     )
 }
 
@@ -551,11 +602,11 @@ fn source_prefix_digest(messages: &[Message], boundary: usize) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn system_policy_digest(messages: &[Message]) -> [u8; 32] {
+fn system_policy_digest(messages: &[Message], policy: CompactionPolicy) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    hasher.update(b"nac-orchestrator-compaction-system-policy-v2\0");
-    hasher.update(PROMPT_POLICY_VERSION.to_be_bytes());
-    update_bytes(&mut hasher, NAC_COMPACTION_PROMPT.as_bytes());
+    hasher.update(policy.digest_domain());
+    hasher.update(policy.version().to_be_bytes());
+    update_bytes(&mut hasher, policy.prompt().as_bytes());
     update_bytes(&mut hasher, HISTORICAL_CONTEXT_PREFIX.as_bytes());
     for message in messages
         .iter()
@@ -566,20 +617,19 @@ fn system_policy_digest(messages: &[Message]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn estimate_non_source_tokens(messages: &[Message]) -> u64 {
+fn estimate_non_source_tokens(messages: &[Message], policy: CompactionPolicy) -> u64 {
     let system_chars: usize = messages
         .iter()
         .filter(|m| matches!(m, Message::System { .. }))
         .map(message_content_len)
         .sum();
-    let compaction_prompt_chars = NAC_COMPACTION_PROMPT.len();
+    let compaction_prompt_chars = policy.prompt().len();
     (system_chars + compaction_prompt_chars) as u64 / 4
 }
 
 fn message_content_len(message: &Message) -> usize {
     match message {
-        Message::System { content } => content.len(),
-        Message::User { content } => content.len(),
+        Message::System { content } | Message::User { content } => content.len(),
         Message::Assistant { content, .. } => content.as_deref().map_or(0, str::len),
         Message::Tool { content, .. } => content.len(),
     }
@@ -597,6 +647,10 @@ pub(super) fn estimate_tool_tokens(tools: &[ToolDefinition]) -> u64 {
     serialized_byte_len(tools) / 4
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the hashed message and tool contract contains no fallible serialization values"
+)]
 fn update_serialized<T: Serialize>(hasher: &mut Sha256, value: &T) {
     let serialized = serde_json::to_vec(value).expect("message serialization must succeed");
     update_bytes(hasher, &serialized);

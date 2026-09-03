@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, type RenderResult } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSessionStream } from "@/app/hooks/useSessionStream";
+import { useDelegatedPermissionStream, useSessionStream } from "@/app/hooks/useSessionStream";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
 import { resetRuntime } from "@/app/store/runtimeStore";
@@ -137,6 +137,11 @@ function Harness() {
   return null;
 }
 
+function DelegatedPermissionHarness() {
+  useDelegatedPermissionStream("child-session", true);
+  return null;
+}
+
 async function mount(client: QueryClient): Promise<RenderResult> {
   const renderer = render(
     <QueryClientProvider client={client}>
@@ -160,6 +165,29 @@ afterEach(() => {
 });
 
 describe("session stream request coordination", () => {
+  it("keeps a child permission stream live without mounting the child transcript", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const renderer = render(
+      <QueryClientProvider client={client}>
+        <DelegatedPermissionHarness />
+      </QueryClientProvider>,
+    );
+    await act(async () => undefined);
+    const stream_source = source();
+    expect(stream_source.url).toContain("/sessions/child-session/events/stream");
+
+    await act(async () => stream_source.onopen?.());
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.sessionPermissions("child-session"),
+      exact: true,
+    });
+    await act(async () => renderer.unmount());
+    expect(stream_source.readyState).toBe(FakeEventSource.CLOSED);
+  });
+
   it("coalesces a 100-commit burst into one in-flight tail and one follow-up", async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -257,6 +285,10 @@ describe("session stream request coordination", () => {
       queryKey: queryKeys.sessionSkills(SESSION_ID),
       exact: true,
     });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.sessionPermissions(SESSION_ID),
+      exact: true,
+    });
 
     await act(async () => {
       stream_source.emit("replay_boundary", { epoch_id: "three" });
@@ -279,6 +311,33 @@ describe("session stream request coordination", () => {
       await secondSnapshot.promise;
     });
     expect(stream.getPage).toHaveBeenCalledOnce();
+
+    await act(async () => renderer.unmount());
+  });
+
+  it("refreshes permission state when replay loss makes exact events unknowable", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    client.setQueryData(queryKeys.sessionSnapshot(SESSION_ID), snapshot([user("old")]));
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const renderer = await mount(client);
+    const stream_source = source();
+
+    await act(async () => {
+      stream_source.emit("replay_gap", { missing_from_sequence_id: 4 });
+      stream_source.emit("lagged", { skipped: 3 });
+    });
+
+    expect(invalidate).toHaveBeenCalledTimes(2);
+    expect(invalidate).toHaveBeenNthCalledWith(1, {
+      queryKey: queryKeys.sessionPermissions(SESSION_ID),
+      exact: true,
+    });
+    expect(invalidate).toHaveBeenNthCalledWith(2, {
+      queryKey: queryKeys.sessionPermissions(SESSION_ID),
+      exact: true,
+    });
 
     await act(async () => renderer.unmount());
   });

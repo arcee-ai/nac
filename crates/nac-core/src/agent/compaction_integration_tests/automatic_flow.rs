@@ -13,6 +13,7 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
+            session_behavior: None,
             store_path: PathBuf::from("unused.db"),
             session_id: None,
             orchestrator_compaction_threshold: Some(1),
@@ -32,6 +33,7 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .unwrap();
@@ -45,6 +47,61 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
             .is_some_and(|tools| !tools.is_empty())
     );
     assert_eq!(worker.last_usage.unwrap().orchestrator_context_tokens, 0);
+}
+
+#[tokio::test]
+async fn direct_primary_uses_the_direct_compaction_prompt() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let store_path = std::env::temp_dir()
+        .join(format!(
+            "nac_agent_direct_compaction_{}",
+            uuid::Uuid::new_v4()
+        ))
+        .join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json(
+            "200 OK",
+            scripted_responses_text("direct checkpoint", 30, 0, 4, 34),
+        ),
+        ScriptedResponse::json(
+            "200 OK",
+            scripted_responses_text("ordinary answer", 20, 0, 3, 23),
+        ),
+    ]);
+    let mut agent = compaction_test_agent_with_mode(
+        ModelClient::new_for_test_server(server.base_url.clone()),
+        store_path.clone(),
+        Some("session"),
+        Some(1),
+        EventSink::none(),
+        AgentMode::Direct,
+    );
+    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.messages = compactable_messages();
+    store_agent_snapshot(&store_path, &agent);
+
+    assert_eq!(agent.send("current").await.unwrap(), "ordinary answer");
+    let requests = server.finish();
+    assert_eq!(requests.len(), 2);
+    let summary_body = String::from_utf8_lossy(&requests[0].body);
+    assert!(summary_body.contains("direct-session context-compaction request"));
+    assert!(!summary_body.contains("## Orchestration history"));
+    let checkpoints =
+        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+            &store_path,
+            "session",
+        )
+        .unwrap();
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(
+        checkpoints[0].prompt_policy_version,
+        compaction::DIRECT_PROMPT_POLICY_VERSION
+    );
+
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]

@@ -208,7 +208,7 @@ fn load_settings(paths: &PathContext) -> AgentsMdSettings {
     let Some(path) = paths.nac_config_path() else {
         return settings;
     };
-    let Ok(raw) = fs::read_to_string(&path) else {
+    let Ok(raw) = crate::mcp::read_mcp_configuration_consistently(&path) else {
         return settings;
     };
     let Ok(config) = toml::from_str::<AgentsMdConfigFile>(&raw) else {

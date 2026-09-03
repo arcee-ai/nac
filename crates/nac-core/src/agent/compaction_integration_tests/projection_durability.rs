@@ -416,8 +416,9 @@ async fn valid_checkpoint_projects_after_restore_when_generation_is_disabled() {
     .unwrap();
 
     agent.restore_compaction_checkpoint().unwrap();
+    let tool_defs = agent.tool_defs.clone();
     let view = agent
-        .prepare_provider_view(&mut TokenUsage::default())
+        .prepare_provider_view(&mut TokenUsage::default(), &tool_defs)
         .await;
     let encoded = serde_json::to_string(&view.messages).unwrap();
     assert!(encoded.contains("restored summary"));
