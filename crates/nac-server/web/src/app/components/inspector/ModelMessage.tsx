@@ -17,10 +17,7 @@ import {
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
 import { MessageActionIcon } from "@/app/components/inspector/MessageActionIcon";
 import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
-import {
-  SnapshotBadge,
-  type FilesPanelLink,
-} from "@/app/components/inspector/SnapshotBadge";
+import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
 import { SpawnedSessionCard } from "@/app/components/inspector/SpawnedSessionCard";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
@@ -29,15 +26,8 @@ import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
 import { DELEGATED_READONLY_HINT } from "@/app/lib/sessionBehavior";
-import {
-  partitionAgentTranscript,
-  turnOriginKey,
-} from "@/app/lib/agentSegments";
-import {
-  RUN_CANCELLED_MARKER,
-  type ModelTurn,
-  type TranscriptBlock,
-} from "@/app/lib/transcript";
+import { partitionAgentTranscript, turnOriginKey } from "@/app/lib/agentSegments";
+import { RUN_CANCELLED_MARKER, type ModelTurn, type TranscriptBlock } from "@/app/lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -46,10 +36,7 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
  * model is doing rather than what it produced. Once it is over the badge carries
  * how long the model spent on it, whenever the backend timed the call.
  */
-function thoughtsLabel(block: {
-  streaming: boolean;
-  durationMs: number | null;
-}): string {
+function thoughtsLabel(block: { streaming: boolean; durationMs: number | null }): string {
   if (block.streaming) return "Thinking";
   if (block.durationMs == null) return "Thoughts";
   return `Thoughts, ${formatSeconds(block.durationMs)}`;
@@ -169,12 +156,9 @@ export const ModelMessage = memo(function ModelMessage({
   spawnParentSessionId,
 }: ModelMessageProps) {
   perfRender("ModelMessage");
-  const lockHint = readOnly
-    ? (readOnlyReason ?? DELEGATED_READONLY_HINT)
-    : undefined;
+  const lockHint = readOnly ? (readOnlyReason ?? DELEGATED_READONLY_HINT) : undefined;
   const actionLocked = actionsDisabled || readOnly;
-  const showResend =
-    readOnly || (onRefresh != null && userMessageIndex != null);
+  const showResend = readOnly || (onRefresh != null && userMessageIndex != null);
   const canRevert = onRevert != null && userMessageIndex != null;
   const forkIndex = turn.messageIndex;
   const showFork = readOnly || (onFork != null && forkIndex != null);
@@ -184,8 +168,7 @@ export const ModelMessage = memo(function ModelMessage({
   // already written, so it closes the turn below the snapshot rather than
   // sitting wherever the marker happens to fall between the blocks.
   const cancelled = turn.blocks.some(
-    (block) =>
-      block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
+    (block) => block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
   );
   const isMobile = useIsMobile();
   const renderTranscriptBlock = (block: TranscriptBlock) => {
@@ -223,9 +206,7 @@ export const ModelMessage = memo(function ModelMessage({
             pending={block.pending}
             active={selectedWorkset === block.worksetId}
             onClick={() => {
-              onSelectAgentSegment?.(
-                `${turnOriginKey(turn)}:workset-${block.key}`,
-              );
+              onSelectAgentSegment?.(`${turnOriginKey(turn)}:workset-${block.key}`);
               onSelectWorkset(block.worksetId);
             }}
           />
@@ -262,14 +243,8 @@ export const ModelMessage = memo(function ModelMessage({
     >
       <div className="flex flex-col flex-grow gap-1 pt-2 md:max-w-[calc(100%-36px)] min-w-0">
         <div className="flex gap-3 items-center mb-4 min-w-0">
-          <SessionTypeAvatar
-            sessionType={sessionType}
-            running={active}
-            className="shrink-0"
-          />
-          <span className="label-small text-basic-primary truncate">
-            {model}
-          </span>
+          <SessionTypeAvatar sessionType={sessionType} running={active} className="shrink-0" />
+          <span className="label-small text-basic-primary truncate">{model}</span>
           {/* The header carries whichever of the two is available: what the run
               is doing now, or how long it took once it is over. */}
           {active && activity ? (
@@ -338,13 +313,9 @@ export const ModelMessage = memo(function ModelMessage({
                 sessionId={fork.session_id}
                 title={fork.title}
                 deleted={fork.deleted}
-                onOpen={
-                  onOpenFork ? () => onOpenFork(fork.session_id) : undefined
-                }
+                onOpen={onOpenFork ? () => onOpenFork(fork.session_id) : undefined}
                 onDismiss={
-                  onDismissFork && fork.deleted
-                    ? () => onDismissFork(fork.session_id)
-                    : undefined
+                  onDismissFork && fork.deleted ? () => onDismissFork(fork.session_id) : undefined
                 }
               />
             ))}
@@ -385,8 +356,7 @@ export const ModelMessage = memo(function ModelMessage({
               title="Revert to this snapshot"
               disabled={actionLocked || !canRevert}
               disabledReason={
-                lockHint ??
-                (canRevert ? null : "This message is not in the transcript yet")
+                lockHint ?? (canRevert ? null : "This message is not in the transcript yet")
               }
               position={TooltipPosition.BottomRight}
               isMobile={isMobile}
@@ -406,11 +376,7 @@ export const ModelMessage = memo(function ModelMessage({
                 disabledReason={lockHint}
                 position={TooltipPosition.BottomRight}
                 isMobile={isMobile}
-                onClick={
-                  forkIndex != null && onFork
-                    ? () => onFork(forkIndex)
-                    : undefined
-                }
+                onClick={forkIndex != null && onFork ? () => onFork(forkIndex) : undefined}
               >
                 <Icon iconName={IconName.Scheme} size={16} />
               </MessageActionIcon>
@@ -423,11 +389,7 @@ export const ModelMessage = memo(function ModelMessage({
                 disabledReason={lockHint}
                 position={TooltipPosition.BottomRight}
                 isMobile={isMobile}
-                onClick={
-                  forkIndex != null && onContinue
-                    ? () => onContinue(forkIndex)
-                    : undefined
-                }
+                onClick={forkIndex != null && onContinue ? () => onContinue(forkIndex) : undefined}
               >
                 <Icon
                   iconName={sessionTypeIconName(

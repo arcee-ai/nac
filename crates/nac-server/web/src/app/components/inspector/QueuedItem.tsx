@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  Icon,
-  IconName,
-} from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import type { InboxItem } from "@/app/types/api";
 

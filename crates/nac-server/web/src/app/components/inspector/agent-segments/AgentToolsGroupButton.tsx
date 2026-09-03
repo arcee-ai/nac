@@ -42,60 +42,63 @@ function segmentsUnchanged(
   return true;
 }
 
-export const AgentToolsGroupButton = memo(function AgentToolsGroupButton({
-  group,
-  active,
-  onSelect,
-}: {
-  group: AgentToolsGroup;
-  active: boolean;
-  onSelect: (id: string) => void;
-}) {
-  const items = useMemo(() => toolsItemsFromGroup(group), [group]);
-  const label = actionListLabel(group);
-  const steps = useMemo(() => buildStepperSteps(group), [group]);
-  const onSelectRef = useRef(onSelect);
-  onSelectRef.current = onSelect;
-  const groupId = group.id;
-  const handleClick = useCallback(() => {
-    onSelectRef.current(groupId);
-  }, [groupId]);
-  const [holdOpen, setHoldOpen] = useState(group.inProgress && steps.length > 0);
+export const AgentToolsGroupButton = memo(
+  function AgentToolsGroupButton({
+    group,
+    active,
+    onSelect,
+  }: {
+    group: AgentToolsGroup;
+    active: boolean;
+    onSelect: (id: string) => void;
+  }) {
+    const items = useMemo(() => toolsItemsFromGroup(group), [group]);
+    const label = actionListLabel(group);
+    const steps = useMemo(() => buildStepperSteps(group), [group]);
+    const onSelectRef = useRef(onSelect);
+    onSelectRef.current = onSelect;
+    const groupId = group.id;
+    const handleClick = useCallback(() => {
+      onSelectRef.current(groupId);
+    }, [groupId]);
+    const [holdOpen, setHoldOpen] = useState(group.inProgress && steps.length > 0);
 
-  useEffect(() => {
-    if (group.inProgress && steps.length > 0) {
-      setHoldOpen(true);
-      return undefined;
-    }
-    const timeout = window.setTimeout(() => setHoldOpen(false), STEP_FADE_MS);
-    return () => window.clearTimeout(timeout);
-  }, [group.inProgress, steps.length]);
+    useEffect(() => {
+      if (group.inProgress && steps.length > 0) {
+        setHoldOpen(true);
+        return undefined;
+      }
+      const timeout = window.setTimeout(() => setHoldOpen(false), STEP_FADE_MS);
+      return () => window.clearTimeout(timeout);
+    }, [group.inProgress, steps.length]);
 
-  const showSteps = holdOpen && steps.length > 0;
+    const showSteps = holdOpen && steps.length > 0;
 
-  return (
-    <div className="relative my-6">
-      <ToolsSegments
-        items={items}
-        label={label}
-        durationMs={group.durationMs}
-        inProgress={group.inProgress}
-        active={active}
-        ariaLabel={label}
-        onClick={handleClick}
-      />
-      {showSteps ? (
-        <div className="pointer-events-none absolute top-full left-0 right-0 z-10 pl-4">
-          <StepByStepDisplayer steps={steps} faded={!group.inProgress} />
-        </div>
-      ) : null}
-    </div>
-  );
-}, function agentToolsGroupButtonPropsAreEqual(prev, next) {
-  if (prev.active !== next.active) return false;
-  if (prev.group.id !== next.group.id) return false;
-  if (prev.group.inProgress !== next.group.inProgress) return false;
-  if (prev.group.durationMs !== next.group.durationMs) return false;
-  if (prev.group.label !== next.group.label) return false;
-  return segmentsUnchanged(prev.group.segments, next.group.segments);
-});
+    return (
+      <div className="relative my-6">
+        <ToolsSegments
+          items={items}
+          label={label}
+          durationMs={group.durationMs}
+          inProgress={group.inProgress}
+          active={active}
+          ariaLabel={label}
+          onClick={handleClick}
+        />
+        {showSteps ? (
+          <div className="pointer-events-none absolute top-full left-0 right-0 z-10 pl-4">
+            <StepByStepDisplayer steps={steps} faded={!group.inProgress} />
+          </div>
+        ) : null}
+      </div>
+    );
+  },
+  function agentToolsGroupButtonPropsAreEqual(prev, next) {
+    if (prev.active !== next.active) return false;
+    if (prev.group.id !== next.group.id) return false;
+    if (prev.group.inProgress !== next.group.inProgress) return false;
+    if (prev.group.durationMs !== next.group.durationMs) return false;
+    if (prev.group.label !== next.group.label) return false;
+    return segmentsUnchanged(prev.group.segments, next.group.segments);
+  },
+);

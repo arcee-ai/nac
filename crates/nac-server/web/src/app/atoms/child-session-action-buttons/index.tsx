@@ -19,18 +19,10 @@ export interface ChildSessionActionButtonsProps {
   className?: string;
 }
 
-function ActionTooltip({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function ActionTooltip({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <Tooltip title={title} position={TooltipPosition.TopCenter} className="flex h-6 shrink-0">
-      <span className="flex size-6 shrink-0 items-center justify-center">
-        {children}
-      </span>
+      <span className="flex size-6 shrink-0 items-center justify-center">{children}</span>
     </Tooltip>
   );
 }

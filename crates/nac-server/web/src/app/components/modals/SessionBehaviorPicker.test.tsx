@@ -9,33 +9,31 @@ afterEach(cleanup);
 
 describe("session behavior picker", () => {
   it("shows Agent and Orchestrator with Agent selected by default", () => {
-    render(<SessionBehaviorPicker value="direct" onChange={() => {}} />);
+    render(<SessionBehaviorPicker value="direct-with-orchestrator" onChange={() => {}} />);
 
     expect(screen.getAllByRole("radio")).toHaveLength(2);
-    expect(screen.getByRole("radio", { name: /^Agent /i }).getAttribute("aria-checked")).toBe(
+    expect(screen.getByRole("radio", { name: /Agent Default/i }).getAttribute("aria-checked")).toBe(
       "true",
     );
     expect(screen.getByText(/start a new chat to choose a different behavior/i)).toBeTruthy();
 
-    const agent = screen.getByRole("radio", { name: /^Agent /i });
+    const agent = screen.getByRole("radio", { name: /Agent Default/i });
     expect(agent.textContent).toMatch(/Default/);
     expect(agent.textContent).toMatch(/persistent coding agent/i);
     expect(agent.textContent).toMatch(/edits files and runs commands directly/i);
-    expect(agent.textContent).toMatch(
-      /fresh-context coding agents and separate Orchestrator sessions/i,
-    );
+    expect(agent.textContent).toMatch(/fresh-context coding agents/i);
+    expect(agent.textContent).toMatch(/separate Orchestrator sessions/i);
 
     const orchestrator = screen.getByRole("radio", { name: /^Orchestrator /i });
     expect(orchestrator.textContent).toMatch(/planner/i);
     expect(orchestrator.textContent).toMatch(/does not edit directly/i);
     expect(orchestrator.textContent).toMatch(/retained Orchestrator worker threads/i);
     expect(orchestrator.textContent).toMatch(/Actions and Worksets/i);
-    expect(screen.queryByRole("radio", { name: /Direct \+ NAC/i })).toBeNull();
   });
 
   it("reports an explicit Orchestrator choice", () => {
     const onChange = vi.fn();
-    render(<SessionBehaviorPicker value="direct" onChange={onChange} />);
+    render(<SessionBehaviorPicker value="direct-with-orchestrator" onChange={onChange} />);
 
     fireEvent.click(screen.getByRole("radio", { name: /^Orchestrator /i }));
 
@@ -44,8 +42,10 @@ describe("session behavior picker", () => {
 
   it("supports roving keyboard selection with one tab stop", () => {
     const onChange = vi.fn();
-    const view = render(<SessionBehaviorPicker value="direct" onChange={onChange} />);
-    const agent = screen.getByRole("radio", { name: /^Agent /i });
+    const view = render(
+      <SessionBehaviorPicker value="direct-with-orchestrator" onChange={onChange} />,
+    );
+    const agent = screen.getByRole("radio", { name: /Agent Default/i });
     const orchestrator = screen.getByRole("radio", { name: /^Orchestrator /i });
 
     expect(agent.tabIndex).toBe(0);

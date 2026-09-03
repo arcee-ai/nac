@@ -3,7 +3,13 @@ import {
   turnOriginKey,
   type AgentToolsGroup,
 } from "@/app/lib/agentSegments";
-import type { ThreadState, TranscriptBlock, TranscriptThread, TranscriptTurn, UserTurn } from "@/app/lib/transcript";
+import type {
+  ThreadState,
+  TranscriptBlock,
+  TranscriptThread,
+  TranscriptTurn,
+  UserTurn,
+} from "@/app/lib/transcript";
 
 export type ActionFilter = "all" | "threads" | "tools" | "sessions" | "worksets";
 
@@ -191,10 +197,7 @@ export function flattenActionItems(sections: readonly ActionTurnSection[]): Acti
 }
 
 /** Origin key of the newest model turn, when that turn is still producing output. */
-export function liveTurnOriginKey(
-  turns: readonly TranscriptTurn[],
-  live: boolean,
-): string | null {
+export function liveTurnOriginKey(turns: readonly TranscriptTurn[], live: boolean): string | null {
   if (!live) return null;
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];

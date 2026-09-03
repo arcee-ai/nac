@@ -23,8 +23,7 @@ const COPY = {
   direct: {
     title: "Launch coding agent",
     hint: "Start a fresh-context coding agent. Browse, steer, continue, and cancel it from Related Sessions.",
-    promptPlaceholder:
-      "Describe the task, relevant context, and expected verification",
+    promptPlaceholder: "Describe the task, relevant context, and expected verification",
     submit: "Start coding agent",
     missing: "A complete child prompt is required.",
     fail: "Unable to start child",
@@ -96,12 +95,8 @@ export function SpawnComposeForm({
             size={32}
             className="shrink-0 text-basic-primary"
           />
-          <p className="label-big text-center text-basic-primary">
-            {copy.title}
-          </p>
-          <p className="label-small text-center text-basic-tertiary">
-            {copy.hint}
-          </p>
+          <p className="label-big text-center text-basic-primary">{copy.title}</p>
+          <p className="label-small text-center text-basic-tertiary">{copy.hint}</p>
         </div>
         <form
           className="flex w-full flex-col gap-2 rounded-[8px] bg-elevation-level-1 p-3 shadow-2xl"
@@ -119,9 +114,11 @@ export function SpawnComposeForm({
             isDisabled={busy}
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) {
-                return;
-              }
+              // Enter sends, as it does in the chat composer; Shift keeps the
+              // newline and the modifier combo stays for the muscle memory it
+              // was written for.
+              if (event.nativeEvent.isComposing) return;
+              if (event.key !== "Enter" || event.shiftKey) return;
               event.preventDefault();
               if (canSend) void submit();
             }}
@@ -129,11 +126,7 @@ export function SpawnComposeForm({
           />
           <div className="flex items-center justify-between gap-3">
             <label className="flex items-center gap-2 label-micro text-basic-primary">
-              <Switch
-                checked={background}
-                disabled={busy}
-                onChange={setBackground}
-              />
+              <Switch checked={background} disabled={busy} onChange={setBackground} />
               Run in background
             </label>
             <Button

@@ -29,11 +29,7 @@ import {
 } from "@/app/lib/sessionOrder";
 import { api } from "@/app/services/api";
 import { useQueryInvalidators } from "@/app/services/queries/invalidation";
-import {
-  queryKeys,
-  SESSIONS_POLL_MS,
-  WORKSPACE_STATS_POLL_MS,
-} from "@/app/services/queries/keys";
+import { queryKeys, SESSIONS_POLL_MS, WORKSPACE_STATS_POLL_MS } from "@/app/services/queries/keys";
 import {
   beginSnapshotFetch,
   currentSessionGeneration,
@@ -79,9 +75,7 @@ export function mergeWorkspaceStats(
   );
   return base.map((entry) => {
     const workspaceDiff = workspaceById.get(entry.summary.session_id);
-    return workspaceDiff === undefined
-      ? entry
-      : { ...entry, workspace_diff: workspaceDiff };
+    return workspaceDiff === undefined ? entry : { ...entry, workspace_diff: workspaceDiff };
   });
 }
 
@@ -102,8 +96,7 @@ export function useSessionsWithWorkspaceStats(
     staleTime: cadence.statsMs,
   });
   const data = useMemo(
-    () =>
-      base.data ? mergeWorkspaceStats(base.data, stats.data ?? []) : base.data,
+    () => (base.data ? mergeWorkspaceStats(base.data, stats.data ?? []) : base.data),
     [base.data, stats.data],
   );
   return { ...base, data };
@@ -122,35 +115,26 @@ export function useSessionSummary(id: string | null) {
       sessions.find((item) => item.summary.session_id === id) ?? null,
     [id],
   );
-  return useQuery<ManagedSessionSummary[], Error, ManagedSessionSummary | null>(
-    {
-      queryKey: queryKeys.sessions(false),
-      queryFn: ({ signal }) => api.listSessions({}, signal),
-      refetchInterval: SESSIONS_POLL_MS,
-      staleTime: 0,
-      placeholderData: keepPreviousData,
-      select,
-    },
-  );
+  return useQuery<ManagedSessionSummary[], Error, ManagedSessionSummary | null>({
+    queryKey: queryKeys.sessions(false),
+    queryFn: ({ signal }) => api.listSessions({}, signal),
+    refetchInterval: SESSIONS_POLL_MS,
+    staleTime: 0,
+    placeholderData: keepPreviousData,
+    select,
+  });
 }
 
 function previousDataFrom(sessionId: string) {
-  return <T>(
-    previous: T | undefined,
-    previousQuery?: { queryKey: readonly unknown[] },
-  ) => (previousQuery?.queryKey[1] === sessionId ? previous : undefined);
+  return <T>(previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) =>
+    previousQuery?.queryKey[1] === sessionId ? previous : undefined;
 }
 
 function cachedSessionIsAgent(client: QueryClient, id: string): boolean {
-  const snapshot = client.getQueryData<SessionSnapshotResponse>(
-    queryKeys.sessionSnapshot(id),
-  );
+  const snapshot = client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id));
   if (isAgentBehavior(snapshot?.metadata.behavior)) return true;
-  const list = client.getQueryData<ManagedSessionSummary[]>(
-    queryKeys.sessions(false),
-  );
-  const behavior = list?.find((item) => item.summary.session_id === id)?.summary
-    .behavior;
+  const list = client.getQueryData<ManagedSessionSummary[]>(queryKeys.sessions(false));
+  const behavior = list?.find((item) => item.summary.session_id === id)?.summary.behavior;
   return isAgentBehavior(behavior);
 }
 
@@ -207,29 +191,17 @@ export function useSessionSnapshot(
         signal,
       });
       if (!validSnapshotWindow(incoming)) {
-        throw new Error(
-          "The server returned an invalid snapshot message page.",
-        );
+        throw new Error("The server returned an invalid snapshot message page.");
       }
-      if (
-        signal.aborted ||
-        !isCurrentSessionGeneration(id!, token.generation)
-      ) {
+      if (signal.aborted || !isCurrentSessionGeneration(id!, token.generation)) {
         throw new DOMException("Snapshot superseded", "AbortError");
       }
       const focused = mergeFocusedSnapshot(
-        client.getQueryData<SessionSnapshotResponse>(
-          queryKeys.sessionSnapshot(id!),
-        ),
+        client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id!)),
         incoming,
         token.replace,
       );
-      const snapshot = await withAgentHistory(
-        id!,
-        focused,
-        signal,
-        token.generation,
-      );
+      const snapshot = await withAgentHistory(id!, focused, signal, token.generation);
       finishSnapshotFetch(id!, token);
       return snapshot;
     },
@@ -246,9 +218,7 @@ export function useLoadOlderMessages(id: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: async (): Promise<boolean> => {
-      const current = client.getQueryData<SessionSnapshotResponse>(
-        queryKeys.sessionSnapshot(id),
-      );
+      const current = client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id));
       const start = current?.message_page?.start;
       if (start === undefined || start <= 0) {
         throw new Error("No older messages are available.");
@@ -265,24 +235,18 @@ export function useLoadOlderMessages(id: string) {
       if (!isCurrentSessionGeneration(id, generation)) return false;
 
       let accepted = false;
-      client.setQueryData<SessionSnapshotResponse>(
-        queryKeys.sessionSnapshot(id),
-        (latest) => {
-          if (!latest) return latest;
-          const merged = prependMessagePage(latest, page, start);
-          if (!merged) return latest;
-          accepted = true;
-          return merged;
-        },
-      );
+      client.setQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id), (latest) => {
+        if (!latest) return latest;
+        const merged = prependMessagePage(latest, page, start);
+        if (!merged) return latest;
+        accepted = true;
+        return merged;
+      });
       return accepted;
     },
   });
 }
-export function useThreadEventPages(
-  id: string | null,
-  threadName: string | null,
-) {
+export function useThreadEventPages(id: string | null, threadName: string | null) {
   return useInfiniteQuery<
     ThreadEventPage,
     Error,
@@ -298,8 +262,7 @@ export function useThreadEventPages(
         signal,
       }),
     initialPageParam: null,
-    getNextPageParam: (lastPage) =>
-      lastPage.has_older ? lastPage.next_before_id : undefined,
+    getNextPageParam: (lastPage) => (lastPage.has_older ? lastPage.next_before_id : undefined),
     enabled: Boolean(id && threadName),
     staleTime: Number.POSITIVE_INFINITY,
   });
@@ -329,15 +292,9 @@ export function useCreateSession() {
  */
 function sessionIdsShowingFork(client: QueryClient, forkId: string): string[] {
   const ids: string[] = [];
-  for (const query of client
-    .getQueryCache()
-    .findAll({ queryKey: ["session"] })) {
+  for (const query of client.getQueryCache().findAll({ queryKey: ["session"] })) {
     const key = query.queryKey;
-    if (
-      key[0] !== "session" ||
-      key[2] !== "snapshot" ||
-      typeof key[1] !== "string"
-    ) {
+    if (key[0] !== "session" || key[2] !== "snapshot" || typeof key[1] !== "string") {
       continue;
     }
     const sessionId = key[1];
@@ -375,12 +332,7 @@ export interface RenameSessionVariables {
 export function useUpdatePresentation() {
   const invalidate = useQueryInvalidators();
   return useMutation({
-    mutationFn: ({
-      id,
-      title,
-      pinned,
-      expectedVersion,
-    }: RenameSessionVariables) =>
+    mutationFn: ({ id, title, pinned, expectedVersion }: RenameSessionVariables) =>
       api.updatePresentation(id, {
         title,
         pinned,
@@ -470,8 +422,7 @@ export function useUpdateConfig() {
 export function useSubmitRun() {
   const invalidate = useQueryInvalidators();
   return useMutation({
-    mutationFn: ({ id, prompt }: { id: string; prompt: string }) =>
-      api.submitRun(id, prompt),
+    mutationFn: ({ id, prompt }: { id: string; prompt: string }) => api.submitRun(id, prompt),
     onMutate: ({ prompt }) => {
       setOptimisticUserPrompt(prompt);
     },
@@ -489,12 +440,8 @@ export function useCancelRun() {
     mutationFn: (id: string) => api.cancelActiveRun(id),
     onMutate: (id) => {
       const runtime = requestRunCancel();
-      const snapshot = client.getQueryData<SessionSnapshotResponse>(
-        queryKeys.sessionSnapshot(id),
-      );
-      const sessions = client.getQueryData<ManagedSessionSummary[]>(
-        queryKeys.sessions(false),
-      );
+      const snapshot = client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id));
+      const sessions = client.getQueryData<ManagedSessionSummary[]>(queryKeys.sessions(false));
       const sessionsWithStats = client.getQueryData<ManagedSessionSummary[]>(
         queryKeys.sessions(true),
       );
@@ -511,10 +458,7 @@ export function useCancelRun() {
         client.setQueryData(queryKeys.sessions(false), previous.sessions);
       }
       if (previous.sessionsWithStats !== undefined) {
-        client.setQueryData(
-          queryKeys.sessions(true),
-          previous.sessionsWithStats,
-        );
+        client.setQueryData(queryKeys.sessions(true), previous.sessionsWithStats);
       }
     },
     onSuccess: (_data, id) => {
@@ -525,10 +469,7 @@ export function useCancelRun() {
   });
 }
 
-function idleSessionEntry(
-  entry: ManagedSessionSummary,
-  sessionId: string,
-): ManagedSessionSummary {
+function idleSessionEntry(entry: ManagedSessionSummary, sessionId: string): ManagedSessionSummary {
   if (entry.summary.session_id !== sessionId) return entry;
   if (!entry.active && entry.active_run === undefined) return entry;
   return { ...entry, active: false, active_run: undefined };
@@ -536,15 +477,12 @@ function idleSessionEntry(
 
 /** Drop a live run from every cache the tab strip and breadcrumbs read. */
 function clearCachedActiveRun(client: QueryClient, sessionId: string): void {
-  client.setQueryData<SessionSnapshotResponse>(
-    queryKeys.sessionSnapshot(sessionId),
-    (current) =>
-      current?.active_run ? { ...current, active_run: undefined } : current,
+  client.setQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(sessionId), (current) =>
+    current?.active_run ? { ...current, active_run: undefined } : current,
   );
   for (const workspaceStats of [false, true] as const) {
-    client.setQueryData<ManagedSessionSummary[]>(
-      queryKeys.sessions(workspaceStats),
-      (list) => list?.map((entry) => idleSessionEntry(entry, sessionId)),
+    client.setQueryData<ManagedSessionSummary[]>(queryKeys.sessions(workspaceStats), (list) =>
+      list?.map((entry) => idleSessionEntry(entry, sessionId)),
     );
   }
 }

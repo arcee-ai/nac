@@ -1,14 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  Icon,
-  IconName,
-} from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
 import { isAgentBehavior } from "@/app/lib/sessionBehavior";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { toRunError } from "@/app/lib/providerError";
@@ -57,16 +50,10 @@ function GrantRow({
     <div className="flex items-start gap-3 rounded-[4px] bg-elevation-level-2 px-3 py-2">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="tag-label uppercase text-basic-secondary">
-            {grant.action}
-          </span>
-          <span className="tag-label uppercase text-basic-tertiary">
-            {grant.backend}
-          </span>
+          <span className="tag-label uppercase text-basic-secondary">{grant.action}</span>
+          <span className="tag-label uppercase text-basic-tertiary">{grant.backend}</span>
         </div>
-        <div className="mt-1 break-all code code-small text-basic-primary">
-          {grant.resource}
-        </div>
+        <div className="mt-1 break-all code code-small text-basic-primary">{grant.resource}</div>
       </div>
       <Button
         size={ButtonSize.Small}
@@ -99,31 +86,21 @@ export function PermissionRequestPrompt({
   replyChoice: PermissionReply | undefined;
   onReply: (choice: PermissionReply) => void;
 }) {
-  const rememberable = request.resources.some(
-    (resource) => resource.save_resource,
-  );
+  const rememberable = request.resources.some((resource) => resource.save_resource);
   return (
     <div aria-label="Requested access">
       {sourceLabel ? (
-        <div className="mb-2 text-small text-basic-secondary">
-          From {sourceLabel}
-        </div>
+        <div className="mb-2 text-small text-basic-secondary">From {sourceLabel}</div>
       ) : null}
-      <div className="mb-2 tag-label uppercase text-basic-tertiary">
-        Requested access
-      </div>
+      <div className="mb-2 tag-label uppercase text-basic-tertiary">Requested access</div>
       <div className="flex flex-col gap-2">
         {request.resources.map((resource, index) => (
           <div
             key={`${resource.action}:${resource.resource}:${index}`}
             className="rounded-[4px] bg-elevation-level-2 px-3 py-2"
           >
-            <div className="tag-label uppercase text-basic-secondary">
-              {resource.action}
-            </div>
-            <div className="mt-1 break-words text-small text-basic-primary">
-              {resource.display}
-            </div>
+            <div className="tag-label uppercase text-basic-secondary">{resource.action}</div>
+            <div className="mt-1 break-words text-small text-basic-primary">{resource.display}</div>
             {resource.save_resource && !compact ? (
               <div className="mt-2 break-all code code-small text-basic-tertiary">
                 Always: {resource.save_resource}
@@ -172,23 +149,17 @@ export function PermissionRequestPrompt({
   );
 }
 
-export function usePermissionAsks(
-  sessionId: string,
-  behavior: SessionBehavior | null,
-) {
+export function usePermissionAsks(sessionId: string, behavior: SessionBehavior | null) {
   const direct = isAgentBehavior(behavior);
   const childrenQuery = useTraditionalChildren(sessionId, direct);
-  const runningChildren = (childrenQuery.data ?? []).filter(
-    (child) => child.status === "running",
-  );
+  const runningChildren = (childrenQuery.data ?? []).filter((child) => child.status === "running");
   const watchedIds = direct
     ? [sessionId, ...runningChildren.map((child) => child.child_session_id)]
     : [];
   const queries = useQueries({
     queries: watchedIds.map((id) => ({
       queryKey: queryKeys.sessionPermissions(id),
-      queryFn: ({ signal }: { signal?: AbortSignal }) =>
-        api.getPermissions(id, signal),
+      queryFn: ({ signal }: { signal?: AbortSignal }) => api.getPermissions(id, signal),
       enabled: direct,
       staleTime: Infinity,
       retry: false,
@@ -203,8 +174,7 @@ export function usePermissionAsks(
     }
     runningChildren.forEach((child, index) => {
       const childRequests =
-        (queries[index + 1]?.data as PermissionStateResponse | undefined)
-          ?.requests ?? [];
+        (queries[index + 1]?.data as PermissionStateResponse | undefined)?.requests ?? [];
       for (const request of childRequests) {
         asks.push({
           sessionId: child.child_session_id,
@@ -256,9 +226,7 @@ export function PermissionPanel({
         reply: choice,
       });
     } catch (error) {
-      toast.error(
-        `Unable to answer permission request: ${errorMessage(toRunError(error))}`,
-      );
+      toast.error(`Unable to answer permission request: ${errorMessage(toRunError(error))}`);
     } finally {
       setReplyingTo(null);
     }
@@ -270,9 +238,7 @@ export function PermissionPanel({
     try {
       await deleteGrant.mutateAsync({ sessionId, grantId: grant.id });
     } catch (error) {
-      toast.error(
-        `Unable to forget permission: ${errorMessage(toRunError(error))}`,
-      );
+      toast.error(`Unable to forget permission: ${errorMessage(toRunError(error))}`);
     } finally {
       setDeletingGrant(null);
     }
@@ -290,9 +256,7 @@ export function PermissionPanel({
       </div>
 
       {permissions.isPending ? (
-        <div className="py-4 text-center text-small text-basic-secondary">
-          Loading permissions…
-        </div>
+        <div className="py-4 text-center text-small text-basic-secondary">Loading permissions…</div>
       ) : permissions.isError ? (
         <div className="rounded-[4px] bg-error-secondary p-3 text-small text-error-primary">
           Permissions could not be loaded. The run remains fail-closed.
@@ -325,9 +289,7 @@ export function PermissionPanel({
                 ))}
               </div>
             ) : (
-              <div className="text-small text-basic-secondary">
-                No remembered permissions.
-              </div>
+              <div className="text-small text-basic-secondary">No remembered permissions.</div>
             )}
           </div>
         </div>

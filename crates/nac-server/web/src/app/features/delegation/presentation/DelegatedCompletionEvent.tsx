@@ -1,12 +1,6 @@
 import { useNavigate } from "react-router-dom";
 
-import {
-  Button,
-  ButtonSize,
-  ButtonVariant,
-  CopyButton,
-  TooltipPosition,
-} from "@/app/atoms";
+import { Button, ButtonSize, ButtonVariant, CopyButton, TooltipPosition } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import type { DelegatedCompletion } from "@/app/features/delegation/completion";
 import { Markdown } from "@/app/lib/markdown";

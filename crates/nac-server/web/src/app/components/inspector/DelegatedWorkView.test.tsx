@@ -1,14 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,10 +14,7 @@ import {
   selectSpawn,
   useSelectedSpawn,
 } from "@/app/store/sessionLayoutStore";
-import type {
-  SessionAssignmentRecord,
-  SessionSnapshotResponse,
-} from "@/app/types/api";
+import type { SessionAssignmentRecord, SessionSnapshotResponse } from "@/app/types/api";
 
 function Location() {
   return <div data-testid="location">{useLocation().pathname}</div>;
@@ -136,11 +126,7 @@ function emptySnapshot(id: string): SessionSnapshotResponse {
   } as SessionSnapshotResponse;
 }
 
-function View({
-  behavior,
-}: {
-  behavior: "direct" | "direct-with-orchestrator";
-}) {
+function View({ behavior }: { behavior: "direct" | "direct-with-orchestrator" }) {
   const selected = useSelectedSpawn();
   return (
     <DelegatedWorkView
@@ -176,16 +162,10 @@ function mount(behavior: "direct" | "direct-with-orchestrator", seed = true) {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   if (seed) {
-    client.setQueryData(queryKeys.sessionSpawns("parent"), [
-      child,
-      orchestrator,
-    ]);
+    client.setQueryData(queryKeys.sessionSpawns("parent"), [child, orchestrator]);
   }
   client.setQueryData(queryKeys.sessionSnapshot("child-1"), emptySnapshot("child-1"));
-  client.setQueryData(
-    queryKeys.sessionSnapshot("orchestrator-1"),
-    emptySnapshot("orchestrator-1"),
-  );
+  client.setQueryData(queryKeys.sessionSnapshot("orchestrator-1"), emptySnapshot("orchestrator-1"));
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/sessions/parent"]}>
@@ -223,24 +203,18 @@ describe("delegated work", () => {
   it("shows Agent and Orchestrator assignments in one list", () => {
     mount("direct-with-orchestrator");
 
-    expect(
-      screen.getByRole("button", { name: /Review permissions/ }),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: /Run the compatibility audit/ }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Review permissions/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Run the compatibility audit/ })).toBeTruthy();
     expect(screen.getByText("Launch coding agent")).toBeTruthy();
     expect(screen.queryByText("Coding agents")).toBeNull();
     expect(screen.queryByText("NAC orchestrators")).toBeNull();
+    expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New Orchestrator" })).toBeTruthy();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /Review permissions/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Review permissions/ }));
     expect(screen.getByText("Thinking…")).toBeTruthy();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /Run the compatibility audit/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Run the compatibility audit/ }));
     expect(screen.getByText("No messages yet.")).toBeTruthy();
     expect(screen.queryByText("Thinking…")).toBeNull();
   });
@@ -248,20 +222,17 @@ describe("delegated work", () => {
   it("navigates from a delegated preview to its transcript", () => {
     mount("direct");
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /Review permissions/ }),
-    );
+    expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "New Orchestrator" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Review permissions/ }));
     fireEvent.click(screen.getByRole("button", { name: "Go to session" }));
-    expect(screen.getByTestId("location").textContent).toBe(
-      "/session/child-1/actions",
-    );
+    expect(screen.getByTestId("location").textContent).toBe("/session/child-1/actions");
     expect(screen.getByText("Run the compatibility audit")).toBeTruthy();
   });
 
   it("keeps a recoverable retry entry point after a relationship-list failure", async () => {
-    listSpawns
-      .mockRejectedValueOnce(new Error("temporary failure"))
-      .mockResolvedValue([child]);
+    listSpawns.mockRejectedValueOnce(new Error("temporary failure")).mockResolvedValue([child]);
     mount("direct", false);
 
     expect((await screen.findByRole("alert")).textContent).toContain(
@@ -269,9 +240,7 @@ describe("delegated work", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: /Review permissions/ }),
-      ).toBeTruthy(),
+      expect(screen.getByRole("button", { name: /Review permissions/ })).toBeTruthy(),
     );
     expect(listSpawns).toHaveBeenCalledTimes(2);
   });
@@ -279,13 +248,9 @@ describe("delegated work", () => {
   it("routes pause through the unified spawn API", async () => {
     mount("direct-with-orchestrator");
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /Review permissions/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Review permissions/ }));
     fireEvent.click(screen.getByRole("button", { name: "Pause session" }));
-    await waitFor(() =>
-      expect(cancelSpawn).toHaveBeenCalledWith("parent", "child-1"),
-    );
+    await waitFor(() => expect(cancelSpawn).toHaveBeenCalledWith("parent", "child-1"));
   });
 
   it("renders cache-driven polling transitions without a page refresh", async () => {
@@ -307,6 +272,7 @@ describe("delegated work", () => {
       ]);
     });
 
+    await waitFor(() => expect(row.querySelector(".text-shimmer-basic")).toBeNull());
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Pause session" })).toBeNull();
       expect(screen.getByRole("button", { name: "Go to session" })).toBeTruthy();

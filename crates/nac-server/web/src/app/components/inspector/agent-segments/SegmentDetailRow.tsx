@@ -14,10 +14,7 @@ import { ToolCallLabel } from "@/app/components/inspector/agent-segments/ToolCal
 import SegmentDetailBox, {
   type SidebarBoxContent,
 } from "@/app/components/inspector/agent-segments/SegmentDetailBox";
-import {
-  ToolCallLabelState,
-  type SegmentDisplayConfig,
-} from "@/app/lib/agentSegments";
+import { ToolCallLabelState, type SegmentDisplayConfig } from "@/app/lib/agentSegments";
 import { cn } from "@/app/lib/cn";
 
 export interface SegmentDetailItem {

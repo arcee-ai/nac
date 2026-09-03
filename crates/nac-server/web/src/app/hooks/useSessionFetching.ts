@@ -32,8 +32,7 @@ export function useSessionFetching(sessionId: string): boolean {
         // counts; a heartbeat against a warm cache does not, or the
         // delegated panel would keep the hairline lit during a run.
         if (query.state.data === undefined) return true;
-        const interval = (query.options as { refetchInterval?: unknown })
-          .refetchInterval;
+        const interval = (query.options as { refetchInterval?: unknown }).refetchInterval;
         return !(typeof interval === "number" && interval > 0);
       },
     }) > 0;

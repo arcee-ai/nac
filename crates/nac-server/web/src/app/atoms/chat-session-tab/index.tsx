@@ -4,20 +4,11 @@ import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
 import ShimmerLoader from "../loader/ShimmerLoader";
-import OriginSessionBadge, {
-  originKindFromOrigin,
-} from "../origin-session-badge";
-import {
-  SessionOrigin,
-  SessionType,
-  sessionTypeIconName,
-} from "../session-type-avatar";
+import OriginSessionBadge, { originKindFromOrigin } from "../origin-session-badge";
+import { SessionOrigin, SessionType, sessionTypeIconName } from "../session-type-avatar";
 import Tooltip from "../tooltip";
 
-interface ChatSessionTabProps extends Omit<
-  React.ButtonHTMLAttributes<HTMLButtonElement>,
-  "title"
-> {
+interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> {
   title: string;
   active?: boolean;
   /** Shimmering title and type icon. */
@@ -90,12 +81,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
           shimmer={running}
         />
       </Tooltip>
-      <span
-        className={cn(
-          "label-micro min-w-0 flex-1 truncate text-left",
-          titleClass,
-        )}
-      >
+      <span className={cn("label-micro min-w-0 flex-1 truncate text-left", titleClass)}>
         {title}
       </span>
     </>
@@ -127,9 +113,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
       <button
         type={type}
         disabled={disabled}
-        aria-label={
-          ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)
-        }
+        aria-label={ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)}
         aria-current={active ? "page" : undefined}
         className={cn(
           "flex h-full min-w-0 items-center gap-1 pt-[2px] pb-1 pl-2 focus-visible:outline-none",

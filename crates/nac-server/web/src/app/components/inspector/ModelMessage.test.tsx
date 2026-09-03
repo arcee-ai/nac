@@ -93,9 +93,7 @@ describe("transcript topology badge navigation", () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Continue in Orchestrator" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue in Orchestrator" }));
     expect(onContinue).toHaveBeenCalledWith(2);
   });
 
@@ -136,29 +134,17 @@ describe("transcript topology badge navigation", () => {
       />,
     );
 
+    expect(screen.getByRole("button", { name: "Resend" }).hasAttribute("disabled")).toBe(true);
     expect(
-      screen.getByRole("button", { name: "Resend" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Revert to this snapshot" }).hasAttribute("disabled"),
     ).toBe(true);
+    expect(screen.getByRole("button", { name: "Create fork" }).hasAttribute("disabled")).toBe(true);
     expect(
-      screen
-        .getByRole("button", { name: "Revert to this snapshot" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
-    expect(
-      screen
-        .getByRole("button", { name: "Create fork" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
-    expect(
-      screen
-        .getByRole("button", { name: "Continue in Orchestrator" })
-        .hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Continue in Orchestrator" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(screen.queryByText("Forked chat")).toBeNull();
-    expect(
-      screen
-        .getByRole("button", { name: "Copy message" })
-        .hasAttribute("disabled"),
-    ).toBe(false);
+    expect(screen.getByRole("button", { name: "Copy message" }).hasAttribute("disabled")).toBe(
+      false,
+    );
   });
 });

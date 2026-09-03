@@ -68,9 +68,7 @@ export const UserMessage = memo(function UserMessage({
   preview = false,
 }: UserMessageProps) {
   perfRender("UserMessage");
-  const lockHint = readOnly
-    ? (readOnlyReason ?? DELEGATED_READONLY_HINT)
-    : undefined;
+  const lockHint = readOnly ? (readOnlyReason ?? DELEGATED_READONLY_HINT) : undefined;
   const actionLocked = actionsDisabled || readOnly;
   const showResend = readOnly || (onRefresh != null && messageIndex != null);
   const canRevert = onRevert != null && messageIndex != null;
@@ -92,11 +90,7 @@ export const UserMessage = memo(function UserMessage({
           className="flex items-center gap-1 pt-1.5 pr-1 label-micro text-basic-tertiary"
           title="Skill content was expanded into the prompt sent to the agent"
         >
-          <Icon
-            iconName={IconName.Bolt}
-            size={12}
-            color="var(--color-fill-basic-tertiary)"
-          />
+          <Icon iconName={IconName.Bolt} size={12} color="var(--color-fill-basic-tertiary)" />
           <span>
             {invokedSkills.length === 1 ? "Skill" : "Skills"} expanded:{" "}
             {invokedSkills.map((name) => `$${name}`).join(", ")}
@@ -130,9 +124,7 @@ export const UserMessage = memo(function UserMessage({
               position={TooltipPosition.BottomLeft}
               isMobile={isMobile}
               onClick={
-                messageIndex != null && onRefresh
-                  ? () => onRefresh(messageIndex)
-                  : undefined
+                messageIndex != null && onRefresh ? () => onRefresh(messageIndex) : undefined
               }
             >
               <Icon iconName={IconName.Refresh} size={16} />
@@ -143,8 +135,7 @@ export const UserMessage = memo(function UserMessage({
             title="Revert to this snapshot"
             disabled={actionLocked || !canRevert}
             disabledReason={
-              lockHint ??
-              (canRevert ? null : "This message is not in the transcript yet")
+              lockHint ?? (canRevert ? null : "This message is not in the transcript yet")
             }
             position={TooltipPosition.BottomLeft}
             isMobile={isMobile}

@@ -1,11 +1,7 @@
 import { IconName } from "@/app/atoms/icon";
 import { formatSeconds } from "@/app/lib/format";
 import type { ToolPresentation } from "@/app/lib/toolPresentation";
-import type {
-  ModelTurn,
-  TranscriptBlock,
-  TranscriptTurn,
-} from "@/app/lib/transcript";
+import type { ModelTurn, TranscriptBlock, TranscriptTurn } from "@/app/lib/transcript";
 
 /** Consecutive thoughts and tool calls collapsed into one pill tray. */
 export interface AgentToolsGroup {
@@ -142,6 +138,18 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
     regularLabel: "Start session",
     inProgressLabel: "Starting session…",
   },
+  subagent: {
+    id: "subagent",
+    icon: IconName.Plane,
+    regularLabel: "Start coding agent",
+    inProgressLabel: "Starting coding agent…",
+  },
+  orchestrator_launch: {
+    id: "orchestrator_launch",
+    icon: IconName.Orchestrator,
+    regularLabel: "Start orchestrator",
+    inProgressLabel: "Starting orchestrator…",
+  },
   session_status: {
     id: "session_status",
     icon: IconName.Info,
@@ -172,6 +180,48 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
     regularLabel: "Cancel session",
     inProgressLabel: "Cancelling session…",
   },
+  subagent_status: {
+    id: "subagent_status",
+    icon: IconName.Info,
+    regularLabel: "Check coding agent",
+    inProgressLabel: "Checking coding agent…",
+  },
+  subagent_cancel: {
+    id: "subagent_cancel",
+    icon: IconName.Trash,
+    regularLabel: "Cancel coding agent",
+    inProgressLabel: "Cancelling coding agent…",
+  },
+  orchestrator_status: {
+    id: "orchestrator_status",
+    icon: IconName.Info,
+    regularLabel: "Check orchestrator",
+    inProgressLabel: "Checking orchestrator…",
+  },
+  orchestrator_steer: {
+    id: "orchestrator_steer",
+    icon: IconName.AddChat,
+    regularLabel: "Steer orchestrator",
+    inProgressLabel: "Steering orchestrator…",
+  },
+  orchestrator_read: {
+    id: "orchestrator_read",
+    icon: IconName.Eye,
+    regularLabel: "Read orchestrator",
+    inProgressLabel: "Reading orchestrator…",
+  },
+  orchestrator_wait: {
+    id: "orchestrator_wait",
+    icon: IconName.Timelaps,
+    regularLabel: "Wait for orchestrator",
+    inProgressLabel: "Waiting for orchestrator…",
+  },
+  orchestrator_cancel: {
+    id: "orchestrator_cancel",
+    icon: IconName.Trash,
+    regularLabel: "Cancel orchestrator",
+    inProgressLabel: "Cancelling orchestrator…",
+  },
   workset_define: {
     id: "workset_define",
     icon: IconName.Checklist,
@@ -187,7 +237,7 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
 };
 
 /** Spawned sessions stay out of the ToolsSegments tray and get their own row. */
-const STANDALONE_TOOL_NAMES = new Set(["session_spawn"]);
+const STANDALONE_TOOL_NAMES = new Set(["session_spawn", "subagent", "orchestrator_launch"]);
 
 export function isStandaloneToolName(name: string): boolean {
   return STANDALONE_TOOL_NAMES.has(name);
@@ -237,11 +287,7 @@ function isStandaloneBlock(block: TranscriptBlock): boolean {
 
 function isGroupable(block: TranscriptBlock): boolean {
   if (isStandaloneBlock(block)) return false;
-  return (
-    block.kind === "thoughts" ||
-    block.kind === "tool-detail" ||
-    block.kind === "tool"
-  );
+  return block.kind === "thoughts" || block.kind === "tool-detail" || block.kind === "tool";
 }
 
 function segmentFromBlock(block: TranscriptBlock): AgentSegment | null {
@@ -332,6 +378,8 @@ const TOOL_TRAILING: Record<string, string> = {
   session_wait: "Wait",
   session_cancel: "Delete",
   session_spawn: "Spawn",
+  subagent: "Spawn",
+  orchestrator_launch: "Spawn",
   workset_define: "Workset",
   thread_delete: "Delete",
 };
@@ -358,8 +406,7 @@ function readyActionListLabel(group: AgentToolsGroup): string {
 export function actionListLabel(group: AgentToolsGroup): string {
   if (!group.inProgress) return readyActionListLabel(group);
   if (actionListIsThoughtsOnly(group)) return REASONING_CONFIG.inProgressLabel;
-  if (group.segments.length === 1)
-    return configForSegment(group.segments[0]).inProgressLabel;
+  if (group.segments.length === 1) return configForSegment(group.segments[0]).inProgressLabel;
   return `${readyActionListLabel(group)}...`;
 }
 
@@ -371,18 +418,10 @@ export function actionButtonLabel(group: AgentToolsGroup): string {
   return duration ? `${label}, ${duration}` : label;
 }
 
-const FAILED_TOOL_STATUSES = new Set([
-  "error",
-  "cancelled",
-  "timed-out",
-  "interrupted",
-]);
+const FAILED_TOOL_STATUSES = new Set(["error", "cancelled", "timed-out", "interrupted"]);
 
 export function toolSegmentFailed(segment: AgentSegment): boolean {
-  return (
-    segment.kind === "tool" &&
-    FAILED_TOOL_STATUSES.has(segment.presentation.status)
-  );
+  return segment.kind === "tool" && FAILED_TOOL_STATUSES.has(segment.presentation.status);
 }
 
 export function actionListFailed(group: AgentToolsGroup): boolean {
@@ -394,9 +433,7 @@ export function actionListTrailing(group: AgentToolsGroup): string | undefined {
     return undefined;
   }
   const tools = group.segments.filter((segment) => segment.kind === "tool");
-  const thoughts = group.segments.some(
-    (segment) => segment.kind === "thinking",
-  );
+  const thoughts = group.segments.some((segment) => segment.kind === "thinking");
   if (!thoughts && tools.length === 1) {
     return TOOL_TRAILING[tools[0].presentation.name];
   }
@@ -416,26 +453,20 @@ export function actionListIcon(group: AgentToolsGroup): IconName {
  */
 export function actionListIsSegmentsGroup(group: AgentToolsGroup): boolean {
   const tools = group.segments.filter((segment) => segment.kind === "tool");
-  const thoughts = group.segments.some(
-    (segment) => segment.kind === "thinking",
-  );
+  const thoughts = group.segments.some((segment) => segment.kind === "thinking");
   if (tools.length === 0) return false;
   return thoughts || tools.length > 1;
 }
 
 export function actionListIsThoughtsOnly(group: AgentToolsGroup): boolean {
   return (
-    group.segments.length > 0 &&
-    group.segments.every((segment) => segment.kind === "thinking")
+    group.segments.length > 0 && group.segments.every((segment) => segment.kind === "thinking")
   );
 }
 
 export function segmentIsLive(segment: AgentSegment): boolean {
   if (segment.kind === "thinking") return segment.streaming;
-  return (
-    segment.presentation.status === "pending" ||
-    segment.presentation.status === "running"
-  );
+  return segment.presentation.status === "pending" || segment.presentation.status === "running";
 }
 
 /** Nested action-list row under an expanded tools group. */
@@ -490,10 +521,7 @@ export function turnOriginKey(turn: ModelTurn): string {
 }
 
 /** Collapse consecutive thoughts / tool calls; leave prose and orchestrator cards alone. */
-export function partitionAgentTranscript(
-  turn: ModelTurn,
-  live = false,
-): AgentTranscriptItem[] {
+export function partitionAgentTranscript(turn: ModelTurn, live = false): AgentTranscriptItem[] {
   const items: AgentTranscriptItem[] = [];
   const originKey = turnOriginKey(turn);
   let pending: AgentSegment[] = [];
@@ -528,9 +556,7 @@ export function partitionAgentTranscript(
   return items;
 }
 
-export function collectAgentToolsGroups(
-  turns: TranscriptTurn[],
-): AgentToolsGroup[] {
+export function collectAgentToolsGroups(turns: TranscriptTurn[]): AgentToolsGroup[] {
   const groups: AgentToolsGroup[] = [];
   for (const turn of turns) {
     if (turn.kind !== "model") continue;
@@ -552,9 +578,7 @@ export interface ToolsSegmentItem {
   failed?: boolean;
 }
 
-export function toolsItemsFromGroup(
-  group: AgentToolsGroup,
-): ToolsSegmentItem[] {
+export function toolsItemsFromGroup(group: AgentToolsGroup): ToolsSegmentItem[] {
   return group.segments.map((segment) => ({
     id: segment.key,
     icon: configForSegment(segment).icon,

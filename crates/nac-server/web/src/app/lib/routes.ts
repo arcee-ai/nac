@@ -35,23 +35,18 @@ const SESSION_PANEL_ALIASES: Record<string, SessionPanel> = {
  * Panels the wide side box tabs between. A wide box carries the revisions in
  * its footer chip, so History is a phone-only panel of the bottom bar.
  */
-export const WIDE_SESSION_PANELS = SESSION_PANELS.filter(
-  (panel) => panel !== "history",
-);
+export const WIDE_SESSION_PANELS = SESSION_PANELS.filter((panel) => panel !== "history");
 
 export const DEFAULT_SESSION_PANEL: SessionPanel = "actions";
 
-export function isSessionPanel(
-  value: string | undefined,
-): value is SessionPanel {
+export function isSessionPanel(value: string | undefined): value is SessionPanel {
   // SAFETY: the cast only widens the readonly tuple to a mutable array for
   // `includes`; no element is ever written through it.
   return (SESSION_PANELS as readonly string[]).includes(value ?? "");
 }
 
 export function sessionPanelFromPath(value: string | undefined): SessionPanel {
-  if (value && value in SESSION_PANEL_ALIASES)
-    return SESSION_PANEL_ALIASES[value];
+  if (value && value in SESSION_PANEL_ALIASES) return SESSION_PANEL_ALIASES[value];
   return isSessionPanel(value) ? value : DEFAULT_SESSION_PANEL;
 }
 

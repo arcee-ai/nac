@@ -14,15 +14,13 @@ import { ChildTranscriptPreview } from "@/app/components/inspector/ChildTranscri
 import { GroupLabel } from "@/app/components/projects/GroupLabel";
 import { SpawnComposeForm } from "@/app/features/delegation/presentation/SpawnComposeForm";
 import { presentSessionAssignment } from "@/app/features/delegation/model";
-import {
-  PanelEmpty,
-  PanelSplit,
-} from "@/app/components/inspector/PanelSplit";
+import { PanelEmpty, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useNow } from "@/app/hooks/useNow";
 import { SESSION_PANEL_LABEL } from "@/app/lib/routes";
 import { groupByRecency } from "@/app/lib/projects";
 import {
   assignmentIsOpen,
+  canLaunchManagedOrchestrator,
   isAgentBehavior,
   sessionTypeFromBehavior,
 } from "@/app/lib/sessionBehavior";
@@ -35,9 +33,7 @@ const RECENCY_TICK_MS = 60_000;
 function QueryError({ label, retry }: { label: string; retry: () => void }) {
   return (
     <div role="alert" className="rounded-[6px] border border-error-primary p-3">
-      <div className="text-small text-error-primary">
-        {label} could not be loaded.
-      </div>
+      <div className="text-small text-error-primary">{label} could not be loaded.</div>
       <Button
         className="mt-2"
         size={ButtonSize.Small}
@@ -64,14 +60,9 @@ export function DelegatedWorkView({
   const enabled = isAgentBehavior(behavior);
   const assignments = useSessionSpawns(sessionId, enabled);
   const now = useNow(RECENCY_TICK_MS, enabled);
-  const [compose, setCompose] = useState<SessionAssignmentChildBehavior | null>(
-    "direct",
-  );
+  const [compose, setCompose] = useState<SessionAssignmentChildBehavior | null>("direct");
   const rows = (assignments.data ?? []).map(presentSessionAssignment);
-  const current =
-    compose != null
-      ? null
-      : (rows.find((row) => row.id === selected) ?? null);
+  const current = compose != null ? null : (rows.find((row) => row.id === selected) ?? null);
 
   useEffect(() => {
     setCompose(selected ? null : "direct");
@@ -96,6 +87,7 @@ export function DelegatedWorkView({
     showSidePanelList(false);
   };
 
+  const canSpawnOrchestrator = canLaunchManagedOrchestrator(behavior);
   const listToolbar = enabled ? (
     <div className="flex flex-col gap-1 border-b border-muted px-3 py-2 shrink-0">
       <TabButton
@@ -108,16 +100,18 @@ export function DelegatedWorkView({
         <Icon iconName={IconName.Add} size={16} className="shrink-0" />
         <span className="flex-1 min-w-0 truncate text-left">New Agent</span>
       </TabButton>
-      <TabButton
-        type="button"
-        size={TabButtonSize.Medium}
-        active={compose === "orchestrator"}
-        aria-pressed={compose === "orchestrator"}
-        onClick={() => openCompose("orchestrator")}
-      >
-        <Icon iconName={IconName.Add} size={16} className="shrink-0" />
-        <span className="flex-1 min-w-0 truncate text-left">New Orchestrator</span>
-      </TabButton>
+      {canSpawnOrchestrator ? (
+        <TabButton
+          type="button"
+          size={TabButtonSize.Medium}
+          active={compose === "orchestrator"}
+          aria-pressed={compose === "orchestrator"}
+          onClick={() => openCompose("orchestrator")}
+        >
+          <Icon iconName={IconName.Add} size={16} className="shrink-0" />
+          <span className="flex-1 min-w-0 truncate text-left">New Orchestrator</span>
+        </TabButton>
+      ) : null}
     </div>
   ) : null;
 
@@ -130,13 +124,12 @@ export function DelegatedWorkView({
       Loading spawn sessions…
     </div>
   ) : assignments.isError ? (
-    <QueryError
-      label="Spawn sessions"
-      retry={() => void assignments.refetch()}
-    />
+    <QueryError label="Spawn sessions" retry={() => void assignments.refetch()} />
   ) : rows.length === 0 ? (
     <div className="p-1 label-micro text-basic-muted">
-      None yet. Spawn an Agent or Orchestrator session from this chat.
+      {canSpawnOrchestrator
+        ? "None yet. Spawn an Agent or Orchestrator session from this chat."
+        : "None yet. Spawn a coding Agent from this chat."}
     </div>
   ) : (
     <div className="flex flex-col gap-8 px-1">
@@ -154,11 +147,7 @@ export function DelegatedWorkView({
                   title={row.description}
                   badgeLabel={row.typeLabel}
                   sessionType={sessionType}
-                  origin={
-                    assignmentIsOpen(row.status)
-                      ? "delegated-locked"
-                      : "delegated"
-                  }
+                  origin={assignmentIsOpen(row.status) ? "delegated-locked" : "delegated"}
                   active={compose == null && row.id === current?.id}
                   running={assignmentIsOpen(row.status)}
                   onClick={() => {
@@ -177,19 +166,13 @@ export function DelegatedWorkView({
   if (!enabled) {
     return (
       <PanelSplit listTitle={SESSION_PANEL_LABEL.delegated} list={list}>
-        <PanelEmpty>
-          Orchestrator sessions do not own delegated work.
-        </PanelEmpty>
+        <PanelEmpty>Orchestrator sessions do not own delegated work.</PanelEmpty>
       </PanelSplit>
     );
   }
 
   return (
-    <PanelSplit
-      listTitle={SESSION_PANEL_LABEL.delegated}
-      listToolbar={listToolbar}
-      list={list}
-    >
+    <PanelSplit listTitle={SESSION_PANEL_LABEL.delegated} listToolbar={listToolbar} list={list}>
       {compose ? (
         <SpawnComposeForm
           parentSessionId={sessionId}
@@ -200,14 +183,12 @@ export function DelegatedWorkView({
           }}
         />
       ) : current ? (
-        <ChildTranscriptPreview
-          parentSessionId={sessionId}
-          childSessionId={current.id}
-        />
+        <ChildTranscriptPreview parentSessionId={sessionId} childSessionId={current.id} />
       ) : (
         <PanelEmpty title="No spawn sessions yet.">
-          They appear here as the agent starts them, or start one with New
-          Agent or New Orchestrator.
+          {canSpawnOrchestrator
+            ? "They appear here as the agent starts them, or start one with New Agent or New Orchestrator."
+            : "They appear here as the agent starts them, or start one with New Agent."}
         </PanelEmpty>
       )}
     </PanelSplit>

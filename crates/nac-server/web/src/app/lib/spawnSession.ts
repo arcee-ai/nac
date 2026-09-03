@@ -1,7 +1,4 @@
-import {
-  isStandaloneToolName,
-  type AgentToolsGroup,
-} from "@/app/lib/agentSegments";
+import { isStandaloneToolName, type AgentToolsGroup } from "@/app/lib/agentSegments";
 import { formatSeconds } from "@/app/lib/format";
 import type { TranscriptTurn } from "@/app/lib/transcript";
 import type { SessionAssignmentRecord } from "@/app/types/api";
@@ -57,10 +54,7 @@ export function assignmentForSpawn(
 }
 
 /** Last few child-transcript fragments for the spawn card peek. */
-export function childPreviewLines(
-  turns: TranscriptTurn[],
-  thinking: boolean,
-): string[] {
+export function childPreviewLines(turns: TranscriptTurn[], thinking: boolean): string[] {
   const lines: string[] = [];
   for (const turn of turns) {
     if (turn.kind !== "model") continue;

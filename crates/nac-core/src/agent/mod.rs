@@ -134,49 +134,43 @@ fn rewrite_direct_assignment_system_prompt(
     current: &str,
     working_directory: &str,
     description: Option<&str>,
-    assignment_open: bool,
+    is_child: bool,
+    with_orchestrator: bool,
 ) -> String {
-    let agent_base = render_direct_with_orchestrator_system_prompt(working_directory);
+    let direct_base = render_direct_system_prompt(working_directory);
+    let dwo_base = render_direct_with_orchestrator_system_prompt(working_directory);
     let child_base =
         description.map(|value| render_general_child_system_prompt(working_directory, value));
-    let next_base = if assignment_open {
-        child_base.clone().unwrap_or_else(|| agent_base.clone())
+    let next_base = if is_child {
+        child_base.clone().unwrap_or_else(|| {
+            if with_orchestrator {
+                dwo_base.clone()
+            } else {
+                direct_base.clone()
+            }
+        })
+    } else if with_orchestrator {
+        dwo_base.clone()
     } else {
-        agent_base.clone()
+        direct_base.clone()
     };
     if current.starts_with(&next_base) {
         return current.to_string();
     }
-    let Some(suffix) = current.strip_prefix(&agent_base).or_else(|| {
-        child_base
-            .as_deref()
-            .and_then(|base| current.strip_prefix(base))
-    }) else {
+    let Some(suffix) = current
+        .strip_prefix(&dwo_base)
+        .or_else(|| current.strip_prefix(&direct_base))
+        .or_else(|| {
+            child_base
+                .as_deref()
+                .and_then(|base| current.strip_prefix(base))
+        })
+    else {
         return current.to_string();
     };
     let mut next = next_base;
     next.push_str(suffix);
     next
-}
-
-fn transcript_tool_call_names(messages: &[Message]) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut seen = HashSet::new();
-    for message in messages {
-        let Message::Assistant {
-            tool_calls: Some(calls),
-            ..
-        } = message
-        else {
-            continue;
-        };
-        for call in calls {
-            if seen.insert(call.function.name.clone()) {
-                names.push(call.function.name.clone());
-            }
-        }
-    }
-    names
 }
 
 fn light_model_prompt_guidance(light: &ModelClient) -> String {
@@ -269,9 +263,20 @@ impl Agent {
         } else {
             None
         };
-        // Every primary Agent now shares one tool surface. Callers still pass
-        // session_behavior for construction identity; do not branch on it here.
-        let _ = config.session_behavior;
+        let direct_behavior = if mode == AgentMode::Direct && traditional_child.is_none() {
+            config
+                .session_behavior
+                .or_else(|| {
+                    config.session_id.as_deref().and_then(|session_id| {
+                        crate::sessions::load_session(&config.store_path, session_id)
+                            .ok()
+                            .map(|snapshot| snapshot.behavior)
+                    })
+                })
+                .unwrap_or(crate::sessions::SessionBehavior::Direct)
+        } else {
+            crate::sessions::SessionBehavior::Direct
+        };
         let compaction = if matches!(mode, AgentMode::Orchestrator | AgentMode::Direct) {
             config.session_id.clone().map(|session_id| {
                 CompactionState::new(
@@ -318,30 +323,26 @@ impl Agent {
                     config.light_client.as_deref(),
                 ),
             ),
-            AgentMode::Direct => {
-                let assignment_open = traditional_child
-                    .as_ref()
-                    .is_some_and(|child| child.status.is_open());
-                if assignment_open {
-                    let description = traditional_child
-                        .as_ref()
-                        .map(|child| child.description.as_str())
-                        .unwrap_or_default();
-                    (
-                        render_general_child_system_prompt(&cwd, description),
-                        tools::running_assigned_direct_tool_definitions(
-                            client.supports_image_tool_results(),
-                        ),
-                    )
-                } else {
-                    (
-                        render_direct_with_orchestrator_system_prompt(&cwd),
+            AgentMode::Direct => match traditional_child.as_ref() {
+                Some(child) => (
+                    render_general_child_system_prompt(&cwd, &child.description),
+                    tools::worker_tool_definitions(client.supports_image_tool_results()),
+                ),
+                None => (
+                    if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
+                        render_direct_with_orchestrator_system_prompt(&cwd)
+                    } else {
+                        render_direct_system_prompt(&cwd)
+                    },
+                    if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
                         tools::direct_with_orchestrator_tool_definitions(
                             client.supports_image_tool_results(),
-                        ),
-                    )
-                }
-            }
+                        )
+                    } else {
+                        tools::direct_tool_definitions(client.supports_image_tool_results())
+                    },
+                ),
+            },
         };
         if config.mode == AgentMode::Orchestrator {
             if let Some(light) = config.light_client.as_deref() {
@@ -356,10 +357,7 @@ impl Agent {
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
         }
-        let assignment_open = traditional_child
-            .as_ref()
-            .is_some_and(|child| child.status.is_open());
-        let web_retrieval_eligible = mode == AgentMode::Direct && !assignment_open;
+        let web_retrieval_eligible = mode == AgentMode::Direct && traditional_child.is_none();
         if web_retrieval_eligible
             && tool_defs.iter().any(|definition| {
                 tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str())
@@ -417,8 +415,8 @@ impl Agent {
                 .map(|definition| definition.function.name.clone())
                 .collect(),
         );
-        let goal_runtime = match (mode, config.session_id.as_ref(), assignment_open) {
-            (AgentMode::Direct, Some(session_id), false) => Some(Arc::new(
+        let goal_runtime = match (mode, config.session_id.as_ref(), traditional_child.as_ref()) {
+            (AgentMode::Direct, Some(session_id), None) => Some(Arc::new(
                 crate::goals::GoalRuntime::new(config.store_path.clone(), session_id.clone()),
             )),
             _ => None,
@@ -533,33 +531,26 @@ impl Agent {
         let Some(session_id) = self.tool_runtime.session_id.clone() else {
             return Ok(());
         };
-        let assignment = crate::store::load_assignment(&self.tool_runtime.store_path, &session_id)?;
-        let open = assignment
-            .as_ref()
-            .is_some_and(|record| record.status.is_open());
+        let child =
+            crate::store::load_traditional_child(&self.tool_runtime.store_path, &session_id)?;
+        let with_orchestrator = child.is_none()
+            && crate::sessions::load_session(&self.tool_runtime.store_path, &session_id)
+                .ok()
+                .is_some_and(|snapshot| {
+                    snapshot.behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator
+                });
         let image_read = self.client.supports_image_tool_results();
-        let mut tool_defs = if open {
-            tools::running_assigned_direct_tool_definitions(image_read)
-        } else {
+        let mut tool_defs = if child.is_some() {
+            tools::worker_tool_definitions(image_read)
+        } else if with_orchestrator {
             tools::direct_with_orchestrator_tool_definitions(image_read)
+        } else {
+            tools::direct_tool_definitions(image_read)
         };
         tool_defs.extend(self.extra_tool_defs.iter().cloned());
-        let history_names = transcript_tool_call_names(&self.messages);
-        let history_has_web = history_names.iter().any(|name| {
-            tools::WEB_TOOL_NAMES
-                .iter()
-                .any(|web| name.as_str() == *web)
-        });
-        let history_has_goals = history_names.iter().any(|name| {
-            tools::GOAL_TOOL_NAMES
-                .iter()
-                .any(|goal| name.as_str() == *goal)
-        });
-        tool_defs = tools::extend_definitions_with_history(tool_defs, history_names, image_read);
         self.tool_defs = tool_defs;
-        self.web_retrieval_eligible = !open || history_has_web;
-        let wants_goals = !open || history_has_goals;
-        if wants_goals && self.tool_runtime.goal_runtime.is_none() {
+        self.web_retrieval_eligible = child.is_none();
+        if child.is_none() && self.tool_runtime.goal_runtime.is_none() {
             self.tool_runtime.goal_runtime = Some(Arc::new(crate::goals::GoalRuntime::new(
                 self.tool_runtime.store_path.clone(),
                 session_id,
@@ -569,10 +560,9 @@ impl Agent {
             *content = rewrite_direct_assignment_system_prompt(
                 content,
                 &self.working_directory,
-                assignment
-                    .as_ref()
-                    .map(|record| record.description.as_str()),
-                open,
+                child.as_ref().map(|record| record.description.as_str()),
+                child.is_some(),
+                with_orchestrator,
             );
         }
         Ok(())
@@ -982,19 +972,11 @@ impl Agent {
             let tool_messages =
                 finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
 
-            if self.tool_runtime.command_cancellation.is_cancelled() {
-                let error = anyhow!("worker command cancelled");
-                self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
-                    message: error.to_string(),
-                });
-                self.record_terminal_cleanup_error().await;
-                return Err(error);
-            }
-
             // Fold worker token usage (from thread dispatches) into the
             // orchestrator's accumulated usage. Only cost fields are summed;
-            // orchestrator context stays ordinary-orchestrator-only.
+            // orchestrator context stays ordinary-orchestrator-only. This
+            // precedes the cancellation return so a Stop landing during a tool
+            // round still persists the worker spend the run already incurred.
             {
                 let mut wu = self.tool_runtime.worker_usage.lock().await;
                 accumulated_usage.add_cost_saturating(&wu);
@@ -1004,6 +986,16 @@ impl Agent {
             self.last_usage = Some(accumulated_usage.clone());
             if let Some(goals) = &self.tool_runtime.goal_runtime {
                 goals.update_usage(&accumulated_usage);
+            }
+
+            if self.tool_runtime.command_cancellation.is_cancelled() {
+                let error = anyhow!("worker command cancelled");
+                self.emit(AgentEvent::Error {
+                    thread_name: self.thread_name.clone(),
+                    message: error.to_string(),
+                });
+                self.record_terminal_cleanup_error().await;
+                return Err(error);
             }
 
             // Transcript commit point (tool results): the complete parallel

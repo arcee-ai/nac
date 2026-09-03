@@ -15,16 +15,9 @@ import {
   type AgentToolsGroup,
 } from "@/app/lib/agentSegments";
 import { cn } from "@/app/lib/cn";
-import {
-  STICK_TOLERANCE_PX,
-  distanceFromBottom,
-  scrollToBottomInstantly,
-} from "@/app/lib/scroll";
+import { STICK_TOLERANCE_PX, distanceFromBottom, scrollToBottomInstantly } from "@/app/lib/scroll";
 import { sessionIdFromPath } from "@/app/lib/routes";
-import {
-  GLOB_EMPTY_RESULT_LABEL,
-  isEmptyGlobResultPreview,
-} from "@/app/lib/toolPresentation";
+import { GLOB_EMPTY_RESULT_LABEL, isEmptyGlobResultPreview } from "@/app/lib/toolPresentation";
 import { toWorkspaceRelativePath } from "@/app/lib/workspaceLink";
 import { queryKeys } from "@/app/services/queries";
 import type { SessionSnapshotResponse } from "@/app/types/api";
@@ -70,8 +63,7 @@ function boxesForSegment(
       key: `${segment.key}-input`,
       content: segment.presentation.summary,
       accent:
-        segment.presentation.name === "exec_command" ||
-        segment.presentation.name === "glob"
+        segment.presentation.name === "exec_command" || segment.presentation.name === "glob"
           ? "info"
           : undefined,
     });
@@ -87,12 +79,8 @@ function boxesForSegment(
   return {
     boxes,
     copyText: [
-      segment.presentation.summary
-        ? `Input:\n${segment.presentation.summary}`
-        : "",
-      segment.presentation.resultPreview
-        ? `Output:\n${segment.presentation.resultPreview}`
-        : "",
+      segment.presentation.summary ? `Input:\n${segment.presentation.summary}` : "",
+      segment.presentation.resultPreview ? `Output:\n${segment.presentation.resultPreview}` : "",
     ]
       .filter(Boolean)
       .join("\n\n"),
@@ -106,12 +94,9 @@ function readFileBoxes(
   const summary = segment.presentation.summary;
   const preview = segment.presentation.resultPreview;
   const path =
-    toWorkspaceRelativePath(summary, hostRoots) ??
-    toWorkspaceRelativePath(preview, hostRoots);
+    toWorkspaceRelativePath(summary, hostRoots) ?? toWorkspaceRelativePath(preview, hostRoots);
   if (!path) return null;
-  const boxes: SidebarBoxContent[] = [
-    { kind: "file", key: `${segment.key}-file`, path },
-  ];
+  const boxes: SidebarBoxContent[] = [{ kind: "file", key: `${segment.key}-file`, path }];
   if (preview && toWorkspaceRelativePath(preview, hostRoots) == null) {
     boxes.push({
       kind: "markdown",
@@ -169,17 +154,13 @@ function parseLooseGlobObject(chunk: string): unknown {
 
 function globEntryFromUnknown(entry: unknown): GlobEntry[] {
   if (!entry || typeof entry !== "object") return [];
-  const path =
-    "path" in entry && typeof entry.path === "string" ? entry.path : "";
+  const path = "path" in entry && typeof entry.path === "string" ? entry.path : "";
   if (!path) return [];
-  const kind =
-    "kind" in entry && entry.kind === "directory" ? "directory" : "file";
+  const kind = "kind" in entry && entry.kind === "directory" ? "directory" : "file";
   return [{ kind, path }];
 }
 
-function globQueryBox(
-  segment: Extract<AgentSegment, { kind: "tool" }>,
-): SidebarBoxContent | null {
+function globQueryBox(segment: Extract<AgentSegment, { kind: "tool" }>): SidebarBoxContent | null {
   if (!segment.presentation.summary) return null;
   return {
     kind: "code",
@@ -204,22 +185,17 @@ function globFileBoxes(
     });
     return {
       boxes,
-      copyText: [
-        query ? `Query:\n${segment.presentation.summary}` : "",
-        GLOB_EMPTY_RESULT_LABEL,
-      ]
+      copyText: [query ? `Query:\n${segment.presentation.summary}` : "", GLOB_EMPTY_RESULT_LABEL]
         .filter(Boolean)
         .join("\n\n"),
     };
   }
-  const resolved = parseGlobEntries(segment.presentation.resultPreview).flatMap(
-    (entry) => {
-      const path =
-        toWorkspaceRelativePath(entry.path, hostRoots) ??
-        (entry.path.startsWith("/") ? null : entry.path.replace(/^\.\//, ""));
-      return path ? [{ kind: entry.kind, path }] : [];
-    },
-  );
+  const resolved = parseGlobEntries(segment.presentation.resultPreview).flatMap((entry) => {
+    const path =
+      toWorkspaceRelativePath(entry.path, hostRoots) ??
+      (entry.path.startsWith("/") ? null : entry.path.replace(/^\.\//, ""));
+    return path ? [{ kind: entry.kind, path }] : [];
+  });
   if (resolved.length === 0) return null;
   const shown = resolved.slice(0, MAX_GLOB_FILES);
   const more = resolved.length - shown.length;
@@ -239,9 +215,7 @@ function globFileBoxes(
   return {
     boxes,
     copyText: [
-      segment.presentation.summary
-        ? `Query:\n${segment.presentation.summary}`
-        : "",
+      segment.presentation.summary ? `Query:\n${segment.presentation.summary}` : "",
       resolved.map((entry) => entry.path).join("\n"),
     ]
       .filter(Boolean)
@@ -258,8 +232,7 @@ function itemsFromGroup(
     const live =
       segment.kind === "thinking"
         ? segment.streaming
-        : segment.presentation.status === "pending" ||
-          segment.presentation.status === "running";
+        : segment.presentation.status === "pending" || segment.presentation.status === "running";
     return {
       key: segment.key,
       config: configForSegment(segment),
@@ -283,9 +256,7 @@ export function SegmentDetailList({
   const client = useQueryClient();
   const sessionId = sessionIdFromPath(location.pathname);
   const snapshot = sessionId
-    ? client.getQueryData<SessionSnapshotResponse>(
-        queryKeys.sessionSnapshot(sessionId),
-      )
+    ? client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(sessionId))
     : undefined;
   const hostRoots = useMemo(
     () => [
@@ -299,10 +270,7 @@ export function SegmentDetailList({
       snapshot?.metadata.cwd,
     ],
   );
-  const items = useMemo(
-    () => itemsFromGroup(group, hostRoots),
-    [group, hostRoots],
-  );
+  const items = useMemo(() => itemsFromGroup(group, hostRoots), [group, hostRoots]);
   const rootRef = useRef<HTMLDivElement>(null);
   const stuckRef = useRef(true);
   const scrollTo = useActionSegmentScroll();
@@ -320,16 +288,13 @@ export function SegmentDetailList({
     if (!scrollTo) return;
     const root = rootRef.current;
     if (!root) return;
-    const el = root.querySelector(
-      `[data-segment-key="${CSS.escape(scrollTo.key)}"]`,
-    );
+    const el = root.querySelector(`[data-segment-key="${CSS.escape(scrollTo.key)}"]`);
     if (!(el instanceof HTMLElement)) return;
     stuckRef.current = false;
     const reduced =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const marginTop =
-      Number.parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+    const marginTop = Number.parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
     const top =
       root.scrollTop +
       el.getBoundingClientRect().top -

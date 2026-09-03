@@ -43,7 +43,7 @@ function stripInlineMarkdown(text: string): string {
   value = value.replace(/`+([^`]+?)`+/g, "$1");
   value = value.replace(/^\s*#{1,6}\s+/, "");
   value = value.replace(/^\s*>\s+/, "");
-  value = value.replace(/\\([\\`*_{}\[\]()#+\-.!])/g, "$1");
+  value = value.replace(/\\([\\`*_{}[\]()#+\-.!])/g, "$1");
   return value.replace(/\s+/g, " ").trim();
 }
 
@@ -82,19 +82,14 @@ function lastCompleteSentence(text: string | undefined): string | undefined {
   return chosen || undefined;
 }
 
-function stepFromSegment(
-  segment: AgentSegment,
-  active: boolean,
-): StepByStepStep {
+function stepFromSegment(segment: AgentSegment, active: boolean): StepByStepStep {
   return {
     key: segment.key,
     config: configForSegment(segment),
     state: active ? ToolCallLabelState.Active : ToolCallLabelState.Default,
     durationMs: segment.kind === "thinking" ? segment.durationMs : null,
     activeText:
-      active && segment.kind === "thinking"
-        ? lastCompleteSentence(segment.text)
-        : undefined,
+      active && segment.kind === "thinking" ? lastCompleteSentence(segment.text) : undefined,
   };
 }
 
@@ -145,11 +140,7 @@ function stepByStepDisplayerPropsAreEqual(
   return areStepByStepStepListsContentEqual(prev.steps, next.steps);
 }
 
-const OPACITY_FROM_END: readonly string[] = [
-  "opacity-100",
-  "opacity-50",
-  "opacity-15",
-];
+const OPACITY_FROM_END: readonly string[] = ["opacity-100", "opacity-50", "opacity-15"];
 
 const StepByStepRows = memo(
   function StepByStepRows({ steps }: { steps: StepByStepStep[] }) {
@@ -183,11 +174,7 @@ function measureOverflow(outer: HTMLElement, inner: HTMLElement): number {
   return Math.max(0, inner.offsetHeight - available);
 }
 
-function StepByStepDisplayer({
-  steps,
-  faded = false,
-  className = "",
-}: StepByStepDisplayerProps) {
+function StepByStepDisplayer({ steps, faded = false, className = "" }: StepByStepDisplayerProps) {
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<number | null>(null);

@@ -21,8 +21,7 @@ export function SpawnedSessionCard({
 }) {
   const child = useSpawnedChildSession(parentSessionId, group);
   const state = child.missing ? "missing" : child.running ? "running" : "ready";
-  const selected =
-    active || (selectedChildId != null && selectedChildId === child.childId);
+  const selected = active || (selectedChildId != null && selectedChildId === child.childId);
   return (
     <ChildSessionBadge
       title={child.title}
@@ -33,9 +32,7 @@ export function SpawnedSessionCard({
       busy={child.busy}
       canOpen={Boolean(child.childId) && !child.missing}
       inert={inert}
-      onSelect={
-        inert ? undefined : () => onSelect?.(group.id, child.childId)
-      }
+      onSelect={inert ? undefined : () => onSelect?.(group.id, child.childId)}
       onPause={inert ? undefined : () => void child.pause()}
       onPlay={inert ? undefined : () => void child.play()}
       onStop={inert ? undefined : () => void child.stop()}

@@ -8,6 +8,7 @@ import { RenameProjectModal } from "@/app/components/modals/RenameProjectModal";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { newestPrimarySessionForProject, projectForSessionLocation } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
+import { DEFAULT_SESSION_BEHAVIOR } from "@/app/lib/sessionBehavior";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -81,7 +82,11 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   );
 
   const newChat = useCallback(
-    async (projectId: string, firstChat = false, behavior: SessionBehavior = "direct") => {
+    async (
+      projectId: string,
+      firstChat = false,
+      behavior: SessionBehavior = DEFAULT_SESSION_BEHAVIOR,
+    ) => {
       try {
         if (firstChat) {
           const [projects, listed] = await Promise.all([

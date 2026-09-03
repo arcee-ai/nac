@@ -18,17 +18,10 @@ const STATUS_MARK: Record<ToolPresentation["status"], string> = {
 };
 
 /** Compact primary-transcript presentation for one safe tool lifecycle. */
-export const ToolCallDetail = memo(function ToolCallDetail({
-  tool,
-}: {
-  tool: ToolPresentation;
-}) {
+export const ToolCallDetail = memo(function ToolCallDetail({ tool }: { tool: ToolPresentation }) {
   const pending = tool.status === "pending" || tool.status === "running";
-  const emptyGlob =
-    tool.name === "glob" && isEmptyGlobResultPreview(tool.resultPreview);
-  const resultPreview = emptyGlob
-    ? GLOB_EMPTY_RESULT_LABEL
-    : tool.resultPreview;
+  const emptyGlob = tool.name === "glob" && isEmptyGlobResultPreview(tool.resultPreview);
+  const resultPreview = emptyGlob ? GLOB_EMPTY_RESULT_LABEL : tool.resultPreview;
   return (
     <div
       className="my-3 w-full max-w-full min-w-0 rounded-[6px] border border-tertiary px-3 py-2"
@@ -48,9 +41,7 @@ export const ToolCallDetail = memo(function ToolCallDetail({
         >
           {STATUS_MARK[tool.status]}
         </span>
-        <span className="label-small break-words text-basic-primary">
-          {tool.label}
-        </span>
+        <span className="label-small break-words text-basic-primary">{tool.label}</span>
         {tool.summary ? (
           <span className="code code-small min-w-0 break-all text-basic-tertiary">
             {tool.summary}
@@ -73,8 +64,7 @@ export const ToolCallDetail = memo(function ToolCallDetail({
               ? "label-micro mt-1 min-w-0 pl-5 text-basic-muted"
               : "code code-small mt-1 min-w-0 break-all pl-5",
             !emptyGlob &&
-              (tool.status === "error" ||
-              tool.resultPreview?.startsWith("Error:")
+              (tool.status === "error" || tool.resultPreview?.startsWith("Error:")
                 ? "text-error-primary"
                 : "text-basic-tertiary"),
           )}

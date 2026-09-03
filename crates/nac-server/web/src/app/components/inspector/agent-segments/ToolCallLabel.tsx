@@ -1,9 +1,6 @@
 import { cn } from "@/app/lib/cn";
 import { formatSeconds } from "@/app/lib/format";
-import {
-  ToolCallLabelState,
-  type SegmentDisplayConfig,
-} from "@/app/lib/agentSegments";
+import { ToolCallLabelState, type SegmentDisplayConfig } from "@/app/lib/agentSegments";
 
 export function ToolCallLabel({
   config,

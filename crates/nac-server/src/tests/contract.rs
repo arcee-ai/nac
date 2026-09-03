@@ -138,6 +138,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("PUT", "/managed/secrets/{name}"),
     ("PUT", "/projects/order"),
     ("PUT", "/sessions/order"),
+    ("PUT", "/sessions/{session_id}/inbox/order"),
     ("PUT", "/sessions/{session_id}/presentation"),
 ];
 

@@ -51,9 +51,9 @@ pub struct ToolRuntime {
 
 impl ToolRuntime {
     pub(crate) fn allows_tool(&self, name: &str) -> bool {
-        self.allowed_tools.as_ref().is_none_or(|allowed| {
-            allowed.contains(name) || spawn_family_allows_legacy(allowed, name)
-        })
+        self.allowed_tools
+            .as_ref()
+            .is_none_or(|allowed| allowed.contains(name))
     }
 
     pub(crate) async fn command_environment_snapshot(

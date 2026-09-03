@@ -25,9 +25,7 @@ const KIND_FROM_ORIGIN: Record<string, OriginSessionKind> = {
 };
 
 /** Origin chip for a session origin other than the user-created default. */
-export function originKindFromOrigin(
-  origin: string | undefined,
-): OriginSessionKind | undefined {
+export function originKindFromOrigin(origin: string | undefined): OriginSessionKind | undefined {
   return origin ? KIND_FROM_ORIGIN[origin] : undefined;
 }
 
@@ -41,10 +39,7 @@ interface OriginSessionBadgeProps {
  * sit on the sublevel surface; a locked delegation inverts to the primary
  * button fill.
  */
-const OriginSessionBadge: React.FC<OriginSessionBadgeProps> = ({
-  kind,
-  className = "",
-}) => {
+const OriginSessionBadge: React.FC<OriginSessionBadgeProps> = ({ kind, className = "" }) => {
   const locked = kind === OriginSessionKind.DelegatedLocked;
 
   return (

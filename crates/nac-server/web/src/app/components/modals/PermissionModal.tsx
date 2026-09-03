@@ -26,12 +26,7 @@ export function PermissionModal({
   const mounted = useExitTransition(open);
   if (!mounted || !sessionId) return null;
   return (
-    <PermissionPrompt
-      open={open}
-      sessionId={sessionId}
-      behavior={behavior}
-      onClose={onClose}
-    />
+    <PermissionPrompt open={open} sessionId={sessionId} behavior={behavior} onClose={onClose} />
   );
 }
 
@@ -70,21 +65,14 @@ function PermissionPrompt({
         reply: choice,
       });
     } catch (error) {
-      toast.error(
-        `Unable to answer permission request: ${errorMessage(toRunError(error))}`,
-      );
+      toast.error(`Unable to answer permission request: ${errorMessage(toRunError(error))}`);
     } finally {
       setReplyingTo(null);
     }
   };
 
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Permission required"
-      size={ModalSize.Small}
-    >
+    <Modal open={open} onClose={onClose} title="Permission required" size={ModalSize.Small}>
       {!ready ? (
         <p className="text-small text-basic-secondary">Loading permissions…</p>
       ) : active ? (
@@ -103,9 +91,7 @@ function PermissionPrompt({
           />
         </div>
       ) : (
-        <p className="text-small text-basic-secondary">
-          No pending permission request.
-        </p>
+        <p className="text-small text-basic-secondary">No pending permission request.</p>
       )}
     </Modal>
   );

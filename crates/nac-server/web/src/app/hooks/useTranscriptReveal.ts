@@ -39,9 +39,7 @@ export function useTranscriptReveal(
   // changes included, so this covers the reads that only start once the
   // messages are in the tree without having to name them one by one.
   const fetching = useIsFetching({ queryKey: queryKeys.sessionRoot(sessionId) });
-  const [shown, setShown] = useState<string | null>(() =>
-    hasContent ? sessionId : null,
-  );
+  const [shown, setShown] = useState<string | null>(() => (hasContent ? sessionId : null));
   const [openId, setOpenId] = useState(sessionId);
 
   // Adjust during render so a cached return never commits a hidden frame.

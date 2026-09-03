@@ -45,9 +45,6 @@ fn orchestrator_surface_stays_session_free() {
         .iter()
         .map(|definition| definition.function.name.as_str())
         .collect::<Vec<_>>();
-    assert!(crate::tools::SPAWN_TOOL_NAMES
-        .iter()
-        .all(|name| !names.contains(name)));
     assert!(names.iter().all(|name| {
         !name.starts_with("session_")
             && !name.contains("subagent")
@@ -184,7 +181,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
     );
     assert_eq!(
         names(&child),
-        crate::tools::RUNNING_ASSIGNED_DIRECT_TOOL_NAMES.map(str::to_string)
+        crate::tools::WORKER_TOOL_NAMES.map(str::to_string)
     );
     assert_eq!(
         names(&delegating),
@@ -212,7 +209,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
     );
     assert_eq!(
         capability_names(child.model_request_capabilities_for_test(Some("child-exa-canary"))),
-        crate::tools::RUNNING_ASSIGNED_DIRECT_TOOL_NAMES
+        crate::tools::WORKER_TOOL_NAMES
     );
     let delegating_web = capability_names(
         delegating.model_request_capabilities_for_test(Some("delegating-exa-canary")),
@@ -232,47 +229,16 @@ fn direct_topologies_expose_exact_capability_boundaries() {
                 && content.contains("review the implementation")
     ));
     assert!(matches!(
-        parent.messages.first(),
-        Some(Message::System { content })
-            if content.contains("Managed orchestration")
-                && content.contains("separate durable NAC sessions")
-    ));
-    assert!(matches!(
         delegating.messages.first(),
         Some(Message::System { content })
             if content.contains("Managed orchestration")
-                && content.contains("separate durable NAC sessions")
+                && content.contains("separate durable NAC orchestrator sessions")
     ));
-
-    crate::store::begin_traditional_child_run(
-        &store_path,
-        "child",
-        "run-1",
-        crate::store::TraditionalChildExecutionMode::Foreground,
-    )
-    .unwrap();
-    crate::store::settle_traditional_child_run(
-        &store_path,
-        "child",
-        "run-1",
-        crate::store::TraditionalChildTerminal {
-            status: crate::store::TraditionalChildStatus::Completed,
-            report: Some("done".to_string()),
-            failure: None,
-            change_summary: None,
-            verification_summary: None,
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        capability_names(child.model_request_capabilities_for_test(None)),
-        crate::tools::DIRECT_TOOL_NAMES
-    );
     assert!(matches!(
-        child.messages.first(),
+        parent.messages.first(),
         Some(Message::System { content })
-            if content.contains("Managed orchestration")
-                && !content.contains("traditional child coding agent")
+            if !content.contains("Managed orchestration")
+                && content.contains("Traditional subagents")
     ));
 
     drop(parent);
@@ -364,24 +330,14 @@ fn key_argument_preview_is_family_aware_and_fail_closed() {
         ("grep", r#"{"pattern":"AgentEvent"}"#, "AgentEvent"),
         ("web_search", r#"{"query":"NAC docs"}"#, "NAC docs"),
         (
-            "session_spawn",
+            "orchestrator_launch",
             r#"{"description":"Audit storage","prompt":"SECRET_PROMPT"}"#,
             "Audit storage",
-        ),
-        (
-            "session_spawn",
-            r#"{"description":"Review tests","prompt":"SECRET_PROMPT"}"#,
-            "Review tests",
         ),
         (
             "subagent",
-            r#"{"description":"Audit storage","prompt":"SECRET_PROMPT"}"#,
-            "Audit storage",
-        ),
-        (
-            "orchestrator_launch",
-            r#"{"description":"Plan rollout","prompt":"SECRET_PROMPT"}"#,
-            "Plan rollout",
+            r#"{"description":"Review tests","prompt":"SECRET_PROMPT"}"#,
+            "Review tests",
         ),
         (
             "mcp__linear__linear_read_issue",
@@ -1163,19 +1119,21 @@ fn assignment_prompt_rewrite_keeps_unknown_prefix() {
         "/workspace",
         Some("review the implementation"),
         true,
+        false,
     );
     assert_eq!(rewritten, current);
 }
 
 #[test]
 fn assignment_prompt_rewrite_swaps_known_head_and_keeps_suffix() {
-    let agent = render_direct_with_orchestrator_system_prompt("/workspace");
+    let agent = render_direct_system_prompt("/workspace");
     let current = format!("{agent}\n\n## Project\nKeep this suffix.");
     let rewritten = super::rewrite_direct_assignment_system_prompt(
         &current,
         "/workspace",
         Some("review the implementation"),
         true,
+        false,
     );
     let child = render_general_child_system_prompt("/workspace", "review the implementation");
     assert!(rewritten.starts_with(&child));
@@ -1183,9 +1141,9 @@ fn assignment_prompt_rewrite_swaps_known_head_and_keeps_suffix() {
 }
 
 #[test]
-fn model_request_advertises_legacy_spawn_names_from_transcript() {
+fn model_request_advertises_allison_spawn_names() {
     let root =
-        std::env::temp_dir().join(format!("nac_legacy_spawn_history_{}", uuid::Uuid::new_v4()));
+        std::env::temp_dir().join(format!("nac_allison_spawn_names_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let store_path = root.join("store.db");
     let mut snapshot = crate::sessions::new_snapshot(
@@ -1234,43 +1192,23 @@ fn model_request_advertises_legacy_spawn_names_from_transcript() {
     )
     .unwrap();
 
-    let without_history: Vec<_> = agent
+    let names: Vec<_> = agent
         .model_request_capabilities_for_test(None)
         .into_iter()
         .map(|definition| definition.function.name)
         .collect();
-    assert!(without_history.iter().any(|name| name == "session_spawn"));
-    assert!(!without_history.iter().any(|name| name == "subagent"));
-
-    agent.messages.push(Message::Assistant {
-        content: None,
-        reasoning_text: None,
-        reasoning_details: None,
-        tool_calls: Some(vec![test_tool_call(
-            "call-1",
-            "subagent",
-            r#"{"profile":"general","description":"review","prompt":"go","child_session_id":null,"background":true}"#,
-        )]),
-        duration_ms: None,
-        model_origin: None,
-        reasoning_field: None,
-    });
-    let with_history: Vec<_> = agent
-        .model_request_capabilities_for_test(None)
-        .into_iter()
-        .map(|definition| definition.function.name)
-        .collect();
-    assert!(with_history.iter().any(|name| name == "session_spawn"));
-    assert!(with_history.iter().any(|name| name == "subagent"));
+    assert!(names.iter().any(|name| name == "subagent"));
+    assert!(!names.iter().any(|name| name == "orchestrator_launch"));
+    assert!(!names.iter().any(|name| name == "session_spawn"));
 
     drop(agent);
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn reopened_assignment_keeps_spawn_names_already_in_transcript() {
+fn settled_traditional_child_keeps_worker_tools() {
     let root =
-        std::env::temp_dir().join(format!("nac_reopen_spawn_history_{}", uuid::Uuid::new_v4()));
+        std::env::temp_dir().join(format!("nac_settled_child_tools_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let store_path = root.join("store.db");
     for session_id in ["parent", "child"] {
@@ -1349,40 +1287,14 @@ fn reopened_assignment_keeps_spawn_names_already_in_transcript() {
         },
     )
     .unwrap();
-    let unlocked: Vec<_> = child
+    let names: Vec<_> = child
         .model_request_capabilities_for_test(None)
         .into_iter()
         .map(|definition| definition.function.name)
         .collect();
-    assert!(unlocked.iter().any(|name| name == "session_spawn"));
-
-    child.messages.push(Message::Assistant {
-        content: None,
-        reasoning_text: None,
-        reasoning_details: None,
-        tool_calls: Some(vec![test_tool_call(
-            "call-spawn",
-            "session_spawn",
-            r#"{"behavior":"direct","description":"next","prompt":"go","child_session_id":null,"background":true}"#,
-        )]),
-        duration_ms: None,
-        model_origin: None,
-        reasoning_field: None,
-    });
-    crate::store::begin_traditional_child_run(
-        &store_path,
-        "child",
-        "run-2",
-        crate::store::TraditionalChildExecutionMode::Background,
-    )
-    .unwrap();
-    let relocked: Vec<_> = child
-        .model_request_capabilities_for_test(None)
-        .into_iter()
-        .map(|definition| definition.function.name)
-        .collect();
-    assert!(relocked.iter().any(|name| name == "session_spawn"));
-    assert!(!relocked.iter().any(|name| name == "create_goal"));
+    assert_eq!(names, crate::tools::WORKER_TOOL_NAMES);
+    assert!(!names.iter().any(|name| name == "subagent"));
+    assert!(!names.iter().any(|name| name == "create_goal"));
 
     drop(child);
     let _ = std::fs::remove_dir_all(root);

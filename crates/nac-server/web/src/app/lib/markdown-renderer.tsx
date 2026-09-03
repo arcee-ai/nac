@@ -331,11 +331,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
           // Blocks are append-only, so their position is their identity.
           // Only the open tail is still streaming: earlier blocks are settled,
           // and a remount must not restart their fade from opacity 0.
-          <StreamedBlock
-            key={index}
-            source={source}
-            streaming={index === blocks.length - 1}
-          />
+          <StreamedBlock key={index} source={source} streaming={index === blocks.length - 1} />
         ))
       ) : (
         <Parsed source={children} streaming={false} />

@@ -52,16 +52,10 @@ describe("delegated completion event", () => {
     );
     expect(screen.getByText("Generation 2")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Revert to this snapshot" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create fork" })).toBeNull();
     expect(screen.getByRole("button", { name: "Copy message" })).toBeTruthy();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Open exact conspect" }),
-    );
-    expect(screen.getByTestId("location").textContent).toBe(
-      "/session/child%2Fexact/actions",
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Open exact conspect" }));
+    expect(screen.getByTestId("location").textContent).toBe("/session/child%2Fexact/actions");
   });
 });

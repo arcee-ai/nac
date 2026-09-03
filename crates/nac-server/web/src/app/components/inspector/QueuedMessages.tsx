@@ -37,9 +37,7 @@ export function QueuedMessages({
 }: QueuedMessagesProps) {
   const [ordered, setOrdered] = useState(items);
   const [draggingId, setDraggingId] = useState<number | null>(null);
-  const [dropAt, setDropAt] = useState<{ id: number; edge: QueueDropEdge } | null>(
-    null,
-  );
+  const [dropAt, setDropAt] = useState<{ id: number; edge: QueueDropEdge } | null>(null);
 
   useEffect(() => {
     setOrdered(items);
@@ -90,9 +88,7 @@ export function QueuedMessages({
                 item={item}
                 disabled={disabled}
                 dragging={draggingId === item.id}
-                dropEdge={
-                  dropAt?.id === item.id && draggingId !== item.id ? dropAt.edge : null
-                }
+                dropEdge={dropAt?.id === item.id && draggingId !== item.id ? dropAt.edge : null}
                 onDragStart={setDraggingId}
                 onDragOver={(id, edge) => {
                   if (!draggingId) return;

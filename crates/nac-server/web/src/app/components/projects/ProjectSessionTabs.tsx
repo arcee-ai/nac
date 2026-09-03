@@ -48,10 +48,7 @@ import {
   useDismissedChatTabs,
   writeChatTabStripScroll,
 } from "@/app/store/chatTabsStore";
-import type {
-  ManagedSessionSummary,
-  SessionSummarySnapshot,
-} from "@/app/types/api";
+import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
 /** Which side of the tab under the pointer the dragged one would land on. */
 function edgeUnderPointer(element: HTMLElement, clientX: number): DropEdge {
@@ -153,15 +150,9 @@ export function ProjectSessionTabs({
     return (
       <div className="flex h-12 items-center gap-3 px-2 border-b border-b-tertiary">
         {leading}
-        <Icon
-          iconName={IconName.Danger}
-          size={28}
-          className="shrink-0 text-danger-primary"
-        />
+        <Icon iconName={IconName.Danger} size={28} className="shrink-0 text-danger-primary" />
         <div className="flex flex-col flex-1 min-w-0 text-danger-primary">
-          <span className="label-micro truncate">
-            The session is not assigned
-          </span>
+          <span className="label-micro truncate">The session is not assigned</span>
           <span className="text-[10px] leading-[12px] opacity-75 truncate">
             Adding new sessions is unavailable
           </span>
@@ -205,8 +196,7 @@ export function ProjectSessionTabs({
   // transcript with no tab above it reads as belonging to nothing.
   const visible = ordered.filter(
     (entry) =>
-      !dismissed.has(entry.summary.session_id) ||
-      entry.summary.session_id === activeSessionId,
+      !dismissed.has(entry.summary.session_id) || entry.summary.session_id === activeSessionId,
   );
 
   // A single tab has nothing to trade places with.
@@ -235,9 +225,7 @@ export function ProjectSessionTabs({
   // has none, so the list is the place left to land.
   const closeTab = (sessionId: string) => {
     if (sessionId === activeSessionId) {
-      const index = visible.findIndex(
-        (entry) => entry.summary.session_id === sessionId,
-      );
+      const index = visible.findIndex((entry) => entry.summary.session_id === sessionId);
       const next = visible[index + 1] ?? visible[index - 1];
       navigate(next ? routes.session(next.summary.session_id) : routes.list());
     }
@@ -246,9 +234,7 @@ export function ProjectSessionTabs({
 
   return (
     <div className="flex items-center gap-3 px-2 border-b border-b-tertiary">
-      {leading ? (
-        <div className="flex items-center shrink-0">{leading}</div>
-      ) : null}
+      {leading ? <div className="flex items-center shrink-0">{leading}</div> : null}
       {/* Horizontal only: the strip is one row and must never grow taller. */}
       <div
         ref={stripRef}
@@ -258,17 +244,11 @@ export function ProjectSessionTabs({
         }}
       >
         {empty ? (
-          <ChatSessionTab
-            title={NEW_AGENT_TITLE}
-            active
-            onClick={() => setNewSessionOpen(true)}
-          />
+          <ChatSessionTab title={NEW_AGENT_TITLE} active onClick={() => setNewSessionOpen(true)} />
         ) : (
           visible.map((entry) => {
             const sessionId = entry.summary.session_id;
-            const behavior = sessionBehaviorPresentation(
-              entry.summary.behavior,
-            );
+            const behavior = sessionBehaviorPresentation(entry.summary.behavior);
             const origin = sessionOriginFromRecord(
               entry.lineage,
               entry.summary.forked_from,
@@ -278,10 +258,7 @@ export function ProjectSessionTabs({
             return (
               <div
                 key={sessionId}
-                className={cn(
-                  "relative",
-                  dragging === sessionId && "opacity-40",
-                )}
+                className={cn("relative", dragging === sessionId && "opacity-40")}
                 draggable={reorderable}
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = "move";
@@ -296,10 +273,7 @@ export function ProjectSessionTabs({
                   if (!dragging) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
-                  const edge = edgeUnderPointer(
-                    event.currentTarget,
-                    event.clientX,
-                  );
+                  const edge = edgeUnderPointer(event.currentTarget, event.clientX);
                   setDropAt((current) =>
                     current?.sessionId === sessionId && current.edge === edge
                       ? current
@@ -309,10 +283,7 @@ export function ProjectSessionTabs({
                 onDrop={(event) => {
                   if (!dragging) return;
                   event.preventDefault();
-                  dropOn(
-                    sessionId,
-                    edgeUnderPointer(event.currentTarget, event.clientX),
-                  );
+                  dropOn(sessionId, edgeUnderPointer(event.currentTarget, event.clientX));
                 }}
               >
                 {dropAt?.sessionId === sessionId ? (
@@ -339,8 +310,7 @@ export function ProjectSessionTabs({
                       forkedFromTitle: entry.summary.forked_from?.title,
                       convertedFromTitle: converted?.title,
                       convertedFromType: converted
-                        ? sessionBehaviorPresentation(converted.source_behavior)
-                            .label
+                        ? sessionBehaviorPresentation(converted.source_behavior).label
                         : undefined,
                     }),
                   )}
@@ -374,9 +344,7 @@ export function ProjectSessionTabs({
           }
         >
           <Button
-            variant={
-              open ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost
-            }
+            variant={open ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
             size={ButtonSize.Medium}
             content={ButtonContent.Icon}
             aria-label="All chats in this project"
@@ -398,11 +366,7 @@ export function ProjectSessionTabs({
             onOpenChange={setNewSessionOpen}
           >
             <Button
-              variant={
-                newSessionOpen
-                  ? ButtonVariant.GhostHighlighted
-                  : ButtonVariant.Ghost
-              }
+              variant={newSessionOpen ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
               size={ButtonSize.Medium}
               content={ButtonContent.Icon}
               aria-label="Create new session"

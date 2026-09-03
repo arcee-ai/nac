@@ -57,9 +57,7 @@ const ChildSessionBadge: React.FC<ChildSessionBadgeProps> = ({
   };
 
   return (
-    <div
-      className={`${active ? "border-l-primary" : "border-l-tertiary"} my-8 pl-4 border-l-2`}
-    >
+    <div className={`${active ? "border-l-primary" : "border-l-tertiary"} my-8 pl-4 border-l-2`}>
       <div
         role={inert || missing ? undefined : "group"}
         tabIndex={inert || missing ? -1 : 0}
@@ -87,11 +85,7 @@ const ChildSessionBadge: React.FC<ChildSessionBadgeProps> = ({
         <div className="flex h-11 w-full shrink-0 items-center gap-[10px] px-2">
           {missing ? (
             <span className="flex size-7 shrink-0 items-center justify-center">
-              <Icon
-                iconName={IconName.Close}
-                size={20}
-                color="var(--color-fill-basic-muted)"
-              />
+              <Icon iconName={IconName.Close} size={20} color="var(--color-fill-basic-muted)" />
             </span>
           ) : (
             <SessionTypeAvatar
@@ -103,11 +97,7 @@ const ChildSessionBadge: React.FC<ChildSessionBadgeProps> = ({
           <span
             className={cn(
               "min-w-0 flex-1 truncate label-small leading-5",
-              missing
-                ? "text-basic-muted"
-                : running
-                  ? "text-shimmer-basic"
-                  : "text-basic-primary",
+              missing ? "text-basic-muted" : running ? "text-shimmer-basic" : "text-basic-primary",
             )}
           >
             {missing ? "No chat found" : title}
@@ -134,9 +124,7 @@ const ChildSessionBadge: React.FC<ChildSessionBadgeProps> = ({
         {peek.length ? (
           <div className="flex w-full shrink-0 flex-col px-2 pb-2">
             {peek.map((line, index) => {
-              const fade =
-                LINE_OPACITY[LINE_OPACITY.length - peek.length + index] ??
-                "opacity-100";
+              const fade = LINE_OPACITY[LINE_OPACITY.length - peek.length + index] ?? "opacity-100";
               return (
                 <div
                   key={`${index}:${line}`}

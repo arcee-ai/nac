@@ -34,10 +34,7 @@ const CircularLoader: React.FC<CircularLoaderProps> & {
   const radius = 12 - strokeWidth / 2;
 
   return (
-    <div
-      className={cn("inline-flex w-fit h-fit animate-spin", className)}
-      {...props}
-    >
+    <div className={cn("inline-flex w-fit h-fit animate-spin", className)} {...props}>
       <svg
         width={size - 2}
         height={size - 2}
@@ -52,13 +49,7 @@ const CircularLoader: React.FC<CircularLoaderProps> & {
           </linearGradient>
           <mask id={maskId} maskUnits="userSpaceOnUse">
             <rect x="0" y="0" width="12" height="24" fill="white" />
-            <rect
-              x="12"
-              y="0"
-              width="12"
-              height="24"
-              fill={`url(#${gradientId})`}
-            />
+            <rect x="12" y="0" width="12" height="24" fill={`url(#${gradientId})`} />
           </mask>
         </defs>
         <circle

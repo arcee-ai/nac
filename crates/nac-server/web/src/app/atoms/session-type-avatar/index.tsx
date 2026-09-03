@@ -16,13 +16,10 @@ export enum SessionOrigin {
   DelegatedLocked = "delegated-locked",
 }
 
-/** Plane for Agent, orchestrator glyph otherwise. Used by tabs and list rows. */
-export function sessionTypeIconName(
-  sessionType: `${SessionType}` = SessionType.Agent,
-): IconName {
-  return sessionType === SessionType.Orchestrator
-    ? IconName.Orchestrator
-    : IconName.Plane;
+/** Plane for Agent, orchestrator glyph otherwise. */
+export function sessionTypeIconName(sessionType: `${SessionType}` = SessionType.Agent): IconName {
+  if (sessionType === SessionType.Orchestrator) return IconName.Orchestrator;
+  return IconName.Plane;
 }
 
 interface SessionTypeAvatarProps {

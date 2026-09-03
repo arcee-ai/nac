@@ -47,14 +47,24 @@ impl<'a> DelegationApplication<'a> {
         Self { manager }
     }
 
+    /// Parent eligibility is a durable topology fact, and a stored behavior is
+    /// immutable, so it is answered before attachment. Attaching first would
+    /// let an unrelated failure such as unusable model settings mask the
+    /// rejection this rule owes the caller.
+    fn reject_nac_parent(&self, parent_session_id: &str) -> Result<()> {
+        let parent = sessions::load_session(&self.manager.inner.store_path, parent_session_id)?;
+        if parent.behavior.is_nac() {
+            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
+        }
+        Ok(())
+    }
+
     pub(crate) async fn list_traditional_children(
         &self,
         parent_session_id: &str,
     ) -> Result<Vec<TraditionalChildRecord>> {
-        let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior.is_nac() {
-            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
-        }
+        self.reject_nac_parent(parent_session_id)?;
+        self.manager.attach_session(parent_session_id).await?;
         if nac_core::store::assignment_is_open(&self.manager.inner.store_path, parent_session_id)? {
             return Err(anyhow!("running assigned sessions cannot launch children"));
         }
@@ -69,10 +79,8 @@ impl<'a> DelegationApplication<'a> {
         parent_session_id: &str,
         command: StartTraditionalChild,
     ) -> Result<TraditionalChildRecord> {
-        let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior.is_nac() {
-            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
-        }
+        self.reject_nac_parent(parent_session_id)?;
+        self.manager.attach_session(parent_session_id).await?;
         let controller =
             nac_core::traditional_children::controller_for(&self.manager.inner.store_path)?;
         let child = controller
@@ -128,10 +136,8 @@ impl<'a> DelegationApplication<'a> {
         &self,
         parent_session_id: &str,
     ) -> Result<Vec<ManagedOrchestratorRecord>> {
-        let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior.is_nac() {
-            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
-        }
+        self.reject_nac_parent(parent_session_id)?;
+        self.manager.attach_session(parent_session_id).await?;
         nac_core::store::list_managed_orchestrators(
             &self.manager.inner.store_path,
             parent_session_id,
@@ -143,10 +149,8 @@ impl<'a> DelegationApplication<'a> {
         parent_session_id: &str,
         command: StartManagedOrchestrator,
     ) -> Result<ManagedOrchestratorRecord> {
-        let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior.is_nac() {
-            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
-        }
+        self.reject_nac_parent(parent_session_id)?;
+        self.manager.attach_session(parent_session_id).await?;
         let controller =
             nac_core::orchestration_control::controller_for(&self.manager.inner.store_path)?;
         let orchestrator = controller
@@ -204,10 +208,8 @@ impl<'a> DelegationApplication<'a> {
         &self,
         parent_session_id: &str,
     ) -> Result<Vec<SessionAssignmentRecord>> {
-        let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior.is_nac() {
-            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
-        }
+        self.reject_nac_parent(parent_session_id)?;
+        self.manager.attach_session(parent_session_id).await?;
         if nac_core::store::assignment_is_open(&self.manager.inner.store_path, parent_session_id)? {
             return Err(anyhow!("running assigned sessions cannot launch children"));
         }

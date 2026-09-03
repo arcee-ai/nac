@@ -21,18 +21,12 @@ describe("UserMessage", () => {
       />,
     );
 
+    expect(screen.getByRole("button", { name: "Resend" }).hasAttribute("disabled")).toBe(true);
     expect(
-      screen.getByRole("button", { name: "Resend" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Revert to this snapshot" }).hasAttribute("disabled"),
     ).toBe(true);
-    expect(
-      screen
-        .getByRole("button", { name: "Revert to this snapshot" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
-    expect(
-      screen
-        .getByRole("button", { name: "Copy message" })
-        .hasAttribute("disabled"),
-    ).toBe(false);
+    expect(screen.getByRole("button", { name: "Copy message" }).hasAttribute("disabled")).toBe(
+      false,
+    );
   });
 });

@@ -60,9 +60,7 @@ export function ChatSessionList({
   );
 
   if (sessions.length === 0) {
-    return (
-      <div className="label-small text-basic-muted px-2 py-1">{emptyLabel}</div>
-    );
+    return <div className="label-small text-basic-muted px-2 py-1">{emptyLabel}</div>;
   }
 
   return (
@@ -75,9 +73,7 @@ export function ChatSessionList({
               const title = entry.lineage?.description?.trim()
                 ? entry.lineage.description
                 : sessionTitle(entry.summary);
-              const behavior = sessionBehaviorPresentation(
-                entry.summary.behavior,
-              );
+              const behavior = sessionBehaviorPresentation(entry.summary.behavior);
               return (
                 <ChatSessionButton
                   key={entry.summary.session_id}
@@ -99,15 +95,9 @@ export function ChatSessionList({
                         {onPin ? (
                           <ChatRowAction
                             isMobile={isMobile}
-                            title={
-                              entry.summary.pinned ? "Unpin chat" : "Pin chat"
-                            }
+                            title={entry.summary.pinned ? "Unpin chat" : "Pin chat"}
                             ariaLabel={`${entry.summary.pinned ? "Unpin" : "Pin"} ${title}`}
-                            iconName={
-                              entry.summary.pinned
-                                ? IconName.Unpin
-                                : IconName.Pin
-                            }
+                            iconName={entry.summary.pinned ? IconName.Unpin : IconName.Pin}
                             onClick={() => onPin(entry)}
                           />
                         ) : null}

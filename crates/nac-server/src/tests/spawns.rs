@@ -3,7 +3,11 @@ use super::*;
 #[tokio::test]
 async fn spawn_list_unifies_agent_and_nac_assignments() {
     let root = temp_root("spawn_list");
-    seed_direct_session(&root, "direct");
+    seed_direct_with_orchestrator_session_with_base_url(
+        &root,
+        "direct",
+        "https://api.openai.com/v1".to_string(),
+    );
     seed_direct_session(&root, "child");
     seed_editable_session(&root, "orchestrator-child");
     seed_editable_session(&root, "orchestrator");

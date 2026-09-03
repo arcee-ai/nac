@@ -45,6 +45,7 @@ import {
 } from "@/app/lib/modelConfig";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
+import { DEFAULT_SESSION_BEHAVIOR } from "@/app/lib/sessionBehavior";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { ApiError } from "@/app/services/api";
 import {
@@ -397,7 +398,7 @@ function CreateProjectForm({
     // The location is the project's, so the request must not restate it: the
     // server rejects a project-selected create that also carries a cwd.
     const body: CreateSessionRequest = {
-      behavior: "direct",
+      behavior: DEFAULT_SESSION_BEHAVIOR,
       first_chat: true,
       project_id: projectId,
       model,

@@ -108,13 +108,9 @@ function ToolsSegments({
   const maxPills = isMobile ? MAX_PILLS_MOBILE : MAX_PILLS_DESKTOP;
   const viewportMaxPx = maxPills * PILL_SLOT_PX - COUPLER_WIDTH_PX;
   const showDuration = !inProgress && durationMs != null;
-  const [lingering, setLingering] = useState<Map<string, ToolsSegmentItem>>(
-    () => new Map(),
-  );
+  const [lingering, setLingering] = useState<Map<string, ToolsSegmentItem>>(() => new Map());
   const prevItemsRef = useRef<ToolsSegmentItem[]>(items);
-  const timeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
-    new Map(),
-  );
+  const timeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const prevLingeringSizeRef = useRef(0);
   const [allowTransition, setAllowTransition] = useState(true);
   const lingeringRef = useRef(lingering);
@@ -130,9 +126,7 @@ function ToolsSegments({
     }
 
     const currentIds = new Set(items.map((item) => item.id));
-    const dropped = prevItemsRef.current.filter(
-      (pill) => !currentIds.has(pill.id),
-    );
+    const dropped = prevItemsRef.current.filter((pill) => !currentIds.has(pill.id));
 
     if (dropped.length > 0) {
       setLingering((prev) => {
@@ -195,10 +189,7 @@ function ToolsSegments({
     [],
   );
 
-  const lingeringList = useMemo(
-    () => Array.from(lingering.values()),
-    [lingering],
-  );
+  const lingeringList = useMemo(() => Array.from(lingering.values()), [lingering]);
   const renderedPills = useMemo(() => {
     const idsInItems = new Set(items.map((pill) => pill.id));
     const lingerOnly = lingeringList.filter((pill) => !idsInItems.has(pill.id));
@@ -210,13 +201,9 @@ function ToolsSegments({
   // Slicing first and padding width with `overflowCount` left empty space
   // that `justify-end` shoved into the window whenever +N was showing.
   const overflowCount = Math.max(0, renderedPills.length - maxPills);
-  const innerWidthPx = Math.max(
-    0,
-    renderedPills.length * PILL_SLOT_PX - COUPLER_WIDTH_PX,
-  );
+  const innerWidthPx = Math.max(0, renderedPills.length * PILL_SLOT_PX - COUPLER_WIDTH_PX);
   const translateXPx = -(overflowCount * PILL_SLOT_PX);
-  const lastItemId =
-    items.length > 0 ? items[items.length - 1].id : undefined;
+  const lastItemId = items.length > 0 ? items[items.length - 1].id : undefined;
   const reducedMotion = useMemo(() => prefersReducedMotion(), []);
 
   return (
@@ -236,10 +223,7 @@ function ToolsSegments({
       <div className="flex items-center shrink-0">
         {overflowCount > 0 ? (
           <>
-            <ToolPill.Overflow
-              count={overflowCount}
-              size={ToolPillSize.Small}
-            />
+            <ToolPill.Overflow count={overflowCount} size={ToolPillSize.Small} />
             <Coupler />
           </>
         ) : null}
@@ -273,9 +257,7 @@ function ToolsSegments({
       </div>
       {!inProgress ? (
         <div className="flex items-center gap-2 min-w-0 pr-2">
-          <span className="min-w-0 truncate label-micro text-basic-tertiary">
-            {label}
-          </span>
+          <span className="min-w-0 truncate label-micro text-basic-tertiary">{label}</span>
           {showDuration ? (
             <span className="text-micro text-basic-muted shrink-0 whitespace-nowrap">
               {formatSeconds(durationMs)}

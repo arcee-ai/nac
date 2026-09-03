@@ -9,10 +9,7 @@ import type {
   SessionSummarySnapshot,
   TokenUsage,
 } from "@/app/types/api";
-import {
-  parseDelegatedCompletion,
-  delegatedTaskTitle,
-} from "@/app/features/delegation/completion";
+import { parseDelegatedCompletion, delegatedTaskTitle } from "@/app/features/delegation/completion";
 
 export function shortId(id: string | null | undefined): string {
   if (!id) return "--";
@@ -44,9 +41,7 @@ interface InvokedSkillsExpansion {
  * `</skill_content>` (rendered bodies have the tag neutralized, so the first
  * one closes the block).
  */
-function parseSkillContentBlock(
-  text: string,
-): { name: string; rest: string } | null {
+function parseSkillContentBlock(text: string): { name: string; rest: string } | null {
   if (!text.startsWith(SKILL_CONTENT_OPEN)) return null;
   const afterOpen = text.slice(SKILL_CONTENT_OPEN.length);
   const quote = afterOpen.indexOf('"');
@@ -70,9 +65,7 @@ function parseSkillContentBlock(
  * expansion appends. Anything else (prose that happens to end with the
  * closing tag, a malformed tail) is user text and returns null.
  */
-function parseInvokedSkillsExpansion(
-  text: string,
-): InvokedSkillsExpansion | null {
+function parseInvokedSkillsExpansion(text: string): InvokedSkillsExpansion | null {
   if (!text.endsWith(INVOKED_SKILLS_CLOSE)) return null;
   const withoutClose = text.slice(0, text.length - INVOKED_SKILLS_CLOSE.length);
   if (!withoutClose.endsWith("\n")) return null;
@@ -107,9 +100,7 @@ function invokedSkillsDisplayPrompt(text: string): string | null {
  * from the same structural region the collapse recognizes, so the bubble's
  * indicator and its collapsed text always agree.
  */
-export function invokedSkillNames(
-  content: string | null | undefined,
-): string[] | null {
+export function invokedSkillNames(content: string | null | undefined): string[] | null {
   if (content == null) return null;
   const expansion = parseInvokedSkillsExpansion(String(content));
   return expansion ? expansion.names : null;
@@ -120,9 +111,7 @@ export function invokedSkillNames(
  * expansion first (matching the Rust collapse order), then a legacy `/plan`
  * or `/run` command message. Non-command text is returned unchanged.
  */
-export function displayPromptFromMessageText(
-  content: string | null | undefined,
-): string {
+export function displayPromptFromMessageText(content: string | null | undefined): string {
   const text = String(content ?? "");
   const collapsed = invokedSkillsDisplayPrompt(text);
   if (collapsed != null) return collapsed;
@@ -135,10 +124,7 @@ export function displayPromptFromMessageText(
   }
   const completion = parseDelegatedCompletion(normalized);
   if (completion) {
-    const type =
-      completion.kind === "coding-agent"
-        ? "traditional child"
-        : "managed orchestrator";
+    const type = completion.kind === "coding-agent" ? "traditional child" : "managed orchestrator";
     return `[${type} ${completion.status}: ${completion.description}]`;
   }
   const header = normalized.split("\n", 1)[0] ?? "";
@@ -175,13 +161,13 @@ export const NEW_CHAT_TITLE = "New Session";
 export const NEW_AGENT_TITLE = "New Agent";
 export const NEW_ORCHESTRATOR_TITLE = "New Orchestrator";
 
+// "New Agent + Orchestrator" is no longer produced, but chats stored while it
+// was must keep counting as unnamed.
 const PLACEHOLDER_SESSION_TITLE =
-  /^(New Session|New Agent|New Orchestrator)( \d+)?$/;
+  /^(New Session|New Agent \+ Orchestrator|New Agent|New Orchestrator)( \d+)?$/;
 
 /** Display name for an empty chat of this type, before anyone names it. */
-export function untitledSessionTitle(
-  behavior: SessionBehavior | null | undefined,
-): string {
+export function untitledSessionTitle(behavior: SessionBehavior | null | undefined): string {
   if (behavior === "direct" || behavior === "direct-with-orchestrator") {
     return NEW_AGENT_TITLE;
   }
@@ -197,9 +183,7 @@ export function isPlaceholderSessionTitle(title: string): boolean {
 }
 
 /** A chat nobody has named and nobody has said anything in yet. */
-export function isUntitledSession(
-  summary: SessionSummarySnapshot | null | undefined,
-): boolean {
+export function isUntitledSession(summary: SessionSummarySnapshot | null | undefined): boolean {
   if (!summary) return false;
   if (summary.title != null && summary.title.trim()) return false;
   return !(summary.last_user_prompt ?? "").trim();
@@ -207,10 +191,8 @@ export function isUntitledSession(
 
 const AUTO_SESSION_TITLE_CHARS = 30;
 const FORK_TITLE_PREFIX = /^Fork:\s*/i;
-const CONTINUE_SESSION_TITLE =
-  /^(Continue in (?:NAC|Agent|Orchestrator)|Continue)$/;
-const DELEGATED_PROMPT_TITLE =
-  /^\[(?:traditional child|managed orchestrator) [a-z]+: (.+)\]$/i;
+const CONTINUE_SESSION_TITLE = /^(Continue in (?:NAC|Agent|Orchestrator)|Continue)$/;
+const DELEGATED_PROMPT_TITLE = /^\[(?:traditional child|managed orchestrator) [a-z]+: (.+)\]$/i;
 
 /**
  * Tab- and list-sized name: drop the Fork: prefix (the origin badge already
@@ -226,10 +208,7 @@ export function compactSessionTitle(raw: string): string {
   const collapsed = displayPromptFromMessageText(withoutFork).trim();
   const wrapped = DELEGATED_PROMPT_TITLE.exec(collapsed);
   if (wrapped?.[1]?.trim()) return wrapped[1].trim();
-  if (
-    CONTINUE_SESSION_TITLE.test(text) ||
-    CONTINUE_SESSION_TITLE.test(withoutFork)
-  ) {
+  if (CONTINUE_SESSION_TITLE.test(text) || CONTINUE_SESSION_TITLE.test(withoutFork)) {
     return "Continue";
   }
   return collapsed || withoutFork;
@@ -264,9 +243,7 @@ export function autoSessionTitleFromPrompt(prompt: string): string {
   return `${chars.slice(0, AUTO_SESSION_TITLE_CHARS).join("")}...`;
 }
 
-export function displaySessionTitle(
-  summary: SessionSummarySnapshot | null | undefined,
-): string {
+export function displaySessionTitle(summary: SessionSummarySnapshot | null | undefined): string {
   if (!summary) return "";
   if (summary.title != null && summary.title.trim()) {
     const compact = compactSessionTitle(summary.title);
@@ -313,9 +290,7 @@ export function sessionTitle(
  * Timestamps are compared as text: the store writes them zero-padded and in
  * UTC, so they sort correctly without being parsed into dates first.
  */
-export function numberUntitledSessions(
-  sessions: ManagedSessionSummary[],
-): Map<string, string> {
+export function numberUntitledSessions(sessions: ManagedSessionSummary[]): Map<string, string> {
   const names = new Map<string, string>();
   const takenPerBucket = new Map<string, number>();
   const untitled = sessions
@@ -401,9 +376,7 @@ export function formatClock(ms: number | null | undefined): string {
 export function parseStoreTime(value: string | null | undefined): number {
   if (!value) return Number.NaN;
   const isoish = value.replace(" ", "T");
-  return Date.parse(
-    /(?:Z|[+-]\d\d:?\d\d)$/.test(isoish) ? isoish : `${isoish}Z`,
-  );
+  return Date.parse(/(?:Z|[+-]\d\d:?\d\d)$/.test(isoish) ? isoish : `${isoish}Z`);
 }
 
 /** A store timestamp as a short local date and time. */
@@ -437,30 +410,18 @@ export type SessionEnv = (typeof SESSION_ENVS)[number];
  * Where the session runs. Sandbox and ssh are mutually exclusive in practice,
  * and sandbox wins because it is the more specific isolation.
  */
-export function sessionEnvLabel(
-  summary: SessionSummarySnapshot | null | undefined,
-): SessionEnv {
+export function sessionEnvLabel(summary: SessionSummarySnapshot | null | undefined): SessionEnv {
   if (!summary) return ENV_LOCAL;
   if (summary.sandboxed) return ENV_SANDBOX;
   if (summary.ssh_host) return ENV_SSH;
   return ENV_LOCAL;
 }
 
-const TERMINAL_RUN_STATES = [
-  "done",
-  "completed",
-  "cancelled",
-  "canceled",
-  "failed",
-  "error",
-];
+const TERMINAL_RUN_STATES = ["done", "completed", "cancelled", "canceled", "failed", "error"];
 
 /** A truthy active run without a terminal state still counts as running. */
 export function isActiveRun(
-  activeRun:
-    | (ActiveRunSnapshot & { state?: string; status?: string })
-    | null
-    | undefined,
+  activeRun: (ActiveRunSnapshot & { state?: string; status?: string }) | null | undefined,
 ): boolean {
   if (!activeRun) return false;
   const state = (activeRun.state ?? activeRun.status ?? "").toLowerCase();
@@ -507,29 +468,23 @@ export function addTokenUsage(
     input_tokens: (base?.input_tokens ?? 0) + delta.input_tokens,
     output_tokens: (base?.output_tokens ?? 0) + delta.output_tokens,
     cache_read_tokens: (base?.cache_read_tokens ?? 0) + delta.cache_read_tokens,
-    cache_write_tokens:
-      (base?.cache_write_tokens ?? 0) + delta.cache_write_tokens,
-    reasoning_tokens:
-      (base?.reasoning_tokens ?? 0) + (delta.reasoning_tokens ?? 0),
+    cache_write_tokens: (base?.cache_write_tokens ?? 0) + delta.cache_write_tokens,
+    reasoning_tokens: (base?.reasoning_tokens ?? 0) + (delta.reasoning_tokens ?? 0),
     total_tokens: contextTokens,
     cost:
       base?.cost || delta.cost
         ? {
             input: (base?.cost?.input ?? 0) + (delta.cost?.input ?? 0),
             output: (base?.cost?.output ?? 0) + (delta.cost?.output ?? 0),
-            cache_read:
-              (base?.cost?.cache_read ?? 0) + (delta.cost?.cache_read ?? 0),
-            cache_write:
-              (base?.cost?.cache_write ?? 0) + (delta.cost?.cache_write ?? 0),
+            cache_read: (base?.cost?.cache_read ?? 0) + (delta.cost?.cache_read ?? 0),
+            cache_write: (base?.cost?.cache_write ?? 0) + (delta.cost?.cache_write ?? 0),
             total: (base?.cost?.total ?? 0) + (delta.cost?.total ?? 0),
           }
         : undefined,
   };
 }
 
-export function tokenUsageHasSpend(
-  usage: TokenUsage | null | undefined,
-): boolean {
+export function tokenUsageHasSpend(usage: TokenUsage | null | undefined): boolean {
   if (!usage) return false;
   return (
     usage.input_tokens +
@@ -557,24 +512,15 @@ export function maxBillableUsage(
     output_tokens: Math.max(a.output_tokens, b.output_tokens),
     cache_read_tokens: Math.max(a.cache_read_tokens, b.cache_read_tokens),
     cache_write_tokens: Math.max(a.cache_write_tokens, b.cache_write_tokens),
-    reasoning_tokens: Math.max(
-      a.reasoning_tokens ?? 0,
-      b.reasoning_tokens ?? 0,
-    ),
+    reasoning_tokens: Math.max(a.reasoning_tokens ?? 0, b.reasoning_tokens ?? 0),
     total_tokens: a.total_tokens || b.total_tokens,
     cost:
       a.cost || b.cost
         ? {
             input: Math.max(a.cost?.input ?? 0, b.cost?.input ?? 0),
             output: Math.max(a.cost?.output ?? 0, b.cost?.output ?? 0),
-            cache_read: Math.max(
-              a.cost?.cache_read ?? 0,
-              b.cost?.cache_read ?? 0,
-            ),
-            cache_write: Math.max(
-              a.cost?.cache_write ?? 0,
-              b.cost?.cache_write ?? 0,
-            ),
+            cache_read: Math.max(a.cost?.cache_read ?? 0, b.cost?.cache_read ?? 0),
+            cache_write: Math.max(a.cost?.cache_write ?? 0, b.cost?.cache_write ?? 0),
             total: Math.max(a.cost?.total ?? 0, b.cost?.total ?? 0),
           }
         : undefined,
@@ -610,11 +556,7 @@ export function runMetrics(
   const active = isActiveRun(activeRun);
   const persisted = tokenUsage(snapshot);
   const folded = runUsage
-    ? addTokenUsage(
-        persisted,
-        runUsage,
-        runUsage.total_tokens || (persisted?.total_tokens ?? 0),
-      )
+    ? addTokenUsage(persisted, runUsage, runUsage.total_tokens || (persisted?.total_tokens ?? 0))
     : persisted;
 
   return {

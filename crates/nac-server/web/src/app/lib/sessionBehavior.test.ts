@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CREATE_SESSION_BEHAVIORS,
+  DEFAULT_SESSION_BEHAVIOR,
   SESSION_BEHAVIORS,
   isAgentBehavior,
   sessionBehaviorPresentation,
@@ -11,24 +12,24 @@ import {
 import type { SessionBehavior } from "@/app/types/api";
 
 describe("session behavior presentation", () => {
-  it("offers Agent and Orchestrator for new chats and presents hybrid rows as Agent", () => {
+  it("offers only Agent and Orchestrator for new chats while presenting stored direct chats", () => {
     expect(SESSION_BEHAVIORS.map((behavior) => behavior.id)).toEqual([
       "direct",
+      "direct-with-orchestrator",
       "orchestrator",
     ]);
     expect(CREATE_SESSION_BEHAVIORS.map((behavior) => behavior.id)).toEqual([
-      "direct",
+      "direct-with-orchestrator",
       "orchestrator",
     ]);
+    expect(DEFAULT_SESSION_BEHAVIOR).toBe("direct-with-orchestrator");
 
     expect(sessionBehaviorPresentation("orchestrator")).toMatchObject({
       label: "Orchestrator",
       navigationLabel: "Orchestrator",
       topLevel: expect.stringMatching(/planner/i),
       editsDirectly: false,
-      delegation: expect.stringMatching(
-        /retained Orchestrator worker threads/i,
-      ),
+      delegation: expect.stringMatching(/retained Orchestrator worker threads/i),
       inspection: expect.stringMatching(/Actions and Worksets/i),
     });
     expect(sessionBehaviorPresentation("direct")).toMatchObject({
@@ -36,16 +37,16 @@ describe("session behavior presentation", () => {
       navigationLabel: "Agent",
       topLevel: expect.stringMatching(/persistent coding agent/i),
       editsDirectly: true,
-      delegation: expect.stringMatching(/separate Orchestrator sessions/i),
+      delegation: expect.stringMatching(/fresh-context coding agents/i),
       inspection: expect.stringMatching(/Actions show reasoning/i),
     });
-    expect(
-      sessionBehaviorPresentation("direct-with-orchestrator"),
-    ).toMatchObject({
+    expect(sessionBehaviorPresentation("direct-with-orchestrator")).toMatchObject({
       id: "direct-with-orchestrator",
       label: "Agent",
       navigationLabel: "Agent",
+      createLabel: "New Agent",
       editsDirectly: true,
+      delegation: expect.stringMatching(/separate Orchestrator sessions/i),
     });
     expect(isAgentBehavior("direct")).toBe(true);
     expect(isAgentBehavior("direct-with-orchestrator")).toBe(true);
@@ -54,11 +55,7 @@ describe("session behavior presentation", () => {
 });
 
 describe("session panel policy", () => {
-  const behaviors: SessionBehavior[] = [
-    "orchestrator",
-    "direct",
-    "direct-with-orchestrator",
-  ];
+  const behaviors: SessionBehavior[] = ["orchestrator", "direct", "direct-with-orchestrator"];
 
   it("keeps every primary behavior's established desktop and mobile panels", () => {
     expect(sessionPanelPolicy("orchestrator", null)).toEqual({
@@ -67,10 +64,7 @@ describe("session panel policy", () => {
       defaultPanel: "actions",
       readOnly: false,
     });
-    for (const behavior of [
-      "direct",
-      "direct-with-orchestrator",
-    ] satisfies SessionBehavior[]) {
+    for (const behavior of ["direct", "direct-with-orchestrator"] satisfies SessionBehavior[]) {
       expect(sessionPanelPolicy(behavior, null)).toEqual({
         widePanels: ["actions", "files", "delegated"],
         mobilePanels: ["actions", "files", "delegated", "history"],
@@ -82,9 +76,7 @@ describe("session panel policy", () => {
 
   it("gives traditional children Actions and Files while the assignment is open", () => {
     for (const behavior of behaviors) {
-      expect(
-        sessionPanelPolicy(behavior, "traditional-child", "running"),
-      ).toEqual({
+      expect(sessionPanelPolicy(behavior, "traditional-child", "running")).toEqual({
         widePanels: ["actions", "files"],
         mobilePanels: ["actions", "files", "history"],
         defaultPanel: "actions",
@@ -94,13 +86,8 @@ describe("session panel policy", () => {
   });
 
   it("treats settled traditional children as ordinary Agent chats", () => {
-    for (const behavior of [
-      "direct",
-      "direct-with-orchestrator",
-    ] satisfies SessionBehavior[]) {
-      expect(
-        sessionPanelPolicy(behavior, "traditional-child", "completed"),
-      ).toEqual({
+    for (const behavior of ["direct", "direct-with-orchestrator"] satisfies SessionBehavior[]) {
+      expect(sessionPanelPolicy(behavior, "traditional-child", "completed")).toEqual({
         widePanels: ["actions", "files", "delegated"],
         mobilePanels: ["actions", "files", "delegated", "history"],
         defaultPanel: "actions",
@@ -111,9 +98,7 @@ describe("session panel policy", () => {
 
   it("gives managed orchestrators their own Threads and Worksets while remaining read-only", () => {
     for (const behavior of behaviors) {
-      expect(
-        sessionPanelPolicy(behavior, "managed-orchestrator", "running"),
-      ).toEqual({
+      expect(sessionPanelPolicy(behavior, "managed-orchestrator", "running")).toEqual({
         widePanels: ["actions", "threads", "files", "worksets"],
         mobilePanels: ["actions", "threads", "files", "worksets", "history"],
         defaultPanel: "actions",
@@ -123,9 +108,7 @@ describe("session panel policy", () => {
   });
 
   it("unlocks a settled managed orchestrator", () => {
-    expect(
-      sessionPanelPolicy("orchestrator", "managed-orchestrator", "completed"),
-    ).toEqual({
+    expect(sessionPanelPolicy("orchestrator", "managed-orchestrator", "completed")).toEqual({
       widePanels: ["actions", "threads", "files", "worksets"],
       mobilePanels: ["actions", "threads", "files", "worksets", "history"],
       defaultPanel: "actions",
@@ -141,8 +124,6 @@ describe("session panel policy", () => {
   });
 
   it("preserves the legacy omitted-behavior default", () => {
-    expect(sessionPanelPolicy(undefined, null)).toEqual(
-      sessionPanelPolicy("orchestrator", null),
-    );
+    expect(sessionPanelPolicy(undefined, null)).toEqual(sessionPanelPolicy("orchestrator", null));
   });
 });

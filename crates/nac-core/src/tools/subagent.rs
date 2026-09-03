@@ -436,9 +436,9 @@ mod tests {
         let client = crate::model::ModelClient::new_for_test();
 
         let foreground = crate::tools::execute_tool(
-            "session_spawn",
+            "subagent",
             json!({
-                "behavior": "direct",
+                "profile": "general",
                 "description": "review store",
                 "prompt": "inspect persistence",
                 "child_session_id": null,
@@ -459,12 +459,11 @@ mod tests {
         assert_eq!(foreground.status, TraditionalChildStatus::Completed);
 
         let background = crate::tools::execute_tool(
-            "session_spawn",
+            "subagent",
             json!({
-                "behavior": "direct",
+                "profile": "general",
                 "description": "review store",
                 "prompt": "inspect in background",
-                "child_session_id": null,
                 "background": true
             }),
             &runtime,
@@ -538,7 +537,7 @@ mod tests {
         ));
         let client = crate::model::ModelClient::new_for_test();
 
-        for tool in ["session_status", "session_cancel"] {
+        for tool in ["subagent_status", "subagent_cancel"] {
             let foreign = crate::tools::execute_tool(
                 tool,
                 json!({"child_session_id": "child-a"}),
@@ -561,7 +560,7 @@ mod tests {
             );
             assert_eq!(
                 foreign.content.as_text(),
-                Some("Error: session assignment was not found")
+                Some("Error: traditional child was not found")
             );
         }
 

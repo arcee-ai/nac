@@ -19,10 +19,7 @@ import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { ProjectSessionTabs } from "@/app/components/projects/ProjectSessionTabs";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
-import {
-  useRunStateSync,
-  useSessionStream,
-} from "@/app/hooks/useSessionStream";
+import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { parseStoreTime } from "@/app/lib/format";
 import { perfRender } from "@/app/lib/perfDebug";
@@ -123,11 +120,7 @@ export default function SessionPage() {
 
   perfRender("SessionPage");
 
-  const {
-    data: snapshot = null,
-    error,
-    refetch: refetchSnapshot,
-  } = useSessionSnapshot(id);
+  const { data: snapshot = null, error, refetch: refetchSnapshot } = useSessionSnapshot(id);
   const { data: entry = null } = useSessionSummary(id);
   const { data: sessionList } = useSessions();
   const allSessions = sessionList ?? [];
@@ -144,14 +137,9 @@ export default function SessionPage() {
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
   useAutoSshConnect(id, entry?.summary);
-  const behavior =
-    entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator";
+  const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator";
   const lineage = entry?.lineage ?? snapshot?.lineage;
-  const panelPolicy = sessionPanelPolicy(
-    behavior,
-    lineage?.kind,
-    lineage?.assignment_status,
-  );
+  const panelPolicy = sessionPanelPolicy(behavior, lineage?.kind, lineage?.assignment_status);
   const sessionPanels = panelPolicy.mobilePanels;
   const requestedPanel = sessionPanelFromPath(panel);
   const effectivePanel = sessionPanels.includes(requestedPanel)
@@ -159,8 +147,7 @@ export default function SessionPage() {
     : panelPolicy.defaultPanel;
 
   useEffect(() => {
-    if (!id || !snapshot || !isSessionPanel(panel) || panel === effectivePanel)
-      return;
+    if (!id || !snapshot || !isSessionPanel(panel) || panel === effectivePanel) return;
     navigate(routes.session(id, effectivePanel), { replace: true });
   }, [effectivePanel, id, navigate, panel, snapshot]);
   // The phone dialog header shows the selected file's +/- badge; a revision
@@ -192,9 +179,7 @@ export default function SessionPage() {
   // The repair notice already explains a broken config, and that is exactly why
   // the snapshot request fails, so only report an unexplained fetch failure.
   const failure = configError ?? (!snapshot && error ? error : null);
-  const errorNotice = failure
-    ? toNotice(failure, () => void refetchSnapshot())
-    : null;
+  const errorNotice = failure ? toNotice(failure, () => void refetchSnapshot()) : null;
 
   const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));
 
@@ -213,23 +198,17 @@ export default function SessionPage() {
     ? changedFiles.find((file) => file.path === currentFilePath)
     : undefined;
   const fileBadge =
-    currentChangedFile &&
-    (currentChangedFile.additions || currentChangedFile.deletions) ? (
+    currentChangedFile && (currentChangedFile.additions || currentChangedFile.deletions) ? (
       <div className="flex items-center gap-2 shrink-0 code code-small">
-        <span className="text-success-primary">
-          +{currentChangedFile.additions ?? 0}
-        </span>
-        <span className="text-error-primary">
-          -{currentChangedFile.deletions ?? 0}
-        </span>
+        <span className="text-success-primary">+{currentChangedFile.additions ?? 0}</span>
+        <span className="text-error-primary">-{currentChangedFile.deletions ?? 0}</span>
       </div>
     ) : null;
 
   // ThreadsView syncs the open thread's name and running bit into the store so
   // this header stays aligned with the detail pane (including title shimmer).
   const currentThreadName = selectedThread;
-  const threadTitleRunning =
-    effectivePanel === "threads" && selectedThreadRunning;
+  const threadTitleRunning = effectivePanel === "threads" && selectedThreadRunning;
 
   const sideBox = (
     <SessionSideBox
@@ -247,11 +226,7 @@ export default function SessionPage() {
   const projectSessions = projectId
     ? allSessions
         .filter((session) => session.summary.project_id === projectId)
-        .sort(
-          (a, b) =>
-            parseStoreTime(b.summary.updated_at) -
-            parseStoreTime(a.summary.updated_at),
-        )
+        .sort((a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at))
     : [];
 
   return (
@@ -301,13 +276,7 @@ export default function SessionPage() {
         className={cn(
           "flex flex-col items-center flex-1 min-w-0 h-full",
           "transition-[padding] duration-150 ease-out",
-          isMobile
-            ? "px-0 pt-16"
-            : collapsed
-              ? "pl-2 pr-2"
-              : isDesktop
-                ? "pl-6 pr-2"
-                : "pl-2 pr-2",
+          isMobile ? "px-0 pt-16" : collapsed ? "pl-2 pr-2" : isDesktop ? "pl-6 pr-2" : "pl-2 pr-2",
         )}
       >
         {/* The phone reaches the same chats through the header's sheet; there
@@ -322,10 +291,7 @@ export default function SessionPage() {
               summary={entry?.summary ?? null}
               leading={
                 collapsed ? (
-                  <Tooltip
-                    title="Show panel"
-                    position={TooltipPosition.BottomRight}
-                  >
+                  <Tooltip title="Show panel" position={TooltipPosition.BottomRight}>
                     <Button
                       size={ButtonSize.Medium}
                       variant={ButtonVariant.Ghost}
@@ -379,9 +345,7 @@ export default function SessionPage() {
                   <span
                     className={cn(
                       "header-small",
-                      threadTitleRunning
-                        ? "text-shimmer-basic"
-                        : "text-basic-primary",
+                      threadTitleRunning ? "text-shimmer-basic" : "text-basic-primary",
                     )}
                   >
                     {effectivePanel === "threads"
@@ -394,9 +358,7 @@ export default function SessionPage() {
                             SESSION_PANEL_LABEL.worksets)
                           : effectivePanel === "files"
                             ? (selectedFile?.split("/").pop() ??
-                              snapshot?.workspace?.changed_files?.[0]?.path
-                                .split("/")
-                                .pop() ??
+                              snapshot?.workspace?.changed_files?.[0]?.path.split("/").pop() ??
                               SESSION_PANEL_LABEL.files)
                             : SESSION_PANEL_LABEL[effectivePanel]}
                   </span>
@@ -405,10 +367,7 @@ export default function SessionPage() {
               </div>
 
               {snapshot?.workspace?.branch && !snapshot.lineage ? (
-                <BranchPicker
-                  sessionId={id}
-                  branch={snapshot.workspace.branch}
-                />
+                <BranchPicker sessionId={id} branch={snapshot.workspace.branch} />
               ) : null}
             </div>
           }

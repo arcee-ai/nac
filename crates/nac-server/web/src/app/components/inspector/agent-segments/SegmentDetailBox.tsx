@@ -29,16 +29,10 @@ export function SegmentDetailBox({ box }: { box: SidebarBoxContent }) {
     return <FileSegmentButton path={box.path} directory={box.directory} />;
   }
   if (box.kind === "more") {
-    return (
-      <span className="label-micro text-basic-muted px-2">
-        +{box.count} more
-      </span>
-    );
+    return <span className="label-micro text-basic-muted px-2">+{box.count} more</span>;
   }
   if (box.kind === "muted") {
-    return (
-      <span className="label-micro text-basic-muted px-2">{box.content}</span>
-    );
+    return <span className="label-micro text-basic-muted px-2">{box.content}</span>;
   }
 
   return (
@@ -49,12 +43,7 @@ export function SegmentDetailBox({ box }: { box: SidebarBoxContent }) {
       )}
     >
       {box.kind === "code" ? (
-        <pre
-          className={cn(
-            "agent-segment-code-pre code-small",
-            boxTextClass(box.accent),
-          )}
-        >
+        <pre className={cn("agent-segment-code-pre code-small", boxTextClass(box.accent))}>
           <code>{box.content}</code>
         </pre>
       ) : (

@@ -1,12 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -36,15 +28,9 @@ import { ChildControls } from "@/app/components/inspector/ChildControls";
 import { GoalControls } from "@/app/components/inspector/GoalControls";
 import { QueuedMessages } from "@/app/components/inspector/QueuedMessages";
 import { SshBadge } from "@/app/components/SshBadge";
-import {
-  resolveCatalogModel,
-  type ResolvedCatalogModel,
-} from "@/app/lib/catalog";
+import { resolveCatalogModel, type ResolvedCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
-import {
-  assignmentIsOpen,
-  DELEGATED_READONLY_HINT,
-} from "@/app/lib/sessionBehavior";
+import { assignmentIsOpen, DELEGATED_READONLY_HINT } from "@/app/lib/sessionBehavior";
 import {
   displayPromptFromMessageText,
   ENV_SSH,
@@ -148,9 +134,7 @@ function submittedSlashCommand(
   const argumentsText = nameEnd === -1 ? "" : body.slice(nameEnd).trim();
   return (
     definitions.find(
-      (definition) =>
-        definition.name === name &&
-        (definition.accepts_arguments || !argumentsText),
+      (definition) => definition.name === name && (definition.accepts_arguments || !argumentsText),
     ) ?? null
   );
 }
@@ -242,12 +226,7 @@ function StatBadge({
 }) {
   return (
     <Tooltip title={title} position={TooltipPosition.TopCenter}>
-      <div
-        className={cn(
-          "flex items-center gap-[2px] py-1 whitespace-nowrap",
-          className,
-        )}
-      >
+      <div className={cn("flex items-center gap-[2px] py-1 whitespace-nowrap", className)}>
         {prefix ? (
           <span className={labelClassName}>{prefix}</span>
         ) : showIcon && iconName ? (
@@ -326,11 +305,7 @@ function ChatInputBoxLoading({
         />
         <div className="flex items-center gap-[10px] w-full">
           <div className="flex min-w-0 flex-1 items-center">
-            <ShimmerLoader
-              rows={1}
-              className="w-full max-w-[200px] gap-0"
-              rowClassName="h-6"
-            />
+            <ShimmerLoader rows={1} className="w-full max-w-[200px] gap-0" rowClassName="h-6" />
           </div>
           {running ? (
             <Button
@@ -344,11 +319,7 @@ function ChatInputBoxLoading({
               Stop
             </Button>
           ) : (
-            <ShimmerLoader
-              rows={1}
-              className="w-16 shrink-0 gap-0"
-              rowClassName="h-6"
-            />
+            <ShimmerLoader rows={1} className="w-16 shrink-0 gap-0" rowClassName="h-6" />
           )}
         </div>
       </div>
@@ -360,11 +331,7 @@ function ChatInputBoxLoading({
  * Message field plus the run status bar that replaced the old metrics grid:
  * model, environment, cumulative token usage and the run timer.
  */
-export function ChatInputBox({
-  sessionId,
-  snapshot,
-  entry,
-}: ChatInputBoxProps) {
+export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) {
   perfRender("ChatInputBox");
   const [value, setValue] = useState("");
   // Async submission must only clear the prompt it actually sent. A user can
@@ -386,15 +353,11 @@ export function ChatInputBox({
     start: 0,
     end: 0,
   });
-  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(
-    null,
-  );
+  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   // The pointer's row is held apart from the keyboard's so that leaving the list
   // takes the highlight with it instead of stranding it on the last row crossed.
-  const [hoveredSuggestion, setHoveredSuggestion] = useState<number | null>(
-    null,
-  );
+  const [hoveredSuggestion, setHoveredSuggestion] = useState<number | null>(null);
   const collapsed = isMobile && !focused;
   const rowPx = isMobile ? ROW_PX.mobile : ROW_PX.wide;
   const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
@@ -408,10 +371,8 @@ export function ChatInputBox({
   const updateInboxItem = useUpdateInboxItem();
   const cancelInboxItem = useCancelInboxItem();
   const reorderInboxItems = useReorderInboxItems();
-  const behavior =
-    entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
-  const direct =
-    behavior === "direct" || behavior === "direct-with-orchestrator";
+  const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
+  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const lineage = entry?.lineage ?? snapshot?.lineage;
   const readOnly = assignmentIsOpen(lineage?.assignment_status);
   const parentSessionId = lineage?.parent_session_id ?? null;
@@ -429,8 +390,7 @@ export function ChatInputBox({
     isError: commandsFailed,
     refetch: refetchCommands,
   } = useSlashCommands();
-  const { data: skillDefinitions, isError: skillsFailed } =
-    useSessionSkills(sessionId);
+  const { data: skillDefinitions, isError: skillsFailed } = useSessionSkills(sessionId);
   const ref = useRef<HTMLTextAreaElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const completionCaretRef = useRef<number | null>(null);
@@ -448,33 +408,22 @@ export function ChatInputBox({
   useEffect(() => {
     liftSessionSpend(tokenUsage(snapshot));
   }, [snapshot]);
-  const metrics = runMetrics(
-    snapshot,
-    entry,
-    running || stopping ? runUsage : null,
-    sessionSpend,
-  );
+  const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
   const catalog = useModelCatalog();
   const persistedUsage = tokenUsage(snapshot);
   // A fork inherits context but not spend, so the gauge must not depend on
   // billed usage being present.
-  const contextTokens =
-    metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
+  const contextTokens = metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
   const context = contextGauge(
     contextTokens,
-    resolveCatalogModel(
-      catalog.data,
-      snapshot?.metadata?.backend,
-      metrics.model,
-    ),
+    resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
   );
   const now = useNow(1000, running);
   const runStartedAt = useRunStartedAt();
   const lastElapsedMs = useLastElapsedMs();
   // Stop freezes the clock at click; Stopping must not keep adding cleanup time.
-  const liveElapsed =
-    running && runStartedAt != null ? Math.max(0, now - runStartedAt) : null;
+  const liveElapsed = running && runStartedAt != null ? Math.max(0, now - runStartedAt) : null;
   const elapsedMs = liveElapsed ?? lastElapsedMs ?? metrics.lastResponseMs;
 
   const sshTarget = sshTargetFromSummary(entry?.summary);
@@ -496,9 +445,7 @@ export function ChatInputBox({
     clearGoal.isPending;
   const busy = mutationPending || stopping || (running && !runningDirect);
   const canSend = Boolean(value.trim()) && !busy;
-  const pendingInbox = (inboxQuery.data ?? []).filter(
-    (item) => item.status === "pending",
-  );
+  const pendingInbox = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
   const changeInboxDelivery = async (
     itemId: number,
     expectedVersion: number,
@@ -512,21 +459,14 @@ export function ChatInputBox({
         delivery,
       });
     } catch (error) {
-      toast.error(
-        `Unable to change pending message: ${errorMessage(toRunError(error))}`,
-      );
+      toast.error(`Unable to change pending message: ${errorMessage(toRunError(error))}`);
     }
   };
-  const cancelPendingInbox = async (
-    itemId: number,
-    expectedVersion: number,
-  ) => {
+  const cancelPendingInbox = async (itemId: number, expectedVersion: number) => {
     try {
       await cancelInboxItem.mutateAsync({ sessionId, itemId, expectedVersion });
     } catch (error) {
-      toast.error(
-        `Unable to cancel pending message: ${errorMessage(toRunError(error))}`,
-      );
+      toast.error(`Unable to cancel pending message: ${errorMessage(toRunError(error))}`);
     }
   };
   const saveInboxPrompt = async (item: InboxItem, prompt: string) => {
@@ -539,9 +479,7 @@ export function ChatInputBox({
         prompt,
       });
     } catch (error) {
-      toast.error(
-        `Unable to edit queued message: ${errorMessage(toRunError(error))}`,
-      );
+      toast.error(`Unable to edit queued message: ${errorMessage(toRunError(error))}`);
       throw error;
     }
   };
@@ -549,9 +487,7 @@ export function ChatInputBox({
     try {
       await reorderInboxItems.mutateAsync({ sessionId, itemIds });
     } catch (error) {
-      toast.error(
-        `Unable to reorder queued messages: ${errorMessage(toRunError(error))}`,
-      );
+      toast.error(`Unable to reorder queued messages: ${errorMessage(toRunError(error))}`);
     }
   };
 
@@ -611,13 +547,7 @@ export function ChatInputBox({
     );
   }, [commandDefinitions, commandQuery, direct]);
   const skillQuery = useMemo(
-    () =>
-      skillReferenceQuery(
-        value,
-        selection.start,
-        selection.end,
-        skillDefinitions ?? [],
-      ),
+    () => skillReferenceQuery(value, selection.start, selection.end, skillDefinitions ?? []),
     [selection, skillDefinitions, value],
   );
   const pendingSkillQuery = useMemo(() => {
@@ -636,11 +566,7 @@ export function ChatInputBox({
       end: selection.end,
     };
   }, [commandQuery, selection, skillDefinitions, value]);
-  const suggestionKind = commandQuery
-    ? "slash"
-    : skillQuery || pendingSkillQuery
-      ? "skill"
-      : null;
+  const suggestionKind = commandQuery ? "slash" : skillQuery || pendingSkillQuery ? "skill" : null;
   const options = useMemo<SuggestionOption[]>(() => {
     if (suggestionKind === "slash") {
       return filteredCommands.map((definition) => ({
@@ -674,26 +600,17 @@ export function ChatInputBox({
           )
         : null;
   const suggestionsOpen =
-    focused &&
-    suggestionKind !== null &&
-    currentSuggestionIdentity !== dismissedSuggestion;
+    focused && suggestionKind !== null && currentSuggestionIdentity !== dismissedSuggestion;
   // A narrower query can leave the keyboard's highlight past the last row.
-  const keyboardSuggestion = Math.min(
-    activeSuggestion,
-    Math.max(options.length - 1, 0),
-  );
+  const keyboardSuggestion = Math.min(activeSuggestion, Math.max(options.length - 1, 0));
   // What Tab and Enter would take, which is whatever is lit: the pointer
   // outranks the keyboard while it is in the list.
   const suggestionIndex =
     hoveredSuggestion !== null && hoveredSuggestion < options.length
       ? hoveredSuggestion
       : keyboardSuggestion;
-  const selectedSuggestion = suggestionsOpen
-    ? options[suggestionIndex]
-    : undefined;
-  const activeOptionId = selectedSuggestion
-    ? `${listboxId}-option-${suggestionIndex}`
-    : undefined;
+  const selectedSuggestion = suggestionsOpen ? options[suggestionIndex] : undefined;
+  const activeOptionId = selectedSuggestion ? `${listboxId}-option-${suggestionIndex}` : undefined;
   const preserveSuggestionFocus = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       if (selectedSuggestion) event.preventDefault();
@@ -734,12 +651,7 @@ export function ChatInputBox({
         const reference = `$${option.definition.name}`;
         completed = `${value.slice(0, skillQuery.start)}${reference}${value.slice(skillQuery.end)}`;
         caret = skillQuery.start + reference.length;
-        dismissed = suggestionIdentity(
-          "skill",
-          completed,
-          skillQuery.start,
-          caret,
-        );
+        dismissed = suggestionIdentity("skill", completed, skillQuery.start, caret);
       }
       if (completed === value) {
         completionCaretRef.current = null;
@@ -762,8 +674,7 @@ export function ChatInputBox({
     [skillDefinitions, value],
   );
   const mirrorActive =
-    !history.active &&
-    skillSegments.some((segment) => segment.skillName !== null);
+    !history.active && skillSegments.some((segment) => segment.skillName !== null);
 
   useLayoutEffect(() => {
     const textarea = ref.current;
@@ -817,8 +728,7 @@ export function ChatInputBox({
 
   const runGoalCommand = useCallback(
     async (text: string) => {
-      if (!direct)
-        throw new Error("Durable goals are available only in direct chats");
+      if (!direct) throw new Error("Durable goals are available only in direct chats");
       let goal = goalQuery.data;
       if (goal === undefined) {
         const result = await goalQuery.refetch();
@@ -896,23 +806,15 @@ export function ChatInputBox({
           }
         }
 
-        const command = definitions
-          ? submittedSlashCommand(text, definitions)
-          : null;
+        const command = definitions ? submittedSlashCommand(text, definitions) : null;
         if (command?.command === "compact") {
           try {
             await compactSession.mutateAsync(sessionId);
             pushLocalEvent("compaction", "▶ compacting context…");
             clearField();
           } catch (error) {
-            pushLocalEvent(
-              "error",
-              `compact failed: ${errorMessage(toRunError(error))}`,
-              true,
-            );
-            toast.error(
-              `Failed to compact: ${humanErrorText(toRunError(error), backend)}`,
-            );
+            pushLocalEvent("error", `compact failed: ${errorMessage(toRunError(error))}`, true);
+            toast.error(`Failed to compact: ${humanErrorText(toRunError(error), backend)}`);
           }
           return;
         }
@@ -921,9 +823,7 @@ export function ChatInputBox({
             await runGoalCommand(prompt);
             clearField();
           } catch (error) {
-            toast.error(
-              `Goal command failed: ${humanErrorText(toRunError(error))}`,
-            );
+            toast.error(`Goal command failed: ${humanErrorText(toRunError(error))}`);
           }
           return;
         }
@@ -942,14 +842,8 @@ export function ChatInputBox({
           }
           clearField();
         } catch (error) {
-          pushLocalEvent(
-            "error",
-            `submit failed: ${errorMessage(toRunError(error))}`,
-            true,
-          );
-          toast.error(
-            `Failed to send: ${humanErrorText(toRunError(error), backend)}`,
-          );
+          pushLocalEvent("error", `submit failed: ${errorMessage(toRunError(error))}`, true);
+          toast.error(`Failed to send: ${humanErrorText(toRunError(error), backend)}`);
         }
       } finally {
         submitInFlight.current = false;
@@ -975,10 +869,7 @@ export function ChatInputBox({
 
   // A starter prompt goes out on its own; it is already a whole instruction,
   // and the field is where it would otherwise have to be confirmed.
-  useEffect(
-    () => consumePromptRequests((prompt) => void submit(prompt)),
-    [submit],
-  );
+  useEffect(() => consumePromptRequests((prompt) => void submit(prompt)), [submit]);
 
   const stop = useCallback(async () => {
     await actions.stopRun(sessionId);
@@ -1002,18 +893,10 @@ export function ChatInputBox({
         // bar it sits in elsewhere has room for the 24px square only.
         className={isMobile ? "btn-round" : undefined}
         size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-        variant={
-          permissionPending
-            ? ButtonVariant.GhostHighlightedAccent
-            : ButtonVariant.Ghost
-        }
+        variant={permissionPending ? ButtonVariant.GhostHighlightedAccent : ButtonVariant.Ghost}
         content={ButtonContent.Icon}
-        aria-label={
-          permissionPending ? "Permission required" : "Session settings"
-        }
-        onClick={() =>
-          permissionPending ? openPermissions() : actions.settings(sessionId)
-        }
+        aria-label={permissionPending ? "Permission required" : "Session settings"}
+        onClick={() => (permissionPending ? openPermissions() : actions.settings(sessionId))}
       >
         <Icon iconName={IconName.Gear} size={isMobile ? undefined : 16} />
       </Button>
@@ -1021,11 +904,7 @@ export function ChatInputBox({
   );
   const permissionOpener = (
     <>
-      <PermissionSettingsOpener
-        sessionId={sessionId}
-        behavior={behavior}
-        onAsk={openPermissions}
-      />
+      <PermissionSettingsOpener sessionId={sessionId} behavior={behavior} onAsk={openPermissions} />
       <PermissionModal
         open={permissionOpen}
         sessionId={sessionId}
@@ -1039,11 +918,7 @@ export function ChatInputBox({
   // the field has text; an empty field reuses the same control as Stop so
   // the toolbar does not grow a second cancel label.
   const sendStopsRun = running && (!runningDirect || !value.trim());
-  const sendIcon = (
-    <Icon
-      iconName={sendStopsRun || stopping ? IconName.Stop : IconName.ArrowTop}
-    />
-  );
+  const sendIcon = <Icon iconName={sendStopsRun || stopping ? IconName.Stop : IconName.ArrowTop} />;
   const sendLabel = stopping
     ? "Stopping run"
     : sendStopsRun
@@ -1117,12 +992,7 @@ export function ChatInputBox({
       )}
     >
       <div className="relative flex-1 min-w-0">
-        <span
-          className="sr-only"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
+        <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {suggestionStatus}
         </span>
         {mirrorActive && !collapsed ? (
@@ -1225,10 +1095,7 @@ export function ChatInputBox({
                 dismissSuggestions();
                 return;
               }
-              if (
-                (event.key === "ArrowDown" || event.key === "ArrowUp") &&
-                options.length
-              ) {
+              if ((event.key === "ArrowDown" || event.key === "ArrowUp") && options.length) {
                 event.preventDefault();
                 // From the lit row, so the keyboard carries on from where the
                 // pointer left the highlight rather than jumping back to its
@@ -1246,10 +1113,7 @@ export function ChatInputBox({
                 completeSuggestion(selectedSuggestion);
                 return;
               }
-              if (
-                event.key === "Enter" &&
-                (selectedSuggestion || suggestionKind === "slash")
-              ) {
+              if (event.key === "Enter" && (selectedSuggestion || suggestionKind === "slash")) {
                 event.preventDefault();
                 if (selectedSuggestion) completeSuggestion(selectedSuggestion);
                 return;
@@ -1266,8 +1130,7 @@ export function ChatInputBox({
         {history.active ? (
           <>
             <span id={previewHelpId} className="sr-only">
-              Press Tab to take this prompt, Escape to leave it, or start typing
-              to dismiss it
+              Press Tab to take this prompt, Escape to leave it, or start typing to dismiss it
             </span>
             {/* The preview is drawn here rather than left to the native
                 placeholder, which cannot be measured — this way the key that
@@ -1281,10 +1144,7 @@ export function ChatInputBox({
           </>
         ) : null}
         {collapsed ? (
-          <div
-            className="absolute inset-0 flex items-center px-4 cursor-text"
-            onClick={focusEnd}
-          >
+          <div className="absolute inset-0 flex items-center px-4 cursor-text" onClick={focusEnd}>
             <span
               className={cn(
                 "w-full truncate text-medium",
@@ -1341,15 +1201,11 @@ export function ChatInputBox({
             // keeps the highlight the keyboard put on the first row.
             onPointerMove={() => setHoveredSuggestion(index)}
             onPointerLeave={() =>
-              setHoveredSuggestion((current) =>
-                current === index ? null : current,
-              )
+              setHoveredSuggestion((current) => (current === index ? null : current))
             }
             onClick={() => completeSuggestion(option)}
           >
-            <span className="code code-small shrink-0 text-basic-primary">
-              {option.name}
-            </span>
+            <span className="code code-small shrink-0 text-basic-primary">{option.name}</span>
             <span
               className={cn(
                 "min-w-0 flex-1 text-small text-basic-secondary",
@@ -1361,9 +1217,7 @@ export function ChatInputBox({
           </button>
         ))
       ) : (
-        <div className="px-3 py-2 text-small text-basic-secondary">
-          No matching commands
-        </div>
+        <div className="px-3 py-2 text-small text-basic-secondary">No matching commands</div>
       )}
     </div>
   );
@@ -1431,9 +1285,7 @@ export function ChatInputBox({
         <QueuedMessages
           items={pendingInbox}
           disabled={mutationPending}
-          onSteer={(item) =>
-            void changeInboxDelivery(item.id, item.version, "steer")
-          }
+          onSteer={(item) => void changeInboxDelivery(item.id, item.version, "steer")}
           onDelete={(item) => void cancelPendingInbox(item.id, item.version)}
           onSavePrompt={saveInboxPrompt}
           onReorder={(itemIds) => void reorderPendingInbox(itemIds)}
@@ -1457,143 +1309,135 @@ export function ChatInputBox({
           void submit();
         }}
       >
-      {permissionOpener}
-      {isMobile ? (
-        <div className="flex items-end gap-2">
-          {fieldWithSuggestions}
-          {sendButton}
-        </div>
-      ) : (
-        fieldWithSuggestions
-      )}
-
-      {/* The status line wraps rather than letting its `shrink-0` chips run
-          into each other once the chat column is narrow. */}
-      <div
-        className={cn(
-          "flex flex-wrap items-center gap-[10px]",
-          // The glyph inside the pill already carries the row's left margin.
-          isMobile && "pl-2",
+        {permissionOpener}
+        {isMobile ? (
+          <div className="flex items-end gap-2">
+            {fieldWithSuggestions}
+            {sendButton}
+          </div>
+        ) : (
+          fieldWithSuggestions
         )}
-      >
-        <div className="flex flex-1 min-w-0 flex-wrap items-center gap-y-1 gap-x-4">
-          {/* A phone's settings glyph lives in the pill instead. */}
-          {isMobile ? null : settingsButton}
 
-          <GoalControls
-            sessionId={sessionId}
-            behavior={behavior}
-            openRequest={goalOpenRequest}
-          />
-          <ChildControls sessionId={sessionId} behavior={behavior} />
+        {/* The status line wraps rather than letting its `shrink-0` chips run
+          into each other once the chat column is narrow. */}
+        <div
+          className={cn(
+            "flex flex-wrap items-center gap-[10px]",
+            // The glyph inside the pill already carries the row's left margin.
+            isMobile && "pl-2",
+          )}
+        >
+          <div className="flex flex-1 min-w-0 flex-wrap items-center gap-y-1 gap-x-4">
+            {/* A phone's settings glyph lives in the pill instead. */}
+            {isMobile ? null : settingsButton}
 
-          {/* The model name is the first thing a narrow column gives up; the
+            <GoalControls sessionId={sessionId} behavior={behavior} openRequest={goalOpenRequest} />
+            <ChildControls sessionId={sessionId} behavior={behavior} />
+
+            {/* The model name is the first thing a narrow column gives up; the
               same switch lives in the session settings the gear opens. */}
-          {narrow ? null : (
-            <ModelPicker
-              sessionId={sessionId}
-              metadata={snapshot?.metadata ?? null}
-              label={metrics.model}
-              disabled={busy}
-            />
-          )}
+            {narrow ? null : (
+              <ModelPicker
+                sessionId={sessionId}
+                metadata={snapshot?.metadata ?? null}
+                label={metrics.model}
+                disabled={busy}
+              />
+            )}
 
-          {isSsh ? (
-            <SshBadge
-              state={sshStatus === "connected" ? "connected" : "reconnect"}
-              onReconnect={() => void reconnectSsh()}
-            />
-          ) : (
-            <span className="text-[10px] leading-[12px] font-medium uppercase text-basic-tertiary shrink-0">
-              {metrics.env}
-            </span>
-          )}
+            {isSsh ? (
+              <SshBadge
+                state={sshStatus === "connected" ? "connected" : "reconnect"}
+                onReconnect={() => void reconnectSsh()}
+              />
+            ) : (
+              <span className="text-[10px] leading-[12px] font-medium uppercase text-basic-tertiary shrink-0">
+                {metrics.env}
+              </span>
+            )}
 
-          {metrics.usage || contextTokens ? (
-            <div className="flex items-center gap-[2px] min-w-0">
-              {/* The backend reports the live context window here, not a sum
+            {metrics.usage || contextTokens ? (
+              <div className="flex items-center gap-[2px] min-w-0">
+                {/* The backend reports the live context window here, not a sum
                   of the columns beside it. A fork can have context without
                   billed spend, so this badge is not gated on usage. */}
-              <StatBadge
-                iconName={IconName.Timelaps}
-                value={context.value}
-                className="text-info-primary"
-                title={context.title}
-                labelClassName="tag-label"
-              />
-              {/* The per-direction columns go with the model name, leaving the
+                <StatBadge
+                  iconName={IconName.Timelaps}
+                  value={context.value}
+                  className="text-info-primary"
+                  title={context.title}
+                  labelClassName="tag-label"
+                />
+                {/* The per-direction columns go with the model name, leaving the
                   narrow row the reading that matters. */}
-              {metrics.usage && !narrow ? (
-                <>
-                  <StatBadge
-                    iconName={IconName.ArrowTop}
-                    value={formatTokensCompact(metrics.usage.input_tokens)}
-                    className="text-info-secondary opacity-75"
-                    title="Input tokens"
-                    labelClassName="tag-label"
-                  />
-                  {metrics.usage.cache_read_tokens > 0 ? (
+                {metrics.usage && !narrow ? (
+                  <>
                     <StatBadge
-                      prefix="C"
-                      value={formatTokensCompact(
-                        metrics.usage.cache_read_tokens,
-                      )}
+                      iconName={IconName.ArrowTop}
+                      value={formatTokensCompact(metrics.usage.input_tokens)}
                       className="text-info-secondary opacity-75"
-                      title="Cache read tokens"
+                      title="Input tokens"
                       labelClassName="tag-label"
                     />
-                  ) : null}
-                  <StatBadge
-                    iconName={IconName.ArrowDown}
-                    value={formatTokensCompact(metrics.usage.output_tokens)}
-                    className="text-info-secondary opacity-75"
-                    title="Output tokens"
-                    labelClassName="tag-label"
-                  />
-                </>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+                    {metrics.usage.cache_read_tokens > 0 ? (
+                      <StatBadge
+                        prefix="C"
+                        value={formatTokensCompact(metrics.usage.cache_read_tokens)}
+                        className="text-info-secondary opacity-75"
+                        title="Cache read tokens"
+                        labelClassName="tag-label"
+                      />
+                    ) : null}
+                    <StatBadge
+                      iconName={IconName.ArrowDown}
+                      value={formatTokensCompact(metrics.usage.output_tokens)}
+                      className="text-info-secondary opacity-75"
+                      title="Output tokens"
+                      labelClassName="tag-label"
+                    />
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
 
-        <div className="flex items-center gap-[10px] shrink-0">
-          {/* Priced from the model catalog, so a model the catalog has no
+          <div className="flex items-center gap-[10px] shrink-0">
+            {/* Priced from the model catalog, so a model the catalog has no
               rates for shows "--" rather than a misleading zero. */}
-          {metrics.usage ? (
-            <StatBadge
-              iconName={IconName.Price}
-              iconSize={16}
-              value={formatCostMicros(metrics.usage.cost?.total)}
-              className="text-basic-primary"
-              title="Session cost"
-              showIcon={false}
-            />
-          ) : null}
+            {metrics.usage ? (
+              <StatBadge
+                iconName={IconName.Price}
+                iconSize={16}
+                value={formatCostMicros(metrics.usage.cost?.total)}
+                className="text-basic-primary"
+                title="Session cost"
+                showIcon={false}
+              />
+            ) : null}
 
-          <Tooltip
-            title={running ? "Run elapsed" : "Last response time"}
-            position={TooltipPosition.TopRight}
-          >
-            <div
-              className={cn(
-                "flex items-center gap-1 p-1 shrink-0 label-micro",
-                running ? "text-basic-primary" : "text-basic-tertiary",
-              )}
+            <Tooltip
+              title={running ? "Run elapsed" : "Last response time"}
+              position={TooltipPosition.TopRight}
             >
-              {/* The narrow row reads as the bare clock, with the Stop
+              <div
+                className={cn(
+                  "flex items-center gap-1 p-1 shrink-0 label-micro",
+                  running ? "text-basic-primary" : "text-basic-tertiary",
+                )}
+              >
+                {/* The narrow row reads as the bare clock, with the Stop
                   affordance beside the field carrying the run's state. */}
-              {narrow ? null : running ? (
-                <Loader size={LoaderSize.Small} />
-              ) : (
-                <Icon iconName={IconName.History} size={16} />
-              )}
-              <span className="block w-[40px] text-center">
-                {formatClock(elapsedMs)}
-              </span>
-            </div>
-          </Tooltip>
+                {narrow ? null : running ? (
+                  <Loader size={LoaderSize.Small} />
+                ) : (
+                  <Icon iconName={IconName.History} size={16} />
+                )}
+                <span className="block w-[40px] text-center">{formatClock(elapsedMs)}</span>
+              </div>
+            </Tooltip>
+          </div>
         </div>
-      </div>
       </form>
     </div>
   );

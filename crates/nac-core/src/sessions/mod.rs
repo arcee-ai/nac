@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
-use rusqlite::{OptionalExtension, params};
+use anyhow::{anyhow, Context, Result};
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::light_model::LightModelSettings;
@@ -34,7 +34,7 @@ pub use operation_lease::{
 // Compatibility aliases for callers that have not yet adopted operation-wide naming.
 pub type SessionRunLease = SessionOperationLease;
 pub type SessionRunLeaseError = SessionOperationLeaseError;
-pub use snapshot::{SessionRunState, SessionRunStateUpdate, new_snapshot, refresh_snapshot};
+pub use snapshot::{new_snapshot, refresh_snapshot, SessionRunState, SessionRunStateUpdate};
 
 pub(crate) async fn load_session_async(
     path: PathBuf,
@@ -76,7 +76,7 @@ impl SessionBehavior {
         }
     }
 
-    /// Agent chats: `direct` and the compatibility alias `direct-with-orchestrator`.
+    /// Agent chats: `direct` and `direct-with-orchestrator`.
     /// NAC (`orchestrator`) is not an agent.
     pub const fn is_agent(self) -> bool {
         matches!(self, Self::Direct | Self::DirectWithOrchestrator)
@@ -87,12 +87,10 @@ impl SessionBehavior {
         matches!(self, Self::Orchestrator)
     }
 
-    /// New rows persist only `direct` or `orchestrator`.
+    /// New rows persist the selected public behavior, including
+    /// `direct-with-orchestrator`.
     pub const fn for_create(self) -> Self {
-        match self {
-            Self::DirectWithOrchestrator => Self::Direct,
-            other => other,
-        }
+        self
     }
 }
 

@@ -1,19 +1,6 @@
-import {
-  DropdownContent,
-  Icon,
-  IconName,
-  Loader,
-  LoaderSize,
-  LoaderVariant,
-} from "@/app/atoms";
+import { DropdownContent, Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  type MouseEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useLayoutEffect, useRef, type MouseEvent, type ReactNode } from "react";
 
 import {
   actionButtonLabel,
@@ -26,11 +13,7 @@ import {
   segmentIsLive,
   toolSegmentFailed,
 } from "@/app/lib/agentSegments";
-import type {
-  ActionFilter,
-  ActionItem,
-  ActionTurnSection,
-} from "@/app/lib/actionsTimeline";
+import type { ActionFilter, ActionItem, ActionTurnSection } from "@/app/lib/actionsTimeline";
 import { formatStoreTime } from "@/app/lib/format";
 import {
   collapseActionGroup,
@@ -107,9 +90,7 @@ export function ActionTurnHeader({ section }: { section: ActionTurnSection }) {
         {section.prompt || "Untitled turn"}
       </span>
       {when ? (
-        <span className="shrink-0 text-[10px] leading-[14px] text-basic-tertiary">
-          {when}
-        </span>
+        <span className="shrink-0 text-[10px] leading-[14px] text-basic-tertiary">{when}</span>
       ) : null}
     </div>
   );
@@ -180,11 +161,7 @@ export function ActionListButton({
       )}
     >
       {running ? (
-        <Loader
-          size={LoaderSize.Micro}
-          variant={LoaderVariant.Neutral}
-          className="shrink-0"
-        />
+        <Loader size={LoaderSize.Micro} variant={LoaderVariant.Neutral} className="shrink-0" />
       ) : (
         <Icon
           iconName={failed ? IconName.Close : pending ? IconName.Clock : icon}
@@ -199,11 +176,7 @@ export function ActionListButton({
       <span
         className={cn(
           "flex-1 min-w-0 truncate text-left label-micro",
-          running
-            ? "text-shimmer-basic"
-            : pending
-              ? "text-basic-tertiary"
-              : "text-basic-secondary",
+          running ? "text-shimmer-basic" : pending ? "text-basic-tertiary" : "text-basic-secondary",
         )}
       >
         {label}
@@ -235,10 +208,7 @@ export function ActionGroupRow({
   const expandable = actionListIsSegmentsGroup(item.group);
   const panelId = `${item.id}-segments`;
   return (
-    <div
-      data-action-anchor={item.id}
-      className="flex flex-col w-full [overflow-anchor:auto]"
-    >
+    <div data-action-anchor={item.id} className="flex flex-col w-full [overflow-anchor:auto]">
       <ActionListButton
         label={actionButtonLabel(item.group)}
         trailing={actionListTrailing(item.group)}
@@ -347,11 +317,7 @@ export function ActionThreadRow({
   running?: boolean;
   cancelled?: boolean;
   errored?: boolean;
-  onSelect: (
-    name: string,
-    episodeKey: string,
-    event: MouseEvent<HTMLButtonElement>,
-  ) => void;
+  onSelect: (name: string, episodeKey: string, event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const failed = Boolean(cancelled || errored);
   return (
@@ -386,11 +352,7 @@ interface ActionListHandlers {
   };
   onSelectGroup: (id: string, event: MouseEvent<HTMLButtonElement>) => void;
   onSelectSpawn: (id: string, event: MouseEvent<HTMLButtonElement>) => void;
-  onSelectThread: (
-    name: string,
-    episodeKey: string,
-    event: MouseEvent<HTMLButtonElement>,
-  ) => void;
+  onSelectThread: (name: string, episodeKey: string, event: MouseEvent<HTMLButtonElement>) => void;
   onSelectSegment: (groupId: string, segmentKey: string) => void;
 }
 
@@ -496,9 +458,7 @@ export function ActionItemList({
   const newestId = items[0]?.id;
   useLayoutEffect(() => {
     if (!pinToNewest || !newestId) return;
-    const el = document.querySelector(
-      `[data-action-anchor="${CSS.escape(newestId)}"]`,
-    );
+    const el = document.querySelector(`[data-action-anchor="${CSS.escape(newestId)}"]`);
     if (!(el instanceof HTMLElement)) return;
     const scroller = nearestScrollParent(el);
     if (scroller) scroller.scrollTop = 0;
@@ -508,10 +468,7 @@ export function ActionItemList({
     if (selectedGroupId === prevSelected.current) return;
     prevSelected.current = selectedGroupId;
     const selected = items.find((item) => item.id === selectedGroupId);
-    if (
-      selected?.kind === "group" &&
-      actionListIsSegmentsGroup(selected.group)
-    ) {
+    if (selected?.kind === "group" && actionListIsSegmentsGroup(selected.group)) {
       expandActionGroup(selected.id);
     } else {
       collapseActionGroup();
@@ -522,23 +479,15 @@ export function ActionItemList({
     const pending = pendingAnchor.current;
     if (!pending) return;
     pendingAnchor.current = null;
-    const el = pending.scroller.querySelector(
-      `[data-action-anchor="${CSS.escape(pending.id)}"]`,
-    );
+    const el = pending.scroller.querySelector(`[data-action-anchor="${CSS.escape(pending.id)}"]`);
     if (!(el instanceof HTMLElement)) return;
     pending.scroller.scrollTop += el.getBoundingClientRect().top - pending.top;
   }, [expandedGroupId]);
 
-  const handleSelectGroup = (
-    id: string,
-    event: MouseEvent<HTMLButtonElement>,
-  ) => {
+  const handleSelectGroup = (id: string, event: MouseEvent<HTMLButtonElement>) => {
     rememberAnchor(id, event.currentTarget);
     const selected = items.find((item) => item.id === id);
-    if (
-      selected?.kind === "group" &&
-      actionListIsSegmentsGroup(selected.group)
-    ) {
+    if (selected?.kind === "group" && actionListIsSegmentsGroup(selected.group)) {
       toggleActionGroup(id);
     } else {
       collapseActionGroup();
@@ -546,10 +495,7 @@ export function ActionItemList({
     onSelectGroup(id);
   };
 
-  const handleSelectSpawn = (
-    id: string,
-    event: MouseEvent<HTMLButtonElement>,
-  ) => {
+  const handleSelectSpawn = (id: string, event: MouseEvent<HTMLButtonElement>) => {
     rememberAnchor(id, event.currentTarget);
     collapseActionGroup();
     onSelectGroup(id);

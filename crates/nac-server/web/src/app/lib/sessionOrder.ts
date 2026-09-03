@@ -42,9 +42,7 @@ export function applyTabOrder(
  * Newest child of a parent is closest to it; grandchildren follow their own
  * parent the same way. A child whose parent is not on the strip stays put.
  */
-export function placeSpawnsAfterParents(
-  entries: ManagedSessionSummary[],
-): ManagedSessionSummary[] {
+export function placeSpawnsAfterParents(entries: ManagedSessionSummary[]): ManagedSessionSummary[] {
   const present = new Set(entries.map((entry) => entry.summary.session_id));
   const children = new Map<string, ManagedSessionSummary[]>();
   const roots: ManagedSessionSummary[] = [];

@@ -1,7 +1,4 @@
-import {
-  compactSessionTitle,
-  isPlaceholderSessionTitle,
-} from "@/app/lib/format";
+import { compactSessionTitle, isPlaceholderSessionTitle } from "@/app/lib/format";
 import type { SessionPanel } from "@/app/lib/routes";
 import type { SessionBehavior, SessionLineage } from "@/app/types/api";
 
@@ -19,6 +16,11 @@ export interface SessionBehaviorPresentation {
   hint: string;
 }
 
+/**
+ * Stored `direct` chats predate the split between agent toolsets, so they are
+ * presented but no longer offered: only `direct-with-orchestrator` reaches the
+ * `orchestrator_*` tools, and behavior is fixed for a chat's lifetime.
+ */
 const AGENT_PRESENTATION: SessionBehaviorPresentation = {
   id: "direct",
   label: "Agent",
@@ -27,48 +29,71 @@ const AGENT_PRESENTATION: SessionBehaviorPresentation = {
   topLevel: "One persistent coding agent handles the top-level conversation.",
   editsDirectly: true,
   editing: "The top-level agent edits files and runs commands directly.",
-  delegation:
-    "It can launch fresh-context coding agents and separate Orchestrator sessions.",
+  delegation: "It can launch fresh-context coding agents.",
   inspection: "Actions show reasoning, tool calls, and spawned sessions.",
-  hint: "A persistent coding agent that edits files and runs commands itself. Best for hands-on implementation, debugging, and iterating in one conversation.",
+  hint: "A persistent coding agent that edits files and runs commands itself. Best for hands-on implementation. It can spawn coding agents.",
+};
+
+/** The Agent chats this build creates: coding agents plus Orchestrator sessions. */
+const AGENT_WITH_ORCHESTRATOR_PRESENTATION: SessionBehaviorPresentation = {
+  id: "direct-with-orchestrator",
+  label: "Agent",
+  navigationLabel: "Agent",
+  createLabel: "New Agent",
+  topLevel: "One persistent coding agent handles the top-level conversation.",
+  editsDirectly: true,
+  editing: "The top-level agent edits files and runs commands directly.",
+  delegation: "It can launch fresh-context coding agents and separate Orchestrator sessions.",
+  inspection: "Related Sessions keep coding agents and Orchestrator planners distinct.",
+  hint: "A persistent coding agent that edits files and runs commands itself. Best for hands-on implementation. It can spawn coding agents and launch Orchestrator planners.",
+};
+
+const ORCHESTRATOR_PRESENTATION: SessionBehaviorPresentation = {
+  id: "orchestrator",
+  label: "Orchestrator",
+  navigationLabel: "Orchestrator",
+  createLabel: "New Orchestrator",
+  topLevel: "A planner handles the top-level conversation.",
+  editsDirectly: false,
+  editing: "The planner does not edit directly.",
+  delegation: "It delegates coding to retained Orchestrator worker threads.",
+  inspection: "Actions and Worksets show the plan and worker progress.",
+  hint: "A planner that delegates coding to worker threads. Best for large tasks you want broken into parallel work.",
 };
 
 export const SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = [
   AGENT_PRESENTATION,
-  {
-    id: "orchestrator",
-    label: "Orchestrator",
-    navigationLabel: "Orchestrator",
-    createLabel: "New Orchestrator",
-    topLevel: "A planner handles the top-level conversation.",
-    editsDirectly: false,
-    editing: "The planner does not edit directly.",
-    delegation: "It delegates coding to retained Orchestrator worker threads.",
-    inspection: "Actions and Worksets show the plan and worker progress.",
-    hint: "A planner that delegates coding to worker threads. Best for large tasks you want broken into parallel work.",
-  },
+  AGENT_WITH_ORCHESTRATOR_PRESENTATION,
+  ORCHESTRATOR_PRESENTATION,
 ];
 
-/** New chats may only choose Agent or Orchestrator. Old hybrid rows present as Agent. */
-export const CREATE_SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] =
-  SESSION_BEHAVIORS;
+/**
+ * New chats may only choose Agent or Orchestrator. The Agent row creates
+ * `direct-with-orchestrator` so a new agent keeps the Orchestrator launcher;
+ * plain `direct` stays a stored value that presents as Agent.
+ */
+export const CREATE_SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = [
+  AGENT_WITH_ORCHESTRATOR_PRESENTATION,
+  ORCHESTRATOR_PRESENTATION,
+];
 
-export function isAgentBehavior(
+/** Behavior the Agent row creates, and the default for unqualified new chats. */
+export const DEFAULT_SESSION_BEHAVIOR: SessionBehavior = AGENT_WITH_ORCHESTRATOR_PRESENTATION.id;
+
+export function isAgentBehavior(behavior: SessionBehavior | null | undefined): boolean {
+  return behavior === "direct" || behavior === "direct-with-orchestrator";
+}
+
+export function canLaunchManagedOrchestrator(
   behavior: SessionBehavior | null | undefined,
 ): boolean {
-  return behavior === "direct" || behavior === "direct-with-orchestrator";
+  return behavior === "direct-with-orchestrator";
 }
 
 export function sessionBehaviorPresentation(
   behavior: SessionBehavior | null | undefined,
 ): SessionBehaviorPresentation {
-  if (behavior === "direct-with-orchestrator") {
-    return { ...AGENT_PRESENTATION, id: "direct-with-orchestrator" };
-  }
-  return (
-    SESSION_BEHAVIORS.find((option) => option.id === behavior) ??
-    SESSION_BEHAVIORS[1]
-  );
+  return SESSION_BEHAVIORS.find((option) => option.id === behavior) ?? ORCHESTRATOR_PRESENTATION;
 }
 
 export function sessionBehaviorLabel(behavior: SessionBehavior): string {
@@ -109,11 +134,14 @@ const MANAGED_ORCHESTRATOR_PANELS: SessionPanelPolicy = {
 };
 
 export type AssignmentStatus =
-  "idle" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  | "idle"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
 
-export function assignmentIsOpen(
-  status: AssignmentStatus | string | null | undefined,
-): boolean {
+export function assignmentIsOpen(status: AssignmentStatus | string | null | undefined): boolean {
   return status === "idle" || status === "running";
 }
 
@@ -137,9 +165,7 @@ export function sessionOriginFromRecord(
   convertedFrom?: unknown,
 ): "user" | "fork" | "converted" | "delegated" | "delegated-locked" {
   if (lineage) {
-    return assignmentIsOpen(lineage.assignment_status)
-      ? "delegated-locked"
-      : "delegated";
+    return assignmentIsOpen(lineage.assignment_status) ? "delegated-locked" : "delegated";
   }
   if (forkedFrom) return "fork";
   if (convertedFrom) return "converted";
@@ -168,8 +194,7 @@ export function sessionOriginDetail(options: {
     case "converted": {
       const source = compactOriginTitle(options.convertedFromTitle);
       const typeLabel = options.convertedFromType?.trim();
-      if (source && !isPlaceholderSessionTitle(source))
-        return `Converted from ${source}`;
+      if (source && !isPlaceholderSessionTitle(source)) return `Converted from ${source}`;
       if (typeLabel) return `Converted from ${typeLabel}`;
       return "Converted from another session type";
     }
@@ -212,8 +237,6 @@ export function sessionPanelPolicy(
 }
 
 /** Side-box tab that hosts the Actions timeline. */
-export function actionsPanel(
-  _behavior: SessionBehavior | null | undefined,
-): SessionPanel {
+export function actionsPanel(_behavior: SessionBehavior | null | undefined): SessionPanel {
   return "actions";
 }

@@ -8,11 +8,7 @@ import {
   ActionTurnHeader,
   actionFilterEmptyCopy,
 } from "@/app/components/inspector/ActionList";
-import {
-  PanelEmpty,
-  PanelLoading,
-  PanelSplit,
-} from "@/app/components/inspector/PanelSplit";
+import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { usePagedRows } from "@/app/hooks/usePagedRows";
 import { useLiveActionFollow } from "@/app/hooks/useLiveActionFollow";
 import type { ActionItem } from "@/app/lib/actionsTimeline";
@@ -25,10 +21,7 @@ import type { AgentToolsGroup } from "@/app/lib/agentSegments";
 import { groupIsSpawn } from "@/app/lib/spawnSession";
 import { SESSION_PANEL_LABEL } from "@/app/lib/routes";
 import { buildTranscript, withStreamedOutput } from "@/app/lib/transcript";
-import {
-  lockLiveActionFollow,
-  selectAgentSegment,
-} from "@/app/store/sessionLayoutStore";
+import { lockLiveActionFollow, selectAgentSegment } from "@/app/store/sessionLayoutStore";
 import {
   useFinishedToolCalls,
   useLiveThreads,
@@ -46,13 +39,9 @@ function selectedGroup(
   const match = newest
     ? newest
     : (items.find(
-        (item) =>
-          (item.kind === "group" || item.kind === "spawn") &&
-          item.id === selected,
-      ) ??
-      items.find((item) => item.kind === "group" || item.kind === "spawn"));
-  if (!match || match.kind === "thread" || match.kind === "workset")
-    return null;
+        (item) => (item.kind === "group" || item.kind === "spawn") && item.id === selected,
+      ) ?? items.find((item) => item.kind === "group" || item.kind === "spawn"));
+  if (!match || match.kind === "thread" || match.kind === "workset") return null;
   return match.group;
 }
 
@@ -76,27 +65,12 @@ export function ThoughtsToolsView({
 
   const sections = useMemo(() => {
     const turns = withStreamedOutput(
-      buildTranscript(
-        snapshot,
-        liveThreads,
-        finishedToolCalls,
-        primaryToolEvents,
-      ),
+      buildTranscript(snapshot, liveThreads, finishedToolCalls, primaryToolEvents),
       { text: streamText, reasoning: streamReasoning },
     );
-    const live =
-      Boolean(snapshot?.active_run) ||
-      Boolean(streamText) ||
-      Boolean(streamReasoning);
+    const live = Boolean(snapshot?.active_run) || Boolean(streamText) || Boolean(streamReasoning);
     return buildActionTimeline(turns, liveTurnOriginKey(turns, live));
-  }, [
-    snapshot,
-    liveThreads,
-    finishedToolCalls,
-    primaryToolEvents,
-    streamText,
-    streamReasoning,
-  ]);
+  }, [snapshot, liveThreads, finishedToolCalls, primaryToolEvents, streamText, streamReasoning]);
 
   const items = useMemo(() => flattenActionItems(sections), [sections]);
   const newest = following ? items[0] : undefined;
@@ -105,9 +79,7 @@ export function ThoughtsToolsView({
   const currentRow = current
     ? sections.findIndex((section) =>
         section.items.some(
-          (item) =>
-            (item.kind === "group" || item.kind === "spawn") &&
-            item.id === current.id,
+          (item) => (item.kind === "group" || item.kind === "spawn") && item.id === current.id,
         ),
       )
     : -1;
@@ -128,19 +100,14 @@ export function ThoughtsToolsView({
     if (selected === current.id) return;
     if (
       selected &&
-      items.some(
-        (item) =>
-          (item.kind === "group" || item.kind === "spawn") &&
-          item.id === selected,
-      )
+      items.some((item) => (item.kind === "group" || item.kind === "spawn") && item.id === selected)
     ) {
       return;
     }
     onSelect(current.id);
   }, [following, selected, current, items, onSelect]);
 
-  if (!snapshot)
-    return <PanelLoading listTitle={SESSION_PANEL_LABEL.actions} />;
+  if (!snapshot) return <PanelLoading listTitle={SESSION_PANEL_LABEL.actions} />;
 
   return (
     <PanelSplit
@@ -170,9 +137,7 @@ export function ThoughtsToolsView({
                 </div>
               </div>
             ))}
-            {hasMore ? (
-              <div ref={sentinelRef} aria-hidden className="h-px" />
-            ) : null}
+            {hasMore ? <div ref={sentinelRef} aria-hidden className="h-px" /> : null}
           </>
         )
       }

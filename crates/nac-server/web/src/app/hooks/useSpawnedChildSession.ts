@@ -30,10 +30,7 @@ function isNotFound(error: unknown): boolean {
  * session id. Snapshot fetch is keyed by child id; it never writes the parent's
  * runtime store.
  */
-export function useSpawnedChildSession(
-  parentSessionId: string,
-  source: AgentToolsGroup | string,
-) {
+export function useSpawnedChildSession(parentSessionId: string, source: AgentToolsGroup | string) {
   const navigate = useNavigate();
   const toast = useToast();
   const assignments = useSessionSpawns(parentSessionId, Boolean(parentSessionId));
@@ -52,8 +49,10 @@ export function useSpawnedChildSession(
       assignmentIsOpen(assignment?.status) || Boolean(query.state.data?.active_run) ? 1_000 : false,
   });
   const missing = Boolean(childId) && snapshotQuery.isError && isNotFound(snapshotQuery.error);
+  // An idle assignment is parent-owned but not working: it must read as ready,
+  // matching the steer/cancel affordances `presentSessionAssignment` allows.
   const running =
-    assignmentIsOpen(assignment?.status) ||
+    assignment?.status === "running" ||
     Boolean(snapshotQuery.data?.active_run) ||
     (!childId && Boolean(group?.inProgress));
   const title = (assignment?.description || group?.label || "").trim() || "Spawned session";

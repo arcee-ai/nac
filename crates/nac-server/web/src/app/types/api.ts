@@ -30,8 +30,7 @@ export type ManagedGitHubStatus = ApiSchema<"GitHubStatusResponse">;
 export type ManagedGitHubLoginStarted = ApiSchema<"GitHubLoginStartedResponse">;
 export type ManagedGitHubLoginState = ApiSchema<"GitHubLoginStateResponse">;
 export type ManagedGitHubRepository = ApiSchema<"GitHubRepositoryResponse">;
-export type ManagedGitHubRepositoryList =
-  ApiSchema<"GitHubRepositoryListResponse">;
+export type ManagedGitHubRepositoryList = ApiSchema<"GitHubRepositoryListResponse">;
 export type ManagedGitHubBranchList = ApiSchema<"GitHubBranchListResponse">;
 
 export type ManagedSecretSummary = ApiSchema<"ManagedSecretSummary">;
@@ -70,8 +69,7 @@ export type MessageRole = Message["role"];
 
 export type SessionSummarySnapshot = ApiSchema<"SessionSummarySnapshot">;
 
-export type SubmittedUserMessageSnapshot =
-  ApiSchema<"SubmittedUserMessageSnapshot">;
+export type SubmittedUserMessageSnapshot = ApiSchema<"SubmittedUserMessageSnapshot">;
 
 export type ActiveRunSnapshot = ApiSchema<"ActiveRunSnapshot">;
 
@@ -126,11 +124,9 @@ export type WorkspaceDiffStage = "staged" | "unstaged" | "untracked";
 
 // The backend serialises these as plain strings; the unions document the known
 // values without rejecting anything new the server may start sending.
-export type WorkspaceDiffStatus =
-  "added" | "deleted" | "modified" | "untracked" | (string & {});
+export type WorkspaceDiffStatus = "added" | "deleted" | "modified" | "untracked" | (string & {});
 /** Beware: the backend says insert/delete, not addition/deletion. */
-export type WorkspaceDiffLineKind =
-  "context" | "delete" | "insert" | (string & {});
+export type WorkspaceDiffLineKind = "context" | "delete" | "insert" | (string & {});
 
 export type WorkspaceDiffLine = ApiSchema<"WorkspaceDiffLine">;
 
@@ -157,8 +153,7 @@ export interface ThreadEventBoundary {
   sequence_id: number;
 }
 
-export type ThreadEventDecodeDiagnostic =
-  ApiSchema<"ThreadEventDecodeDiagnostic">;
+export type ThreadEventDecodeDiagnostic = ApiSchema<"ThreadEventDecodeDiagnostic">;
 
 export type CompactionReason = ApiSchema<"CompactionReason">;
 export type CompactionSkipReason = ApiSchema<"CompactionSkipReason">;
@@ -198,24 +193,20 @@ export type ReorderInboxItemsRequest = ApiSchema<"ReorderInboxItemsRequest">;
 
 export type TraditionalChildStatus = ApiSchema<"TraditionalChildStatus">;
 
-export type TraditionalChildExecutionMode =
-  ApiSchema<"TraditionalChildExecutionMode">;
+export type TraditionalChildExecutionMode = ApiSchema<"TraditionalChildExecutionMode">;
 
 export type TraditionalChildRecord = ApiSchema<"TraditionalChildRecord">;
 
-export type StartTraditionalChildRequest =
-  ApiSchema<"StartTraditionalChildRequest">;
+export type StartTraditionalChildRequest = ApiSchema<"StartTraditionalChildRequest">;
 
 export type ManagedOrchestratorStatus = TraditionalChildStatus;
 export type ManagedOrchestratorExecutionMode = TraditionalChildExecutionMode;
 
 export type ManagedOrchestratorRecord = ApiSchema<"ManagedOrchestratorRecord">;
 
-export type StartManagedOrchestratorRequest =
-  ApiSchema<"StartManagedOrchestratorRequest">;
+export type StartManagedOrchestratorRequest = ApiSchema<"StartManagedOrchestratorRequest">;
 
-export type SessionAssignmentChildBehavior =
-  ApiSchema<"SessionAssignmentChildBehavior">;
+export type SessionAssignmentChildBehavior = ApiSchema<"SessionAssignmentChildBehavior">;
 
 export type SessionAssignmentRecord = ApiSchema<"SessionAssignmentRecord">;
 
@@ -268,8 +259,7 @@ export type RawSessionConfig = ApiSchema<"RawSessionConfig">;
 
 export type LaunchModelDefaults = ApiSchema<"LaunchModelDefaults">;
 
-export type LaunchModelDefaultsRequest =
-  ApiSchema<"LaunchModelDefaultsRequest">;
+export type LaunchModelDefaultsRequest = ApiSchema<"LaunchModelDefaultsRequest">;
 
 /**
  * An API key kept in NAC home. The value itself never leaves the server, so
@@ -318,12 +308,10 @@ export type SshConfigurationRecord = ApiSchema<"SshConfigurationRecord">;
 
 export type SshConfigurationList = ApiSchema<"SshConfigurationList">;
 
-export type CreateSshConfigurationRequest =
-  ApiSchema<"CreateSshConfigurationRequest">;
+export type CreateSshConfigurationRequest = ApiSchema<"CreateSshConfigurationRequest">;
 
 /** Tri-state fields: omit to keep, null to clear, value to replace. */
-export type UpdateSshConfigurationRequest =
-  ApiSchema<"UpdateSshConfigurationRequest">;
+export type UpdateSshConfigurationRequest = ApiSchema<"UpdateSshConfigurationRequest">;
 
 export type McpTransport = ApiSchema<"McpTransportSchema">;
 
@@ -398,20 +386,17 @@ export type ModelConfigurationRecord = ApiSchema<"ModelConfigurationRecord">;
 
 export type ModelConfigurationList = ApiSchema<"ModelConfigurationList">;
 
-export type CreateModelConfigurationRequest =
-  ApiSchema<"CreateModelConfigurationRequest">;
+export type CreateModelConfigurationRequest = ApiSchema<"CreateModelConfigurationRequest">;
 
 /**
  * Every field is tri-state: omit it to keep what is stored, send null to clear
  * it, send a value to replace it. `api_key` cannot be read back, so omitting it
  * keeps the credential the configuration already points at.
  */
-export type UpdateModelConfigurationRequest =
-  ApiSchema<"UpdateModelConfigurationRequest">;
+export type UpdateModelConfigurationRequest = ApiSchema<"UpdateModelConfigurationRequest">;
 
 /** A configuration the server checked end to end, with the models it allows. */
-export type ResolvedModelConfiguration =
-  ApiSchema<"ResolvedModelConfiguration">;
+export type ResolvedModelConfiguration = ApiSchema<"ResolvedModelConfiguration">;
 
 /**
  * Tri-state field of the create/patch config endpoints: omit the key to keep
@@ -449,8 +434,7 @@ export type ReorderProjectsResponse = ApiSchema<"ReorderProjectsResponse">;
 
 export type UpdateConfigRequest = ApiSchema<"UpdateConfigRequest">;
 
-export type UpdateSessionPresentationRequest =
-  ApiSchema<"UpdateSessionPresentationRequest">;
+export type UpdateSessionPresentationRequest = ApiSchema<"UpdateSessionPresentationRequest">;
 
 export type ReorderSessionsRequest = ApiSchema<"ReorderSessionsRequest">;
 
@@ -480,8 +464,7 @@ export type ContinueSessionRequest = ApiSchema<"ContinueSessionRequest">;
 
 export type ContinueSessionResponse = ApiSchema<"ContinueSessionResponse">;
 
-export type OrchestratorSteeringResponse =
-  ApiSchema<"OrchestratorSteeringResponse">;
+export type OrchestratorSteeringResponse = ApiSchema<"OrchestratorSteeringResponse">;
 
 export type ThreadSteeringResponse = ApiSchema<"ThreadSteeringResponse">;
 

@@ -1,14 +1,9 @@
 import React from "react";
 
 import { cn } from "../../lib/cn";
-import {
-  PILL_SIZE_MEDIUM_PX,
-  PILL_SIZE_SMALL_PX,
-} from "../../lib/agentSegments";
+import { PILL_SIZE_MEDIUM_PX, PILL_SIZE_SMALL_PX } from "../../lib/agentSegments";
 import Icon, { IconName } from "../icon";
-import CircularLoader, {
-  CircularLoaderVariant,
-} from "../loader/CircularLoader";
+import CircularLoader, { CircularLoaderVariant } from "../loader/CircularLoader";
 
 export enum ToolPillSize {
   Medium = "medium",
@@ -47,11 +42,7 @@ interface ToolPillOverflowProps extends React.HTMLAttributes<HTMLDivElement> {
   size?: ToolPillSize;
 }
 
-const pillContainerClasses = (
-  isActive: boolean,
-  className: string,
-  size: ToolPillSize,
-) =>
+const pillContainerClasses = (isActive: boolean, className: string, size: ToolPillSize) =>
   cn(
     "relative inline-flex items-center justify-center rounded-full shrink-0 overflow-hidden",
     size === ToolPillSize.Medium ? "border" : "border",
@@ -87,9 +78,7 @@ const ToolPill: React.FC<ToolPillProps> = ({
         size={sizeIconPx[size]}
         className={cn(
           "relative",
-          isError
-            ? "[&>path]:!fill-error-primary"
-            : "[&>path]:!fill-basic-primary",
+          isError ? "[&>path]:!fill-error-primary" : "[&>path]:!fill-basic-primary",
         )}
       />
       {isActive ? (
@@ -126,9 +115,7 @@ const ToolPillOverflow: React.FC<ToolPillOverflowProps> = ({
   </div>
 );
 
-const MemoToolPill = React.memo(
-  ToolPill,
-) as React.NamedExoticComponent<ToolPillProps> & {
+const MemoToolPill = React.memo(ToolPill) as React.NamedExoticComponent<ToolPillProps> & {
   Size: typeof ToolPillSize;
   State: typeof ToolPillState;
   Overflow: React.NamedExoticComponent<ToolPillOverflowProps>;

@@ -1,5 +1,5 @@
 import { cn } from "@/app/lib/cn";
-import { CREATE_SESSION_BEHAVIORS } from "@/app/lib/sessionBehavior";
+import { CREATE_SESSION_BEHAVIORS, DEFAULT_SESSION_BEHAVIOR } from "@/app/lib/sessionBehavior";
 import type { SessionBehavior } from "@/app/types/api";
 
 export function SessionBehaviorPicker({
@@ -61,7 +61,7 @@ export function SessionBehaviorPicker({
             >
               <span className="flex items-center justify-between gap-2">
                 <span className="text-small font-medium text-basic-primary">{option.label}</span>
-                {option.id === "direct" ? (
+                {option.id === DEFAULT_SESSION_BEHAVIOR ? (
                   <span className="tag-label shrink-0 text-basic-tertiary">Default</span>
                 ) : null}
               </span>
