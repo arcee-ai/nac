@@ -185,13 +185,15 @@ Use `make managed-image` when only a local build is wanted. The smoke target
 builds before testing unless `MANAGED_IMAGE_SKIP_BUILD=1` is supplied for an
 already-built image.
 
-The smoke builds the exact `linux/amd64` image, initializes a fake strict
+The smoke builds the exact `linux/amd64` image, first proves that a fresh host
+cannot become ready without its bootstrap mount, initializes a fake strict
 bootstrap, runs with a read-only root, waits for health/readiness, checks the
 tool inventory and non-root identity, and verifies that status and logs do not
 leak its canary tokens. It then models a rotated durable token, reconciles the
-original bootstrap without overwriting that state, and finally restarts with no
-bootstrap mount. It never contacts a real GitHub App, model endpoint, ArceeFM,
-or AWS account.
+original bootstrap without overwriting that state, kills the container
+abruptly, and proves the same durable host becomes ready with no bootstrap
+mount. It never contacts a real GitHub App, model endpoint, ArceeFM, or AWS
+account.
 
 ## Publication
 

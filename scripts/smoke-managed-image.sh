@@ -119,6 +119,30 @@ start_container() {
         "$image" >/dev/null
 }
 
+assert_bootstrap_required() {
+    start_container without-bootstrap
+    attempts=0
+    while [ "$attempts" -lt 40 ]; do
+        running=$($container_runtime inspect --format '{{.State.Running}}' "$container_name" 2>/dev/null || true)
+        [ "$running" = true ] || break
+        port=$($container_runtime port "$container_name" 3210/tcp 2>/dev/null | sed -n '1s/.*://p')
+        if [ -n "$port" ] && curl -fsS --noproxy '*' --connect-timeout 1 --max-time 1 \
+            "http://127.0.0.1:$port/readyz" >/dev/null 2>&1; then
+            fail 'fresh managed host became ready without its bootstrap mount'
+        fi
+        attempts=$((attempts + 1))
+        sleep 0.25
+    done
+    running=$($container_runtime inspect --format '{{.State.Running}}' "$container_name" 2>/dev/null || true)
+    if [ "$running" = true ]; then
+        "$container_runtime" logs "$container_name" >&2 || true
+        fail 'fresh managed host did not reject startup without its bootstrap mount'
+    fi
+    exit_code=$($container_runtime inspect --format '{{.State.ExitCode}}' "$container_name")
+    [ "$exit_code" -ne 0 ] || fail 'missing-bootstrap startup exited successfully'
+    "$container_runtime" rm -f "$container_name" >/dev/null
+}
+
 wait_until_ready() {
     port=$($container_runtime port "$container_name" 3210/tcp | sed -n '1s/.*://p')
     [ -n "$port" ] || fail 'container runtime did not publish port 3210'
@@ -141,6 +165,10 @@ wait_until_ready() {
     "$container_runtime" logs "$container_name" >&2 || true
     fail 'container did not become ready within 60 seconds'
 }
+
+# A fresh host must fail closed until the exact mounted generation can be
+# imported into the durable credential and receipt files.
+assert_bootstrap_required
 
 start_container with-bootstrap
 port=$(wait_until_ready)
@@ -221,7 +249,10 @@ curl -fsS --noproxy '*' --connect-timeout 1 --max-time 5 \
     jq -e ".access_token | endswith(\"-rotated\")" /var/lib/nac/arcee_auth.json >/dev/null
     jq -e ".refresh_token | endswith(\"-rotated\")" /var/lib/nac/arcee_auth.json >/dev/null
 '
-"$container_runtime" stop --time 25 "$container_name" >/dev/null
+# Model an abrupt process/container loss after the durable import. The next
+# start must recover from the PVC-backed credential and receipt without
+# depending on the one-time bootstrap mount.
+"$container_runtime" kill --signal KILL "$container_name" >/dev/null
 "$container_runtime" rm "$container_name" >/dev/null
 
 # The receipt must make a later steady-state restart independent of the
