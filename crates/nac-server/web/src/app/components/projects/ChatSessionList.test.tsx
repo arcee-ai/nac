@@ -58,7 +58,7 @@ describe("chat session behavior identity", () => {
     expect(screen.getByRole("button", { name: "Plan the release, Orchestrator" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fix the parser, Agent" })).toBeTruthy();
     const hybrid = screen.getByRole("button", {
-      name: "Coordinate the migration, Agent",
+      name: "Coordinate the migration, Agent + Orchestrator",
     });
     expect(hybrid).toBeTruthy();
 

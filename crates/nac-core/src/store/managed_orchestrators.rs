@@ -1,6 +1,6 @@
 use super::*;
 
-use rusqlite::{TransactionBehavior, params};
+use rusqlite::{params, TransactionBehavior};
 
 pub const MAX_RUNNING_MANAGED_ORCHESTRATORS: u64 = 4;
 const MAX_OUTCOME_CHARS: usize = 64 * 1024;
@@ -137,8 +137,10 @@ fn create_managed_orchestrator_relationship_with_connection(
     if parent_behavior == "orchestrator" {
         return Err(anyhow!(crate::sessions::NAC_CANNOT_CREATE_SESSIONS));
     }
-    if parent_behavior != "direct" && parent_behavior != "direct-with-orchestrator" {
-        return Err(anyhow!("managed orchestrators require an agent parent"));
+    if parent_behavior != "direct-with-orchestrator" {
+        return Err(anyhow!(
+            "managed orchestrators require a direct-with-orchestrator parent"
+        ));
     }
     if assignment_is_open_with_connection(connection, parent_session_id)? {
         return Err(anyhow!(
@@ -549,26 +551,22 @@ mod tests {
         assert_eq!(relation.root_session_id, "parent");
 
         insert_test_session(&path, "ordinary-direct");
-        insert_test_session(&path, "second-orchestrator");
         let connection = open_runtime_connection(&path).unwrap();
         connection
             .execute(
-                "UPDATE sessions SET behavior = CASE session_id
-                    WHEN 'ordinary-direct' THEN 'direct'
-                    WHEN 'second-orchestrator' THEN 'orchestrator'
-                    ELSE behavior END
-                 WHERE session_id IN ('ordinary-direct', 'second-orchestrator')",
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'ordinary-direct'",
                 [],
             )
             .unwrap();
-        let from_direct = create_managed_orchestrator_relationship(
+        assert!(create_managed_orchestrator_relationship(
             &path,
             "ordinary-direct",
-            "second-orchestrator",
-            "allowed from agent",
+            "orchestrator",
+            "forbidden",
         )
-        .unwrap();
-        assert_eq!(from_direct.parent_session_id, "ordinary-direct");
+        .unwrap_err()
+        .to_string()
+        .contains("direct-with-orchestrator"));
 
         insert_test_session(&path, "planner");
         insert_test_session(&path, "third-orchestrator");
@@ -793,17 +791,15 @@ mod tests {
                 .unwrap();
             }
         }
-        assert!(
-            begin_managed_orchestrator_run(
-                &path,
-                "orchestrator-4",
-                "run-4",
-                ManagedOrchestratorExecutionMode::Foreground,
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("concurrency limit")
-        );
+        assert!(begin_managed_orchestrator_run(
+            &path,
+            "orchestrator-4",
+            "run-4",
+            ManagedOrchestratorExecutionMode::Foreground,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("concurrency limit"));
         settle_managed_orchestrator_run(
             &path,
             "orchestrator-0",

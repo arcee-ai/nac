@@ -5,6 +5,7 @@ import Icon, { IconName } from "../icon";
 
 export enum SessionType {
   Agent = "agent",
+  AgentWithOrchestrator = "agent-with-orchestrator",
   Orchestrator = "orchestrator",
 }
 
@@ -16,13 +17,11 @@ export enum SessionOrigin {
   DelegatedLocked = "delegated-locked",
 }
 
-/** Plane for Agent, orchestrator glyph otherwise. Used by tabs and list rows. */
-export function sessionTypeIconName(
-  sessionType: `${SessionType}` = SessionType.Agent,
-): IconName {
-  return sessionType === SessionType.Orchestrator
-    ? IconName.Orchestrator
-    : IconName.Plane;
+/** Plane for Agent, plane-add for Agent + Orchestrator, orchestrator glyph otherwise. */
+export function sessionTypeIconName(sessionType: `${SessionType}` = SessionType.Agent): IconName {
+  if (sessionType === SessionType.Orchestrator) return IconName.Orchestrator;
+  if (sessionType === SessionType.AgentWithOrchestrator) return IconName.PlaneAdd;
+  return IconName.Plane;
 }
 
 interface SessionTypeAvatarProps {
@@ -34,8 +33,8 @@ interface SessionTypeAvatarProps {
 
 /**
  * 28px session-type mark (Figma SessionAvatar). Neutral gray chip; Agent is
- * plane, Orchestrator is the orchestrator glyph. Origin lives on
- * OriginSessionBadge beside the title, not on this mark.
+ * plane, Agent + Orchestrator is plane-add, Orchestrator is the orchestrator
+ * glyph. Origin lives on OriginSessionBadge beside the title, not on this mark.
  */
 const SessionTypeAvatar: React.FC<SessionTypeAvatarProps> = ({
   sessionType = SessionType.Agent,

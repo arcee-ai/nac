@@ -113,6 +113,15 @@ const TOOL_LABELS: Record<string, string> = {
   session_read: "Read session",
   session_wait: "Wait for session",
   session_cancel: "Cancel session",
+  subagent: "Start coding agent",
+  subagent_status: "Check coding agent",
+  subagent_cancel: "Cancel coding agent",
+  orchestrator_launch: "Start orchestrator",
+  orchestrator_status: "Check orchestrator",
+  orchestrator_steer: "Steer orchestrator",
+  orchestrator_read: "Read orchestrator",
+  orchestrator_wait: "Wait for orchestrator",
+  orchestrator_cancel: "Cancel orchestrator",
 };
 
 const STATUS_LABELS: Record<ToolPresentationStatus, string> = {
@@ -259,16 +268,30 @@ function summaryFromCallArguments(name: string, call: ToolCall): string | null {
     case "update_goal":
       return argumentString(obj, "status");
     case "session_spawn":
+    case "subagent":
+    case "orchestrator_launch":
       return (
         argumentString(obj, "description") ??
-        argumentString(obj, "child_session_id")
+        argumentString(obj, "child_session_id") ??
+        argumentString(obj, "orchestrator_session_id")
       );
     case "session_status":
     case "session_read":
     case "session_wait":
     case "session_cancel":
     case "session_steer":
+    case "subagent_status":
+    case "subagent_cancel":
       return argumentString(obj, "child_session_id");
+    case "orchestrator_status":
+    case "orchestrator_read":
+    case "orchestrator_wait":
+    case "orchestrator_cancel":
+    case "orchestrator_steer":
+      return (
+        argumentString(obj, "orchestrator_session_id") ??
+        argumentString(obj, "child_session_id")
+      );
     case "thread": {
       const threadName = argumentString(obj, "name");
       const action = argumentString(obj, "action");

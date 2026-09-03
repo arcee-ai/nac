@@ -142,6 +142,18 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
     regularLabel: "Start session",
     inProgressLabel: "Starting session…",
   },
+  subagent: {
+    id: "subagent",
+    icon: IconName.Plane,
+    regularLabel: "Start coding agent",
+    inProgressLabel: "Starting coding agent…",
+  },
+  orchestrator_launch: {
+    id: "orchestrator_launch",
+    icon: IconName.Orchestrator,
+    regularLabel: "Start orchestrator",
+    inProgressLabel: "Starting orchestrator…",
+  },
   session_status: {
     id: "session_status",
     icon: IconName.Info,
@@ -172,6 +184,48 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
     regularLabel: "Cancel session",
     inProgressLabel: "Cancelling session…",
   },
+  subagent_status: {
+    id: "subagent_status",
+    icon: IconName.Info,
+    regularLabel: "Check coding agent",
+    inProgressLabel: "Checking coding agent…",
+  },
+  subagent_cancel: {
+    id: "subagent_cancel",
+    icon: IconName.Trash,
+    regularLabel: "Cancel coding agent",
+    inProgressLabel: "Cancelling coding agent…",
+  },
+  orchestrator_status: {
+    id: "orchestrator_status",
+    icon: IconName.Info,
+    regularLabel: "Check orchestrator",
+    inProgressLabel: "Checking orchestrator…",
+  },
+  orchestrator_steer: {
+    id: "orchestrator_steer",
+    icon: IconName.AddChat,
+    regularLabel: "Steer orchestrator",
+    inProgressLabel: "Steering orchestrator…",
+  },
+  orchestrator_read: {
+    id: "orchestrator_read",
+    icon: IconName.Eye,
+    regularLabel: "Read orchestrator",
+    inProgressLabel: "Reading orchestrator…",
+  },
+  orchestrator_wait: {
+    id: "orchestrator_wait",
+    icon: IconName.Timelaps,
+    regularLabel: "Wait for orchestrator",
+    inProgressLabel: "Waiting for orchestrator…",
+  },
+  orchestrator_cancel: {
+    id: "orchestrator_cancel",
+    icon: IconName.Trash,
+    regularLabel: "Cancel orchestrator",
+    inProgressLabel: "Cancelling orchestrator…",
+  },
   workset_define: {
     id: "workset_define",
     icon: IconName.Checklist,
@@ -187,7 +241,11 @@ const TOOL_CONFIGS: Record<string, SegmentDisplayConfig> = {
 };
 
 /** Spawned sessions stay out of the ToolsSegments tray and get their own row. */
-const STANDALONE_TOOL_NAMES = new Set(["session_spawn"]);
+const STANDALONE_TOOL_NAMES = new Set([
+  "session_spawn",
+  "subagent",
+  "orchestrator_launch",
+]);
 
 export function isStandaloneToolName(name: string): boolean {
   return STANDALONE_TOOL_NAMES.has(name);
@@ -332,6 +390,8 @@ const TOOL_TRAILING: Record<string, string> = {
   session_wait: "Wait",
   session_cancel: "Delete",
   session_spawn: "Spawn",
+  subagent: "Spawn",
+  orchestrator_launch: "Spawn",
   workset_define: "Workset",
   thread_delete: "Delete",
 };

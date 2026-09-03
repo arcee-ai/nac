@@ -3,7 +3,7 @@
 
 use super::*;
 
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{params, OptionalExtension};
 
 use crate::sessions::SessionBehavior;
 
@@ -230,7 +230,7 @@ mod tests {
         connection
             .execute(
                 "UPDATE sessions SET behavior = CASE session_id
-                    WHEN 'parent' THEN 'direct'
+                    WHEN 'parent' THEN 'direct-with-orchestrator'
                     WHEN 'child' THEN 'direct'
                     ELSE 'orchestrator' END
                  WHERE session_id IN ('parent', 'child', 'orchestrator')",

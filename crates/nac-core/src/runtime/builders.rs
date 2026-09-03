@@ -45,17 +45,12 @@ async fn build_run_config_inner(
     project_id: Option<String>,
     behavior: sessions::SessionBehavior,
 ) -> Result<OrchestratorRunConfig> {
-    let behavior = behavior.for_create();
     let agent_mode = match behavior {
         sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
         sessions::SessionBehavior::Direct | sessions::SessionBehavior::DirectWithOrchestrator => {
             AgentMode::Direct
         }
     };
-    debug_assert!(
-        !matches!(behavior, sessions::SessionBehavior::DirectWithOrchestrator),
-        "create paths persist Agent as direct"
-    );
     let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd

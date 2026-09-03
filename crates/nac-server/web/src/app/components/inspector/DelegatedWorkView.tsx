@@ -24,6 +24,7 @@ import { SESSION_PANEL_LABEL } from "@/app/lib/routes";
 import { groupByRecency } from "@/app/lib/projects";
 import {
   assignmentIsOpen,
+  canLaunchManagedOrchestrator,
   isAgentBehavior,
   sessionTypeFromBehavior,
 } from "@/app/lib/sessionBehavior";
@@ -97,6 +98,7 @@ export function DelegatedWorkView({
     showSidePanelList(false);
   };
 
+  const canSpawnOrchestrator = canLaunchManagedOrchestrator(behavior);
   const listToolbar = enabled ? (
     <div className="flex flex-col gap-1 border-b border-muted px-3 py-2 shrink-0">
       <TabButton
@@ -109,16 +111,18 @@ export function DelegatedWorkView({
         <Icon iconName={IconName.Add} size={16} className="shrink-0" />
         <span className="flex-1 min-w-0 truncate text-left">New Agent</span>
       </TabButton>
-      <TabButton
-        type="button"
-        size={TabButtonSize.Medium}
-        active={compose === "orchestrator"}
-        aria-pressed={compose === "orchestrator"}
-        onClick={() => openCompose("orchestrator")}
-      >
-        <Icon iconName={IconName.Add} size={16} className="shrink-0" />
-        <span className="flex-1 min-w-0 truncate text-left">New Orchestrator</span>
-      </TabButton>
+      {canSpawnOrchestrator ? (
+        <TabButton
+          type="button"
+          size={TabButtonSize.Medium}
+          active={compose === "orchestrator"}
+          aria-pressed={compose === "orchestrator"}
+          onClick={() => openCompose("orchestrator")}
+        >
+          <Icon iconName={IconName.Add} size={16} className="shrink-0" />
+          <span className="flex-1 min-w-0 truncate text-left">New Orchestrator</span>
+        </TabButton>
+      ) : null}
     </div>
   ) : null;
 
@@ -137,7 +141,9 @@ export function DelegatedWorkView({
     />
   ) : rows.length === 0 ? (
     <div className="p-1 label-micro text-basic-muted">
-      None yet. Spawn an Agent or Orchestrator session from this chat.
+      {canSpawnOrchestrator
+        ? "None yet. Spawn an Agent or Orchestrator session from this chat."
+        : "None yet. Spawn a coding Agent from this chat."}
     </div>
   ) : (
     <div className="flex flex-col gap-8 px-1">
@@ -211,8 +217,9 @@ export function DelegatedWorkView({
         />
       ) : (
         <PanelEmpty title="No spawn sessions yet.">
-          They appear here as the agent starts them, or start one with New
-          Agent or New Orchestrator.
+          {canSpawnOrchestrator
+            ? "They appear here as the agent starts them, or start one with New Agent or New Orchestrator."
+            : "They appear here as the agent starts them, or start one with New Agent."}
         </PanelEmpty>
       )}
     </PanelSplit>

@@ -8,7 +8,7 @@ interface OrchestratorControlsProps {
 
 /**
  * Users cannot launch managed orchestrators from the composer.
- * The model still uses session_spawn; completion events stay on the parent transcript.
+ * The model uses subagent / orchestrator_launch; completion events stay on the parent transcript.
  */
 export function OrchestratorControls({
   sessionId: _sessionId,

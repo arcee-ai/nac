@@ -14,7 +14,7 @@ export function SessionBehaviorPicker({
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="label-small text-basic-primary">How should this chat work?</legend>
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-2" role="radiogroup">
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-3" role="radiogroup">
         {CREATE_SESSION_BEHAVIORS.map((option, index) => {
           const selected = option.id === value;
           return (

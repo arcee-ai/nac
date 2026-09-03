@@ -232,6 +232,8 @@ describe("delegated work", () => {
     expect(screen.getByText("Thinking…")).toBeTruthy();
     expect(screen.queryByText("Coding agents")).toBeNull();
     expect(screen.queryByText("NAC orchestrators")).toBeNull();
+    expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New Orchestrator" })).toBeTruthy();
 
     fireEvent.click(
       screen.getByRole("button", { name: /Run the compatibility audit/ }),
@@ -242,6 +244,9 @@ describe("delegated work", () => {
 
   it("navigates from a delegated preview to its transcript", () => {
     mount("direct");
+
+    expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "New Orchestrator" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Go to session" }));
     expect(screen.getByTestId("location").textContent).toBe(
@@ -295,7 +300,9 @@ describe("delegated work", () => {
       ]);
     });
 
-    await waitFor(() => expect(row.textContent).toContain("Completed"));
+    await waitFor(() =>
+      expect(row.querySelector(".text-shimmer-basic")).toBeNull(),
+    );
     expect(screen.queryByRole("button", { name: "Pause session" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop session" })).toBeNull();
     expect(screen.getByRole("button", { name: "Go to session" })).toBeTruthy();

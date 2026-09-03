@@ -68,6 +68,7 @@ export enum IconName {
   Image = "image",
   Attachment = "attachment",
   Plane = "plane",
+  PlaneAdd = "planeAdd",
   Headphones = "headphones",
   Bolt = "bolt",
   Private = "private",
@@ -168,12 +169,23 @@ interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
 
 const DEFAULT_VIEW_BOX = "0 0 24 24";
 
+const pathSegments = (d: string | readonly string[] | undefined): readonly string[] =>
+  d == null ? [""] : typeof d === "string" ? [d] : d;
+
 const getGlyph = (iconName: IconName) => {
   const entry = iconPaths[iconName];
   if (entry?.kind === "glyph") {
-    return entry;
+    return {
+      viewBox: entry.viewBox,
+      segments: pathSegments(entry.d),
+      fillRule: entry.fillRule,
+    };
   }
-  return { d: entry?.d ?? "", viewBox: DEFAULT_VIEW_BOX };
+  return {
+    viewBox: DEFAULT_VIEW_BOX,
+    segments: pathSegments(entry?.d),
+    fillRule: entry?.fillRule,
+  };
 };
 
 /**
@@ -232,8 +244,9 @@ const Icon: React.FC<IconProps> & { Name: typeof IconName } = ({
   shimmer = false,
   ...props
 }) => {
-  const { d, viewBox } = getGlyph(iconName);
+  const { segments, viewBox, fillRule } = getGlyph(iconName);
   const gradientId = `icon-shimmer-${useId().replace(/:/g, "")}`;
+  const fill = shimmer ? `url(#${gradientId})` : "currentColor";
   return (
     <svg
       className={`icon ${className}`}
@@ -255,18 +268,9 @@ const Icon: React.FC<IconProps> & { Name: typeof IconName } = ({
             x2="1"
             y2="0"
           >
-            <stop
-              offset="0%"
-              stopColor="var(--color-text-basic-secondary)"
-            />
-            <stop
-              offset="50%"
-              stopColor="var(--color-text-basic-muted)"
-            />
-            <stop
-              offset="100%"
-              stopColor="var(--color-text-basic-secondary)"
-            />
+            <stop offset="0%" stopColor="var(--color-text-basic-secondary)" />
+            <stop offset="50%" stopColor="var(--color-text-basic-muted)" />
+            <stop offset="100%" stopColor="var(--color-text-basic-secondary)" />
             <animateTransform
               attributeName="gradientTransform"
               type="translate"
@@ -278,7 +282,9 @@ const Icon: React.FC<IconProps> & { Name: typeof IconName } = ({
           </linearGradient>
         </defs>
       ) : null}
-      <path d={d} fill={shimmer ? `url(#${gradientId})` : "currentColor"} />
+      {segments.map((d, index) => (
+        <path key={index} d={d} fill={fill} fillRule={fillRule} />
+      ))}
     </svg>
   );
 };

@@ -73,6 +73,6 @@ describe("project session tab behavior identity", () => {
     expect(screen.getByRole("button", { name: "Code, Agent" }).getAttribute("aria-current")).toBe(
       "page",
     );
-    expect(screen.getByRole("button", { name: "Coordinate, Agent" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Coordinate, Agent + Orchestrator" })).toBeTruthy();
   });
 });

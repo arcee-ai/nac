@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex, Weak as StdWeak};
@@ -30,7 +30,6 @@ pub(crate) mod mutation;
 pub(crate) mod orchestrator;
 pub mod read;
 mod runtime_context;
-pub(crate) mod session;
 pub(crate) mod subagent;
 mod terminal_tools;
 pub mod thread;
@@ -143,7 +142,7 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
 ];
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 17] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 14] = [
     "read",
     "write",
     "edit",
@@ -155,33 +154,31 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 17] = [
     "create_goal",
     "get_goal",
     "update_goal",
-    "session_spawn",
-    "session_status",
-    "session_steer",
-    "session_read",
-    "session_wait",
-    "session_cancel",
+    "subagent",
+    "subagent_status",
+    "subagent_cancel",
 ];
 pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
-    "session_spawn",
-    "session_status",
-    "session_steer",
-    "session_read",
-    "session_wait",
-    "session_cancel",
+    "orchestrator_launch",
+    "orchestrator_status",
+    "orchestrator_steer",
+    "orchestrator_read",
+    "orchestrator_wait",
+    "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const SPAWN_TOOL_NAMES: [&str; 6] = [
-    "session_spawn",
-    "session_status",
-    "session_steer",
-    "session_read",
-    "session_wait",
-    "session_cancel",
-];
-/// Pre-universal-session spawn names. Still executable as aliases of `session_*`
-/// and advertised when they already appear in a transcript.
-pub(crate) const LEGACY_SPAWN_TOOL_NAMES: [&str; 9] = [
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 20] = [
+    "read",
+    "write",
+    "edit",
+    "glob",
+    "grep",
+    "exec_command",
+    "write_stdin",
+    "read_command_output",
+    "create_goal",
+    "get_goal",
+    "update_goal",
     "subagent",
     "subagent_status",
     "subagent_cancel",
@@ -192,10 +189,6 @@ pub(crate) const LEGACY_SPAWN_TOOL_NAMES: [&str; 9] = [
     "orchestrator_wait",
     "orchestrator_cancel",
 ];
-/// Agent tools while an assignment is open: coding only, matching workers.
-pub(crate) const RUNNING_ASSIGNED_DIRECT_TOOL_NAMES: [&str; 8] = WORKER_TOOL_NAMES;
-/// Compatibility alias: every Agent now has NAC spawn tools.
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 17] = DIRECT_TOOL_NAMES;
 
 fn worker_tool_registry(
     image_read: bool,
@@ -221,12 +214,6 @@ fn worker_tool_registry(
         .register(orchestrator::ReadTool)
         .register(orchestrator::WaitTool)
         .register(orchestrator::CancelTool)
-        .register(session::SessionSpawnTool)
-        .register(session::SessionStatusTool)
-        .register(session::SessionSteerTool)
-        .register(session::SessionReadTool)
-        .register(session::SessionWaitTool)
-        .register(session::SessionCancelTool)
         .register(web::WebSearchTool)
         .register(web::WebFetchTool)
         .finish()?;
@@ -250,45 +237,16 @@ pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
         .definitions()
 }
 
-fn is_running_assigned_direct_capability(name: &str) -> bool {
-    WORKER_TOOL_NAMES.contains(&name)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the static running-assignment capability list is collision-checked"
-)]
-pub fn running_assigned_direct_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    let definitions = worker_tool_registry(image_read)
-        .expect("built-in direct tool registration must be collision-free")
-        .snapshot_where(|descriptor| is_running_assigned_direct_capability(descriptor.name()))
-        .definitions();
-    debug_assert_eq!(
-        definitions
-            .iter()
-            .map(|definition| definition.function.name.as_str())
-            .collect::<Vec<_>>(),
-        RUNNING_ASSIGNED_DIRECT_TOOL_NAMES
-    );
-    definitions
-}
-
 #[expect(
     clippy::expect_used,
     reason = "the static first-party tool registry and direct capability list are collision-checked"
 )]
 pub fn direct_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    let snapshot = worker_tool_registry(image_read)
+    worker_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
         .snapshot(DIRECT_TOOL_NAMES)
-        .expect("built-in direct capability selection must be complete");
-    debug_assert!(
-        ORCHESTRATOR_CONTROL_TOOL_NAMES
-            .iter()
-            .all(|name| snapshot.contains(name)),
-        "every Agent must expose NAC spawn controls"
-    );
-    snapshot.definitions()
+        .expect("built-in direct capability selection must be complete")
+        .definitions()
 }
 
 #[cfg(test)]
@@ -308,7 +266,17 @@ pub(crate) fn direct_tool_definitions_with_web(
     reason = "the static direct-with-orchestrator capability list is covered by registry tests"
 )]
 pub fn direct_with_orchestrator_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    direct_tool_definitions(image_read)
+    let snapshot = worker_tool_registry(image_read)
+        .expect("built-in direct tool registration must be collision-free")
+        .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
+        .expect("direct-with-orchestrator capability selection must be complete");
+    debug_assert!(
+        ORCHESTRATOR_CONTROL_TOOL_NAMES
+            .iter()
+            .all(|name| snapshot.contains(name)),
+        "orchestrator runtime must expose every orchestrator control capability"
+    );
+    snapshot.definitions()
 }
 
 #[cfg(test)]
@@ -324,56 +292,7 @@ pub(crate) fn direct_with_orchestrator_tool_definitions_with_web(
 }
 
 fn is_complete_direct_capability(name: &str) -> bool {
-    DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name)
-        || WEB_TOOL_NAMES.contains(&name)
-        || LEGACY_SPAWN_TOOL_NAMES.contains(&name)
-}
-
-pub(crate) fn spawn_family_allows_legacy(allowed: &HashSet<String>, name: &str) -> bool {
-    LEGACY_SPAWN_TOOL_NAMES.contains(&name)
-        && SPAWN_TOOL_NAMES.iter().any(|tool| allowed.contains(*tool))
-}
-
-/// Keep every transcript tool name that this agent can still execute. Desired
-/// surface may shrink after assignment lock; history names must stay in
-/// `tools[]` so providers do not reject the request.
-#[expect(
-    clippy::expect_used,
-    reason = "the static first-party tool registry is collision-checked during construction"
-)]
-pub(crate) fn extend_definitions_with_history(
-    mut definitions: Vec<ToolDefinition>,
-    history_names: impl IntoIterator<Item = impl AsRef<str>>,
-    image_read: bool,
-) -> Vec<ToolDefinition> {
-    let mut present: HashSet<String> = definitions
-        .iter()
-        .map(|definition| definition.function.name.clone())
-        .collect();
-    let needed: Vec<String> = history_names
-        .into_iter()
-        .map(|name| name.as_ref().to_string())
-        .filter(|name| !present.contains(name) && is_complete_direct_capability(name))
-        .collect();
-    if needed.is_empty() {
-        return definitions;
-    }
-    let extras = worker_tool_registry(image_read)
-        .expect("built-in direct tool registration must be collision-free")
-        .snapshot_where(|descriptor| needed.iter().any(|name| descriptor.name() == name))
-        .definitions();
-    for name in needed {
-        if !present.insert(name.clone()) {
-            continue;
-        }
-        if let Some(definition) = extras
-            .iter()
-            .find(|definition| definition.function.name == name)
-        {
-            definitions.push(definition.clone());
-        }
-    }
-    definitions
+    DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name) || WEB_TOOL_NAMES.contains(&name)
 }
 
 #[expect(

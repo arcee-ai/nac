@@ -173,16 +173,20 @@ export function formatSeconds(ms: number | null | undefined): string {
 /** Fallback for an untitled chat whose type was never recorded. */
 export const NEW_CHAT_TITLE = "New Session";
 export const NEW_AGENT_TITLE = "New Agent";
+export const NEW_AGENT_WITH_ORCHESTRATOR_TITLE = "New Agent + Orchestrator";
 export const NEW_ORCHESTRATOR_TITLE = "New Orchestrator";
 
 const PLACEHOLDER_SESSION_TITLE =
-  /^(New Session|New Agent|New Orchestrator)( \d+)?$/;
+  /^(New Session|New Agent \+ Orchestrator|New Agent|New Orchestrator)( \d+)?$/;
 
 /** Display name for an empty chat of this type, before anyone names it. */
 export function untitledSessionTitle(
   behavior: SessionBehavior | null | undefined,
 ): string {
-  if (behavior === "direct" || behavior === "direct-with-orchestrator") {
+  if (behavior === "direct-with-orchestrator") {
+    return NEW_AGENT_WITH_ORCHESTRATOR_TITLE;
+  }
+  if (behavior === "direct") {
     return NEW_AGENT_TITLE;
   }
   if (behavior === "orchestrator") {

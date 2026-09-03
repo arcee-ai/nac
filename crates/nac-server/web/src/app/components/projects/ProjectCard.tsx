@@ -14,17 +14,10 @@ import { ProjectCardActions } from "@/app/components/projects/ProjectCardActions
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
-import {
-  formatCostMicros,
-  isActiveRun,
-  sessionEnvLabel,
-} from "@/app/lib/format";
+import { formatCostMicros, isActiveRun, sessionEnvLabel } from "@/app/lib/format";
 import type { ProjectListItem } from "@/app/lib/projects";
 import { providerLabel } from "@/app/lib/providers";
-import {
-  sessionOriginFromRecord,
-  sessionTypeFromBehavior,
-} from "@/app/lib/sessionBehavior";
+import { sessionOriginFromRecord, sessionTypeFromBehavior } from "@/app/lib/sessionBehavior";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 
 // Figma ProjectCard has a full-bleed "Surface" layer below the content that
@@ -50,14 +43,10 @@ function surfaceToken({
   pressed: boolean;
 }) {
   if (pressed) {
-    return highlighted
-      ? SURFACE_TOKENS.highlightedPressed
-      : SURFACE_TOKENS.pressed;
+    return highlighted ? SURFACE_TOKENS.highlightedPressed : SURFACE_TOKENS.pressed;
   }
   if (hover) {
-    return highlighted
-      ? SURFACE_TOKENS.highlightedHovered
-      : SURFACE_TOKENS.hovered;
+    return highlighted ? SURFACE_TOKENS.highlightedHovered : SURFACE_TOKENS.hovered;
   }
   return highlighted ? SURFACE_TOKENS.highlighted : SURFACE_TOKENS.default;
 }
@@ -81,7 +70,7 @@ interface CardFacts {
   runningCount: number;
   /** The chat whose environment stands in for the row. */
   representative: SessionSummarySnapshot | null;
-  sessionType: "agent" | "orchestrator";
+  sessionType: ReturnType<typeof sessionTypeFromBehavior>;
   origin: ReturnType<typeof sessionOriginFromRecord>;
 }
 
@@ -123,23 +112,16 @@ function factsFor(
     runningCount: running ? 1 : 0,
     representative: summary,
     sessionType: sessionTypeFromBehavior(summary.behavior),
-    origin: sessionOriginFromRecord(
-      lineage,
-      summary.forked_from,
-      summary.converted_from,
-    ),
+    origin: sessionOriginFromRecord(lineage, summary.forked_from, summary.converted_from),
   };
 }
 
 function Metrics({ facts }: { facts: CardFacts }) {
-  const costLabel =
-    facts.costMicros > 0 ? formatCostMicros(facts.costMicros) : null;
+  const costLabel = facts.costMicros > 0 ? formatCostMicros(facts.costMicros) : null;
   return (
     <div className="flex items-center gap-2.5 shrink-0 min-w-0">
       {costLabel ? (
-        <span className="text-micro text-basic-primary whitespace-nowrap">
-          {costLabel}
-        </span>
+        <span className="text-micro text-basic-primary whitespace-nowrap">{costLabel}</span>
       ) : null}
       {facts.countLabel ? (
         <span className="text-micro text-info-primary whitespace-nowrap truncate">
@@ -158,9 +140,7 @@ function Provenance({ facts }: { facts: CardFacts }) {
         {sessionEnvLabel(facts.representative)}
       </span>
       {provider ? (
-        <span className="text-micro text-basic-muted truncate md:max-w-[128px]">
-          {provider}
-        </span>
+        <span className="text-micro text-basic-muted truncate md:max-w-[128px]">{provider}</span>
       ) : null}
     </div>
   );
@@ -399,10 +379,7 @@ export function ProjectCard({
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
           <div className="flex items-center gap-1.5 w-full">
             {facts.pinned ? (
-              <Icon
-                iconName={IconName.Pin}
-                className="text-basic-secondary shrink-0"
-              />
+              <Icon iconName={IconName.Pin} className="text-basic-secondary shrink-0" />
             ) : null}
             <div
               className={cn(
@@ -413,15 +390,8 @@ export function ProjectCard({
               {facts.title}
             </div>
             {configError ? (
-              <Tooltip
-                title={configError}
-                position={TooltipPosition.BottomRight}
-                sticky
-              >
-                <Icon
-                  iconName={IconName.Repair}
-                  className="text-error-primary shrink-0"
-                />
+              <Tooltip title={configError} position={TooltipPosition.BottomRight} sticky>
+                <Icon iconName={IconName.Repair} className="text-error-primary shrink-0" />
               </Tooltip>
             ) : null}
             {/* A project counts the chats currently running inside it; a loose
@@ -439,9 +409,7 @@ export function ProjectCard({
               )
             ) : null}
           </div>
-          <div className="code code-micro text-basic-tertiary truncate w-full">
-            {facts.cwd}
-          </div>
+          <div className="code code-micro text-basic-tertiary truncate w-full">{facts.cwd}</div>
         </div>
       </div>
       {!isDesktop ? <Provenance facts={facts} /> : null}

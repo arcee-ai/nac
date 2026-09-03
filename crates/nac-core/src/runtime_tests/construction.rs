@@ -170,7 +170,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     assert!(matches!(
         delegating.agent.messages.first(),
         Some(Message::System { content })
-            if content.contains("separate durable NAC sessions")
+            if content.contains("separate durable NAC orchestrator sessions")
     ));
 
     let _ = std::fs::remove_dir_all(root);

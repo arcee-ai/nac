@@ -11,13 +11,15 @@ import {
 import type { SessionBehavior } from "@/app/types/api";
 
 describe("session behavior presentation", () => {
-  it("offers Agent and Orchestrator for new chats and presents hybrid rows as Agent", () => {
+  it("offers Agent, Agent + Orchestrator, and Orchestrator for new chats", () => {
     expect(SESSION_BEHAVIORS.map((behavior) => behavior.id)).toEqual([
       "direct",
+      "direct-with-orchestrator",
       "orchestrator",
     ]);
     expect(CREATE_SESSION_BEHAVIORS.map((behavior) => behavior.id)).toEqual([
       "direct",
+      "direct-with-orchestrator",
       "orchestrator",
     ]);
 
@@ -36,16 +38,18 @@ describe("session behavior presentation", () => {
       navigationLabel: "Agent",
       topLevel: expect.stringMatching(/persistent coding agent/i),
       editsDirectly: true,
-      delegation: expect.stringMatching(/separate Orchestrator sessions/i),
+      delegation: expect.stringMatching(/fresh-context coding agents/i),
       inspection: expect.stringMatching(/Actions show reasoning/i),
     });
     expect(
       sessionBehaviorPresentation("direct-with-orchestrator"),
     ).toMatchObject({
       id: "direct-with-orchestrator",
-      label: "Agent",
-      navigationLabel: "Agent",
+      label: "Agent + Orchestrator",
+      navigationLabel: "Agent + Orchestrator",
+      createLabel: "New Agent + Orchestrator",
       editsDirectly: true,
+      delegation: expect.stringMatching(/separate Orchestrator sessions/i),
     });
     expect(isAgentBehavior("direct")).toBe(true);
     expect(isAgentBehavior("direct-with-orchestrator")).toBe(true);
@@ -80,7 +84,7 @@ describe("session panel policy", () => {
     }
   });
 
-  it("keeps traditional children Files/History-only while the assignment is open", () => {
+  it("keeps traditional children Files/History-only", () => {
     for (const behavior of behaviors) {
       expect(
         sessionPanelPolicy(behavior, "traditional-child", "running"),
@@ -90,21 +94,13 @@ describe("session panel policy", () => {
         defaultPanel: "files",
         readOnly: true,
       });
-    }
-  });
-
-  it("treats settled traditional children as ordinary Agent chats", () => {
-    for (const behavior of [
-      "direct",
-      "direct-with-orchestrator",
-    ] satisfies SessionBehavior[]) {
       expect(
         sessionPanelPolicy(behavior, "traditional-child", "completed"),
       ).toEqual({
-        widePanels: ["actions", "files", "delegated"],
-        mobilePanels: ["actions", "files", "delegated", "history"],
-        defaultPanel: "actions",
-        readOnly: false,
+        widePanels: ["files"],
+        mobilePanels: ["files", "history"],
+        defaultPanel: "files",
+        readOnly: true,
       });
     }
   });
@@ -122,14 +118,14 @@ describe("session panel policy", () => {
     }
   });
 
-  it("unlocks a settled managed orchestrator", () => {
+  it("keeps a managed orchestrator read-only after settle", () => {
     expect(
       sessionPanelPolicy("orchestrator", "managed-orchestrator", "completed"),
     ).toEqual({
       widePanels: ["actions", "threads", "files", "worksets"],
       mobilePanels: ["actions", "threads", "files", "worksets", "history"],
       defaultPanel: "actions",
-      readOnly: false,
+      readOnly: true,
     });
   });
 

@@ -273,6 +273,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("managed orchestrator prompt is empty")
             || message.contains("NAC sessions cannot create sessions")
             || message.contains("managed orchestrators require an agent parent")
+            || message.contains("managed orchestrators require a direct-with-orchestrator parent")
             || message.contains("managed orchestrators require direct-with-orchestrator")
             || message.contains("managed orchestrator description")
             || message.contains("managed orchestrator sessions cannot launch")

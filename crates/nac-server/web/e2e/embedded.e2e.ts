@@ -291,9 +291,12 @@ test("creates Agent by default and offers Orchestrator from the new-session popo
   await page
     .getByRole("button", { name: "Create new session", exact: true })
     .click();
-  await expect(page.getByRole("button", { name: "New Agent" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Agent", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "New Agent + Orchestrator", exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Default", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "New Orchestrator" }).click();
+  await page.getByRole("button", { name: "New Orchestrator", exact: true }).click();
   await expect
     .poll(() => page.url())
     .not.toContain(`/session/${agentSessionId}/`);
