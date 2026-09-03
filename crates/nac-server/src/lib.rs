@@ -953,10 +953,6 @@ impl SessionManager {
         }
     }
 
-    pub(crate) fn assignment_is_open(&self, session_id: &str) -> Result<bool> {
-        nac_core::store::assignment_is_open(&self.inner.store_path, session_id)
-    }
-
     fn require_primary_operation_session(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
         if self.session_lineage(session_id)?.is_some() {

@@ -31,11 +31,11 @@ import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
 import {
-  assignmentIsOpen,
   actionsPanel,
   DELEGATED_READONLY_HINT,
   FROZEN_DELEGATED_TURN_HINT,
   isAgentBehavior,
+  sessionIsDelegated,
   sessionTypeFromBehavior,
 } from "@/app/lib/sessionBehavior";
 import { RevertModal } from "@/app/components/modals/RevertModal";
@@ -441,9 +441,8 @@ export function Transcript({
   const sessionType = sessionTypeFromBehavior(snapshot?.metadata.behavior);
   const isAgent = isAgentBehavior(snapshot?.metadata.behavior);
   const hasOlderMessages = snapshot?.message_page?.has_older === true;
-  const assignmentOpen = assignmentIsOpen(snapshot?.lineage?.assignment_status);
   const frozenMessageCount = snapshot?.lineage?.frozen_message_count ?? 0;
-  const readOnly = assignmentOpen;
+  const readOnly = sessionIsDelegated(snapshot?.lineage);
   // A revision is captured per finished run, so each model turn carries what
   // its own run changed instead of one running total for the whole checkout.
   const turnRevisions = useMemo(

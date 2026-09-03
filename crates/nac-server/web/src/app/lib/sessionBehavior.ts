@@ -129,7 +129,14 @@ export function assignmentIsOpen(status: AssignmentStatus | string | null | unde
   return status === "idle" || status === "running";
 }
 
-/** Composer and message-action copy when the child is still parent-owned. */
+/** Parent owns this transcript for the lifetime of the assignment row. */
+export function sessionIsDelegated(
+  lineage: SessionLineage | null | undefined,
+): boolean {
+  return lineage != null;
+}
+
+/** Composer and message-action copy when the child is parent-owned. */
 export const DELEGATED_READONLY_HINT =
   "This delegated transcript is read-only. Continue, steer, or cancel it from its parent chat.";
 
@@ -150,7 +157,7 @@ export function sessionOriginFromRecord(
   convertedFrom?: unknown,
 ): "user" | "fork" | "converted" | "delegated" | "delegated-locked" {
   if (lineage) {
-    return assignmentIsOpen(lineage.assignment_status) ? "delegated-locked" : "delegated";
+    return "delegated-locked";
   }
   if (forkedFrom) return "fork";
   if (convertedFrom) return "converted";

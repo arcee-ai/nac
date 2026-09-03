@@ -38,7 +38,7 @@ import {
 } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
-  assignmentIsOpen,
+  sessionIsDelegated,
   DELEGATED_READONLY_HINT,
 } from "@/app/lib/sessionBehavior";
 import {
@@ -329,8 +329,8 @@ export function ChatInputBox({
     entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
   const direct =
     behavior === "direct" || behavior === "direct-with-orchestrator";
-  const readOnly = assignmentIsOpen(
-    entry?.lineage?.assignment_status ?? snapshot?.lineage?.assignment_status,
+  const readOnly = sessionIsDelegated(
+    entry?.lineage ?? snapshot?.lineage,
   );
   const ownershipKnown = entry !== null || snapshot !== null;
   const inboxQuery = useSessionInbox(sessionId, direct && !readOnly);

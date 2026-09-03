@@ -67,12 +67,11 @@ describe("project chat ownership", () => {
     ]);
     expect(listableSessions(sessions).map((entry) => entry.summary.session_id)).toEqual([
       "parent",
-      "settled",
       "orphan",
     ]);
     expect(
       projectEntries([project], sessions)[0].sessions.map((entry) => entry.summary.session_id),
-    ).toEqual(["parent", "settled"]);
+    ).toEqual(["parent"]);
     expect(orphanSessions(sessions).map((entry) => entry.summary.session_id)).toEqual(["orphan"]);
   });
 

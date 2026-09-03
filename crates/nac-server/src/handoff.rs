@@ -81,8 +81,9 @@ impl SessionManager {
             return Err(ContinueSessionError::NotFound);
         }
         if self
-            .assignment_is_open(session_id)
+            .session_lineage(session_id)
             .map_err(|error| report_failure(session_id, "verify assignment status", &error))?
+            .is_some()
         {
             return Err(ContinueSessionError::NotFound);
         }
@@ -105,8 +106,9 @@ impl SessionManager {
             return Err(ContinueSessionError::NotFound);
         }
         if self
-            .assignment_is_open(session_id)
+            .session_lineage(session_id)
             .map_err(|error| report_failure(session_id, "recheck assignment status", &error))?
+            .is_some()
         {
             return Err(ContinueSessionError::NotFound);
         }

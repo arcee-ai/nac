@@ -4,7 +4,6 @@
 
 import { isActiveRun, parseStoreTime } from "@/app/lib/format";
 import { compareSortOrder } from "@/app/lib/sessionOrder";
-import { assignmentIsOpen } from "@/app/lib/sessionBehavior";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 /** User-created chats only. First-chat idempotency stays on this set. */
@@ -12,11 +11,9 @@ export function primarySessions(sessions: ManagedSessionSummary[]): ManagedSessi
   return sessions.filter((entry) => entry.lineage == null);
 }
 
-/** User-created chats plus settled assignments. Running/idle spawns stay off the list. */
+/** User-created chats only. Spawned assignments stay in Related Sessions. */
 export function listableSessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[] {
-  return sessions.filter(
-    (entry) => entry.lineage == null || !assignmentIsOpen(entry.lineage.assignment_status),
-  );
+  return primarySessions(sessions);
 }
 
 /** A project together with the sessions that belong to it. */
