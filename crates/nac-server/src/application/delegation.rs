@@ -136,8 +136,10 @@ impl<'a> DelegationApplication<'a> {
         parent_session_id: &str,
     ) -> Result<Vec<ManagedOrchestratorRecord>> {
         let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior.is_nac() {
-            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
+        if service.metadata().behavior != sessions::SessionBehavior::DirectWithOrchestrator {
+            return Err(anyhow!(
+                "managed orchestrators require direct-with-orchestrator behavior"
+            ));
         }
         nac_core::store::list_managed_orchestrators(
             &self.manager.inner.store_path,
@@ -150,10 +152,7 @@ impl<'a> DelegationApplication<'a> {
         parent_session_id: &str,
         command: StartManagedOrchestrator,
     ) -> Result<ManagedOrchestratorRecord> {
-        let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior.is_nac() {
-            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
-        }
+        self.manager.attach_session(parent_session_id).await?;
         let controller =
             nac_core::orchestration_control::controller_for(&self.manager.inner.store_path)?;
         let orchestrator = controller

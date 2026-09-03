@@ -418,7 +418,7 @@ async fn traditional_child_goal_http_api_is_bad_request() {
     assert_eq!(
         body["error"],
         serde_json::Value::String(
-            "running assigned sessions cannot own autonomous goals".to_string()
+            "traditional child sessions cannot own autonomous goals".to_string()
         )
     );
 
@@ -558,13 +558,13 @@ async fn managed_orchestrator_http_api_runs_foreground_then_delivers_background_
         get_response(app.clone(), "/sessions/ordinary-direct/orchestrators", None)
             .await
             .status(),
-        StatusCode::OK
+        StatusCode::BAD_REQUEST
     );
     let rejected = get_response(app, "/sessions/orchestrator/orchestrators", None).await;
     assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
         response_json(rejected).await["error"],
-        sessions::NAC_CANNOT_CREATE_SESSIONS
+        "managed orchestrators require direct-with-orchestrator behavior"
     );
     let _ = std::fs::remove_dir_all(root);
 }
@@ -591,7 +591,7 @@ async fn nac_parent_cannot_create_managed_orchestrators() {
     assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
         response_json(rejected).await["error"],
-        sessions::NAC_CANNOT_CREATE_SESSIONS
+        "managed orchestrators require direct-with-orchestrator behavior"
     );
     let _ = std::fs::remove_dir_all(root);
 }

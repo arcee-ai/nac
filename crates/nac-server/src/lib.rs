@@ -959,7 +959,7 @@ impl SessionManager {
 
     fn require_primary_operation_session(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
-        if self.assignment_is_open(session_id)? {
+        if self.session_lineage(session_id)?.is_some() {
             return Err(anyhow!(
                 "delegated sessions accept work only through their parent"
             ));
@@ -969,7 +969,7 @@ impl SessionManager {
 
     fn require_primary_direct_session(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
-        if self.assignment_is_open(session_id)? {
+        if self.session_lineage(session_id)?.is_some() {
             return Err(anyhow!(
                 "delegated sessions accept input only through their parent"
             ));
@@ -1358,17 +1358,9 @@ impl SessionManager {
             parent_session_id,
         )?;
         let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
-        if parent.behavior.is_nac() {
-            return Err(anyhow!(sessions::NAC_CANNOT_CREATE_SESSIONS));
-        }
-        if nac_core::store::load_session_assignment(&self.inner.store_path, parent_session_id)?
-            .is_some_and(|assignment| {
-                assignment.child_behavior
-                    == nac_core::store::SessionAssignmentChildBehavior::Orchestrator
-            })
-        {
+        if parent.behavior != sessions::SessionBehavior::DirectWithOrchestrator {
             return Err(anyhow!(
-                "managed orchestrator sessions cannot launch orchestrators"
+                "managed orchestrators require direct-with-orchestrator behavior"
             ));
         }
         let orchestrator_session_id = uuid::Uuid::new_v4().to_string();

@@ -134,8 +134,8 @@ impl PermissionBroker {
             .as_ref()
             .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
         let delegated_child =
-            match crate::store::assignment_is_open(&self.store_path, &self.session_id) {
-                Ok(open) => open,
+            match crate::store::load_traditional_child(&self.store_path, &self.session_id) {
+                Ok(child) => child.is_some(),
                 Err(error) => {
                     return AuthorizationOutcome::Denied(format!(
                         "delegated ownership could not be checked before approval: {error}"

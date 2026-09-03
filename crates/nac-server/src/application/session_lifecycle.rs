@@ -93,9 +93,7 @@ impl<'a> SessionLifecycleApplication<'a> {
         for assignment in
             nac_core::store::list_session_assignments(&self.manager.inner.store_path, session_id)?
         {
-            if assignment.status.is_open() {
-                Box::pin(self.delete_cascade(&assignment.child_session_id)).await?;
-            }
+            Box::pin(self.delete_cascade(&assignment.child_session_id)).await?;
         }
 
         // Snapshot decode failures remain fail-closed so cleanup authority is

@@ -155,8 +155,9 @@ impl SessionManager {
             return Err(RevertSessionError::NotFound);
         }
         if self
-            .assignment_is_open(session_id)
+            .session_lineage(session_id)
             .map_err(|error| report_failure(session_id, "verify session ownership", &error))?
+            .is_some()
         {
             return Err(RevertSessionError::NotFound);
         }
@@ -179,8 +180,9 @@ impl SessionManager {
             return Err(RevertSessionError::NotFound);
         }
         if self
-            .assignment_is_open(session_id)
+            .session_lineage(session_id)
             .map_err(|error| report_failure(session_id, "recheck session ownership", &error))?
+            .is_some()
         {
             return Err(RevertSessionError::NotFound);
         }
@@ -228,9 +230,13 @@ impl SessionManager {
         {
             return Err(RegenerateSessionError::NotFound);
         }
-        if self.assignment_is_open(session_id).map_err(|error| {
-            report_regenerate_failure(session_id, "verify session ownership", &error)
-        })? {
+        if self
+            .session_lineage(session_id)
+            .map_err(|error| {
+                report_regenerate_failure(session_id, "verify session ownership", &error)
+            })?
+            .is_some()
+        {
             return Err(RegenerateSessionError::NotFound);
         }
 
@@ -253,9 +259,13 @@ impl SessionManager {
         {
             return Err(RegenerateSessionError::NotFound);
         }
-        if self.assignment_is_open(session_id).map_err(|error| {
-            report_regenerate_failure(session_id, "recheck session ownership", &error)
-        })? {
+        if self
+            .session_lineage(session_id)
+            .map_err(|error| {
+                report_regenerate_failure(session_id, "recheck session ownership", &error)
+            })?
+            .is_some()
+        {
             return Err(RegenerateSessionError::NotFound);
         }
 

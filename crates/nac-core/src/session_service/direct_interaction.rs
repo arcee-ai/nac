@@ -17,7 +17,7 @@ impl SessionService {
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        if crate::store::assignment_is_open(&self.metadata.store_path, session_id)? {
+        if crate::store::load_traditional_child(&self.metadata.store_path, session_id)?.is_some() {
             return Err(anyhow::anyhow!(
                 "delegated sessions accept input only through their parent"
             ));
@@ -39,9 +39,9 @@ impl SessionService {
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        if crate::store::assignment_is_open(&self.metadata.store_path, session_id)? {
+        if crate::store::load_traditional_child(&self.metadata.store_path, session_id)?.is_some() {
             return Err(anyhow::anyhow!(
-                "running assigned sessions cannot own autonomous goals"
+                "traditional child sessions cannot own autonomous goals"
             ));
         }
         Ok(())

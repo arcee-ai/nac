@@ -503,15 +503,13 @@ impl SessionService {
             }
         } else {
             if let Some(session_id) = self.metadata.session_id.as_deref() {
-                let child =
-                    crate::store::load_traditional_child(&self.metadata.store_path, session_id)
-                        .map_err(|error| SessionSubmitError::Coordination {
-                            message: SessionCoordinationError::store(format!(
-                                "failed to inspect traditional child relationship: {error:#}"
-                            )),
-                        })?;
-                if child.as_ref().is_some_and(|record| record.status.is_open())
-                    || child_execution_mode.is_some()
+                if crate::store::load_traditional_child(&self.metadata.store_path, session_id)
+                    .map_err(|error| SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::store(format!(
+                            "failed to inspect traditional child relationship: {error:#}"
+                        )),
+                    })?
+                    .is_some()
                 {
                     crate::store::begin_traditional_child_run(
                         &self.metadata.store_path,

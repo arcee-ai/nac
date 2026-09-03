@@ -527,7 +527,6 @@ async fn traditional_child_cannot_create_an_autonomous_goal() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("cannot own autonomous goals"));
-    // Idle assignments stay parent-owned; a settled child may create a goal.
     assert!(crate::store::load_session_goal(&store_path, session_id)
         .unwrap()
         .is_none());
@@ -536,7 +535,7 @@ async fn traditional_child_cannot_create_an_autonomous_goal() {
 }
 
 #[tokio::test]
-async fn settled_child_can_create_an_autonomous_goal() {
+async fn settled_child_cannot_create_an_autonomous_goal() {
     let session_id = "session-settled-child-goal";
     let (parts, store_path) = test_direct_active_service(
         "settled_child_goal",
@@ -580,12 +579,17 @@ async fn settled_child_can_create_an_autonomous_goal() {
     )
     .unwrap();
 
-    let goal = parts
+    let goal_error = parts
         .service
         .create_direct_goal("continue after the assignment", None)
         .await
-        .unwrap();
-    assert_eq!(goal.objective, "continue after the assignment");
+        .unwrap_err();
+    assert!(goal_error
+        .to_string()
+        .contains("traditional child sessions cannot own autonomous goals"));
+    assert!(crate::store::load_session_goal(&store_path, session_id)
+        .unwrap()
+        .is_none());
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
