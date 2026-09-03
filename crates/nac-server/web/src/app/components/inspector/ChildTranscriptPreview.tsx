@@ -4,6 +4,7 @@ import ChildSessionActionButtons from "@/app/atoms/child-session-action-buttons"
 import SessionTypeAvatar from "@/app/atoms/session-type-avatar";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
+import { SpawnSteerInput } from "@/app/features/delegation/presentation/SpawnSteerInput";
 import { useChildSessionLive } from "@/app/hooks/useChildSessionLive";
 import { useSpawnedChildSession } from "@/app/hooks/useSpawnedChildSession";
 import type { AgentToolsGroup } from "@/app/lib/agentSegments";
@@ -118,6 +119,13 @@ export function ChildTranscriptPreview({
           })
         )}
       </div>
+      {child.missing || !child.childId ? null : (
+        <SpawnSteerInput
+          disabled={child.busy}
+          sending={child.busy}
+          onSend={child.send}
+        />
+      )}
     </div>
   );
 }
