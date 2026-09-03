@@ -97,9 +97,9 @@ const DIRECT_PANELS: SessionPanelPolicy = {
 };
 
 const TRADITIONAL_CHILD_PANELS: SessionPanelPolicy = {
-  widePanels: ["files"],
-  mobilePanels: ["files", "history"],
-  defaultPanel: "files",
+  widePanels: ["actions", "files"],
+  mobilePanels: ["actions", "files", "history"],
+  defaultPanel: "actions",
   readOnly: true,
 };
 

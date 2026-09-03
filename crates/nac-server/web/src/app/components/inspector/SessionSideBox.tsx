@@ -25,6 +25,7 @@ import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useWorkspaceRevisionChanges } from "@/app/services/queries";
+import { useRunning } from "@/app/store/runtimeStore";
 import {
   selectAgentSegment,
   selectRevision,
@@ -94,13 +95,15 @@ function FooterChip({
  *
  * Its own component because it listens to every fetch in the session, and that
  * is a busy signal during a run: re-rendering the panels off it would undo the
- * quiet it is there to report.
+ * quiet it is there to report. A live run already has its own activity UI, so
+ * the hairline stays off while the session is running.
  */
 function SideBoxProgress({ sessionId }: { sessionId: string }) {
   const fetching = useSessionFetching(sessionId);
+  const running = useRunning(sessionId);
   return (
     <ProgressLoader
-      active={fetching}
+      active={fetching && !running}
       className="absolute bottom-[-1px] left-0 right-0 z-[1]"
     />
   );
@@ -310,6 +313,7 @@ export function SessionSideBox({
                 // A tablet shows one column at a time, and a new panel opens on
                 // its selected row; a desktop split ignores the flag entirely.
                 showSidePanelList(false);
+                if (name === "delegated") selectSpawn(null);
                 onPanelChange(name);
               }}
             >

@@ -16,7 +16,6 @@ import { SpawnComposeForm } from "@/app/features/delegation/presentation/SpawnCo
 import { presentSessionAssignment } from "@/app/features/delegation/model";
 import {
   PanelEmpty,
-  PanelLoading,
   PanelSplit,
 } from "@/app/components/inspector/PanelSplit";
 import { useNow } from "@/app/hooks/useNow";
@@ -66,17 +65,17 @@ export function DelegatedWorkView({
   const assignments = useSessionSpawns(sessionId, enabled);
   const now = useNow(RECENCY_TICK_MS, enabled);
   const [compose, setCompose] = useState<SessionAssignmentChildBehavior | null>(
-    null,
+    "direct",
   );
   const rows = (assignments.data ?? []).map(presentSessionAssignment);
   const current =
     compose != null
       ? null
-      : (rows.find((row) => row.id === selected) ?? rows[0] ?? null);
+      : (rows.find((row) => row.id === selected) ?? null);
 
   useEffect(() => {
-    setCompose(null);
-  }, [sessionId]);
+    setCompose(selected ? null : "direct");
+  }, [selected, sessionId]);
 
   const groups = useMemo(() => {
     const records = [...(assignments.data ?? [])].sort((left, right) =>
@@ -183,10 +182,6 @@ export function DelegatedWorkView({
         </PanelEmpty>
       </PanelSplit>
     );
-  }
-
-  if (assignments.isPending && !assignments.data) {
-    return <PanelLoading listTitle={SESSION_PANEL_LABEL.delegated} />;
   }
 
   return (

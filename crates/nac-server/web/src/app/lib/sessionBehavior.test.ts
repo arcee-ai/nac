@@ -80,14 +80,14 @@ describe("session panel policy", () => {
     }
   });
 
-  it("keeps traditional children Files/History-only while the assignment is open", () => {
+  it("gives traditional children Actions and Files while the assignment is open", () => {
     for (const behavior of behaviors) {
       expect(
         sessionPanelPolicy(behavior, "traditional-child", "running"),
       ).toEqual({
-        widePanels: ["files"],
-        mobilePanels: ["files", "history"],
-        defaultPanel: "files",
+        widePanels: ["actions", "files"],
+        mobilePanels: ["actions", "files", "history"],
+        defaultPanel: "actions",
         readOnly: true,
       });
     }

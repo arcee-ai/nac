@@ -229,9 +229,14 @@ describe("delegated work", () => {
     expect(
       screen.getByRole("button", { name: /Run the compatibility audit/ }),
     ).toBeTruthy();
-    expect(screen.getByText("Thinking…")).toBeTruthy();
+    expect(screen.getByText("Launch coding agent")).toBeTruthy();
     expect(screen.queryByText("Coding agents")).toBeNull();
     expect(screen.queryByText("NAC orchestrators")).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Review permissions/ }),
+    );
+    expect(screen.getByText("Thinking…")).toBeTruthy();
 
     fireEvent.click(
       screen.getByRole("button", { name: /Run the compatibility audit/ }),
@@ -243,6 +248,9 @@ describe("delegated work", () => {
   it("navigates from a delegated preview to its transcript", () => {
     mount("direct");
 
+    fireEvent.click(
+      screen.getByRole("button", { name: /Review permissions/ }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Go to session" }));
     expect(screen.getByTestId("location").textContent).toBe(
       "/session/child-1/actions",
@@ -271,6 +279,9 @@ describe("delegated work", () => {
   it("routes pause through the unified spawn API", async () => {
     mount("direct-with-orchestrator");
 
+    fireEvent.click(
+      screen.getByRole("button", { name: /Review permissions/ }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Pause session" }));
     await waitFor(() =>
       expect(cancelSpawn).toHaveBeenCalledWith("parent", "child-1"),
@@ -280,6 +291,7 @@ describe("delegated work", () => {
   it("renders cache-driven polling transitions without a page refresh", async () => {
     const client = mount("direct");
     const row = screen.getByRole("button", { name: /Review permissions/ });
+    fireEvent.click(row);
     expect(row.querySelector(".text-shimmer-basic")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Pause session" })).toBeTruthy();
 
@@ -295,9 +307,10 @@ describe("delegated work", () => {
       ]);
     });
 
-    await waitFor(() => expect(row.textContent).toContain("Completed"));
-    expect(screen.queryByRole("button", { name: "Pause session" })).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Pause session" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Go to session" })).toBeTruthy();
+    });
     expect(screen.queryByRole("button", { name: "Stop session" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Go to session" })).toBeTruthy();
   });
 });

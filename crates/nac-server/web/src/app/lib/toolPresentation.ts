@@ -148,7 +148,7 @@ function humanize(value: string): string {
   return words ? words[0].toUpperCase() + words.slice(1) : "Tool call";
 }
 
-function toolLabel(name: string): string {
+export function toolLabel(name: string): string {
   const known = TOOL_LABELS[name];
   if (known) return known;
   if (name.startsWith("mcp__")) {

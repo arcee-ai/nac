@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   Button,
@@ -18,6 +19,7 @@ import {
   KeyboardShortcut,
   Loader,
   LoaderSize,
+  ShimmerLoader,
   StickyButton,
   Popover,
   PopoverPlacement,
@@ -29,6 +31,7 @@ import {
   PermissionSettingsOpener,
   usePermissionAskPending,
 } from "@/app/components/inspector/PermissionControls";
+import { PermissionModal } from "@/app/components/modals/PermissionModal";
 import { ChildControls } from "@/app/components/inspector/ChildControls";
 import { GoalControls } from "@/app/components/inspector/GoalControls";
 import { QueuedMessages } from "@/app/components/inspector/QueuedMessages";
@@ -56,6 +59,7 @@ import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useNow } from "@/app/hooks/useNow";
 import { usePromptHistoryPreview } from "@/app/hooks/usePromptHistoryPreview";
 import { perfRender } from "@/app/lib/perfDebug";
+import { routes } from "@/app/lib/routes";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import {
   skillReferenceQuery,
@@ -92,6 +96,7 @@ import {
   useRunning,
   useSessionSpend,
 } from "@/app/store/runtimeStore";
+import { revealSidePanel } from "@/app/store/sessionLayoutStore";
 import {
   markSshConnected,
   markSshDisconnected,
@@ -279,6 +284,79 @@ function contextGauge(used: number | null, resolved: ResolvedCatalogModel) {
 }
 
 /**
+ * Composer chrome while ownership is still unknown. Same card as the live
+ * field, with Figma ChatInputBoxLoading shimmers in place of the controls.
+ */
+function ChatInputBoxLoading({
+  isMobile,
+  isTablet,
+  running,
+  stopping,
+  onStop,
+}: {
+  isMobile: boolean;
+  isTablet: boolean;
+  running: boolean;
+  stopping: boolean;
+  onStop: () => void;
+}) {
+  return (
+    <div
+      className={cn("flex flex-col gap-1", isMobile && "px-4 pt-8 pb-8")}
+      style={isMobile ? GROUND_FADE_UP : undefined}
+    >
+      <div
+        className={cn(
+          "flex flex-col",
+          isMobile
+            ? "gap-3"
+            : isTablet
+              ? "gap-3 px-2 pt-2 pb-4 rounded-[12px] bg-elevation-level-1 shadow-2xl"
+              : "gap-4 p-4 rounded-[8px] bg-elevation-level-1 shadow-2xl",
+        )}
+        role="status"
+        aria-busy="true"
+        aria-label="Loading session controls"
+      >
+        <span className="sr-only">Loading session controls…</span>
+        <ShimmerLoader
+          rows={1}
+          className="w-full gap-0"
+          rowClassName={isMobile ? "h-[40px]" : "h-[48px]"}
+        />
+        <div className="flex items-center gap-[10px] w-full">
+          <div className="flex min-w-0 flex-1 items-center">
+            <ShimmerLoader
+              rows={1}
+              className="w-full max-w-[200px] gap-0"
+              rowClassName="h-6"
+            />
+          </div>
+          {running ? (
+            <Button
+              size={ButtonSize.Small}
+              variant={ButtonVariant.GhostDestructive}
+              content={ButtonContent.Text}
+              aria-label="Stop run"
+              loading={stopping}
+              onClick={onStop}
+            >
+              Stop
+            </Button>
+          ) : (
+            <ShimmerLoader
+              rows={1}
+              className="w-16 shrink-0 gap-0"
+              rowClassName="h-6"
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Message field plus the run status bar that replaced the old metrics grid:
  * model, environment, cumulative token usage and the run timer.
  */
@@ -295,6 +373,7 @@ export function ChatInputBox({
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   // Everything narrower than the desktop column drops what will not fit there:
@@ -333,9 +412,9 @@ export function ChatInputBox({
     entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
   const direct =
     behavior === "direct" || behavior === "direct-with-orchestrator";
-  const readOnly = assignmentIsOpen(
-    entry?.lineage?.assignment_status ?? snapshot?.lineage?.assignment_status,
-  );
+  const lineage = entry?.lineage ?? snapshot?.lineage;
+  const readOnly = assignmentIsOpen(lineage?.assignment_status);
+  const parentSessionId = lineage?.parent_session_id ?? null;
   const ownershipKnown = entry !== null || snapshot !== null;
   const inboxQuery = useSessionInbox(sessionId, direct && !readOnly);
   const goalQuery = useSessionGoal(sessionId, direct && !readOnly);
@@ -343,6 +422,8 @@ export function ChatInputBox({
   const updateGoal = useUpdateGoal();
   const clearGoal = useClearGoal();
   const [goalOpenRequest, setGoalOpenRequest] = useState(0);
+  const [permissionOpen, setPermissionOpen] = useState(false);
+  const openPermissions = useCallback(() => setPermissionOpen(true), []);
   const {
     data: commandDefinitions,
     isError: commandsFailed,
@@ -903,8 +984,19 @@ export function ChatInputBox({
     await actions.stopRun(sessionId);
   }, [actions, sessionId]);
 
+  const goToParent = useCallback(() => {
+    if (!parentSessionId) return;
+    revealSidePanel(isMobile);
+    navigate(routes.session(parentSessionId, "delegated"), {
+      state: { openSpawn: sessionId },
+    });
+  }, [isMobile, navigate, parentSessionId, sessionId]);
+
   const settingsButton = (
-    <Tooltip title="Session settings" position={TooltipPosition.TopLeft}>
+    <Tooltip
+      title={permissionPending ? "Permission required" : "Session settings"}
+      position={TooltipPosition.TopLeft}
+    >
       <Button
         // A phone gets the design's 40px circle around a 24px glyph; the status
         // bar it sits in elsewhere has room for the 24px square only.
@@ -917,18 +1009,30 @@ export function ChatInputBox({
         }
         content={ButtonContent.Icon}
         aria-label={
-          permissionPending
-            ? "Session settings (permission required)"
-            : "Session settings"
+          permissionPending ? "Permission required" : "Session settings"
         }
-        onClick={() => actions.settings(sessionId)}
+        onClick={() =>
+          permissionPending ? openPermissions() : actions.settings(sessionId)
+        }
       >
         <Icon iconName={IconName.Gear} size={isMobile ? undefined : 16} />
       </Button>
     </Tooltip>
   );
   const permissionOpener = (
-    <PermissionSettingsOpener sessionId={sessionId} behavior={behavior} />
+    <>
+      <PermissionSettingsOpener
+        sessionId={sessionId}
+        behavior={behavior}
+        onAsk={openPermissions}
+      />
+      <PermissionModal
+        open={permissionOpen}
+        sessionId={sessionId}
+        behavior={behavior}
+        onClose={() => setPermissionOpen(false)}
+      />
+    </>
   );
 
   // Orchestrator Send is Stop for the whole run. Agent Send enqueues while
@@ -1285,20 +1389,13 @@ export function ChatInputBox({
     return (
       <>
         {permissionOpener}
-        <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
-          <span className="flex-1">Loading session controls…</span>
-          {running && (
-            <Button
-              size={ButtonSize.Small}
-              variant={ButtonVariant.GhostDestructive}
-              content={ButtonContent.Text}
-              aria-label="Stop run"
-              onClick={() => void stop()}
-            >
-              Stop
-            </Button>
-          )}
-        </div>
+        <ChatInputBoxLoading
+          isMobile={isMobile}
+          isTablet={isTablet}
+          running={running}
+          stopping={stopping}
+          onStop={() => void stop()}
+        />
       </>
     );
   }
@@ -1307,8 +1404,18 @@ export function ChatInputBox({
     return (
       <>
         {permissionOpener}
-        <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
+        <div className="flex items-center gap-3 rounded-[8px] bg-elevation-level-2 p-4 pb-6 text-small text-info-primary shadow-2xl">
           <span className="flex-1">{DELEGATED_READONLY_HINT}</span>
+          {parentSessionId ? (
+            <Button
+              size={ButtonSize.Medium}
+              variant={ButtonVariant.Primary}
+              content={ButtonContent.Text}
+              onClick={goToParent}
+            >
+              Go to parent
+            </Button>
+          ) : null}
           {settingsButton}
         </div>
       </>

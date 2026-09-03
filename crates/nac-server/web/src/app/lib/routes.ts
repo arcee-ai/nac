@@ -64,6 +64,15 @@ export const routes = {
   designPreview: () => "/design",
 };
 
+/** Child to open in Related Sessions after navigating to its parent. */
+export function spawnIdFromLocationState(state: unknown): string | null {
+  if (!state || typeof state !== "object" || !("openSpawn" in state)) {
+    return null;
+  }
+  const value = (state as { openSpawn: unknown }).openSpawn;
+  return typeof value === "string" && value ? value : null;
+}
+
 /**
  * Session the path points at, or null on any other screen. The top bar sits in
  * the layout route, above the match that carries `:sessionId`, so it cannot
