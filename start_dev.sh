@@ -13,9 +13,11 @@
 # open its source. It is absent from the committed build that ./start.sh serves.
 #
 # Environment:
-#   NAC_BIND      address nac-web binds to (default 127.0.0.1:3210)
-#   VITE_PORT     port for the Vite dev server (default 5173)
-#   NAC_PROFILE   cargo profile for nac-web: debug (default) or release
+#   NAC_BIND        address nac-web binds to (default 127.0.0.1:3210)
+#   VITE_PORT       port for the Vite dev server (default 5173)
+#   NAC_PROFILE     cargo profile for nac-web: debug (default) or release
+#   NAC_STORE_PATH  SQLite store (default ~/.config/nac/linked.db).
+#                   Set to ~/.config/nac/store.db to use the default store.
 
 set -euo pipefail
 
@@ -25,6 +27,7 @@ cd "$ROOT"
 BIND="${NAC_BIND:-127.0.0.1:3210}"
 VITE_PORT="${VITE_PORT:-5173}"
 PROFILE="${NAC_PROFILE:-debug}"
+STORE_PATH="${NAC_STORE_PATH:-$HOME/.config/nac/linked.db}"
 WEB_DIR="crates/nac-server/web"
 
 for tool in cargo npm curl; do
@@ -94,9 +97,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "==> starting nac-web on http://$BIND"
+echo "==> store $STORE_PATH"
 # The browser should open on the Vite origin below, not the API bind.
 # `-y` skips the project-folder prompt so a backgrounded API never blocks.
-"target/$PROFILE/nac-web" --bind "$BIND" --no-open -y &
+"target/$PROFILE/nac-web" --bind "$BIND" --no-open -y --store-path "$STORE_PATH" &
 BACKEND_PID=$!
 
 # Vite would otherwise start proxying to a socket that is not listening yet and

@@ -1,4 +1,4 @@
-.PHONY: all setup build dev demo release install ci test test-rust test-web test-source-size generate-api-contract test-api-contract test-assets test-e2e test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev demo linked release install ci test test-rust test-web test-source-size generate-api-contract test-api-contract test-assets test-e2e test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -10,6 +10,7 @@ DEV_BIND ?= 127.0.0.1:3210
 DEV_URL ?= http://$(DEV_BIND)/
 DEV_STORE_PATH ?=
 DEMO_STORE_PATH ?= $(HOME)/.config/nac/dev.db
+LINKED_STORE_PATH ?= $(HOME)/.config/nac/linked.db
 
 ifeq ($(shell uname -s),Darwin)
 BROWSER_OPEN ?= open
@@ -81,6 +82,10 @@ dev:
 demo:
 	npm --prefix $(WEB_DIR) run build
 	$(MAKE) dev DEV_STORE_PATH="$(DEMO_STORE_PATH)"
+
+## Run with an isolated linked-chat store (does not migrate store.db)
+linked:
+	$(MAKE) dev DEV_STORE_PATH="$(LINKED_STORE_PATH)"
 
 ## Build the nac-web binary (release)
 release:
@@ -223,6 +228,7 @@ help:
 		'  build        Build nac-web (debug) [default]' \
 		'  dev          Build and run nac-web, then open it in the default browser' \
 		'  demo         Rebuild production assets and run with ~/.config/nac/dev.db' \
+		'  linked       Run with ~/.config/nac/linked.db (schema experiments)' \
 		'  release      Build nac-web (release)' \
 		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
 		'  ci           Run formatting, lint, and test gates' \
