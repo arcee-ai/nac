@@ -142,11 +142,6 @@ fn create_managed_orchestrator_relationship_with_connection(
             "managed orchestrators require a direct-with-orchestrator parent"
         ));
     }
-    if assignment_is_open_with_connection(connection, parent_session_id)? {
-        return Err(anyhow!(
-            "running assigned sessions cannot launch managed orchestrators"
-        ));
-    }
     if behavior(orchestrator_session_id)? != "orchestrator" {
         return Err(anyhow!("managed session must use orchestrator behavior"));
     }

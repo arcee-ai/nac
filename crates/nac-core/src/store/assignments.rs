@@ -31,16 +31,6 @@ pub fn assignment_is_open(path: &Path, session_id: &str) -> Result<bool> {
     Ok(load_assignment(path, session_id)?.is_some_and(|assignment| assignment.status.is_open()))
 }
 
-pub(crate) fn assignment_is_open_with_connection(
-    connection: &rusqlite::Connection,
-    session_id: &str,
-) -> Result<bool> {
-    if let Some(status) = assignment_status_with_connection(connection, session_id)? {
-        return Ok(status.is_open());
-    }
-    Ok(false)
-}
-
 pub fn assignment_is_running(path: &Path, session_id: &str) -> Result<bool> {
     Ok(load_assignment(path, session_id)?
         .is_some_and(|assignment| assignment.status == TraditionalChildStatus::Running))
@@ -48,20 +38,6 @@ pub fn assignment_is_running(path: &Path, session_id: &str) -> Result<bool> {
 
 pub fn assignment_frozen_message_count(path: &Path, session_id: &str) -> Result<Option<u64>> {
     Ok(load_assignment(path, session_id)?.and_then(|assignment| assignment.frozen_message_count))
-}
-
-fn assignment_status_with_connection(
-    connection: &rusqlite::Connection,
-    session_id: &str,
-) -> Result<Option<TraditionalChildStatus>> {
-    let status: Option<String> = connection
-        .query_row(
-            "SELECT status FROM session_assignments WHERE child_session_id = ?1",
-            params![session_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    status.map(|status| status.parse()).transpose()
 }
 
 pub(crate) fn session_transcript_len(

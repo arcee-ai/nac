@@ -1112,35 +1112,6 @@ fn failed_tool_round_ignores_successful_results() {
 }
 
 #[test]
-fn assignment_prompt_rewrite_keeps_unknown_prefix() {
-    let current = "foreign head\n\n## Project\nKeep this suffix.";
-    let rewritten = super::rewrite_direct_assignment_system_prompt(
-        current,
-        "/workspace",
-        Some("review the implementation"),
-        true,
-        false,
-    );
-    assert_eq!(rewritten, current);
-}
-
-#[test]
-fn assignment_prompt_rewrite_swaps_known_head_and_keeps_suffix() {
-    let agent = render_direct_system_prompt("/workspace");
-    let current = format!("{agent}\n\n## Project\nKeep this suffix.");
-    let rewritten = super::rewrite_direct_assignment_system_prompt(
-        &current,
-        "/workspace",
-        Some("review the implementation"),
-        true,
-        false,
-    );
-    let child = render_general_child_system_prompt("/workspace", "review the implementation");
-    assert!(rewritten.starts_with(&child));
-    assert!(rewritten.ends_with("## Project\nKeep this suffix."));
-}
-
-#[test]
 fn model_request_advertises_allison_spawn_names() {
     let root =
         std::env::temp_dir().join(format!("nac_allison_spawn_names_{}", uuid::Uuid::new_v4()));

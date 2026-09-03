@@ -424,7 +424,6 @@ pub(super) async fn build_resume_config_from_snapshot(
     {
         snapshot.messages = repaired_blob;
     }
-    agent.sync_assignment_surface()?;
     agent.restore_compaction_checkpoint()?;
 
     let session_id = snapshot.session_id.clone();

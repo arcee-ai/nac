@@ -10,7 +10,7 @@ DEV_BIND ?= 127.0.0.1:3210
 DEV_URL ?= http://$(DEV_BIND)/
 DEV_STORE_PATH ?=
 DEMO_STORE_PATH ?= $(HOME)/.config/nac/dev.db
-LINKED_STORE_PATH ?= $(HOME)/.config/nac/linked.db
+LINKED_STORE_PATH ?= $(HOME)/.config/nac/linked-allison-demo.db
 
 ifeq ($(shell uname -s),Darwin)
 BROWSER_OPEN ?= open
@@ -83,7 +83,7 @@ demo:
 	npm --prefix $(WEB_DIR) run build
 	$(MAKE) dev DEV_STORE_PATH="$(DEMO_STORE_PATH)"
 
-## Run with an isolated linked-chat store (does not migrate store.db)
+## Run with an isolated allison-runtime store (does not migrate store.db)
 linked:
 	$(MAKE) dev DEV_STORE_PATH="$(LINKED_STORE_PATH)"
 
@@ -228,7 +228,7 @@ help:
 		'  build        Build nac-web (debug) [default]' \
 		'  dev          Build and run nac-web, then open it in the default browser' \
 		'  demo         Rebuild production assets and run with ~/.config/nac/dev.db' \
-		'  linked       Run with ~/.config/nac/linked.db (schema experiments)' \
+		'  linked       Run with ~/.config/nac/linked-allison-demo.db (this branch)' \
 		'  release      Build nac-web (release)' \
 		'  install      Install nac-web into $$INSTALL_ROOT/bin (~/.local)' \
 		'  ci           Run formatting, lint, and test gates' \

@@ -130,49 +130,6 @@ pub struct AgentConfig {
 
 /// Light-model addendum to the orchestrator system prompt: names the light
 /// model so weight classification has a real signal.
-fn rewrite_direct_assignment_system_prompt(
-    current: &str,
-    working_directory: &str,
-    description: Option<&str>,
-    is_child: bool,
-    with_orchestrator: bool,
-) -> String {
-    let direct_base = render_direct_system_prompt(working_directory);
-    let dwo_base = render_direct_with_orchestrator_system_prompt(working_directory);
-    let child_base =
-        description.map(|value| render_general_child_system_prompt(working_directory, value));
-    let next_base = if is_child {
-        child_base.clone().unwrap_or_else(|| {
-            if with_orchestrator {
-                dwo_base.clone()
-            } else {
-                direct_base.clone()
-            }
-        })
-    } else if with_orchestrator {
-        dwo_base.clone()
-    } else {
-        direct_base.clone()
-    };
-    if current.starts_with(&next_base) {
-        return current.to_string();
-    }
-    let Some(suffix) = current
-        .strip_prefix(&dwo_base)
-        .or_else(|| current.strip_prefix(&direct_base))
-        .or_else(|| {
-            child_base
-                .as_deref()
-                .and_then(|base| current.strip_prefix(base))
-        })
-    else {
-        return current.to_string();
-    };
-    let mut next = next_base;
-    next.push_str(suffix);
-    next
-}
-
 fn light_model_prompt_guidance(light: &ModelClient) -> String {
     format!(
         "\n\nA light worker model is configured. Every thread dispatch requires a \
@@ -188,8 +145,6 @@ pub struct Agent {
     client: ModelClient,
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
-    extra_tool_defs: Vec<ToolDefinition>,
-    working_directory: String,
     admission_controlled_tools: bool,
     direct_primary: bool,
     web_retrieval_eligible: bool,
@@ -349,11 +304,6 @@ impl Agent {
                 system_prompt.push_str(&light_model_prompt_guidance(light));
             }
         }
-        let extra_tool_defs = if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
-            config.extra_tool_defs.clone()
-        } else {
-            Vec::new()
-        };
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
         }
@@ -428,8 +378,6 @@ impl Agent {
             client,
             messages,
             tool_defs,
-            extra_tool_defs,
-            working_directory: cwd,
             admission_controlled_tools: mode == AgentMode::Direct,
             direct_primary: mode == AgentMode::Direct,
             web_retrieval_eligible,
@@ -486,7 +434,6 @@ impl Agent {
     /// and the tool names are replaced together before the request and the
     /// resulting runtime is cloned into exactly that response's tool round.
     fn refresh_model_request_capabilities(&mut self) -> Result<Vec<ToolDefinition>> {
-        self.sync_assignment_surface()?;
         let credential = if self.web_retrieval_eligible {
             crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV)?
         } else {
@@ -505,14 +452,7 @@ impl Agent {
             .map(Arc::new);
         let mut definitions = self.tool_defs.clone();
         if credential.is_some() {
-            let has_web = definitions.iter().any(|definition| {
-                tools::WEB_TOOL_NAMES
-                    .iter()
-                    .any(|name| definition.function.name == *name)
-            });
-            if !has_web {
-                definitions.extend(crate::tools::web::definitions());
-            }
+            definitions.extend(crate::tools::web::definitions());
         }
         self.tool_runtime.allowed_tools = Some(Arc::new(
             definitions
@@ -524,56 +464,11 @@ impl Agent {
         definitions
     }
 
-    pub(crate) fn sync_assignment_surface(&mut self) -> Result<()> {
-        if !self.direct_primary {
-            return Ok(());
-        }
-        let Some(session_id) = self.tool_runtime.session_id.clone() else {
-            return Ok(());
-        };
-        let child =
-            crate::store::load_traditional_child(&self.tool_runtime.store_path, &session_id)?;
-        let with_orchestrator = child.is_none()
-            && crate::sessions::load_session(&self.tool_runtime.store_path, &session_id)
-                .ok()
-                .is_some_and(|snapshot| {
-                    snapshot.behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator
-                });
-        let image_read = self.client.supports_image_tool_results();
-        let mut tool_defs = if child.is_some() {
-            tools::worker_tool_definitions(image_read)
-        } else if with_orchestrator {
-            tools::direct_with_orchestrator_tool_definitions(image_read)
-        } else {
-            tools::direct_tool_definitions(image_read)
-        };
-        tool_defs.extend(self.extra_tool_defs.iter().cloned());
-        self.tool_defs = tool_defs;
-        self.web_retrieval_eligible = child.is_none();
-        if child.is_none() && self.tool_runtime.goal_runtime.is_none() {
-            self.tool_runtime.goal_runtime = Some(Arc::new(crate::goals::GoalRuntime::new(
-                self.tool_runtime.store_path.clone(),
-                session_id,
-            )));
-        }
-        if let Some(Message::System { content }) = self.messages.first_mut() {
-            *content = rewrite_direct_assignment_system_prompt(
-                content,
-                &self.working_directory,
-                child.as_ref().map(|record| record.description.as_str()),
-                child.is_some(),
-                with_orchestrator,
-            );
-        }
-        Ok(())
-    }
-
     #[cfg(test)]
     fn model_request_capabilities_for_test(
         &mut self,
         credential: Option<&str>,
     ) -> Vec<ToolDefinition> {
-        self.sync_assignment_surface().expect("assignment surface");
         self.install_model_request_capabilities(credential.map(str::to_string))
     }
 

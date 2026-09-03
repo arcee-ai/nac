@@ -258,8 +258,10 @@ fn create_traditional_child_relationship_with_connection(
     if parent_behavior == "orchestrator" {
         return Err(anyhow!(crate::sessions::NAC_CANNOT_CREATE_SESSIONS));
     }
-    if assignment_is_open_with_connection(connection, parent_session_id)? {
-        return Err(anyhow!("running assigned sessions cannot launch children"));
+    if load_child_with_connection(connection, parent_session_id)?.is_some() {
+        return Err(anyhow!(
+            "traditional child nesting limit reached (1): child sessions cannot launch children"
+        ));
     }
     let child_behavior: String = connection
         .query_row(
@@ -658,49 +660,16 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert!(
-            create_traditional_child_relationship(
-                &path,
-                "child",
-                "grandchild",
-                GENERAL_CHILD_PROFILE,
-                "nested",
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("running assigned sessions cannot launch children")
-        );
-
-        begin_traditional_child_run(
-            &path,
-            "child",
-            "run-1",
-            TraditionalChildExecutionMode::Foreground,
-        )
-        .unwrap();
-        settle_traditional_child_run(
-            &path,
-            "child",
-            "run-1",
-            TraditionalChildTerminal {
-                status: TraditionalChildStatus::Completed,
-                report: Some("done".to_string()),
-                failure: None,
-                change_summary: None,
-                verification_summary: None,
-            },
-        )
-        .unwrap();
-        let grandchild = create_traditional_child_relationship(
+        assert!(create_traditional_child_relationship(
             &path,
             "child",
             "grandchild",
             GENERAL_CHILD_PROFILE,
-            "nested after settle",
+            "nested",
         )
-        .unwrap();
-        assert_eq!(grandchild.parent_session_id, "child");
-        assert_eq!(grandchild.status, TraditionalChildStatus::Idle);
+        .unwrap_err()
+        .to_string()
+        .contains("nesting limit"));
     }
 
     #[test]

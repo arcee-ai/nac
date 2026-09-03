@@ -16,7 +16,7 @@
 #   NAC_BIND        address nac-web binds to (default 127.0.0.1:3210)
 #   VITE_PORT       port for the Vite dev server (default 5173)
 #   NAC_PROFILE     cargo profile for nac-web: debug (default) or release
-#   NAC_STORE_PATH  SQLite store (default ~/.config/nac/linked.db).
+#   NAC_STORE_PATH  SQLite store (default ~/.config/nac/linked-allison-demo.db).
 #                   Set to ~/.config/nac/store.db to use the default store.
 
 set -euo pipefail
@@ -27,7 +27,7 @@ cd "$ROOT"
 BIND="${NAC_BIND:-127.0.0.1:3210}"
 VITE_PORT="${VITE_PORT:-5173}"
 PROFILE="${NAC_PROFILE:-debug}"
-STORE_PATH="${NAC_STORE_PATH:-$HOME/.config/nac/linked.db}"
+STORE_PATH="${NAC_STORE_PATH:-$HOME/.config/nac/linked-allison-demo.db}"
 WEB_DIR="crates/nac-server/web"
 
 for tool in cargo npm curl; do

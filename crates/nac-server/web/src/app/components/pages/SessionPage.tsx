@@ -26,6 +26,7 @@ import {
 import { cn } from "@/app/lib/cn";
 import { parseStoreTime } from "@/app/lib/format";
 import { perfRender } from "@/app/lib/perfDebug";
+import { primarySessions } from "@/app/lib/projects";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
 import {
@@ -238,8 +239,10 @@ export default function SessionPage() {
   // router lands on a sibling. Hash history applies that navigation on a later
   // tick than the cache update.
   const projectId = (entry ? entry.summary.project_id : heldProjectId) ?? null;
+  // Spawned agents and orchestrators live in Related Sessions, not as extra
+  // tabs. The strip is user-created chats only (`lineage == null`).
   const projectSessions = projectId
-    ? allSessions
+    ? primarySessions(allSessions)
         .filter((session) => session.summary.project_id === projectId)
         .sort(
           (a, b) =>
