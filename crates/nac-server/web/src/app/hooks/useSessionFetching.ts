@@ -24,7 +24,19 @@ const MIN_VISIBLE_MS = 500;
  * refreshing", not to strobe once per request.
  */
 export function useSessionFetching(sessionId: string): boolean {
-  const fetching = useIsFetching({ queryKey: queryKeys.sessionRoot(sessionId) }) > 0;
+  const fetching =
+    useIsFetching({
+      queryKey: queryKeys.sessionRoot(sessionId),
+      predicate: (query) => {
+        // Inbox and spawn lists poll on a timer. Their first load still
+        // counts; a heartbeat against a warm cache does not, or the
+        // delegated panel would keep the hairline lit during a run.
+        if (query.state.data === undefined) return true;
+        const interval = (query.options as { refetchInterval?: unknown })
+          .refetchInterval;
+        return !(typeof interval === "number" && interval > 0);
+      },
+    }) > 0;
   const [visible, setVisible] = useState(false);
   const shownAt = useRef(0);
 
