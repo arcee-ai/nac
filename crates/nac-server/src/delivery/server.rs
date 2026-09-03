@@ -349,6 +349,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::session_state::update_direct_inbox_item,
             delivery::session_state::cancel_direct_inbox_item
         ))
+        .routes(routes!(delivery::session_state::reorder_direct_inbox_items))
         .routes(routes!(
             delivery::session_state::get_direct_goal,
             delivery::session_state::create_direct_goal

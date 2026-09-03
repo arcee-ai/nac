@@ -559,9 +559,24 @@ export const api = {
       body: { delivery, prompt },
     }),
 
-  updateInboxItem: (id: string, itemId: number, expectedVersion: number, delivery: InboxDelivery) =>
+  updateInboxItem: (
+    id: string,
+    itemId: number,
+    expectedVersion: number,
+    delivery: InboxDelivery,
+    prompt?: string,
+  ) =>
     request<InboxItem>("PATCH", `${sessionPath(id)}/inbox/${itemId}`, {
-      body: { expected_version: expectedVersion, delivery },
+      body: {
+        expected_version: expectedVersion,
+        delivery,
+        ...(prompt !== undefined ? { prompt } : {}),
+      },
+    }),
+
+  reorderInboxItems: (id: string, itemIds: number[]) =>
+    request<InboxItem[]>("PUT", `${sessionPath(id)}/inbox/order`, {
+      body: { item_ids: itemIds },
     }),
 
   cancelInboxItem: (id: string, itemId: number, expectedVersion: number) =>

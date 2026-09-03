@@ -157,7 +157,7 @@ function humanize(value: string): string {
   return words ? words[0].toUpperCase() + words.slice(1) : "Tool call";
 }
 
-function toolLabel(name: string): string {
+export function toolLabel(name: string): string {
   const known = TOOL_LABELS[name];
   if (known) return known;
   if (name.startsWith("mcp__")) {
@@ -318,6 +318,41 @@ function summaryFromCallArguments(name: string, call: ToolCall): string | null {
   }
 }
 
+function jsonStringField(value: unknown, key: string): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" && field.trim() ? field : null;
+}
+
+/** Keep newlines in command output; strip other control characters. */
+function sanitizeCommandOutput(value: string): string {
+  return [...value]
+    .map((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      if (code === 9 || code === 10) return character;
+      return code < 32 || code === 127 ? " " : character;
+    })
+    .join("")
+    .trim();
+}
+
+/** One-shot Run command results are pretty JSON; the Actions card wants stdout. */
+function execCommandResultPreview(resultText: string | null): string | null {
+  if (!resultText) return null;
+  try {
+    const parsed: unknown = JSON.parse(resultText);
+    const stdout = jsonStringField(parsed, "stdout_preview");
+    if (stdout) return sanitizeCommandOutput(stdout);
+    const stderr = jsonStringField(parsed, "stderr_preview");
+    if (stderr) return sanitizeCommandOutput(stderr);
+    const pty = jsonStringField(parsed, "content_preview");
+    if (pty) return sanitizeCommandOutput(pty);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** File contents stay out; glob needs the structured entries JSON to list paths. */
 function resultPreviewFromToolBody(
   name: string,
@@ -326,6 +361,7 @@ function resultPreviewFromToolBody(
   if (!resultText) return null;
   if (name === "read" || name === "write" || name === "edit") return null;
   if (name === "glob") return resultText.trim() || null;
+  if (name === "exec_command") return execCommandResultPreview(resultText);
   return bounded(resultText, PREVIEW_LIMIT) || null;
 }
 
@@ -384,11 +420,18 @@ export function presentToolCall({
   else if (active) status = "pending";
   else status = "interrupted";
 
-  let resultPreview =
-    name === "glob" && resultText?.trim()
-      ? resultText
-      : bounded(events?.finished?.content_preview, PREVIEW_LIMIT) ||
-        resultPreviewFromToolBody(name, resultText);
+  let resultPreview: string | null;
+  if (name === "glob" && resultText?.trim()) {
+    resultPreview = resultText;
+  } else if (name === "exec_command") {
+    resultPreview =
+      execCommandResultPreview(resultText) ||
+      bounded(events?.finished?.content_preview, PREVIEW_LIMIT);
+  } else {
+    resultPreview =
+      bounded(events?.finished?.content_preview, PREVIEW_LIMIT) ||
+      resultPreviewFromToolBody(name, resultText);
+  }
   if (!resultPreview && resultHasImage) resultPreview = "Image result";
   if (!resultPreview && status === "cancelled")
     resultPreview = "No result was retained.";

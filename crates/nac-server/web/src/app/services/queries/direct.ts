@@ -304,16 +304,32 @@ export function useUpdateInboxItem() {
       itemId,
       expectedVersion,
       delivery,
+      prompt,
     }: {
       sessionId: string;
       itemId: number;
       expectedVersion: number;
       delivery: InboxDelivery;
-    }) => api.updateInboxItem(sessionId, itemId, expectedVersion, delivery),
+      prompt?: string;
+    }) =>
+      prompt === undefined
+        ? api.updateInboxItem(sessionId, itemId, expectedVersion, delivery)
+        : api.updateInboxItem(sessionId, itemId, expectedVersion, delivery, prompt),
     onSuccess: (item, { sessionId }) => {
       client.setQueryData<InboxItem[]>(queryKeys.sessionInbox(sessionId), (items = []) =>
         items.map((candidate) => (candidate.id === item.id ? item : candidate)),
       );
+    },
+  });
+}
+
+export function useReorderInboxItems() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, itemIds }: { sessionId: string; itemIds: number[] }) =>
+      api.reorderInboxItems(sessionId, itemIds),
+    onSuccess: (items, { sessionId }) => {
+      client.setQueryData(queryKeys.sessionInbox(sessionId), items);
     },
   });
 }

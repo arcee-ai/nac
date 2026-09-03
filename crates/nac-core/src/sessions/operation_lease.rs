@@ -453,12 +453,10 @@ mod tests {
         ));
         assert_eq!(acquire.to_string(), "session operation lease failed");
         assert!(!acquire.to_string().contains(CANARY));
-        assert!(
-            std::error::Error::source(&acquire)
-                .unwrap()
-                .to_string()
-                .contains(CANARY)
-        );
+        assert!(std::error::Error::source(&acquire)
+            .unwrap()
+            .to_string()
+            .contains(CANARY));
         let chained = anyhow::Error::new(acquire);
         assert_eq!(chained.to_string(), "session operation lease failed");
         assert!(format!("{chained:#}").contains(CANARY));
@@ -471,12 +469,10 @@ mod tests {
             "failed to validate session operation lease"
         );
         assert!(!validate.to_string().contains(CANARY));
-        assert!(
-            std::error::Error::source(&validate)
-                .unwrap()
-                .to_string()
-                .contains(CANARY)
-        );
+        assert!(std::error::Error::source(&validate)
+            .unwrap()
+            .to_string()
+            .contains(CANARY));
 
         let legacy_alias: sessions::SessionRunLeaseError =
             SessionOperationLeaseError::Store(anyhow::anyhow!("legacy source: {CANARY}"));
@@ -519,7 +515,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn lock_paths_are_private_and_reject_symlink_files() {
-        use std::os::unix::fs::{PermissionsExt, symlink};
+        use std::os::unix::fs::{symlink, PermissionsExt};
 
         let store_path = test_store("secure_path");
         store::initialize(&store_path).unwrap();

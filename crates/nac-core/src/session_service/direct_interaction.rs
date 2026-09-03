@@ -150,6 +150,7 @@ impl SessionService {
         item_id: i64,
         expected_version: i64,
         delivery: crate::store::InboxDelivery,
+        content: Option<&str>,
     ) -> Result<crate::store::SessionInboxRecord> {
         self.require_direct_primary_behavior()?;
         let session_id = self
@@ -157,14 +158,26 @@ impl SessionService {
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let (record, target_run_id) = {
+        let (record, interrupt_run_id) = {
             let active = self.lock_active_operation();
-            let target_run_id = match (delivery, active.as_ref()) {
+            // Queue-list "steer now" interrupts a live agent and promotes that
+            // item as the successor prompt. Leave `target_run_id` unset so the
+            // dying run cannot consume the item into a cancelled transcript.
+            // Task-less helper runs still bind for in-run injection.
+            let interrupt_run_id = match (delivery, active.as_ref()) {
                 (crate::store::InboxDelivery::Steer, Some(ActiveSessionOperation::Run(run)))
-                    if !run.finishing =>
+                    if !run.finishing && run.task.is_some() =>
                 {
-                    Some(run.snapshot.run_id.to_string())
+                    Some(run.snapshot.run_id.clone())
                 }
+                _ => None,
+            };
+            let target_run_id = match (delivery, active.as_ref(), interrupt_run_id.as_ref()) {
+                (
+                    crate::store::InboxDelivery::Steer,
+                    Some(ActiveSessionOperation::Run(run)),
+                    None,
+                ) if !run.finishing => Some(run.snapshot.run_id.to_string()),
                 _ => None,
             };
             let record = crate::store::update_pending_session_inbox_item(
@@ -174,13 +187,71 @@ impl SessionService {
                 expected_version,
                 delivery,
                 target_run_id.as_deref(),
+                content,
             )?;
-            (record, target_run_id)
+            (record, interrupt_run_id)
         };
-        if target_run_id.is_none() {
+        if let Some(run_id) = interrupt_run_id {
+            self.move_pending_direct_inbox_item_to_front(session_id, record.id)?;
+            match self.request_cancel(&run_id).await {
+                Ok(()) | Err(SessionCancelError::NotActive { .. }) => {}
+                Err(error) => return Err(error.into()),
+            }
+            if !self.has_active_operation() {
+                self.start_next_direct_inbox_item().await?;
+            }
+            return crate::store::load_session_inbox_item(
+                &self.metadata.store_path,
+                session_id,
+                record.id,
+            );
+        }
+        if record.target_run_id.is_none() {
             self.start_next_direct_inbox_item().await?;
         }
         Ok(record)
+    }
+
+    fn move_pending_direct_inbox_item_to_front(
+        &self,
+        session_id: &str,
+        item_id: i64,
+    ) -> Result<()> {
+        let pending: Vec<i64> =
+            crate::store::list_session_inbox(&self.metadata.store_path, session_id)?
+                .into_iter()
+                .filter(|item| item.status == crate::store::InboxStatus::Pending)
+                .map(|item| item.id)
+                .collect();
+        if pending.first() == Some(&item_id) || !pending.contains(&item_id) {
+            return Ok(());
+        }
+        let mut ordered = Vec::with_capacity(pending.len());
+        ordered.push(item_id);
+        ordered.extend(pending.into_iter().filter(|id| *id != item_id));
+        crate::store::reorder_pending_session_inbox_items(
+            &self.metadata.store_path,
+            session_id,
+            &ordered,
+        )?;
+        Ok(())
+    }
+
+    pub fn reorder_direct_inbox_items(
+        &self,
+        item_ids: &[i64],
+    ) -> Result<Vec<crate::store::SessionInboxRecord>> {
+        self.require_direct_primary_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        crate::store::reorder_pending_session_inbox_items(
+            &self.metadata.store_path,
+            session_id,
+            item_ids,
+        )
     }
 
     pub fn cancel_direct_inbox_item(

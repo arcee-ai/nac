@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -14,12 +14,12 @@ mod workspace_diff;
 mod workspace_files;
 
 pub use workspace_diff::{
-    WorkspaceDiffHunk, WorkspaceDiffLine, WorkspaceDiffSection, WorkspaceDiffStage,
-    WorkspaceFileDiff, revision_file_diff, validate_workspace_relpath, workspace_file_diff,
+    revision_file_diff, validate_workspace_relpath, workspace_file_diff, WorkspaceDiffHunk,
+    WorkspaceDiffLine, WorkspaceDiffSection, WorkspaceDiffStage, WorkspaceFileDiff,
 };
 pub use workspace_files::{
-    OpenLocalPathResult, WorkspaceFileContent, WorkspaceFileList, list_files, list_revision_files,
-    open_local_path, read_file, read_revision_file,
+    list_files, list_revision_files, open_local_path, read_file, read_revision_file,
+    OpenLocalPathResult, WorkspaceFileContent, WorkspaceFileList,
 };
 
 pub type NumstatPairs = HashMap<String, (Option<u64>, Option<u64>)>;

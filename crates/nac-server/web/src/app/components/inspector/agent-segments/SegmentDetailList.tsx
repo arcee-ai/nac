@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 
@@ -15,6 +15,11 @@ import {
   type AgentToolsGroup,
 } from "@/app/lib/agentSegments";
 import { cn } from "@/app/lib/cn";
+import {
+  STICK_TOLERANCE_PX,
+  distanceFromBottom,
+  scrollToBottomInstantly,
+} from "@/app/lib/scroll";
 import { sessionIdFromPath } from "@/app/lib/routes";
 import {
   GLOB_EMPTY_RESULT_LABEL,
@@ -73,7 +78,8 @@ function boxesForSegment(
   }
   if (segment.presentation.resultPreview) {
     boxes.push({
-      kind: "markdown",
+      kind:
+        segment.presentation.name === "exec_command" ? "code" : "markdown",
       key: `${segment.key}-output`,
       content: segment.presentation.resultPreview,
       accent: outputAccent(segment),
@@ -248,7 +254,7 @@ function itemsFromGroup(
   group: AgentToolsGroup,
   hostRoots: Array<string | null | undefined>,
 ): SegmentDetailItem[] {
-  return [...group.segments].reverse().map((segment) => {
+  return group.segments.map((segment) => {
     const { boxes, copyText } = boxesForSegment(segment, hostRoots);
     const live =
       segment.kind === "thinking"
@@ -299,8 +305,17 @@ export function SegmentDetailList({
     [group, hostRoots],
   );
   const rootRef = useRef<HTMLDivElement>(null);
+  const stuckRef = useRef(true);
   const scrollTo = useActionSegmentScroll();
   const selectedKey = useSelectedActionSegmentKey();
+  const last = items[items.length - 1];
+  const followSeed = `${items.length}:${last?.key ?? ""}:${last?.copyText.length ?? 0}:${group.inProgress}`;
+
+  useLayoutEffect(() => {
+    const element = rootRef.current;
+    if (!element || !stuckRef.current) return;
+    scrollToBottomInstantly(element);
+  }, [followSeed]);
 
   useEffect(() => {
     if (!scrollTo) return;
@@ -310,6 +325,7 @@ export function SegmentDetailList({
       `[data-segment-key="${CSS.escape(scrollTo.key)}"]`,
     );
     if (!(el instanceof HTMLElement)) return;
+    stuckRef.current = false;
     const reduced =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -327,7 +343,7 @@ export function SegmentDetailList({
     return (
       <div
         className={cn(
-          "flex items-center justify-center h-full label-small text-basic-tertiary",
+          "flex items-center justify-center h-full px-4 label-small text-basic-tertiary",
           className,
         )}
       >
@@ -336,13 +352,22 @@ export function SegmentDetailList({
     );
   }
   return (
-    <div ref={rootRef} className={className}>
+    <div
+      ref={rootRef}
+      className={cn(className, "flex flex-col gap-2")}
+      onScroll={() => {
+        const element = rootRef.current;
+        if (element) {
+          stuckRef.current = distanceFromBottom(element) <= STICK_TOLERANCE_PX;
+        }
+      }}
+    >
       {items.map((item, index) => (
         <SegmentDetailRow
           key={item.key}
           item={item}
           isLast={index === items.length - 1}
-          animateConnector={group.inProgress && index === 0}
+          animateConnector={group.inProgress && index === items.length - 2}
           highlighted={selectedKey === item.key}
         />
       ))}

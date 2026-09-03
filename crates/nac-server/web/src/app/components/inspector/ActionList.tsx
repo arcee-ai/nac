@@ -505,11 +505,23 @@ export function ActionItemList({
   }, [pinToNewest, newestId]);
 
   useEffect(() => {
+    if (selectedGroupId == null) {
+      prevSelected.current = null;
+      collapseActionGroup();
+      return;
+    }
+    const selected = items.find((item) => item.id === selectedGroupId);
+    if (!selected) {
+      // Each turn mounts its own list. Collapsing when the selected row is
+      // not in this section races the owner and closes the accordion after
+      // refresh even though that row stays active.
+      prevSelected.current = null;
+      return;
+    }
     if (selectedGroupId === prevSelected.current) return;
     prevSelected.current = selectedGroupId;
-    const selected = items.find((item) => item.id === selectedGroupId);
     if (
-      selected?.kind === "group" &&
+      selected.kind === "group" &&
       actionListIsSegmentsGroup(selected.group)
     ) {
       expandActionGroup(selected.id);

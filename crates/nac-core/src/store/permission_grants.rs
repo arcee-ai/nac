@@ -230,21 +230,17 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert!(
-            list_permission_grants(&path, "session-b")
-                .unwrap()
-                .is_empty()
-        );
+        assert!(list_permission_grants(&path, "session-b")
+            .unwrap()
+            .is_empty());
 
         let id = list_permission_grants(&path, "session-a").unwrap()[0]
             .id
             .clone();
         delete_permission_grant(&path, "session-a", &id).unwrap();
-        assert!(
-            list_permission_grants(&path, "session-a")
-                .unwrap()
-                .is_empty()
-        );
+        assert!(list_permission_grants(&path, "session-a")
+            .unwrap()
+            .is_empty());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

@@ -1,4 +1,7 @@
-import { compactSessionTitle, isPlaceholderSessionTitle } from "@/app/lib/format";
+import {
+  compactSessionTitle,
+  isPlaceholderSessionTitle,
+} from "@/app/lib/format";
 import type { SessionPanel } from "@/app/lib/routes";
 import type { SessionBehavior, SessionLineage } from "@/app/types/api";
 
@@ -37,8 +40,10 @@ const AGENT_WITH_ORCHESTRATOR_PRESENTATION: SessionBehaviorPresentation = {
   topLevel: "One persistent coding agent handles the top-level conversation.",
   editsDirectly: true,
   editing: "The top-level agent edits files and runs commands directly.",
-  delegation: "It can launch fresh-context coding agents and separate Orchestrator sessions.",
-  inspection: "Related Sessions keep coding agents and Orchestrator planners distinct.",
+  delegation:
+    "It can launch fresh-context coding agents and separate Orchestrator sessions.",
+  inspection:
+    "Back Chat keep coding agents and Orchestrator planners distinct.",
   hint: "A persistent coding agent that can also launch Orchestrator planners. Best when you want to implement directly and spin up planning sessions.",
 };
 
@@ -62,9 +67,12 @@ export const SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = [
 ];
 
 /** New chats may choose Agent, Agent + Orchestrator, or Orchestrator. */
-export const CREATE_SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = SESSION_BEHAVIORS;
+export const CREATE_SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] =
+  SESSION_BEHAVIORS;
 
-export function isAgentBehavior(behavior: SessionBehavior | null | undefined): boolean {
+export function isAgentBehavior(
+  behavior: SessionBehavior | null | undefined,
+): boolean {
   return behavior === "direct" || behavior === "direct-with-orchestrator";
 }
 
@@ -77,7 +85,10 @@ export function canLaunchManagedOrchestrator(
 export function sessionBehaviorPresentation(
   behavior: SessionBehavior | null | undefined,
 ): SessionBehaviorPresentation {
-  return SESSION_BEHAVIORS.find((option) => option.id === behavior) ?? ORCHESTRATOR_PRESENTATION;
+  return (
+    SESSION_BEHAVIORS.find((option) => option.id === behavior) ??
+    ORCHESTRATOR_PRESENTATION
+  );
 }
 
 export function sessionBehaviorLabel(behavior: SessionBehavior): string {
@@ -106,9 +117,9 @@ const DIRECT_PANELS: SessionPanelPolicy = {
 };
 
 const TRADITIONAL_CHILD_PANELS: SessionPanelPolicy = {
-  widePanels: ["files"],
-  mobilePanels: ["files", "history"],
-  defaultPanel: "files",
+  widePanels: ["actions", "files"],
+  mobilePanels: ["actions", "files", "history"],
+  defaultPanel: "actions",
   readOnly: true,
 };
 
@@ -125,7 +136,9 @@ export type AssignmentStatus =
   | "cancelled"
   | "interrupted";
 
-export function assignmentIsOpen(status: AssignmentStatus | string | null | undefined): boolean {
+export function assignmentIsOpen(
+  status: AssignmentStatus | string | null | undefined,
+): boolean {
   return status === "idle" || status === "running";
 }
 
@@ -186,7 +199,8 @@ export function sessionOriginDetail(options: {
     case "converted": {
       const source = compactOriginTitle(options.convertedFromTitle);
       const typeLabel = options.convertedFromType?.trim();
-      if (source && !isPlaceholderSessionTitle(source)) return `Converted from ${source}`;
+      if (source && !isPlaceholderSessionTitle(source))
+        return `Converted from ${source}`;
       if (typeLabel) return `Converted from ${typeLabel}`;
       return "Converted from another session type";
     }
@@ -210,7 +224,7 @@ export function sessionAvatarTooltipDescription(
  * Session ownership and panel topology are related but distinct. Every
  * delegated transcript is read-only, while the durable relationship kind says
  * whether that transcript owns an orchestrator's Threads and Worksets or is a
- * traditional child with Files/History only.
+ * traditional child with Actions and Files.
  */
 export function sessionPanelPolicy(
   behavior: SessionBehavior | null | undefined,
@@ -218,13 +232,16 @@ export function sessionPanelPolicy(
   _assignmentStatus?: AssignmentStatus | string | null,
 ): SessionPanelPolicy {
   if (lineageKind === "traditional-child") return TRADITIONAL_CHILD_PANELS;
-  if (lineageKind === "managed-orchestrator") return MANAGED_ORCHESTRATOR_PANELS;
+  if (lineageKind === "managed-orchestrator")
+    return MANAGED_ORCHESTRATOR_PANELS;
   return sessionBehaviorPresentation(behavior).id === "orchestrator"
     ? ORCHESTRATOR_PANELS
     : DIRECT_PANELS;
 }
 
 /** Side-box tab that hosts the Actions timeline. */
-export function actionsPanel(_behavior: SessionBehavior | null | undefined): SessionPanel {
+export function actionsPanel(
+  _behavior: SessionBehavior | null | undefined,
+): SessionPanel {
   return "actions";
 }

@@ -30,6 +30,7 @@ pub(crate) struct CreateInboxItem {
 pub(crate) struct UpdateInboxItem {
     pub(crate) expected_version: i64,
     pub(crate) delivery: InboxDelivery,
+    pub(crate) prompt: Option<String>,
 }
 
 pub(crate) struct CreateGoal {
@@ -64,19 +65,9 @@ impl<'a> SessionIntentApplication<'a> {
     ) -> Result<SessionInboxRecord> {
         self.manager.require_primary_direct_session(session_id)?;
         let service = self.manager.attach_session(session_id).await?;
-        let prompt = match service.prepare_user_input(&command.prompt) {
-            PreparedUserInput::Empty => return Err(anyhow!("prompt is empty")),
-            PreparedUserInput::InvalidSlashCommand { message } => return Err(anyhow!(message)),
-            PreparedUserInput::FrontendCommand(command) => {
-                return Err(anyhow!(
-                    "frontend command '{}' is not supported by the server API",
-                    frontend_command_name(command)
-                ));
-            }
-            PreparedUserInput::SubmitPrompt(prompt) => prompt,
-        };
+        let prompt = Self::prepare_inbox_prompt(&service, &command.prompt)?;
         service
-            .enqueue_direct_input(command.delivery, &prompt.agent_prompt, None)
+            .enqueue_direct_input(command.delivery, &prompt, None)
             .await
     }
 
@@ -87,11 +78,46 @@ impl<'a> SessionIntentApplication<'a> {
         command: UpdateInboxItem,
     ) -> Result<SessionInboxRecord> {
         self.manager.require_primary_direct_session(session_id)?;
+        let service = self.manager.attach_session(session_id).await?;
+        let prompt = match command.prompt.as_deref() {
+            Some(prompt) => Some(Self::prepare_inbox_prompt(&service, prompt)?),
+            None => None,
+        };
+        service
+            .update_direct_inbox_item(
+                item_id,
+                command.expected_version,
+                command.delivery,
+                prompt.as_deref(),
+            )
+            .await
+    }
+
+    pub(crate) async fn reorder_inbox_items(
+        &self,
+        session_id: &str,
+        item_ids: &[i64],
+    ) -> Result<Vec<SessionInboxRecord>> {
+        self.manager.require_primary_direct_session(session_id)?;
         self.manager
             .attach_session(session_id)
             .await?
-            .update_direct_inbox_item(item_id, command.expected_version, command.delivery)
-            .await
+            .reorder_direct_inbox_items(item_ids)
+    }
+
+    fn prepare_inbox_prompt(
+        service: &nac_core::session_service::SessionService,
+        prompt: &str,
+    ) -> Result<String> {
+        match service.prepare_user_input(prompt) {
+            PreparedUserInput::Empty => Err(anyhow!("prompt is empty")),
+            PreparedUserInput::InvalidSlashCommand { message } => Err(anyhow!(message)),
+            PreparedUserInput::FrontendCommand(command) => Err(anyhow!(
+                "frontend command '{}' is not supported by the server API",
+                frontend_command_name(command)
+            )),
+            PreparedUserInput::SubmitPrompt(prompt) => Ok(prompt.agent_prompt),
+        }
     }
 
     pub(crate) async fn cancel_inbox_item(

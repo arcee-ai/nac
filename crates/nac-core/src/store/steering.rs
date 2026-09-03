@@ -33,7 +33,8 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ThreadSteeringReco
     })
 }
 
-const RECORD_COLUMNS: &str = "id, session_id, thread_name, dispatch_id, instruction, status, created_at, \
+const RECORD_COLUMNS: &str =
+    "id, session_id, thread_name, dispatch_id, instruction, status, created_at, \
      claimed_at, delivered_at, expired_at";
 
 pub fn queue_thread_steering(

@@ -7,12 +7,16 @@ import { compareSortOrder } from "@/app/lib/sessionOrder";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 /** User-created chats only. First-chat idempotency stays on this set. */
-export function primarySessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[] {
+export function primarySessions(
+  sessions: ManagedSessionSummary[],
+): ManagedSessionSummary[] {
   return sessions.filter((entry) => entry.lineage == null);
 }
 
-/** User-created chats only. Spawned assignments stay in Related Sessions. */
-export function listableSessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[] {
+/** User-created chats only. Spawned assignments stay in Back Chat. */
+export function listableSessions(
+  sessions: ManagedSessionSummary[],
+): ManagedSessionSummary[] {
   return primarySessions(sessions);
 }
 
@@ -28,7 +32,10 @@ export interface ProjectEntry {
   updatedAt: string;
 }
 
-function newestUpdate(sessions: ManagedSessionSummary[], fallback: string): string {
+function newestUpdate(
+  sessions: ManagedSessionSummary[],
+  fallback: string,
+): string {
   let newest = fallback;
   for (const entry of listableSessions(sessions)) {
     if (parseStoreTime(entry.summary.updated_at) > parseStoreTime(newest)) {
@@ -38,8 +45,13 @@ function newestUpdate(sessions: ManagedSessionSummary[], fallback: string): stri
   return newest;
 }
 
-function bySessionRecency(a: ManagedSessionSummary, b: ManagedSessionSummary): number {
-  return parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at);
+function bySessionRecency(
+  a: ManagedSessionSummary,
+  b: ManagedSessionSummary,
+): number {
+  return (
+    parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at)
+  );
 }
 
 export function newestPrimarySessionForProject(
@@ -71,7 +83,9 @@ export function projectEntries(
   }
 
   return projects.map((project) => {
-    const owned = (byProject.get(project.project_id) ?? []).sort(bySessionRecency);
+    const owned = (byProject.get(project.project_id) ?? []).sort(
+      bySessionRecency,
+    );
     return {
       project,
       sessions: owned,
@@ -86,7 +100,9 @@ export function projectEntries(
 }
 
 /** Sessions that predate projects, or whose project was deleted, in backend order. */
-export function orphanSessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[] {
+export function orphanSessions(
+  sessions: ManagedSessionSummary[],
+): ManagedSessionSummary[] {
   return listableSessions(sessions)
     .filter((entry) => !entry.summary.project_id)
     .sort((a, b) => compareSortOrder(a.summary, b.summary));
@@ -102,7 +118,9 @@ export type ProjectListItem =
   | { kind: "orphan"; session: ManagedSessionSummary };
 
 export function projectListItemId(item: ProjectListItem): string {
-  return item.kind === "project" ? item.entry.project.project_id : item.session.summary.session_id;
+  return item.kind === "project"
+    ? item.entry.project.project_id
+    : item.session.summary.session_id;
 }
 
 /** Projects in backend order (pinned first), then unassigned chats in theirs. */
@@ -111,11 +129,15 @@ export function projectListItems(
   sessions: ManagedSessionSummary[],
 ): ProjectListItem[] {
   return [
-    ...projectEntries(projects, sessions).map((entry): ProjectListItem => ({
-      kind: "project",
-      entry,
-    })),
-    ...orphanSessions(sessions).map((session): ProjectListItem => ({ kind: "orphan", session })),
+    ...projectEntries(projects, sessions).map(
+      (entry): ProjectListItem => ({
+        kind: "project",
+        entry,
+      }),
+    ),
+    ...orphanSessions(sessions).map(
+      (session): ProjectListItem => ({ kind: "orphan", session }),
+    ),
   ];
 }
 
@@ -135,7 +157,10 @@ export type SessionLocation = {
   ssh_identity_file?: string | null;
 };
 
-export function sameSessionLocation(left: SessionLocation, right: SessionLocation): boolean {
+export function sameSessionLocation(
+  left: SessionLocation,
+  right: SessionLocation,
+): boolean {
   return (
     left.cwd === right.cwd &&
     (left.ssh_host ?? null) === (right.ssh_host ?? null) &&
@@ -168,10 +193,18 @@ export function projectForSessionLocation(
   summary: SessionLocation | null | undefined,
 ): ProjectRecord | null {
   if (!summary) return null;
-  return projects.find((project) => sameSessionLocation(project, summary)) ?? null;
+  return (
+    projects.find((project) => sameSessionLocation(project, summary)) ?? null
+  );
 }
 
-export type RecencyBucket = "Pinned" | "Today" | "Yesterday" | "This week" | "This month" | "Older";
+export type RecencyBucket =
+  | "Pinned"
+  | "Today"
+  | "Yesterday"
+  | "This week"
+  | "This month"
+  | "Older";
 
 const BUCKET_ORDER: RecencyBucket[] = [
   "Pinned",

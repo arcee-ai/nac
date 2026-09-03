@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import {
+  Navigate,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
 import {
   Button,
@@ -34,6 +39,7 @@ import {
   routes,
   SESSION_PANEL_LABEL,
   sessionPanelFromPath,
+  spawnIdFromLocationState,
   type SessionPanel,
 } from "@/app/lib/routes";
 import {
@@ -47,6 +53,7 @@ import { clearAttention } from "@/app/store/attentionStore";
 import {
   resetSessionSelection,
   revealSidePanel,
+  selectSpawn,
   showSidePanelList,
   toggleSidePanelCollapsed,
   toggleSidePanelExpanded,
@@ -115,7 +122,9 @@ export default function SessionPage() {
     panel?: string;
   }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const id = sessionId ?? null;
+  const openSpawn = spawnIdFromLocationState(location.state);
   const [heldProjectId, setHeldProjectId] = useState<string | null>(null);
 
   perfRender("SessionPage");
@@ -143,10 +152,11 @@ export default function SessionPage() {
   useAutoSshConnect(id, entry?.summary);
   const behavior =
     entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator";
+  const lineage = entry?.lineage ?? snapshot?.lineage;
   const panelPolicy = sessionPanelPolicy(
     behavior,
-    snapshot?.lineage?.kind,
-    snapshot?.lineage?.assignment_status,
+    lineage?.kind,
+    lineage?.assignment_status,
   );
   const sessionPanels = panelPolicy.mobilePanels;
   const requestedPanel = sessionPanelFromPath(panel);
@@ -169,7 +179,8 @@ export default function SessionPage() {
   useEffect(() => {
     if (id) clearAttention(id);
     resetSessionSelection();
-  }, [id]);
+    if (openSpawn) selectSpawn(openSpawn);
+  }, [id, openSpawn]);
 
   if (entry) {
     const nextProjectId = entry.summary.project_id ?? null;
@@ -239,7 +250,7 @@ export default function SessionPage() {
   // router lands on a sibling. Hash history applies that navigation on a later
   // tick than the cache update.
   const projectId = (entry ? entry.summary.project_id : heldProjectId) ?? null;
-  // Spawned agents and orchestrators live in Related Sessions, not as extra
+  // Spawned agents and orchestrators live in Back Chat, not as extra
   // tabs. The strip is user-created chats only (`lineage == null`).
   const projectSessions = projectId
     ? primarySessions(allSessions)
@@ -433,6 +444,7 @@ export default function SessionPage() {
             onPanelChange={(next) => {
               // A fresh tab opens on the row it already has, not its list.
               showSidePanelList(false);
+              if (next === "delegated") selectSpawn(null);
               goToPanel(next);
             }}
           />

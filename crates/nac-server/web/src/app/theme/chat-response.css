@@ -31,6 +31,20 @@
   animation: fadeInOut 150ms ease-out forwards;
 }
 
+/* A reparse remounts every chunk in the open tail. Keep already-painted
+   siblings visible so only the newest block fades in. */
+.chat-response.streaming p:not(:last-child) .streaming-chunk,
+.chat-response.streaming li:not(:last-child) .streaming-chunk,
+.chat-response.streaming h1:not(:last-child) .streaming-chunk,
+.chat-response.streaming h2:not(:last-child) .streaming-chunk,
+.chat-response.streaming h3:not(:last-child) .streaming-chunk,
+.chat-response.streaming h4:not(:last-child) .streaming-chunk,
+.chat-response.streaming h5:not(:last-child) .streaming-chunk,
+.chat-response.streaming h6:not(:last-child) .streaming-chunk {
+  opacity: 1;
+  animation: none;
+}
+
 @keyframes fadeInOut {
   0% {
     opacity: 0;

@@ -113,7 +113,7 @@ export function useSessionsWithWorkspaceStats(
  * The single summary a session screen needs, picked out of the polled list.
  *
  * Subscribing to the whole list would re-render the chat every five seconds
- * over changes to unrelated sessions; the selected entry keeps its identity
+ * over changes to unBack Chat; the selected entry keeps its identity
  * across a refetch that did not touch it, so the transcript stays put.
  */
 export function useSessionSummary(id: string | null) {

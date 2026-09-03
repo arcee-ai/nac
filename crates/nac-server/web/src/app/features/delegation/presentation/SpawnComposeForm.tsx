@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Button,
+  ButtonContent,
   ButtonSize,
   ButtonVariant,
-  Input,
-  InputSize,
-  SessionTypeAvatar,
+  Icon,
+  IconName,
   Switch,
   TextArea,
   TextAreaSize,
+  sessionTypeIconName,
 } from "@/app/atoms";
 import { assignmentLabelFromPrompt } from "@/app/features/delegation/model";
 import { toRunError } from "@/app/lib/providerError";
@@ -21,20 +22,19 @@ import type { SessionAssignmentChildBehavior } from "@/app/types/api";
 const COPY = {
   direct: {
     title: "Launch coding agent",
-    hint: "Start a fresh-context coding agent. Browse, steer, continue, and cancel it from Related Sessions.",
-    promptLabel: "Complete task prompt",
-    promptPlaceholder: "Describe the task, relevant context, and expected verification",
+    hint: "Start a fresh-context coding agent. Browse, steer, continue, and cancel it from Back Chat.",
+    promptPlaceholder:
+      "Describe the task, relevant context, and expected verification",
     submit: "Start coding agent",
-    missing: "A short description and complete child prompt are required.",
+    missing: "A complete child prompt is required.",
     fail: "Unable to start child",
   },
   orchestrator: {
     title: "Launch orchestrator",
-    hint: "Start a separate Orchestrator planning session. Browse, steer, continue, and cancel it from Related Sessions.",
-    promptLabel: "Complete objective",
+    hint: "Start a separate Orchestrator planning session. Browse, steer, continue, and cancel it from Back Chat.",
     promptPlaceholder: "Describe scope, constraints, and expected verification",
     submit: "Start orchestrator",
-    missing: "A short description and complete orchestration objective are required.",
+    missing: "A complete orchestration objective is required.",
     fail: "Unable to start orchestrator",
   },
 } as const;
@@ -51,20 +51,22 @@ export function SpawnComposeForm({
   const start = useStartSessionSpawn();
   const toast = useToast();
   const copy = COPY[behavior];
-  const [description, setDescription] = useState("");
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const [prompt, setPrompt] = useState("");
   const [background, setBackground] = useState(true);
 
   useEffect(() => {
-    setDescription("");
     setPrompt("");
     setBackground(true);
+    promptRef.current?.focus();
   }, [behavior, parentSessionId]);
 
   const busy = start.isPending;
+  const canSend = prompt.trim().length > 0 && !busy;
+
   const submit = async () => {
     const promptText = prompt.trim();
-    const label = description.trim() || assignmentLabelFromPrompt(promptText);
+    const label = assignmentLabelFromPrompt(promptText);
     if (!label || !promptText) {
       toast.error(copy.missing);
       return;
@@ -86,60 +88,68 @@ export function SpawnComposeForm({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-muted px-3">
-        <SessionTypeAvatar
-          className="size-7 shrink-0"
-          sessionType={sessionTypeFromBehavior(behavior)}
-        />
-        <span className="min-w-0 flex-1 truncate label-small text-basic-primary">
-          {copy.title}
-        </span>
-      </div>
-      <form
-        className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4 [&>*]:shrink-0"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <p className="label-micro text-basic-muted">{copy.hint}</p>
-        <Input
-          label="Short description"
-          inputSize={InputSize.Medium}
-          placeholder={
-            behavior === "direct"
-              ? "Review persistence"
-              : "Implement the persistence slice"
-          }
-          value={description}
-          maxLength={120}
-          onChange={(event) => setDescription(event.target.value)}
-        />
-        <TextArea
-          label={copy.promptLabel}
-          textAreaSize={TextAreaSize.Medium}
-          placeholder={copy.promptPlaceholder}
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          textAreaClassName="h-[112px] resize-none"
-        />
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <label className="flex items-center gap-2 label-small text-basic-secondary">
-            <Switch checked={background} disabled={busy} onChange={setBackground} />
-            Run in background
-          </label>
-          <Button
-            type="submit"
-            size={ButtonSize.Medium}
-            variant={ButtonVariant.Primary}
-            loading={busy}
-            disabled={busy}
-          >
-            {copy.submit}
-          </Button>
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto px-4 [&>*]:shrink-0">
+      <div className="flex w-full flex-col items-center gap-4">
+        <div className="flex max-w-[400px] flex-col items-center gap-2">
+          <Icon
+            iconName={sessionTypeIconName(sessionTypeFromBehavior(behavior))}
+            size={32}
+            className="shrink-0 text-basic-primary"
+          />
+          <p className="label-big text-center text-basic-primary">
+            {copy.title}
+          </p>
+          <p className="label-small text-center text-basic-tertiary">
+            {copy.hint}
+          </p>
         </div>
-      </form>
+        <form
+          className="flex w-full flex-col gap-2 rounded-[8px] bg-elevation-level-1 p-3 shadow-2xl"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSend) void submit();
+          }}
+        >
+          <TextArea
+            ref={promptRef}
+            aria-label={copy.title}
+            textAreaSize={TextAreaSize.Medium}
+            placeholder={copy.promptPlaceholder}
+            value={prompt}
+            isDisabled={busy}
+            onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) {
+                return;
+              }
+              event.preventDefault();
+              if (canSend) void submit();
+            }}
+            textAreaClassName="h-[126px] resize-none"
+          />
+          <div className="flex items-center justify-between gap-3">
+            <label className="flex items-center gap-2 label-micro text-basic-primary">
+              <Switch
+                checked={background}
+                disabled={busy}
+                onChange={setBackground}
+              />
+              Run in background
+            </label>
+            <Button
+              type="submit"
+              size={ButtonSize.Medium}
+              variant={ButtonVariant.Primary}
+              content={ButtonContent.Icon}
+              loading={busy}
+              disabled={!canSend}
+              aria-label={copy.submit}
+            >
+              <Icon iconName={IconName.ArrowTop} />
+            </Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

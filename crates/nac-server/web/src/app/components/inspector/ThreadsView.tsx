@@ -1459,7 +1459,7 @@ export function ThreadsView({
         <SegmentDetailList
           key={currentGroup.id}
           group={currentGroup}
-          className="flex-1 min-h-0 overflow-auto px-4 py-4 [&>*]:shrink-0"
+          className="flex-1 min-h-0 overflow-auto py-4 [&>*]:shrink-0"
         />
       ) : threadDetail ? (
         threadDetail

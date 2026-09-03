@@ -84,22 +84,22 @@ describe("session panel policy", () => {
     }
   });
 
-  it("keeps traditional children Files/History-only", () => {
+  it("gives traditional children Actions and Files while remaining read-only", () => {
     for (const behavior of behaviors) {
       expect(
         sessionPanelPolicy(behavior, "traditional-child", "running"),
       ).toEqual({
-        widePanels: ["files"],
-        mobilePanels: ["files", "history"],
-        defaultPanel: "files",
+        widePanels: ["actions", "files"],
+        mobilePanels: ["actions", "files", "history"],
+        defaultPanel: "actions",
         readOnly: true,
       });
       expect(
         sessionPanelPolicy(behavior, "traditional-child", "completed"),
       ).toEqual({
-        widePanels: ["files"],
-        mobilePanels: ["files", "history"],
-        defaultPanel: "files",
+        widePanels: ["actions", "files"],
+        mobilePanels: ["actions", "files", "history"],
+        defaultPanel: "actions",
         readOnly: true,
       });
     }

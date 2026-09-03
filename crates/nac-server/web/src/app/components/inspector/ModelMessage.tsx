@@ -81,7 +81,7 @@ interface ModelMessageProps {
   /** Episode key of the thread card the panels are pointing at, if any. */
   selectedThreadEpisode: string | null;
   selectedWorkset: string | null;
-  /** Spawned child the Related Sessions panel is pointing at, if any. */
+  /** Spawned child the Back Chat panel is pointing at, if any. */
   selectedSpawn?: string | null;
   /** Thoughts & tools group the side panel is pointing at, if any. */
   selectedAgentSegment?: string | null;

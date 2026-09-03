@@ -444,6 +444,13 @@ pub struct CreateInboxItemRequest {
 pub struct UpdateInboxItemRequest {
     pub expected_version: i64,
     pub delivery: InboxDelivery,
+    #[serde(default)]
+    pub prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct ReorderInboxItemsRequest {
+    pub item_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]

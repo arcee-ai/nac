@@ -728,12 +728,10 @@ mod tests {
         )
         .unwrap();
         assert!(delete_model_configuration(&path, "config-a").unwrap());
-        assert!(
-            load_project_launch_context(&path, "project-a")
-                .unwrap()
-                .default_model_config
-                .is_none()
-        );
+        assert!(load_project_launch_context(&path, "project-a")
+            .unwrap()
+            .default_model_config
+            .is_none());
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

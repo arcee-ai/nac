@@ -867,7 +867,21 @@ impl Agent {
             let tool_messages =
                 finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
 
+            // Fold worker token usage (from thread dispatches) into the
+            // orchestrator's accumulated usage before any early return. Only
+            // cost fields are summed; orchestrator context stays ordinary-
+            // orchestrator-only.
+            {
+                let mut wu = self.tool_runtime.worker_usage.lock().await;
+                accumulated_usage.add_cost_saturating(&wu);
+                *wu = TokenUsage::default();
+            }
+
             if self.tool_runtime.command_cancellation.is_cancelled() {
+                self.last_usage = Some(accumulated_usage.clone());
+                if let Some(goals) = &self.tool_runtime.goal_runtime {
+                    goals.update_usage(&accumulated_usage);
+                }
                 let error = anyhow!("worker command cancelled");
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
@@ -875,15 +889,6 @@ impl Agent {
                 });
                 self.record_terminal_cleanup_error().await;
                 return Err(error);
-            }
-
-            // Fold worker token usage (from thread dispatches) into the
-            // orchestrator's accumulated usage. Only cost fields are summed;
-            // orchestrator context stays ordinary-orchestrator-only.
-            {
-                let mut wu = self.tool_runtime.worker_usage.lock().await;
-                accumulated_usage.add_cost_saturating(&wu);
-                *wu = TokenUsage::default();
             }
 
             self.last_usage = Some(accumulated_usage.clone());

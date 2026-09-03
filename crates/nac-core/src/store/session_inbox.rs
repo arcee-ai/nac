@@ -77,10 +77,12 @@ pub struct SessionInboxRecord {
     pub delivered_at: Option<String>,
     pub cancelled_at: Option<String>,
     pub version: i64,
+    pub queue_order: i64,
 }
 
-pub(crate) const INBOX_RECORD_COLUMNS: &str = "id, session_id, delivery, status, content, target_run_id, client_id, \
-     delivered_run_id, created_at, updated_at, delivered_at, cancelled_at, version";
+pub(crate) const INBOX_RECORD_COLUMNS: &str =
+    "id, session_id, delivery, status, content, target_run_id, client_id, \
+     delivered_run_id, created_at, updated_at, delivered_at, cancelled_at, version, queue_order";
 
 pub(crate) fn row_to_inbox_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionInboxRecord> {
     let delivery: String = row.get(2)?;
@@ -103,6 +105,7 @@ pub(crate) fn row_to_inbox_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<S
         delivered_at: row.get(10)?,
         cancelled_at: row.get(11)?,
         version: row.get(12)?,
+        queue_order: row.get(13)?,
     })
 }
 
@@ -127,18 +130,24 @@ pub fn create_session_inbox_item(
     }
     let connection = open_runtime_connection(path)?;
     let now = now_utc();
+    let queue_order: i64 = connection.query_row(
+        "SELECT COALESCE(MAX(queue_order), 0) + 1 FROM session_inbox WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get(0),
+    )?;
     connection.execute(
         "INSERT INTO session_inbox
          (session_id, delivery, status, content, target_run_id, client_id,
-          created_at, updated_at)
-         VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?6)",
+          created_at, updated_at, queue_order)
+         VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?6, ?7)",
         params![
             session_id,
             delivery.as_str(),
             content,
             target_run_id,
             client_id,
-            now
+            now,
+            queue_order
         ],
     )?;
     load_session_inbox_item_with_connection(&connection, session_id, connection.last_insert_rowid())
@@ -175,7 +184,7 @@ pub fn list_session_inbox(path: &Path, session_id: &str) -> Result<Vec<SessionIn
     let connection = open_runtime_connection(path)?;
     let mut statement = connection.prepare(&format!(
         "SELECT {INBOX_RECORD_COLUMNS} FROM session_inbox
-         WHERE session_id = ?1 ORDER BY id ASC"
+         WHERE session_id = ?1 ORDER BY queue_order ASC, id ASC"
     ))?;
     let rows = statement.query_map(params![session_id], row_to_inbox_record)?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -191,7 +200,7 @@ pub fn next_pending_session_inbox_item(
             &format!(
                 "SELECT {INBOX_RECORD_COLUMNS} FROM session_inbox
                  WHERE session_id = ?1 AND status = 'pending'
-                 ORDER BY id ASC LIMIT 1"
+                 ORDER BY queue_order ASC, id ASC LIMIT 1"
             ),
             params![session_id],
             row_to_inbox_record,
@@ -206,6 +215,7 @@ pub fn update_pending_session_inbox_item(
     expected_version: i64,
     delivery: InboxDelivery,
     target_run_id: Option<&str>,
+    content: Option<&str>,
 ) -> Result<SessionInboxRecord> {
     if expected_version < 0 {
         return Err(anyhow!("inbox item version must not be negative"));
@@ -213,16 +223,21 @@ pub fn update_pending_session_inbox_item(
     if delivery == InboxDelivery::Queue && target_run_id.is_some() {
         return Err(anyhow!("queued inbox input cannot target an active run"));
     }
+    let content = content.map(str::trim);
+    if matches!(content, Some("")) {
+        return Err(anyhow!("inbox content is empty"));
+    }
     let connection = open_runtime_connection(path)?;
     let changed = connection.execute(
         "UPDATE session_inbox
-         SET delivery = ?1, target_run_id = ?2, updated_at = ?3,
-             version = version + 1
-         WHERE session_id = ?4 AND id = ?5 AND status = 'pending'
-           AND version = ?6",
+         SET delivery = ?1, target_run_id = ?2, content = COALESCE(?3, content),
+             updated_at = ?4, version = version + 1
+         WHERE session_id = ?5 AND id = ?6 AND status = 'pending'
+           AND version = ?7",
         params![
             delivery.as_str(),
             target_run_id,
+            content,
             now_utc(),
             session_id,
             item_id,
@@ -238,6 +253,55 @@ pub fn update_pending_session_inbox_item(
         ));
     }
     load_session_inbox_item_with_connection(&connection, session_id, item_id)
+}
+
+pub fn reorder_pending_session_inbox_items(
+    path: &Path,
+    session_id: &str,
+    item_ids: &[i64],
+) -> Result<Vec<SessionInboxRecord>> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return Err(anyhow!("session id is empty"));
+    }
+    let mut seen = std::collections::HashSet::with_capacity(item_ids.len());
+    for item_id in item_ids {
+        if !seen.insert(*item_id) {
+            return Err(anyhow!(
+                "invalid inbox reorder: duplicate item id {item_id}"
+            ));
+        }
+    }
+    let mut connection = open_runtime_connection(path)?;
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let pending_ids: Vec<i64> = {
+        let mut statement = transaction.prepare(
+            "SELECT id FROM session_inbox
+             WHERE session_id = ?1 AND status = 'pending'
+             ORDER BY queue_order ASC, id ASC",
+        )?;
+        let rows = statement.query_map(params![session_id], |row| row.get(0))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    if pending_ids.len() != item_ids.len() || pending_ids.iter().any(|id| !seen.contains(id)) {
+        return Err(anyhow!("inbox queue order conflict: pending set changed"));
+    }
+    let now = now_utc();
+    for (index, item_id) in item_ids.iter().enumerate() {
+        let queue_order = i64::try_from(index).context("inbox queue order overflowed")?;
+        let changed = transaction.execute(
+            "UPDATE session_inbox
+             SET queue_order = ?1, updated_at = ?2, version = version + 1
+             WHERE session_id = ?3 AND id = ?4 AND status = 'pending'",
+            params![queue_order, now, session_id, item_id],
+        )?;
+        if changed != 1 {
+            return Err(anyhow!("inbox queue order conflict: pending set changed"));
+        }
+    }
+    transaction.commit()?;
+    list_session_inbox(path, session_id)
 }
 
 pub fn cancel_pending_session_inbox_item(
@@ -326,31 +390,29 @@ mod tests {
             0,
             InboxDelivery::Steer,
             Some("run"),
+            None,
         )
         .unwrap();
         assert_eq!(steered.delivery, InboxDelivery::Steer);
         assert_eq!(steered.target_run_id.as_deref(), Some("run"));
         assert_eq!(steered.version, 1);
-        assert!(
-            update_pending_session_inbox_item(
-                &path,
-                "session",
-                item.id,
-                0,
-                InboxDelivery::Queue,
-                None
-            )
-            .is_err()
-        );
+        assert!(update_pending_session_inbox_item(
+            &path,
+            "session",
+            item.id,
+            0,
+            InboxDelivery::Queue,
+            None,
+            None,
+        )
+        .is_err());
 
         let cancelled = cancel_pending_session_inbox_item(&path, "session", item.id, 1).unwrap();
         assert_eq!(cancelled.status, InboxStatus::Cancelled);
         assert_eq!(cancelled.version, 2);
-        assert!(
-            next_pending_session_inbox_item(&path, "session")
-                .unwrap()
-                .is_none()
-        );
+        assert!(next_pending_session_inbox_item(&path, "session")
+            .unwrap()
+            .is_none());
 
         let connection = open_runtime_connection(&path).unwrap();
         connection

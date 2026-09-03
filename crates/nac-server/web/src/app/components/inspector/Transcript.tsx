@@ -23,6 +23,7 @@ import {
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
+import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useLiveActionFollow } from "@/app/hooks/useLiveActionFollow";
@@ -657,7 +658,7 @@ export function Transcript({
           <PerfProfiler id="turns">
             {turns.map((turn, index) => {
               if (turn.kind === "delegated-completion") {
-                return null;
+                return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
               }
               if (turn.kind === "user") {
                 const taskFrozen =

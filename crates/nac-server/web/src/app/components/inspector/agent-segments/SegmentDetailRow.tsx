@@ -45,8 +45,8 @@ export function SegmentDetailRow({
   return (
     <div
       className={cn(
-        "flex gap-2 items-start w-full scroll-mt-2 rounded-[4px]",
-        highlighted && "bg-btn-ghost-highlighted -mx-2 px-2",
+        "flex gap-2 items-start w-full scroll-mt-2 px-4 py-2",
+        highlighted && "bg-btn-ghost-highlighted",
       )}
       data-segment-key={item.key}
     >
@@ -64,13 +64,13 @@ export function SegmentDetailRow({
         />
         {!isLast ? (
           <div
-            className={`flex-1 min-h-0 w-px bg-[var(--color-border-tertiary)]${
+            className={`flex-1 min-h-0 w-px -mb-6 bg-[var(--color-border-tertiary)]${
               animateConnector ? " agent-segment-row-connector" : ""
             }`}
           />
         ) : null}
       </div>
-      <div className="flex flex-col flex-1 min-w-0 gap-2 pb-8">
+      <div className="flex flex-col flex-1 min-w-0 gap-2">
         <div className="flex gap-2 items-center w-full h-7">
           <ToolCallLabel
             config={item.config}

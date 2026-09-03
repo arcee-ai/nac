@@ -585,7 +585,7 @@ describe("direct inbox and goal journeys", () => {
     await waitFor(() => expect(textarea.value).toBe("drafted steer"));
   });
 
-  it("uses ordinary active-run Send for a durable steer", async () => {
+  it("uses ordinary active-run Send to queue a follow-up", async () => {
     syncRunFromSnapshot({
       run_id: "run-live",
       prompt_preview: "working",
@@ -594,12 +594,12 @@ describe("direct inbox and goal journeys", () => {
     const textarea = composer({ behavior: "direct" });
     type(textarea, "adjust the implementation");
 
-    fireEvent.click(screen.getByRole("button", { name: "Steer active run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Queue message" }));
 
     await waitFor(() =>
       expect(fakes.createInboxItem).toHaveBeenCalledWith(
         "session",
-        "steer",
+        "queue",
         "adjust the implementation",
       ),
     );
@@ -607,7 +607,7 @@ describe("direct inbox and goal journeys", () => {
     expect(textarea.value).toBe("");
   });
 
-  it("offers Queue Next and turns empty-field Send into Stop", async () => {
+  it("queues follow-up Send and turns empty-field Send into Stop", async () => {
     syncRunFromSnapshot({
       run_id: "run-live",
       prompt_preview: "working",
@@ -615,10 +615,10 @@ describe("direct inbox and goal journeys", () => {
     });
     const textarea = composer({ behavior: "direct" });
     type(textarea, "follow-up work");
-    expect(screen.getByRole("button", { name: "Steer active run" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Queue Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Queue message" }));
     await waitFor(() =>
       expect(fakes.createInboxItem).toHaveBeenCalledWith("session", "queue", "follow-up work"),
     );
@@ -664,28 +664,28 @@ describe("direct inbox and goal journeys", () => {
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
   });
 
-  it("shows pending durable input and permits delivery edits and cancellation", async () => {
-    composer({ behavior: "direct", inboxItems: [inbox()] });
+  it("shows queued durable input and permits steer and cancellation", async () => {
+    composer({ behavior: "direct", inboxItems: [inbox("queue")] });
 
-    expect(screen.getByLabelText("Pending messages").textContent).toContain("pending instruction");
-    fireEvent.click(screen.getByRole("button", { name: "Change to queue" }));
+    expect(screen.getByLabelText("Queued (1)").textContent).toContain("pending instruction");
+    fireEvent.click(screen.getByRole("button", { name: "Steer now" }));
     await waitFor(() =>
-      expect(fakes.updateInboxItem).toHaveBeenCalledWith("session", 7, 2, "queue"),
+      expect(fakes.updateInboxItem).toHaveBeenCalledWith("session", 7, 2, "steer"),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from queue" }));
     await waitFor(() => expect(fakes.cancelInboxItem).toHaveBeenCalledWith("session", 7, 3));
   });
 
-  it("surfaces pending-message edit and cancellation failures", async () => {
+  it("surfaces queued-message steer and cancellation failures", async () => {
     fakes.updateInboxItem.mockRejectedValueOnce(new Error("edit conflict"));
-    composer({ behavior: "direct", inboxItems: [inbox()] });
-    fireEvent.click(screen.getByRole("button", { name: "Change to queue" }));
+    composer({ behavior: "direct", inboxItems: [inbox("queue")] });
+    fireEvent.click(screen.getByRole("button", { name: "Steer now" }));
     expect(await screen.findByText(/Unable to change pending message: edit conflict/)).toBeTruthy();
 
     cleanup();
     fakes.cancelInboxItem.mockRejectedValueOnce(new Error("cancel conflict"));
-    composer({ behavior: "direct", inboxItems: [inbox()] });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    composer({ behavior: "direct", inboxItems: [inbox("queue")] });
+    fireEvent.click(screen.getByRole("button", { name: "Remove from queue" }));
     expect(
       await screen.findByText(/Unable to cancel pending message: cancel conflict/),
     ).toBeTruthy();

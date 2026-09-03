@@ -310,6 +310,7 @@ export function SessionSideBox({
                 // A tablet shows one column at a time, and a new panel opens on
                 // its selected row; a desktop split ignores the flag entirely.
                 showSidePanelList(false);
+                if (name === "delegated") selectSpawn(null);
                 onPanelChange(name);
               }}
             >

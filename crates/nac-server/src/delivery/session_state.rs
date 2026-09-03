@@ -13,10 +13,10 @@ use nac_core::{
 use crate::{
     ApiError, ApiErrorBody, CancelInboxItemRequest, ClearGoalRequest, CreateGoalRequest,
     CreateInboxItemRequest, InboxItemResponse, MessagesPageResponse, MessagesQuery,
-    PermissionStateResponse, ReplyPermissionRequest, SessionManager, SessionSnapshotQuery,
-    SessionSnapshotResponse, ThreadEventsQuery, UpdateGoalRequest, UpdateInboxItemRequest,
-    DEFAULT_MESSAGE_PAGE_LIMIT, DEFAULT_THREAD_EVENT_PAGE_LIMIT, MAX_MESSAGE_PAGE_LIMIT,
-    MAX_THREAD_EVENT_PAGE_LIMIT,
+    PermissionStateResponse, ReorderInboxItemsRequest, ReplyPermissionRequest, SessionManager,
+    SessionSnapshotQuery, SessionSnapshotResponse, ThreadEventsQuery, UpdateGoalRequest,
+    UpdateInboxItemRequest, DEFAULT_MESSAGE_PAGE_LIMIT, DEFAULT_THREAD_EVENT_PAGE_LIMIT,
+    MAX_MESSAGE_PAGE_LIMIT, MAX_THREAD_EVENT_PAGE_LIMIT,
 };
 
 #[utoipa::path(
@@ -152,6 +152,31 @@ pub(crate) async fn update_direct_inbox_item(
             .update_direct_inbox_item(&session_id, item_id, request)
             .await?
             .into(),
+    ))
+}
+
+#[utoipa::path(
+    put,
+    path = "/sessions/{session_id}/inbox/order",
+    operation_id = "put_sessions_session_id_inbox_order",
+    tag = "conversation",
+    params(("session_id" = String, Path)),
+    request_body(content = ReorderInboxItemsRequest, content_type = "application/json"),
+    responses((status = 200, description = "Success", body = Vec<InboxItemResponse>, content_type = "application/json"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request conflict", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn reorder_direct_inbox_items(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<ReorderInboxItemsRequest>, JsonRejection>,
+) -> std::result::Result<Json<Vec<InboxItemResponse>>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    Ok(Json(
+        manager
+            .reorder_direct_inbox_items(&session_id, request)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     ))
 }
 

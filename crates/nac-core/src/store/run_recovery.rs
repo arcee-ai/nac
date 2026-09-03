@@ -663,11 +663,9 @@ mod tests {
         let error = writer
             .append_run_prompt("session-a", 1, &user("must roll back"), "run-2")
             .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("already has an active durable run")
-        );
+        assert!(error
+            .to_string()
+            .contains("already has an active durable run"));
         assert_eq!(
             transcript(&writer),
             vec![(0, serde_json::to_value(user("first")).unwrap())]
@@ -1025,13 +1023,11 @@ mod tests {
         update.finished_run_id = Some("run-1".to_string());
         update.finished_run_disposition = Some(RunTerminalDisposition::Completed);
         crate::sessions::save_session_run_state(&path, &update).unwrap();
-        assert!(
-            load_run_recovery(&path, "orchestrator")
-                .unwrap()
-                .unwrap()
-                .terminal_disposition
-                .is_some()
-        );
+        assert!(load_run_recovery(&path, "orchestrator")
+            .unwrap()
+            .unwrap()
+            .terminal_disposition
+            .is_some());
 
         settle_managed_orchestrator_run(
             &path,

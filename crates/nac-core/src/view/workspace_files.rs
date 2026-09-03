@@ -13,11 +13,11 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::workspace_diff::validate_workspace_relpath;
-use crate::workspace::{GitTarget, WorktreeRead, first_stderr_line};
+use crate::workspace::{first_stderr_line, GitTarget, WorktreeRead};
 
 /// Enough for any repository a person browses by hand; past this the tree is
 /// unusable as a list anyway.

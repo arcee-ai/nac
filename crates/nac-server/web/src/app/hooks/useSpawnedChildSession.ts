@@ -3,7 +3,10 @@ import { useNavigate } from "react-router-dom";
 
 import type { AgentToolsGroup } from "@/app/lib/agentSegments";
 import { routes } from "@/app/lib/routes";
-import { assignmentIsOpen, sessionTypeFromBehavior } from "@/app/lib/sessionBehavior";
+import {
+  assignmentIsOpen,
+  sessionTypeFromBehavior,
+} from "@/app/lib/sessionBehavior";
 import {
   assignmentForSpawn,
   childPreviewLines,
@@ -26,7 +29,7 @@ function isNotFound(error: unknown): boolean {
 
 /**
  * Parent-owned controls and peek data for one `session_spawn` card, Actions
- * preview, or Related Sessions detail. `source` is the tools group or the child
+ * preview, or Back Chat detail. `source` is the tools group or the child
  * session id. Snapshot fetch is keyed by child id; it never writes the parent's
  * runtime store.
  */
@@ -36,7 +39,10 @@ export function useSpawnedChildSession(
 ) {
   const navigate = useNavigate();
   const toast = useToast();
-  const assignments = useSessionSpawns(parentSessionId, Boolean(parentSessionId));
+  const assignments = useSessionSpawns(
+    parentSessionId,
+    Boolean(parentSessionId),
+  );
   const startSpawn = useStartSessionSpawn();
   const cancelSpawn = useCancelSessionSpawn();
   const group = typeof source === "string" ? null : source;
@@ -49,14 +55,21 @@ export function useSpawnedChildSession(
     enabled: Boolean(childId),
     retry: false,
     refetchInterval: (query) =>
-      assignmentIsOpen(assignment?.status) || Boolean(query.state.data?.active_run) ? 1_000 : false,
+      assignmentIsOpen(assignment?.status) ||
+      Boolean(query.state.data?.active_run)
+        ? 1_000
+        : false,
   });
-  const missing = Boolean(childId) && snapshotQuery.isError && isNotFound(snapshotQuery.error);
+  const missing =
+    Boolean(childId) &&
+    snapshotQuery.isError &&
+    isNotFound(snapshotQuery.error);
   const running =
     assignmentIsOpen(assignment?.status) ||
     Boolean(snapshotQuery.data?.active_run) ||
     (!childId && Boolean(group?.inProgress));
-  const title = (assignment?.description || group?.label || "").trim() || "Spawned session";
+  const title =
+    (assignment?.description || group?.label || "").trim() || "Spawned session";
   const sessionType = sessionTypeFromBehavior(
     assignment?.child_behavior ?? snapshotQuery.data?.metadata.behavior,
   );
@@ -71,7 +84,9 @@ export function useSpawnedChildSession(
     try {
       await cancelSpawn.mutateAsync({ sessionId: parentSessionId, childId });
     } catch (error) {
-      toast.error(`Unable to pause delegated work: ${errorMessage(toRunError(error))}`);
+      toast.error(
+        `Unable to pause delegated work: ${errorMessage(toRunError(error))}`,
+      );
     }
   }, [cancelSpawn, childId, parentSessionId, toast]);
 
@@ -80,7 +95,9 @@ export function useSpawnedChildSession(
     try {
       await cancelSpawn.mutateAsync({ sessionId: parentSessionId, childId });
     } catch (error) {
-      toast.error(`Unable to stop delegated work: ${errorMessage(toRunError(error))}`);
+      toast.error(
+        `Unable to stop delegated work: ${errorMessage(toRunError(error))}`,
+      );
     }
   }, [cancelSpawn, childId, parentSessionId, toast]);
 
@@ -95,14 +112,17 @@ export function useSpawnedChildSession(
           payload: {
             behavior: assignment?.child_behavior ?? "direct",
             child_session_id: childId,
-            description: assignment?.description || group?.label || "Spawned session",
+            description:
+              assignment?.description || group?.label || "Spawned session",
             prompt: text,
             background: true,
           },
         });
         return true;
       } catch (error) {
-        toast.error(`Unable to send to spawned session: ${errorMessage(toRunError(error))}`);
+        toast.error(
+          `Unable to send to spawned session: ${errorMessage(toRunError(error))}`,
+        );
         return false;
       }
     },

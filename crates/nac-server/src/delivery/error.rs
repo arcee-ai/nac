@@ -246,6 +246,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("not active")
             || message.contains("active run is finishing")
             || message.contains("version conflict")
+            || message.contains("inbox queue order conflict")
             || message.contains("no longer pending")
             || message.contains("no longer current")
             || message.contains("unfinished goal")
@@ -264,6 +265,8 @@ impl From<anyhow::Error> for ApiError {
             StatusCode::NOT_IMPLEMENTED
         } else if message.contains("invalid")
             || message.contains("prompt is empty")
+            || message.contains("inbox content is empty")
+            || message.contains("invalid inbox reorder")
             || message.contains("goal objective is empty")
             || message.contains("goal token budget")
             || message.contains("traditional child prompt is empty")

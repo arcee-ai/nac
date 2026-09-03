@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use anyhow::{anyhow, Context, Result};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 mod assignments;
 mod managed_orchestrators;
@@ -34,30 +34,30 @@ pub use model_configurations::*;
 pub use permission_grants::*;
 pub use projects::*;
 pub use render::*;
-pub use run_recovery::{
-    ActiveRunReconciliation, RunRecoveryRecord, RunRecoveryStatus, RunTerminalDisposition,
-    clear_settled_run_recovery, load_run_recovery, reconcile_active_run,
-};
 pub(crate) use run_recovery::{
     clear_active_run, load_run_recovery_with_connection, mark_active_run_failed,
     replace_with_active_run,
 };
+pub use run_recovery::{
+    clear_settled_run_recovery, load_run_recovery, reconcile_active_run, ActiveRunReconciliation,
+    RunRecoveryRecord, RunRecoveryStatus, RunTerminalDisposition,
+};
 pub use schema::{check_readiness, default_store_path, initialize, schema_version};
 pub(crate) use session_assignments::load_session_assignment_with_connection;
 pub use session_assignments::{
-    SessionAssignmentChildBehavior, SessionAssignmentRecord, list_session_assignments,
-    list_suppressed_session_assignment_generations, load_session_assignment,
-    load_session_assignment_for_parent,
+    list_session_assignments, list_suppressed_session_assignment_generations,
+    load_session_assignment, load_session_assignment_for_parent, SessionAssignmentChildBehavior,
+    SessionAssignmentRecord,
 };
 pub use session_forks::{
-    SessionForkLink, SessionForkOrigin, clone_session_conversation_artifacts, dismiss_session_fork,
-    insert_session_fork, list_session_forks,
+    clone_session_conversation_artifacts, dismiss_session_fork, insert_session_fork,
+    list_session_forks, SessionForkLink, SessionForkOrigin,
 };
 pub(crate) use session_forks::{fork_origin_from_parts, list_session_forks_with_connection};
 pub use session_goals::*;
 pub(crate) use session_handoffs::converted_origin_from_parts;
 pub use session_handoffs::{
-    SessionConvertedOrigin, SessionHandoffRecord, insert_session_handoff, list_session_handoffs,
+    insert_session_handoff, list_session_handoffs, SessionConvertedOrigin, SessionHandoffRecord,
 };
 pub use session_inbox::*;
 pub use ssh_configurations::*;
@@ -69,7 +69,7 @@ pub use transcript::*;
 pub use worksets::*;
 pub use workspace_revisions::*;
 
-pub(crate) use schema::{StoreConnection, open_connection, open_runtime_connection};
+pub(crate) use schema::{open_connection, open_runtime_connection, StoreConnection};
 #[cfg(test)]
 pub(crate) use schema::{track_connection_opens, tracked_connection_opens};
 pub(crate) use steering::list_thread_steering_with_connection;
@@ -285,11 +285,9 @@ mod tests {
 
         let threads = list_threads(&store_path, session_id).unwrap();
         assert_eq!(threads.len(), 2);
-        assert!(
-            threads
-                .iter()
-                .any(|thread| thread.name == "auth" && thread.episode_count == 2)
-        );
+        assert!(threads
+            .iter()
+            .any(|thread| thread.name == "auth" && thread.episode_count == 2));
 
         let auth_episodes = thread_read(&store_path, session_id, "auth").unwrap();
         assert_eq!(auth_episodes.len(), 2);

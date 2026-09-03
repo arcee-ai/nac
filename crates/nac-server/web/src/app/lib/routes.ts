@@ -20,7 +20,7 @@ export type SessionPanel = (typeof SESSION_PANELS)[number];
 export const SESSION_PANEL_LABEL = {
   threads: "Threads",
   actions: "Actions",
-  delegated: "Related Sessions",
+  delegated: "Back Chat",
   files: "Files",
   worksets: "Worksets",
   history: "History",
@@ -63,6 +63,15 @@ export const routes = {
   project: (projectId: string) => `/project/${encodeURIComponent(projectId)}`,
   designPreview: () => "/design",
 };
+
+/** Child to open in Back Chat after navigating to its parent. */
+export function spawnIdFromLocationState(state: unknown): string | null {
+  if (!state || typeof state !== "object" || !("openSpawn" in state)) {
+    return null;
+  }
+  const value = (state as { openSpawn: unknown }).openSpawn;
+  return typeof value === "string" && value ? value : null;
+}
 
 /**
  * Session the path points at, or null on any other screen. The top bar sits in

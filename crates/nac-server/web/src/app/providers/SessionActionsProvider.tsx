@@ -1,4 +1,10 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 
 import { DeleteModal } from "@/app/components/modals/DeleteModal";
 import { RenameModal } from "@/app/components/modals/RenameModal";
@@ -27,9 +33,13 @@ type ModalKind = "rename" | "delete" | "settings";
 
 /**
  * Owns the actions a session card and the inspector header share, along with
- * the two small modals they open, so both surfaces behave identically.
+ * the small modals they open, so both surfaces behave identically.
  */
-export function SessionActionsProvider({ children }: { children: React.ReactNode }) {
+export function SessionActionsProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const toast = useToast();
   const pin = useTogglePin();
   const cancelRun = useCancelRun();
@@ -58,7 +68,9 @@ export function SessionActionsProvider({ children }: { children: React.ReactNode
         try {
           await togglePin(summary);
         } catch (error) {
-          toast.error(`Failed to update pin: ${errorMessage(toRunError(error))}`);
+          toast.error(
+            `Failed to update pin: ${errorMessage(toRunError(error))}`,
+          );
         }
       },
       stopRun: async (sessionId) => {
@@ -81,7 +93,11 @@ export function SessionActionsProvider({ children }: { children: React.ReactNode
       {children}
       <RenameModal open={modal === "rename"} onClose={close} summary={target} />
       <DeleteModal open={modal === "delete"} onClose={close} summary={target} />
-      <SettingsModal open={modal === "settings"} id={settingsId} onClose={close} />
+      <SettingsModal
+        open={modal === "settings"}
+        id={settingsId}
+        onClose={close}
+      />
     </SessionActionsContext.Provider>
   );
 }
@@ -89,7 +105,9 @@ export function SessionActionsProvider({ children }: { children: React.ReactNode
 export function useSessionActions(): SessionActions {
   const ctx = useContext(SessionActionsContext);
   if (!ctx) {
-    throw new Error("useSessionActions must be used within SessionActionsProvider");
+    throw new Error(
+      "useSessionActions must be used within SessionActionsProvider",
+    );
   }
   return ctx;
 }

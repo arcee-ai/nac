@@ -33,7 +33,7 @@ interface SessionLayoutState {
   selectedAgentSegment: string | null;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
-  /** Spawned child the chat last pointed the Related Sessions panel at. */
+  /** Spawned child the chat last pointed the Back Chat panel at. */
   selectedSpawn: string | null;
   /** Revision the panels are looking at, or null for the live working tree. */
   selectedRevision: number | null;
@@ -149,18 +149,28 @@ export function selectAgentSegment(
   }
   setState(
     selectedAgentSegment
-      ? { selectedAgentSegment, selectedThread: null, selectedThreadEpisode: null }
+      ? {
+          selectedAgentSegment,
+          selectedThread: null,
+          selectedThreadEpisode: null,
+        }
       : { selectedAgentSegment },
   );
   if (selectedAgentSegment && !opts?.follow) showSidePanelList(false);
 }
 
-export function selectWorkset(selectedWorkset: string | null, opts?: { follow?: boolean }): void {
+export function selectWorkset(
+  selectedWorkset: string | null,
+  opts?: { follow?: boolean },
+): void {
   setState({ selectedWorkset });
   if (selectedWorkset && !opts?.follow) showSidePanelList(false);
 }
 
-export function selectSpawn(selectedSpawn: string | null, opts?: { follow?: boolean }): void {
+export function selectSpawn(
+  selectedSpawn: string | null,
+  opts?: { follow?: boolean },
+): void {
   setState({ selectedSpawn });
   if (selectedSpawn && !opts?.follow) showSidePanelList(false);
 }
@@ -188,7 +198,10 @@ export function noteLiveActionRun(runId: string | null): void {
 export function lockLiveActionFollow(runId?: string | null): void {
   const nextRun = runId ?? getState().actionsFollowRunId;
   if (!nextRun) return;
-  if (getState().actionsFollowLocked && getState().actionsFollowRunId === nextRun) {
+  if (
+    getState().actionsFollowLocked &&
+    getState().actionsFollowRunId === nextRun
+  ) {
     return;
   }
   setState({
@@ -260,14 +273,19 @@ export const useSidePanelCollapsed = () => useStore((s) => s.collapsed);
 export const useSidePanelExpanded = () => useStore((s) => s.expanded);
 export const useSidePanelList = () => useStore((s) => s.panelList);
 export const useSelectedThread = () => useStore((s) => s.selectedThread);
-export const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
-export const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
-export const useSelectedAgentSegment = () => useStore((s) => s.selectedAgentSegment);
+export const useSelectedThreadEpisode = () =>
+  useStore((s) => s.selectedThreadEpisode);
+export const useSelectedThreadRunning = () =>
+  useStore((s) => s.selectedThreadRunning);
+export const useSelectedAgentSegment = () =>
+  useStore((s) => s.selectedAgentSegment);
 export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
 export const useSelectedSpawn = () => useStore((s) => s.selectedSpawn);
 export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);
 export const useToggledFolders = () => useStore((s) => s.toggledFolders);
 export const useFileListing = () => useStore((s) => s.fileListing);
-export const useActionsFollowLocked = () => useStore((s) => s.actionsFollowLocked);
-export const useActionsFollowRunId = () => useStore((s) => s.actionsFollowRunId);
+export const useActionsFollowLocked = () =>
+  useStore((s) => s.actionsFollowLocked);
+export const useActionsFollowRunId = () =>
+  useStore((s) => s.actionsFollowRunId);

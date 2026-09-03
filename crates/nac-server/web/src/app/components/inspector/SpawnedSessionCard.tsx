@@ -13,7 +13,7 @@ export function SpawnedSessionCard({
   group: AgentToolsGroup;
   parentSessionId: string;
   active?: boolean;
-  /** Child session id the Related Sessions panel is pointing at, if any. */
+  /** Child session id the Back Chat panel is pointing at, if any. */
   selectedChildId?: string | null;
   /** Preview transcripts show the card but do not select or control it. */
   inert?: boolean;
@@ -33,9 +33,7 @@ export function SpawnedSessionCard({
       busy={child.busy}
       canOpen={Boolean(child.childId) && !child.missing}
       inert={inert}
-      onSelect={
-        inert ? undefined : () => onSelect?.(group.id, child.childId)
-      }
+      onSelect={inert ? undefined : () => onSelect?.(group.id, child.childId)}
       onPause={inert ? undefined : () => void child.pause()}
       onPlay={inert ? undefined : () => void child.play()}
       onStop={inert ? undefined : () => void child.stop()}

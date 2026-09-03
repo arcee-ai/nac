@@ -13,7 +13,10 @@ import {
   TabButtonSize,
   TooltipPosition,
 } from "@/app/atoms";
-import { CREATE_SESSION_BEHAVIORS, sessionTypeFromBehavior } from "@/app/lib/sessionBehavior";
+import {
+  CREATE_SESSION_BEHAVIORS,
+  sessionTypeFromBehavior,
+} from "@/app/lib/sessionBehavior";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import type { SessionBehavior } from "@/app/types/api";
 
@@ -42,9 +45,13 @@ export function NewSessionPopover({
             className="!gap-2"
             onClick={() => onSelect(option.id)}
           >
-            <SessionTypeAvatar sessionType={sessionTypeFromBehavior(option.id)} />
+            <SessionTypeAvatar
+              sessionType={sessionTypeFromBehavior(option.id)}
+            />
             <span className="flex min-w-0 flex-1 items-center gap-1">
-              <span className="label-small min-w-0 truncate">{option.createLabel}</span>
+              <span className="label-small min-w-0 truncate">
+                {option.createLabel}
+              </span>
               <span
                 className="inline-flex shrink-0 [&_.icon]:!h-4 [&_.icon]:!w-4 [&_.icon]:!min-h-4 [&_.icon]:!min-w-4 [&_svg]:!h-4 [&_svg]:!w-4"
                 onClick={(event) => event.stopPropagation()}
@@ -99,7 +106,7 @@ export function NewSessionMenu({
       open={open}
       onClose={() => onOpenChange(false)}
       placement={PopoverPlacement.BottomLeft}
-      size={PopoverSize.Small}
+      size={PopoverSize.Medium}
       sticky
       panelClassName="px-1 py-2 gap-2"
       content={

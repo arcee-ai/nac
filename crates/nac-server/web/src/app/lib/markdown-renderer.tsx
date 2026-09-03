@@ -301,8 +301,14 @@ function ParsedWithMath({
  * appends: once a later block exists this text is settled, and re-parsing it is
  * pure waste that grows with every delta.
  */
-const StreamedBlock = memo(function StreamedBlock({ source }: { source: string }) {
-  return <Parsed source={source} streaming />;
+const StreamedBlock = memo(function StreamedBlock({
+  source,
+  streaming,
+}: {
+  source: string;
+  streaming: boolean;
+}) {
+  return <Parsed source={source} streaming={streaming} />;
 });
 
 /**
@@ -321,9 +327,15 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
   return (
     <PerfProfiler id="markdown">
       {streaming ? (
-        splitMarkdownBlocks(children).map((source, index) => (
+        splitMarkdownBlocks(children).map((source, index, blocks) => (
           // Blocks are append-only, so their position is their identity.
-          <StreamedBlock key={index} source={source} />
+          // Only the open tail is still streaming: earlier blocks are settled,
+          // and a remount must not restart their fade from opacity 0.
+          <StreamedBlock
+            key={index}
+            source={source}
+            streaming={index === blocks.length - 1}
+          />
         ))
       ) : (
         <Parsed source={children} streaming={false} />
