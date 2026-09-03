@@ -195,33 +195,33 @@ abruptly, and proves the same durable host becomes ready with no bootstrap
 mount. It never contacts a real GitHub App, model endpoint, ArceeFM, or AWS
 account.
 
-## Publication
+## Image CI and publication ownership
 
-`.github/workflows/managed-image.yml` builds and smokes pull-request and main
-candidates without AWS credentials or publication. A manual dispatch accepts
-an exact ref and publishes only after the same smoke to the GitHub `dev`
-environment. Configure these environment values:
+`.github/workflows/managed-image.yml` builds and smokes pull-request, `main`,
+and manually dispatched candidates without registry credentials or
+publication. Every lane checks out the triggering commit, builds the exact
+`linux/amd64` image with `push: false`, and runs the source-owned smoke
+contract. The public NAC repository has no AWS identity, ECR configuration,
+package-write permission, or image publish job.
 
-- variable `AWS_REGION`
-- secret `OIDC_ROLE_TO_ASSUME`
-- variable `ECR_REPOSITORY`
-- variable `ECR_CACHE_REPOSITORY`
-
-Publication uses GitHub OIDC, a registry BuildKit cache, maximum provenance,
-and an SBOM. The tag includes the full candidate SHA, workflow run ID, and
-attempt; the workflow emits the digest and creates no moving `latest` or `dev`
-application tag. Platform must deploy by immutable digest.
+Private Managed NAC publication is owned by
+`arcee-ai/managed-nac-controller`. Its reviewed workflow checks out an exact
+full NAC commit, builds this repository's canonical Dockerfile, runs this
+repository's smoke contract, and publishes the accepted image to private ECR
+inside that repository's AWS/OIDC trust boundary. Neither repository triggers
+the other or shares publishing credentials. Deployment selects the resulting
+private image by immutable digest.
 
 ## First dogfood and external gaps
 
 Automated tests use local GitHub/Git doubles and production-embedded browser
-API doubles. A real staging demonstration additionally requires the
-platform-owned ECR/OIDC inputs, controller and PVC contract, gateway owner
-authentication, allowed egress, stable hostname, and revocable Arcee managed
-grant. On staging, validate one server-minted bootstrap, fail-closed logout or
-revocation behavior, and the independent interactive fallback after an explicit
-credential-source change, plus repository and
-branch discovery, clone, HTTPS Git push (including a safe workflow-file change
-in a disposable repository), `gh` use, process/pod restart, and same-volume
-rescheduling. Those external checks do not weaken or replace the local NAC
-contracts.
+API doubles. A real staging demonstration additionally requires a private
+runtime image published from the reviewed NAC commit, the controller and PVC
+contract, gateway owner authentication, allowed egress, stable hostname, and
+revocable Arcee managed grant. On staging, validate one server-minted
+bootstrap, fail-closed logout or revocation behavior, and the independent
+interactive fallback after an explicit credential-source change, plus
+repository and branch discovery, clone, HTTPS Git push (including a safe
+workflow-file change in a disposable repository), `gh` use, process/pod
+restart, and same-volume rescheduling. Those external checks do not weaken or
+replace the local NAC contracts.
