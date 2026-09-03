@@ -64,8 +64,10 @@ export function useSpawnedChildSession(
     Boolean(childId) &&
     snapshotQuery.isError &&
     isNotFound(snapshotQuery.error);
+  // An idle assignment is parent-owned but not working: it must read as ready,
+  // matching the steer/cancel affordances `presentSessionAssignment` allows.
   const running =
-    assignmentIsOpen(assignment?.status) ||
+    assignment?.status === "running" ||
     Boolean(snapshotQuery.data?.active_run) ||
     (!childId && Boolean(group?.inProgress));
   const title =

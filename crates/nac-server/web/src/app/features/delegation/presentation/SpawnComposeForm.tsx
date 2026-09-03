@@ -119,9 +119,11 @@ export function SpawnComposeForm({
             isDisabled={busy}
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) {
-                return;
-              }
+              // Enter sends, as it does in the chat composer; Shift keeps the
+              // newline and the modifier combo stays for the muscle memory it
+              // was written for.
+              if (event.nativeEvent.isComposing) return;
+              if (event.key !== "Enter" || event.shiftKey) return;
               event.preventDefault();
               if (canSend) void submit();
             }}

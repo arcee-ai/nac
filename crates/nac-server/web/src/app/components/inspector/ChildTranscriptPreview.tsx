@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 
 import ChildSessionActionButtons from "@/app/atoms/child-session-action-buttons";
 import SessionTypeAvatar from "@/app/atoms/session-type-avatar";
@@ -7,9 +7,13 @@ import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { SpawnSteerInput } from "@/app/features/delegation/presentation/SpawnSteerInput";
 import { useChildSessionLive } from "@/app/hooks/useChildSessionLive";
 import { useSpawnedChildSession } from "@/app/hooks/useSpawnedChildSession";
+import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import type { AgentToolsGroup } from "@/app/lib/agentSegments";
 import { sessionTypeFromBehavior } from "@/app/lib/sessionBehavior";
 import { buildTranscript, withStreamedOutput } from "@/app/lib/transcript";
+
+/** Glide the preview onto a message the reader just sent, as the chat does. */
+const SEND_FOLLOW_MS = 300;
 
 export function ChildTranscriptPreview({
   parentSessionId,
@@ -23,7 +27,12 @@ export function ChildTranscriptPreview({
   const child = useSpawnedChildSession(parentSessionId, group ?? childSessionId ?? "");
   const live = useChildSessionLive(child.childId, Boolean(child.childId) && !child.missing, parentSessionId);
   const running = child.running || live.running;
-  const scrollerRef = useRef<HTMLDivElement>(null);
+  // Same follow behavior as the chat transcript: the streamed child is glided
+  // onto rather than snapped to, and the growth observer covers the height a
+  // markdown block only settles on after it has laid out.
+  const { scrollRef, contentRef, followLatest } = useStickToBottom({
+    resetKey: child.childId,
+  });
 
   const turns = useMemo(() => {
     return withStreamedOutput(buildTranscript(child.snapshot, {}, {}, []), {
@@ -32,11 +41,16 @@ export function ChildTranscriptPreview({
     });
   }, [child.snapshot, live.reasoning, live.text]);
 
-  useEffect(() => {
-    const scroller = scrollerRef.current;
-    if (!scroller) return;
-    scroller.scrollTop = scroller.scrollHeight;
-  }, [turns, live.text, live.reasoning]);
+  const send = useCallback(
+    async (prompt: string) => {
+      const accepted = await child.send(prompt);
+      // The prompt reaches the view with the next snapshot, so this only asks
+      // the growth that follows to glide instead of tick.
+      if (accepted) followLatest(SEND_FOLLOW_MS);
+      return accepted;
+    },
+    [child.send, followLatest],
+  );
 
   const model = child.snapshot?.metadata.model ?? "Model";
   const sessionType = sessionTypeFromBehavior(
@@ -71,60 +85,62 @@ export function ChildTranscriptPreview({
         )}
       </div>
       <div
-        ref={scrollerRef}
-        className="flex min-h-0 flex-1 flex-col overflow-auto px-4 py-2 [&>*]:shrink-0"
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-auto [overflow-anchor:none]"
       >
-        {child.missing ? (
-          <p className="label-small text-basic-muted">
-            No chat found. Chat deleted or unrelated.
-          </p>
-        ) : !child.childId ? (
-          <p className="label-small text-basic-muted">Starting session…</p>
-        ) : turns.length === 0 ? (
-          <p className="label-small text-basic-muted">
-            {running ? "Thinking…" : "No messages yet."}
-          </p>
-        ) : (
-          turns.map((turn, index) => {
-            if (turn.kind === "delegated-completion") return null;
-            if (turn.kind === "user") {
+        <div ref={contentRef} className="flex flex-col px-4 py-2 [&>*]:shrink-0">
+          {child.missing ? (
+            <p className="label-small text-basic-muted">
+              No chat found. Chat deleted or unrelated.
+            </p>
+          ) : !child.childId ? (
+            <p className="label-small text-basic-muted">Starting session…</p>
+          ) : turns.length === 0 ? (
+            <p className="label-small text-basic-muted">
+              {child.snapshotPending
+                ? "Loading…"
+                : running
+                  ? "Thinking…"
+                  : "No messages yet."}
+            </p>
+          ) : (
+            turns.map((turn, index) => {
+              if (turn.kind === "delegated-completion") return null;
+              if (turn.kind === "user") {
+                return (
+                  <UserMessage
+                    key={turn.key}
+                    text={turn.text}
+                    invokedSkills={turn.invokedSkills}
+                    preview
+                  />
+                );
+              }
+              const last = index === turns.length - 1 && turn.kind === "model";
               return (
-                <UserMessage
+                <ModelMessage
                   key={turn.key}
-                  text={turn.text}
-                  invokedSkills={turn.invokedSkills}
+                  turn={turn}
+                  model={model}
+                  sessionType={sessionType}
+                  active={running && last}
+                  isLast={false}
                   preview
+                  spawnParentSessionId={child.childId ?? parentSessionId}
+                  selectedThreadEpisode={null}
+                  selectedWorkset={null}
+                  selectedSpawn={null}
+                  selectedAgentSegment={null}
+                  onSelectThread={() => undefined}
+                  onSelectWorkset={() => undefined}
                 />
               );
-            }
-            const last = index === turns.length - 1 && turn.kind === "model";
-            return (
-              <ModelMessage
-                key={turn.key}
-                turn={turn}
-                model={model}
-                sessionType={sessionType}
-                active={running && last}
-                isLast={false}
-                preview
-                spawnParentSessionId={child.childId ?? parentSessionId}
-                selectedThreadEpisode={null}
-                selectedWorkset={null}
-                selectedSpawn={null}
-                selectedAgentSegment={null}
-                onSelectThread={() => undefined}
-                onSelectWorkset={() => undefined}
-              />
-            );
-          })
-        )}
+            })
+          )}
+        </div>
       </div>
       {child.missing || !child.childId ? null : (
-        <SpawnSteerInput
-          disabled={child.busy}
-          sending={child.busy}
-          onSend={child.send}
-        />
+        <SpawnSteerInput disabled={child.busy} sending={child.busy} onSend={send} />
       )}
     </div>
   );

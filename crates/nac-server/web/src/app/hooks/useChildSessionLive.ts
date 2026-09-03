@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { subscribeToSessionEvents } from "@/app/services/eventStream";
@@ -10,6 +10,11 @@ export interface ChildLiveStream {
   text: string;
   reasoning: string;
   running: boolean;
+}
+
+/** What the snapshot now carries, dropped from the head of the live buffer. */
+function remainder(buffered: string, committed: string): string {
+  return buffered.startsWith(committed) ? buffered.slice(committed.length) : "";
 }
 
 /**
@@ -24,31 +29,61 @@ export function useChildSessionLive(
   parentSessionId?: string,
 ): ChildLiveStream {
   const client = useQueryClient();
+  const bufferRef = useRef({ text: "", reasoning: "" });
   const [text, setText] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
+    const buffer = bufferRef.current;
+
+    const publish = () => {
+      setText(buffer.text);
+      setReasoning(buffer.reasoning);
+    };
+
+    const clearBuffer = () => {
+      buffer.text = "";
+      buffer.reasoning = "";
+      publish();
+    };
+
+    // A new subscription never inherits the previous child's partial output.
+    clearBuffer();
     if (!sessionId || !enabled) {
-      setText("");
-      setReasoning("");
       setRunning(false);
       return;
     }
 
     let disposed = false;
     let snapshotTimer: number | null = null;
+    /**
+     * What the pending refetch is expected to commit. Dropping it only once the
+     * snapshot has landed keeps the streamed output on screen instead of
+     * blanking it for the length of the debounce.
+     */
+    let committing: { text: string; reasoning: string } | null = null;
     const id = sessionId;
 
-    const scheduleSnapshot = () => {
+    const scheduleSnapshot = (commitBuffer = false) => {
+      if (commitBuffer) committing = { ...buffer };
       if (snapshotTimer != null) window.clearTimeout(snapshotTimer);
       snapshotTimer = window.setTimeout(() => {
         snapshotTimer = null;
         if (disposed) return;
-        void client.invalidateQueries({
-          queryKey: queryKeys.sessionSnapshot(id),
-          exact: true,
-        });
+        const committed = committing;
+        committing = null;
+        void client
+          .invalidateQueries({
+            queryKey: queryKeys.sessionSnapshot(id),
+            exact: true,
+          })
+          .then(() => {
+            if (disposed || !committed) return;
+            buffer.text = remainder(buffer.text, committed.text);
+            buffer.reasoning = remainder(buffer.reasoning, committed.reasoning);
+            publish();
+          });
       }, RELOAD_DEBOUNCE_MS);
     };
 
@@ -56,8 +91,8 @@ export function useChildSessionLive(
       onEnvelope: (envelope) => {
         const type = envelope.event.type;
         if (type === "run_started") {
-          setText("");
-          setReasoning("");
+          committing = null;
+          clearBuffer();
           setRunning(true);
         } else if (
           type === "run_completed" ||
@@ -71,19 +106,21 @@ export function useChildSessionLive(
             });
           }
         }
-        if (type === "transcript_appended" || type === "transcript_reverted") {
-          setText("");
-          setReasoning("");
+        if (type === "transcript_reverted") {
+          committing = null;
+          clearBuffer();
         }
-        scheduleSnapshot();
+        scheduleSnapshot(type === "transcript_appended");
       },
       onAssistantDelta: (delta) => {
         if (delta.thread_name) return;
-        if (delta.text) setText((current) => current + delta.text);
-        if (delta.reasoning) setReasoning((current) => current + delta.reasoning);
+        if (!delta.text && !delta.reasoning) return;
+        buffer.text += delta.text ?? "";
+        buffer.reasoning += delta.reasoning ?? "";
+        publish();
       },
-      onReplayGap: scheduleSnapshot,
-      onLagged: scheduleSnapshot,
+      onReplayGap: () => scheduleSnapshot(),
+      onLagged: () => scheduleSnapshot(),
     });
 
     return () => {
