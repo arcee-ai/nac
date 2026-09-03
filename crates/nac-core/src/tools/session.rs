@@ -454,6 +454,12 @@ impl NativeTool for SessionSteerTool {
             };
             match assignment.child_behavior {
                 SessionAssignmentChildBehavior::Direct => {
+                    if assignment.status != TraditionalChildStatus::Running {
+                        return ToolResult::text(
+                            "Error: session_steer is only valid while the assignment is running; use session_spawn with this child_session_id to start a new generation",
+                            true,
+                        );
+                    }
                     if input.thread_name.is_some() {
                         return ToolResult::text(
                             "Error: thread_name is only valid for NAC assignments",
@@ -764,5 +770,118 @@ impl NativeTool for SessionCancelTool {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+    use crate::traditional_children::{ChildFuture, TraditionalChildController};
+    use anyhow::anyhow;
+    use serde_json::json;
+
+    struct FakeController {
+        starts: Mutex<Vec<TraditionalChildStartRequest>>,
+    }
+
+    impl TraditionalChildController for FakeController {
+        fn start<'a>(
+            &'a self,
+            request: TraditionalChildStartRequest,
+        ) -> ChildFuture<'a, TraditionalChildRecord> {
+            self.starts.lock().unwrap().push(request);
+            Box::pin(async { Err(anyhow!("session_steer must not start a generation")) })
+        }
+
+        fn wait<'a>(
+            &'a self,
+            _child_session_id: &'a str,
+            _generation: u64,
+        ) -> ChildFuture<'a, TraditionalChildRecord> {
+            Box::pin(async { unreachable!("wait") })
+        }
+
+        fn cancel<'a>(
+            &'a self,
+            _parent_session_id: &'a str,
+            _child_session_id: &'a str,
+        ) -> ChildFuture<'a, TraditionalChildRecord> {
+            Box::pin(async { unreachable!("cancel") })
+        }
+
+        fn wake<'a>(&'a self, _session_id: &'a str) -> ChildFuture<'a, ()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    fn persist_direct_session(store_path: &std::path::Path, session_id: &str) {
+        let root = store_path.parent().expect("store parent");
+        let mut snapshot = crate::sessions::new_snapshot(
+            session_id.to_string(),
+            root.to_path_buf(),
+            "test-model".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            crate::model::BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            std::collections::BTreeMap::new(),
+        );
+        snapshot.behavior = crate::sessions::SessionBehavior::Direct;
+        crate::sessions::create_session(store_path, &snapshot).unwrap();
+    }
+
+    #[tokio::test]
+    async fn session_steer_rejects_idle_direct_assignment() {
+        let root =
+            std::env::temp_dir().join(format!("nac_session_steer_idle_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let store_path = root.join("store.db");
+        persist_direct_session(&store_path, "parent");
+        persist_direct_session(&store_path, "child");
+        crate::store::create_traditional_child_relationship(
+            &store_path,
+            "parent",
+            "child",
+            GENERAL_CHILD_PROFILE,
+            "review the implementation",
+        )
+        .unwrap();
+        let controller = Arc::new(FakeController {
+            starts: Mutex::new(Vec::new()),
+        });
+        crate::traditional_children::register_controller(store_path.clone(), controller.clone());
+        let mut runtime = crate::tools::test_runtime();
+        runtime.store_path = store_path;
+        runtime.session_id = Some("parent".to_string());
+        runtime.allowed_tools = Some(Arc::new(
+            crate::tools::DIRECT_TOOL_NAMES
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        ));
+
+        let result = crate::tools::execute_tool(
+            "session_steer",
+            json!({
+                "child_session_id": "child",
+                "instruction": "keep going"
+            }),
+            &runtime,
+            &crate::model::ModelClient::new_for_test(),
+        )
+        .await;
+        assert!(result.is_error);
+        assert!(result
+            .content
+            .as_text()
+            .unwrap_or_default()
+            .contains("only valid while the assignment is running"));
+        assert!(controller.starts.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(root);
     }
 }

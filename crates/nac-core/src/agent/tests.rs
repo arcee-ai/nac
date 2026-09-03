@@ -374,6 +374,16 @@ fn key_argument_preview_is_family_aware_and_fail_closed() {
             "Review tests",
         ),
         (
+            "subagent",
+            r#"{"description":"Audit storage","prompt":"SECRET_PROMPT"}"#,
+            "Audit storage",
+        ),
+        (
+            "orchestrator_launch",
+            r#"{"description":"Plan rollout","prompt":"SECRET_PROMPT"}"#,
+            "Plan rollout",
+        ),
+        (
             "mcp__linear__linear_read_issue",
             r#"{"name":"ALL-1","authorization":"SECRET_HEADER"}"#,
             "ALL-1",
@@ -1143,4 +1153,237 @@ fn failed_tool_round_ignores_successful_results() {
         ToolResult::text("ok", false),
     )];
     assert!(failed_tool_round(&calls, &results).is_none());
+}
+
+#[test]
+fn assignment_prompt_rewrite_keeps_unknown_prefix() {
+    let current = "foreign head\n\n## Project\nKeep this suffix.";
+    let rewritten = super::rewrite_direct_assignment_system_prompt(
+        current,
+        "/workspace",
+        Some("review the implementation"),
+        true,
+    );
+    assert_eq!(rewritten, current);
+}
+
+#[test]
+fn assignment_prompt_rewrite_swaps_known_head_and_keeps_suffix() {
+    let agent = render_direct_with_orchestrator_system_prompt("/workspace");
+    let current = format!("{agent}\n\n## Project\nKeep this suffix.");
+    let rewritten = super::rewrite_direct_assignment_system_prompt(
+        &current,
+        "/workspace",
+        Some("review the implementation"),
+        true,
+    );
+    let child = render_general_child_system_prompt("/workspace", "review the implementation");
+    assert!(rewritten.starts_with(&child));
+    assert!(rewritten.ends_with("## Project\nKeep this suffix."));
+}
+
+#[test]
+fn model_request_advertises_legacy_spawn_names_from_transcript() {
+    let root =
+        std::env::temp_dir().join(format!("nac_legacy_spawn_history_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let store_path = root.join("store.db");
+    let mut snapshot = crate::sessions::new_snapshot(
+        "parent".to_string(),
+        root.clone(),
+        "test-model".to_string(),
+        "https://api.openai.com/v1".to_string(),
+        crate::model::BackendKind::OpenAiResponses,
+        None,
+        None,
+        None,
+        Vec::new(),
+        Some("OPENAI_API_KEY".to_string()),
+        std::collections::BTreeMap::new(),
+    );
+    snapshot.behavior = crate::sessions::SessionBehavior::Direct;
+    crate::sessions::create_session(&store_path, &snapshot).unwrap();
+
+    let mut agent = Agent::with_config(
+        ModelClient::new_for_test(),
+        AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
+            mode: AgentMode::Direct,
+            session_behavior: None,
+            store_path,
+            session_id: Some("parent".to_string()),
+            orchestrator_compaction_threshold: None,
+            initial_messages: Vec::new(),
+            thread_name: None,
+            dispatch_id: None,
+            event_sink: EventSink::none(),
+            workspace_cwd: root.clone(),
+            config_cwd: root.clone(),
+            working_directory: root.display().to_string(),
+            worker_executable: None,
+            sandbox: None,
+            ssh: None,
+            mcp: None,
+            skills: None,
+            extra_tool_defs: Vec::new(),
+            agents_md_message: None,
+            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            light_client: None,
+            permission_rules: Vec::new(),
+        },
+    )
+    .unwrap();
+
+    let without_history: Vec<_> = agent
+        .model_request_capabilities_for_test(None)
+        .into_iter()
+        .map(|definition| definition.function.name)
+        .collect();
+    assert!(without_history.iter().any(|name| name == "session_spawn"));
+    assert!(!without_history.iter().any(|name| name == "subagent"));
+
+    agent.messages.push(Message::Assistant {
+        content: None,
+        reasoning_text: None,
+        reasoning_details: None,
+        tool_calls: Some(vec![test_tool_call(
+            "call-1",
+            "subagent",
+            r#"{"profile":"general","description":"review","prompt":"go","child_session_id":null,"background":true}"#,
+        )]),
+        duration_ms: None,
+        model_origin: None,
+        reasoning_field: None,
+    });
+    let with_history: Vec<_> = agent
+        .model_request_capabilities_for_test(None)
+        .into_iter()
+        .map(|definition| definition.function.name)
+        .collect();
+    assert!(with_history.iter().any(|name| name == "session_spawn"));
+    assert!(with_history.iter().any(|name| name == "subagent"));
+
+    drop(agent);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn reopened_assignment_keeps_spawn_names_already_in_transcript() {
+    let root =
+        std::env::temp_dir().join(format!("nac_reopen_spawn_history_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let store_path = root.join("store.db");
+    for session_id in ["parent", "child"] {
+        let mut snapshot = crate::sessions::new_snapshot(
+            session_id.to_string(),
+            root.clone(),
+            "test-model".to_string(),
+            "https://api.openai.com/v1".to_string(),
+            crate::model::BackendKind::OpenAiResponses,
+            None,
+            None,
+            None,
+            Vec::new(),
+            Some("OPENAI_API_KEY".to_string()),
+            std::collections::BTreeMap::new(),
+        );
+        snapshot.behavior = crate::sessions::SessionBehavior::Direct;
+        crate::sessions::create_session(&store_path, &snapshot).unwrap();
+    }
+    crate::store::create_traditional_child_relationship(
+        &store_path,
+        "parent",
+        "child",
+        crate::store::GENERAL_CHILD_PROFILE,
+        "review the implementation",
+    )
+    .unwrap();
+
+    let mut child = Agent::with_config(
+        ModelClient::new_for_test(),
+        AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
+            mode: AgentMode::Direct,
+            session_behavior: None,
+            store_path: store_path.clone(),
+            session_id: Some("child".to_string()),
+            orchestrator_compaction_threshold: None,
+            initial_messages: Vec::new(),
+            thread_name: None,
+            dispatch_id: None,
+            event_sink: EventSink::none(),
+            workspace_cwd: root.clone(),
+            config_cwd: root.clone(),
+            working_directory: root.display().to_string(),
+            worker_executable: None,
+            sandbox: None,
+            ssh: None,
+            mcp: None,
+            skills: None,
+            extra_tool_defs: Vec::new(),
+            agents_md_message: None,
+            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            light_client: None,
+            permission_rules: Vec::new(),
+        },
+    )
+    .unwrap();
+
+    crate::store::begin_traditional_child_run(
+        &store_path,
+        "child",
+        "run-1",
+        crate::store::TraditionalChildExecutionMode::Foreground,
+    )
+    .unwrap();
+    crate::store::settle_traditional_child_run(
+        &store_path,
+        "child",
+        "run-1",
+        crate::store::TraditionalChildTerminal {
+            status: crate::store::TraditionalChildStatus::Completed,
+            report: Some("done".to_string()),
+            failure: None,
+            change_summary: None,
+            verification_summary: None,
+        },
+    )
+    .unwrap();
+    let unlocked: Vec<_> = child
+        .model_request_capabilities_for_test(None)
+        .into_iter()
+        .map(|definition| definition.function.name)
+        .collect();
+    assert!(unlocked.iter().any(|name| name == "session_spawn"));
+
+    child.messages.push(Message::Assistant {
+        content: None,
+        reasoning_text: None,
+        reasoning_details: None,
+        tool_calls: Some(vec![test_tool_call(
+            "call-spawn",
+            "session_spawn",
+            r#"{"behavior":"direct","description":"next","prompt":"go","child_session_id":null,"background":true}"#,
+        )]),
+        duration_ms: None,
+        model_origin: None,
+        reasoning_field: None,
+    });
+    crate::store::begin_traditional_child_run(
+        &store_path,
+        "child",
+        "run-2",
+        crate::store::TraditionalChildExecutionMode::Background,
+    )
+    .unwrap();
+    let relocked: Vec<_> = child
+        .model_request_capabilities_for_test(None)
+        .into_iter()
+        .map(|definition| definition.function.name)
+        .collect();
+    assert!(relocked.iter().any(|name| name == "session_spawn"));
+    assert!(!relocked.iter().any(|name| name == "create_goal"));
+
+    drop(child);
+    let _ = std::fs::remove_dir_all(root);
 }

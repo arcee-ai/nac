@@ -189,10 +189,16 @@ fn direct_registries_preserve_exact_topology_capabilities() {
     assert_eq!(worker, super::WORKER_TOOL_NAMES);
     assert_eq!(direct, super::DIRECT_TOOL_NAMES);
     assert_eq!(running_assigned, super::RUNNING_ASSIGNED_DIRECT_TOOL_NAMES);
-    assert!(!running_assigned.iter().any(|name| name == "create_goal"));
+    assert_eq!(running_assigned, super::WORKER_TOOL_NAMES);
+    assert!(super::GOAL_TOOL_NAMES
+        .iter()
+        .all(|name| !running_assigned.iter().any(|assigned| assigned == name)));
     assert!(super::SPAWN_TOOL_NAMES
         .iter()
         .all(|name| !running_assigned.iter().any(|assigned| assigned == name)));
+    assert!(super::LEGACY_SPAWN_TOOL_NAMES
+        .iter()
+        .all(|name| !direct.iter().any(|tool| tool == name)));
     assert_eq!(delegating, super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES);
     assert_eq!(&delegating[11..], super::ORCHESTRATOR_CONTROL_TOOL_NAMES);
     assert_eq!(&direct_web[..super::DIRECT_TOOL_NAMES.len()], &direct);
@@ -269,6 +275,83 @@ fn launch_tools_use_strict_compatible_nullable_new_session_ids() {
         );
         assert_eq!(parameters["additionalProperties"], false);
     }
+}
+
+#[test]
+fn history_union_advertises_legacy_spawn_names_without_changing_new_sessions() {
+    let fresh = super::direct_tool_definitions(false);
+    assert!(super::LEGACY_SPAWN_TOOL_NAMES.iter().all(|name| {
+        !fresh
+            .iter()
+            .any(|definition| definition.function.name == *name)
+    }));
+
+    let with_history = super::extend_definitions_with_history(
+        fresh.clone(),
+        ["subagent", "orchestrator_launch", "read"],
+        false,
+    );
+    let names: Vec<_> = with_history
+        .iter()
+        .map(|definition| definition.function.name.as_str())
+        .collect();
+    assert!(names.contains(&"session_spawn"));
+    assert!(names.contains(&"subagent"));
+    assert!(names.contains(&"orchestrator_launch"));
+    assert_eq!(names.iter().filter(|name| **name == "subagent").count(), 1);
+}
+
+#[tokio::test]
+async fn spawn_surface_executes_legacy_names_and_assigned_surface_does_not() {
+    let mut runtime = super::test_runtime();
+    runtime.allowed_tools = Some(Arc::new(
+        super::DIRECT_TOOL_NAMES
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    ));
+    let aliased = super::execute_tool(
+        "subagent",
+        serde_json::json!({
+            "profile": "general",
+            "description": "review store",
+            "prompt": "inspect persistence",
+            "child_session_id": null,
+            "background": true
+        }),
+        &runtime,
+        &crate::model::ModelClient::new_for_test(),
+    )
+    .await;
+    assert_ne!(
+        aliased.content.as_text(),
+        Some("Error: unknown tool 'subagent' is not available to this agent")
+    );
+
+    runtime.allowed_tools = Some(Arc::new(
+        super::RUNNING_ASSIGNED_DIRECT_TOOL_NAMES
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    ));
+    let assigned = super::execute_tool(
+        "subagent",
+        serde_json::json!({
+            "profile": "general",
+            "description": "review store",
+            "prompt": "inspect persistence",
+            "child_session_id": null,
+            "background": true
+        }),
+        &runtime,
+        &crate::model::ModelClient::new_for_test(),
+    )
+    .await;
+    assert!(assigned.is_error);
+    assert_eq!(
+        assigned.content.as_text(),
+        Some("Error: unknown tool 'subagent' is not available to this agent")
+    );
 }
 
 #[tokio::test]

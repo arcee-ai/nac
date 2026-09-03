@@ -139,21 +139,44 @@ fn rewrite_direct_assignment_system_prompt(
     let agent_base = render_direct_with_orchestrator_system_prompt(working_directory);
     let child_base =
         description.map(|value| render_general_child_system_prompt(working_directory, value));
-    let suffix = current
-        .strip_prefix(&agent_base)
-        .or_else(|| {
-            child_base
-                .as_deref()
-                .and_then(|base| current.strip_prefix(base))
-        })
-        .unwrap_or("");
-    let mut next = if assignment_open {
-        child_base.unwrap_or_else(|| agent_base.clone())
+    let next_base = if assignment_open {
+        child_base.clone().unwrap_or_else(|| agent_base.clone())
     } else {
-        agent_base
+        agent_base.clone()
     };
+    if current.starts_with(&next_base) {
+        return current.to_string();
+    }
+    let Some(suffix) = current.strip_prefix(&agent_base).or_else(|| {
+        child_base
+            .as_deref()
+            .and_then(|base| current.strip_prefix(base))
+    }) else {
+        return current.to_string();
+    };
+    let mut next = next_base;
     next.push_str(suffix);
     next
+}
+
+fn transcript_tool_call_names(messages: &[Message]) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut seen = HashSet::new();
+    for message in messages {
+        let Message::Assistant {
+            tool_calls: Some(calls),
+            ..
+        } = message
+        else {
+            continue;
+        };
+        for call in calls {
+            if seen.insert(call.function.name.clone()) {
+                names.push(call.function.name.clone());
+            }
+        }
+    }
+    names
 }
 
 fn light_model_prompt_guidance(light: &ModelClient) -> String {
@@ -484,7 +507,14 @@ impl Agent {
             .map(Arc::new);
         let mut definitions = self.tool_defs.clone();
         if credential.is_some() {
-            definitions.extend(crate::tools::web::definitions());
+            let has_web = definitions.iter().any(|definition| {
+                tools::WEB_TOOL_NAMES
+                    .iter()
+                    .any(|name| definition.function.name == *name)
+            });
+            if !has_web {
+                definitions.extend(crate::tools::web::definitions());
+            }
         }
         self.tool_runtime.allowed_tools = Some(Arc::new(
             definitions
@@ -514,9 +544,22 @@ impl Agent {
             tools::direct_with_orchestrator_tool_definitions(image_read)
         };
         tool_defs.extend(self.extra_tool_defs.iter().cloned());
+        let history_names = transcript_tool_call_names(&self.messages);
+        let history_has_web = history_names.iter().any(|name| {
+            tools::WEB_TOOL_NAMES
+                .iter()
+                .any(|web| name.as_str() == *web)
+        });
+        let history_has_goals = history_names.iter().any(|name| {
+            tools::GOAL_TOOL_NAMES
+                .iter()
+                .any(|goal| name.as_str() == *goal)
+        });
+        tool_defs = tools::extend_definitions_with_history(tool_defs, history_names, image_read);
         self.tool_defs = tool_defs;
-        self.web_retrieval_eligible = !open;
-        if !open && self.tool_runtime.goal_runtime.is_none() {
+        self.web_retrieval_eligible = !open || history_has_web;
+        let wants_goals = !open || history_has_goals;
+        if wants_goals && self.tool_runtime.goal_runtime.is_none() {
             self.tool_runtime.goal_runtime = Some(Arc::new(crate::goals::GoalRuntime::new(
                 self.tool_runtime.store_path.clone(),
                 session_id,
