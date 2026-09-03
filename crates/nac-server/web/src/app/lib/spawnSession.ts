@@ -40,13 +40,17 @@ export function spawnChildIdFromGroup(group: AgentToolsGroup): string | null {
 
 export function assignmentForSpawn(
   assignments: SessionAssignmentRecord[] | undefined,
-  group: AgentToolsGroup,
+  groupOrChildId: AgentToolsGroup | string,
 ): SessionAssignmentRecord | null {
-  const childId = spawnChildIdFromGroup(group);
+  if (typeof groupOrChildId === "string") {
+    if (!groupOrChildId) return null;
+    return assignments?.find((row) => row.child_session_id === groupOrChildId) ?? null;
+  }
+  const childId = spawnChildIdFromGroup(groupOrChildId);
   if (childId) {
     return assignments?.find((row) => row.child_session_id === childId) ?? null;
   }
-  const description = group.label.trim();
+  const description = groupOrChildId.label.trim();
   if (!description) return null;
   const matches = (assignments ?? []).filter((row) => row.description === description);
   return matches.length === 1 ? (matches[0] ?? null) : null;

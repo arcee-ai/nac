@@ -68,7 +68,7 @@ function Item({ item }: { item: WorksetItemSnapshot }) {
   );
 }
 
-function Detail({ workset }: { workset: WorksetSnapshot }) {
+export function WorksetDetail({ workset }: { workset: WorksetSnapshot }) {
   return (
     <div className="flex flex-col gap-6 flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0">
       <Field label="ID">
@@ -158,7 +158,7 @@ export function WorksetsView({
       }
     >
       {current ? (
-        <Detail workset={current} />
+        <WorksetDetail workset={current} />
       ) : (
         <PanelEmpty>No worksets defined for this session.</PanelEmpty>
       )}

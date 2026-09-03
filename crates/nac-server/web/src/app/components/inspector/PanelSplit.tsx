@@ -234,8 +234,8 @@ export function PanelSplit({
 }
 
 /**
- * Row of the left list, sized to the 24px tree row in the design — and to the
- * 48px touch row on a phone, where a finger has none of a pointer's precision.
+ * Row of the left list. Files stay on the 24px tree row; chat-session lists
+ * pass medium for 36px. Phone rows are 48px so a finger has a real target.
  */
 export function PanelRow({
   label,
@@ -245,6 +245,7 @@ export function PanelRow({
   trailing,
   labelClassName,
   title,
+  size,
   onClick,
 }: {
   label: string;
@@ -256,13 +257,18 @@ export function PanelRow({
   /** Overrides the label colour, e.g. to mark a file's git status. */
   labelClassName?: string;
   title?: string;
+  /**
+   * Desktop row height. Files keep the default 24px tree row; chat-session
+   * lists pass medium (36px). Phone rows stay large for touch.
+   */
+  size?: TabButtonSize;
   onClick?: () => void;
 }) {
   const isMobile = useIsMobile();
   return (
     <TabButton
       type="button"
-      size={isMobile ? TabButtonSize.Large : TabButtonSize.Small}
+      size={isMobile ? TabButtonSize.Large : (size ?? TabButtonSize.Small)}
       active={active}
       disabled={disabled}
       aria-pressed={active}

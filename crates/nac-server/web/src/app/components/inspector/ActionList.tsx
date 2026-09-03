@@ -38,6 +38,7 @@ import {
   focusActionSegment,
   toggleActionGroup,
   useExpandedActionGroupId,
+  useSelectedActionSegmentKey,
 } from "@/app/lib/actionExpand";
 
 export function actionFilterEmptyCopy(
@@ -124,7 +125,7 @@ function nearestScrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-function ActionListButton({
+export function ActionListButton({
   label,
   trailing,
   icon,
@@ -220,12 +221,14 @@ export function ActionGroupRow({
   item,
   active,
   expanded,
+  selectedSegmentKey,
   onSelect,
   onSelectSegment,
 }: {
   item: Extract<ActionItem, { kind: "group" }>;
   active: boolean;
   expanded: boolean;
+  selectedSegmentKey: string | null;
   onSelect: (id: string, event: MouseEvent<HTMLButtonElement>) => void;
   onSelectSegment: (groupId: string, segmentKey: string) => void;
 }) {
@@ -264,6 +267,7 @@ export function ActionGroupRow({
                   icon={config.icon}
                   running={segmentIsLive(segment)}
                   failed={toolSegmentFailed(segment)}
+                  active={selectedSegmentKey === segment.key}
                   preventFocusScroll
                   onClick={() => onSelectSegment(item.id, segment.key)}
                 />
@@ -372,6 +376,7 @@ interface ActionListHandlers {
   selectedGroupId: string | null;
   selectedThreadEpisode: string | null;
   expandedGroupId: string | null;
+  selectedSegmentKey: string | null;
   episodeCount: (name: string) => number;
   threadFlags?: (name: string) => {
     pending: boolean;
@@ -397,6 +402,7 @@ function renderItem(item: ActionItem, args: ActionListHandlers) {
         item={item}
         active={args.selectedGroupId === item.id}
         expanded={args.expandedGroupId === item.id}
+        selectedSegmentKey={args.selectedSegmentKey}
         onSelect={args.onSelectGroup}
         onSelectSegment={args.onSelectSegment}
       />
@@ -469,6 +475,7 @@ export function ActionItemList({
   onSelectThread: (name: string, episodeKey: string) => void;
 }) {
   const expandedGroupId = useExpandedActionGroupId();
+  const selectedSegmentKey = useSelectedActionSegmentKey();
   const prevSelected = useRef<string | null | undefined>(undefined);
   const pendingAnchor = useRef<{
     id: string;
@@ -567,6 +574,7 @@ export function ActionItemList({
     selectedGroupId,
     selectedThreadEpisode,
     expandedGroupId,
+    selectedSegmentKey,
     episodeCount,
     threadFlags,
     onSelectGroup: handleSelectGroup,

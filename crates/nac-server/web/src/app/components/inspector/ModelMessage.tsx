@@ -81,11 +81,13 @@ interface ModelMessageProps {
   /** Episode key of the thread card the panels are pointing at, if any. */
   selectedThreadEpisode: string | null;
   selectedWorkset: string | null;
+  /** Spawned child the Related Sessions panel is pointing at, if any. */
+  selectedSpawn?: string | null;
   /** Thoughts & tools group the side panel is pointing at, if any. */
   selectedAgentSegment?: string | null;
   onSelectThread: (name: string, episodeKey: string) => void;
   onSelectWorkset: (id: string) => void;
-  onSelectAgentSegment?: (id: string) => void;
+  onSelectAgentSegment?: (id: string, childSessionId?: string | null) => void;
   /**
    * Snapshot index of the user prompt this model turn answers. Resend and
    * revert address that prompt — same endpoints as the user bubble above.
@@ -143,6 +145,7 @@ export const ModelMessage = memo(function ModelMessage({
   isLast = false,
   selectedThreadEpisode,
   selectedWorkset,
+  selectedSpawn = null,
   selectedAgentSegment = null,
   onSelectThread,
   onSelectWorkset,
@@ -308,6 +311,7 @@ export const ModelMessage = memo(function ModelMessage({
                   group={item.group}
                   parentSessionId={spawnParentSessionId}
                   active={selectedAgentSegment === item.group.id}
+                  selectedChildId={selectedSpawn}
                   inert={preview}
                   onSelect={onSelectAgentSegment}
                 />

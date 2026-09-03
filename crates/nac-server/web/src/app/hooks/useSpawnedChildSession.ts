@@ -25,18 +25,26 @@ function isNotFound(error: unknown): boolean {
 }
 
 /**
- * Parent-owned controls and peek data for one `session_spawn` card or Actions
- * preview. Snapshot fetch is keyed by child id; it never writes the parent's
+ * Parent-owned controls and peek data for one `session_spawn` card, Actions
+ * preview, or Related Sessions detail. `source` is the tools group or the child
+ * session id. Snapshot fetch is keyed by child id; it never writes the parent's
  * runtime store.
  */
-export function useSpawnedChildSession(parentSessionId: string, group: AgentToolsGroup) {
+export function useSpawnedChildSession(
+  parentSessionId: string,
+  source: AgentToolsGroup | string,
+) {
   const navigate = useNavigate();
   const toast = useToast();
   const assignments = useSessionSpawns(parentSessionId, Boolean(parentSessionId));
   const startSpawn = useStartSessionSpawn();
   const cancelSpawn = useCancelSessionSpawn();
-  const assignment = assignmentForSpawn(assignments.data, group);
-  const childId = spawnChildIdFromGroup(group) ?? assignment?.child_session_id ?? null;
+  const group = typeof source === "string" ? null : source;
+  const assignment = assignmentForSpawn(assignments.data, source);
+  const childId =
+    (typeof source === "string" ? source : spawnChildIdFromGroup(source)) ||
+    assignment?.child_session_id ||
+    null;
   const snapshotQuery = useSessionSnapshot(childId, {
     enabled: Boolean(childId),
     retry: false,
@@ -47,8 +55,8 @@ export function useSpawnedChildSession(parentSessionId: string, group: AgentTool
   const running =
     assignmentIsOpen(assignment?.status) ||
     Boolean(snapshotQuery.data?.active_run) ||
-    (!childId && group.inProgress);
-  const title = (assignment?.description || group.label).trim() || "Spawned session";
+    (!childId && Boolean(group?.inProgress));
+  const title = (assignment?.description || group?.label || "").trim() || "Spawned session";
   const sessionType = sessionTypeFromBehavior(
     assignment?.child_behavior ?? snapshotQuery.data?.metadata.behavior,
   );
@@ -84,7 +92,7 @@ export function useSpawnedChildSession(parentSessionId: string, group: AgentTool
         payload: {
           behavior: assignment?.child_behavior ?? "direct",
           child_session_id: childId,
-          description: assignment?.description || group.label,
+          description: assignment?.description || group?.label || "Spawned session",
           prompt: "Continue.",
           background: true,
         },
@@ -96,7 +104,7 @@ export function useSpawnedChildSession(parentSessionId: string, group: AgentTool
     assignment?.child_behavior,
     assignment?.description,
     childId,
-    group.label,
+    group?.label,
     parentSessionId,
     startSpawn,
     toast,

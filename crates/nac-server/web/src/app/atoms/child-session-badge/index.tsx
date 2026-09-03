@@ -29,7 +29,7 @@ const LINE_OPACITY = ["opacity-10", "opacity-30", "opacity-100"] as const;
 
 /**
  * Spawned child peek in a parent transcript (Figma ChildSessionBadge). Click
- * selects the spawn in Actions; stop / pause / open live on hover.
+ * selects the spawn in Related Sessions; stop / pause / open live on hover.
  */
 const ChildSessionBadge: React.FC<ChildSessionBadgeProps> = ({
   title,

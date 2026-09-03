@@ -18,6 +18,7 @@ import {
   ToolCallLabelState,
   type SegmentDisplayConfig,
 } from "@/app/lib/agentSegments";
+import { cn } from "@/app/lib/cn";
 
 export interface SegmentDetailItem {
   key: string;
@@ -33,15 +34,20 @@ export function SegmentDetailRow({
   item,
   isLast,
   animateConnector,
+  highlighted = false,
 }: {
   item: SegmentDetailItem;
   isLast: boolean;
   animateConnector: boolean;
+  highlighted?: boolean;
 }) {
   const isActive = item.state === ToolCallLabelState.Active;
   return (
     <div
-      className="flex gap-2 items-start w-full scroll-mt-2"
+      className={cn(
+        "flex gap-2 items-start w-full scroll-mt-2 rounded-[4px]",
+        highlighted && "bg-btn-ghost-highlighted -mx-2 px-2",
+      )}
       data-segment-key={item.key}
     >
       <div className="flex flex-col items-center self-stretch shrink-0">

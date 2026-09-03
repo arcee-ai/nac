@@ -6,7 +6,7 @@ import SegmentDetailRow, {
   type SegmentDetailItem,
 } from "@/app/components/inspector/agent-segments/SegmentDetailRow";
 import type { SidebarBoxContent } from "@/app/components/inspector/agent-segments/SegmentDetailBox";
-import { useActionSegmentScroll } from "@/app/lib/actionExpand";
+import { useActionSegmentScroll, useSelectedActionSegmentKey } from "@/app/lib/actionExpand";
 import {
   configForSegment,
   toolSegmentFailed,
@@ -300,6 +300,7 @@ export function SegmentDetailList({
   );
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollTo = useActionSegmentScroll();
+  const selectedKey = useSelectedActionSegmentKey();
 
   useEffect(() => {
     if (!scrollTo) return;
@@ -342,6 +343,7 @@ export function SegmentDetailList({
           item={item}
           isLast={index === items.length - 1}
           animateConnector={group.inProgress && index === 0}
+          highlighted={selectedKey === item.key}
         />
       ))}
     </div>

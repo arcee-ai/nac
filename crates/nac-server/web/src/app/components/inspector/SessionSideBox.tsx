@@ -30,6 +30,7 @@ import {
   selectRevision,
   selectThread,
   selectWorkset,
+  selectSpawn,
   showSidePanelList,
   toggleSidePanelCollapsed,
   toggleSidePanelExpanded,
@@ -38,6 +39,7 @@ import {
   useSelectedThread,
   useSelectedThreadEpisode,
   useSelectedWorkset,
+  useSelectedSpawn,
   useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
 import type {
@@ -195,6 +197,7 @@ export function SessionSideBox({
   const selectedThreadEpisode = useSelectedThreadEpisode();
   const selectedAgentSegment = useSelectedAgentSegment();
   const selectedWorkset = useSelectedWorkset();
+  const selectedSpawn = useSelectedSpawn();
   const selectedRevision = useSelectedRevision();
   const behavior = snapshot?.metadata.behavior ?? "orchestrator";
   const direct =
@@ -261,7 +264,12 @@ export function SessionSideBox({
         />
       ) : null}
       {active === "delegated" ? (
-        <DelegatedWorkView sessionId={sessionId} behavior={behavior} />
+        <DelegatedWorkView
+          sessionId={sessionId}
+          behavior={behavior}
+          selected={selectedSpawn}
+          onSelect={selectSpawn}
+        />
       ) : null}
       {active === "history" ? (
         <HistoryView

@@ -20,7 +20,7 @@ export type SessionPanel = (typeof SESSION_PANELS)[number];
 export const SESSION_PANEL_LABEL = {
   threads: "Threads",
   actions: "Actions",
-  delegated: "Spawn Sessions",
+  delegated: "Related Sessions",
   files: "Files",
   worksets: "Worksets",
   history: "History",

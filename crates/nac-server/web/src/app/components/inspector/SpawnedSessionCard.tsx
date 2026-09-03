@@ -6,29 +6,36 @@ export function SpawnedSessionCard({
   group,
   parentSessionId,
   active = false,
+  selectedChildId = null,
   inert = false,
   onSelect,
 }: {
   group: AgentToolsGroup;
   parentSessionId: string;
   active?: boolean;
+  /** Child session id the Related Sessions panel is pointing at, if any. */
+  selectedChildId?: string | null;
   /** Preview transcripts show the card but do not select or control it. */
   inert?: boolean;
-  onSelect?: (id: string) => void;
+  onSelect?: (id: string, childSessionId?: string | null) => void;
 }) {
   const child = useSpawnedChildSession(parentSessionId, group);
   const state = child.missing ? "missing" : child.running ? "running" : "ready";
+  const selected =
+    active || (selectedChildId != null && selectedChildId === child.childId);
   return (
     <ChildSessionBadge
       title={child.title}
       lines={child.lines}
       sessionType={child.sessionType}
       state={state}
-      active={active && !inert}
+      active={selected && !inert}
       busy={child.busy}
       canOpen={Boolean(child.childId) && !child.missing}
       inert={inert}
-      onSelect={inert ? undefined : () => onSelect?.(group.id)}
+      onSelect={
+        inert ? undefined : () => onSelect?.(group.id, child.childId)
+      }
       onPause={inert ? undefined : () => void child.pause()}
       onPlay={inert ? undefined : () => void child.play()}
       onStop={inert ? undefined : () => void child.stop()}

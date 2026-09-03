@@ -24,13 +24,7 @@ function boxTextClass(accent: SidebarBoxAccent | undefined): string {
   return "text-basic-secondary";
 }
 
-export function SegmentDetailBox({
-  box,
-  size = "small",
-}: {
-  box: SidebarBoxContent;
-  size?: "small" | "medium";
-}) {
+export function SegmentDetailBox({ box }: { box: SidebarBoxContent }) {
   if (box.kind === "file") {
     return <FileSegmentButton path={box.path} directory={box.directory} />;
   }

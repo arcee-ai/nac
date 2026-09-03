@@ -281,7 +281,7 @@ test("creates Agent by default and offers Orchestrator from the new-session popo
   await expect(page.getByText("Agent", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("tab", { name: "Actions" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Spawn Sessions" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Related Sessions" })).toBeVisible();
   await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(
     0,
   );
@@ -319,7 +319,7 @@ test("creates Agent by default and offers Orchestrator from the new-session popo
   await tabs.filter({ has: page.getByText("Agent", { exact: true }) }).click();
   await expect(page.getByText("Agent", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("tab", { name: "Actions" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Spawn Sessions" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Related Sessions" })).toBeVisible();
   await expect(page.getByText("Delegated work", { exact: true })).toHaveCount(
     0,
   );

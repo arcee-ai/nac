@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import ChildSessionActionButtons from "@/app/atoms/child-session-action-buttons";
+import SessionTypeAvatar from "@/app/atoms/session-type-avatar";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useChildSessionLive } from "@/app/hooks/useChildSessionLive";
@@ -12,11 +13,13 @@ import { buildTranscript, withStreamedOutput } from "@/app/lib/transcript";
 export function ChildTranscriptPreview({
   parentSessionId,
   group,
+  childSessionId,
 }: {
   parentSessionId: string;
-  group: AgentToolsGroup;
+  group?: AgentToolsGroup;
+  childSessionId?: string | null;
 }) {
-  const child = useSpawnedChildSession(parentSessionId, group);
+  const child = useSpawnedChildSession(parentSessionId, group ?? childSessionId ?? "");
   const live = useChildSessionLive(child.childId, Boolean(child.childId) && !child.missing, parentSessionId);
   const running = child.running || live.running;
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -42,6 +45,11 @@ export function ChildTranscriptPreview({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-muted px-3">
+        <SessionTypeAvatar
+          className="size-7 shrink-0"
+          sessionType={child.sessionType}
+          running={running}
+        />
         <span
           className={`min-w-0 flex-1 truncate label-small ${
             running ? "text-shimmer-basic" : "text-basic-primary"
@@ -101,6 +109,7 @@ export function ChildTranscriptPreview({
                 spawnParentSessionId={child.childId ?? parentSessionId}
                 selectedThreadEpisode={null}
                 selectedWorkset={null}
+                selectedSpawn={null}
                 selectedAgentSegment={null}
                 onSelectThread={() => undefined}
                 onSelectWorkset={() => undefined}

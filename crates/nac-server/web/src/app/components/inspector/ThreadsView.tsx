@@ -27,7 +27,7 @@ import { usePagedRows } from "@/app/hooks/usePagedRows";
 import { useLiveActionFollow } from "@/app/hooks/useLiveActionFollow";
 import { SegmentDetailList } from "@/app/components/inspector/agent-segments/SegmentDetailList";
 import { ChildTranscriptPreview } from "@/app/components/inspector/ChildTranscriptPreview";
-import { WorksetsView } from "@/app/components/inspector/WorksetsView";
+import { WorksetDetail } from "@/app/components/inspector/WorksetsView";
 import {
   ActionItemList,
   ActionListEmpty,
@@ -1085,6 +1085,11 @@ export function ThreadsView({
     );
     return match?.kind === "workset" ? match : null;
   }, [listItems, activeGroupId]);
+  const worksetSnapshot = useMemo(() => {
+    const id = selectedWorkset || currentWorkset?.worksetId || null;
+    if (!id) return null;
+    return snapshot?.worksets.items.find((item) => item.id === id) ?? null;
+  }, [currentWorkset?.worksetId, selectedWorkset, snapshot?.worksets.items]);
   const showingGroup =
     scope === "timeline" &&
     Boolean(activeGroupId && currentGroup && currentGroup.id === activeGroupId);
@@ -1436,14 +1441,15 @@ export function ThreadsView({
       }
     >
       {showingWorkset ? (
-        <WorksetsView
-          snapshot={snapshot}
-          selected={selectedWorkset || currentWorkset?.worksetId || null}
-          onSelect={(id) => {
-            lockLiveActionFollow(runId);
-            selectWorkset(id);
-          }}
-        />
+        worksetSnapshot ? (
+          <WorksetDetail workset={worksetSnapshot} />
+        ) : (
+          <PanelEmpty title={currentWorkset?.title ?? "Workset"}>
+            {currentWorkset?.pending
+              ? "The orchestrator is still defining this workset."
+              : "This workset is not in the snapshot yet."}
+          </PanelEmpty>
+        )
       ) : showingGroup && currentGroup && spawn ? (
         <ChildTranscriptPreview
           parentSessionId={sessionId}

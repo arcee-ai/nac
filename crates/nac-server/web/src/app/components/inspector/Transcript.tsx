@@ -72,11 +72,13 @@ import {
   selectRevision,
   selectThread,
   selectWorkset,
+  selectSpawn,
   useSelectedAgentSegment,
   useSelectedFile,
   useSelectedRevision,
   useSelectedThreadEpisode,
   useSelectedWorkset,
+  useSelectedSpawn,
 } from "@/app/store/sessionLayoutStore";
 import {
   pushLocalEvent,
@@ -174,6 +176,7 @@ export function Transcript({
   const selectedThreadEpisode = useSelectedThreadEpisode();
   const selectedAgentSegment = useSelectedAgentSegment();
   const selectedWorkset = useSelectedWorkset();
+  const selectedSpawn = useSelectedSpawn();
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const liveRunId = snapshot?.active_run?.run_id ?? null;
@@ -486,10 +489,14 @@ export function Transcript({
     [liveRunId, onFocusPanel],
   );
   const focusAgentSegment = useCallback(
-    (id: string) => {
+    (id: string, childSessionId?: string | null) => {
       lockLiveActionFollow(liveRunId);
       selectAgentSegment(id);
-      onFocusPanel(actionsPanel(snapshot?.metadata.behavior));
+      if (childSessionId) selectSpawn(childSessionId);
+      const agent = isAgentBehavior(snapshot?.metadata.behavior);
+      onFocusPanel(
+        agent && childSessionId ? "delegated" : actionsPanel(snapshot?.metadata.behavior),
+      );
     },
     [liveRunId, onFocusPanel, snapshot?.metadata.behavior],
   );
@@ -730,6 +737,7 @@ export function Transcript({
                   selectedWorkset={
                     panel === "worksets" ? selectedWorkset : null
                   }
+                  selectedSpawn={panel === "delegated" ? selectedSpawn : null}
                   selectedAgentSegment={
                     panel === "actions" || panel === "threads"
                       ? selectedAgentSegment
@@ -821,6 +829,7 @@ export function Transcript({
                 panel === "threads" ? selectedThreadEpisode : null
               }
               selectedWorkset={panel === "worksets" ? selectedWorkset : null}
+              selectedSpawn={panel === "delegated" ? selectedSpawn : null}
               selectedAgentSegment={
                 panel === "actions" || panel === "threads"
                   ? selectedAgentSegment

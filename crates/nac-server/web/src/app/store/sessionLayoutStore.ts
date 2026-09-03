@@ -33,6 +33,8 @@ interface SessionLayoutState {
   selectedAgentSegment: string | null;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
+  /** Spawned child the chat last pointed the Related Sessions panel at. */
+  selectedSpawn: string | null;
   /** Revision the panels are looking at, or null for the live working tree. */
   selectedRevision: number | null;
   /** File the Files panel is showing. */
@@ -63,6 +65,7 @@ export const sessionLayoutStore = createStore<SessionLayoutState>({
   selectedThreadRunning: false,
   selectedAgentSegment: null,
   selectedWorkset: null,
+  selectedSpawn: null,
   selectedRevision: null,
   selectedFile: null,
   toggledFolders: new Set(),
@@ -157,6 +160,11 @@ export function selectWorkset(selectedWorkset: string | null, opts?: { follow?: 
   if (selectedWorkset && !opts?.follow) showSidePanelList(false);
 }
 
+export function selectSpawn(selectedSpawn: string | null, opts?: { follow?: boolean }): void {
+  setState({ selectedSpawn });
+  if (selectedSpawn && !opts?.follow) showSidePanelList(false);
+}
+
 /**
  * Bind Actions follow to this run. A new run starts following again. A lock
  * taken on this same run (a chat click before the Actions panel recorded the
@@ -233,6 +241,7 @@ export function resetSessionSelection(): void {
     selectedThreadEpisode: null,
     selectedAgentSegment: null,
     selectedWorkset: null,
+    selectedSpawn: null,
     selectedRevision: null,
     selectedFile: null,
     toggledFolders: new Set(),
@@ -255,6 +264,7 @@ export const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEp
 export const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
 export const useSelectedAgentSegment = () => useStore((s) => s.selectedAgentSegment);
 export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
+export const useSelectedSpawn = () => useStore((s) => s.selectedSpawn);
 export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);
 export const useToggledFolders = () => useStore((s) => s.toggledFolders);
