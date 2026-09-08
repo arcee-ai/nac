@@ -221,6 +221,7 @@ pub(super) async fn run_worker(
         )
     })?;
     let mut command = Command::new(executable);
+    command.arg("__worker");
     for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
         command.env_remove(name);
     }
@@ -240,7 +241,6 @@ pub(super) async fn run_worker(
         command.current_dir(&runtime.workspace_cwd);
     }
     command
-        .arg("__worker")
         .arg("--session-id")
         .arg(invocation.session_id)
         .arg("--thread-name")
@@ -599,7 +599,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn managed_worker_receives_only_the_nonsecret_store_root() {
+    async fn managed_worker_subcommand_precedes_nonsecret_environment_options() {
         let root =
             std::env::temp_dir().join(format!("nac_worker_secrets_{}", uuid::Uuid::new_v4()));
         let state_root = root.join("managed-state");
@@ -674,9 +674,9 @@ done
             std::fs::read_to_string(root.join("inherited-secret")).unwrap(),
             "unset"
         );
-        assert!(!std::fs::read_to_string(root.join("argv"))
-            .unwrap()
-            .contains("managed-worker-canary-never-in-argv"));
+        let argv = std::fs::read_to_string(root.join("argv")).unwrap();
+        assert_eq!(argv.lines().next(), Some("__worker"));
+        assert!(!argv.contains("managed-worker-canary-never-in-argv"));
         let _ = std::fs::remove_dir_all(root);
     }
 
