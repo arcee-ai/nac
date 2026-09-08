@@ -5,6 +5,8 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 dockerfile="$repo_root/docker/managed/Dockerfile"
 entrypoint="$repo_root/docker/managed/entrypoint.sh"
 workflow="$repo_root/.github/workflows/managed-image.yml"
+lfs_smoke="$repo_root/scripts/smoke-managed-git-lfs.sh"
+managed_status="$repo_root/crates/nac-server/src/managed_status.rs"
 
 fail() {
     printf 'managed image contract: %s\n' "$1" >&2
@@ -27,6 +29,9 @@ require_literal "$dockerfile" 'GO_VERSION=1.27.0'
 require_literal "$dockerfile" 'UV_VERSION=0.12.1'
 require_literal "$dockerfile" 'corepack enable'
 require_literal "$dockerfile" 'fd-find'
+require_literal "$dockerfile" 'git-lfs'
+require_literal "$dockerfile" 'git lfs install --system --skip-repo'
+require_literal "$dockerfile" 'git lfs version'
 require_literal "$dockerfile" '/var/lib/nac'
 require_literal "$dockerfile" '/repositories'
 require_literal "$dockerfile" '/home/nac'
@@ -41,8 +46,14 @@ require_literal "$entrypoint" 'without requiring the bootstrap mount'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_credential_source = \"managed-bootstrap\"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" '/run/secrets/nac/bootstrap.json'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assert_bootstrap_required'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'smoke-managed-git-lfs.sh'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'kill --signal KILL'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'start_container without-bootstrap'
+require_literal "$lfs_smoke" 'git lfs version'
+require_literal "$lfs_smoke" 'git clone --quiet'
+require_literal "$lfs_smoke" 'git lfs fsck'
+sh -n "$lfs_smoke"
+require_literal "$managed_status" '"git-lfs"'
 require_literal "$repo_root/docker/managed/fixtures/bootstrap.json" '"client_id": "managed-nac"'
 if grep -Eq '(^|[[:space:]])(sudo|su)([[:space:]]|$)' "$dockerfile" "$entrypoint"; then
     fail 'image or entrypoint grants an escalation command'
