@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import {
@@ -68,7 +68,134 @@ beforeEach(() => {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   }));
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
 });
+
+it("treats a successful empty entitlement index as authoritative for rows and defaults", async () => {
+  vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
+  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
+  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
+  vi.spyOn(api, "listProviderModels").mockResolvedValue({
+    base_url: hostStatus.model.endpoint,
+    models: [],
+  });
+  const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <ConfigurationsPanel invalid={false} onChange={onChange} />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  try {
+    await waitFor(() =>
+      expect(
+        client.getQueryData(["managed-provider-models", "arcee-api", hostStatus.model.endpoint]),
+      ).toEqual({ base_url: hostStatus.model.endpoint, models: [] }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Select a model/ })).toBeTruthy(),
+    );
+    expect(onChange).toHaveBeenCalled();
+    expect(onChange.mock.calls.every(([selection]) => selection === null)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /Select a model/ }));
+    expect(screen.queryByText("Trinity")).toBeNull();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("uses the configured managed default only when live discovery is unavailable", async () => {
+  vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
+  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
+  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
+  vi.spyOn(api, "listProviderModels").mockRejectedValue(new Error("offline"));
+  const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <ConfigurationsPanel invalid={false} onChange={onChange} />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  try {
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          kind: "resolved",
+          backend: "arcee-api",
+          model: hostStatus.model.id,
+        }),
+      ),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("never emits a managed default between status, catalog, and entitlement hydration", async () => {
+  const host = deferred<ManagedHostStatus>();
+  const catalogRequest = deferred<ModelCatalog>();
+  const entitlement = deferred<{
+    base_url: string;
+    models: Array<{ id: string; display_name: string | null }>;
+  }>();
+  vi.spyOn(api, "getManagedStatus").mockReturnValue(host.promise);
+  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
+  vi.spyOn(api, "getModelCatalog").mockReturnValue(catalogRequest.promise);
+  const discovery = vi.spyOn(api, "listProviderModels").mockReturnValue(entitlement.promise);
+  const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <ConfigurationsPanel invalid={false} onChange={onChange} />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  const onlyNullSelections = () =>
+    onChange.mock.calls.length > 0 &&
+    onChange.mock.calls.every(([selection]) => selection === null);
+  try {
+    host.resolve(hostStatus);
+    await waitFor(() => expect(client.getQueryData(["managed-host-status"])).toEqual(hostStatus));
+    expect(onlyNullSelections()).toBe(true);
+    expect(discovery).not.toHaveBeenCalled();
+
+    catalogRequest.resolve(catalog);
+    await waitFor(() => expect(discovery).toHaveBeenCalledOnce());
+    expect(onlyNullSelections()).toBe(true);
+
+    entitlement.resolve({
+      base_url: hostStatus.model.endpoint,
+      models: [{ id: hostStatus.model.id, display_name: "Trinity" }],
+    });
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          kind: "resolved",
+          backend: "arcee-api",
+          model: hostStatus.model.id,
+        }),
+      ),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
