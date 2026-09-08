@@ -6,6 +6,7 @@ import type { ToolPresentation } from "@/app/lib/toolPresentation";
 const STATUS_MARK: Record<ToolPresentation["status"], string> = {
   pending: "○",
   running: "▸",
+  "awaiting-approval": "◇",
   success: "✓",
   error: "✕",
   "timed-out": "◷",
@@ -16,6 +17,7 @@ const STATUS_MARK: Record<ToolPresentation["status"], string> = {
 /** Compact primary-transcript presentation for one safe tool lifecycle. */
 export const ToolCallDetail = memo(function ToolCallDetail({ tool }: { tool: ToolPresentation }) {
   const pending = tool.status === "pending" || tool.status === "running";
+  const awaitingApproval = tool.status === "awaiting-approval";
   return (
     <div
       className="my-3 w-full max-w-full min-w-0 rounded-[6px] border border-tertiary px-3 py-2"
@@ -26,11 +28,13 @@ export const ToolCallDetail = memo(function ToolCallDetail({ tool }: { tool: Too
           aria-hidden="true"
           className={cn(
             "code code-small shrink-0",
-            pending
-              ? "text-shimmer-basic"
-              : tool.status === "success"
-                ? "text-success-primary"
-                : "text-error-primary",
+            awaitingApproval
+              ? "text-accent-primary"
+              : pending
+                ? "text-shimmer-basic"
+                : tool.status === "success"
+                  ? "text-success-primary"
+                  : "text-error-primary",
           )}
         >
           {STATUS_MARK[tool.status]}
@@ -45,7 +49,11 @@ export const ToolCallDetail = memo(function ToolCallDetail({ tool }: { tool: Too
           aria-label={`${tool.label} status: ${tool.statusLabel}`}
           className={cn(
             "label-micro shrink-0",
-            pending ? "text-basic-secondary" : "text-basic-muted",
+            awaitingApproval
+              ? "text-accent-primary"
+              : pending
+                ? "text-basic-secondary"
+                : "text-basic-muted",
           )}
         >
           {tool.statusLabel}

@@ -568,6 +568,7 @@ export function buildTranscript(
   liveThreads: Record<string, RuntimeThread>,
   liveFinishedToolCalls: Record<string, true> = {},
   livePrimaryToolEvents: AgentEvent[] = [],
+  pendingPermissionCallIds: ReadonlySet<string> = new Set(),
 ): TranscriptTurn[] {
   const messages = snapshot?.messages ?? [];
   const durations = snapshot?.response_timing.response_durations_ms ?? [];
@@ -712,6 +713,7 @@ export function buildTranscript(
               resultText: result?.text ?? null,
               resultHasImage: result?.hasImage ?? false,
               active: Boolean(snapshot?.active_run) && index > lastUserIndex,
+              awaitingApproval: pendingPermissionCallIds.has(call.id),
               turnCancelled: assistantTurnCancelled(messages, index, RUN_CANCELLED_MARKER),
             }),
           });

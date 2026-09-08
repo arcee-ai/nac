@@ -122,6 +122,18 @@ describe("tool presentation mapper", () => {
     expect(
       presentToolCall({
         call: call("read"),
+        events: indexToolEvents([started("read", "file.rs")]).get("call-read"),
+        hasResult: false,
+        resultText: null,
+        resultHasImage: false,
+        active: true,
+        awaitingApproval: true,
+        turnCancelled: false,
+      }),
+    ).toMatchObject({ status: "awaiting-approval", statusLabel: "Awaiting approval" });
+    expect(
+      presentToolCall({
+        call: call("read"),
         hasResult: false,
         resultText: null,
         resultHasImage: false,

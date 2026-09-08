@@ -3,6 +3,7 @@ import type { AgentEvent, Message, SessionSnapshotResponse, ToolCall } from "@/a
 export type ToolPresentationStatus =
   | "pending"
   | "running"
+  | "awaiting-approval"
   | "success"
   | "error"
   | "timed-out"
@@ -109,6 +110,7 @@ const TOOL_LABELS: Record<string, string> = {
 const STATUS_LABELS: Record<ToolPresentationStatus, string> = {
   pending: "Pending",
   running: "Running",
+  "awaiting-approval": "Awaiting approval",
   success: "Succeeded",
   error: "Failed",
   "timed-out": "Timed out",
@@ -182,6 +184,7 @@ export function presentToolCall({
   resultText,
   resultHasImage,
   active,
+  awaitingApproval,
   turnCancelled,
 }: {
   call: ToolCall;
@@ -191,6 +194,8 @@ export function presentToolCall({
   resultText: string | null;
   resultHasImage: boolean;
   active: boolean;
+  /** Canonical pending permission state correlated by the backend call id. */
+  awaitingApproval?: boolean;
   turnCancelled: boolean;
 }): ToolPresentation {
   const rawName = events?.started?.name ?? events?.finished?.name ?? call.function?.name ?? "tool";
@@ -201,6 +206,7 @@ export function presentToolCall({
     status = "cancelled";
   } else if (resultText?.trim() === INTERRUPTED_MARKER) status = "interrupted";
   else if (hasResult) status = "success";
+  else if (active && awaitingApproval) status = "awaiting-approval";
   else if (active && events?.started) status = "running";
   else if (active) status = "pending";
   else status = "interrupted";
