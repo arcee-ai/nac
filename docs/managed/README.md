@@ -144,6 +144,15 @@ endpoint. The grant authorizes all Arcee models entitled to its organization;
 refresh tokens remain owner-only NAC state and are never returned by status
 APIs.
 
+The web model picker discovers that complete entitled model list through NAC;
+the browser sends only the exact configured backend and endpoint, while NAC
+reads and applies the credential server-side. Selecting another entitled model
+does not rewrite `managed.toml` or the mounted secret. It writes a revisioned
+session settings override into the durable SQLite store, and resume continues
+to use that stored override ahead of the deployment default. A missing
+credential, different backend or endpoint, or explicit environment selector
+fails closed.
+
 Managed v0 does not claim isolation from a fully compromised NAC process: that
 process must read and use its model credential. A stronger boundary would need
 a separate credential-injecting broker.

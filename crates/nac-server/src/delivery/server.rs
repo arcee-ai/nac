@@ -816,6 +816,24 @@ async fn provider_models_handler(
             .unwrap_or_default();
         return Ok(Json(ProviderModelList { base_url, models }));
     }
+    if api_key.trim().is_empty() && api_key_env.is_none() {
+        let destination = request
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty());
+        if let Some((base_url, models)) = manager
+            .model_catalog()
+            .mounted_key_models(backend, destination)
+            .await
+            .map_err(|_| ApiError {
+                status: StatusCode::BAD_GATEWAY,
+                message: "managed provider model discovery failed".to_string(),
+            })?
+        {
+            return Ok(Json(ProviderModelList { base_url, models }));
+        }
+    }
     // A key already filed away is named rather than sent, so a setup that is
     // only being reviewed never has to hand its secret back to the page first.
     let api_key = match api_key_env {

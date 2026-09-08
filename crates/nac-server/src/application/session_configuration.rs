@@ -179,14 +179,33 @@ impl<'a> SessionConfigurationApplication<'a> {
             nac_core::light_model::validate(light, &extra_headers)
                 .map_err(request_configuration_error_from)?;
         }
-        validate_model_configuration(
-            backend,
-            &prospective.model,
-            Some(&prospective.base_url),
-            reasoning_effort,
-            prospective.api_key_env.as_deref(),
-            &extra_headers,
-        )?;
+        let mounted_override = self.manager.managed_model().filter(|profile| {
+            profile.matches_settings_override(
+                backend,
+                &prospective.base_url,
+                prospective.api_key_env.as_deref(),
+            )
+        });
+        if let Some(profile) = mounted_override {
+            let managed = self.manager.managed_host().ok_or_else(|| {
+                anyhow!("managed model profile is missing its host configuration")
+            })?;
+            // The immutable mount is only an authentication input. The
+            // revisioned SQLite row below owns the user's model override and
+            // outranks the deployment default when this session is resumed.
+            profile
+                .credential_ready(managed)
+                .map_err(request_configuration_error_from)?;
+        } else {
+            validate_model_configuration(
+                backend,
+                &prospective.model,
+                Some(&prospective.base_url),
+                reasoning_effort,
+                prospective.api_key_env.as_deref(),
+                &extra_headers,
+            )?;
+        }
         // Persist only revisioned session-configuration columns after all
         // caller-controlled model configuration and credential checks succeed.
         // The revision CAS rejects a concurrent PATCH, while run/history writes remain independent of these columns.

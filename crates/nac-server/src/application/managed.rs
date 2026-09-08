@@ -113,6 +113,22 @@ impl ManagedModelProfile {
             && snapshot.api_key_env.is_none()
     }
 
+    /// Whether an application-owned session settings row may reuse this
+    /// profile's credential. The model id is deliberately absent: entitlement
+    /// comes from the provider's authenticated model index, not from the one
+    /// deployment default in the read-only host configuration.
+    pub(crate) fn matches_settings_override(
+        &self,
+        backend: BackendKind,
+        base_url: &str,
+        api_key_env: Option<&str>,
+    ) -> bool {
+        self.credential_source == ManagedModelCredentialSource::MountedApiKey
+            && backend == self.backend
+            && base_url == self.endpoint
+            && api_key_env.is_none()
+    }
+
     pub(crate) fn resume_options(&self) -> ResumeModelOptions {
         ResumeModelOptions {
             trusted_api_key_file: self.trusted_api_key_file(),
