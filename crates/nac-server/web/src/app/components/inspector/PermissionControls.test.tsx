@@ -86,6 +86,31 @@ afterEach(() => {
 });
 
 describe("direct permission controls", () => {
+  it("keeps a large remembered-grant list in the bounded scrolling modal body", () => {
+    const state = pendingState();
+    state.grants = Array.from({ length: 20 }, (_, index) => ({
+      id: `grant-${index}`,
+      session_id: SESSION_ID,
+      action: "read",
+      resource: `/outside/workspace/dependency-${index}/a-long-resource-name.rs`,
+      backend: "local",
+      session_config_version: 1,
+      created_at: `2026-09-08T00:00:${String(index).padStart(2, "0")}Z`,
+    }));
+    mount(state);
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.className).toContain("max-h-[calc(100vh-2rem)]");
+    expect(dialog.className).toContain("overflow-hidden");
+    const scrollingBody = Array.from(dialog.children).find((element) =>
+      element.className.includes("overflow-auto"),
+    );
+    expect(scrollingBody).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Always allow" })).toBeTruthy();
+  });
+
   it("opens a new request and sends the explicit always reply", async () => {
     mount(pendingState());
 

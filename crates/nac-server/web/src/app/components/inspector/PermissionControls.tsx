@@ -153,6 +153,7 @@ export function PermissionControls({
         open={open}
         onClose={close}
         size={ModalSize.Wide}
+        flush
         title={active ? "Permission required" : "Permissions"}
         subheader={
           active
