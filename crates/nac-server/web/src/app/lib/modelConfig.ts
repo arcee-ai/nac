@@ -223,6 +223,7 @@ export interface SettingsInitialValues {
 export function buildSettingsPatch(
   values: ModelFormValues,
   initial: SettingsInitialValues,
+  allowsCredentiallessSelection = false,
 ): UpdateConfigRequest {
   const backend = requiredSettingsString(values.backend, "Backend");
   const managedUrl = managedLaunchBaseUrl(backend);
@@ -239,7 +240,9 @@ export function buildSettingsPatch(
       throw new Error("Select an API key environment variable or explicitly choose none");
     }
     apiKeyEnv = selected;
-    validateCredentialMode(backend, values.credential_mode);
+    if (!(allowsCredentiallessSelection && values.credential_mode === "none")) {
+      validateCredentialMode(backend, values.credential_mode);
+    }
   }
 
   const current = {

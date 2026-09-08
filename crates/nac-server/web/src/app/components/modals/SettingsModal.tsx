@@ -34,6 +34,8 @@ import { LightModelSection, type LightSelection } from "@/app/components/modals/
 import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
+import { matchesManagedModelPick } from "@/app/features/managed/model";
+import { useManagedHostStatus } from "@/app/features/managed/queries";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
@@ -240,6 +242,8 @@ function SettingsForm({
   const toast = useToast();
   const sessionTitle = useSessionTitle();
   const updateConfig = useUpdateConfig();
+  const managedHostQuery = useManagedHostStatus();
+  const managedHost = managedHostQuery.data ?? null;
   const createModelConfig = useCreateModelConfig();
   const [openingSummary] = useState(summary);
   const updatePresentation = useUpdatePresentation();
@@ -324,7 +328,10 @@ function SettingsForm({
 
   const blocked = !selection;
   const busy =
-    updateConfig.isPending || updatePresentation.isPending || createModelConfig.isPending;
+    managedHostQuery.isPending ||
+    updateConfig.isPending ||
+    updatePresentation.isPending ||
+    createModelConfig.isPending;
 
   const seedTarget = sshTargetFromSummary(openingSummary);
   const sshStatus = useSshConnectionStatus(seedTarget);
@@ -387,6 +394,14 @@ function SettingsForm({
 
     let patch;
     try {
+      const allowsCredentiallessSelection = Boolean(
+        managedHost?.model_ready &&
+        matchesManagedModelPick(managedHost, {
+          backend: selected.backend,
+          model: selected.model,
+          baseUrl: selected.base_url,
+        }),
+      );
       patch = buildSettingsPatch(
         {
           model: selected.model,
@@ -399,6 +414,7 @@ function SettingsForm({
           orchestrator_compaction_threshold: compaction,
         },
         initial,
+        allowsCredentiallessSelection,
       );
     } catch (validationError) {
       setError(errorMessage(toRunError(validationError)));
