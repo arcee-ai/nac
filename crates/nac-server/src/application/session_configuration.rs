@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use nac_core::{
     light_model::LightModelSettings,
     model::{validate_model_configuration, EffectiveModelSettings},
-    runtime::NacConfig,
+    runtime::{effective_model_settings, ModelOptions, NacConfig, OptionalModelOption},
     sessions,
 };
 
@@ -179,14 +179,41 @@ impl<'a> SessionConfigurationApplication<'a> {
             nac_core::light_model::validate(light, &extra_headers)
                 .map_err(request_configuration_error_from)?;
         }
-        validate_model_configuration(
-            backend,
-            &prospective.model,
-            Some(&prospective.base_url),
-            reasoning_effort,
-            prospective.api_key_env.as_deref(),
-            &extra_headers,
-        )?;
+        let mounted_profile = self.manager.managed_model().filter(|profile| {
+            profile.backend == backend
+                && profile.endpoint == prospective.base_url
+                && prospective.api_key_env.is_none()
+                && profile.trusted_api_key_file().is_some()
+        });
+        if let Some(profile) = mounted_profile {
+            // Use the same trusted-file client construction as launch/resume.
+            // Only the deployment's exact destination may borrow its credential.
+            let settings = effective_model_settings(
+                &ModelOptions {
+                    backend: Some(backend),
+                    api_model: Some(prospective.model.clone()),
+                    api_base_url: Some(prospective.base_url.clone()),
+                    reasoning_effort: reasoning_effort
+                        .map(OptionalModelOption::Value)
+                        .unwrap_or(OptionalModelOption::Clear),
+                    api_key_env: OptionalModelOption::Clear,
+                    trusted_api_key_file: profile.trusted_api_key_file(),
+                    extra_headers: Some(extra_headers),
+                    ..ModelOptions::default()
+                },
+                &NacConfig::default(),
+            )?;
+            settings.validate_credentials()?;
+        } else {
+            validate_model_configuration(
+                backend,
+                &prospective.model,
+                Some(&prospective.base_url),
+                reasoning_effort,
+                prospective.api_key_env.as_deref(),
+                &extra_headers,
+            )?;
+        }
         // Persist only revisioned session-configuration columns after all
         // caller-controlled model configuration and credential checks succeed.
         // The revision CAS rejects a concurrent PATCH, while run/history writes remain independent of these columns.

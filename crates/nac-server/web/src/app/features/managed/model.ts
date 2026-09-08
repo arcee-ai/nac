@@ -1,5 +1,10 @@
 import type { CatalogPick } from "@/app/lib/catalog";
-import type { ManagedCloneOperation, ManagedHostStatus } from "@/app/types/api";
+import type {
+  ManagedCloneOperation,
+  ManagedHostStatus,
+  ModelCatalog,
+  ProviderModelsRequest,
+} from "@/app/types/api";
 
 export type ManagedTab = "status" | "github" | "secrets";
 
@@ -54,7 +59,19 @@ export function matchesManagedModelPick(
     pick &&
     status &&
     pick.backend === status.model.backend &&
-    pick.model === status.model.id &&
     pick.baseUrl === status.model.endpoint,
   );
+}
+
+/** Stored logins and the host's mounted key can discover models without BYOK. */
+export function readyManagedModelRequests(
+  catalog: ModelCatalog | undefined,
+  status: ManagedModelHostStatus | null,
+): ProviderModelsRequest[] {
+  return (catalog?.providers ?? []).flatMap((provider) => {
+    if (provider.auth_status !== "ready") return [];
+    if (provider.auth !== "api_key_env") return [{ backend: provider.id }];
+    if (!status?.model_ready || provider.id !== status.model.backend) return [];
+    return [{ backend: provider.id, base_url: status.model.endpoint }];
+  });
 }

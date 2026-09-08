@@ -5,9 +5,10 @@ import {
   managedModelPick,
   managedSecretNameError,
   matchesManagedModelPick,
+  readyManagedModelRequests,
   repositoryIdentity,
 } from "@/app/features/managed/model";
-import type { ManagedCloneOperation, ManagedHostStatus } from "@/app/types/api";
+import type { ManagedCloneOperation, ManagedHostStatus, ModelCatalog } from "@/app/types/api";
 
 const managedModelStatus = {
   model_ready: true,
@@ -38,7 +39,7 @@ describe("managed feature model", () => {
     expect(cloneIsRunning({ status: "completed" } as ManagedCloneOperation)).toBe(false);
   });
 
-  it("projects and exactly matches the managed host model profile", () => {
+  it("keeps the deployment default but shares its credential across models at the same destination", () => {
     const pick = managedModelPick(managedModelStatus);
     expect(pick).toEqual({
       backend: "arcee-api",
@@ -47,7 +48,37 @@ describe("managed feature model", () => {
     });
     if (!pick) throw new Error("managed status should produce a model pick");
     expect(matchesManagedModelPick(managedModelStatus, pick)).toBe(true);
-    expect(matchesManagedModelPick(managedModelStatus, { ...pick, model: "other" })).toBe(false);
+    expect(
+      matchesManagedModelPick(managedModelStatus, { ...pick, model: "moonshotai/kimi-k3" }),
+    ).toBe(true);
+    expect(
+      matchesManagedModelPick(managedModelStatus, { ...pick, baseUrl: "https://other.test" }),
+    ).toBe(false);
+    expect(
+      matchesManagedModelPick(managedModelStatus, { ...pick, backend: "openai-responses" }),
+    ).toBe(false);
+    expect(matchesManagedModelPick(null, pick)).toBe(false);
     expect(managedModelPick(null)).toBeNull();
+  });
+
+  it("discovers the full mounted-key provider without sending a key or changing stored-login discovery", () => {
+    // Only discovery/auth fields are read by this projection.
+    const catalog = {
+      catalog_version: 1,
+      providers: [
+        { id: "arcee-api", auth: "api_key_env", auth_status: "ready" },
+        { id: "openai-responses", auth: "api_key_env", auth_status: "ready" },
+        { id: "arcee-auth", auth: "managed_arcee", auth_status: "ready" },
+        { id: "chatgpt-codex-responses", auth: "codex_oauth", auth_status: "no_credential" },
+      ],
+    } as ModelCatalog;
+    expect(readyManagedModelRequests(catalog, managedModelStatus)).toEqual([
+      { backend: "arcee-api", base_url: "https://api.arcee.ai/api/v1" },
+      { backend: "arcee-auth" },
+    ]);
+    expect(readyManagedModelRequests(catalog, null)).toEqual([{ backend: "arcee-auth" }]);
+    expect(
+      readyManagedModelRequests(catalog, { ...managedModelStatus, model_ready: false }),
+    ).toEqual([{ backend: "arcee-auth" }]);
   });
 });

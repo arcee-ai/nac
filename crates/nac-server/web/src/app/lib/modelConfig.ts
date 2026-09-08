@@ -2,6 +2,8 @@
 // backends with a fixed base URL, credential modes, light-model credential
 // inheritance, reasoning-effort clearing and extra-header validation.
 
+import { matchesManagedModelPick } from "@/app/features/managed/model";
+import type { ManagedHostStatus } from "@/app/types/api";
 import type { JsonObject } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import type { BackendKind, LightModelSettings, UpdateConfigRequest } from "@/app/types/api";
@@ -223,6 +225,7 @@ export interface SettingsInitialValues {
 export function buildSettingsPatch(
   values: ModelFormValues,
   initial: SettingsInitialValues,
+  managedHost: Pick<ManagedHostStatus, "model" | "model_ready"> | null = null,
 ): UpdateConfigRequest {
   const backend = requiredSettingsString(values.backend, "Backend");
   const managedUrl = managedLaunchBaseUrl(backend);
@@ -239,7 +242,16 @@ export function buildSettingsPatch(
       throw new Error("Select an API key environment variable or explicitly choose none");
     }
     apiKeyEnv = selected;
-    validateCredentialMode(backend, values.credential_mode);
+    const mountedCredential =
+      managedHost?.model_ready &&
+      matchesManagedModelPick(managedHost, {
+        backend: backend as BackendKind,
+        model: values.model,
+        baseUrl,
+      });
+    if (!(mountedCredential && values.credential_mode === "none")) {
+      validateCredentialMode(backend, values.credential_mode);
+    }
   }
 
   const current = {

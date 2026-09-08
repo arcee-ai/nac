@@ -35,6 +35,7 @@ import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
+import { useManagedHostStatus } from "@/app/features/managed/queries";
 import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
@@ -240,6 +241,7 @@ function SettingsForm({
   const toast = useToast();
   const sessionTitle = useSessionTitle();
   const updateConfig = useUpdateConfig();
+  const managedHost = useManagedHostStatus().data ?? null;
   const createModelConfig = useCreateModelConfig();
   const [openingSummary] = useState(summary);
   const updatePresentation = useUpdatePresentation();
@@ -399,6 +401,7 @@ function SettingsForm({
           orchestrator_compaction_threshold: compaction,
         },
         initial,
+        managedHost,
       );
     } catch (validationError) {
       setError(errorMessage(toRunError(validationError)));

@@ -32,8 +32,10 @@ removed.
 The production definition is
 [`docker/managed/Dockerfile`](../../docker/managed/Dockerfile). It is pinned to
 `linux/amd64`, runs without `sudo` as `10001:10001`, uses Tini as PID 1, and
-contains Git/GitHub, OpenSSH, shell/search/build utilities, Python and uv,
+contains Git/Git LFS/GitHub, OpenSSH, shell/search/build utilities, Python and uv,
 Node LTS/npm/Corepack, pinned Rust with rustfmt/clippy, and pinned Go.
+Git LFS filters are installed in the system Git configuration so they remain
+available when a persistent home is mounted, including existing owner homes.
 
 Mount these paths with the stated ownership:
 
@@ -188,7 +190,8 @@ already-built image.
 The smoke builds the exact `linux/amd64` image, first proves that a fresh host
 cannot become ready without its bootstrap mount, initializes a fake strict
 bootstrap, runs with a read-only root, waits for health/readiness, checks the
-tool inventory and non-root identity, and verifies that status and logs do not
+tool inventory and non-root identity, transfers and hydrates a local Git LFS
+fixture without network credentials, and verifies that status and logs do not
 leak its canary tokens. It then models a rotated durable token, reconciles the
 original bootstrap without overwriting that state, kills the container
 abruptly, and proves the same durable host becomes ready with no bootstrap
@@ -225,3 +228,23 @@ repository and branch discovery, clone, HTTPS Git push (including a safe
 workflow-file change in a disposable repository), `gh` use, process/pod
 restart, and same-volume rescheduling. Those external checks do not weaken or
 replace the local NAC contracts.
+
+### Mounted model credentials and existing sessions
+
+A host-mounted API key can discover and select every model returned by the
+configured provider. The deployment's selected model remains the initial
+default. Settings on existing sessions use the same mounted credential only
+for the exact configured backend and endpoint; selecting another destination
+requires its own credential. Keys are never returned to the browser or copied
+into the server/worker environment.
+
+Workers receive the managed context after the internal `__worker` subcommand.
+Only nonsecret paths and the GitHub client ID are passed as launch arguments.
+The runtime image installs Git LFS filters system-wide so fresh and existing
+persistent home mounts can push, clone and hydrate LFS assets.
+
+A disabled **Always allow** button means the harness could not derive a safe
+reusable permission. Broad executable authority, including Git's ability to
+invoke configured helpers, remains invocation-only. The prompt now explains
+this directly; use **Allow once** for that request. Narrow remembered grants
+retain their existing behavior.

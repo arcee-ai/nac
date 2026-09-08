@@ -228,6 +228,12 @@ export function PermissionControls({
                     </div>
                   ))}
                 </div>
+                {!rememberable ? (
+                  <p className="mt-2 text-small text-basic-secondary">
+                    This request can only be approved once. Its access cannot be safely saved as a
+                    reusable permission.
+                  </p>
+                ) : null}
                 {requests.length > 1 ? (
                   <div className="mt-2 text-small text-basic-secondary">
                     {requests.length - 1} more request{requests.length === 2 ? "" : "s"} waiting.

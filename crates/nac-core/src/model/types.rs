@@ -236,6 +236,12 @@ pub fn resolve_model_base_url(backend: BackendKind, base_url: Option<String>) ->
 }
 
 impl EffectiveModelSettings {
+    /// Validate credential availability and destination policy using the same
+    /// client construction as execution, without sending a provider request.
+    pub fn validate_credentials(self) -> Result<()> {
+        super::ModelClient::from_effective_settings(self).map(|_| ())
+    }
+
     fn from_optional_with_resolved(
         backend: Option<BackendKind>,
         model: Option<String>,

@@ -213,6 +213,116 @@ async fn managed_host_supplies_default_model_and_mounted_credential() {
 }
 
 #[tokio::test]
+async fn mounted_key_discovers_all_provider_models_only_at_its_configured_destination() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("mounted_model_discovery");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_managed_credential(&root.join("model-token"), "mounted-model-index-key\n");
+    let (base_url, authorization) = scripted_model_index(
+        r#"{"data":[{"id":"trinity-large-thinking"},{"id":"moonshotai/kimi-k3"}]}"#,
+    );
+    // The fake provider is local; production configuration validates HTTPS.
+    let mut config = test_managed_manager(&root).managed_host().unwrap().clone();
+    config.model_endpoint = base_url.clone();
+    let manager = SessionManager::new(ServerOptions {
+        root_cwd: root.clone(),
+        store_path: Some(root.join("store.db")),
+        worker_executable: None,
+        managed_host: Some(config),
+    })
+    .unwrap();
+    let app = router(manager);
+
+    for request in [
+        serde_json::json!({"backend": "openai-responses", "base_url": base_url}),
+        serde_json::json!({"backend": "arcee-api", "base_url": "https://other.example.test"}),
+        serde_json::json!({"backend": "arcee-api", "base_url": format!("{base_url}/other")}),
+        serde_json::json!({"backend": "arcee-api", "api_key_env": "NAC_CONFIG_absent"}),
+    ] {
+        let response = post_json(app.clone(), "/providers/models", request).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(!response_json(response)
+            .await
+            .to_string()
+            .contains("mounted-model-index-key"));
+        assert!(
+            authorization.try_recv().is_err(),
+            "refused discovery must not contact the provider"
+        );
+    }
+
+    let response = post_json(
+        app.clone(),
+        "/providers/models",
+        serde_json::json!({"backend": "arcee-api"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let listing = response_json(response).await;
+    assert_eq!(listing["base_url"], base_url);
+    let models = listing["models"].as_array().unwrap();
+    assert_eq!(models.len(), 2);
+    assert!(models
+        .iter()
+        .any(|model| model["id"] == "moonshotai/kimi-k3"));
+    assert!(!listing.to_string().contains("mounted-model-index-key"));
+    assert_eq!(
+        authorization.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "Bearer mounted-model-index-key"
+    );
+
+    std::fs::remove_file(root.join("model-token")).unwrap();
+    let response = post_json(
+        app,
+        "/providers/models",
+        serde_json::json!({"backend": "arcee-api"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        response_json(response).await["error"],
+        "managed provider model discovery failed"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn mounted_key_launches_and_resumes_a_nondefault_provider_model() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("mounted_nondefault_model");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_managed_credential(&root.join("model-token"), "mounted-session-key\n");
+    let manager = test_managed_manager(&root);
+    let created = manager
+        .create_session(CreateSessionRequest {
+            backend: RequestField::Value("arcee-api".to_string()),
+            base_url: RequestField::Value("https://api.arcee.ai/api/v1".to_string()),
+            model: RequestField::Value("moonshotai/kimi-k3".to_string()),
+            api_key_env: RequestField::Null,
+            ..CreateSessionRequest::default()
+        })
+        .await
+        .expect("all provider models can use the mounted credential");
+    let session_id = created.metadata.session_id.unwrap();
+    let stored = sessions::load_session(&root.join("store.db"), &session_id).unwrap();
+    assert_eq!(stored.model, "moonshotai/kimi-k3");
+    assert_eq!(stored.api_key_env, None);
+    manager
+        .inner
+        .active_sessions
+        .write()
+        .await
+        .remove(&session_id);
+    manager
+        .attach_session(&session_id)
+        .await
+        .expect("nondefault model resumes with mounted credential");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn managed_preserved_legacy_auth_is_tombstoned_but_never_authorized() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("managed_preserved_legacy_auth");
@@ -621,5 +731,74 @@ async fn the_model_index_refuses_an_unresolvable_name_and_a_login_backend() {
         "a login backend explains that it takes no key: {message}"
     );
 
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn managed_settings_patch_uses_only_the_exact_mounted_destination() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_settings");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_managed_credential(&root.join("model-token"), "settings-key-canary\n");
+    let manager = test_managed_manager(&root);
+    let created = manager
+        .create_session(CreateSessionRequest::default())
+        .await
+        .unwrap();
+    let id = created.metadata.session_id.unwrap();
+    manager.inner.active_sessions.write().await.remove(&id);
+    manager
+        .update_session_config(
+            &id,
+            UpdateConfigRequest {
+                model: RequestField::Value("moonshotai/kimi-k3".into()),
+                ..UpdateConfigRequest::default()
+            },
+        )
+        .await
+        .expect("mounted credential should support existing-session model changes");
+    let accepted = manager.session_config(&id).unwrap();
+    assert_eq!(accepted.model, "moonshotai/kimi-k3");
+    assert_eq!(accepted.api_key_env, None);
+    for patch in [
+        UpdateConfigRequest {
+            base_url: RequestField::Value("https://api.arcee.ai/other".into()),
+            ..UpdateConfigRequest::default()
+        },
+        UpdateConfigRequest {
+            backend: RequestField::Value("openai-responses".into()),
+            ..UpdateConfigRequest::default()
+        },
+        UpdateConfigRequest {
+            api_key_env: RequestField::Value("MISSING_EXPLICIT_KEY".into()),
+            ..UpdateConfigRequest::default()
+        },
+    ] {
+        let error = manager.update_session_config(&id, patch).await.unwrap_err();
+        assert!(!error.to_string().contains("settings-key-canary"));
+        let unchanged = manager.session_config(&id).unwrap();
+        assert_eq!(unchanged.model, accepted.model);
+        assert_eq!(unchanged.base_url, accepted.base_url);
+        assert_eq!(unchanged.backend, accepted.backend);
+        assert_eq!(unchanged.api_key_env, accepted.api_key_env);
+    }
+    manager
+        .attach_session(&id)
+        .await
+        .expect("edited session must resume with mounted key");
+    manager.inner.active_sessions.write().await.remove(&id);
+    std::fs::remove_file(root.join("model-token")).unwrap();
+    assert!(manager
+        .update_session_config(
+            &id,
+            UpdateConfigRequest {
+                model: RequestField::Value("trinity-large-thinking".into()),
+                ..UpdateConfigRequest::default()
+            }
+        )
+        .await
+        .is_err());
+    assert_eq!(manager.session_config(&id).unwrap().model, accepted.model);
     let _ = std::fs::remove_dir_all(root);
 }

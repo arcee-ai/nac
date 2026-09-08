@@ -70,6 +70,7 @@ RUN test "$(dpkg --print-architecture)" = amd64 \
         findutils \
         gh \
         git \
+        git-lfs \
         gzip \
         jq \
         libssl-dev \
@@ -88,6 +89,7 @@ RUN test "$(dpkg --print-architecture)" = amd64 \
         xz-utils \
         zip \
     && rm -rf /var/lib/apt/lists/* \
+    && git lfs install --system --skip-repo \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/node.tar.xz \
         "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
@@ -124,12 +126,15 @@ RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint \
     && cargo --version \
     && rustfmt --version \
     && cargo-clippy --version \
+    && git lfs version \
     && node --version \
     && npm --version \
     && corepack --version \
     && go version \
     && uv --version
 
+# Keep LFS filters outside HOME, which is replaced by a persistent mount.
+# The installation above writes /etc/gitconfig before dropping privileges.
 USER 10001:10001
 WORKDIR /repositories
 EXPOSE 3210

@@ -221,6 +221,7 @@ pub(super) async fn run_worker(
         )
     })?;
     let mut command = Command::new(executable);
+    command.arg("__worker");
     for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
         command.env_remove(name);
     }
@@ -240,7 +241,6 @@ pub(super) async fn run_worker(
         command.current_dir(&runtime.workspace_cwd);
     }
     command
-        .arg("__worker")
         .arg("--session-id")
         .arg(invocation.session_id)
         .arg("--thread-name")
@@ -609,6 +609,8 @@ mod tests {
             r#"#!/bin/sh
 printf '%s' "${{DEMO_TOKEN-unset}}" > '{root}/inherited-secret'
 printf '%s\n' "$@" > '{root}/argv'
+[ "$1" = __worker ] || exit 64
+shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --managed-secret-root) printf '%s' "$2" > '{root}/secret-root'; shift 2 ;;

@@ -6,6 +6,7 @@ import { useMemo } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/app/services/api";
+import { readyManagedModelRequests } from "@/app/features/managed/model";
 import type {
   BackendKind,
   ManagedAuthList,
@@ -100,25 +101,22 @@ export function useManagedProviderModels(backend: BackendKind | null, enabled: b
 }
 
 export function useReadyManagedProviderModels(catalog: ModelCatalog | undefined) {
-  const ready = useMemo(
-    () =>
-      (catalog?.providers ?? []).filter(
-        (provider) => provider.auth_status === "ready" && provider.auth !== "api_key_env",
-      ),
-    [catalog],
-  );
+  const status = useManagedHostStatus().data ?? null;
+  const ready = useMemo(() => readyManagedModelRequests(catalog, status), [catalog, status]);
   const results = useQueries({
-    queries: ready.map((provider) => ({
-      queryKey: managedQueryKeys.providerModels(provider.id),
-      queryFn: () => api.listProviderModels({ backend: provider.id }),
+    queries: ready.map((request) => ({
+      queryKey: request.base_url
+        ? [...managedQueryKeys.providerModels(request.backend), request.base_url]
+        : managedQueryKeys.providerModels(request.backend),
+      queryFn: () => api.listProviderModels(request),
       retry: false,
       staleTime: 5 * 60_000,
     })),
   });
   const live = new Map<BackendKind, ProviderModel[]>();
-  ready.forEach((provider, index) => {
+  ready.forEach((request, index) => {
     const models = results[index]?.data?.models;
-    if (models?.length) live.set(provider.id, models);
+    if (models?.length) live.set(request.backend, models);
   });
   return live;
 }

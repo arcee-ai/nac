@@ -108,6 +108,7 @@ describe("direct permission controls", () => {
     expect(screen.getByRole("button", { name: "Always allow" }).hasAttribute("disabled")).toBe(
       true,
     );
+    expect(screen.getByText(/This request can only be approved once/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Allow once" }).hasAttribute("disabled")).toBe(false);
     expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(false);
   });
