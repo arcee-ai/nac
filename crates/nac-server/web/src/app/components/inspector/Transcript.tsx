@@ -49,6 +49,7 @@ import {
   useForkSession,
   useLoadOlderMessages,
   useRegenerateRun,
+  useSessionPermissions,
   useSubmitRun,
   useWorkspaceRevisions,
 } from "@/app/services/queries";
@@ -168,6 +169,19 @@ export function Transcript({
   const dismissFork = useDismissSessionFork();
   const olderMessages = useLoadOlderMessages(sessionId);
   const { data: revisions } = useWorkspaceRevisions(sessionId);
+  const direct =
+    snapshot?.metadata.behavior === "direct" ||
+    snapshot?.metadata.behavior === "direct-with-orchestrator";
+  const { data: permissions } = useSessionPermissions(sessionId, direct);
+  const pendingPermissionCallIds = useMemo(
+    () =>
+      new Set(
+        (permissions?.requests ?? [])
+          .map((request) => request.call_id)
+          .filter((callId): callId is string => Boolean(callId)),
+      ),
+    [permissions?.requests],
+  );
   const { scrollRef, contentRef, showJumpButton, jumpToLatest, followLatest } = useStickToBottom({
     resetKey: sessionId,
     // Intentionally not keyed on running / active_run / message count: those
@@ -213,9 +227,15 @@ export function Transcript({
   const snapshotTurns = useMemo(
     () =>
       perfTime("buildTranscript", () =>
-        buildTranscript(snapshot, liveThreads, finishedToolCalls, primaryToolEvents),
+        buildTranscript(
+          snapshot,
+          liveThreads,
+          finishedToolCalls,
+          primaryToolEvents,
+          pendingPermissionCallIds,
+        ),
       ),
-    [snapshot, liveThreads, finishedToolCalls, primaryToolEvents],
+    [snapshot, liveThreads, finishedToolCalls, primaryToolEvents, pendingPermissionCallIds],
   );
   // Prefer the live active_run copy; fall back to the optimistic prompt set at
   // Send so the bubble is already above the model pill before the round-trip.

@@ -34,6 +34,7 @@ describe("primary transcript tool detail", () => {
   it.each([
     ["pending", "Pending"],
     ["running", "Running"],
+    ["awaiting-approval", "Awaiting approval"],
     ["success", "Succeeded"],
     ["error", "Failed"],
     ["timed-out", "Timed out"],

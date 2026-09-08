@@ -418,6 +418,17 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
         }),
       ]);
 
+      const awaitingApproval = toolDetails(
+        buildTranscript(base, {}, {}, [start], new Set(["call-primary"])),
+      );
+      expect(awaitingApproval).toEqual([
+        expect.objectContaining({
+          callId: "call-primary",
+          status: "awaiting-approval",
+          statusLabel: "Awaiting approval",
+        }),
+      ]);
+
       const finish = primaryFinish("call-primary", "exec_command");
       const settled = toolDetails(buildTranscript(base, {}, {}, [start, finish]));
       expect(settled).toHaveLength(1);
