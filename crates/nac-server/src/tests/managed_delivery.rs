@@ -213,6 +213,188 @@ async fn managed_host_supplies_default_model_and_mounted_credential() {
 }
 
 #[tokio::test]
+async fn mounted_key_discovers_every_entitled_model_only_at_its_configured_destination() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("mounted_model_discovery");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_managed_credential(&root.join("model-token"), "mounted-model-index-key\n");
+    let (base_url, authorization) = scripted_model_index(
+        r#"{"data":[{"id":"trinity-large-thinking"},{"id":"moonshotai/kimi-k3"}]}"#,
+    );
+    // The scripted provider is loopback HTTP; production managed configuration
+    // validation requires HTTPS.
+    let mut config = test_managed_manager(&root).managed_host().unwrap().clone();
+    config.model_endpoint = base_url.clone();
+    let manager = SessionManager::new(ServerOptions {
+        root_cwd: root.clone(),
+        store_path: Some(root.join("store.db")),
+        worker_executable: None,
+        managed_host: Some(config),
+    })
+    .unwrap();
+    let app = router(manager);
+
+    for request in [
+        serde_json::json!({"backend": "openai-responses", "base_url": base_url}),
+        serde_json::json!({"backend": "arcee-api", "base_url": "https://other.example.test"}),
+        serde_json::json!({"backend": "arcee-api", "base_url": format!("{base_url}/other")}),
+        serde_json::json!({"backend": "arcee-api", "api_key_env": "NAC_CONFIG_absent"}),
+    ] {
+        let response = post_json(app.clone(), "/providers/models", request).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(!response_json(response)
+            .await
+            .to_string()
+            .contains("mounted-model-index-key"));
+        assert!(
+            authorization.try_recv().is_err(),
+            "a refused destination must not contact the provider"
+        );
+    }
+
+    let response = post_json(
+        app.clone(),
+        "/providers/models",
+        serde_json::json!({"backend": "arcee-api"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let listing = response_json(response).await;
+    assert_eq!(listing["base_url"], base_url);
+    let models = listing["models"].as_array().unwrap();
+    assert_eq!(models.len(), 2);
+    assert!(models
+        .iter()
+        .any(|model| model["id"] == "moonshotai/kimi-k3"));
+    assert!(!listing.to_string().contains("mounted-model-index-key"));
+    assert_eq!(
+        authorization.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "Bearer mounted-model-index-key"
+    );
+
+    std::fs::remove_file(root.join("model-token")).unwrap();
+    let response = post_json(
+        app,
+        "/providers/models",
+        serde_json::json!({"backend": "arcee-api"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        response_json(response).await["error"],
+        "managed provider model discovery failed"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn managed_session_settings_override_read_only_defaults_and_resume_with_the_mount() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_settings_override");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let config_path = nac_home.join("config.toml");
+    let mounted_default = "[model]\nmodel = \"trinity-large-thinking\"\n";
+    std::fs::write(&config_path, mounted_default).unwrap();
+    let credential_path = root.join("model-token");
+    let credential = b"settings-key-canary\n";
+    write_managed_credential(&credential_path, credential);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o400)).unwrap();
+        std::fs::set_permissions(&credential_path, std::fs::Permissions::from_mode(0o400)).unwrap();
+    }
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    let manager = test_managed_manager(&root);
+    let created = manager
+        .create_session(CreateSessionRequest::default())
+        .await
+        .expect("the read-only deployment default should launch");
+    let id = created.metadata.session_id.unwrap();
+    manager.inner.active_sessions.write().await.remove(&id);
+
+    manager
+        .update_session_config(
+            &id,
+            UpdateConfigRequest {
+                model: RequestField::Value("moonshotai/kimi-k3".into()),
+                ..UpdateConfigRequest::default()
+            },
+        )
+        .await
+        .expect("the application-owned session row should accept an entitled model override");
+    let accepted = manager.session_config(&id).unwrap();
+    assert_eq!(accepted.model, "moonshotai/kimi-k3");
+    assert_eq!(accepted.backend.as_deref(), Some("arcee-api"));
+    assert_eq!(accepted.api_key_env, None);
+    assert_eq!(
+        std::fs::read_to_string(&config_path).unwrap(),
+        mounted_default
+    );
+    assert_eq!(std::fs::read(&credential_path).unwrap(), credential);
+
+    for patch in [
+        UpdateConfigRequest {
+            base_url: RequestField::Value("https://api.arcee.ai/other".into()),
+            ..UpdateConfigRequest::default()
+        },
+        UpdateConfigRequest {
+            backend: RequestField::Value("openai-responses".into()),
+            ..UpdateConfigRequest::default()
+        },
+        UpdateConfigRequest {
+            api_key_env: RequestField::Value("MISSING_EXPLICIT_KEY".into()),
+            ..UpdateConfigRequest::default()
+        },
+    ] {
+        let error = manager.update_session_config(&id, patch).await.unwrap_err();
+        assert!(!error.to_string().contains("settings-key-canary"));
+        let unchanged = manager.session_config(&id).unwrap();
+        assert_eq!(unchanged.model, accepted.model);
+        assert_eq!(unchanged.base_url, accepted.base_url);
+        assert_eq!(unchanged.backend, accepted.backend);
+        assert_eq!(unchanged.api_key_env, accepted.api_key_env);
+    }
+
+    manager
+        .attach_session(&id)
+        .await
+        .expect("the persisted model override must outrank the mounted default on resume");
+    assert_eq!(
+        manager.snapshot(&id).await.unwrap().metadata.model,
+        accepted.model
+    );
+    assert_eq!(
+        std::fs::read_to_string(&config_path).unwrap(),
+        mounted_default
+    );
+    assert_eq!(std::fs::read(&credential_path).unwrap(), credential);
+
+    manager.inner.active_sessions.write().await.remove(&id);
+    std::fs::remove_file(&credential_path).unwrap();
+    assert!(manager
+        .update_session_config(
+            &id,
+            UpdateConfigRequest {
+                model: RequestField::Value("trinity-large-thinking".into()),
+                ..UpdateConfigRequest::default()
+            }
+        )
+        .await
+        .is_err());
+    assert_eq!(manager.session_config(&id).unwrap().model, accepted.model);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn managed_preserved_legacy_auth_is_tombstoned_but_never_authorized() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("managed_preserved_legacy_auth");
