@@ -15,6 +15,7 @@ export function useManagedModelProfile() {
 
   return {
     defaultPick,
+    configured: defaultPick !== null,
     matches,
     credentialReady: Boolean(status?.model_ready),
     initializing: host.isPending,

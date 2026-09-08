@@ -18,7 +18,7 @@ import {
   type CatalogPick,
   resolveCatalogModel,
 } from "@/app/lib/catalog";
-import { useModelCatalog } from "@/app/services/queries";
+import { useModelCatalog, useReadyManagedProviderModels } from "@/app/services/queries";
 import type { LightModelSettings, ModelCatalog, ReasoningEffort } from "@/app/types/api";
 
 export type LightMode = "single" | "dual";
@@ -95,6 +95,7 @@ export function LightModelSection({
   onChange: (selection: LightSelection) => void;
 }) {
   const catalog = useModelCatalog();
+  const liveByBackend = useReadyManagedProviderModels(catalog.data);
   const [mode, setMode] = useState<LightMode>(initial ? "dual" : "single");
   const [light, setLight] = useState<LightState>(() => lightStateFrom(initial, catalog.data));
 
@@ -158,6 +159,7 @@ export function LightModelSection({
                 catalog={catalog.data}
                 loading={catalog.isLoading}
                 failed={catalog.isError}
+                liveByBackend={liveByBackend}
                 value={effectiveLight.pick}
                 onSelect={(pick) =>
                   setLight({

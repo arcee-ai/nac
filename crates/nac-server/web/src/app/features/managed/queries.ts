@@ -121,10 +121,17 @@ export function useReadyManagedProviderModels(catalog: ModelCatalog | undefined)
       staleTime: 5 * 60_000,
     })),
   });
-  const live = new Map<BackendKind, ProviderModel[]>();
+  // null is a live request still settling, [] is an authoritative successful
+  // response with no entitlements, and absence means discovery is unavailable
+  // or failed so catalog consumers may use their documented seed fallback.
+  const live = new Map<BackendKind, ProviderModel[] | null>();
   ready.forEach((request, index) => {
-    const models = results[index]?.data?.models;
-    if (models?.length) live.set(request.backend, models);
+    const result = results[index];
+    // Presence in the map means live discovery succeeded. An empty index is
+    // authoritative too: falling back to the seed catalog would expose models
+    // this organization is not entitled to use.
+    if (result?.isPending) live.set(request.backend, null);
+    else if (result?.isSuccess) live.set(request.backend, result.data.models);
   });
   return live;
 }

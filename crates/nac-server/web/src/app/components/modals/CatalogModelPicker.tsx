@@ -29,7 +29,7 @@ import { catalogBaseUrl, type CatalogPick } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { formatTokensCompact } from "@/app/lib/format";
 import { providerLabel, providerOrder } from "@/app/lib/providers";
-import { useReadyManagedProviderModels } from "@/app/services/queries";
+import { modelsForProvider } from "@/app/components/modals/catalogModelOverlay";
 import type {
   BackendKind,
   CatalogModel,
@@ -44,44 +44,10 @@ interface Row {
   model: CatalogModel;
 }
 
-const EMPTY_COST: ModelCostRates = {
-  input: 0,
-  output: 0,
-  cache_read: 0,
-  cache_write: 0,
-};
-
-/** Live discovery only returns id + display name; fill limits from the catalog. */
-function modelsForProvider(
-  provider: CatalogProvider,
-  live: ProviderModel[] | undefined,
-): CatalogModel[] {
-  if (!live?.length) return provider.models;
-  const known = new Map(provider.models.map((model) => [model.id, model]));
-  return live.map((entry) => {
-    const catalog = known.get(entry.id);
-    if (catalog) {
-      return entry.display_name && entry.display_name !== catalog.display_name
-        ? { ...catalog, display_name: entry.display_name }
-        : catalog;
-    }
-    return {
-      id: entry.id,
-      display_name: entry.display_name,
-      context_window: provider.default_limits.context_window,
-      max_tokens: provider.default_limits.max_tokens,
-      cost: EMPTY_COST,
-      reasoning: false,
-      supported_efforts: provider.default_limits.supported_efforts,
-      source: "fallback",
-    };
-  });
-}
-
 function rowsFor(
   catalog: ModelCatalog | undefined,
   query: string,
-  liveByBackend: Map<BackendKind, ProviderModel[]>,
+  liveByBackend: Map<BackendKind, ProviderModel[] | null>,
 ): Row[] {
   const needle = query.trim().toLowerCase();
   const providers = [...(catalog?.providers ?? [])].sort((left, right) => {
@@ -146,12 +112,17 @@ export function CatalogModelPicker({
   catalog,
   loading,
   failed,
+  disabled = false,
+  liveByBackend,
   value,
   onSelect,
 }: {
   catalog: ModelCatalog | undefined;
   loading: boolean;
   failed: boolean;
+  /** Prevents a seed pick while an authoritative managed index is settling. */
+  disabled?: boolean;
+  liveByBackend: Map<BackendKind, ProviderModel[] | null>;
   value: CatalogPick | null;
   onSelect: (pick: CatalogPick) => void;
 }) {
@@ -167,8 +138,6 @@ export function CatalogModelPicker({
   const [hovered, setHovered] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const tabSize = isMobile ? TabButtonSize.Large : TabButtonSize.Medium;
-  const liveByBackend = useReadyManagedProviderModels(catalog);
-
   const rows = useMemo(
     () => rowsFor(catalog, query, liveByBackend),
     [catalog, query, liveByBackend],
@@ -350,7 +319,7 @@ export function CatalogModelPicker({
         variant={ButtonVariant.Secondary}
         size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
         content={ButtonContent.IconRight}
-        disabled={!catalog}
+        disabled={!catalog || disabled}
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         className="w-full md:w-[280px]"

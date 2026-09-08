@@ -39,6 +39,7 @@ import {
   useModelCatalog,
   useModelConfigs,
   useProviderModels,
+  useReadyManagedProviderModels,
   useResolvedModelConfig,
 } from "@/app/services/queries";
 import type {
@@ -125,6 +126,7 @@ export function ConfigurationsPanel({
   const managedModel = useManagedModelProfile();
   const { data: saved, isPending: savedInitializing } = useModelConfigs();
   const catalog = useModelCatalog();
+  const liveByBackend = useReadyManagedProviderModels(catalog.data);
   const deleteConfig = useDeleteModelConfig();
   const configurations = useMemo(() => saved?.configurations ?? [], [saved]);
 
@@ -154,8 +156,34 @@ export function ConfigurationsPanel({
   // authoritative over an automatic catalog default. Until those first reads
   // settle, emit no implicit selection; a deliberate source/model choice made
   // by the user remains authoritative and does not wait on background state.
+  const configuredManagedDefault = managedModel.defaultPick;
+  const managedDefaultModels = configuredManagedDefault
+    ? liveByBackend.get(configuredManagedDefault.backend)
+    : undefined;
+  // A ready profile cannot classify absence as an unavailable/error fallback
+  // until the catalog arrives and gives live discovery a provider to query.
+  const managedCatalogPending =
+    managedModel.configured && managedModel.credentialReady && catalog.isPending;
+  const managedEntitlementsPending = managedDefaultModels === null;
   const initialSourcesPending =
-    picked === null && pickedModel === null && (savedInitializing || managedModel.initializing);
+    picked === null &&
+    pickedModel === null &&
+    (savedInitializing ||
+      managedModel.initializing ||
+      managedCatalogPending ||
+      managedEntitlementsPending);
+
+  const entitledManagedDefault = useMemo<CatalogPick | null>(() => {
+    if (!configuredManagedDefault) return null;
+    // No live result means discovery is unavailable or failed, so preserve the
+    // documented deployment-default fallback. A successful array is exact,
+    // including []: emit the configured default only when it is entitled.
+    if (managedDefaultModels === undefined) return configuredManagedDefault;
+    if (managedDefaultModels === null) return null;
+    return managedDefaultModels.some((entry) => entry.id === configuredManagedDefault.model)
+      ? configuredManagedDefault
+      : null;
+  }, [configuredManagedDefault, managedDefaultModels]);
 
   // Launching usually means reusing the setup from last time, so the newest
   // saved configuration opens selected. With nothing saved yet the catalog is
@@ -187,9 +215,17 @@ export function ConfigurationsPanel({
   const catalogDefault = useMemo(
     () =>
       source.kind === "catalog" && !initialSourcesPending
-        ? (managedModel.defaultPick ?? defaultCatalogPick(catalog.data))
+        ? managedModel.configured
+          ? entitledManagedDefault
+          : defaultCatalogPick(catalog.data)
         : null,
-    [source.kind, catalog.data, managedModel.defaultPick, initialSourcesPending],
+    [
+      source.kind,
+      catalog.data,
+      managedModel.configured,
+      entitledManagedDefault,
+      initialSourcesPending,
+    ],
   );
   const catalogPick = pickedModel ?? catalogDefault;
 
@@ -598,6 +634,8 @@ export function ConfigurationsPanel({
                     catalog={catalog.data}
                     loading={catalog.isLoading}
                     failed={catalog.isError}
+                    disabled={initialSourcesPending}
+                    liveByBackend={liveByBackend}
                     value={catalogPick}
                     onSelect={(pick) => {
                       setPicked({ kind: "catalog" });
