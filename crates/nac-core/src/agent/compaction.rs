@@ -6,12 +6,17 @@ use uuid::Uuid;
 
 mod planning;
 
-#[cfg(test)]
-pub(crate) use planning::checkpoint_digests;
 use planning::*;
-pub(super) use planning::{CompactionState, PreparedProviderView, HISTORICAL_CONTEXT_PREFIX};
 #[cfg(test)]
-pub(super) use planning::{NAC_COMPACTION_PROMPT, PROMPT_POLICY_VERSION};
+pub(crate) use planning::{checkpoint_digests, checkpoint_digests_for_policy};
+pub(super) use planning::{
+    CompactionPolicy, CompactionState, PreparedProviderView, HISTORICAL_CONTEXT_PREFIX,
+};
+#[cfg(test)]
+pub(super) use planning::{
+    DIRECT_PROMPT_POLICY_VERSION, NAC_COMPACTION_PROMPT, NAC_DIRECT_COMPACTION_PROMPT,
+    PROMPT_POLICY_VERSION,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactionResult {
@@ -209,15 +214,20 @@ impl super::Agent {
         result
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "this path is selected only when the agent owns compaction state"
+    )]
     pub(super) async fn prepare_provider_view(
         &mut self,
         accumulated_usage: &mut TokenUsage,
+        tool_defs: &[crate::types::ToolDefinition],
     ) -> PreparedProviderView {
         let plan = self
             .compaction
             .as_mut()
             .expect("compaction state exists")
-            .plan(&self.messages, &self.tool_defs, CompactionReason::Auto);
+            .plan(&self.messages, tool_defs, CompactionReason::Auto);
         let CompactionPlan { prepared, decision } = plan;
         if matches!(decision, CompactionDecision::NotTriggered) {
             return prepared;
@@ -243,6 +253,10 @@ impl super::Agent {
         prepared
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a triggered compaction retains the state that produced its candidate through activation"
+    )]
     async fn execute_triggered_compaction(
         &mut self,
         compaction_id: Uuid,

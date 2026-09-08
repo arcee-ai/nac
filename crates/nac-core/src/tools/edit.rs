@@ -4,10 +4,119 @@ use serde_json::{json, Value};
 
 use crate::sandbox::{FileIoMode, HostPathResolution};
 use crate::tools::mutation::{
-    argument_error, edit_local_cancellable, edit_mounted_cancellable, execute_remote,
-    permission_error, required_string, EditSpec,
+    argument_error, edit_local, edit_local_bound, edit_mounted, execute_remote, permission_error,
+    required_string, EditSpec,
 };
-use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
+use crate::tools::{
+    kernel, resolve_workspace_path, shared_workspace_gate, ToolResult, ToolRuntime,
+};
+use crate::types::{FunctionDef, ToolDefinition};
+
+pub(crate) struct EditTool;
+
+impl kernel::NativeTool for EditTool {
+    type Input = Value;
+
+    fn definition(&self) -> ToolDefinition {
+        definition()
+    }
+
+    fn admission(&self) -> kernel::ToolAdmission {
+        kernel::ToolAdmission::Exclusive
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        validate_input(&input)?;
+        Ok(input)
+    }
+
+    fn permission_resources(
+        &self,
+        input: &Self::Input,
+        services: kernel::ToolServices<'_>,
+    ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+        let path = input
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| argument_error("decoded edit input is missing its path"))?;
+        let path = services
+            .runtime
+            .backend
+            .resolve_path(path)
+            .map_err(|error| argument_error(format!("invalid edit path: {error}")))?;
+        Ok(crate::permissions::file_resources(
+            "edit",
+            path,
+            services.runtime.backend.as_ref(),
+            &services.runtime.store_path,
+            true,
+        ))
+    }
+
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        resources: &[kernel::PermissionResource],
+        _services: kernel::ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        let path = resources
+            .iter()
+            .find(|resource| resource.action == "edit")
+            .ok_or_else(|| argument_error("authorized mutation target is missing"))?;
+        let object = input
+            .as_object_mut()
+            .ok_or_else(|| argument_error("decoded edit input is not an object"))?;
+        object.insert("path".to_string(), Value::String(path.resource.clone()));
+        object.insert("_nac_authorized_path_bound".to_string(), Value::Bool(true));
+        Ok(())
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        services: kernel::ToolServices<'a>,
+        _context: &'a kernel::ToolCallContext,
+    ) -> futures_util::future::BoxFuture<'a, ToolResult> {
+        Box::pin(async move {
+            let gate = shared_workspace_gate(services.runtime);
+            let _write = gate.write().await;
+            execute(input, services.runtime).await
+        })
+    }
+}
+
+pub fn definition() -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "edit".to_string(),
+            description: "Atomically apply one or more exact, non-overlapping replacements against one file revision. On stale_revision, read again and retry the complete batch."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to file" },
+                    "expected_revision": { "type": "string", "description": "Complete-file revision from read" },
+                    "edits": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_text": { "type": "string", "minLength": 1, "description": "Exact text from the original revision" },
+                                "new_text": { "type": "string", "description": "Replacement text" }
+                            },
+                            "required": ["old_text", "new_text"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["path", "expected_revision", "edits"],
+                "additionalProperties": false
+            }),
+        },
+    }
+}
 
 pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let path = match required_string(&args, "path") {
@@ -38,13 +147,12 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
                         "atomic edit is not supported for a single-file sandbox mount: {path}"
                     ));
                 }
-                return edit_mounted_cancellable(
+                return edit_mounted(
                     host_path.root,
                     host_path.relative,
                     path,
                     expected_revision,
                     edits,
-                    &runtime.command_cancellation,
                 )
                 .await;
             }
@@ -71,14 +179,71 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         .await;
     }
 
-    edit_local_cancellable(
-        resolve_workspace_path(runtime, PathBuf::from(&path)),
-        path,
-        expected_revision,
-        edits,
-        &runtime.command_cancellation,
-    )
-    .await
+    if args
+        .get("_nac_authorized_path_bound")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        edit_local_bound(
+            resolve_workspace_path(runtime, PathBuf::from(&path)),
+            path,
+            expected_revision,
+            edits,
+        )
+        .await
+    } else {
+        edit_local(
+            resolve_workspace_path(runtime, PathBuf::from(&path)),
+            path,
+            expected_revision,
+            edits,
+        )
+        .await
+    }
+}
+
+fn validate_input(input: &Value) -> Result<(), ToolResult> {
+    let object = input
+        .as_object()
+        .ok_or_else(|| argument_error("tool arguments must be an object"))?;
+    if let Some(key) = object
+        .keys()
+        .find(|key| !["path", "expected_revision", "edits"].contains(&key.as_str()))
+    {
+        return Err(argument_error(format!("unknown '{key}' argument")));
+    }
+    for key in ["path", "expected_revision"] {
+        if !object.get(key).is_some_and(Value::is_string) {
+            return Err(argument_error(format!("'{key}' argument must be a string")));
+        }
+    }
+    let edits = object
+        .get("edits")
+        .and_then(Value::as_array)
+        .filter(|edits| !edits.is_empty())
+        .ok_or_else(|| argument_error("'edits' must contain at least one replacement"))?;
+    for edit in edits {
+        let edit = edit
+            .as_object()
+            .ok_or_else(|| argument_error("each edit must be an object"))?;
+        if let Some(key) = edit
+            .keys()
+            .find(|key| !["old_text", "new_text"].contains(&key.as_str()))
+        {
+            return Err(argument_error(format!("unknown '{key}' argument")));
+        }
+        if edit
+            .get("old_text")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
+            return Err(argument_error("'old_text' must be a non-empty string"));
+        }
+        if !edit.get("new_text").is_some_and(Value::is_string) {
+            return Err(argument_error("'new_text' argument must be a string"));
+        }
+    }
+    Ok(())
 }
 
 fn parse_edits(args: &Value) -> Result<Vec<EditSpec>, ToolResult> {

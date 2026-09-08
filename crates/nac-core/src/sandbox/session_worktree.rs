@@ -75,10 +75,22 @@ pub(crate) async fn launch_session(
     session_key: String,
     owner: bool,
     activity_key: String,
+    durable_store_path: Option<PathBuf>,
 ) -> Result<SandboxSession> {
     let forked = spec.worktree.clone();
     let launched = async {
-        let session = SandboxSession::create(spec, session_key, owner, activity_key).await?;
+        let session = if let Some(store_path) = durable_store_path {
+            SandboxSession::create_for_durable_launch(
+                spec,
+                session_key,
+                owner,
+                activity_key,
+                store_path,
+            )
+            .await?
+        } else {
+            SandboxSession::create(spec, session_key, owner, activity_key).await?
+        };
         if let Some(worktree) = &forked {
             session.materialize_worktree().await?;
             mark_materialized(worktree)?;
@@ -143,7 +155,7 @@ pub(crate) fn fork(cwd: &Path, session_key: &str) -> Result<Option<SessionWorktr
     };
     let scratch_root = nac_home.join("worktrees");
     let worktree_path = scratch_root.join(session_key);
-    let branch = format!("nac/{:.12}", session_key);
+    let branch = format!("nac/{session_key:.12}");
     if let Err(error) = worktree::create_without_checkout(&repo.root, &worktree_path, &branch) {
         eprintln!("nac: {error:#}; sandbox will mount the live checkout");
         return Ok(None);

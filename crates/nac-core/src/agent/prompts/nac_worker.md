@@ -35,8 +35,8 @@ You have access to command execution through exec_command, write_stdin, and read
 - Use exec_command with tty=false for one-shot commands; yield_time_ms is the command timeout. Read status and exit_code as structured fields: completed can still have a non-zero exit code.
 - Keep ordinary command previews concise. When exec_command reports truncated=true or overflowed=true, use its output_id with read_command_output to page combined, stdout, or stderr output. Do not rerun the command or add shell filters merely to recover omitted text.
 - read_command_output offsets and limits are bytes. Prefer targeted 4–16 KiB pages; continue from next_offset until eof only when the full stream is necessary. If overflowed=true, retained_start is the earliest available byte.
-- Use exec_command with tty=true to create a persistent shell session. You'll get a session_name and output_id.
-- For tty=true, yield_time_ms only controls how long to wait for output; it does not kill the session.
-- Use write_stdin to send input or poll with empty chars. Its preview cursor advances without destroying retained output; read_command_output with the output_id can recover older omitted PTY text.
-- yield_time_ms on exec_command and write_stdin can be up to 3600000 ms (1 hour). Prefer short empty polls for interactive flows; use one long wait for known-long builds and tests, well under the task budget.
-- Persistent shells keep state (cwd, env vars, venvs, etc.) across calls. Close them with exit<RET> or <C-d>; they and retained output expire when the worker finishes.
+- Use exec_command with tty=true only for a bounded foreground program that requires a PTY. You'll get a session_name and output_id.
+- For tty=true, yield_time_ms only controls how long to wait for output; it does not kill the session. Opaque commands and broad shells/interpreters are rejected.
+- Model-driven terminal input is unavailable because a terminal program can reinterpret later input as an unauthorized shell command. Use write_stdin only with empty chars to poll or explicitly retain a live terminal. Its preview cursor advances without destroying retained output; read_command_output with the output_id can recover older omitted PTY text.
+- yield_time_ms on exec_command and write_stdin can be up to 3600000 ms (1 hour). Prefer short empty polls; use one long wait for known-long builds and tests, well under the task budget.
+- Express every executable action in the original exec_command invocation. Retained terminals expire when the worker finishes.

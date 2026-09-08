@@ -154,6 +154,13 @@ impl SessionManager {
         {
             return Err(RevertSessionError::NotFound);
         }
+        if self
+            .session_lineage(session_id)
+            .map_err(|error| report_failure(session_id, "verify session ownership", &error))?
+            .is_some()
+        {
+            return Err(RevertSessionError::NotFound);
+        }
 
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
@@ -169,6 +176,13 @@ impl SessionManager {
         if !self
             .persisted_operation_session_exists(session_id)
             .map_err(|error| report_failure(session_id, "recheck persisted session", &error))?
+        {
+            return Err(RevertSessionError::NotFound);
+        }
+        if self
+            .session_lineage(session_id)
+            .map_err(|error| report_failure(session_id, "recheck session ownership", &error))?
+            .is_some()
         {
             return Err(RevertSessionError::NotFound);
         }
@@ -216,6 +230,15 @@ impl SessionManager {
         {
             return Err(RegenerateSessionError::NotFound);
         }
+        if self
+            .session_lineage(session_id)
+            .map_err(|error| {
+                report_regenerate_failure(session_id, "verify session ownership", &error)
+            })?
+            .is_some()
+        {
+            return Err(RegenerateSessionError::NotFound);
+        }
 
         let gate = self.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
@@ -233,6 +256,15 @@ impl SessionManager {
             .map_err(|error| {
                 report_regenerate_failure(session_id, "recheck persisted session", &error)
             })?
+        {
+            return Err(RegenerateSessionError::NotFound);
+        }
+        if self
+            .session_lineage(session_id)
+            .map_err(|error| {
+                report_regenerate_failure(session_id, "recheck session ownership", &error)
+            })?
+            .is_some()
         {
             return Err(RegenerateSessionError::NotFound);
         }

@@ -41,6 +41,10 @@ const SENSITIVE_JSON_KEYS: [&str; 13] = [
 
 /// `Authorization: Bearer <token>` / `Authorization: Basic <b64>`, with or
 /// without the surrounding quotes JSON would add.
+#[expect(
+    clippy::expect_used,
+    reason = "the credential-header regex is a compile-time literal covered by redaction tests"
+)]
 fn header_with_scheme_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -52,6 +56,10 @@ fn header_with_scheme_re() -> &'static Regex {
 }
 
 /// Any other credential header value, bare or quoted.
+#[expect(
+    clippy::expect_used,
+    reason = "the credential-header regex is a compile-time literal covered by redaction tests"
+)]
 fn header_value_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -63,6 +71,10 @@ fn header_value_re() -> &'static Regex {
 /// A `Bearer`/`Basic` token standing alone in prose, without a header name.
 /// The token is captured separately so the replacement can tell credential
 /// material from an ordinary prose word (see `redact_patterns`).
+#[expect(
+    clippy::expect_used,
+    reason = "the bearer-token regex is a compile-time literal covered by redaction tests"
+)]
 fn bearer_token_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -72,6 +84,10 @@ fn bearer_token_re() -> &'static Regex {
 }
 
 /// `https://user:pass@host` userinfo embedded in a URL.
+#[expect(
+    clippy::expect_used,
+    reason = "the URL-userinfo regex is a compile-time literal covered by redaction tests"
+)]
 fn url_userinfo_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {

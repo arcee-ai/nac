@@ -18,6 +18,7 @@ import {
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
 import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
+import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
 import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
@@ -86,6 +87,8 @@ interface ModelMessageProps {
   onDismissFork?: (forkId: string) => void;
   /** Disable destructive / network actions while a run is in flight. */
   actionsDisabled?: boolean;
+  /** Parent-owned delegated transcripts expose copy but no mutation affordances. */
+  readOnly?: boolean;
   /**
    * The revision captured for the run behind this turn, when that run changed
    * anything. Absent on a turn whose run is still going, was cancelled, or
@@ -119,12 +122,13 @@ export const ModelMessage = memo(function ModelMessage({
   onOpenFork,
   onDismissFork,
   actionsDisabled = false,
+  readOnly = false,
   snapshotRevision = null,
   filesPanel = null,
 }: ModelMessageProps) {
   perfRender("ModelMessage");
-  const canRefresh = onRefresh != null && userMessageIndex != null;
-  const canRevert = onRevert != null && userMessageIndex != null;
+  const canRefresh = !readOnly && onRefresh != null && userMessageIndex != null;
+  const canRevert = !readOnly && onRevert != null && userMessageIndex != null;
   const forkIndex = turn.messageIndex;
   const copyText = modelCopyText(turn);
   // The stop applies to the whole turn, including the files its runs had
@@ -212,6 +216,8 @@ export const ModelMessage = memo(function ModelMessage({
                     pending={block.pending}
                   />
                 );
+              case "tool-detail":
+                return <ToolCallDetail key={block.key} tool={block.presentation} />;
               case "wave":
                 return (
                   <ThreadWave
@@ -236,7 +242,7 @@ export const ModelMessage = memo(function ModelMessage({
           ) : null}
         </div>
 
-        {forks.length > 0 ? (
+        {!readOnly && forks.length > 0 ? (
           <div className="flex flex-col gap-2 pt-4 md:pl-3 [&>*]:shrink-0">
             {forks.map((fork) => (
               <ForkSessionItem
@@ -296,7 +302,7 @@ export const ModelMessage = memo(function ModelMessage({
                   <Icon iconName={IconName.TurnLeft} size={16} />
                 </Button>
               </Tooltip>
-            ) : (
+            ) : readOnly ? null : (
               <Tooltip
                 title="This message is not in the transcript yet"
                 position={TooltipPosition.BottomRight}
@@ -316,7 +322,7 @@ export const ModelMessage = memo(function ModelMessage({
               </Tooltip>
             )}
 
-            {onFork != null && forkIndex != null ? (
+            {!readOnly && onFork != null && forkIndex != null ? (
               <Tooltip title="Create fork" position={TooltipPosition.BottomRight}>
                 <Button
                   size={isMobile ? ButtonSize.Medium : ButtonSize.Small}

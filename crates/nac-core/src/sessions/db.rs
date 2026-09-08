@@ -84,6 +84,16 @@ fn create_session_once(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
+    insert_new_session_in_transaction(&tx, path, snapshot)?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub(crate) fn insert_new_session_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    path: &Path,
+    snapshot: &SessionSnapshot,
+) -> Result<()> {
     let existing: Option<String> = tx
         .query_row(
             "SELECT session_id FROM sessions WHERE session_id = ?1",
@@ -99,14 +109,13 @@ fn create_session_once(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
         ));
     }
 
-    insert_or_replace_session(&tx, path, snapshot)?;
+    insert_or_replace_session(tx, path, snapshot)?;
     if let Some(project_id) = snapshot.project_id.as_deref() {
         tx.execute(
             "INSERT INTO session_projects (session_id, project_id) VALUES (?1, ?2)",
             params![snapshot.session_id, project_id],
         )?;
     }
-    tx.commit()?;
     Ok(())
 }
 
@@ -160,6 +169,11 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
         &update.run_state.token_usages,
         update.run_state.unattributed_token_usage.as_ref(),
     )?;
+    if update.finished_run_id.is_some() != update.finished_run_disposition.is_some() {
+        return Err(anyhow!(
+            "run-state update must pair a finished run id with its terminal disposition"
+        ));
+    }
     if update.finished_run_id.is_some() && update.failed_run_id.is_some() {
         return Err(anyhow!(
             "run-state update cannot both clear and retain the durable recovery row"
@@ -200,8 +214,35 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
         ));
     }
     if let Some(run_id) = update.finished_run_id.as_deref() {
-        crate::store::clear_active_run(&tx, &update.session_id, run_id)?;
+        if let Some(goal) = update.goal_settlement.as_ref() {
+            crate::store::settle_session_goal_run_with_connection(
+                &tx,
+                &update.session_id,
+                &goal.run_id,
+                goal.final_billable_tokens,
+                goal.terminal_at_epoch_ms,
+                goal.disposition,
+            )?;
+        }
+        crate::store::clear_active_run(
+            &tx,
+            &update.session_id,
+            run_id,
+            update
+                .finished_run_disposition
+                .ok_or_else(|| anyhow!("finished run is missing its validated disposition"))?,
+        )?;
     } else if let Some(run_id) = update.failed_run_id.as_deref() {
+        if let Some(goal) = update.goal_settlement.as_ref() {
+            crate::store::settle_session_goal_run_with_connection(
+                &tx,
+                &update.session_id,
+                &goal.run_id,
+                goal.final_billable_tokens,
+                goal.terminal_at_epoch_ms,
+                goal.disposition,
+            )?;
+        }
         crate::store::mark_active_run_failed(&tx, &update.session_id, run_id)?;
     }
     tx.commit()?;
@@ -328,7 +369,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id
+                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              WHERE s.session_id = ?1",
@@ -338,7 +379,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
         .optional()?;
 
     let Some(row) = row else {
-        return Err(anyhow!("session '{}' was not found", session_id));
+        return Err(anyhow!("session '{session_id}' was not found"));
     };
 
     row.into_snapshot()
@@ -367,7 +408,7 @@ pub(crate) fn load_session_run_state(
         )
         .optional()?;
     let Some((last, previous, durations_json, token_usages_json, updated_at)) = row else {
-        return Err(anyhow!("session '{}' was not found", session_id));
+        return Err(anyhow!("session '{session_id}' was not found"));
     };
     let response_durations_ms = durations_json
         .map(|json| {
@@ -419,7 +460,7 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
         .optional()?;
 
     let Some((mut config, light_model_json)) = row else {
-        return Err(anyhow!("session '{}' was not found", session_id));
+        return Err(anyhow!("session '{session_id}' was not found"));
     };
     match deserialize_light_model(light_model_json.as_deref()) {
         Ok(light_model) => config.light_model = light_model,
@@ -447,7 +488,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id
+                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              ORDER BY s.updated_at DESC, s.created_at DESC
@@ -518,6 +559,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         ssh_identity_file: row.get(20)?,
         light_model_json: row.get(21)?,
         project_id: row.get(22)?,
+        behavior: row.get(23)?,
     })
 }
 
@@ -759,7 +801,7 @@ SELECT s.session_id, s.cwd, s.model, s.backend, s.reasoning_effort,
        p.title, COALESCE(p.pinned, 0), COALESCE(p.sort_order, 0),
        COALESCE(p.version, 0), s.visible_message_count, s.last_user_prompt,
        s.token_usages_json, COALESCE(s.run_count, 0), s.ssh_port, s.ssh_identity_file,
-       sp.project_id,
+       sp.project_id, s.behavior,
        fsrc.source_session_id, fsrc.source_title, origin_p.title,
        origin_s.last_user_prompt, origin_s.session_id
 FROM sessions s
@@ -838,11 +880,12 @@ fn map_session_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionS
         ssh_port: row.get(18)?,
         ssh_identity_file: row.get(19)?,
         project_id: row.get(20)?,
-        fork_source_session_id: row.get(21)?,
-        fork_source_title: row.get(22)?,
-        fork_origin_title: row.get(23)?,
-        fork_origin_prompt: row.get(24)?,
-        fork_origin_session_id: row.get(25)?,
+        behavior: row.get(21)?,
+        fork_source_session_id: row.get(22)?,
+        fork_source_title: row.get(23)?,
+        fork_origin_title: row.get(24)?,
+        fork_origin_prompt: row.get(25)?,
+        fork_origin_session_id: row.get(26)?,
     })
 }
 
@@ -868,6 +911,7 @@ struct SessionSummaryRow {
     ssh_port: Option<u16>,
     ssh_identity_file: Option<String>,
     project_id: Option<String>,
+    behavior: String,
     fork_source_session_id: Option<String>,
     fork_source_title: Option<String>,
     fork_origin_title: Option<String>,
@@ -902,23 +946,15 @@ impl SessionSummaryRow {
         // a truncation rebuilds them, and the migration backfills blob ++ log.
         let visible_message_count = usize::try_from(self.visible_message_count)
             .context("session visible message count overflowed")?;
-        let (response_usages, unattributed) =
-            deserialize_token_accounting(self.token_usages_json.as_deref())?;
-        let aggregated = match (
-            crate::model::TokenUsage::aggregate(&response_usages),
-            unattributed,
-        ) {
-            (Some(mut usage), Some(extra)) => {
-                usage.add_cost_saturating(&extra);
-                Some(usage)
-            }
-            (None, extra) => extra,
-            (usage, None) => usage,
-        };
-        let total_tokens = aggregated.as_ref().map(|usage| usage.billable_tokens());
+        let (response_usages, _) = deserialize_token_accounting(self.token_usages_json.as_deref())?;
+        let aggregated = crate::model::TokenUsage::aggregate(&response_usages);
+        let total_tokens = aggregated
+            .as_ref()
+            .map(crate::model::TokenUsage::billable_tokens);
         let total_cost_micros = aggregated.as_ref().map(|usage| usage.cost.total);
         Ok(SessionSummary {
             session_id: self.session_id,
+            behavior: self.behavior.parse()?,
             project_id: self.project_id,
             cwd,
             workspace_host_path,
@@ -949,7 +985,7 @@ impl SessionSummaryRow {
     }
 }
 
-fn insert_or_replace_session(
+pub(crate) fn insert_or_replace_session(
     tx: &rusqlite::Transaction<'_>,
     path: &Path,
     snapshot: &SessionSnapshot,
@@ -1005,10 +1041,10 @@ fn insert_or_replace_session(
              response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
              extra_headers_json, token_usages_json, config_version,
              orchestrator_compaction_threshold, ssh_port, ssh_identity_file,
-             light_model_json
+             light_model_json, behavior
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
+             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
          )
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
@@ -1053,6 +1089,7 @@ fn insert_or_replace_session(
             stored_ssh_port(snapshot.ssh.as_ref()),
             stored_ssh_identity_file(snapshot.ssh.as_ref()),
             light_model_json,
+            snapshot.behavior.as_str(),
         ],
     )?;
     Ok(())
@@ -1082,6 +1119,7 @@ struct SessionRow {
     ssh_port: Option<u16>,
     ssh_identity_file: Option<String>,
     light_model_json: Option<String>,
+    behavior: String,
 }
 
 impl SessionRow {
@@ -1102,6 +1140,7 @@ impl SessionRow {
             deserialize_token_accounting(self.token_usages_json.as_deref())?;
         Ok(SessionSnapshot {
             session_id: self.session_id,
+            behavior: self.behavior.parse()?,
             project_id: self.project_id,
             cwd: PathBuf::from(self.cwd),
             model: self.model,
@@ -1183,11 +1222,7 @@ fn parse_backend(raw: Option<String>) -> Result<BackendKind> {
         )
     })?;
     raw.parse::<BackendKind>().map_err(|error| {
-        anyhow!(
-            "unsupported stored backend '{}'; session settings repair required: {}",
-            raw,
-            error
-        )
+        anyhow!("unsupported stored backend '{raw}'; session settings repair required: {error}")
     })
 }
 
@@ -1234,8 +1269,7 @@ fn parse_reasoning_effort(raw: Option<String>) -> Result<Option<ReasoningEffort>
         Some("xhigh") => Ok(Some(ReasoningEffort::Xhigh)),
         Some("max") => Ok(Some(ReasoningEffort::Max)),
         Some(other) => Err(anyhow!(
-            "unsupported stored reasoning effort '{}'; session settings repair required: select a supported reasoning effort or clear it",
-            other
+            "unsupported stored reasoning effort '{other}'; session settings repair required: select a supported reasoning effort or clear it"
         )),
         None => Ok(None),
     }

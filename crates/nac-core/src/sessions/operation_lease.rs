@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
+use sha2::{Digest, Sha256};
 
 /// A process-wide, crash-safe exclusive lease for one persisted session operation.
 ///
@@ -16,7 +17,73 @@ pub struct SessionOperationLease {
     session_id: String,
 }
 
+/// Cross-process exclusion for mutations of a session's owned child set.
+/// This is deliberately distinct from the run/compaction lease: a parent run
+/// must be able to create a child while still preventing deletion from taking
+/// its descendant snapshot concurrently.
+#[derive(Debug)]
+pub struct SessionRelationshipLease {
+    _file: File,
+}
+
+/// Shared authority retained for the lifetime of an explicitly retained
+/// terminal. Branch/commit mutations take the exclusive twin.
+#[derive(Debug)]
+pub struct WorkspaceActivityLease {
+    _file: File,
+}
+
+/// Cross-process exclusion for a checkout-wide branch or commit mutation.
+#[derive(Debug)]
+pub struct WorkspaceMutationLease {
+    _file: File,
+}
+
+/// Shared cross-process ownership retained while a process-local terminal can
+/// still mutate resources on behalf of one durable session.
+#[derive(Debug)]
+pub struct SessionResourceLease {
+    _file: File,
+}
+
+/// Exclusive twin used by lifecycle operations that would otherwise orphan
+/// process-local resources owned by a peer process.
+#[derive(Debug)]
+pub struct SessionResourceMutationLease {
+    _file: File,
+}
+
+impl Drop for SessionRelationshipLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
 impl Drop for SessionOperationLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
+impl Drop for WorkspaceActivityLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
+impl Drop for WorkspaceMutationLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
+impl Drop for SessionResourceLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
+impl Drop for SessionResourceMutationLease {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self._file);
     }
@@ -120,6 +187,124 @@ impl SessionOperationLease {
     }
 }
 
+impl SessionRelationshipLease {
+    pub fn try_acquire(
+        store_path: &Path,
+        session_id: &str,
+    ) -> Result<Self, SessionOperationLeaseError> {
+        let canonical_store = canonical_store(store_path).map_err(store_error)?;
+        // Keep this suffix short: persisted identifiers are hex encoded and
+        // may be 120 bytes, so the complete component must remain below the
+        // common 255-byte filesystem limit.
+        let lock_path = secure_lock_path_with_suffix(&canonical_store, session_id, ".rel")
+            .map_err(store_error)?;
+        let file = secure_open_lock_file(&lock_path).map_err(store_error)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                Err(SessionOperationLeaseError::Busy(session_id.to_string()))
+            }
+            Err(error) => Err(store_error(
+                anyhow::Error::new(error)
+                    .context(format!("failed to lock {}", lock_path.display())),
+            )),
+        }
+    }
+}
+
+impl WorkspaceActivityLease {
+    pub fn try_acquire(
+        store_path: &Path,
+        workspace_identity: &[u8],
+    ) -> Result<Self, SessionOperationLeaseError> {
+        let file = open_workspace_lock_file(store_path, workspace_identity)?;
+        match FileExt::try_lock_shared(&file) {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Err(
+                SessionOperationLeaseError::Busy("workspace mutation".to_string()),
+            ),
+            Err(error) => Err(store_error(
+                anyhow::Error::new(error).context("failed to lock workspace activity lease"),
+            )),
+        }
+    }
+}
+
+impl WorkspaceMutationLease {
+    pub fn try_acquire(
+        store_path: &Path,
+        workspace_identity: &[u8],
+    ) -> Result<Self, SessionOperationLeaseError> {
+        let file = open_workspace_lock_file(store_path, workspace_identity)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Err(
+                SessionOperationLeaseError::Busy("retained workspace terminal".to_string()),
+            ),
+            Err(error) => Err(store_error(
+                anyhow::Error::new(error).context("failed to lock workspace mutation lease"),
+            )),
+        }
+    }
+}
+
+impl SessionResourceLease {
+    pub fn try_acquire(
+        store_path: &Path,
+        session_id: &str,
+    ) -> Result<Self, SessionOperationLeaseError> {
+        let canonical_store = canonical_store(store_path).map_err(store_error)?;
+        let lock_path = secure_lock_path_with_suffix(&canonical_store, session_id, ".resource")
+            .map_err(store_error)?;
+        let file = secure_open_lock_file(&lock_path).map_err(store_error)?;
+        match FileExt::try_lock_shared(&file) {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                Err(SessionOperationLeaseError::Busy(session_id.to_string()))
+            }
+            Err(error) => Err(store_error(
+                anyhow::Error::new(error).context("failed to lock session resource lease"),
+            )),
+        }
+    }
+}
+
+impl SessionResourceMutationLease {
+    pub fn try_acquire(
+        store_path: &Path,
+        session_id: &str,
+    ) -> Result<Self, SessionOperationLeaseError> {
+        let canonical_store = canonical_store(store_path).map_err(store_error)?;
+        let lock_path = secure_lock_path_with_suffix(&canonical_store, session_id, ".resource")
+            .map_err(store_error)?;
+        let file = secure_open_lock_file(&lock_path).map_err(store_error)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                Err(SessionOperationLeaseError::Busy(session_id.to_string()))
+            }
+            Err(error) => Err(store_error(
+                anyhow::Error::new(error).context("failed to lock session resource mutation lease"),
+            )),
+        }
+    }
+}
+
+fn open_workspace_lock_file(
+    store_path: &Path,
+    workspace_identity: &[u8],
+) -> Result<File, SessionOperationLeaseError> {
+    let canonical_store = canonical_store(store_path).map_err(store_error)?;
+    let digest = Sha256::digest(workspace_identity);
+    let key = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let lock_path =
+        secure_lock_path_with_suffix(&canonical_store, &key, ".workspace").map_err(store_error)?;
+    secure_open_lock_file(&lock_path).map_err(store_error)
+}
+
 fn canonical_store(store_path: &Path) -> anyhow::Result<PathBuf> {
     fs::canonicalize(store_path).map_err(anyhow::Error::new)
 }
@@ -129,6 +314,14 @@ fn store_error(error: anyhow::Error) -> SessionOperationLeaseError {
 }
 
 fn secure_lock_path(canonical_store: &Path, session_id: &str) -> anyhow::Result<PathBuf> {
+    secure_lock_path_with_suffix(canonical_store, session_id, ".lock")
+}
+
+fn secure_lock_path_with_suffix(
+    canonical_store: &Path,
+    session_id: &str,
+    suffix: &str,
+) -> anyhow::Result<PathBuf> {
     let file_name = canonical_store.file_name().ok_or_else(|| {
         anyhow::anyhow!("store path has no file name: {}", canonical_store.display())
     })?;
@@ -146,7 +339,7 @@ fn secure_lock_path(canonical_store: &Path, session_id: &str) -> anyhow::Result<
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    Ok(lock_dir.join(format!("{encoded_id}.lock")))
+    Ok(lock_dir.join(format!("{encoded_id}{suffix}")))
 }
 
 fn secure_create_lock_dir(path: &Path) -> anyhow::Result<()> {
@@ -166,6 +359,7 @@ fn secure_create_lock_dir(path: &Path) -> anyhow::Result<()> {
                 path.display()
             );
         }
+        // SAFETY: `geteuid` has no arguments or memory preconditions.
         if metadata.uid() != unsafe { libc::geteuid() } {
             anyhow::bail!("session lock directory is not owned by the current user");
         }
@@ -202,8 +396,10 @@ fn secure_open_lock_file(path: &Path) -> anyhow::Result<File> {
             .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
         let file = options.open(path)?;
         let metadata = file.metadata()?;
+        // SAFETY: `geteuid` has no arguments or memory preconditions.
+        let effective_uid = unsafe { libc::geteuid() };
         if !metadata.file_type().is_file()
-            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.uid() != effective_uid
             || metadata.nlink() != 1
         {
             anyhow::bail!(
@@ -297,6 +493,25 @@ mod tests {
         let _ = fs::remove_dir_all(store_path.parent().unwrap());
     }
 
+    #[test]
+    fn relationship_lease_is_distinct_exclusive_and_supports_maximum_ids() {
+        let store_path = test_store("relationship");
+        store::initialize(&store_path).unwrap();
+        let session_id = "s".repeat(120);
+
+        let operation = SessionOperationLease::try_acquire(&store_path, &session_id).unwrap();
+        let relationship = SessionRelationshipLease::try_acquire(&store_path, &session_id).unwrap();
+        assert!(matches!(
+            SessionRelationshipLease::try_acquire(&store_path, &session_id),
+            Err(SessionOperationLeaseError::Busy(_))
+        ));
+
+        drop(relationship);
+        SessionRelationshipLease::try_acquire(&store_path, &session_id).unwrap();
+        drop(operation);
+        let _ = fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
     #[cfg(unix)]
     #[test]
     fn lock_paths_are_private_and_reject_symlink_files() {
@@ -378,6 +593,62 @@ mod tests {
         child.kill().unwrap();
         child.wait().unwrap();
         SessionOperationLease::try_acquire(&store_path, "crash-session").unwrap();
+        let _ = fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn resource_lease_process_helper() {
+        let Some(store_path) = std::env::var_os("NAC_TEST_RESOURCE_LEASE_STORE") else {
+            return;
+        };
+        let ready_path = PathBuf::from(std::env::var_os("NAC_TEST_RESOURCE_LEASE_READY").unwrap());
+        let _lease =
+            SessionResourceLease::try_acquire(Path::new(&store_path), "retained-session").unwrap();
+        fs::write(ready_path, b"ready").unwrap();
+        thread::sleep(Duration::from_secs(30));
+    }
+
+    #[test]
+    fn peer_resource_lease_blocks_lifecycle_mutation_until_process_death() {
+        let store_path = test_store("resource_process_death");
+        store::initialize(&store_path).unwrap();
+        let ready_path = store_path.parent().unwrap().join("resource-ready");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "sessions::operation_lease::tests::resource_lease_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_TEST_RESOURCE_LEASE_STORE", &store_path)
+            .env("NAC_TEST_RESOURCE_LEASE_READY", &ready_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+
+        for _ in 0..200 {
+            if ready_path.exists() {
+                break;
+            }
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "resource lease helper exited early"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            ready_path.exists(),
+            "resource lease helper never became ready"
+        );
+        assert!(matches!(
+            SessionResourceMutationLease::try_acquire(&store_path, "retained-session"),
+            Err(SessionOperationLeaseError::Busy(_))
+        ));
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        SessionResourceMutationLease::try_acquire(&store_path, "retained-session").unwrap();
         let _ = fs::remove_dir_all(store_path.parent().unwrap());
     }
 

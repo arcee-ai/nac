@@ -4,6 +4,7 @@ import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
 
 const TAB = {
   threads: { label: "Threads", iconName: IconName.Flow },
+  delegated: { label: "Delegated", iconName: IconName.People },
   files: { label: "Files", iconName: IconName.Folders },
   worksets: { label: "Worksets", iconName: IconName.Checklist },
   history: { label: "History", iconName: IconName.History },
@@ -16,9 +17,11 @@ const TAB = {
 export function MobileBottomBar({
   panel,
   onPanelChange,
+  panels = SESSION_PANELS,
 }: {
   panel: SessionPanel;
   onPanelChange: (panel: SessionPanel) => void;
+  panels?: readonly SessionPanel[];
 }) {
   return (
     <div className="absolute inset-x-0 bottom-0 z-10 px-2 py-4 pointer-events-none">
@@ -26,7 +29,7 @@ export function MobileBottomBar({
         className="flex items-center gap-1 w-full p-[2px] rounded-[18px] bg-elevation-level-3 shadow-2xl overflow-hidden pointer-events-auto"
         role="tablist"
       >
-        {SESSION_PANELS.map((name) => {
+        {panels.map((name) => {
           const active = panel === name;
           return (
             <button

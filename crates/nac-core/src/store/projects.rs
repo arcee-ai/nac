@@ -2,41 +2,12 @@ use super::*;
 
 use std::collections::{BTreeMap, HashSet};
 
+pub use nac_contracts::{NewProject, ProjectRecord};
+
 use crate::store::model_configurations::{model_configuration_columns, row_to_record_at};
 
 const MAX_NAME_LEN: usize = 120;
 const MAX_DESCRIPTION_LEN: usize = 2_000;
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ProjectRecord {
-    pub project_id: String,
-    pub name: String,
-    pub description: Option<String>,
-    #[cfg_attr(feature = "openapi", schema(value_type = String))]
-    pub cwd: PathBuf,
-    pub ssh_host: Option<String>,
-    pub ssh_port: Option<u16>,
-    pub ssh_identity_file: Option<String>,
-    pub default_model_config_id: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub pinned: bool,
-    pub sort_order: i64,
-    pub presentation_version: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewProject {
-    pub project_id: String,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub cwd: PathBuf,
-    pub ssh_host: Option<String>,
-    pub ssh_port: Option<u16>,
-    pub ssh_identity_file: Option<String>,
-    pub default_model_config_id: Option<String>,
-}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProjectPatch {
@@ -65,13 +36,12 @@ pub enum ProjectStoreError {
 impl std::fmt::Display for ProjectStoreError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidInput(message) => formatter.write_str(message),
+            Self::InvalidInput(message) | Self::Conflict(message) => formatter.write_str(message),
             Self::DuplicateLocation => formatter.write_str("a project already uses this location"),
             Self::NotFound(id) => write!(formatter, "project '{id}' was not found"),
             Self::ModelConfigurationNotFound(id) => {
                 write!(formatter, "model configuration '{id}' was not found")
             }
-            Self::Conflict(message) => formatter.write_str(message),
             Self::Store(error) => write!(formatter, "{error}"),
         }
     }

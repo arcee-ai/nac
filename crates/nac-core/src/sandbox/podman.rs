@@ -1,11 +1,15 @@
 use std::ffi::OsString;
-use std::path::Path;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::Stdio as StdStdio;
 use std::process::{Command as StdCommand, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
+use fs2::FileExt;
 use portable_pty::CommandBuilder as PtyCommandBuilder;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -14,19 +18,13 @@ use tokio::time::timeout;
 use super::{MountSpec, SandboxAvailability, SandboxAvailabilityStatus, SandboxSpec};
 use crate::workspace::first_stderr_line;
 
-/// Host-side wait for `SANDBOX_KILL_WRAPPER`.
-///
-/// The wrapper can sleep up to two seconds on its own (two 20 × 50ms polls)
-/// before exiting, then still has to scan `/proc` and deliver signals. Podman
-/// machine and SSH round-trips sit on top of that, so a 2s host deadline can
-/// fire while a successful kill is still running and report a false cleanup
-/// failure.
-pub(crate) const SANDBOX_KILL_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Host-side read of a guest pidfile while pinning a published PID.
-/// Remote Podman (`ssh://` machine) round-trips can exceed a few hundred
-/// milliseconds; keep this well under `SANDBOX_KILL_TIMEOUT`.
-pub(crate) const SANDBOX_PIDFILE_READ_TIMEOUT: Duration = Duration::from_secs(1);
+fn podman_program() -> OsString {
+    #[cfg(test)]
+    if let Some(program) = std::env::var_os("NAC_TEST_PODMAN_PROGRAM") {
+        return program;
+    }
+    OsString::from("podman")
+}
 
 /// Probes whether podman can be used on this host right now: first the binary
 /// (`podman --version`), then the runtime (`podman info`, which fails while a
@@ -106,146 +104,620 @@ fn start_guidance() -> String {
     "check 'podman info' on this host for why the runtime is not responding".to_string()
 }
 
-pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"pidfile=$2
-if ! (set -C; printf '%s' starting > "$pidfile") 2>/dev/null; then
-  exit 130
-fi
-if command -v setsid >/dev/null 2>&1; then
-  setsid bash -c "$1" &
+pub(crate) const SANDBOX_EXEC_WRAPPER: &str = r#"supervisor='requested=$1
+pidfile=$2
+process_identity() {
+  target=$1
+  if [ -r "/proc/$target/stat" ]; then
+    rest=$(sed '\''s/^.*) //'\'' "/proc/$target/stat" 2>/dev/null) || return 1
+    set -- $rest
+    [ -n "${20:-}" ] || return 1
+    printf '\''proc:%s'\'' "${20}"
+    return 0
+  fi
+  started=$(ps -ww -o lstart= -p "$target" 2>/dev/null) || return 1
+  started=$(printf '\''%s'\'' "$started" | sed '\''s/^[[:space:]]*//;s/[[:space:]]*$//'\'')
+  [ -n "$started" ] || return 1
+  command_line=$(ps -ww -o command= -p "$target" 2>/dev/null) || return 1
+  command_signature=$(printf '\''%s'\'' "$command_line" | cksum 2>/dev/null) || return 1
+  command_signature=${command_signature%% *}
+  [ -n "$command_signature" ] || return 1
+  printf '\''ps:%s:%s'\'' "$started" "$command_signature"
+}
+identity=$(process_identity "$$") || exit 125
+printf '\''%s\t%s\n'\'' "$$" "$identity" > "$pidfile"
+bash -c "$requested"
+status=$?
+pgid=$(ps -o pgid= -p "$$" 2>/dev/null | tr -d '\'' '\'')
+group_members() {
+  [ -n "$pgid" ] || return 0
+  (ps -eo pid=,pgid= 2>/dev/null || ps -ax -o pid= -o pgid= 2>/dev/null) |
+    awk -v group="$pgid" -v self="$$" '\''$2 == group && $1 != self { print $1 }'\''
+}
+for child in $(group_members); do
+  kill -TERM "$child" 2>/dev/null || true
+done
+sleep 0.1
+for child in $(group_members); do
+  kill -KILL "$child" 2>/dev/null || true
+done
+rm -f "$pidfile"
+exit "$status"'
+if command -v setsid >/dev/null 2>&1 && setsid -w true >/dev/null 2>&1; then
+  exec setsid -w bash -c "$supervisor" nac-supervisor "$1" "$2"
 else
   set -m
-  bash -c "$1" &
-fi
-pid=$!
-pidtmp="${pidfile}.ready.$$"
-if ! printf '%s' "$pid" > "$pidtmp" || ! mv -f "$pidtmp" "$pidfile"; then
-  rm -f "$pidtmp"
-  kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null
-  rm -f "$pidfile"
-  exit 125
-fi
-wait "$pid"
-status=$?
-rm -f "$pidfile"
-exit "$status""#;
+  bash -c "$supervisor" nac-supervisor "$1" "$2" &
+  supervisor_pid=$!
+  if [ "${3:-}" = pty ]; then
+    fg %1 >/dev/null 2>/dev/null
+  else
+    wait "$supervisor_pid" 2>/dev/null
+  fi
+fi"#;
 
-pub(crate) const SANDBOX_PTY_WRAPPER: &str = r#"pidfile=$1
-if ! (set -C; printf '%s' starting > "$pidfile") 2>/dev/null; then
-  exit 130
-fi
-pidtmp="${pidfile}.ready.$$"
-if ! printf '%s' "$$" > "$pidtmp" || ! mv -f "$pidtmp" "$pidfile"; then
-  rm -f "$pidtmp" "$pidfile"
-  exit 125
-fi
-bash -i
-status=$?
-rm -f "$pidfile"
-exit "$status""#;
+// PTYs use the same foreground supervisor. The requested command retains the
+// inherited terminal file descriptors, while the supervisor keeps the process
+// group identity alive until successful-exit descendant cleanup is complete.
+pub(crate) const SANDBOX_PTY_WRAPPER: &str = SANDBOX_EXEC_WRAPPER;
 
-/// `$1` is the guest pidfile. `$2` is the PID the host observed when the
-/// exec/PTY wrapper published a numeric identity (empty before that).
-///
-/// A published pin is the stop identity: later pidfile bytes — missing,
-/// `cancelled`, garbage, or a different number — cannot retarget the kill
-/// or fake a successful pre-start tombstone. Without a pin, only a
-/// noclobber create of `cancelled` counts as pre-start; an already-present
-/// `cancelled` is guest-writable and must fail closed.
 pub(crate) const SANDBOX_KILL_WRAPPER: &str = r#"pidfile=$1
-pinned=$2
-pid=
-if [ -n "$pinned" ]; then
-  case "$pinned" in
-    *[!0-9]*) exit 1 ;;
-  esac
-  [ "$pinned" -gt 0 ] || exit 1
-  pid=$pinned
-else
-  attempts=0
-  while :; do
-    if pid=$(cat "$pidfile" 2>/dev/null); then
-      case "$pid" in
-        cancelled) exit 1 ;;
-        starting|'') ;;
-        *[!0-9]*) exit 1 ;;
-        *) [ "$pid" -gt 0 ] || exit 1; break ;;
-      esac
-    elif (set -C; printf '%s' cancelled > "$pidfile") 2>/dev/null; then
-      exit 0
-    fi
-    attempts=$((attempts + 1))
-    [ "$attempts" -ge 20 ] && exit 1
-    sleep 0.05
-  done
-fi
-if [ -n "$pid" ]; then
-  descendants() {
-    parent=$1
-    for stat in /proc/[0-9]*/stat; do
-      [ -r "$stat" ] || continue
-      child=${stat#/proc/}
-      child=${child%/stat}
-      rest=$(sed 's/^.*) //' "$stat" 2>/dev/null) || continue
-      set -- $rest
-      [ "${2:-}" = "$parent" ] || continue
-      printf '%s\n' "$child"
-      descendants "$child"
-    done
-  }
-  pids=$(descendants "$pid")
-  for child in $pids; do
-    kill -KILL "$child" 2>/dev/null || true
-  done
-  kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
-  is_live() {
-    target=$1
-    [ -r "/proc/$target/stat" ] || return 1
+pid=$(sed -n 's/[[:space:]].*$//p' "$pidfile" 2>/dev/null) || exit 0
+expected_identity=$(sed -n 's/^[^[:space:]]*[[:space:]]*//p' "$pidfile" 2>/dev/null) || exit 0
+process_identity() {
+  target=$1
+  if [ -r "/proc/$target/stat" ]; then
     rest=$(sed 's/^.*) //' "/proc/$target/stat" 2>/dev/null) || return 1
     set -- $rest
-    case "${1:-}" in
-      Z*) return 1 ;;
-    esac
+    [ -n "${20:-}" ] || return 1
+    printf 'proc:%s' "${20}"
+    return 0
+  fi
+  started=$(ps -ww -o lstart= -p "$target" 2>/dev/null) || return 1
+  started=$(printf '%s' "$started" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  [ -n "$started" ] || return 1
+  command_line=$(ps -ww -o command= -p "$target" 2>/dev/null) || return 1
+  command_signature=$(printf '%s' "$command_line" | cksum 2>/dev/null) || return 1
+  command_signature=${command_signature%% *}
+  [ -n "$command_signature" ] || return 1
+  printf 'ps:%s:%s' "$started" "$command_signature"
+}
+process_is_live() {
+  if [ -r /proc/1/stat ] || [ -r /proc/self/stat ]; then
+    [ -r "/proc/$1/stat" ] || return 1
+  fi
+  # This predicate deliberately means "not proven gone". Portable ps failure
+  # is inspection uncertainty, not evidence that the recorded PID disappeared.
+  state=$(ps -ww -o stat= -p "$1" 2>/dev/null) || return 0
+  state=$(printf '%s' "$state" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  [ -n "$state" ] || return 0
+  case "$state" in
+    Z*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+identity_state() {
+  [ -n "$pid" ] && [ -n "$expected_identity" ] || {
+    printf 'uncertain'
     return 0
   }
-  group_has_live() {
-    pgid=$1
-    for stat in /proc/[0-9]*/stat; do
-      [ -r "$stat" ] || continue
-      rest=$(sed 's/^.*) //' "$stat" 2>/dev/null) || continue
-      set -- $rest
-      [ "${3:-}" = "$pgid" ] || continue
-      case "${1:-}" in
-        Z*) continue ;;
-      esac
-      return 0
-    done
-    return 1
+  actual_identity=$(process_identity "$pid") || {
+    if process_is_live "$pid"; then
+      printf 'uncertain'
+    else
+      printf 'gone'
+    fi
+    return 0
   }
-  attempts=0
-  while :; do
-    alive=0
-    group_has_live "$pid" && alive=1
-    for target in $pid $pids; do
-      is_live "$target" && alive=1
-    done
-    [ "$alive" -eq 0 ] && break
-    attempts=$((attempts + 1))
-    [ "$attempts" -ge 20 ] && exit 1
-    sleep 0.05
+  if [ "$actual_identity" = "$expected_identity" ]; then
+    printf 'match'
+  else
+    printf 'mismatch'
+  fi
+}
+root_identity_state=$(identity_state)
+if [ "$root_identity_state" = match ]; then
+  process_table=
+  if [ ! -r "/proc/$pid/stat" ]; then
+    process_table=$(ps -eo pid=,ppid= 2>/dev/null || ps -ax -o pid= -o ppid= 2>/dev/null) || exit 1
+  fi
+  descendants() {
+    parent=$1
+    if [ -r "/proc/$pid/stat" ]; then
+      for stat in /proc/[0-9]*/stat; do
+        [ -r "$stat" ] || continue
+        child=${stat#/proc/}
+        child=${child%/stat}
+        rest=$(sed 's/^.*) //' "$stat" 2>/dev/null) || continue
+        set -- $rest
+        [ "${2:-}" = "$parent" ] || continue
+        descendants "$child"
+        printf '%s\n' "$child"
+      done
+    else
+      for child in $(printf '%s\n' "$process_table" | awk -v parent="$parent" '$2 == parent { print $1 }'); do
+        descendants "$child"
+        printf '%s\n' "$child"
+      done
+    fi
+  }
+  pids=$(descendants "$pid")
+  uncertain=0
+  verified_descendants=
+  for child in $pids; do
+    child_identity=$(process_identity "$child") || {
+      process_is_live "$child" && uncertain=1
+      continue
+    }
+    verified_descendants="${verified_descendants}${child}|${child_identity}
+"
   done
+  # The root may exit after descendant discovery. The captured child identity
+  # remains sufficient authority to clean that exact process; do not discard
+  # it merely because the supervisor disappeared before revalidation.
+  while IFS='|' read -r child child_expected_identity; do
+    [ -n "$child" ] || continue
+    child_actual_identity=$(process_identity "$child") || {
+      process_is_live "$child" && uncertain=1
+      continue
+    }
+    if [ "$child_actual_identity" != "$child_expected_identity" ]; then
+      uncertain=1
+      continue
+    fi
+    kill -KILL "$child" 2>/dev/null || {
+      process_is_live "$child" && uncertain=1
+    }
+  done <<NAC_DESCENDANTS
+$verified_descendants
+NAC_DESCENDANTS
+  case "$(identity_state)" in
+    match)
+      kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || {
+        process_is_live "$pid" && uncertain=1
+      }
+      ;;
+    uncertain) uncertain=1 ;;
+    gone|mismatch) ;;
+  esac
+  [ "$uncertain" -eq 0 ] || exit 1
+elif [ "$root_identity_state" = uncertain ]; then
+  # Inspection failure is not proof that the recorded process disappeared or
+  # that its PID was reused. Preserve the pidfile as retry authority and report
+  # incomplete cleanup to the caller.
+  exit 1
 fi
 rm -f "$pidfile""#;
 
 pub(crate) struct PodmanSession {
     spec: SandboxSpec,
     session_key: String,
-    owner: bool,
+    /// Whether this attachment may create the stable container when it is
+    /// absent. Ordinary worker attachments inherit the parent-owned container
+    /// and must not recreate it; durable-session resume is an explicit
+    /// lifecycle owner even though it never receives destructive Drop
+    /// authority.
+    create_if_missing: bool,
+    cleanup_on_drop: AtomicBool,
     container_name: String,
     /// Key setup activity is reported under: a client-supplied launch id when
     /// one was sent, else the session key. Keyed per launch so concurrent
     /// launches do not clobber each other's reported phase.
     activity_key: String,
+    /// Present only while a fresh durable launch has created its container but
+    /// has not yet transferred ownership to the committed session row.
+    creation_store_path: Option<PathBuf>,
+    creation_record: Mutex<Option<CreationRecordAuthority>>,
+}
+
+struct CreationRecordAuthority {
+    cidfile: PathBuf,
+    lock_file: File,
+}
+
+impl CreationRecordAuthority {
+    fn remove(self) {
+        let cidfile = self.cidfile.clone();
+        let _ = FileExt::unlock(&self.lock_file);
+        drop(self);
+        remove_creation_record(&cidfile);
+    }
+}
+
+/// Owns an in-flight `podman run` until it is known to have settled. If the
+/// caller is cancelled while awaiting creation, cleanup is ordered after the
+/// exact detached child finishes so `rm` cannot race ahead of container
+/// registration.
+struct PendingContainerCreation {
+    task: Option<tokio::task::JoinHandle<std::io::Result<std::process::Output>>>,
+    record: Option<CreationRecordAuthority>,
+    settled: bool,
+}
+
+impl PendingContainerCreation {
+    fn disarm(&mut self) {
+        self.task = None;
+        if let Some(record) = self.record.take() {
+            record.remove();
+        }
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "only successful creation transfers the still-owned cleanup record"
+    )]
+    fn transfer_record(&mut self) -> CreationRecordAuthority {
+        self.task = None;
+        self.record
+            .take()
+            .expect("successful creation retains its ownership record")
+    }
+}
+
+impl Drop for PendingContainerCreation {
+    fn drop(&mut self) {
+        let Some(task) = self.task.take() else {
+            return;
+        };
+        let Some(record) = self.record.take() else {
+            return;
+        };
+        let settled = self.settled;
+        tokio::spawn(async move {
+            if settled {
+                drop(task);
+            } else {
+                let _ = task.await;
+            }
+            let cidfile = record.cidfile.clone();
+            if let Err(error) = destroy_created_container_record(record).await {
+                eprintln!(
+                    "nac: failed to roll back cancelled sandbox creation recorded in '{}': {error:#}",
+                    cidfile.display()
+                );
+            }
+        });
+    }
+}
+
+/// Removes only the container identity emitted by this exact `podman run`.
+/// A failed duplicate-name creator has no cidfile and therefore cannot delete
+/// the peer container that won the shared deterministic name.
+#[cfg(test)]
+async fn destroy_created_container(cidfile: &Path) -> Result<()> {
+    destroy_created_container_only(cidfile).await?;
+    remove_creation_record(cidfile);
+    Ok(())
+}
+
+async fn destroy_created_container_record(record: CreationRecordAuthority) -> Result<()> {
+    destroy_created_container_only(&record.cidfile).await?;
+    record.remove();
+    Ok(())
+}
+
+async fn destroy_created_container_only(cidfile: &Path) -> Result<()> {
+    let container_id = match tokio::fs::read_to_string(cidfile).await {
+        Ok(container_id) => container_id.trim().to_string(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(());
+        }
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to read Podman creation cidfile '{}'",
+                    cidfile.display()
+                )
+            });
+        }
+    };
+    if container_id.len() != 64 || !container_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!(
+            "Podman creation cidfile '{}' did not contain a full container ID; cleanup authority was preserved",
+            cidfile.display()
+        );
+    }
+
+    let token_path = creation_token_path(cidfile);
+    let ownership_token = tokio::fs::read_to_string(&token_path)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to read Podman creation ownership token '{}'; cleanup authority was preserved",
+                token_path.display()
+            )
+        })?;
+    let ownership_token = ownership_token.trim();
+    if ownership_token.is_empty() {
+        bail!(
+            "Podman creation ownership token '{}' was empty; cleanup authority was preserved",
+            token_path.display()
+        );
+    }
+
+    let inspection = Command::new(podman_program())
+        .args([
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            "{{ index .Config.Labels \"io.nac.creation-token\" }}",
+            "--",
+            &container_id,
+        ])
+        .output()
+        .await
+        .context("failed to verify Podman sandbox creation ownership")?;
+    if !inspection.status.success() {
+        bail!(
+            "failed to verify newly created sandbox container '{}': {}; cleanup authority was preserved in '{}'",
+            container_id,
+            first_stderr_line(&inspection.stderr),
+            cidfile.display()
+        );
+    }
+    if String::from_utf8_lossy(&inspection.stdout).trim() != ownership_token {
+        bail!(
+            "Podman creation cidfile '{}' did not identify the container owned by this launch; refusing removal",
+            cidfile.display()
+        );
+    }
+
+    let output = Command::new(podman_program())
+        .args(["rm", "--ignore", "-f", "--", &container_id])
+        .output()
+        .await
+        .context("failed to execute Podman sandbox creation rollback")?;
+    if !output.status.success() {
+        bail!(
+            "failed to remove newly created sandbox container '{}': {}; cleanup authority was preserved in '{}'",
+            container_id,
+            first_stderr_line(&output.stderr),
+            cidfile.display()
+        );
+    }
+    Ok(())
+}
+
+fn remove_creation_record(cidfile: &Path) {
+    let _ = std::fs::remove_file(cidfile);
+    let _ = std::fs::remove_file(creation_token_path(cidfile));
+    let _ = std::fs::remove_file(creation_session_path(cidfile));
+    let _ = std::fs::remove_file(creation_store_path(cidfile));
+    let _ = std::fs::remove_file(creation_lock_path(cidfile));
+    if let Some(directory) = cidfile.parent() {
+        let _ = std::fs::remove_dir(directory);
+    }
+}
+
+fn creation_token_path(cidfile: &Path) -> std::path::PathBuf {
+    cidfile.with_file_name("ownership.token")
+}
+
+fn creation_session_path(cidfile: &Path) -> PathBuf {
+    cidfile.with_file_name("session.key")
+}
+
+fn creation_store_path(cidfile: &Path) -> PathBuf {
+    cidfile.with_file_name("store.path")
+}
+
+fn creation_lock_path(cidfile: &Path) -> PathBuf {
+    cidfile.with_file_name("ownership.lock")
+}
+
+fn write_private_record(path: &Path, contents: &[u8]) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to create private record '{}'", path.display()))?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+fn create_creation_record(
+    session_key: &str,
+    store_path: Option<&Path>,
+    ownership_token: &str,
+) -> Result<CreationRecordAuthority> {
+    let directory = std::env::temp_dir().join(format!(
+        "nac-podman-create-{}-{}",
+        sanitize_name(session_key),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir(&directory).with_context(|| {
+        format!(
+            "failed to create private Podman creation record directory '{}'",
+            directory.display()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+    }
+
+    let cidfile = directory.join("container.cid");
+    let result = (|| -> Result<CreationRecordAuthority> {
+        write_private_record(
+            &creation_token_path(&cidfile),
+            format!("{ownership_token}\n").as_bytes(),
+        )?;
+        write_private_record(
+            &creation_session_path(&cidfile),
+            format!("{session_key}\n").as_bytes(),
+        )?;
+        if let Some(store_path) = store_path {
+            let canonical_store = store_path.canonicalize().with_context(|| {
+                format!(
+                    "failed to canonicalize durable store '{}' for Podman creation ownership",
+                    store_path.display()
+                )
+            })?;
+            write_private_record(
+                &creation_store_path(&cidfile),
+                &serde_json::to_vec(&canonical_store)?,
+            )?;
+        }
+        let lock_path = creation_lock_path(&cidfile);
+        write_private_record(&lock_path, b"")?;
+        let lock_file = OpenOptions::new().read(true).write(true).open(&lock_path)?;
+        FileExt::lock_exclusive(&lock_file)?;
+        #[cfg(unix)]
+        File::open(&directory)?.sync_all()?;
+        Ok(CreationRecordAuthority { cidfile, lock_file })
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+    result
+}
+
+/// On server startup, settle private creation records that outlived their
+/// creating process. The held lock distinguishes an active launch from an
+/// abandoned one. A committed row wins ownership; otherwise removal remains
+/// bound to the full container ID and per-launch Podman label.
+pub(crate) async fn reconcile_creation_records(store_path: &Path) -> Result<()> {
+    let canonical_store = store_path.canonicalize().with_context(|| {
+        format!(
+            "failed to canonicalize durable store '{}' before reconciling Podman creation ownership",
+            store_path.display()
+        )
+    })?;
+    let entries = match std::fs::read_dir(std::env::temp_dir()) {
+        Ok(entries) => entries,
+        Err(error) => return Err(error).context("failed to scan Podman creation records"),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                eprintln!("nac: failed to inspect a Podman creation record: {error}");
+                continue;
+            }
+        };
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with("nac-podman-create-") {
+            continue;
+        }
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                eprintln!(
+                    "nac: failed to inspect Podman creation record '{}': {error}",
+                    entry.path().display()
+                );
+                continue;
+            }
+        };
+        if !file_type.is_dir() || file_type.is_symlink() {
+            continue;
+        }
+        let cidfile = entry.path().join("container.cid");
+        let recorded_store: PathBuf = match std::fs::read(creation_store_path(&cidfile))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        {
+            Some(recorded_store) => recorded_store,
+            None => continue,
+        };
+        if recorded_store != canonical_store {
+            continue;
+        }
+        let lock_file = match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(creation_lock_path(&cidfile))
+        {
+            Ok(lock_file) => lock_file,
+            Err(error) => {
+                eprintln!(
+                    "nac: Podman creation record '{}' has no usable ownership lock: {error}; cleanup authority was preserved",
+                    cidfile.display()
+                );
+                continue;
+            }
+        };
+        match FileExt::try_lock_exclusive(&lock_file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => continue,
+            Err(error) => {
+                eprintln!(
+                    "nac: failed to claim abandoned Podman creation record '{}': {error}",
+                    cidfile.display()
+                );
+                continue;
+            }
+        }
+        let record = CreationRecordAuthority { cidfile, lock_file };
+        // The creator may have died while its detached `podman run` child was
+        // still registering the container. An absent cidfile is therefore
+        // uncertainty, not proof that no container can appear after this
+        // scan. Keep the record for a later reconciliation pass.
+        if !record.cidfile.exists() {
+            eprintln!(
+                "nac: abandoned Podman creation record '{}' has no container ID yet; cleanup authority was preserved for retry",
+                record.cidfile.display()
+            );
+            continue;
+        }
+        let session_key = match std::fs::read_to_string(creation_session_path(&record.cidfile)) {
+            Ok(session_key) => session_key.trim().to_string(),
+            Err(error) => {
+                eprintln!(
+                    "nac: Podman creation record '{}' has no usable session identity: {error}; cleanup authority was preserved",
+                    record.cidfile.display()
+                );
+                continue;
+            }
+        };
+        if uuid::Uuid::parse_str(&session_key).is_err() {
+            eprintln!(
+                "nac: Podman creation record '{}' has an invalid session identity; cleanup authority was preserved",
+                record.cidfile.display()
+            );
+            continue;
+        }
+        match crate::sessions::session_exists(store_path, &session_key) {
+            Ok(true) => record.remove(),
+            Ok(false) => {
+                if let Err(error) = destroy_created_container_record(record).await {
+                    eprintln!(
+                        "nac: failed to reconcile abandoned Podman creation: {error:#}"
+                    );
+                }
+            }
+            Err(error) => eprintln!(
+                "nac: failed to check durable ownership for Podman creation record '{}': {error:#}; cleanup authority was preserved",
+                record.cidfile.display()
+            ),
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn destroy_owned_container(session_key: &str) -> Result<()> {
+    let container_name = format!("nac-{}", sanitize_name(session_key));
+    let output = Command::new("podman")
+        .args(["rm", "--ignore", "-f", &container_name])
+        .output()
+        .await
+        .context("failed to execute Podman sandbox cleanup")?;
+    if !output.status.success() {
+        bail!(
+            "failed to remove sandbox container '{}': {}",
+            container_name,
+            first_stderr_line(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 impl PodmanSession {
@@ -259,14 +731,62 @@ impl PodmanSession {
         Self {
             spec,
             session_key,
-            owner,
+            create_if_missing: owner,
+            cleanup_on_drop: AtomicBool::new(owner),
             container_name,
             activity_key,
+            creation_store_path: None,
+            creation_record: Mutex::new(None),
         }
+    }
+
+    pub(crate) fn new_for_durable_launch(
+        spec: SandboxSpec,
+        session_key: String,
+        owner: bool,
+        activity_key: String,
+        store_path: PathBuf,
+    ) -> Self {
+        let mut session = Self::new(spec, session_key, owner, activity_key);
+        session.creation_store_path = Some(store_path);
+        session
+    }
+
+    pub(crate) fn new_for_durable_resume(
+        spec: SandboxSpec,
+        session_key: String,
+        activity_key: String,
+    ) -> Self {
+        let mut session = Self::new(spec, session_key, false, activity_key);
+        session.create_if_missing = true;
+        session
     }
 
     pub(crate) fn spec(&self) -> &SandboxSpec {
         &self.spec
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "poisoning the creation-record lock invalidates container cleanup ownership"
+    )]
+    pub(crate) fn retain_for_durable_session(&self) {
+        self.cleanup_on_drop.store(false, Ordering::Release);
+        let creation_record = self
+            .creation_record
+            .lock()
+            .expect("Podman creation record lock poisoned")
+            .take();
+        if let Some(record) = creation_record {
+            record.remove();
+        }
+    }
+
+    /// Checked launch rollback owns cleanup from this point, but the durable
+    /// creation record remains until that removal succeeds so process loss can
+    /// still be reconciled on a later startup.
+    pub(crate) fn disable_drop_cleanup(&self) {
+        self.cleanup_on_drop.store(false, Ordering::Release);
     }
 
     pub(crate) async fn ensure_ready(&self) -> Result<()> {
@@ -283,7 +803,7 @@ impl PodmanSession {
             Err(error) => return Err(explain_runtime_failure(error).await),
         };
         if !exists {
-            if !self.owner {
+            if !self.create_if_missing {
                 bail!(
                     "sandbox session '{}' is not available; start the parent nac process first",
                     self.session_key
@@ -307,7 +827,7 @@ impl PodmanSession {
     /// what lets the slow phase be reported and streamed instead of looking
     /// frozen.
     async fn ensure_image(&self) -> Result<()> {
-        let exists = Command::new("podman")
+        let exists = Command::new(podman_program())
             .arg("image")
             .arg("exists")
             .arg(&self.spec.image)
@@ -411,6 +931,9 @@ impl PodmanSession {
         stdin: Option<&[u8]>,
     ) -> Result<std::process::Output> {
         let mut command = Command::new("podman");
+        for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
+            command.env_remove(name);
+        }
         command.args(self.exec_args(program, args, true, false, None, &[]));
 
         if stdin.is_some() {
@@ -457,6 +980,7 @@ impl PodmanSession {
 
     pub(crate) fn terminal_pty_command(
         &self,
+        cmd_str: &str,
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, String) {
@@ -465,7 +989,9 @@ impl PodmanSession {
             "-lc".to_string(),
             SANDBOX_PTY_WRAPPER.to_string(),
             "nac-pty".to_string(),
+            cmd_str.to_string(),
             pidfile.clone(),
+            "pty".to_string(),
         ];
         let mut cmd = PtyCommandBuilder::new("podman");
         cmd.args(self.exec_args("bash", &pty_args, true, true, cwd, envs));
@@ -494,35 +1020,7 @@ impl PodmanSession {
         (command, pidfile)
     }
 
-    pub(crate) async fn read_published_pid(&self, pidfile: &str) -> Result<Option<String>> {
-        let mut command = Command::new("podman");
-        command
-            .arg("exec")
-            .arg(&self.container_name)
-            .arg("cat")
-            .arg("--")
-            .arg(pidfile)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
-        let output = match timeout(SANDBOX_PIDFILE_READ_TIMEOUT, command.output()).await {
-            Ok(Ok(output)) => output,
-            _ => return Ok(None),
-        };
-        if !output.status.success() {
-            return Ok(None);
-        }
-        Ok(parse_published_pid(&String::from_utf8_lossy(
-            &output.stdout,
-        )))
-    }
-
-    pub(crate) async fn terminal_pipe_kill(
-        &self,
-        pidfile: &str,
-        published_pid: Option<&str>,
-    ) -> Result<()> {
+    pub(crate) async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
         let mut command = Command::new("podman");
         command
             .arg("exec")
@@ -532,19 +1030,15 @@ impl PodmanSession {
             .arg(SANDBOX_KILL_WRAPPER)
             .arg("nac-kill")
             .arg(pidfile)
-            .arg(published_pid.unwrap_or(""))
-            .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
+            .stderr(Stdio::null());
 
-        let status = timeout(SANDBOX_KILL_TIMEOUT, command.status())
-            .await
-            .map_err(|_| anyhow!("podman command cleanup timed out"))??;
-        if !status.success() {
-            bail!("podman command cleanup exited with {status}");
+        match timeout(Duration::from_secs(2), command.status()).await {
+            Ok(Ok(status)) if status.success() => Ok(()),
+            Ok(Ok(status)) => bail!("Podman command cleanup exited with status {status}"),
+            Ok(Err(error)) => Err(error).context("failed to start Podman command cleanup"),
+            Err(_) => bail!("Podman command cleanup timed out"),
         }
-        Ok(())
     }
 
     fn exec_args(
@@ -585,7 +1079,7 @@ impl PodmanSession {
     }
 
     async fn container_exists(&self) -> Result<bool> {
-        let output = Command::new("podman")
+        let output = Command::new(podman_program())
             .arg("container")
             .arg("exists")
             .arg(&self.container_name)
@@ -612,12 +1106,41 @@ impl PodmanSession {
         Ok(String::from_utf8_lossy(&output.stdout).trim() == "true")
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the creation task is installed in the pending guard immediately before awaiting it"
+    )]
     async fn create_container(&self) -> Result<()> {
-        let mut command = Command::new("podman");
-        command.args(self.create_container_args()?);
-        let output = command
-            .output()
-            .await
+        let ownership_token = uuid::Uuid::new_v4().to_string();
+        let record = create_creation_record(
+            &self.session_key,
+            self.creation_store_path.as_deref(),
+            &ownership_token,
+        )?;
+        let cidfile = record.cidfile.clone();
+        let args = match self
+            .create_container_args_with_cidfile(Some((&cidfile, ownership_token.as_str())))
+        {
+            Ok(args) => args,
+            Err(error) => {
+                record.remove();
+                return Err(error);
+            }
+        };
+        let task = tokio::spawn(async move {
+            let mut command = Command::new(podman_program());
+            command.args(args);
+            command.output().await
+        });
+        let mut pending = PendingContainerCreation {
+            task: Some(task),
+            record: Some(record),
+            settled: false,
+        };
+        let result = pending.task.as_mut().expect("creation task is armed").await;
+        pending.settled = true;
+        let output = result
+            .map_err(|error| anyhow!("Podman sandbox creation task failed: {error}"))?
             .with_context(|| "failed to execute 'podman run'")?;
         if !output.status.success() {
             return Err(explain_runtime_failure(anyhow!(
@@ -626,6 +1149,20 @@ impl PodmanSession {
                 String::from_utf8_lossy(&output.stderr).trim()
             ))
             .await);
+        }
+        if self.creation_store_path.is_some() {
+            let record = pending.transfer_record();
+            let replaced = self
+                .creation_record
+                .lock()
+                .expect("Podman creation record lock poisoned")
+                .replace(record);
+            debug_assert!(
+                replaced.is_none(),
+                "a sandbox session may own only one pending Podman creation record"
+            );
+        } else {
+            pending.disarm();
         }
         Ok(())
     }
@@ -648,7 +1185,15 @@ impl PodmanSession {
         Ok(())
     }
 
+    #[cfg(test)]
     fn create_container_args(&self) -> Result<Vec<OsString>> {
+        self.create_container_args_with_cidfile(None)
+    }
+
+    fn create_container_args_with_cidfile(
+        &self,
+        creation_record: Option<(&Path, &str)>,
+    ) -> Result<Vec<OsString>> {
         let mut args = vec![
             OsString::from("run"),
             OsString::from("-d"),
@@ -660,6 +1205,15 @@ impl PodmanSession {
             OsString::from("--memory"),
             OsString::from(format!("{}m", self.spec.memory_mib)),
         ];
+
+        if let Some((cidfile, ownership_token)) = creation_record {
+            args.push(OsString::from("--cidfile"));
+            args.push(cidfile.as_os_str().to_os_string());
+            args.push(OsString::from("--label"));
+            args.push(OsString::from(format!(
+                "io.nac.creation-token={ownership_token}"
+            )));
+        }
 
         if should_keep_id_userns() && self.spec.mounts.iter().any(|mount| !mount.read_only) {
             args.push(OsString::from("--userns"));
@@ -699,32 +1253,71 @@ impl PodmanSession {
     }
 
     /// Explicitly destroy the sandbox container, regardless of remaining
-    /// `Arc` references.  Best-effort and idempotent: `podman rm -f` already
-    /// handles non-existent containers gracefully.
+    /// `Arc` references. `--ignore` makes absence idempotent while every real
+    /// runtime failure remains visible to the lifecycle caller.
+    #[expect(
+        clippy::expect_used,
+        reason = "poisoning the creation-record lock invalidates container cleanup ownership"
+    )]
     pub(crate) async fn destroy(&self) -> Result<()> {
-        if !self.owner {
-            return Ok(());
+        destroy_owned_container(&self.session_key).await?;
+        let creation_record = self
+            .creation_record
+            .lock()
+            .expect("Podman creation record lock poisoned")
+            .take();
+        if let Some(record) = creation_record {
+            record.remove();
         }
-        let mut cmd = Command::new("podman");
-        cmd.args(["rm", "-f", &self.container_name]);
-        let _ = cmd.output().await; // best-effort, ignore errors
         Ok(())
     }
 }
 
 impl Drop for PodmanSession {
+    #[expect(
+        clippy::expect_used,
+        reason = "poisoning the mutable creation record invalidates rollback ownership"
+    )]
     fn drop(&mut self) {
-        if !self.owner {
+        if !self.cleanup_on_drop.load(Ordering::Acquire) {
             return;
         }
 
-        let _ = StdCommand::new("podman")
+        let removed = match StdCommand::new("podman")
             .arg("rm")
+            .arg("--ignore")
             .arg("-f")
             .arg(&self.container_name)
             .stdout(StdStdio::null())
             .stderr(StdStdio::null())
-            .spawn();
+            .status()
+        {
+            Ok(status) if status.success() => true,
+            Ok(status) => {
+                eprintln!(
+                    "nac: failed to roll back fresh sandbox container '{}' (status {status})",
+                    self.container_name
+                );
+                false
+            }
+            Err(error) => {
+                eprintln!(
+                    "nac: failed to execute rollback for fresh sandbox container '{}': {error}",
+                    self.container_name
+                );
+                false
+            }
+        };
+        if removed {
+            if let Some(record) = self
+                .creation_record
+                .get_mut()
+                .expect("Podman creation record lock poisoned")
+                .take()
+            {
+                record.remove();
+            }
+        }
     }
 }
 
@@ -777,27 +1370,14 @@ impl Drop for ActivityGuard {
 }
 
 pub(crate) fn make_sandbox_pidfile() -> String {
-    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-    format!("/tmp/nac-exec-{}-{id}.pid", std::process::id())
-}
-
-pub(crate) fn parse_published_pid(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() || !trimmed.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    if trimmed.parse::<u64>().ok()? == 0 {
-        return None;
-    }
-    Some(trimmed.to_string())
+    format!("/tmp/nac-exec-{}.pid", uuid::Uuid::new_v4().simple())
 }
 
 fn bind_mount_arg(mount: &MountSpec) -> Result<OsString> {
     for (kind, path) in [("host", &mount.host), ("guest", &mount.guest)] {
         if path.as_os_str().as_encoded_bytes().contains(&b',') {
             bail!(
-                "invalid podman bind-mount {kind} path '{}': contains ','; \
+                "podman bind-mount {kind} path '{}' contains ','; \
                  move the path before launching the sandbox",
                 path.display()
             );
@@ -850,378 +1430,5 @@ fn should_enable_gpu_access_options() -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sandbox::DEFAULT_SANDBOX_WORKDIR;
-    use std::path::PathBuf;
-
-    fn sample_session() -> PodmanSession {
-        PodmanSession::new(
-            SandboxSpec {
-                mounts: vec![MountSpec {
-                    host: PathBuf::from("/tmp/project"),
-                    guest: PathBuf::from(DEFAULT_SANDBOX_WORKDIR),
-                    read_only: false,
-                }],
-                shm_size: Some("0".to_string()),
-                ..Default::default()
-            },
-            "abc123".to_string(),
-            false,
-            "abc123".to_string(),
-        )
-    }
-
-    #[test]
-    fn image_exists_exit_codes_are_classified() {
-        assert!(matches!(
-            classify_image_exists(Some(0), b""),
-            ImageCheck::Present
-        ));
-        assert!(matches!(
-            classify_image_exists(Some(1), b""),
-            ImageCheck::Missing
-        ));
-        // Engine-down style failure (podman exits 125) surfaces its stderr.
-        match classify_image_exists(Some(125), b"Error: unable to connect to Podman socket\n") {
-            ImageCheck::Failed(detail) => {
-                assert!(detail.contains("unable to connect to Podman socket"));
-            }
-            _ => panic!("exit 125 must be a check failure, not a missing image"),
-        }
-        // Signal termination (no exit code) is also a failure, and empty
-        // stderr still yields a usable message.
-        match classify_image_exists(None, b"") {
-            ImageCheck::Failed(detail) => assert_eq!(detail, "no details reported"),
-            _ => panic!("signal termination must be a check failure"),
-        }
-    }
-
-    #[test]
-    fn pull_error_detail_prefers_the_error_line_over_progress() {
-        // Pull progress precedes the real failure on stderr; the first line
-        // is a status, not the reason.
-        let stderr = b"Trying to pull registry.example.com/img:latest...\nCopying blob sha256:abc\nError: initializing source: unauthorized\n";
-        assert_eq!(
-            pull_error_detail(stderr),
-            "Error: initializing source: unauthorized"
-        );
-        // Without an `Error:` line, the last non-empty line is the reason.
-        let stderr = b"Trying to pull registry.example.com/img:latest...\nmanifest unknown\n";
-        assert_eq!(pull_error_detail(stderr), "manifest unknown");
-        // Empty stderr still yields a usable message.
-        assert_eq!(pull_error_detail(b""), "no details reported");
-        assert_eq!(pull_error_detail(b"\n  \n"), "no details reported");
-    }
-
-    #[test]
-    fn worker_cli_args_are_explicit() {
-        let args = sample_session().worker_cli_args();
-        let rendered: Vec<String> = args
-            .into_iter()
-            .map(|value| value.to_string_lossy().to_string())
-            .collect();
-        assert!(rendered.contains(&"--sandbox".to_string()));
-        assert!(rendered.contains(&"--no-mount-cwd".to_string()));
-        assert!(rendered.contains(&"--sandbox-session-key".to_string()));
-        assert!(rendered.contains(&"--sandbox-mount".to_string()));
-        assert!(rendered.contains(&"/tmp/project".to_string()));
-        assert!(rendered.contains(&"/workspace".to_string()));
-        assert!(!rendered.contains(&"/tmp/project:/workspace".to_string()));
-        assert!(rendered.contains(&"--sandbox-shm-size".to_string()));
-        assert!(rendered.contains(&"0".to_string()));
-    }
-
-    #[test]
-    fn create_container_args_include_mounts_and_command() {
-        let args = sample_session().create_container_args().unwrap();
-        let rendered: Vec<String> = args
-            .into_iter()
-            .map(|value| value.to_string_lossy().to_string())
-            .collect();
-        assert!(rendered.starts_with(&["run".to_string(), "-d".to_string(), "--rm".to_string(),]));
-        assert!(rendered.contains(&"--mount".to_string()));
-        assert!(rendered.contains(&"type=bind,src=/tmp/project,dst=/workspace".to_string()));
-        assert!(rendered.contains(&"--shm-size".to_string()));
-        assert!(rendered.contains(&"0".to_string()));
-        assert_eq!(
-            rendered.contains(&"--userns".to_string()),
-            should_keep_id_userns()
-        );
-        assert_eq!(
-            rendered.contains(&"keep-id".to_string()),
-            should_keep_id_userns()
-        );
-        assert!(rendered
-            .iter()
-            .any(|value| value.contains("sleep infinity")));
-    }
-
-    #[test]
-    fn create_container_args_preserve_colons_in_typed_mount_paths() {
-        let mut session = sample_session();
-        session.spec.mounts[0].host = PathBuf::from("/tmp/nac:home/worktree");
-        let rendered: Vec<String> = session
-            .create_container_args()
-            .unwrap()
-            .into_iter()
-            .map(|value| value.to_string_lossy().to_string())
-            .collect();
-        assert!(
-            rendered.contains(&"type=bind,src=/tmp/nac:home/worktree,dst=/workspace".to_string())
-        );
-        let worker_args = session.worker_cli_args();
-        assert!(worker_args.windows(3).any(|args| {
-            args == [
-                OsString::from("--sandbox-mount"),
-                OsString::from("/tmp/nac:home/worktree"),
-                OsString::from("/workspace"),
-            ]
-        }));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn worker_cli_args_preserve_non_utf_mount_paths() {
-        use std::os::unix::ffi::OsStringExt;
-
-        let host = PathBuf::from(OsString::from_vec(b"/tmp/nac-\xff-worktree".to_vec()));
-        let mut session = sample_session();
-        session.spec.mounts[0].host = host.clone();
-
-        let args = session.worker_cli_args();
-        assert!(args.windows(3).any(|args| {
-            args[0] == OsString::from("--sandbox-mount")
-                && args[1] == host.as_os_str()
-                && args[2] == OsString::from("/workspace")
-        }));
-    }
-
-    #[test]
-    fn create_container_args_skip_user_without_rw_mounts() {
-        let session = PodmanSession::new(
-            SandboxSpec {
-                shm_size: Some("0".to_string()),
-                ..Default::default()
-            },
-            "empty".to_string(),
-            false,
-            "empty".to_string(),
-        );
-        let rendered: Vec<String> = session
-            .create_container_args()
-            .unwrap()
-            .into_iter()
-            .map(|value| value.to_string_lossy().to_string())
-            .collect();
-        assert!(!rendered.contains(&"--userns".to_string()));
-    }
-
-    #[test]
-    fn create_container_args_include_gpu_devices() {
-        let session = PodmanSession::new(
-            SandboxSpec {
-                gpu_devices: vec![
-                    "nvidia.com/gpu=all".to_string(),
-                    "nvidia.com/gpu=mig1:0".to_string(),
-                ],
-                shm_size: Some("8g".to_string()),
-                ..Default::default()
-            },
-            "gpu".to_string(),
-            false,
-            "gpu".to_string(),
-        );
-        let rendered: Vec<String> = session
-            .create_container_args()
-            .unwrap()
-            .into_iter()
-            .map(|value| value.to_string_lossy().to_string())
-            .collect();
-        assert!(rendered.contains(&"--device".to_string()));
-        assert!(rendered.contains(&"nvidia.com/gpu=all".to_string()));
-        assert!(rendered.contains(&"nvidia.com/gpu=mig1:0".to_string()));
-        assert!(rendered.contains(&"--shm-size".to_string()));
-        assert!(rendered.contains(&"8g".to_string()));
-        assert_eq!(
-            rendered.contains(&"label=disable".to_string()),
-            should_enable_gpu_access_options()
-        );
-        assert_eq!(
-            rendered.contains(&"keep-groups".to_string()),
-            should_enable_gpu_access_options()
-        );
-    }
-
-    #[test]
-    fn exec_args_enable_interactive_mode_when_stdin_is_present() {
-        let args = sample_session().exec_args(
-            "python3",
-            &["-c".to_string(), "print('hi')".to_string()],
-            true,
-            false,
-            None,
-            &[],
-        );
-        let rendered: Vec<String> = args
-            .into_iter()
-            .map(|value| value.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(rendered.first().map(String::as_str), Some("exec"));
-        assert!(rendered.contains(&"-i".to_string()));
-        assert!(!rendered.contains(&"-t".to_string()));
-    }
-
-    #[test]
-    fn exec_args_skip_interactive_mode_without_stdin() {
-        let args = sample_session().exec_args(
-            "bash",
-            &["-lc".to_string(), "pwd".to_string()],
-            false,
-            false,
-            None,
-            &[],
-        );
-        let rendered: Vec<String> = args
-            .into_iter()
-            .map(|value| value.to_string_lossy().to_string())
-            .collect();
-        assert!(!rendered.contains(&"-i".to_string()));
-        assert!(!rendered.contains(&"-t".to_string()));
-    }
-
-    #[test]
-    fn exec_args_includes_it_flags_when_interactive_and_tty() {
-        let args = sample_session().exec_args("bash", &[], true, true, None, &[]);
-        let rendered: Vec<String> = args
-            .into_iter()
-            .map(|value| value.to_string_lossy().to_string())
-            .collect();
-        assert!(rendered.contains(&"-i".to_string()));
-        assert!(rendered.contains(&"-t".to_string()));
-    }
-
-    #[test]
-    fn terminal_pipe_command_includes_env_vars() {
-        let session = sample_session();
-        let (command, _pidfile) = session.terminal_pipe_command(
-            "echo hello",
-            None,
-            &[
-                ("TERM".to_string(), "dumb".to_string()),
-                ("PAGER".to_string(), "cat".to_string()),
-            ],
-        );
-        // Render the command as a debug string to inspect arguments
-        let debug = format!("{command:?}");
-        assert!(debug.contains("--env"), "expected --env flag: {debug}");
-        assert!(debug.contains("TERM=dumb"), "expected TERM=dumb: {debug}");
-        assert!(debug.contains("PAGER=cat"), "expected PAGER=cat: {debug}");
-    }
-
-    #[test]
-    fn sandbox_pidfile_path_is_container_tmp_path() {
-        let path = make_sandbox_pidfile();
-        assert!(path.starts_with("/tmp/nac-exec-"));
-        assert!(path.ends_with(".pid"));
-    }
-
-    #[test]
-    fn sandbox_wrappers_track_and_kill_process_group() {
-        assert!(SANDBOX_EXEC_WRAPPER.contains("setsid bash -c"));
-        assert!(
-            SANDBOX_EXEC_WRAPPER.contains("printf '%s' \"$pid\" > \"$pidtmp\""),
-            "exec wrapper: {SANDBOX_EXEC_WRAPPER}"
-        );
-        assert!(SANDBOX_EXEC_WRAPPER.contains("mv -f \"$pidtmp\" \"$pidfile\""));
-        assert!(SANDBOX_PTY_WRAPPER.contains("printf '%s' \"$$\" > \"$pidtmp\""));
-        assert!(SANDBOX_PTY_WRAPPER.contains("mv -f \"$pidtmp\" \"$pidfile\""));
-        assert!(SANDBOX_PTY_WRAPPER.contains("bash -i"));
-        assert!(SANDBOX_KILL_WRAPPER.contains("descendants()"));
-
-        assert!(!SANDBOX_KILL_WRAPPER.contains("kill -TERM"));
-        assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"$child\""));
-        assert!(SANDBOX_KILL_WRAPPER.contains("kill -KILL \"-$pid\""));
-        assert!(SANDBOX_KILL_WRAPPER.contains("is_live()"));
-        assert!(SANDBOX_KILL_WRAPPER.contains("group_has_live()"));
-        assert!(!SANDBOX_KILL_WRAPPER.contains("kill -0 \"-$pid\""));
-        assert!(SANDBOX_KILL_WRAPPER.contains("[ \"$attempts\" -ge 20 ] && exit 1"));
-        assert!(
-            SANDBOX_KILL_WRAPPER.contains("cancelled) exit 1 ;;"),
-            "unpinned kill must not treat a guest-written cancelled pidfile as success"
-        );
-        assert!(
-            SANDBOX_KILL_TIMEOUT > Duration::from_millis(20 * 50 * 2),
-            "host kill deadline must outlast the wrapper's two 20×50ms wait loops"
-        );
-    }
-
-    #[test]
-    fn kill_wrapper_tombstones_a_missing_pidfile() {
-        let pidfile =
-            std::env::temp_dir().join(format!("nac-missing-pidfile-{}.pid", uuid::Uuid::new_v4()));
-        let marker =
-            std::env::temp_dir().join(format!("nac-late-command-{}", uuid::Uuid::new_v4()));
-        let kill_status = StdCommand::new("sh")
-            .arg("-c")
-            .arg(SANDBOX_KILL_WRAPPER)
-            .arg("nac-kill")
-            .arg(&pidfile)
-            .status()
-            .unwrap();
-
-        assert!(kill_status.success());
-        assert_eq!(std::fs::read_to_string(&pidfile).unwrap(), "cancelled");
-
-        let exec_status = StdCommand::new("sh")
-            .arg("-c")
-            .arg(SANDBOX_EXEC_WRAPPER)
-            .arg("nac-exec")
-            .arg(format!("printf ran > '{}'", shell_escape_path(&marker)))
-            .arg(&pidfile)
-            .status()
-            .unwrap();
-
-        assert!(!exec_status.success());
-        assert!(!marker.exists());
-        let _ = std::fs::remove_file(pidfile);
-    }
-
-    #[test]
-    fn kill_wrapper_rejects_an_empty_pidfile() {
-        let pidfile =
-            std::env::temp_dir().join(format!("nac-empty-pidfile-{}.pid", uuid::Uuid::new_v4()));
-        std::fs::write(&pidfile, "").unwrap();
-
-        let status = StdCommand::new("sh")
-            .arg("-c")
-            .arg(SANDBOX_KILL_WRAPPER)
-            .arg("nac-kill")
-            .arg(&pidfile)
-            .status()
-            .unwrap();
-
-        assert!(!status.success());
-        let _ = std::fs::remove_file(pidfile);
-    }
-
-    #[test]
-    fn kill_wrapper_rejects_a_cancelled_pidfile_without_a_pin() {
-        let pidfile = std::env::temp_dir().join(format!(
-            "nac-cancelled-pidfile-{}.pid",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::write(&pidfile, "cancelled").unwrap();
-
-        let status = StdCommand::new("sh")
-            .arg("-c")
-            .arg(SANDBOX_KILL_WRAPPER)
-            .arg("nac-kill")
-            .arg(&pidfile)
-            .status()
-            .unwrap();
-
-        assert!(!status.success());
-        let _ = std::fs::remove_file(pidfile);
-    }
-}
+#[path = "podman_tests.rs"]
+mod tests;

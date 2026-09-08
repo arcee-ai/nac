@@ -10,48 +10,56 @@ use anyhow::{Context, Result};
 use portable_pty::{NativePtySystem, PtySize, PtySystem};
 use tokio::sync::Notify;
 
-use super::{ArtifactKind, OutputRegistry, OutputStream};
+use super::{ArtifactKind, OutputArtifactLease, OutputRegistry, OutputStream};
 #[cfg(all(unix, not(target_os = "linux")))]
 use crate::process::signal_descendants;
 #[cfg(target_os = "linux")]
-use crate::process::{process_identity_matches, process_start_time, signal_descendants};
+use crate::process::{process_start_time, signal_descendants};
 use crate::sandbox::ExecutionBackend;
 
 pub struct TerminalSession {
     pub name: String,
     writer: Box<dyn Write + Send>,
     output_id: String,
+    _output_lease: OutputArtifactLease,
     preview_cursor: u64,
     output_notify: Arc<Notify>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     #[cfg(target_os = "linux")]
     root_start_time: u64,
+    #[cfg(unix)]
+    process_group_id: Option<libc::pid_t>,
     _pty_pair: portable_pty::PtyPair,
     _reader_thread: std::thread::JoinHandle<()>,
     pub created_at: Instant,
     pub last_output_at: Instant,
     alive: Arc<AtomicBool>,
     exit_code: Option<i32>,
+    retained: bool,
+    _workspace_activity: Option<crate::sessions::WorkspaceActivityLease>,
+    _session_resource: Option<crate::sessions::SessionResourceLease>,
     /// Remote process-tree cleanup: backends that return a pidfile from
     /// `terminal_pty_command` get a backend-side kill on session teardown.
     backend_cleanup: Option<(Arc<ExecutionBackend>, String)>,
-    /// Guest PID the host observed after the PTY wrapper published a numeric
-    /// pidfile. Kill uses this pin so a later missing/`cancelled` pidfile
-    /// cannot fake a pre-start tombstone.
-    published_pid: Option<String>,
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
 }
 
 impl TerminalSession {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "PTY creation keeps command, geometry, backend, output lease, and environment authority explicit"
+    )]
     pub fn spawn(
         name: String,
+        command: &str,
         cwd: Option<PathBuf>,
         cols: u16,
         rows: u16,
         backend: &Arc<ExecutionBackend>,
         output_registry: OutputRegistry,
+        extra_envs: &[(String, String)],
     ) -> Result<Self> {
         let pty_system = NativePtySystem::default();
         let pty_pair = pty_system
@@ -62,9 +70,15 @@ impl TerminalSession {
                 pixel_height: 0,
             })
             .context("Failed to open PTY pair")?;
+        // Reserve bounded output metadata before the command can exist. If
+        // every slot belongs to a live command, fail without spawning a PTY
+        // process whose output could not be retained.
+        let output_lease = output_registry.create(ArtifactKind::Pty)?;
+        let output_id = output_lease.output_id().to_string();
 
-        let envs = terminal_env_owned();
-        let (cmd, pidfile) = backend.terminal_pty_command(cwd.as_deref(), &envs);
+        let mut envs = terminal_env_owned();
+        envs.extend(extra_envs.iter().cloned());
+        let (cmd, pidfile) = backend.terminal_pty_command(command, cwd.as_deref(), &envs);
         // resolved_cwd mirrors the default-workdir fallback inside each
         // backend's terminal_pty_command: explicit cwd if provided, otherwise
         // the backend's default terminal directory. Keep these in sync.
@@ -74,7 +88,7 @@ impl TerminalSession {
         let child = pty_pair
             .slave
             .spawn_command(cmd)
-            .context("Failed to spawn bash in PTY")?;
+            .context("Failed to spawn command in PTY")?;
         #[cfg(target_os = "linux")]
         let mut child = child;
         #[cfg(target_os = "linux")]
@@ -88,6 +102,14 @@ impl TerminalSession {
             };
             start_time
         };
+        #[cfg(unix)]
+        let process_group_id = child.process_id().and_then(|pid| {
+            let pid = pid as libc::pid_t;
+            // SAFETY: `getpgid` accepts any integer process id; a failed lookup
+            // returns -1 and therefore cannot equal the child id.
+            let group = unsafe { libc::getpgid(pid) };
+            (group == pid).then_some(group)
+        });
 
         let reader = pty_pair
             .master
@@ -99,12 +121,11 @@ impl TerminalSession {
             .context("Failed to take PTY writer")?;
 
         let alive = Arc::new(AtomicBool::new(true));
-        let alive_clone = alive.clone();
-        let output_id = output_registry.create(ArtifactKind::Pty);
+        let alive_clone = Arc::clone(&alive);
         let reader_output_id = output_id.clone();
-        let reader_output_registry = output_registry.clone();
+        let reader_output_registry = output_registry;
         let notify = Arc::new(Notify::new());
-        let notify_clone = notify.clone();
+        let notify_clone = Arc::clone(&notify);
 
         let reader_thread = std::thread::spawn(move || {
             let mut reader = reader;
@@ -132,19 +153,24 @@ impl TerminalSession {
             name,
             writer,
             output_id,
+            _output_lease: output_lease,
             preview_cursor: 0,
             output_notify: notify,
             child,
             #[cfg(target_os = "linux")]
             root_start_time,
+            #[cfg(unix)]
+            process_group_id,
             _pty_pair: pty_pair,
             _reader_thread: reader_thread,
             created_at: Instant::now(),
             last_output_at: Instant::now(),
             alive,
             exit_code: None,
+            retained: false,
+            _workspace_activity: None,
+            _session_resource: None,
             backend_cleanup,
-            published_pid: None,
             cwd: resolved_cwd,
             cols,
             rows,
@@ -187,14 +213,70 @@ impl TerminalSession {
             return;
         }
 
+        #[cfg(unix)]
+        if self.process_group_id.is_some() && self.root_exited_without_reaping() {
+            // WNOWAIT leaves the exited group leader as a zombie, so its pid
+            // and process-group id cannot be recycled between this ownership
+            // check and the signal. This reaches surviving same-group
+            // descendants without risking a later kill of an unrelated group.
+            self.signal_process_group(libc::SIGKILL);
+            self.process_group_id = None;
+        }
+
         if let Ok(Some(status)) = self.child.try_wait() {
             self.exit_code = Some(status.exit_code() as i32);
+            #[cfg(unix)]
+            {
+                // Never retain an id after reaping. If the pre-reap ownership
+                // check was unavailable or failed, leaking an unusual
+                // descendant is safer than signaling a recycled group id.
+                self.process_group_id = None;
+            }
             self.alive.store(false, Ordering::SeqCst);
         }
     }
 
+    #[cfg(unix)]
+    fn root_exited_without_reaping(&self) -> bool {
+        let Some(pid) = self.child.process_id().map(|pid| pid as libc::pid_t) else {
+            return false;
+        };
+        // SAFETY: `siginfo_t` is a C output record for which the all-zero byte
+        // pattern is a valid initialized state before `waitid` fills it.
+        let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+        // SAFETY: `info` is writable for one `siginfo_t`, `pid` is an integer
+        // child id, and the flag combination requests a non-reaping status read.
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        // SAFETY: `info` is initialized above and either remains zeroed or was
+        // populated by `waitid`, so reading its pid field is valid.
+        result == 0 && unsafe { info.si_pid() } == pid
+    }
+
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code
+    }
+
+    pub fn retain(
+        &mut self,
+        workspace_activity: Option<crate::sessions::WorkspaceActivityLease>,
+        session_resource: Option<crate::sessions::SessionResourceLease>,
+    ) {
+        if !self.retained {
+            self.retained = true;
+            self._workspace_activity = workspace_activity;
+            self._session_resource = session_resource;
+        }
+    }
+
+    pub fn is_retained(&self) -> bool {
+        self.retained
     }
 
     pub fn idle_duration(&self) -> Duration {
@@ -205,51 +287,38 @@ impl TerminalSession {
         self.child.process_id()
     }
 
-    /// Remember the guest PID once the PTY wrapper publishes it, so later
-    /// pidfile tampering cannot fake a successful cancel.
-    pub async fn observe_published_pid(&mut self) {
-        let Some((backend, pidfile)) = &self.backend_cleanup else {
-            return;
-        };
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while Instant::now() < deadline {
-            match backend.read_published_pid(pidfile).await {
-                Ok(Some(pid)) => {
-                    self.published_pid = Some(pid);
-                    return;
-                }
-                _ => tokio::time::sleep(Duration::from_millis(20)).await,
-            }
-        }
+    #[cfg(test)]
+    pub(crate) fn set_backend_cleanup_for_test(
+        &mut self,
+        backend: Arc<ExecutionBackend>,
+        pidfile: String,
+    ) {
+        self.backend_cleanup = Some((backend, pidfile));
     }
 
     pub async fn kill(&mut self) -> Result<()> {
-        let backend_result = if let Some((backend, pidfile)) = &self.backend_cleanup {
-            // Only a PID observed while the wrapper was publishing is a pin.
-            // A kill-time cat of the guest-writable pidfile can be `cancelled`
-            // or another number and must not retarget the kill.
-            backend
-                .terminal_pipe_kill(pidfile, self.published_pid.as_deref())
-                .await
-        } else {
-            Ok(())
-        };
-
         self.refresh_status();
         #[cfg(unix)]
         let descendant_result = if self.exit_code.is_none() {
-            let descendant_result = self.signal_descendants(libc::SIGKILL);
-            self.signal_process_group(libc::SIGKILL);
-            descendant_result
+            self.signal_descendants(libc::SIGKILL)
         } else {
             Ok(())
         };
+        #[cfg(unix)]
+        self.signal_process_group(libc::SIGKILL);
 
         self.reap_child().await;
         self.alive.store(false, Ordering::SeqCst);
+        // A missing remote pidfile is safe only after the local transport is
+        // dead and therefore cannot start the wrapper later.
+        let backend_cleanup = if let Some((backend, pidfile)) = &self.backend_cleanup {
+            backend.terminal_pipe_kill(pidfile).await
+        } else {
+            Ok(())
+        };
         #[cfg(unix)]
         descendant_result?;
-        backend_result?;
+        backend_cleanup.context("remote terminal cleanup incomplete")?;
         Ok(())
     }
 
@@ -289,28 +358,23 @@ impl TerminalSession {
 
     #[cfg(target_os = "linux")]
     fn signal_process_group(&self, signal: libc::c_int) {
-        let Some(pid) = self.child.process_id().map(|pid| pid as libc::pid_t) else {
+        let Some(pgid) = self.process_group_id else {
             return;
         };
-        if !process_identity_matches(pid, self.root_start_time) {
-            return;
-        }
+        // SAFETY: `pgid` was captured for the owned PTY process group;
+        // negative `kill` targets a process group and takes no pointers.
         unsafe {
-            let pgid = libc::getpgid(pid);
-            if pgid > 0 {
-                libc::kill(-pgid, signal);
-            }
+            libc::kill(-pgid, signal);
         }
     }
 
     #[cfg(all(unix, not(target_os = "linux")))]
     fn signal_process_group(&self, signal: libc::c_int) {
-        if let Some(pid) = self.child.process_id() {
+        if let Some(pgid) = self.process_group_id {
+            // SAFETY: `pgid` was captured for the owned PTY process group;
+            // negative `kill` targets that group and takes no pointers.
             unsafe {
-                let pgid = libc::getpgid(pid as libc::pid_t);
-                if pgid > 0 {
-                    libc::kill(-pgid, signal);
-                }
+                libc::kill(-pgid, signal);
             }
         }
     }
@@ -350,8 +414,9 @@ impl Drop for TerminalSession {
         #[cfg(unix)]
         if self.exit_code.is_none() {
             let _ = self.signal_descendants(libc::SIGTERM);
-            self.signal_process_group(libc::SIGTERM);
         }
+        #[cfg(unix)]
+        self.signal_process_group(libc::SIGTERM);
         self.alive.store(false, Ordering::SeqCst);
     }
 }
@@ -412,6 +477,30 @@ mod tests {
         })
     }
 
+    #[test]
+    #[cfg(unix)]
+    fn exited_pty_descendant_helper() {
+        if std::env::var_os("NAC_EXITED_PTY_DESCENDANT_HELPER").is_none() {
+            return;
+        }
+        let pid = unsafe { libc::getpid() };
+        let parent = unsafe { libc::getppid() };
+        let group = unsafe { libc::getpgid(parent) };
+        assert!(group > 0);
+        assert_eq!(unsafe { libc::setpgid(0, group) }, 0);
+        unsafe {
+            libc::signal(libc::SIGHUP, libc::SIG_IGN);
+        }
+        println!("NAC_CHILD:{pid}");
+        std::io::stdout().flush().unwrap();
+        unsafe {
+            libc::close(libc::STDIN_FILENO);
+            libc::close(libc::STDOUT_FILENO);
+            libc::close(libc::STDERR_FILENO);
+        }
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
     #[tokio::test]
     #[cfg(unix)]
     async fn kill_removes_background_jobs_from_pty_shell() {
@@ -423,14 +512,21 @@ mod tests {
             OutputRegistry::new(crate::terminal::CommandOutputLimits::default()).unwrap();
         let mut session = TerminalSession::spawn(
             "test".to_string(),
+            "bash",
             None,
             120,
             40,
             &backend,
             registry.clone(),
+            &[],
         )
         .unwrap();
-        session.write(b"sleep 30 & echo NAC_CHILD:$!\r").unwrap();
+        // The PTY uses the account's configured login shell, which may not
+        // support POSIX job syntax (for example, Fish has no `$!`). Run the
+        // process-tree fixture through `sh` so the test is shell-independent.
+        session
+            .write(b"sh -c 'sleep 30 & echo NAC_CHILD:$!; wait'\r")
+            .unwrap();
 
         let mut cursor = 0;
         let mut output = String::new();
@@ -474,5 +570,88 @@ mod tests {
             }
         }
         assert!(!still_running, "background child survived PTY cleanup");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn completed_pty_root_kills_surviving_process_group() {
+        let backend = crate::sandbox::execution_backend_from_sandbox(
+            None,
+            &std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+        );
+        let registry =
+            OutputRegistry::new(crate::terminal::CommandOutputLimits::default()).unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let executable = format!(
+            "'{}'",
+            executable.display().to_string().replace('\'', "'\"'\"'")
+        );
+        let command = format!(
+            "NAC_EXITED_PTY_DESCENDANT_HELPER=1 {executable} --exact terminal::session::tests::exited_pty_descendant_helper --nocapture & sleep 0.2"
+        );
+        let mut session = TerminalSession::spawn(
+            "exited-root".to_string(),
+            &command,
+            None,
+            120,
+            40,
+            &backend,
+            registry.clone(),
+            &[],
+        )
+        .unwrap();
+
+        let mut cursor = 0;
+        let mut output = String::new();
+        let mut child_pid = None;
+        for _ in 0..40 {
+            let page = registry
+                .page(
+                    session.output_id(),
+                    OutputStream::Combined,
+                    cursor,
+                    32 * 1024,
+                )
+                .unwrap();
+            cursor = page.next_offset;
+            output.push_str(&page.content);
+            child_pid = parse_child_pid(&output);
+            if child_pid.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let child_pid = child_pid.unwrap_or_else(|| panic!("child pid not found in: {output:?}"));
+        assert!(
+            process_running(child_pid),
+            "background child exited too early"
+        );
+
+        for _ in 0..40 {
+            session.refresh_status();
+            if session.exit_code().is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(session.exit_code().is_some(), "PTY root did not exit");
+
+        let mut still_running = false;
+        for _ in 0..40 {
+            still_running = process_running(child_pid);
+            if !still_running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if still_running {
+            unsafe {
+                libc::kill(child_pid as libc::pid_t, libc::SIGKILL);
+            }
+        }
+        assert!(
+            !still_running,
+            "background child survived exited-root PTY cleanup"
+        );
     }
 }

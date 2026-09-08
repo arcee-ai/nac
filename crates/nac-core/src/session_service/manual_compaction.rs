@@ -162,6 +162,10 @@ struct ManualCompactionTaskGuard {
 }
 
 impl ManualCompactionTaskGuard {
+    #[expect(
+        clippy::expect_used,
+        reason = "the guard owns a lifecycle until its single completion path consumes it"
+    )]
     fn complete(mut self, result: SessionCompactionCompletion) {
         self.lifecycle
             .as_mut()
@@ -196,14 +200,20 @@ impl Drop for ManualCompactionTaskGuard {
 }
 
 impl SessionClientHandle {
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "compaction admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_compact(
         &self,
     ) -> std::result::Result<SessionCompactionHandle, SessionCompactionAdmissionError> {
         self.service.try_compact_for_client(self.client_id.clone())
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "compaction admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_compact_with_lease(
         &self,
         lease: sessions::SessionOperationLease,
@@ -214,14 +224,20 @@ impl SessionClientHandle {
 }
 
 impl SessionService {
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "compaction admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_compact(
         &self,
     ) -> std::result::Result<SessionCompactionHandle, SessionCompactionAdmissionError> {
         self.try_compact_inner(None, None)
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "compaction admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_compact_for_client(
         &self,
         client_id: SessionClientId,
@@ -229,7 +245,10 @@ impl SessionService {
         self.try_compact_inner(Some(client_id), None)
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "compaction admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_compact_with_lease(
         &self,
         lease: sessions::SessionOperationLease,
@@ -237,7 +256,10 @@ impl SessionService {
         self.try_compact_inner(None, Some(lease))
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "compaction admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub fn try_compact_for_client_with_lease(
         &self,
         client_id: SessionClientId,
@@ -246,7 +268,14 @@ impl SessionService {
         self.try_compact_inner(Some(client_id), Some(lease))
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "compaction admission errors carry the complete active-operation conflict snapshot"
+    )]
+    #[expect(
+        clippy::expect_used,
+        reason = "persisted sessions acquire a lease during successful compaction admission"
+    )]
     fn try_compact_inner(
         &self,
         client_id: Option<SessionClientId>,
@@ -300,7 +329,7 @@ impl SessionService {
             completion: Some(completion_tx),
             lifecycle: Some(lifecycle),
         };
-        let agent = self.agent.clone();
+        let agent = Arc::clone(&self.agent);
         let persist_service = self.clone();
         let compaction_id = snapshot.compaction_id;
         let task = tokio::spawn(async move {

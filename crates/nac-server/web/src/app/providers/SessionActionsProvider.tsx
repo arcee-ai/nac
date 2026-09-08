@@ -18,7 +18,7 @@ interface SessionActions {
   remove: (summary: SessionSummarySnapshot) => void;
   settings: (sessionId: string) => void;
   togglePin: (summary: SessionSummarySnapshot) => Promise<void>;
-  stopRun: (summary: SessionSummarySnapshot) => Promise<void>;
+  stopRun: (sessionId: string) => Promise<void>;
 }
 
 const SessionActionsContext = createContext<SessionActions | null>(null);
@@ -61,9 +61,9 @@ export function SessionActionsProvider({ children }: { children: React.ReactNode
           toast.error(`Failed to update pin: ${errorMessage(toRunError(error))}`);
         }
       },
-      stopRun: async (summary) => {
+      stopRun: async (sessionId) => {
         try {
-          await cancelRun.mutateAsync(summary.session_id);
+          await cancelRun.mutateAsync(sessionId);
           pushLocalEvent("run", "■ run cancellation requested");
           toast.success("Run cancellation requested");
         } catch (error) {

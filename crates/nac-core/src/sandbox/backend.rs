@@ -35,6 +35,94 @@ pub enum ExecutionBackend {
 }
 
 impl ExecutionBackend {
+    /// Resolve the semantic target used by authorization through symlinks.
+    /// Execution may still apply stricter operation-specific confinement, but
+    /// it must never receive more path authority than policy evaluated.
+    pub(crate) async fn canonicalize_permission_path(&self, path: &Path) -> Result<PathBuf> {
+        match self {
+            Self::Local { .. } => {
+                let path = path.to_path_buf();
+                tokio::task::spawn_blocking(move || {
+                    crate::tools::mutation::resolve_target_path(&path)
+                })
+                .await
+                .context("local permission path resolution task failed")?
+                .context("local permission path resolution failed")
+            }
+            Self::Sandbox(_) | Self::Ssh(_) => {
+                const SCRIPT: &str = r#"set -eu
+target=$1
+case $target in
+'~') target=$HOME ;;
+'~/'*) target=$HOME/${target#'~/'} ;;
+/*) ;;
+*) target=$PWD/$target ;;
+esac
+suffix=
+links=0
+while [ -L "$target" ]; do
+	links=$((links + 1))
+	[ "$links" -le 64 ] || exit 1
+	link=$(readlink "$target")
+	case $link in
+	/*) target=$link ;;
+	*)
+		dir=${target%/*}
+		[ -n "$dir" ] || dir=/
+		target=$dir/$link
+		;;
+	esac
+done
+while [ ! -e "$target" ] && [ ! -L "$target" ]; do
+	[ "$target" != / ] || exit 1
+	name=${target##*/}
+	target=${target%/*}
+	[ -n "$target" ] || target=/
+	suffix=/$name$suffix
+done
+if [ -d "$target" ]; then
+	base=$(cd -- "$target" && pwd -P)
+else
+	dir=${target%/*}
+	name=${target##*/}
+	[ -n "$dir" ] || dir=/
+	base=$(cd -- "$dir" && pwd -P)/$name
+fi
+printf '%s%s' "$base" "$suffix"
+"#;
+                let path = path
+                    .to_str()
+                    .context("permission path is not valid UTF-8")?;
+                let output = self
+                    .exec(
+                        "sh",
+                        &[
+                            "-c".to_string(),
+                            SCRIPT.to_string(),
+                            "nac-permission-path".to_string(),
+                            path.to_string(),
+                        ],
+                        None,
+                    )
+                    .await
+                    .context("failed to resolve permission path on execution backend")?;
+                if !output.status.success() {
+                    anyhow::bail!(
+                        "permission path resolution failed on execution backend: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    );
+                }
+                let resolved = String::from_utf8(output.stdout)
+                    .context("execution backend returned a non-UTF-8 permission path")?;
+                let resolved = resolved.trim_end_matches(['\r', '\n']);
+                if resolved.is_empty() || !Path::new(resolved).is_absolute() {
+                    anyhow::bail!("execution backend returned an invalid permission path");
+                }
+                Ok(PathBuf::from(resolved))
+            }
+        }
+    }
+
     #[cfg(test)]
     pub fn kind(&self) -> ExecutionTargetKind {
         match self {
@@ -106,6 +194,7 @@ impl ExecutionBackend {
         match self {
             Self::Local { workspace_cwd } => {
                 let mut command = Command::new(program);
+                remove_native_integration_credentials(&mut command);
                 command.args(args).current_dir(workspace_cwd);
                 if stdin.is_some() {
                     command.stdin(Stdio::piped());
@@ -141,7 +230,7 @@ impl ExecutionBackend {
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (Command, Option<String>) {
-        match self {
+        let (mut command, pidfile) = match self {
             Self::Local { .. } => {
                 let mut command = Command::new("bash");
                 command.arg("-c").arg(cmd);
@@ -158,51 +247,46 @@ impl ExecutionBackend {
                 (command, Some(pidfile))
             }
             Self::Ssh(ssh) => ssh.terminal_pipe_command(cmd, cwd, envs),
-        }
+        };
+        remove_native_integration_credentials(&mut command);
+        (command, pidfile)
     }
 
-    pub async fn read_published_pid(&self, pidfile: &str) -> Result<Option<String>> {
-        match self {
-            Self::Local { .. } => Ok(None),
-            Self::Sandbox(session) => session.read_published_pid(pidfile).await,
-            Self::Ssh(ssh) => ssh.read_published_pid(pidfile).await,
-        }
-    }
-
-    pub async fn terminal_pipe_kill(
-        &self,
-        pidfile: &str,
-        published_pid: Option<&str>,
-    ) -> Result<()> {
+    pub async fn terminal_pipe_kill(&self, pidfile: &str) -> Result<()> {
         match self {
             Self::Local { .. } => Ok(()),
-            Self::Sandbox(session) => session.terminal_pipe_kill(pidfile, published_pid).await,
-            Self::Ssh(ssh) => ssh.terminal_pipe_kill(pidfile, published_pid).await,
+            Self::Sandbox(session) => session.terminal_pipe_kill(pidfile).await,
+            Self::Ssh(ssh) => ssh.terminal_pipe_kill(pidfile).await,
         }
     }
 
     pub fn terminal_pty_command(
         &self,
+        cmd: &str,
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, Option<String>) {
-        match self {
+        let (mut command, pidfile) = match self {
             Self::Local { .. } => {
-                let mut cmd = PtyCommandBuilder::new("bash");
+                let mut command = PtyCommandBuilder::new("bash");
+                command.arg("-c");
+                command.arg(cmd);
                 for (key, value) in envs {
-                    cmd.env(key, value);
+                    command.env(key, value);
                 }
                 if let Some(cwd) = cwd {
-                    cmd.cwd(cwd);
+                    command.cwd(cwd);
                 }
-                (cmd, None)
+                (command, None)
             }
             Self::Sandbox(session) => {
-                let (cmd, pidfile) = session.terminal_pty_command(cwd, envs);
+                let (cmd, pidfile) = session.terminal_pty_command(cmd, cwd, envs);
                 (cmd, Some(pidfile))
             }
-            Self::Ssh(ssh) => ssh.terminal_pty_command(cwd, envs),
-        }
+            Self::Ssh(ssh) => ssh.terminal_pty_command(cmd, cwd, envs),
+        };
+        remove_native_integration_credentials_from_pty(&mut command);
+        (command, pidfile)
     }
 
     pub fn worker_cli_args(&self) -> Vec<OsString> {
@@ -226,6 +310,18 @@ impl ExecutionBackend {
             Self::Local { .. } | Self::Sandbox(_) => true,
             Self::Ssh(_) => false,
         }
+    }
+}
+
+fn remove_native_integration_credentials(command: &mut Command) {
+    for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
+        command.env_remove(name);
+    }
+}
+
+fn remove_native_integration_credentials_from_pty(command: &mut PtyCommandBuilder) {
+    for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
+        command.env_remove(name);
     }
 }
 
@@ -444,7 +540,7 @@ mod tests {
     fn local_terminal_pty_command_is_plain_bash() {
         let backend = local();
         let envs = vec![("TERM".to_string(), "dumb".to_string())];
-        let (cmd, pidfile) = backend.terminal_pty_command(None, &envs);
+        let (cmd, pidfile) = backend.terminal_pty_command("printf exact", None, &envs);
         assert!(pidfile.is_none());
         let debug = format!("{cmd:?}");
         assert!(debug.contains("bash"), "expected bash: {debug}");

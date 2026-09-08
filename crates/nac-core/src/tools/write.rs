@@ -4,10 +4,110 @@ use serde_json::{json, Value};
 
 use crate::sandbox::{FileIoMode, HostPathResolution};
 use crate::tools::mutation::{
-    argument_error, execute_remote, permission_error, required_string, write_local_cancellable,
-    write_mounted_cancellable,
+    argument_error, execute_remote, permission_error, required_string, write_local,
+    write_local_bound, write_mounted,
 };
-use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
+use crate::tools::{
+    kernel, resolve_workspace_path, shared_workspace_gate, ToolResult, ToolRuntime,
+};
+use crate::types::{FunctionDef, ToolDefinition};
+
+pub(crate) struct WriteTool;
+
+impl kernel::NativeTool for WriteTool {
+    type Input = Value;
+
+    fn definition(&self) -> ToolDefinition {
+        definition()
+    }
+
+    fn admission(&self) -> kernel::ToolAdmission {
+        kernel::ToolAdmission::Exclusive
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        validate_input(&input)?;
+        Ok(input)
+    }
+
+    fn permission_resources(
+        &self,
+        input: &Self::Input,
+        services: kernel::ToolServices<'_>,
+    ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+        let path = input
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| argument_error("decoded write input is missing its path"))?;
+        let path = services
+            .runtime
+            .backend
+            .resolve_path(path)
+            .map_err(|error| argument_error(format!("invalid edit path: {error}")))?;
+        Ok(crate::permissions::file_resources(
+            "edit",
+            path,
+            services.runtime.backend.as_ref(),
+            &services.runtime.store_path,
+            true,
+        ))
+    }
+
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        resources: &[kernel::PermissionResource],
+        _services: kernel::ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        let path = resources
+            .iter()
+            .find(|resource| resource.action == "edit")
+            .ok_or_else(|| argument_error("authorized mutation target is missing"))?;
+        let object = input
+            .as_object_mut()
+            .ok_or_else(|| argument_error("decoded write input is not an object"))?;
+        object.insert("path".to_string(), Value::String(path.resource.clone()));
+        object.insert("_nac_authorized_path_bound".to_string(), Value::Bool(true));
+        Ok(())
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        services: kernel::ToolServices<'a>,
+        _context: &'a kernel::ToolCallContext,
+    ) -> futures_util::future::BoxFuture<'a, ToolResult> {
+        Box::pin(async move {
+            let gate = shared_workspace_gate(services.runtime);
+            let _write = gate.write().await;
+            execute(input, services.runtime).await
+        })
+    }
+}
+
+pub fn definition() -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "write".to_string(),
+            description: "Atomically create or replace a UTF-8 file. Use expected_revision null only to create a missing file; replacing requires the revision from read."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to file" },
+                    "content": { "type": "string", "description": "Complete content to write" },
+                    "expected_revision": {
+                        "type": ["string", "null"],
+                        "description": "Revision from read to replace an existing file, or null to create only"
+                    }
+                },
+                "required": ["path", "content", "expected_revision"],
+                "additionalProperties": false
+            }),
+        },
+    }
+}
 
 pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let path = match required_string(&args, "path") {
@@ -38,13 +138,12 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
                         "atomic write is not supported for a single-file sandbox mount: {path}"
                     ));
                 }
-                return write_mounted_cancellable(
+                return write_mounted(
                     host_path.root,
                     host_path.relative,
                     path,
                     content,
                     expected_revision,
-                    &runtime.command_cancellation,
                 )
                 .await;
             }
@@ -71,14 +170,27 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
         .await;
     }
 
-    write_local_cancellable(
-        resolve_workspace_path(runtime, PathBuf::from(&path)),
-        path,
-        content,
-        expected_revision,
-        &runtime.command_cancellation,
-    )
-    .await
+    if args
+        .get("_nac_authorized_path_bound")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        write_local_bound(
+            resolve_workspace_path(runtime, PathBuf::from(&path)),
+            path,
+            content,
+            expected_revision,
+        )
+        .await
+    } else {
+        write_local(
+            resolve_workspace_path(runtime, PathBuf::from(&path)),
+            path,
+            content,
+            expected_revision,
+        )
+        .await
+    }
 }
 
 fn parse_expected_revision(args: &Value) -> Result<Option<String>, ToolResult> {
@@ -87,6 +199,29 @@ fn parse_expected_revision(args: &Value) -> Result<Option<String>, ToolResult> {
         Some(Value::Null) => Ok(None),
         Some(Value::String(revision)) => Ok(Some(revision.clone())),
         Some(_) => Err(argument_error(
+            "'expected_revision' must be a revision string or null",
+        )),
+    }
+}
+
+fn validate_input(input: &Value) -> Result<(), ToolResult> {
+    let object = input
+        .as_object()
+        .ok_or_else(|| argument_error("tool arguments must be an object"))?;
+    if let Some(key) = object
+        .keys()
+        .find(|key| !["path", "content", "expected_revision"].contains(&key.as_str()))
+    {
+        return Err(argument_error(format!("unknown '{key}' argument")));
+    }
+    for key in ["path", "content"] {
+        if !object.get(key).is_some_and(Value::is_string) {
+            return Err(argument_error(format!("'{key}' argument must be a string")));
+        }
+    }
+    match object.get("expected_revision") {
+        Some(Value::String(_) | Value::Null) => Ok(()),
+        _ => Err(argument_error(
             "'expected_revision' must be a revision string or null",
         )),
     }

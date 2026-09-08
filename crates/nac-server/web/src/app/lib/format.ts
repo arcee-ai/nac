@@ -8,6 +8,7 @@ import type {
   SessionSummarySnapshot,
   TokenUsage,
 } from "@/app/types/api";
+import { parseDelegatedCompletion } from "@/app/features/delegation/completion";
 
 export function shortId(id: string | null | undefined): string {
   if (!id) return "--";
@@ -114,6 +115,17 @@ export function displayPromptFromMessageText(content: string | null | undefined)
   const collapsed = invokedSkillsDisplayPrompt(text);
   if (collapsed != null) return collapsed;
   const normalized = text.replaceAll("\r\n", "\n");
+  if (
+    normalized.startsWith('<nac_goal_continuation goal_id="') &&
+    normalized.endsWith("\n</nac_goal_continuation>")
+  ) {
+    return "[durable goal continuation]";
+  }
+  const completion = parseDelegatedCompletion(normalized);
+  if (completion) {
+    const type = completion.kind === "coding-agent" ? "traditional child" : "managed orchestrator";
+    return `[${type} ${completion.status}: ${completion.description}]`;
+  }
   const header = normalized.split("\n", 1)[0] ?? "";
   const match = /^# \/(plan|run)\s*:/.exec(header);
   if (!match) return text;

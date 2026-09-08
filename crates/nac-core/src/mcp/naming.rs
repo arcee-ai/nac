@@ -15,7 +15,7 @@ pub(super) fn allocate_tool_name(
     if *count == 1 {
         base
     } else {
-        format!("{}__{}", base, count)
+        format!("{base}__{count}")
     }
 }
 

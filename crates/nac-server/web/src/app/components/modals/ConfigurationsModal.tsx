@@ -19,7 +19,7 @@ import {
 import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
-import { ManagedAuthCallout } from "@/app/components/modals/ManagedAuthCallout";
+import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
 import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
@@ -27,7 +27,7 @@ import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
+import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
 import { KEY_DEBOUNCE_MS, MASKED_KEY, modelItems, type Validation } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
 import { CLEAR_EFFORT, serializeExtraHeaders } from "@/app/lib/modelConfig";
@@ -47,6 +47,7 @@ import {
 import type {
   BackendKind,
   ModelConfigurationRecord,
+  ReasoningEffort,
   UpdateModelConfigurationRequest,
 } from "@/app/types/api";
 
@@ -293,6 +294,9 @@ function ConfigurationForm({
     }
 
     const threshold = compaction.trim() ? Number(compaction.trim()) : 0;
+    // SAFETY: this value comes exclusively from REASONING_ITEMS, whose ids are
+    // the generated ReasoningEffort values plus the empty "not set" sentinel.
+    const selectedReasoning = reasoning ? (reasoning as ReasoningEffort) : null;
     if (!Number.isSafeInteger(threshold) || threshold < 0) {
       setError("The compaction threshold must be a whole number, or 0 to disable it.");
       return;
@@ -310,7 +314,7 @@ function ConfigurationForm({
           name: name.trim(),
           backend,
           model: chosenModel.trim(),
-          reasoning_effort: reasoning || null,
+          reasoning_effort: selectedReasoning,
           extra_headers: extraHeaders,
           orchestrator_compaction_threshold: threshold,
           initial_prompt: prompt.trim() || null,
@@ -333,7 +337,7 @@ function ConfigurationForm({
           model: chosenModel.trim(),
           base_url: baseUrl.trim() || null,
           api_key: needsKey ? apiKey.trim() : null,
-          reasoning_effort: reasoning || null,
+          reasoning_effort: selectedReasoning,
           extra_headers: extraHeaders,
           orchestrator_compaction_threshold: threshold,
           initial_prompt: prompt.trim() || null,

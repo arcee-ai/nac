@@ -46,13 +46,13 @@ fn now_utc() -> String {
         mo += 1;
     }
     day += remaining as u32;
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:09}",
-        y, mo, day, h, m, s, nanos
-    )
+    format!("{y:04}-{mo:02}-{day:02} {h:02}:{m:02}:{s:02}.{nanos:09}")
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "snapshot construction mirrors the durable session record without an overlapping builder DTO"
+)]
 pub fn new_snapshot(
     session_id: String,
     cwd: PathBuf,
@@ -69,6 +69,7 @@ pub fn new_snapshot(
     let now = now_utc();
     SessionSnapshot {
         session_id,
+        behavior: SessionBehavior::Orchestrator,
         project_id: None,
         cwd,
         model,
@@ -103,6 +104,7 @@ pub fn refresh_snapshot(
 ) -> SessionSnapshot {
     SessionSnapshot {
         session_id: snapshot.session_id.clone(),
+        behavior: snapshot.behavior,
         project_id: snapshot.project_id.clone(),
         cwd: snapshot.cwd.clone(),
         model: snapshot.model.clone(),
@@ -155,9 +157,16 @@ pub struct SessionRunStateUpdate {
     /// Matching durable active run to clear after a canonical completed or
     /// cancelled outcome. `None` for failed runs and non-terminal saves.
     pub finished_run_id: Option<String>,
+    /// Explicit disposition for `finished_run_id`. This must travel with the
+    /// run-state checkpoint so recovery never guesses cancellation from a
+    /// separately appended transcript marker.
+    pub finished_run_disposition: Option<crate::store::RunTerminalDisposition>,
     /// Matching durable active run to retain as a content-free failed terminal
     /// outcome. Mutually exclusive with `finished_run_id`.
     pub failed_run_id: Option<String>,
+    /// Goal settlement committed in the same SQLite transaction as the run
+    /// terminal checkpoint. `None` for sessions/runs without a bound goal.
+    pub goal_settlement: Option<crate::store::GoalRunSettlement>,
     pub updated_at: String,
 }
 
@@ -179,7 +188,9 @@ impl SessionSnapshot {
             sandbox_spec: self.sandbox_spec.clone(),
             run_state,
             finished_run_id: None,
+            finished_run_disposition: None,
             failed_run_id: None,
+            goal_settlement: None,
             updated_at: self.updated_at.clone(),
         }
     }

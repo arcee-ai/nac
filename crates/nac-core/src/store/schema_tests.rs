@@ -136,21 +136,26 @@ fn assert_session_cascade(conn: &Connection, table: &str) {
         .unwrap()
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap();
-    assert_eq!(
-        foreign_keys,
-        vec![(
-            "sessions".to_string(),
-            "session_id".to_string(),
-            "session_id".to_string(),
-            "CASCADE".to_string(),
-        )],
-        "unexpected foreign key for {table}"
+    let session_keys = foreign_keys
+        .iter()
+        .filter(|(target, _, _, _)| target == "sessions")
+        .collect::<Vec<_>>();
+    assert!(
+        !session_keys.is_empty(),
+        "missing session foreign key for {table}"
+    );
+    assert!(
+        session_keys.iter().all(|(_, _, target_column, on_delete)| {
+            target_column == "session_id" && on_delete == "CASCADE"
+        }),
+        "unexpected session foreign key for {table}: {foreign_keys:?}"
     );
 }
 
 fn assert_current_schema(conn: &Connection) {
     let session_columns = table_columns(conn, "sessions");
     for expected in [
+        "behavior",
         "orchestrator_compaction_threshold",
         "visible_message_count",
         "last_user_prompt",
@@ -184,7 +189,95 @@ fn assert_current_schema(conn: &Connection) {
             "created_at"
         ]
     );
-    for table in ["thread_steering", "thread_events"] {
+    assert_eq!(
+        table_columns(conn, "session_inbox"),
+        [
+            "id",
+            "session_id",
+            "delivery",
+            "status",
+            "content",
+            "target_run_id",
+            "client_id",
+            "delivered_run_id",
+            "created_at",
+            "updated_at",
+            "delivered_at",
+            "cancelled_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        table_columns(conn, "session_goals"),
+        [
+            "session_id",
+            "goal_id",
+            "objective",
+            "status",
+            "token_budget",
+            "tokens_used",
+            "time_used_ms",
+            "accounting_run_id",
+            "accounting_token_baseline",
+            "accounting_started_at_epoch_ms",
+            "continuation_run_id",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        table_columns(conn, "traditional_children"),
+        [
+            "child_session_id",
+            "parent_session_id",
+            "root_session_id",
+            "profile",
+            "description",
+            "nesting_depth",
+            "status",
+            "generation",
+            "run_id",
+            "execution_mode",
+            "report",
+            "failure",
+            "change_summary",
+            "verification_summary",
+            "completion_inbox_id",
+            "completion_suppressed",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        table_columns(conn, "managed_orchestrators"),
+        [
+            "orchestrator_session_id",
+            "parent_session_id",
+            "root_session_id",
+            "description",
+            "status",
+            "generation",
+            "run_id",
+            "execution_mode",
+            "report",
+            "failure",
+            "completion_inbox_id",
+            "completion_suppressed",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    for table in [
+        "thread_steering",
+        "thread_events",
+        "session_inbox",
+        "session_goals",
+        "traditional_children",
+        "managed_orchestrators",
+    ] {
         assert_session_cascade(conn, table);
     }
     assert_eq!(
@@ -329,6 +422,270 @@ fn assert_current_schema(conn: &Connection) {
         })
         .unwrap();
     assert_eq!(violation_count, 0);
+}
+
+#[test]
+fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
+    let path = temp_store_path("v16_behavior");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    insert_legacy_session(&legacy, "legacy-session");
+    legacy
+        .execute_batch(
+            "ALTER TABLE sessions DROP COLUMN behavior;
+             PRAGMA user_version = 16;",
+        )
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+
+    let migrated = Connection::open(&path).unwrap();
+    let behavior: String = migrated
+        .query_row(
+            "SELECT behavior FROM sessions WHERE session_id = 'legacy-session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(behavior, "orchestrator");
+    let version: i64 = migrated
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, STORE_SCHEMA_VERSION);
+    assert_eq!(STORE_SCHEMA_VERSION, 24);
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v17_store_adds_the_durable_session_inbox() {
+    let path = temp_store_path("v17_inbox");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch("DROP TABLE session_inbox; PRAGMA user_version = 17;")
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        table_columns(&migrated, "session_inbox"),
+        [
+            "id",
+            "session_id",
+            "delivery",
+            "status",
+            "content",
+            "target_run_id",
+            "client_id",
+            "delivered_run_id",
+            "created_at",
+            "updated_at",
+            "delivered_at",
+            "cancelled_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v18_store_adds_revision_bound_permission_grants() {
+    let path = temp_store_path("v18_permission_grants");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch("DROP TABLE permission_grants; PRAGMA user_version = 18;")
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        table_columns(&migrated, "permission_grants"),
+        [
+            "id",
+            "session_id",
+            "action",
+            "resource",
+            "backend",
+            "session_config_version",
+            "created_at",
+        ]
+    );
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v19_store_adds_durable_session_goals() {
+    let path = temp_store_path("v19_session_goals");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch("DROP TABLE session_goals; PRAGMA user_version = 19;")
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        table_columns(&migrated, "session_goals"),
+        [
+            "session_id",
+            "goal_id",
+            "objective",
+            "status",
+            "token_budget",
+            "tokens_used",
+            "time_used_ms",
+            "accounting_run_id",
+            "accounting_token_baseline",
+            "accounting_started_at_epoch_ms",
+            "continuation_run_id",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v20_store_adds_durable_traditional_children() {
+    let path = temp_store_path("v20_traditional_children");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch("DROP TABLE traditional_children; PRAGMA user_version = 20;")
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        table_columns(&migrated, "traditional_children"),
+        [
+            "child_session_id",
+            "parent_session_id",
+            "root_session_id",
+            "profile",
+            "description",
+            "nesting_depth",
+            "status",
+            "generation",
+            "run_id",
+            "execution_mode",
+            "report",
+            "failure",
+            "change_summary",
+            "verification_summary",
+            "completion_inbox_id",
+            "completion_suppressed",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v21_store_adds_durable_managed_orchestrators() {
+    let path = temp_store_path("v21_managed_orchestrators");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch("DROP TABLE managed_orchestrators; PRAGMA user_version = 21;")
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        table_columns(&migrated, "managed_orchestrators"),
+        [
+            "orchestrator_session_id",
+            "parent_session_id",
+            "root_session_id",
+            "description",
+            "status",
+            "generation",
+            "run_id",
+            "execution_mode",
+            "report",
+            "failure",
+            "completion_inbox_id",
+            "completion_suppressed",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v22_store_adds_relationship_completion_obligations() {
+    let path = temp_store_path("v22_relationship_obligations");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch(
+            "ALTER TABLE traditional_children DROP COLUMN completion_suppressed;
+             ALTER TABLE managed_orchestrators DROP COLUMN completion_suppressed;
+             ALTER TABLE session_run_recovery DROP COLUMN terminal_disposition;
+             PRAGMA user_version = 22;",
+        )
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    assert!(table_columns(&migrated, "traditional_children")
+        .contains(&"completion_suppressed".to_string()));
+    assert!(table_columns(&migrated, "managed_orchestrators")
+        .contains(&"completion_suppressed".to_string()));
+    assert!(table_columns(&migrated, "session_run_recovery")
+        .contains(&"terminal_disposition".to_string()));
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]

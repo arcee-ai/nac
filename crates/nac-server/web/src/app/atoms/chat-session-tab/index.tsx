@@ -13,6 +13,10 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
   running?: boolean;
   /** Display title of the chat this session was forked from. */
   forkedFromTitle?: string | null;
+  /** Compact identity shown after the title, such as the session behavior. */
+  badge?: string;
+  /** Full accessible meaning of the compact badge. */
+  badgeLabel?: string;
   /** Takes the tab off the strip. The chat itself is untouched. */
   onDismiss?: () => void;
 }
@@ -46,9 +50,12 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   active = false,
   running = false,
   forkedFromTitle,
+  badge,
+  badgeLabel,
   onDismiss,
   className = "",
   type = "button",
+  "aria-label": ariaLabel,
   ...props
 }) => {
   const labelClass = running
@@ -71,7 +78,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
     >
       <button
         type={type}
-        aria-label={title}
+        aria-label={ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)}
         aria-current={active ? "page" : undefined}
         className="flex flex-1 min-w-0 items-center justify-start gap-1 px-2 py-1 h-10 w-full max-w-32 min-w-10"
         {...props}
@@ -87,9 +94,17 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
                 : "text-btn-secondary group-hover:text-btn-secondary-hovered"
           }
         />
-        <span className={cn("label-micro w-full min-w-0 truncate text-left", labelClass)}>
+        <span className={cn("label-micro w-full min-w-0 flex-1 truncate text-left", labelClass)}>
           {title}
         </span>
+        {badge ? (
+          <span
+            title={badgeLabel}
+            className="tag-label max-w-[56px] shrink-0 truncate rounded bg-elevation-level-3 px-1 text-basic-tertiary"
+          >
+            {badge}
+          </span>
+        ) : null}
       </button>
       {onDismiss ? (
         <Button
@@ -97,16 +112,14 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
           size={ButtonSize.Small}
           content={ButtonContent.Icon}
           aria-label={`Close ${title}`}
-          onClick={onDismiss}
-          // Hidden rather than transparent, so the title gets the room back
-          // whenever the pointer is elsewhere. Keyboard focus reveals it too, but
-          // only the visible kind: clicking a tab leaves its title button focused,
-          // and plain `:focus` would strand the button on screen long after the
-          // pointer moved away.
-          //
-          // `.btn`'s own `display` is unlayered CSS, so a plain `hidden` never
-          // reaches it.
-          className="shrink-0 !hidden group-hover:!inline-flex group-has-[:focus-visible]:!inline-flex absolute right-0 top-1/2 -translate-y-1/2"
+          title="Close tab"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDismiss();
+          }}
+          // Stay in layout (`display` is `.btn`'s) and fade in on hover. Toggling
+          // `hidden` never wins against unlayered `.btn { display: inline-flex }`.
+          className="absolute right-0 top-1/2 -translate-y-1/2 shrink-0 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto"
         >
           <Icon iconName={IconName.Close} />
         </Button>

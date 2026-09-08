@@ -95,7 +95,10 @@ pub(super) struct GeneratedModel {
 /// revalidation when no sidecar exists yet.
 #[derive(Debug, Deserialize)]
 pub(crate) struct GeneratedManifest {
-    #[allow(dead_code)] // asserted by the manifest hash test only
+    #[allow(
+        dead_code,
+        reason = "generated provenance is consumed by the manifest contract test only"
+    )]
     pub(crate) sha256: String,
     pub(crate) generated_at: String,
     pub(crate) models_dev_etag: Option<String>,

@@ -1,0 +1,16 @@
+[package]
+name = "nac-process"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-support = []
+
+[dependencies]
+libc.workspace = true
+tokio = { workspace = true, features = ["macros", "process", "rt", "sync", "time"] }
+uuid = { workspace = true, features = ["v4"] }

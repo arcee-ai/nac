@@ -21,7 +21,7 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun, parseStoreTime } from "@/app/lib/format";
-import { findProject } from "@/app/lib/projects";
+import { findProject, primarySessions } from "@/app/lib/projects";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
@@ -53,7 +53,7 @@ export function Breadcrumbs() {
   const project = findProject(projectList?.projects ?? [], projectId);
   // Only the phone's sheet lists them; the desktop popover fetches its own.
   const projectSessions = projectId
-    ? sessions
+    ? primarySessions(sessions)
         .filter((entry) => entry.summary.project_id === projectId)
         .sort((a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at))
     : [];

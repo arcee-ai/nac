@@ -1,28 +1,122 @@
 use std::path::PathBuf;
 
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::sandbox::{FileIoMode, HostPathResolution};
-use crate::tools::mutation::{
-    argument_error, execute_remote, read_error, read_mounted, read_opened_file, required_string,
-};
+#[cfg(not(unix))]
+use crate::tools::mutation::read_opened_file;
+use crate::tools::mutation::{argument_error, execute_remote, read_error, read_mounted};
 use crate::tools::{resolve_workspace_path, ToolResult, ToolRuntime};
+use crate::types::{FunctionDef, ToolDefinition};
 
 const DEFAULT_LIMIT: usize = 2_000;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadInput {
+    path: String,
+    offset: usize,
+    limit: usize,
+    authorized_path_bound: bool,
+}
+
+impl ReadInput {
+    #[allow(dead_code, reason = "native callers use this without model JSON")]
+    pub fn new(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            offset: 0,
+            limit: DEFAULT_LIMIT,
+            authorized_path_bound: false,
+        }
+    }
+
+    pub fn with_range(
+        path: impl Into<String>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Self, ToolResult> {
+        if limit == 0 {
+            return Err(argument_error("'limit' must be greater than zero"));
+        }
+        Ok(Self {
+            path: path.into(),
+            offset,
+            limit,
+            authorized_path_bound: false,
+        })
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub(crate) fn bind_authorized_path(&mut self, path: &str) {
+        self.path = path.to_string();
+        self.authorized_path_bound = true;
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadWireInput {
+    path: String,
+    #[serde(default)]
+    offset: usize,
+    limit: Option<usize>,
+}
+
+pub fn definition(image_read: bool) -> ToolDefinition {
+    ToolDefinition {
+        def_type: "function".to_string(),
+        function: FunctionDef {
+            name: "read".to_string(),
+            description: if image_read {
+                "Read and view UTF-8 text or supported PNG, JPEG, WebP, and static GIF image files. Text results include complete-file revision metadata; pass next_offset to continue text files."
+            } else {
+                "Read UTF-8 file content and return JSON metadata including the complete-file revision. Pass next_offset to continue."
+            }
+            .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to file" },
+                    "offset": { "type": "integer", "minimum": 0, "description": "Zero-based line offset (optional; text files only)" },
+                    "limit": { "type": "integer", "minimum": 1, "description": "Maximum lines to read (optional, default 2000; text files only)" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        },
+    }
+}
+
+pub(crate) fn decode(input: Value) -> Result<ReadInput, ToolResult> {
+    let wire: ReadWireInput = serde_json::from_value(input)
+        .map_err(|error| argument_error(format!("invalid read arguments: {error}")))?;
+    ReadInput::with_range(wire.path, wire.offset, wire.limit.unwrap_or(DEFAULT_LIMIT))
+}
+
+#[cfg(test)]
 pub async fn execute(args: Value, runtime: &ToolRuntime, image_read: bool) -> ToolResult {
-    let path = match required_string(&args, "path") {
-        Ok(path) => path,
+    let input = match decode(args) {
+        Ok(input) => input,
         Err(error) => return error,
     };
-    let offset = match optional_usize(&args, "offset", 0, true) {
-        Ok(offset) => offset,
-        Err(error) => return error,
-    };
-    let limit = match optional_usize(&args, "limit", DEFAULT_LIMIT, false) {
-        Ok(limit) => limit,
-        Err(error) => return error,
-    };
+    execute_native(input, runtime, image_read).await
+}
+
+pub async fn execute_native(
+    input: ReadInput,
+    runtime: &ToolRuntime,
+    image_read: bool,
+) -> ToolResult {
+    let ReadInput {
+        path,
+        offset,
+        limit,
+        authorized_path_bound,
+    } = input;
 
     if runtime.backend.file_io() == FileIoMode::RemoteExec {
         let guest_path = match runtime.backend.resolve_path(&path) {
@@ -59,14 +153,12 @@ pub async fn execute(args: Value, runtime: &ToolRuntime, image_read: bool) -> To
         .await;
     }
 
-    read_local(
-        resolve_workspace_path(runtime, PathBuf::from(&path)),
-        path,
-        offset,
-        limit,
-        image_read,
-    )
-    .await
+    let local_path = resolve_workspace_path(runtime, PathBuf::from(&path));
+    if authorized_path_bound {
+        read_local_bound(local_path, path, offset, limit, image_read).await
+    } else {
+        read_local(local_path, path, offset, limit, image_read).await
+    }
 }
 
 async fn read_local(
@@ -76,45 +168,67 @@ async fn read_local(
     limit: usize,
     image_read: bool,
 ) -> ToolResult {
-    let display_for_task = path_display.clone();
-    match tokio::task::spawn_blocking(move || {
-        let file = std::fs::File::open(path)?;
-        Ok::<_, std::io::Error>(read_opened_file(
-            file,
-            display_for_task,
-            offset,
-            limit,
-            image_read,
-        ))
+    let bound = match tokio::task::spawn_blocking(move || {
+        crate::tools::mutation::resolve_target_path(&path)
     })
     .await
     {
-        Ok(Ok(result)) => result,
-        Ok(Err(error)) => read_error(&path_display, error),
-        Err(error) => argument_error(format!("file read task failed for {path_display}: {error}")),
-    }
+        Ok(Ok(path)) => path,
+        Ok(Err(error)) => return read_error(&path_display, error),
+        Err(error) => return argument_error(format!("file path resolution failed: {error}")),
+    };
+    read_local_bound(bound, path_display, offset, limit, image_read).await
 }
 
-fn optional_usize(
-    args: &Value,
-    key: &str,
-    default: usize,
-    allow_zero: bool,
-) -> Result<usize, ToolResult> {
-    let Some(value) = args.get(key) else {
-        return Ok(default);
-    };
-    let Some(value) = value.as_u64() else {
-        return Err(argument_error(format!(
-            "'{key}' must be a non-negative integer"
-        )));
-    };
-    let value =
-        usize::try_from(value).map_err(|_| argument_error(format!("'{key}' is too large")))?;
-    if value == 0 && !allow_zero {
-        return Err(argument_error(format!("'{key}' must be greater than zero")));
+async fn read_local_bound(
+    path: PathBuf,
+    path_display: String,
+    offset: usize,
+    limit: usize,
+    image_read: bool,
+) -> ToolResult {
+    #[cfg(unix)]
+    {
+        let relative = match path.strip_prefix(std::path::Path::new("/")) {
+            Ok(relative) if !relative.as_os_str().is_empty() => relative.to_path_buf(),
+            _ => {
+                return argument_error(format!(
+                    "safe local file reads require an absolute file path: {path_display}"
+                ))
+            }
+        };
+        read_mounted(
+            PathBuf::from("/"),
+            relative,
+            path_display,
+            offset,
+            limit,
+            image_read,
+        )
+        .await
     }
-    Ok(value)
+    #[cfg(not(unix))]
+    {
+        let display_for_task = path_display.clone();
+        match tokio::task::spawn_blocking(move || {
+            let file = std::fs::File::open(path)?;
+            Ok::<_, std::io::Error>(read_opened_file(
+                file,
+                display_for_task,
+                offset,
+                limit,
+                image_read,
+            ))
+        })
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => read_error(&path_display, error),
+            Err(error) => {
+                argument_error(format!("file read task failed for {path_display}: {error}"))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -228,8 +342,10 @@ mod tests {
 
     #[test]
     fn offset_and_limit_validation_is_strict() {
-        assert!(optional_usize(&json!({"offset":-1}), "offset", 0, true).is_err());
-        assert!(optional_usize(&json!({"limit":0}), "limit", DEFAULT_LIMIT, false).is_err());
-        assert_eq!(optional_usize(&json!({}), "offset", 0, true).unwrap(), 0);
+        assert!(decode(json!({"path":"file", "offset":-1})).is_err());
+        assert!(decode(json!({"path":"file", "limit":0})).is_err());
+        let defaults = decode(json!({"path":"file"})).unwrap();
+        assert_eq!(defaults.offset, 0);
+        assert_eq!(defaults.limit, DEFAULT_LIMIT);
     }
 }

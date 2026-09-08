@@ -19,7 +19,10 @@ pub(super) const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// (`clear_thinking_20251015` with `keep: "all"`). The edit requires
 /// `thinking` to be enabled or adaptive in the same request, so it is
 /// omitted when the effort is `None`.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the provider request builder keeps independently optional wire fields explicit"
+)]
 pub(super) fn anthropic_messages_request(
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,
@@ -133,7 +136,7 @@ fn add_cache_control_to_last_block(message: &mut Value, ttl: Option<&str>) {
     };
 
     // If content is a string, convert to a single-element text block array.
-    if let Some(text) = content.as_str().map(|s| s.to_string()) {
+    if let Some(text) = content.as_str().map(std::string::ToString::to_string) {
         *content = Value::Array(vec![json!({"type": "text", "text": text})]);
     }
 
@@ -145,6 +148,10 @@ fn add_cache_control_to_last_block(message: &mut Value, ttl: Option<&str>) {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "image tool history is rejected before Anthropic text-only result mapping"
+)]
 fn anthropic_messages_from_internal(messages: &[Message]) -> Result<(Option<String>, Vec<Value>)> {
     let mut system_parts = Vec::new();
     let mut anthropic_messages = Vec::new();
@@ -294,7 +301,7 @@ pub(super) fn parse_anthropic_messages_response(
     let content = value
         .get("content")
         .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("Response from {} did not include content blocks", url))?;
+        .ok_or_else(|| anyhow!("Response from {url} did not include content blocks"))?;
 
     let mut text_parts = Vec::new();
     let mut tool_calls = Vec::new();
@@ -320,11 +327,7 @@ pub(super) fn parse_anthropic_messages_response(
                     .get("input")
                     .ok_or_else(|| anyhow!("Anthropic tool_use block missing input"))?;
                 let arguments = serde_json::to_string(input).map_err(|error| {
-                    anyhow!(
-                        "Failed to serialize Anthropic tool_use input for '{}': {}",
-                        id,
-                        error
-                    )
+                    anyhow!("Failed to serialize Anthropic tool_use input for '{id}': {error}")
                 })?;
 
                 tool_calls.push(ToolCall {
@@ -365,16 +368,22 @@ pub(super) fn parse_anthropic_messages_response(
         });
 
     let usage = value.get("usage").map(|u| {
-        let input_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let input_tokens = u
+            .get("input_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         let cache_read = u
             .get("cache_read_input_tokens")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
         let cache_write = u
             .get("cache_creation_input_tokens")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
-        let output_tokens = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let output_tokens = u
+            .get("output_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         TokenUsage {
             input_tokens,
             output_tokens,

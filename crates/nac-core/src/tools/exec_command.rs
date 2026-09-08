@@ -3,7 +3,6 @@
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::terminal::{
     CommandStatus, OutputStream, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
@@ -16,7 +15,7 @@ pub fn exec_command_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "exec_command".to_string(),
-            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for an interactive or persistent terminal; continue it with write_stdin."
+            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for a foreground program that needs a PTY. Opaque commands and broad shells/interpreters require explicit direct-session approval. An accepted PTY can be polled, receive separately approved input on its exact handle, or be explicitly retained with write_stdin."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -38,13 +37,14 @@ pub fn write_stdin_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "write_stdin".to_string(),
-            description: "Send input to a persistent terminal from exec_command tty=true, or poll with empty chars. The returned preview cursor advances without deleting retained output; call read_command_output with its output_id and an older cursor to recover omitted text. Supports <RET>, <C-c>, <C-d>, <TAB>, <BSPC>, and arrow-key notation."
+            description: "Continue a foreground terminal from exec_command tty=true. Empty chars only observe; nonempty chars are a separately approved mutation of the exact process-local terminal handle and may be interpreted by that process as commands. Such approval is once-only and cannot create a reusable grant. Set retain=true with empty chars to transition a live terminal into a session-owned background handle that survives the end of a direct run. The returned preview cursor advances without deleting retained output; call read_command_output with its output_id and an older cursor to recover omitted text."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "session_id": { "type": "string", "description": "Session ID returned by exec_command" },
-                    "chars": { "type": "string", "description": "Input or key notation; empty polls output" },
+                    "chars": { "type": "string", "description": "Empty polls output without mutation. Nonempty input is sent only after a separate once-only approval bound to this exact terminal handle; key tokens such as <RET> are supported." },
+                    "retain": { "type": "boolean", "description": "Explicitly retain this live terminal across direct run boundaries (default: false)" },
                     "yield_time_ms": { "type": "number", "description": "Maximum poll duration in milliseconds (default: 500, max: 3600000)" },
                     "max_output_chars": { "type": "number", "description": "Concise preview budget (default: 8000)" }
                 },
@@ -89,6 +89,11 @@ pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> ToolRe
 }
 
 async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Result<(String, bool)> {
+    if runtime.command_cancellation.is_cancelled() {
+        return Err(anyhow!(
+            "run was cancelled before the command process could start"
+        ));
+    }
     let manager = &runtime.terminal_manager;
     let cmd = require_str(args, "cmd")?;
     let tty = args.get("tty").and_then(Value::as_bool).unwrap_or(false);
@@ -103,60 +108,70 @@ async fn execute_exec_command_inner(args: &Value, runtime: &ToolRuntime) -> Resu
         .and_then(Value::as_u64)
         .unwrap_or(8_000) as usize;
     let cwd = resolve_command_cwd(args, runtime)?;
+    let command_environment = runtime.command_environment_snapshot().await?;
+    let extra_envs = command_environment
+        .iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect::<Vec<_>>();
 
     if !tty {
         let output = manager
-            .exec_one_shot_managed(
-                cmd,
+            .exec_one_shot_with_environment(
+                &cmd,
                 cwd,
                 120,
                 40,
                 yield_ms,
                 max_output,
-                Arc::clone(&runtime.backend),
-                runtime.command_cancellation.clone(),
+                &runtime.backend,
+                Some(&runtime.command_cancellation),
+                &extra_envs,
             )
             .await;
+        if let Some(output_id) = output.output_id.as_deref() {
+            runtime.remember_output_environment(output_id, command_environment.clone());
+        }
         let is_error = output.status == CommandStatus::SpawnError;
-        return Ok((serde_json::to_string_pretty(&output)?, is_error));
+        return Ok((
+            command_environment.redact(&serde_json::to_string_pretty(&output)?),
+            is_error,
+        ));
     }
 
-    if runtime.command_cancellation.is_cancelled() {
-        return Err(anyhow!("terminal command cancelled"));
-    }
-
-    let session_name = make_session_name();
+    let session_name = manager.next_session_name();
     manager
-        .create(session_name.clone(), cwd, 120, 40, &runtime.backend)
+        .create_with_environment(
+            session_name.clone(),
+            &cmd,
+            cwd,
+            120,
+            40,
+            &runtime.backend,
+            Some(&runtime.command_cancellation),
+            &extra_envs,
+        )
         .await?;
-    let output = if cmd.trim().is_empty() {
-        manager
-            .write_stdin(
-                &session_name,
-                "",
-                200,
-                max_output,
-                Some(&runtime.command_cancellation),
-            )
-            .await?
-    } else {
-        manager
-            .write_stdin(
-                &session_name,
-                &format!("{cmd}\r"),
-                yield_ms,
-                max_output,
-                Some(&runtime.command_cancellation),
-            )
-            .await?
-    };
-    Ok((serde_json::to_string_pretty(&output)?, false))
+    let output = manager
+        .write_stdin(
+            &session_name,
+            "",
+            yield_ms,
+            max_output,
+            Some(&runtime.command_cancellation),
+        )
+        .await?;
+    runtime.remember_output_environment(&output.output_id, command_environment.clone());
+    Ok((
+        command_environment.redact(&serde_json::to_string_pretty(&output)?),
+        false,
+    ))
 }
 
 pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolResult {
-    let result = async {
+    let result: Result<_> = async {
         let session_id = require_str(args, "session_id")?;
         let chars = args.get("chars").and_then(Value::as_str).unwrap_or("");
+        let retain = args.get("retain").and_then(Value::as_bool).unwrap_or(false);
         let yield_ms = clamp_yield(
             args.get("yield_time_ms")
                 .and_then(Value::as_u64)
@@ -166,12 +181,7 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolRes
             .get("max_output_chars")
             .and_then(Value::as_u64)
             .unwrap_or(8_000) as usize;
-        if runtime.terminal_manager.get(&session_id).await.is_none() {
-            return Err(anyhow!(
-                "terminal session '{session_id}' not found - it may have been closed or expired"
-            ));
-        }
-        runtime
+        let mut output = runtime
             .terminal_manager
             .write_stdin(
                 &session_id,
@@ -180,15 +190,23 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolRes
                 max_output,
                 Some(&runtime.command_cancellation),
             )
-            .await
+            .await?;
+        if retain && output.session_name.is_some() {
+            runtime
+                .terminal_manager
+                .retain_with_cancellation(&session_id, Some(&runtime.command_cancellation))
+                .await?;
+            output.retained = true;
+        }
+        let rendered = serde_json::to_string_pretty(&output)?;
+        let redacted = runtime.redact_output(&output.output_id, &rendered)?;
+        Ok(redacted)
     }
     .await;
 
     match result {
-        Ok(output) => ToolResult {
-            content: (serde_json::to_string_pretty(&output)
-                .unwrap_or_else(|error| format!("Error serializing terminal output: {error}")))
-            .into(),
+        Ok(redacted) => ToolResult {
+            content: redacted.into(),
             is_error: false,
         },
         Err(error) => ToolResult {
@@ -210,7 +228,8 @@ pub fn execute_read_command_output(args: &Value, runtime: &ToolRuntime) -> ToolR
         let page = runtime
             .terminal_manager
             .read_output(&output_id, stream, offset, limit)?;
-        Ok(serde_json::to_string_pretty(&page)?)
+        let rendered = serde_json::to_string_pretty(&page)?;
+        runtime.redact_output(&output_id, &rendered)
     })();
 
     match result {
@@ -243,392 +262,6 @@ fn clamp_yield(ms: u64) -> u64 {
     ms.min(MAX_YIELD_MS)
 }
 
-fn make_session_name() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(1);
-    format!("shell-{}", COUNTER.fetch_add(1, Ordering::SeqCst))
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::events::EventSink;
-    use serde_json::json;
-    use std::process::Command;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
-
-    #[cfg(unix)]
-    use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-    #[cfg(unix)]
-    use std::io::{Read, Write};
-    #[cfg(unix)]
-    use std::net::TcpListener;
-    #[cfg(unix)]
-    use std::time::{Duration, Instant};
-
-    fn test_runtime() -> ToolRuntime {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        ToolRuntime {
-            config_cwd: cwd.clone(),
-            workspace_cwd: cwd.clone(),
-            store_path: PathBuf::new(),
-            session_id: None,
-            worker_executable: None,
-            active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
-            event_sink: EventSink::none(),
-            backend: crate::sandbox::execution_backend_from_sandbox(None, &cwd),
-            mcp: None,
-            skills: None,
-            terminal_manager: crate::terminal::TerminalManager::new(),
-            active_tools: Arc::new(crate::tools::ActiveToolRegistry::default()),
-            command_cancellation: crate::tools::ThreadCancellation::default(),
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
-            light_client: None,
-        }
-    }
-
-    fn unique_temp_dir(label: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("nac_exec_{label}_{unique}"));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    const PROMPT_POLICY_COMMAND: &str =
-        "printf '%s|%s|%s\n' \"$GIT_TERMINAL_PROMPT\" \"$GCM_INTERACTIVE\" \"$GH_PROMPT_DISABLED\"";
-
-    #[tokio::test]
-    async fn prompt_policy_process_helper() {
-        let Some(result_path) = std::env::var_os("NAC_PROMPT_POLICY_RESULT") else {
-            return;
-        };
-
-        let runtime = test_runtime();
-        let one_shot = execute_exec_command(
-            &json!({
-                "cmd": PROMPT_POLICY_COMMAND,
-                "tty": false,
-                "yield_time_ms": 2000
-            }),
-            &runtime,
-        )
-        .await;
-        assert!(!one_shot.is_error, "{}", one_shot.content);
-        let pty = execute_exec_command(
-            &json!({
-                "cmd": PROMPT_POLICY_COMMAND,
-                "tty": true,
-                "yield_time_ms": 2000
-            }),
-            &runtime,
-        )
-        .await;
-        assert!(!pty.is_error, "{}", pty.content);
-
-        let one_shot: Value =
-            serde_json::from_str(one_shot.content.as_text().expect("text tool result")).unwrap();
-        let pty: Value =
-            serde_json::from_str(pty.content.as_text().expect("text tool result")).unwrap();
-        runtime.terminal_manager.remove_all().await;
-        std::fs::write(
-            result_path,
-            serde_json::to_vec(&json!({ "one_shot": one_shot, "pty": pty })).unwrap(),
-        )
-        .unwrap();
-    }
-
-    fn run_prompt_policy_process_helper() -> Value {
-        let dir = unique_temp_dir("prompt_policy");
-        let result_path = dir.join("result.json");
-        let output = Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "tools::exec_command::tests::prompt_policy_process_helper",
-                "--nocapture",
-            ])
-            .env("NAC_PROMPT_POLICY_RESULT", &result_path)
-            .env("GIT_TERMINAL_PROMPT", "sentinel-git")
-            .env("GCM_INTERACTIVE", "sentinel-gcm")
-            .env("GH_PROMPT_DISABLED", "sentinel-gh")
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "prompt-policy helper failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        let result = serde_json::from_slice(&std::fs::read(&result_path).unwrap()).unwrap();
-        let _ = std::fs::remove_dir_all(dir);
-        result
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn git_prompt_process_helper() {
-        let Some(result_path) = std::env::var_os("NAC_GIT_PROMPT_RESULT") else {
-            return;
-        };
-        let prompt_override = if std::env::var_os("NAC_GIT_PROMPT_ENABLE").is_some() {
-            "GIT_TERMINAL_PROMPT=1 "
-        } else {
-            ""
-        };
-        let cmd = format!(
-            "unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy GIT_PROXY_COMMAND; \
-             export NO_PROXY='*' no_proxy='*' GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-             GIT_CONFIG_COUNT=0 GIT_ASKPASS='' SSH_ASKPASS='' LANG=C LC_ALL=C LANGUAGE=''; \
-             {prompt_override}git -c credential.helper= -c core.askPass= -c http.proxy= \
-             ls-remote \"$NAC_GIT_PROMPT_URL\""
-        );
-        let result = execute_exec_command(
-            &json!({ "cmd": cmd, "tty": false, "yield_time_ms": 1000 }),
-            &test_runtime(),
-        )
-        .await;
-        std::fs::write(
-            result_path,
-            result.content.as_text().expect("text tool result"),
-        )
-        .unwrap();
-    }
-
-    #[cfg(unix)]
-    fn run_git_prompt_case(enable_prompt: bool) -> (Value, String) {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let url = format!("http://{}/repo", listener.local_addr().unwrap());
-        let server = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            loop {
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        stream
-                            .set_read_timeout(Some(Duration::from_secs(1)))
-                            .unwrap();
-                        let mut request = [0u8; 4096];
-                        let _ = stream.read(&mut request);
-                        stream
-                            .write_all(
-                                b"HTTP/1.1 401 Unauthorized\r\n\
-                                  WWW-Authenticate: Basic realm=\"nac-test\"\r\n\
-                                  Content-Length: 0\r\n\
-                                  Connection: close\r\n\r\n",
-                            )
-                            .unwrap();
-                        return true;
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        if Instant::now() >= deadline {
-                            return false;
-                        }
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(_) => return false,
-                }
-            }
-        });
-
-        let dir = unique_temp_dir(if enable_prompt {
-            "git_prompt_enabled"
-        } else {
-            "git_prompt_disabled"
-        });
-        let result_path = dir.join("result.json");
-        let pty_pair = NativePtySystem::default()
-            .openpty(PtySize {
-                rows: 24,
-                cols: 120,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .unwrap();
-        let mut reader = pty_pair.master.try_clone_reader().unwrap();
-        let capture = std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let mut buffer = [0u8; 4096];
-            loop {
-                match reader.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(read) => bytes.extend_from_slice(&buffer[..read]),
-                    Err(error) if error.raw_os_error() == Some(libc::EIO) => break,
-                    Err(error) => panic!("failed to read helper PTY: {error}"),
-                }
-            }
-            String::from_utf8_lossy(&bytes).into_owned()
-        });
-
-        let mut command = CommandBuilder::new(std::env::current_exe().unwrap());
-        command.args([
-            "--exact",
-            "tools::exec_command::tests::git_prompt_process_helper",
-            "--nocapture",
-        ]);
-        command.env("NAC_GIT_PROMPT_RESULT", &result_path);
-        command.env("NAC_GIT_PROMPT_URL", &url);
-        if enable_prompt {
-            command.env("NAC_GIT_PROMPT_ENABLE", "1");
-        }
-        let mut child = pty_pair.slave.spawn_command(command).unwrap();
-        drop(pty_pair.slave);
-
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let status = loop {
-            if let Some(status) = child.try_wait().unwrap() {
-                break Some(status);
-            }
-            if Instant::now() >= deadline {
-                child.kill().unwrap();
-                let _ = child.wait();
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        drop(pty_pair.master);
-        let terminal_output = capture.join().unwrap();
-        assert!(server.join().unwrap(), "Git never reached the HTTP fixture");
-        let status = status
-            .unwrap_or_else(|| panic!("Git prompt helper hung; PTY output={terminal_output}"));
-        assert!(
-            status.success(),
-            "Git prompt helper failed with {}; PTY output={terminal_output}",
-            status.exit_code()
-        );
-
-        let result = serde_json::from_slice(&std::fs::read(&result_path).unwrap()).unwrap();
-        let _ = std::fs::remove_dir_all(dir);
-        (result, terminal_output)
-    }
-
-    fn command_preview(value: &Value) -> String {
-        format!(
-            "{}{}",
-            value["stdout_preview"].as_str().unwrap_or_default(),
-            value["stderr_preview"].as_str().unwrap_or_default()
-        )
-    }
-
-    #[test]
-    fn worker_definitions_explain_recovery() {
-        assert!(exec_command_definition()
-            .function
-            .description
-            .contains("read_command_output"));
-        assert!(exec_command_definition()
-            .function
-            .description
-            .contains("non-interactively"));
-        assert!(exec_command_definition()
-            .function
-            .description
-            .contains("terminal prompts are disabled"));
-        assert_eq!(
-            read_command_output_definition().function.name,
-            "read_command_output"
-        );
-    }
-
-    #[test]
-    fn one_shot_overrides_inherited_prompt_policy() {
-        let result = run_prompt_policy_process_helper();
-        assert_eq!(result["one_shot"]["stdout_preview"], "0|0|1\n");
-    }
-
-    #[test]
-    fn pty_preserves_inherited_prompt_policy() {
-        let result = run_prompt_policy_process_helper();
-        let output = result["pty"]["content_preview"].as_str().unwrap();
-        assert!(
-            output.contains("sentinel-git|sentinel-gcm|sentinel-gh"),
-            "got: {output}"
-        );
-        assert!(result["pty"]["session_name"].is_string());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn git_http_auth_prompt_fails_fast_off_server_tty() {
-        let (prompted, prompted_terminal) = run_git_prompt_case(true);
-        assert!(
-            prompted_terminal.contains("Username for"),
-            "negative control did not prompt on the controlling terminal: {prompted_terminal}"
-        );
-        assert_eq!(prompted["status"], "timed_out");
-        assert!(prompted["exit_code"].is_null());
-
-        let (blocked, blocked_terminal) = run_git_prompt_case(false);
-        assert!(
-            !blocked_terminal.contains("Username for"),
-            "prompt leaked to the controlling terminal: {blocked_terminal}"
-        );
-        let output = command_preview(&blocked);
-        assert!(
-            output.contains("terminal prompts disabled"),
-            "Git did not report prompt suppression: {blocked}"
-        );
-        assert_eq!(blocked["status"], "completed");
-        assert!(blocked["exit_code"].as_i64().is_some_and(|code| code != 0));
-    }
-
-    #[tokio::test]
-    async fn short_command_is_complete_without_followup() {
-        let result = execute_exec_command(&json!({"cmd": "printf hello"}), &test_runtime()).await;
-        assert!(!result.is_error, "{}", result.content);
-        let value: Value =
-            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
-        assert_eq!(value["status"], "completed");
-        assert_eq!(value["stdout_preview"], "hello");
-        assert_eq!(value["truncated"], false);
-        assert!(value["output_id"].as_str().is_some());
-    }
-
-    #[tokio::test]
-    async fn nonzero_exit_is_completed_not_tool_error() {
-        let result =
-            execute_exec_command(&json!({"cmd": "printf fail >&2; exit 7"}), &test_runtime()).await;
-        assert!(!result.is_error);
-        let value: Value =
-            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
-        assert_eq!(value["status"], "completed");
-        assert_eq!(value["exit_code"], 7);
-        assert_eq!(value["stderr_preview"], "fail");
-    }
-
-    #[tokio::test]
-    async fn retained_output_is_pageable() {
-        let runtime = test_runtime();
-        let result = execute_exec_command(
-            &json!({"cmd": "python3 -c 'print(\"x\"*20000)'", "max_output_chars": 100}),
-            &runtime,
-        )
-        .await;
-        let value: Value =
-            serde_json::from_str(result.content.as_text().expect("text tool result")).unwrap();
-        assert_eq!(value["truncated"], true);
-        let output_id = value["output_id"].as_str().unwrap();
-        let page = execute_read_command_output(
-            &json!({"output_id": output_id, "stream": "stdout", "offset": 10_000, "limit": 64}),
-            &runtime,
-        );
-        assert!(!page.is_error, "{}", page.content);
-        let page_value: Value =
-            serde_json::from_str(page.content.as_text().expect("text tool result")).unwrap();
-        assert_eq!(page_value["content"].as_str().unwrap().len(), 64);
-    }
-
-    #[test]
-    fn invalid_stream_is_a_tool_error() {
-        let result = execute_read_command_output(
-            &json!({"output_id": "missing", "stream": "wat"}),
-            &test_runtime(),
-        );
-        assert!(result.is_error);
-        assert!(result.content.contains("invalid stream"));
-    }
-}
+#[path = "exec_command_tests.rs"]
+mod tests;

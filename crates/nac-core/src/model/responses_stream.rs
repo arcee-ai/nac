@@ -152,7 +152,7 @@ fn responses_event_is_retryable(event: &Value, message: &str) -> bool {
         .chain([event.get("code")])
         .flatten()
         .filter_map(Value::as_str)
-        .map(|value| value.to_ascii_lowercase())
+        .map(str::to_ascii_lowercase)
         .any(|value| RETRYABLE_CODES.contains(&value.as_str()));
     if structured_retry {
         return true;

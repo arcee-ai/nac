@@ -362,6 +362,7 @@ async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events(
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
+            session_behavior: None,
             store_path: path,
             session_id: Some("worker-session".to_string()),
             orchestrator_compaction_threshold: Some(1),
@@ -381,6 +382,7 @@ async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events(
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
+            permission_rules: Vec::new(),
         },
     )
     .unwrap();

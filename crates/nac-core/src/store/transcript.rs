@@ -127,7 +127,7 @@ pub fn is_transcript_log_payload(event_json: &str) -> bool {
         .is_some_and(|value| {
             value
                 .get(TRANSCRIPT_PAYLOAD_KEY)
-                .is_some_and(|entry| entry.is_object())
+                .is_some_and(serde_json::Value::is_object)
         })
 }
 
@@ -388,6 +388,30 @@ fn append_messages_in_transaction(
     Ok(last_inserted_id)
 }
 
+fn mark_inbox_item_delivered(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+    item_id: i64,
+    run_id: &str,
+    expected_content: &str,
+) -> Result<()> {
+    let now = now_utc();
+    let changed = transaction.execute(
+        "UPDATE session_inbox
+         SET status = 'delivered', delivered_run_id = ?1, delivered_at = ?2,
+             updated_at = ?2, version = version + 1
+         WHERE session_id = ?3 AND id = ?4 AND status = 'pending'
+           AND content = ?5",
+        params![run_id, now, session_id, item_id, expected_content],
+    )?;
+    if changed != 1 {
+        return Err(anyhow!(
+            "inbox item {item_id} was changed or delivered before its transcript commit"
+        ));
+    }
+    Ok(())
+}
+
 impl TranscriptLogWriter {
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
@@ -419,11 +443,50 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         append_messages_in_transaction(&transaction, session_id, start_idx, messages)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Append a claimed orchestrator/thread steering batch and acknowledge
+    /// every steering row in the same transaction. Either both the canonical
+    /// User messages and delivered statuses commit, or neither does.
+    pub fn append_claimed_thread_steering(
+        &self,
+        session_id: &str,
+        dispatch_id: &str,
+        steering_ids: &[i64],
+        start_idx: u64,
+        messages: &[Message],
+    ) -> Result<()> {
+        if steering_ids.len() != messages.len() {
+            return Err(anyhow!(
+                "steering acknowledgement/message count mismatch: {} ids for {} messages",
+                steering_ids.len(),
+                messages.len()
+            ));
+        }
+        if messages.is_empty() {
+            return Ok(());
+        }
+        let _operation = self
+            .operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut connection = open_runtime_connection(&self.store_path)?;
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        append_messages_in_transaction(&transaction, session_id, start_idx, messages)?;
+        super::steering::acknowledge_thread_steering_batch_with_connection(
+            &transaction,
+            steering_ids,
+            session_id,
+            dispatch_id,
+        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -437,13 +500,40 @@ impl TranscriptLogWriter {
         message: &Message,
         run_id: &str,
     ) -> Result<()> {
+        self.append_run_prompt_inner(session_id, idx, message, run_id, None)
+    }
+
+    /// Deliver one pending inbox item at the same commit point as the run's
+    /// canonical User prompt and recovery obligation.
+    pub fn append_inbox_run_prompt(
+        &self,
+        session_id: &str,
+        idx: u64,
+        message: &Message,
+        run_id: &str,
+        inbox_item_id: i64,
+    ) -> Result<()> {
+        self.append_run_prompt_inner(session_id, idx, message, run_id, Some(inbox_item_id))
+    }
+
+    fn append_run_prompt_inner(
+        &self,
+        session_id: &str,
+        idx: u64,
+        message: &Message,
+        run_id: &str,
+        inbox_item_id: Option<i64>,
+    ) -> Result<()> {
         if !matches!(message, Message::User { .. }) {
             return Err(anyhow!("a run prompt must be a user transcript message"));
         }
+        let Message::User { content } = message else {
+            unreachable!()
+        };
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -454,8 +544,69 @@ impl TranscriptLogWriter {
             std::slice::from_ref(message),
         )?;
         replace_with_active_run(&transaction, session_id, run_id, submitted_message_id)?;
+        if let Some(inbox_item_id) = inbox_item_id {
+            mark_inbox_item_delivered(&transaction, session_id, inbox_item_id, run_id, content)?;
+        }
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Consume every steer targeted at `run_id` that won admission before
+    /// this model boundary. Status transition and canonical transcript append
+    /// share one IMMEDIATE transaction; a later steer remains pending for the
+    /// next boundary or idle successor.
+    pub fn append_pending_inbox_steers(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        start_idx: u64,
+    ) -> Result<Vec<SessionInboxRecord>> {
+        let _operation = self
+            .operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut connection = open_runtime_connection(&self.store_path)?;
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let records = {
+            let mut statement = transaction.prepare(&format!(
+                "SELECT {INBOX_RECORD_COLUMNS} FROM session_inbox
+                 WHERE session_id = ?1 AND delivery = 'steer'
+                   AND status = 'pending' AND target_run_id = ?2
+                 ORDER BY id ASC"
+            ))?;
+            let records = statement
+                .query_map(params![session_id, run_id], row_to_inbox_record)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            records
+        };
+        if records.is_empty() {
+            transaction.commit()?;
+            return Ok(Vec::new());
+        }
+        let messages = records
+            .iter()
+            .map(|record| Message::User {
+                content: record.content.clone(),
+            })
+            .collect::<Vec<_>>();
+        append_messages_in_transaction(&transaction, session_id, start_idx, &messages)?;
+        for record in &records {
+            mark_inbox_item_delivered(
+                &transaction,
+                session_id,
+                record.id,
+                run_id,
+                &record.content,
+            )?;
+        }
+        transaction.commit()?;
+        records
+            .into_iter()
+            .map(|record| {
+                load_session_inbox_item_with_connection(&connection, session_id, record.id)
+            })
+            .collect()
     }
 
     /// Read the full log tail relative to a snapshot blob of `blob_len`
@@ -493,7 +644,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = open_runtime_connection(&self.store_path)?;
         let tail_len = tail_len_of(&connection, session_id, blob_len)?;
         if tail_start >= tail_len || limit == 0 {
@@ -560,7 +711,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = open_runtime_connection(&self.store_path)?;
         let tail_len = tail_len_of(&connection, session_id, blob_len)?;
         if tail_start >= tail_len || limit == 0 {
@@ -595,7 +746,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = open_runtime_connection(&self.store_path)?;
         let messages_json: String = connection.query_row(
             "SELECT messages_json FROM sessions WHERE session_id = ?1",
@@ -612,7 +763,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = open_runtime_connection(&self.store_path)?;
         let mut statement = connection.prepare(
             "SELECT id, event_json
@@ -649,7 +800,10 @@ impl TranscriptLogWriter {
     /// index mismatch, that physical row and every later reserved row are
     /// deleted in the same IMMEDIATE transaction that refreshes the session
     /// summary. Malformed or foreign reserved rows fail before any mutation.
-    #[allow(clippy::type_complexity)]
+    #[expect(
+        clippy::type_complexity,
+        reason = "the repair result keeps rows, repaired range, and visible-count metadata atomic"
+    )]
     pub fn read_tail_repairing_gap(
         &self,
         session_id: &str,
@@ -658,7 +812,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -738,7 +892,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -793,7 +947,7 @@ impl TranscriptLogWriter {
         let _operation = self
             .operation
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1162,6 +1316,148 @@ mod tests {
         assert_eq!(summary.visible_message_count, 2);
         assert_eq!(summary.last_user_prompt.as_deref(), Some("tail"));
 
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn steering_acknowledgement_and_transcript_append_are_atomic() {
+        let path = temp_store_path("steering_atomic");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        let steer = queue_thread_steering(
+            &path,
+            "session",
+            ORCHESTRATOR_STEERING_TARGET,
+            "dispatch",
+            "keep going",
+        )
+        .unwrap();
+        assert_eq!(
+            claim_thread_steering(&path, "session", "dispatch")
+                .unwrap()
+                .len(),
+            1
+        );
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        let messages = [Message::User {
+            content: "keep going".to_string(),
+        }];
+
+        writer
+            .append_claimed_thread_steering("session", "dispatch", &[steer.id], 1, &messages)
+            .unwrap_err();
+        assert!(writer.read_from("session", 0).unwrap().is_empty());
+        assert_eq!(
+            list_thread_steering(&path, "session").unwrap()[0].status,
+            "claimed"
+        );
+
+        writer
+            .append_claimed_thread_steering("session", "dispatch", &[steer.id], 0, &messages)
+            .unwrap();
+        assert_eq!(writer.read_from("session", 0).unwrap().len(), 1);
+        assert_eq!(
+            list_thread_steering(&path, "session").unwrap()[0].status,
+            "delivered"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn inbox_delivery_and_transcript_commit_are_atomic_for_steers_and_prompts() {
+        let path = temp_store_path("inbox_atomic");
+        initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        let steer = create_session_inbox_item(
+            &path,
+            "session",
+            InboxDelivery::Steer,
+            "steer now",
+            Some("run-a"),
+            None,
+        )
+        .unwrap();
+        let queued = create_session_inbox_item(
+            &path,
+            "session",
+            InboxDelivery::Queue,
+            "next prompt",
+            None,
+            None,
+        )
+        .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+
+        let delivered = writer
+            .append_pending_inbox_steers("session", "run-a", 0)
+            .unwrap();
+        assert_eq!(
+            delivered.iter().map(|record| record.id).collect::<Vec<_>>(),
+            vec![steer.id]
+        );
+        assert!(writer
+            .append_pending_inbox_steers("session", "run-a", 1)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            load_session_inbox_item(&path, "session", steer.id)
+                .unwrap()
+                .status,
+            InboxStatus::Delivered
+        );
+        assert_eq!(
+            load_session_inbox_item(&path, "session", queued.id)
+                .unwrap()
+                .status,
+            InboxStatus::Pending
+        );
+
+        writer
+            .append_inbox_run_prompt(
+                "session",
+                1,
+                &Message::User {
+                    content: "next prompt".to_string(),
+                },
+                "run-b",
+                queued.id,
+            )
+            .unwrap();
+        let queued = load_session_inbox_item(&path, "session", queued.id).unwrap();
+        assert_eq!(queued.status, InboxStatus::Delivered);
+        assert_eq!(queued.delivered_run_id.as_deref(), Some("run-b"));
+        assert_eq!(
+            load_run_recovery(&path, "session").unwrap().unwrap().run_id,
+            "run-b"
+        );
+
+        let mismatch = create_session_inbox_item(
+            &path,
+            "session",
+            InboxDelivery::Queue,
+            "canonical",
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(writer
+            .append_inbox_run_prompt(
+                "session",
+                2,
+                &Message::User {
+                    content: "different".to_string(),
+                },
+                "run-c",
+                mismatch.id,
+            )
+            .is_err());
+        assert_eq!(writer.read_from("session", 0).unwrap().len(), 2);
+        assert_eq!(
+            load_session_inbox_item(&path, "session", mismatch.id)
+                .unwrap()
+                .status,
+            InboxStatus::Pending
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

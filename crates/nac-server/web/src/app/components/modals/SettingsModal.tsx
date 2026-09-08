@@ -35,9 +35,9 @@ import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
-import { useDeviceLogin } from "@/app/hooks/useDeviceLogin";
+import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
-import { useManagedSignIn } from "@/app/hooks/useManagedSignIn";
+import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
 import { isGeneratedCredentialName, MASKED_KEY, type Validation } from "@/app/lib/apiKey";
 import {
   inheritPrimaryCredential,
@@ -375,7 +375,7 @@ function SettingsForm({
           backend: record.backend as BackendKind,
           model: record.model,
           base_url: record.base_url,
-          api_key_env: record.api_key_env,
+          api_key_env: record.api_key_env ?? null,
         };
       } else {
         selected = selection;

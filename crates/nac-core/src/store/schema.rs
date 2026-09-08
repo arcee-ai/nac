@@ -3,15 +3,28 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-// 17 adds session_forks (conversation clones plus deleted tombstones). 16
-// adds project presentation columns (pin, order, version). 15 added projects
+// 24 adds session_forks (conversation clones plus deleted tombstones). 22 adds
+// durable direct-parent managed orchestrator relationships. 21 adds
+// durable traditional child sessions. 20 added durable direct-session
+// goals. 19 added revision/backend-bound direct permission grants. 18 added the durable
+// direct-session inbox. 17 added the immutable session
+// behavior discriminator and is also the
+// downgrade barrier: older binaries reject the future schema instead of
+// reconstructing a direct session as an orchestrator. 16 added project
+// presentation columns (pin, order, version). 15 added projects
 // and their one-to-many session links. 14 added the bounded interrupted-run
 // recovery row. 13 added the light-model columns (`light_model_json` on both
 // `sessions` and `model_configurations`) — `open_runtime_connection` returns
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 17;
+const STORE_SCHEMA_VERSION: i64 = 24;
+
+/// Current durable-store schema version for credential-free readiness and
+/// operational status reporting.
+pub fn schema_version() -> i64 {
+    STORE_SCHEMA_VERSION
+}
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -46,8 +59,14 @@ struct ConnectionCapacity {
 
 impl ConnectionCapacity {
     fn new(process_limit: usize, store_limit: usize) -> Arc<Self> {
-        assert!(process_limit > 0);
-        assert!(store_limit > 0);
+        assert!(
+            process_limit > 0,
+            "SQLite process connection limit must be positive"
+        );
+        assert!(
+            store_limit > 0,
+            "SQLite store connection limit must be positive"
+        );
         Arc::new(Self {
             process_limit,
             store_limit,
@@ -61,7 +80,7 @@ impl ConnectionCapacity {
         let mut state = self
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
             let store_count = state.by_store.get(store_path).copied().unwrap_or(0);
             if state.total < self.process_limit && store_count < self.store_limit {
@@ -80,7 +99,7 @@ impl ConnectionCapacity {
             let (next, wait) = self
                 .available
                 .wait_timeout(state, remaining)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             state = next;
             if wait.timed_out() {
                 let store_count = state.by_store.get(store_path).copied().unwrap_or(0);
@@ -110,12 +129,16 @@ struct ConnectionPermit {
 }
 
 impl Drop for ConnectionPermit {
+    #[expect(
+        clippy::expect_used,
+        reason = "permit construction and drop maintain exact per-store and total connection counts"
+    )]
     fn drop(&mut self) {
         let mut state = self
             .capacity
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.total = state
             .total
             .checked_sub(1)
@@ -368,8 +391,8 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | STORE_SCHEMA_VERSION => {
-        }
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
+        | 21 | 22 | 23 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -421,6 +444,12 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
     // Light worker model; NULL keeps single-model behavior, so legacy rows
     // load unchanged.
     ensure_column(&transaction, "sessions", "light_model_json", "TEXT")?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "behavior",
+        "TEXT NOT NULL DEFAULT 'orchestrator' CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'))",
+    )?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
     }
@@ -448,6 +477,31 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
     create_projects_tables(&transaction)?;
     create_ssh_configurations_table(&transaction)?;
     create_session_run_recovery_table(&transaction)?;
+    ensure_column(
+        &transaction,
+        "session_run_recovery",
+        "terminal_disposition",
+        "TEXT CHECK (terminal_disposition IN ('completed', 'cancelled'))",
+    )?;
+    create_session_inbox_table(&transaction)?;
+    create_permission_grants_table(&transaction)?;
+    create_session_goals_table(&transaction)?;
+    create_traditional_children_table(&transaction)?;
+    create_managed_orchestrators_table(&transaction)?;
+    // Execution mode records how a generation was admitted and must remain
+    // immutable. Deletion suppresses completion delivery independently.
+    ensure_column(
+        &transaction,
+        "traditional_children",
+        "completion_suppressed",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
+    )?;
+    ensure_column(
+        &transaction,
+        "managed_orchestrators",
+        "completion_suppressed",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
+    )?;
     create_session_forks_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
@@ -507,6 +561,8 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
          );
          CREATE TABLE IF NOT EXISTS sessions (
              session_id TEXT PRIMARY KEY,
+             behavior TEXT NOT NULL DEFAULT 'orchestrator'
+                 CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator')),
              cwd TEXT NOT NULL,
              store_path TEXT NOT NULL,
              model TEXT NOT NULL,
@@ -1020,7 +1076,8 @@ fn rebuild_session_forks_without_source_fk(conn: &Connection) -> Result<()> {
 
 /// One content-free recovery obligation per session. The submitted transcript
 /// row remains the unique source for the prompt; this table only says which
-/// run owns it and whether that run is active, interrupted, or failed.
+/// run owns it and whether that run is active, interrupted, failed, or has a
+/// canonical terminal result whose relationship settlement is still owed.
 fn create_session_run_recovery_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_run_recovery (
@@ -1029,8 +1086,220 @@ fn create_session_run_recovery_table(conn: &Connection) -> Result<()> {
              run_id TEXT NOT NULL CHECK (length(trim(run_id)) > 0),
              submitted_message_id INTEGER NOT NULL
                  REFERENCES thread_events(id) ON DELETE CASCADE,
-             status TEXT NOT NULL CHECK (status IN ('active', 'interrupted', 'failed'))
+             status TEXT NOT NULL CHECK (status IN ('active', 'interrupted', 'failed')),
+             terminal_disposition TEXT
+                 CHECK (terminal_disposition IN ('completed', 'cancelled'))
          );",
+    )?;
+    Ok(())
+}
+
+/// Durable user/child input for persistent direct sessions. Pending rows are
+/// editable; delivery wins only in the same transaction that appends their
+/// canonical User message to the transcript.
+fn create_session_inbox_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_inbox (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             delivery TEXT NOT NULL CHECK (delivery IN ('steer', 'queue')),
+             status TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'delivered', 'cancelled')),
+             content TEXT NOT NULL CHECK (length(trim(content)) > 0),
+             target_run_id TEXT,
+             client_id TEXT,
+             delivered_run_id TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             delivered_at TEXT,
+             cancelled_at TEXT,
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+             CHECK (delivery = 'steer' OR target_run_id IS NULL),
+             CHECK (
+                 (status = 'pending' AND delivered_run_id IS NULL AND delivered_at IS NULL AND cancelled_at IS NULL)
+                 OR (status = 'delivered' AND delivered_run_id IS NOT NULL AND delivered_at IS NOT NULL AND cancelled_at IS NULL)
+                 OR (status = 'cancelled' AND delivered_run_id IS NULL AND delivered_at IS NULL AND cancelled_at IS NOT NULL)
+             )
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_inbox_pending
+             ON session_inbox(session_id, status, id);
+         CREATE INDEX IF NOT EXISTS idx_session_inbox_target
+             ON session_inbox(session_id, target_run_id, status, id);",
+    )?;
+    Ok(())
+}
+
+/// Remembered direct-session approvals. The backend class and session-config
+/// revision are part of the authority boundary: patching a session cannot
+/// carry old grants onto a new target or workspace.
+fn create_permission_grants_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS permission_grants (
+             id TEXT PRIMARY KEY,
+             session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             action TEXT NOT NULL CHECK (length(trim(action)) > 0),
+             resource TEXT NOT NULL CHECK (length(trim(resource)) > 0),
+             backend TEXT NOT NULL CHECK (backend IN ('local', 'podman', 'ssh')),
+             session_config_version INTEGER NOT NULL
+                 CHECK (session_config_version >= 0),
+             created_at TEXT NOT NULL,
+             UNIQUE (session_id, action, resource, backend, session_config_version)
+         );
+         CREATE INDEX IF NOT EXISTS idx_permission_grants_session
+             ON permission_grants(session_id, backend, session_config_version, created_at, id);",
+    )?;
+    Ok(())
+}
+
+/// At most one durable goal generation belongs to a direct session. The
+/// accounting fields bind the currently participating run and are cleared at
+/// settlement; `continuation_run_id` distinguishes service-owned continuation
+/// from an ordinary user/inbox run for crash reconciliation and diagnostics.
+fn create_session_goals_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_goals (
+             session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             goal_id TEXT NOT NULL UNIQUE CHECK (length(trim(goal_id)) > 0),
+             objective TEXT NOT NULL CHECK (length(trim(objective)) > 0),
+             status TEXT NOT NULL
+                 CHECK (status IN ('active', 'paused', 'blocked', 'usage_limited', 'budget_limited', 'complete')),
+             token_budget INTEGER
+                 CHECK (token_budget IS NULL OR token_budget > 0),
+             tokens_used INTEGER NOT NULL DEFAULT 0 CHECK (tokens_used >= 0),
+             time_used_ms INTEGER NOT NULL DEFAULT 0 CHECK (time_used_ms >= 0),
+             accounting_run_id TEXT,
+             accounting_token_baseline INTEGER
+                 CHECK (accounting_token_baseline IS NULL OR accounting_token_baseline >= 0),
+             accounting_started_at_epoch_ms INTEGER
+                 CHECK (accounting_started_at_epoch_ms IS NULL OR accounting_started_at_epoch_ms >= 0),
+             continuation_run_id TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+             CHECK (
+                 (accounting_run_id IS NULL AND accounting_token_baseline IS NULL
+                  AND accounting_started_at_epoch_ms IS NULL AND continuation_run_id IS NULL)
+                 OR
+                 (accounting_run_id IS NOT NULL AND accounting_token_baseline IS NOT NULL
+                  AND accounting_started_at_epoch_ms IS NOT NULL
+                  AND (continuation_run_id IS NULL OR continuation_run_id = accounting_run_id))
+             )
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_goals_status
+             ON session_goals(status, updated_at, session_id);",
+    )?;
+    Ok(())
+}
+
+/// Durable relationship and latest execution generation for an OpenCode-like
+/// traditional child session. The child is still a normal row in `sessions`;
+/// this table adds ownership, profile, bounded nesting, and exactly-once
+/// background completion delivery.
+fn create_traditional_children_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS traditional_children (
+             child_session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             parent_session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             root_session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             profile TEXT NOT NULL CHECK (profile IN ('general')),
+             description TEXT NOT NULL CHECK (
+                 length(trim(description)) > 0 AND length(description) <= 120
+             ),
+             nesting_depth INTEGER NOT NULL CHECK (nesting_depth = 1),
+             status TEXT NOT NULL DEFAULT 'idle'
+                 CHECK (status IN ('idle', 'running', 'completed', 'failed', 'cancelled', 'interrupted')),
+             generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+             run_id TEXT,
+             execution_mode TEXT CHECK (execution_mode IN ('foreground', 'background')),
+             report TEXT,
+             failure TEXT,
+             change_summary TEXT,
+             verification_summary TEXT,
+             completion_inbox_id INTEGER
+                 REFERENCES session_inbox(id) ON DELETE SET NULL,
+             completion_suppressed INTEGER NOT NULL DEFAULT 0
+                 CHECK (completion_suppressed IN (0, 1)),
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+             CHECK (child_session_id <> parent_session_id),
+             CHECK (
+                 (status = 'idle' AND generation = 0 AND run_id IS NULL
+                  AND execution_mode IS NULL AND report IS NULL AND failure IS NULL
+                  AND change_summary IS NULL AND verification_summary IS NULL
+                  AND completion_inbox_id IS NULL)
+                 OR
+                 (status = 'running' AND generation > 0 AND run_id IS NOT NULL
+                  AND execution_mode IS NOT NULL AND report IS NULL AND failure IS NULL
+                  AND change_summary IS NULL AND verification_summary IS NULL
+                  AND completion_inbox_id IS NULL)
+                 OR
+                 (status IN ('completed', 'failed', 'cancelled', 'interrupted')
+                  AND generation > 0 AND run_id IS NOT NULL
+                  AND execution_mode IS NOT NULL)
+             )
+         );
+         CREATE INDEX IF NOT EXISTS idx_traditional_children_parent
+             ON traditional_children(parent_session_id, created_at, child_session_id);
+         CREATE INDEX IF NOT EXISTS idx_traditional_children_root_running
+             ON traditional_children(root_session_id, status, updated_at, child_session_id);",
+    )?;
+    Ok(())
+}
+
+/// Durable ownership and latest run generation for an orchestrator session
+/// launched by a direct-with-orchestrator parent.
+fn create_managed_orchestrators_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS managed_orchestrators (
+             orchestrator_session_id TEXT PRIMARY KEY
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             parent_session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             root_session_id TEXT NOT NULL
+                 REFERENCES sessions(session_id) ON DELETE CASCADE,
+             description TEXT NOT NULL CHECK (
+                 length(trim(description)) > 0 AND length(description) <= 120
+             ),
+             status TEXT NOT NULL DEFAULT 'idle'
+                 CHECK (status IN ('idle', 'running', 'completed', 'failed', 'cancelled', 'interrupted')),
+             generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+             run_id TEXT,
+             execution_mode TEXT CHECK (execution_mode IN ('foreground', 'background')),
+             report TEXT,
+             failure TEXT,
+             completion_inbox_id INTEGER
+                 REFERENCES session_inbox(id) ON DELETE SET NULL,
+             completion_suppressed INTEGER NOT NULL DEFAULT 0
+                 CHECK (completion_suppressed IN (0, 1)),
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+             CHECK (orchestrator_session_id <> parent_session_id),
+             CHECK (
+                 (status = 'idle' AND generation = 0 AND run_id IS NULL
+                  AND execution_mode IS NULL AND report IS NULL AND failure IS NULL
+                  AND completion_inbox_id IS NULL)
+                 OR
+                 (status = 'running' AND generation > 0 AND run_id IS NOT NULL
+                  AND execution_mode IS NOT NULL AND report IS NULL AND failure IS NULL
+                  AND completion_inbox_id IS NULL)
+                 OR
+                 (status IN ('completed', 'failed', 'cancelled', 'interrupted')
+                  AND generation > 0 AND run_id IS NOT NULL
+                  AND execution_mode IS NOT NULL)
+             )
+         );
+         CREATE INDEX IF NOT EXISTS idx_managed_orchestrators_parent
+             ON managed_orchestrators(parent_session_id, created_at, orchestrator_session_id);
+         CREATE INDEX IF NOT EXISTS idx_managed_orchestrators_root_running
+             ON managed_orchestrators(root_session_id, status, updated_at, orchestrator_session_id);",
     )?;
     Ok(())
 }
@@ -1148,6 +1417,10 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "orchestrator_compaction_checkpoints",
         "workspace_revisions",
         "session_run_recovery",
+        "session_inbox",
+        "permission_grants",
+        "traditional_children",
+        "managed_orchestrators",
         "session_forks",
         "projects",
         "session_projects",

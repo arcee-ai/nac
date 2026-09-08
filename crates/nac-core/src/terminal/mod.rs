@@ -5,8 +5,8 @@ mod session;
 
 pub use manager::TerminalManager;
 pub use output::{
-    ArtifactKind, CommandOutputLimits, OutputPage, OutputRegistry, OutputStream,
-    DEFAULT_COMMAND_OUTPUT_MAX_BYTES, DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES,
+    ArtifactKind, CommandOutputLimits, OutputArtifactLease, OutputPage, OutputRegistry,
+    OutputStream, DEFAULT_COMMAND_OUTPUT_MAX_BYTES, DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES,
     DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
 };
 
@@ -20,6 +20,7 @@ pub struct TerminalInfo {
     pub cols: u16,
     pub rows: u16,
     pub alive: bool,
+    pub retained: bool,
     pub idle_ms: u64,
     pub pid: Option<u32>,
 }
@@ -53,6 +54,7 @@ pub struct CommandOutput {
 #[derive(Debug, Clone, Serialize)]
 pub struct TerminalOutput {
     pub session_name: Option<String>,
+    pub retained: bool,
     pub output_id: String,
     pub start_cursor: u64,
     pub end_cursor: u64,

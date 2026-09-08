@@ -4,36 +4,53 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+mod managed_orchestrators;
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
+mod permission_grants;
 mod projects;
 mod render;
 mod run_recovery;
 mod schema;
 mod session_forks;
+mod session_goals;
+mod session_inbox;
 mod ssh_configurations;
 mod steering;
 mod thread_events;
 mod threads;
 mod time;
+mod traditional_children;
 mod transcript;
 mod worksets;
 mod workspace_revisions;
 
+pub use managed_orchestrators::*;
 pub use model_configurations::*;
+pub use permission_grants::*;
 pub use projects::*;
 pub use render::*;
-pub(crate) use run_recovery::*;
-pub use schema::{check_readiness, default_store_path, initialize};
+pub(crate) use run_recovery::{
+    clear_active_run, load_run_recovery_with_connection, mark_active_run_failed,
+    replace_with_active_run,
+};
+pub use run_recovery::{
+    clear_settled_run_recovery, load_run_recovery, reconcile_active_run, ActiveRunReconciliation,
+    RunRecoveryRecord, RunRecoveryStatus, RunTerminalDisposition,
+};
+pub use schema::{check_readiness, default_store_path, initialize, schema_version};
 pub use session_forks::{
     clone_session_conversation_artifacts, dismiss_session_fork, insert_session_fork,
     list_session_forks, SessionForkLink, SessionForkOrigin,
 };
 pub(crate) use session_forks::{fork_origin_from_parts, list_session_forks_with_connection};
+pub use session_goals::*;
+pub use session_inbox::*;
 pub use ssh_configurations::*;
 pub use steering::*;
 pub use thread_events::*;
 pub use threads::*;
+pub use traditional_children::*;
 pub use transcript::*;
 pub use worksets::*;
 pub use workspace_revisions::*;
@@ -102,6 +119,8 @@ pub fn retry_busy<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
 /// kinds exist so the panel can still show what a thread was asked to do and
 /// how it died, which is otherwise lost the moment the worker is killed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(rename_all = "snake_case"))]
 pub enum EpisodeStatus {
     Ok,
     Error,

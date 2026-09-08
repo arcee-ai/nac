@@ -35,13 +35,19 @@ const COMPLETED_RETENTION: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ManagedAuthStatusResponse {
+    #[schema(value_type = ManagedAuthProvider)]
     pub provider: String,
     /// The backend a session selects to use this login.
+    #[schema(value_type = nac_core::model::BackendKind)]
     pub backend: String,
     pub signed_in: bool,
+    #[schema(required)]
     pub account: Option<String>,
+    #[schema(required)]
     pub organization: Option<String>,
+    #[schema(required)]
     pub base_url: Option<String>,
+    #[schema(required)]
     pub expires_at_ms: Option<u64>,
     pub path: String,
 }
@@ -70,12 +76,14 @@ pub struct ManagedAuthListResponse {
 pub struct DeviceLoginStartedResponse {
     /// Handle for polling this login; it names nothing on disk.
     pub login_id: String,
+    #[schema(value_type = ManagedAuthProvider)]
     pub provider: String,
     /// The page to open.
     pub verification_uri: String,
     /// Present only when the flow leaves something to read out: Codex's device
     /// flow expects it typed, Arcee's asks for it to be checked against the
     /// page, and the redirect flow has nothing to show at all.
+    #[schema(required)]
     pub user_code: Option<String>,
     pub expires_in_secs: u64,
 }
@@ -131,14 +139,20 @@ pub(crate) struct ManagedLoginRegistry {
 
 impl ManagedLoginRegistry {
     fn insert(&self, id: String, login: PendingLogin) {
-        let mut entries = self.entries.lock().expect("managed login registry");
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         entries.insert(id, login);
         // Abandoned logins are only noticed when another one starts; there is
         // no other moment that is guaranteed to come.
         let now = Instant::now();
         entries.retain(|_, entry| {
             let finished = !matches!(
-                *entry.outcome.lock().expect("managed login outcome"),
+                *entry
+                    .outcome
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
                 LoginOutcome::Pending
             );
             let keep = !entry.expired(now, finished);
@@ -155,7 +169,10 @@ impl ManagedLoginRegistry {
         id: &str,
         provider: ManagedAuthProvider,
     ) -> Result<DeviceLoginStateResponse, ApiError> {
-        let mut entries = self.entries.lock().expect("managed login registry");
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = entries.get(id).ok_or_else(|| ApiError {
             status: StatusCode::NOT_FOUND,
             message: format!("no login in progress with id '{id}'"),
@@ -168,7 +185,10 @@ impl ManagedLoginRegistry {
         }
 
         let state = {
-            let outcome = entry.outcome.lock().expect("managed login outcome");
+            let outcome = entry
+                .outcome
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             match &*outcome {
                 LoginOutcome::Pending => None,
                 LoginOutcome::Complete(snapshot) => Some(DeviceLoginStateResponse::Complete {
@@ -190,7 +210,10 @@ impl ManagedLoginRegistry {
     }
 
     fn cancel(&self, id: &str) -> bool {
-        let mut entries = self.entries.lock().expect("managed login registry");
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match entries.remove(id) {
             Some(entry) => {
                 entry.task.abort();
@@ -234,7 +257,9 @@ impl SessionManager {
             let outcome = Arc::clone(&outcome);
             async move {
                 let result = pending.complete().await;
-                let mut slot = outcome.lock().expect("managed login outcome");
+                let mut slot = outcome
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 *slot = match result {
                     Ok(snapshot) => LoginOutcome::Complete(Box::new(snapshot)),
                     Err(error) => LoginOutcome::Failed(format!("{error}")),

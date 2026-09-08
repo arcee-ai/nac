@@ -194,11 +194,13 @@ function ListToolbar({
   listing,
   changed,
   revision,
+  readOnly,
 }: {
   sessionId: string;
   listing: FileListing;
   changed: ChangedFileStat[];
   revision: number | null;
+  readOnly: boolean;
 }) {
   const isMobile = useIsMobile();
 
@@ -220,7 +222,9 @@ function ListToolbar({
       />
     </>
   );
-  const commit = <CommitPopover sessionId={sessionId} changed={changed} revision={revision} />;
+  const commit = readOnly ? null : (
+    <CommitPopover sessionId={sessionId} changed={changed} revision={revision} />
+  );
 
   // A phone has no room for a bar of its own above the list, so the design
   // floats the same two controls over its last rows instead.
@@ -547,10 +551,12 @@ export function FilesView({
   sessionId,
   snapshot,
   revision = null,
+  readOnly = false,
 }: {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
   revision?: number | null;
+  readOnly?: boolean;
 }) {
   const client = useQueryClient();
   // Shared rather than local: the same panel also renders inside the
@@ -641,6 +647,7 @@ export function FilesView({
           listing={fileListing}
           changed={changed}
           revision={revision}
+          readOnly={readOnly}
         />
       }
       list={

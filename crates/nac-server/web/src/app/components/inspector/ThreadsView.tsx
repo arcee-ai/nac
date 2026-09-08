@@ -82,7 +82,7 @@ function sessionOwnsThreadName(
   if (!snapshot) return false;
   if (snapshot.threads.some((thread) => thread.name === name)) return true;
   if (Object.hasOwn(snapshot.thread_episodes, name)) return true;
-  return snapshot.active_threads.includes(name);
+  return (snapshot.active_threads ?? []).includes(name);
 }
 
 function logThreadList(payload: Record<string, unknown>): void {

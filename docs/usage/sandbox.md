@@ -51,3 +51,16 @@ On macOS, start Podman first:
 podman machine init
 podman machine start
 ```
+
+## Current MVP limitation
+
+Podman is an optional backend. If the nac process is killed in the narrow
+interval after starting `podman run --cidfile` but before Podman publishes the
+container ID and before the durable session row commits, startup recovery keeps
+the private creation record rather than guessing at ownership. If the ID is
+published only after that startup scan, the uncommitted container and record
+can remain until a later nac restart retries reconciliation or an operator
+removes the verified container with Podman. Local and SSH sessions are not
+affected. This crash window has deterministic record-boundary coverage, but it
+has not been validated against a live Podman runtime in environments where
+Podman is unavailable.

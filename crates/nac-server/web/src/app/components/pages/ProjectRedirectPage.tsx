@@ -1,8 +1,8 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 
 import { Loader, LoaderSize } from "@/app/atoms";
-import { parseStoreTime } from "@/app/lib/format";
+import { newestPrimarySessionForProject } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useProjects, useSessions } from "@/app/services/queries";
@@ -25,30 +25,52 @@ export default function ProjectRedirectPage() {
   const actions = useProjectActions();
   const projectsQuery = useProjects();
   const sessionsQuery = useSessions();
+  const [confirmedProjectId, setConfirmedProjectId] = useState<string | null>(null);
+
+  const refetchProjects = projectsQuery.refetch;
+  const refetchSessions = sessionsQuery.refetch;
+  useEffect(() => {
+    let current = true;
+    void Promise.all([refetchProjects(), refetchSessions()])
+      .then(([projects, sessions]) => {
+        if (current && projects.isSuccess && sessions.isSuccess) {
+          setConfirmedProjectId(projectId);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [projectId, refetchProjects, refetchSessions]);
 
   const project = useMemo(
     () => projectsQuery.data?.projects.find((entry) => entry.project_id === projectId) ?? null,
     [projectsQuery.data, projectId],
   );
-  const newest = useMemo(() => {
-    const owned = (sessionsQuery.data ?? []).filter(
-      (entry) => entry.summary.project_id === projectId,
-    );
-    owned.sort(
-      (a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at),
-    );
-    return owned[0] ?? null;
-  }, [sessionsQuery.data, projectId]);
+  const newest = useMemo(
+    () => newestPrimarySessionForProject(sessionsQuery.data ?? [], projectId),
+    [sessionsQuery.data, projectId],
+  );
 
   const loading = projectsQuery.isLoading || sessionsQuery.isLoading;
-  const needsFirstChat = !loading && project != null && newest == null;
+  const refreshing = projectsQuery.isFetching || sessionsQuery.isFetching;
+  const unavailable = projectsQuery.isError || sessionsQuery.isError;
+  const ownershipLoaded = projectsQuery.isSuccess && sessionsQuery.isSuccess;
+  const needsFirstChat =
+    confirmedProjectId === projectId &&
+    !loading &&
+    !refreshing &&
+    !unavailable &&
+    ownershipLoaded &&
+    project != null &&
+    newest == null;
 
   const startChat = actions.newChat;
   useEffect(() => {
     if (!needsFirstChat) return;
     let pending = firstChatByProject.get(projectId);
     if (!pending) {
-      pending = startChat(projectId).finally(() => {
+      pending = startChat(projectId, true).finally(() => {
         firstChatByProject.delete(projectId);
       });
       firstChatByProject.set(projectId, pending);
@@ -56,8 +78,10 @@ export default function ProjectRedirectPage() {
   }, [needsFirstChat, startChat, projectId]);
 
   // Deleted, or a stale link — the listing is the only honest place to land.
-  if (!loading && !project) return <Navigate to={routes.list()} replace />;
-  if (newest) return <Navigate to={routes.session(newest.summary.session_id)} replace />;
+  const ownershipConfirmed = confirmedProjectId === projectId;
+  if (ownershipConfirmed && !loading && !project) return <Navigate to={routes.list()} replace />;
+  if (ownershipConfirmed && newest)
+    return <Navigate to={routes.session(newest.summary.session_id)} replace />;
 
   return (
     <div className="flex h-full items-center justify-center">

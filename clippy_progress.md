@@ -1,0 +1,268 @@
+# NAC Clippy policy cleanup
+
+Last updated: 2026-08-27
+
+## Objective and discipline
+
+Adopt a curated, warning-free workspace Clippy policy that improves correctness,
+idiomatic Rust, ownership clarity, determinism, and maintenance without enabling
+noisy lint groups. Add exactly one lint at a time, run Clippy autofix first,
+resolve remaining diagnostics deliberately, run proportional checks/tests, and
+commit that green boundary before adding the next lint.
+
+Protected pre-existing state must remain unstaged and unchanged:
+`.gitignore`, `progress.md`, `.agents/skills/goal-prompt/`, `demo_review.md`, and
+`manual_todo.md`.
+
+## Baseline and reference evidence
+
+- NAC starts at `1c8020efc149662989e7c655edd7ea6be0d5ce6a` with `make lint`
+  green under Clippy 0.1.98 / Rust 1.98.0.
+- `/Users/allison/git/codex` is clean `main` at
+  `c941572917b9295c7318b28aab27709202a645c7`. Its policy uses individually
+  selected deny lints, including panic avoidance, async-lock checks, redundant
+  ownership/closure cleanup, and modern format arguments. It does not enable
+  blanket pedantic or nursery groups.
+- `/Users/allison/git/agentic_auxilary` is clean `main` at
+  `81db6151a7a0d08907bde51e24aafc05fd8dd676`. It enables pedantic and nursery
+  with explicit exclusions, plus restriction lints for unsafe documentation,
+  reference-counted clone clarity, panic avoidance, and justified attributes.
+- NAC already treats ordinary Clippy warnings as errors in `make lint`, so
+  explicitly listing default `clippy::all` members is redundant. Workspace
+  crates all inherit the root lint table.
+
+## Chosen lint sequence
+
+Each item gets its own autofix/fix/check/test/commit boundary:
+
+1. `uninlined_format_args` — modern, shorter format strings; fully mechanical.
+2. `redundant_closure_for_method_calls` — clearer method references.
+3. `clone_on_ref_ptr` — make `Arc`/`Rc` ownership increments explicit.
+4. `redundant_clone` — remove unnecessary ownership and allocation.
+5. `semicolon_if_nothing_returned` — consistent statement intent.
+6. `match_same_arms` — eliminate duplicated branching behavior.
+7. `needless_collect` — avoid unnecessary intermediate allocation.
+8. `unused_async` — keep async APIs honest and futures smaller.
+9. `significant_drop_in_scrutinee` — make guard/drop timing explicit.
+10. `trivially_copy_pass_by_ref` — clarify the one small private API found.
+11. `missing_assert_message` — make production invariant failures actionable.
+12. `undocumented_unsafe_blocks` — require local safety reasoning.
+13. `iter_over_hash_type` — prevent accidental nondeterministic iteration.
+14. `unwrap_used` — remove undocumented panic paths in production code.
+15. `expect_used` — replace or narrowly justify remaining panic invariants.
+16. `allow_attributes_without_reason` — require rationale for suppressions.
+17. `future_not_send` — retain a zero-backlog guard for spawned agent futures.
+
+The order pays down mechanical churn before safety/manual work and adds the
+zero-backlog async guard last.
+
+## Rejected policies
+
+- Whole `pedantic`, `nursery`, and `restriction` groups: compiler-version churn
+  and preference-heavy diagnostics would dilute the hard gate.
+- `wildcard_imports`: 104 findings are predominantly intentional sibling-module
+  seams; Clippy suggests enormous brittle import lists.
+- `indexing_slicing` and `string_slice`: 267 and 62 findings respectively,
+  including validated protocol/text boundaries; adopt targeted APIs/tests
+  rather than blanket suppression noise.
+- `large_futures`: four findings, but its size threshold is compiler-sensitive
+  and blanket boxing would add allocations. Treat measured hot paths directly.
+- `manual_let_else`: style-dependent rewrites are not uniformly clearer.
+- `create_dir`, `exit`, `panic`, and `map_err_ignore`: NAC deliberately uses
+  fail-on-existence locks, outermost CLI exits, explicit invariant failures,
+  and redacting error maps. Global policy would obscure those decisions.
+- `self_named_module_files`: conflicts with established ownership-oriented
+  module layout. Default `clippy::all` lints already enforced by `make lint`
+  are not duplicated in the manifest.
+
+## Progress
+
+- `uninlined_format_args`: complete. Workspace autofix rewrote all 177
+  diagnostics; no manual exceptions or residual diagnostics were required.
+- `redundant_closure_for_method_calls`: complete. Clippy applied 105 safe
+  rewrites. One suggestion incorrectly named the private `model::types` module;
+  the equivalent method reference uses the public `crate::model::TokenUsage`
+  re-export instead.
+- `clone_on_ref_ptr`: complete. All 27 reference-count increments now use
+  explicit `Arc::clone`; the type-erased native-tool registry uses
+  `Arc::<T>::clone` so the result can retain its existing trait-object coercion.
+- `redundant_clone`: complete. Clippy removed all six redundant clones; each
+  source value was at its last use and is now moved directly.
+- `semicolon_if_nothing_returned`: complete. Clippy applied all seven
+  statement-tail fixes with no manual exceptions.
+- `match_same_arms`: complete. All 15 duplicate branches were manually merged
+  after autofix declined them; guarded cases retain their original precedence.
+- `needless_collect`: complete. Clippy identified two temporary reversed
+  `Vec<char>` allocations but suggested an iterator chain that does not compile
+  for `Chars`. A shared `char_suffix` helper now finds the UTF-8 boundary and
+  borrows the ordered suffix without either allocation.
+- `unused_async`: complete. Four concrete synchronous implementations and the
+  one delegating steering facade no longer manufacture futures; callers retain
+  their existing settlement, projection, attachment, and discovery ordering.
+- `significant_drop_in_scrutinee`: complete. All three mutex/RwLock-backed
+  scrutinees now bind their owned result in a preceding statement or scope, so
+  guards drop before cleanup, recovery, or cache-eviction work begins.
+- `trivially_copy_pass_by_ref`: complete. The sole zero-sized `Copy`
+  `SandboxBackendType` string projection now takes `self` by value; callers are
+  source-compatible and copy the enum implicitly.
+- `missing_assert_message`: complete. All eight production assertions now name
+  the violated invariant without interpolating credentials, paths, or other
+  sensitive runtime values.
+- `undocumented_unsafe_blocks`: complete. The audit added 38 local safety
+  proofs: all 33 production blocks compiled on macOS plus dormant Linux pidfd,
+  rename-exchange, and process-group paths. Proofs name concrete descriptor,
+  buffer, C-string, ownership, initialization, or syscall preconditions.
+- `iter_over_hash_type`: complete. One order-independent set transfer uses
+  `drain`; the seven observable cleanup, diagnostic, warning, projection,
+  coverage, diff, and measurement paths now use sorted keys or ordered maps.
+- `unwrap_used`: complete. Tests retain the reference-repository convention
+  through `allow-unwrap-in-tests = true`; production code remains subject to
+  the hard gate. All three worker unwraps now tolerate an empty trace or
+  propagate a missing supervised pipe as `io::Error` for guarded cleanup.
+- `expect_used`: complete. The initial 125 production findings were not hidden
+  behind a blanket exception. Recoverable process, decoded-input, managed-state,
+  database-reload, URL, and configuration failures now propagate typed errors;
+  simple stream/login coordination locks recover poisoned guards. The remaining
+  static prompt/URL/regex, closed registry, serialization, counter, and lifecycle
+  invariants retain their explicit panic semantics behind narrow `#[expect]`
+  attributes whose reasons state the proof. Tests use the reference-repository
+  convention `allow-expect-in-tests = true`.
+- `allow_attributes_without_reason`: complete. The 50-item inventory now uses
+  narrow, reasoned `#[expect]` attributes for intentional Clippy diagnostics
+  and reasoned `#[allow]` only for cross-target Rust dead-code/interface cases.
+  Converting to expectations exposed one stale `result_large_err` suppression,
+  which was removed instead of documented.
+- `future_not_send`: complete. The production workspace had zero findings, so
+  the guard adds no source exceptions or compatibility churn.
+
+## Verification and next action
+
+The `uninlined_format_args` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite (`make test-rust`):
+1,156 core tests, 148 server library tests, 23 server binary tests, and all
+credential-store, managed, process, catalog, contracts, and documentation tests
+passed (nine intentionally ignored core tests).
+
+The `redundant_closure_for_method_calls` slice passes `make format-check`,
+`make lint`, `git diff --check`, and the full Rust workspace suite with the same
+green test inventory recorded above.
+
+The `clone_on_ref_ptr` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full `nac-core` suite (1,156 passed, nine ignored).
+
+The `redundant_clone` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite with the same green test
+inventory recorded above.
+
+The `semicolon_if_nothing_returned` slice passes `make format-check`,
+`make lint`, `git diff --check`, all 33 `nac-catalog-gen` tests, 77 focused
+core catalog tests, and 32 focused Arcee tests.
+
+The `match_same_arms` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite with the same green test
+inventory recorded above.
+
+The `needless_collect` slice passes `make format-check`, `make lint`,
+`git diff --check`, and all 14 focused terminal-output tests, including a new
+Unicode boundary/order regression test.
+
+The `unused_async` slice passes `make format-check`, `make lint`,
+`git diff --check`, 73 focused session-service tests (one ignored), 34 focused
+discovery tests (three ignored), and two focused server steering tests.
+
+The `significant_drop_in_scrutinee` slice passes `make format-check`,
+`make lint`, `git diff --check`, and the full Rust workspace suite (including
+1,157 core tests, nine ignored, after the new Unicode regression test).
+
+The `trivially_copy_pass_by_ref` slice passes `make format-check`, `make lint`,
+`git diff --check`, nine focused sandbox tests, and 29 focused persisted-session
+compatibility tests.
+
+The `missing_assert_message` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite with the same green test
+inventory recorded above.
+
+The `undocumented_unsafe_blocks` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite with the same green test
+inventory recorded above.
+
+The `iter_over_hash_type` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite with the same green test
+inventory recorded above.
+
+The `unwrap_used` slice passes `make format-check`, `make lint`,
+`git diff --check`, and all ten focused worker lifecycle/cancellation tests.
+
+The `expect_used` slice passes `make format-check`, `make lint`,
+`git diff --check`, and the full Rust workspace suite, including 1,157 core
+tests (nine ignored), 148 server library tests, and every managed, process,
+credential-store, catalog, contracts, and documentation test. A sandboxed run
+initially reported 254 failures because loopback test-server binds were denied;
+the same suite passed with the required loopback permission, and a second quiet
+workspace run confirmed exit status 0.
+
+The `allow_attributes_without_reason` slice passes `make format-check`,
+`make lint`, `git diff --check`, and the full Rust workspace suite with 1,157
+core tests (nine ignored), 148 server library tests, 23 server binary tests, and
+all remaining workspace tests green.
+
+The `future_not_send` slice passes `make format-check`, `make lint`,
+`git diff --check`, and `cargo test --workspace --locked --no-run` for every
+workspace test target.
+
+Next: commit this exact lint boundary, then run the final repository acceptance
+suite, audit the resulting policy and commit range, and record the final clean
+handoff in one verification commit.
+
+## Final acceptance
+
+Status: complete. NAC now carries 17 additional focused Clippy lints, each
+introduced through an isolated autofix, repair, verification, and commit
+boundary. The policy remains curated rather than enabling whole lint groups;
+production `unwrap`/`expect` paths, undocumented unsafe blocks, unexplained
+suppressions, nondeterministic hash iteration, non-Send futures, ownership
+noise, and the selected allocation/control-flow issues are all hard-gated by
+`make lint`.
+
+Lint-boundary commits, oldest first:
+
+1. `ab68ca7` — `uninlined_format_args`
+2. `5bcf27c` — `redundant_closure_for_method_calls`
+3. `98b3761` — `clone_on_ref_ptr`
+4. `244ef01` — `redundant_clone`
+5. `2c0c55f` — `semicolon_if_nothing_returned`
+6. `145ae19` — `match_same_arms`
+7. `0d68e93` — `needless_collect`
+8. `76977b6` — `unused_async`
+9. `ef476db` — `significant_drop_in_scrutinee`
+10. `d9775b8` — `trivially_copy_pass_by_ref`
+11. `97e14c3` — `missing_assert_message`
+12. `4e39682` — `undocumented_unsafe_blocks`
+13. `80ce5ed` — `iter_over_hash_type`
+14. `747aabe` — `unwrap_used`
+15. `ae0be82` — `expect_used`
+16. `99c224b` — `allow_attributes_without_reason`
+17. `7abee71` — `future_not_send`
+
+Final candidate evidence:
+
+- `make ci`: passed, including formatting, frontend/Rust lint, 1,157 core
+  tests (nine ignored), 148 server library tests, 23 server binary tests, all
+  other Rust workspace tests, 178 frontend tests, OpenAPI/type drift checks,
+  production asset rebuild/drift check, and managed-image contract checks.
+- `make check`: passed for the locked workspace.
+- `make test-durability`: all ten focused crash-window, cancellation,
+  relationship, lease, and managed-binding regressions passed.
+- `make test-e2e`: all 14 production-embedded ordinary and managed browser
+  journeys passed.
+- `make test-managed-image`: Docker 29.7.2 built the locked Linux/amd64 release
+  image and the readiness/restart/shutdown smoke passed. Host/image architecture
+  mismatch warnings were expected under Docker Desktop emulation.
+- Generated OpenAPI, TypeScript types, and committed web assets remained
+  current; no generated diff was produced.
+
+Protected pre-existing `.gitignore`, `progress.md`, goal-prompt skill,
+`demo_review.md`, and `manual_todo.md` state remains unstaged and unchanged by
+this goal. No user-visible API, persistence, session-topology, or configuration
+contract was intentionally changed; panic-prone internal failures were either
+made explicit errors or retained only as reasoned invariant assertions.
