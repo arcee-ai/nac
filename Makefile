@@ -1,4 +1,4 @@
-.PHONY: all setup build dev demo release install ci test test-rust test-web test-source-size generate-api-contract test-api-contract test-assets test-e2e test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev demo release install ci test test-rust test-web test-source-size generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -134,6 +134,10 @@ test-e2e:
 	npm --prefix $(WEB_DIR) run build
 	$(CARGO) build --locked -p $(PKG) --bin $(BIN)
 	NAC_E2E_BINARY="$(CURDIR)/target/debug/$(BIN)" npm --prefix $(WEB_DIR) run test:e2e
+
+## Run non-destructive browser smoke checks against an authenticated remote Managed NAC
+test-e2e-remote:
+	npm --prefix $(WEB_DIR) run test:e2e:remote
 
 ## Run focused deterministic lifecycle and crash-window regressions
 test-durability:
