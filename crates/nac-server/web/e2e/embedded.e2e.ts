@@ -172,7 +172,7 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
     const card = page.locator(`[data-tool-call-id="${callId}"]`);
     await expect(card).toContainText("Run command");
     await expect(card).toContainText(command);
-    await expect(card).toContainText("Running");
+    await expect(card).toContainText("Awaiting approval");
     await page.getByRole("button", { name: "Allow once" }).click();
     await expect(card).toContainText("Running");
 
@@ -192,6 +192,112 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
     harness.provider.assertConsumed();
   });
 }
+
+test("keeps approval state and actions reachable with many remembered permissions", async ({
+  harness,
+  page,
+  request,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  const rememberedRequests = 8;
+  const fixtureRoot = path.join(harness.runRoot, "external-permission-fixtures");
+  await fs.mkdir(fixtureRoot, { recursive: true });
+  const fixturePaths = Array.from({ length: rememberedRequests + 1 }, (_, index) =>
+    path.join(fixtureRoot, `dependency-${index}-${"long-resource-segment-".repeat(3)}fixture.txt`),
+  );
+  await Promise.all(
+    fixturePaths.map((fixturePath, index) =>
+      fs.writeFile(fixturePath, `external permission fixture ${index}\n`),
+    ),
+  );
+
+  fixturePaths.forEach((fixturePath, index) => {
+    harness.provider.enqueue(
+      `remembered-permission-${index}`,
+      index === 0
+        ? { token: "ALL14_ALL15_PERMISSION_TOKEN", requiredTools: ["read"] }
+        : { functionOutputCallId: `permission-read-${index - 1}` },
+      {
+        kind: "function_call",
+        name: "read",
+        callId: `permission-read-${index}`,
+        arguments: { path: fixturePath },
+        stream: true,
+      },
+    );
+  });
+  harness.provider.enqueue(
+    "permissions-complete",
+    { functionOutputCallId: `permission-read-${rememberedRequests}` },
+    { kind: "text", text: "permission journey complete", stream: true },
+  );
+
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  await page.getByRole("combobox", { name: "Message" }).fill("ALL14_ALL15_PERMISSION_TOKEN");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  for (let index = 0; index < rememberedRequests; index += 1) {
+    await harness.provider.waitForRequestCount(index + 1);
+    const card = page.locator(`[data-tool-call-id="permission-read-${index}"]`);
+    await expect(card).toContainText("Awaiting approval");
+    await expect(page.getByRole("button", { name: "Always allow" })).toBeEnabled();
+    await page.getByRole("button", { name: "Always allow" }).click();
+  }
+
+  await harness.provider.waitForRequestCount(rememberedRequests + 1);
+  const pendingCard = page.locator(`[data-tool-call-id="permission-read-${rememberedRequests}"]`);
+  await expect(pendingCard).toContainText("Awaiting approval");
+  await expect(pendingCard).not.toContainText("Running");
+
+  const dialog = page.getByRole("dialog");
+  const scrollBody = dialog.locator(":scope > .overflow-auto");
+  await expect(dialog).toBeVisible();
+  await expect(scrollBody).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Reject" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Allow once" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Always allow" })).toBeVisible();
+  expect(await scrollBody.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+    true,
+  );
+  const viewport = page.viewportSize();
+  const dialogBounds = await dialog.boundingBox();
+  const footerBounds = await page.getByRole("button", { name: "Allow once" }).boundingBox();
+  expect(viewport).not.toBeNull();
+  expect(dialogBounds).not.toBeNull();
+  expect(footerBounds).not.toBeNull();
+  expect(dialogBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(dialogBounds!.y + dialogBounds!.height).toBeLessThanOrEqual(viewport!.height);
+  expect(footerBounds!.y + footerBounds!.height).toBeLessThanOrEqual(viewport!.height);
+
+  await page.mouse.click(4, 4);
+  await expect(dialog).toBeHidden();
+  await expect(pendingCard).toContainText("Awaiting approval");
+  await page.getByRole("button", { name: "Permissions (1)" }).click();
+  await expect(dialog).toBeVisible();
+  await page.getByRole("button", { name: "Allow once" }).click();
+
+  await harness.provider.waitForRequestCount(rememberedRequests + 2);
+  await waitForRunIdle(request, harness, sessionId);
+  await expect(pendingCard).toContainText("Succeeded");
+  await expect(page.getByText("permission journey complete")).toBeVisible();
+
+  await page.getByRole("button", { name: /^Permissions \(\d+\)$/ }).click();
+  const manager = page.getByRole("dialog");
+  const managerBody = manager.locator(":scope > .overflow-auto");
+  await expect(manager).toContainText("Remembered access for this session.");
+  await expect(managerBody).toHaveCount(1);
+  expect(await managerBody.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+    true,
+  );
+  await expect(
+    manager.getByRole("button", { name: /^Forget read permission/ }).first(),
+  ).toBeVisible();
+  await expect(manager.getByRole("button", { name: "Reject" })).toHaveCount(0);
+  harness.provider.assertConsumed();
+});
 
 test("renders an unknown primary tool failure safely after reload", async ({
   harness,
