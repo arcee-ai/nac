@@ -151,6 +151,7 @@ test-durability:
 ## Check the managed image/workflow contract without a container runtime
 test-managed-image-contract:
 	sh -n docker/managed/entrypoint.sh
+	sh -n scripts/smoke-managed-git-lfs.sh
 	sh -n scripts/smoke-managed-image.sh
 	sh -n scripts/test-managed-image-contract.sh
 	sh scripts/test-managed-image-contract.sh

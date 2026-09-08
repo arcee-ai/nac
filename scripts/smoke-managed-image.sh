@@ -176,7 +176,7 @@ port=$(wait_until_ready)
 "$container_runtime" exec "$container_name" /bin/sh -ceu '
     test "$(id -u):$(id -g)" = 10001:10001
     ! command -v sudo >/dev/null 2>&1
-    for tool in bash git gh ssh curl jq rg fd rsync make pkg-config cmake cc python3 uv node npm corepack rustc cargo rustfmt cargo-clippy go tar gzip xz zip unzip tini; do
+    for tool in bash git git-lfs gh ssh curl jq rg fd rsync make pkg-config cmake cc python3 uv node npm corepack rustc cargo rustfmt cargo-clippy go tar gzip xz zip unzip tini; do
         command -v "$tool" >/dev/null
     done
     rustc --version | grep -F "rustc 1.98.0" >/dev/null
@@ -199,6 +199,10 @@ port=$(wait_until_ready)
         exit 1
     fi
 '
+
+# Exercise clean/smudge and an actual LFS transfer as the managed user with the
+# read-only root and mounted HOME; binary presence alone misses setup failures.
+"$container_runtime" exec -i "$container_name" /bin/sh < "$repo_root/scripts/smoke-managed-git-lfs.sh"
 
 index_html=$(curl -fsS --noproxy '*' --connect-timeout 1 --max-time 5 \
     "http://127.0.0.1:$port/")
