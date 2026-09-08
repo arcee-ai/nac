@@ -10,6 +10,7 @@ type ManagedDoubleState = {
   secrets: string[];
   cloneRequest: Record<string, unknown> | null;
   cloneBranch: string;
+  providerRequests: Record<string, unknown>[];
 };
 
 const alternateBranch = "feature/platform.v2/long-prefix-hot-fix";
@@ -98,7 +99,60 @@ async function installManagedDouble(page: Page, initiallyConnected = false) {
     secrets: [],
     cloneRequest: null,
     cloneBranch: "main",
+    providerRequests: [],
   };
+  await page.route(
+    (url) => url.pathname === "/models",
+    async (route: Route) => {
+      return route.fulfill({
+        json: {
+          catalog_version: 1,
+          providers: [
+            {
+              id: "arcee-api",
+              auth: "api_key_env",
+              auth_status: "ready",
+              auth_hint: null,
+              default_base_url: "https://api.arcee.ai/api/v1",
+              managed_base_url: null,
+              default_limits: {
+                context_window: 128000,
+                max_tokens: 4096,
+                supported_efforts: [],
+              },
+              models: [
+                {
+                  id: "trinity-large-thinking",
+                  display_name: "Trinity-Large-Thinking",
+                  context_window: 128000,
+                  max_tokens: 4096,
+                  cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+                  reasoning: true,
+                  supported_efforts: [],
+                  source: "baseline",
+                },
+              ],
+            },
+          ],
+        },
+      });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === "/providers/models",
+    async (route: Route) => {
+      state.providerRequests.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        json: {
+          base_url: "https://api.arcee.ai/api/v1",
+          models: [
+            { id: "trinity-large-thinking", display_name: "Trinity-Large-Thinking" },
+            { id: "moonshotai/kimi-k3", display_name: "Kimi K3" },
+          ],
+        },
+      });
+    },
+  );
   await page.route("**/projects", async (route: Route) => {
     if (route.request().method() !== "GET") return route.fallback();
     return route.fulfill({
@@ -239,6 +293,17 @@ test("completes the managed first-run, write-only secret, and clone journey", as
   await expect(page.getByRole("dialog")).toContainText("New Project");
   await expect(page.getByRole("button", { name: /Trinity-Large-Thinking/ })).toBeVisible();
   await expect(page.getByText("Detected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Trinity-Large-Thinking/ }).click();
+  await page.getByRole("button", { name: /Kimi K3/ }).click();
+  await expect(page.getByRole("button", { name: /Kimi K3/ })).toBeVisible();
+  await expect
+    .poll(() => state.providerRequests)
+    .toEqual([
+      {
+        backend: "arcee-api",
+        base_url: "https://api.arcee.ai/api/v1",
+      },
+    ]);
   await page.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Add repository" }).click();
   await expect(page.getByTestId("managed-github-settings")).toBeVisible();

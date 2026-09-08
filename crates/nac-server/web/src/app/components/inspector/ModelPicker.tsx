@@ -15,6 +15,7 @@ import {
   TabButtonVariant,
 } from "@/app/atoms";
 import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
+import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
 import { modelItems } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
 import { providerLabel, providerUsesApiKey } from "@/app/lib/providers";
@@ -56,6 +57,16 @@ export function ModelPicker({
   const backend = (metadata?.backend ?? "") as BackendKind;
   const usesKey = providerUsesApiKey(backend);
   const { provider, signedIn } = useManagedSignIn(backend);
+  const managedModel = useManagedModelProfile();
+  const current = metadata?.model ?? label;
+  const usesMountedCredential =
+    usesKey &&
+    managedModel.credentialReady &&
+    managedModel.matches({
+      backend,
+      model: current,
+      baseUrl: metadata?.base_url ?? "",
+    });
 
   const keyQuery = useStoredKeyProviderModels(
     backend,
@@ -64,9 +75,13 @@ export function ModelPicker({
     open && usesKey,
   );
   const loginQuery = useManagedProviderModels(backend, open && !usesKey && signedIn);
-  const query = usesKey ? keyQuery : loginQuery;
+  const mountedQuery = useManagedProviderModels(
+    backend,
+    open && usesMountedCredential,
+    metadata?.base_url ?? null,
+  );
+  const query = usesKey ? (usesMountedCredential ? mountedQuery : keyQuery) : loginQuery;
 
-  const current = metadata?.model ?? label;
   const listed = modelItems(query.data?.models ?? []);
   // A model configured earlier may no longer be listed — a renamed or retired
   // one still has to show as what the session runs today.

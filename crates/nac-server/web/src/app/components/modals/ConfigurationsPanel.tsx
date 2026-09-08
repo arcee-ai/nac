@@ -123,7 +123,7 @@ export function ConfigurationsPanel({
 }) {
   const toast = useToast();
   const managedModel = useManagedModelProfile();
-  const { data: saved } = useModelConfigs();
+  const { data: saved, isPending: savedInitializing } = useModelConfigs();
   const catalog = useModelCatalog();
   const deleteConfig = useDeleteModelConfig();
   const configurations = useMemo(() => saved?.configurations ?? [], [saved]);
@@ -150,6 +150,12 @@ export function ConfigurationsPanel({
   const [backendOverride, setBackendOverride] = useState<BackendKind | null>(null);
   const [baseUrlOverride, setBaseUrlOverride] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
+  // Remote saved configurations and the managed host profile are both
+  // authoritative over an automatic catalog default. Until those first reads
+  // settle, emit no implicit selection; a deliberate source/model choice made
+  // by the user remains authoritative and does not wait on background state.
+  const initialSourcesPending =
+    picked === null && pickedModel === null && (savedInitializing || managedModel.initializing);
 
   // Launching usually means reusing the setup from last time, so the newest
   // saved configuration opens selected. With nothing saved yet the catalog is
@@ -180,10 +186,10 @@ export function ConfigurationsPanel({
   // arrives and disappears again the moment another source is chosen.
   const catalogDefault = useMemo(
     () =>
-      source.kind === "catalog"
+      source.kind === "catalog" && !initialSourcesPending
         ? (managedModel.defaultPick ?? defaultCatalogPick(catalog.data))
         : null,
-    [source.kind, catalog.data, managedModel.defaultPick],
+    [source.kind, catalog.data, managedModel.defaultPick, initialSourcesPending],
   );
   const catalogPick = pickedModel ?? catalogDefault;
 
@@ -324,6 +330,7 @@ export function ConfigurationsPanel({
   );
 
   const selection = useMemo<LaunchModelSelection | null>(() => {
+    if (initialSourcesPending) return null;
     if (initial && preservesInitial) {
       const model = provider === CUSTOM ? modelDraft.trim() : chosenModel;
       if (!model) return null;
@@ -434,6 +441,7 @@ export function ConfigurationsPanel({
     };
   }, [
     source.kind,
+    initialSourcesPending,
     initial,
     preservesInitial,
     catalogPick,
@@ -592,6 +600,7 @@ export function ConfigurationsPanel({
                     failed={catalog.isError}
                     value={catalogPick}
                     onSelect={(pick) => {
+                      setPicked({ kind: "catalog" });
                       setPickedModel(pick);
                       setApiKey("");
                       setNameDraft(null);
