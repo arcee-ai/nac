@@ -15,6 +15,7 @@ const MANAGED_RUNTIME_GID: u32 = 10_001;
 const REQUIRED_RUNTIME_TOOLS: &[&str] = &[
     "bash",
     "git",
+    "git-lfs",
     "gh",
     "ssh",
     "curl",
@@ -269,4 +270,14 @@ fn readiness_checks(
         }
     }
     checks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::REQUIRED_RUNTIME_TOOLS;
+
+    #[test]
+    fn managed_readiness_requires_git_lfs_executable() {
+        assert!(REQUIRED_RUNTIME_TOOLS.contains(&"git-lfs"));
+    }
 }
