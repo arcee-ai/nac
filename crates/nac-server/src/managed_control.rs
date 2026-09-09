@@ -55,7 +55,7 @@ async fn status(
     let path = manager.inner.store_path.clone();
     let binding = match operation_binding(&manager, &request) {
         Ok(binding) => binding,
-        Err(response) => return response,
+        Err(status) => return control_configuration_error(status),
     };
     match tokio::task::spawn_blocking(move || {
         nac_core::store::record_managed_status(
@@ -119,7 +119,7 @@ async fn prepare_for_action(
     let path = manager.inner.store_path.clone();
     let binding = match operation_binding(&manager, &request) {
         Ok(binding) => binding,
-        Err(response) => return response,
+        Err(status) => return control_configuration_error(status),
     };
     let Some(expected_identity) = manager.managed_identity().cloned() else {
         return internal_error();
@@ -197,12 +197,12 @@ fn validate(
 fn operation_binding(
     manager: &SessionManager,
     request: &ManagedControlRequest,
-) -> Result<ManagedOperationBinding, Response> {
-    let managed = manager.managed_host().ok_or_else(not_found)?;
+) -> Result<ManagedOperationBinding, StatusCode> {
+    let managed = manager.managed_host().ok_or(StatusCode::NOT_FOUND)?;
     let control = managed
         .managed_control()
-        .map_err(|_| internal_error())?
-        .ok_or_else(not_found)?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
     let audience = format!(
         "urn:nac:managed-control:{}:{}",
         managed.logical_host_id, control.host_incarnation_id
@@ -224,6 +224,14 @@ fn operation_binding(
         actor: request.actor.clone(),
         beneficiary: request.beneficiary.clone(),
     })
+}
+
+fn control_configuration_error(status: StatusCode) -> Response {
+    if status == StatusCode::NOT_FOUND {
+        not_found()
+    } else {
+        internal_error()
+    }
 }
 
 fn error(status: StatusCode, message: &'static str) -> Response {
