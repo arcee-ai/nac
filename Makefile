@@ -157,6 +157,7 @@ test-e2e-remote:
 ## Run focused deterministic lifecycle and crash-window regressions
 test-durability:
 	$(CARGO) test --locked -p nac-core current_schema_initialize_is_byte_exact_and_does_not_enter_a_writer_transaction
+	$(CARGO) test --locked -p nac-core current_schema_delete_mode_initialize_is_read_only_even_during_a_writer_transaction
 	$(CARGO) test --locked -p nac-core invalid_wal_cannot_mask_future_main_schema_or_mutate_any_file
 	$(CARGO) test --locked -p nac-core killed_migrator_rolls_back_and_waiting_process_migrates_exactly_once
 	$(CARGO) test --locked -p nac-core cancellation_adopts_a_committed_single_direct_steer_after_async_abort

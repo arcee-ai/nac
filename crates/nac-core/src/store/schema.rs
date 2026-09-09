@@ -698,11 +698,6 @@ fn open_connection_with_hooks(
     }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     if preflight_schema_version == STORE_SCHEMA_VERSION {
-        let journal_mode: String =
-            conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
-        if !journal_mode.eq_ignore_ascii_case("wal") {
-            conn.pragma_update(None, "journal_mode", "WAL")?;
-        }
         return Ok(conn);
     }
     // journal_mode is database-wide and persistent, so future schemas must be

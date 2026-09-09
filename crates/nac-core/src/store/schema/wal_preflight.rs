@@ -3,6 +3,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const SQLITE_HEADER_LENGTH: usize = 64;
+const SQLITE_PAGE_SIZE_OFFSET: usize = 16;
 const USER_VERSION_OFFSET: usize = 60;
 const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
 const WAL_HEADER_LENGTH: usize = 32;
@@ -30,13 +31,14 @@ pub(super) fn read_schema_version_header(path: &Path) -> Result<Option<i64>> {
         return Ok(None);
     }
     let main_version = read_be_u32(&header[USER_VERSION_OFFSET..USER_VERSION_OFFSET + 4]);
+    let main_page_size = sqlite_page_size(&header);
     Ok(Some(
-        read_wal_schema_version(path)?.unwrap_or_else(|| i64::from(main_version)),
+        read_wal_schema_version(path, main_page_size)?.unwrap_or_else(|| i64::from(main_version)),
     ))
 }
 
 /// Return page one's user_version from the latest valid committed WAL frame.
-fn read_wal_schema_version(path: &Path) -> Result<Option<i64>> {
+fn read_wal_schema_version(path: &Path, main_page_size: Option<usize>) -> Result<Option<i64>> {
     let wal_path = sidecar_path(path, "-wal");
     let mut wal = match std::fs::File::open(&wal_path) {
         Ok(wal) => wal,
@@ -62,6 +64,9 @@ fn read_wal_schema_version(path: &Path) -> Result<Option<i64>> {
         encoded_page_size as usize
     };
     if !(512..=65_536).contains(&page_size) || !page_size.is_power_of_two() {
+        return Ok(None);
+    }
+    if main_page_size != Some(page_size) {
         return Ok(None);
     }
 
@@ -109,6 +114,19 @@ fn read_wal_schema_version(path: &Path) -> Result<Option<i64>> {
         }
     }
     Ok(committed_page_one)
+}
+
+fn sqlite_page_size(header: &[u8; SQLITE_HEADER_LENGTH]) -> Option<usize> {
+    let encoded = u16::from_be_bytes([
+        header[SQLITE_PAGE_SIZE_OFFSET],
+        header[SQLITE_PAGE_SIZE_OFFSET + 1],
+    ]);
+    let page_size = if encoded == 1 {
+        65_536
+    } else {
+        usize::from(encoded)
+    };
+    ((512..=65_536).contains(&page_size) && page_size.is_power_of_two()).then_some(page_size)
 }
 
 #[derive(Clone, Copy)]

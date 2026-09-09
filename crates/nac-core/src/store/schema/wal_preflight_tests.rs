@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 
 #[derive(Clone, Copy, Debug)]
 enum InvalidWal {
+    PageSizeMismatch,
     HeaderChecksum,
     TornFrame,
     FrameChecksum,
@@ -16,7 +17,8 @@ enum InvalidWal {
 }
 
 impl InvalidWal {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
+        Self::PageSizeMismatch,
         Self::HeaderChecksum,
         Self::TornFrame,
         Self::FrameChecksum,
@@ -114,7 +116,8 @@ fn prepare_future_main_with_invalid_wal(path: &Path, invalid: InvalidWal) -> i64
     let connection = Connection::open(path).unwrap();
     connection
         .execute_batch(
-            "PRAGMA journal_mode = DELETE;
+            "PRAGMA page_size = 4096;
+             PRAGMA journal_mode = DELETE;
              CREATE TABLE future_sentinel (value TEXT NOT NULL);
              INSERT INTO future_sentinel VALUES ('future-data-canary');",
         )
@@ -130,16 +133,22 @@ fn prepare_future_main_with_invalid_wal(path: &Path, invalid: InvalidWal) -> i64
         .unwrap();
     drop(connection);
 
-    let mut page_one = std::fs::read(path).unwrap()[..page_size as usize].to_vec();
+    let wal_page_size = if matches!(invalid, InvalidWal::PageSizeMismatch) {
+        512
+    } else {
+        page_size
+    };
+    let mut page_one = std::fs::read(path).unwrap()[..wal_page_size as usize].to_vec();
     page_one[USER_VERSION_OFFSET..USER_VERSION_OFFSET + 4]
         .copy_from_slice(&(super::super::STORE_SCHEMA_VERSION as u32).to_be_bytes());
     let salts = [0x41, 0x4c, 0x4c, 0x2d, 0x33, 0x39, 0x00, 0x01];
     let order = ChecksumByteOrder::Little;
-    let (mut wal, rolling) = wal_header(page_size, salts, order);
+    let (mut wal, rolling) = wal_header(wal_page_size, salts, order);
     let (mut current_frame, current_checksum) =
         wal_frame(1, page_count, salts, &page_one, rolling, order);
 
     match invalid {
+        InvalidWal::PageSizeMismatch => wal.extend_from_slice(&current_frame),
         InvalidWal::HeaderChecksum => {
             wal[24] ^= 0x80;
             wal.extend_from_slice(&current_frame);
@@ -196,6 +205,8 @@ fn valid_wal_checksums_support_both_sqlite_byte_orders() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut main = [0_u8; SQLITE_HEADER_LENGTH];
         main[..SQLITE_MAGIC.len()].copy_from_slice(SQLITE_MAGIC);
+        main[SQLITE_PAGE_SIZE_OFFSET..SQLITE_PAGE_SIZE_OFFSET + 2]
+            .copy_from_slice(&4096_u16.to_be_bytes());
         std::fs::write(&path, main).unwrap();
 
         let page_size = 4096_u32;

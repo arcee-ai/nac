@@ -101,3 +101,73 @@ fn current_schema_initialize_is_byte_exact_and_does_not_enter_a_writer_transacti
     drop(holder);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[test]
+fn current_schema_delete_mode_initialize_is_read_only_even_during_a_writer_transaction() {
+    let path = temp_store_path("delete_mode_read_only");
+    initialize(&path).unwrap();
+    let setup = Connection::open(&path).unwrap();
+    setup
+        .execute_batch(
+            "CREATE TABLE delete_mode_sentinel (value TEXT NOT NULL);
+             INSERT INTO delete_mode_sentinel VALUES ('preserved');
+             PRAGMA wal_checkpoint(TRUNCATE);",
+        )
+        .unwrap();
+    assert_eq!(
+        setup
+            .pragma_query_value::<String, _>(None, "journal_mode", |row| row.get(0))
+            .unwrap()
+            .to_ascii_lowercase(),
+        "wal"
+    );
+    setup.pragma_update(None, "journal_mode", "DELETE").unwrap();
+    drop(setup);
+
+    let paths = sidecars(&path);
+    let before = paths.each_ref().map(|candidate| snapshot(candidate));
+    assert!(before[0].bytes.is_some());
+    assert!(before[1].bytes.is_none() && before[2].bytes.is_none());
+    initialize(&path).unwrap();
+    assert_eq!(
+        paths.each_ref().map(|candidate| snapshot(candidate)),
+        before
+    );
+
+    let holder = Connection::open(&path).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+    let initialize_path = path.clone();
+    let startup = std::thread::spawn(move || {
+        let result = initialize(&initialize_path);
+        finished_tx.send(()).unwrap();
+        result
+    });
+    finished_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("current DELETE-mode startup waited for a writer lock");
+    startup.join().unwrap().unwrap();
+    holder.execute_batch("ROLLBACK").unwrap();
+
+    assert_eq!(
+        paths.each_ref().map(|candidate| snapshot(candidate)),
+        before
+    );
+    assert_eq!(
+        holder
+            .pragma_query_value::<String, _>(None, "journal_mode", |row| row.get(0))
+            .unwrap()
+            .to_ascii_lowercase(),
+        "delete"
+    );
+    assert_eq!(
+        holder
+            .query_row("SELECT value FROM delete_mode_sentinel", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+        "preserved"
+    );
+    drop(holder);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
