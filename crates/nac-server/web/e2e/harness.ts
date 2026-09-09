@@ -318,6 +318,12 @@ async function startHarness(
         BROWSER: "none",
         RUST_BACKTRACE: "1",
         NAC_E2E_API_KEY: "nac-e2e-dummy-only",
+        // Conventional selectors make two independent provider routes
+        // available to the unified model picker without placing either value
+        // in browser state. The scripted tests never send model traffic to
+        // these public endpoints.
+        OPENAI_API_KEY: "nac-e2e-openai-dummy-only",
+        DEEPSEEK_API_KEY: "nac-e2e-deepseek-dummy-only",
         MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
         [cleanupMarkerEnvironment]: cleanupMarker,
         ...(exaCredential == null ? {} : { EXA_API_KEY: exaCredential }),

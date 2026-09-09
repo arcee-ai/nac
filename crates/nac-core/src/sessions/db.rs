@@ -610,6 +610,23 @@ pub(crate) fn compare_and_update_permission_approval_state(
     Ok(true)
 }
 
+/// Reads only the immutable behavior discriminator. Configuration repair paths
+/// use this instead of decoding the whole snapshot, because an unrelated
+/// malformed legacy field must remain explicitly repairable.
+pub fn load_session_behavior(path: &Path, session_id: &str) -> Result<SessionBehavior> {
+    let conn = crate::store::open_connection(path)?;
+    let behavior = conn
+        .query_row(
+            "SELECT behavior FROM sessions WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    behavior
+        .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?
+        .parse()
+}
+
 pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn

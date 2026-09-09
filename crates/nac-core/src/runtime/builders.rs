@@ -63,19 +63,18 @@ async fn build_run_config_inner(
     )?;
     let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
     let light_model = options.model.light_model.clone();
-    let resolved_light_client = light_model
-        .as_ref()
-        .map(|light| resolve_light_client(light, &settings.extra_headers))
-        .transpose()?
-        .map(std::sync::Arc::new);
     let light_client = if behavior == sessions::SessionBehavior::Direct {
         // ALL-36 owns the future responsibilities of a light model in a plain
-        // direct session. Resolve it above to keep persisted configuration
-        // validation unchanged, but do not install a runtime consumer until
-        // that product and safety design has been explicitly accepted.
+        // direct session. Retain its durable configuration, but do not resolve
+        // credentials or construct a client until that product and safety
+        // design has been explicitly accepted.
         None
     } else {
-        resolved_light_client
+        light_model
+            .as_ref()
+            .map(|light| resolve_light_client(light, &settings.extra_headers))
+            .transpose()?
+            .map(std::sync::Arc::new)
     };
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;

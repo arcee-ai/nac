@@ -564,7 +564,7 @@ test("shows and persists the optional light model for every chat behavior", asyn
   ] as const) {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toContainText("New Chat");
-    await expect(dialog).toContainText("gpt-5.6-sol");
+    await expect(dialog).toContainText("GPT-5.6 Sol");
     if (expected.behavior !== "orchestrator") {
       await dialog.getByRole("radio").filter({ hasText: expected.label }).click();
     }
@@ -587,6 +587,70 @@ test("shows and persists the optional light model for every chat behavior", asyn
       await page.getByRole("button", { name: "Create new session", exact: true }).click();
     }
   }
+});
+
+test("uses the unified catalog for a cross-provider New Chat override", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const projectId = await createProject(request, harness);
+  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Primary model", { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Advanced presets and provider setup" }),
+  ).toBeVisible();
+  await dialog.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+  await page.getByPlaceholder("Search models…").fill("deepseek-v4-flash");
+  await page.getByText("deepseek-v4-flash", { exact: true }).click();
+  await dialog.getByRole("button", { name: "Create chat" }).click();
+  await expect(page).toHaveURL(/\/session\/[^/]+\/threads$/);
+  const sessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+  expect(sessionId).toBeTruthy();
+  const config = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
+  expect(config.ok()).toBe(true);
+  expect(await config.json()).toMatchObject({
+    backend: "deepseek-chat",
+    model: "deepseek-v4-flash",
+    base_url: "https://api.deepseek.com",
+  });
+});
+
+test("switches the active chat across configured providers from the unified composer picker", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  const modelButton = page.getByRole("button", { name: "Model" });
+  await expect(modelButton).toBeVisible();
+  await modelButton.click();
+  await page.getByPlaceholder("Search models…").fill("deepseek-v4-flash");
+
+  const mutation = page.waitForRequest(
+    (candidate) =>
+      candidate.method() === "PATCH" && candidate.url().endsWith(`/sessions/${sessionId}/config`),
+  );
+  await page.getByText("deepseek-v4-flash", { exact: true }).click();
+  const body = (await mutation).postDataJSON() as Record<string, unknown>;
+  expect(body).toMatchObject({
+    backend: "deepseek-chat",
+    model: "deepseek-v4-flash",
+    base_url: "https://api.deepseek.com",
+    api_key_env: null,
+    extra_headers: null,
+  });
+  expect(JSON.stringify(body)).not.toContain("nac-e2e-deepseek-dummy-only");
+
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
+      const config = (await response.json()) as { backend?: string; model?: string };
+      return `${config.backend}/${config.model}`;
+    })
+    .toBe("deepseek-chat/deepseek-v4-flash");
 });
 
 test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({

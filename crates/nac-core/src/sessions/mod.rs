@@ -25,9 +25,10 @@ pub(crate) use db::{
 };
 pub use db::{
     create_session, delete_session, increment_run_count, list_sessions, load_last_session,
-    load_permission_approval_mode, load_session, load_session_config, reorder_sessions,
-    save_session, save_session_run_state, session_exists, update_permission_approval_mode,
-    update_raw_session_config, update_session_config, update_session_presentation,
+    load_permission_approval_mode, load_session, load_session_behavior, load_session_config,
+    reorder_sessions, save_session, save_session_run_state, session_exists,
+    update_permission_approval_mode, update_raw_session_config, update_session_config,
+    update_session_presentation,
 };
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,

@@ -73,7 +73,10 @@ async fn create_and_resume_effort_snapshot(
 async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let original_api_key = std::env::var_os("OPENAI_API_KEY");
+    let missing_light_key = "NAC_MISSING_UNUSED_DIRECT_LIGHT_KEY";
+    let original_missing_light_key = std::env::var_os(missing_light_key);
     unsafe { std::env::set_var("OPENAI_API_KEY", "test_dummy_key") };
+    unsafe { std::env::remove_var(missing_light_key) };
     let store_path = temp_store_path("direct_primary");
     let root = store_path.parent().unwrap().to_path_buf();
     std::fs::create_dir_all(&root).unwrap();
@@ -81,7 +84,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
         model: "gpt-5-mini".to_string(),
         backend: Some(BackendKind::OpenAiResponses),
         base_url: Some("https://api.openai.com/v1".to_string()),
-        api_key_env: Some("OPENAI_API_KEY".to_string()),
+        api_key_env: Some(missing_light_key.to_string()),
         reasoning_effort: Some(ReasoningEffort::Low),
     };
     let mut direct_model = test_openai_model_options();
@@ -158,7 +161,9 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     );
 
     let mut delegating_model = test_openai_model_options();
-    delegating_model.light_model = Some(light_model);
+    let mut delegating_light_model = light_model;
+    delegating_light_model.api_key_env = Some("OPENAI_API_KEY".to_string());
+    delegating_model.light_model = Some(delegating_light_model);
     let delegating = build_run_config_for_project_with_behavior(
         RunOptions {
             workspace_cwd: root.clone(),
@@ -195,6 +200,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     ));
 
     let _ = std::fs::remove_dir_all(root);
+    restore_env(missing_light_key, original_missing_light_key);
     restore_env("OPENAI_API_KEY", original_api_key);
 }
 

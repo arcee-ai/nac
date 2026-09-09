@@ -84,6 +84,31 @@ vi.mock("@/app/components/modals/LightModelSection", async () => {
   };
 });
 
+vi.mock("@/app/components/modals/PrimaryModelSection", async () => {
+  const React = await import("react");
+  return {
+    PrimaryModelSection: ({
+      initial,
+      onChange,
+    }: {
+      initial?: {
+        backend: string;
+        model: string;
+        base_url: string;
+        api_key_env: string | null;
+        reasoning_effort: string | null;
+        extra_headers: Record<string, string>;
+      };
+      onChange: (selection: Record<string, unknown> | null) => void;
+    }) => {
+      React.useEffect(() => {
+        onChange(initial ? { kind: "resolved", ...initial, light_model: undefined } : null);
+      }, [initial, onChange]);
+      return <p>Primary model: {initial?.model ?? "none"}</p>;
+    },
+  };
+});
+
 const light: LightModelSettings = {
   model: "gpt-5-mini",
   backend: "openai-responses",

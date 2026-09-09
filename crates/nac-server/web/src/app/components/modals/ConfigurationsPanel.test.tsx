@@ -271,29 +271,27 @@ it("waits for persisted configurations and managed status before emitting an imp
   }
 });
 
-it("does not replace a session light model when its primary fields match a saved setup", async () => {
+it("preserves exact inherited advanced settings when duplicate presets share basic identity", async () => {
   vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
   vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
   vi.spyOn(api, "listModelConfigs").mockResolvedValue({
-    configurations: [
-      {
-        config_id: "saved-config",
-        name: "Saved provider",
-        backend: "openai-responses",
-        model: "gpt-5.6-sol",
-        base_url: "https://api.openai.com/v1",
+    configurations: ["first", "second"].map((suffix, index) => ({
+      config_id: `saved-config-${suffix}`,
+      name: `Saved provider ${suffix}`,
+      backend: "openai-responses" as const,
+      model: "gpt-5.6-sol",
+      base_url: "https://api.openai.com/v1",
+      api_key_env: "SAVED_API_KEY",
+      reasoning_effort: (index === 0 ? "low" : "medium") as "low" | "medium",
+      extra_headers: { "X-Preset": suffix },
+      light_model: {
+        model: "saved-light",
+        backend: "openai-responses" as const,
         api_key_env: "SAVED_API_KEY",
-        reasoning_effort: "high",
-        extra_headers: {},
-        light_model: {
-          model: "saved-light",
-          backend: "openai-responses",
-          api_key_env: "SAVED_API_KEY",
-        },
-        created_at: "2026-09-08T00:00:00Z",
-        updated_at: "2026-09-08T00:00:00Z",
       },
-    ],
+      created_at: "2026-09-08T00:00:00Z",
+      updated_at: "2026-09-08T00:00:00Z",
+    })),
   });
   vi.spyOn(api, "resolveModelConfig").mockResolvedValue({
     backend: "openai-responses",
@@ -317,7 +315,7 @@ it("does not replace a session light model when its primary fields match a saved
             base_url: "https://api.openai.com/v1",
             api_key_env: "SAVED_API_KEY",
             reasoning_effort: "high",
-            extra_headers: {},
+            extra_headers: { "X-Inherited": "exact" },
           }}
           onChange={onChange}
         />
@@ -329,7 +327,8 @@ it("does not replace a session light model when its primary fields match a saved
       expect(onChange).toHaveBeenLastCalledWith(
         expect.objectContaining({
           kind: "resolved",
-          config_id: "saved-config",
+          reasoning_effort: "high",
+          extra_headers: { "X-Inherited": "exact" },
           light_model: undefined,
         }),
       ),
