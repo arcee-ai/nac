@@ -20,6 +20,17 @@ workers, traditional children, and separately launched orchestrators. An
 arbitrary-shell agent can enumerate and transmit those secrets. Managed v0 is
 an owner-wide trust boundary, not a per-Project or per-agent sandbox.
 
+The image must run unprivileged and without `CAP_SYS_PTRACE`; its entrypoint
+fails closed if that capability is effective. The server and managed workers
+set Linux `no_new_privs` and become non-dumpable before spawning untrusted
+commands or MCP servers. Together with the worker's close-on-exec credential
+socket, that blocks ordinary same-UID procfs, ptrace, and `pidfd_getfd`
+inspection of server/worker secrets. The controller must not use a privileged
+pod, add ptrace capability, or weaken the host's process-inspection controls.
+These controls do not protect against kernel compromise or a fully compromised
+NAC process; separate UIDs or an external credential broker are required for a
+stronger boundary.
+
 Platform owns the logical-host controller, gateway/SSO, stable URL, volumes,
 runtime confinement, egress, host-scoped model credential, and lifecycle.
 NAC owns Projects and sessions, GitHub user authorization, repository

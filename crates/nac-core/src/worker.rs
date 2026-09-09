@@ -9,53 +9,9 @@ use crate::agent::Agent;
 use crate::skills::SkillRegistry;
 use crate::store::{self, WorkerContext};
 use crate::types::Message;
+use crate::worker_credentials::{ManagedWorkerCredentialReceiver, ManagedWorkerNativeCredentials};
 
 pub(crate) const MANAGED_WORKER_CANCEL_ACK: &str = "__NAC_CANCEL_ACK__";
-const MANAGED_WORKER_CREDENTIAL_PREFIX: &str = "__NAC_NATIVE_CREDENTIALS_V1__";
-
-#[derive(Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ManagedWorkerNativeCredentials {
-    exa_api_key: Option<String>,
-}
-
-impl ManagedWorkerNativeCredentials {
-    pub(crate) fn from_process_environment() -> std::io::Result<Self> {
-        let exa_api_key = std::env::var_os(crate::model::EXA_API_KEY_ENV)
-            .map(|value| {
-                value.into_string().map_err(|_| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "EXA_API_KEY is not valid Unicode",
-                    )
-                })
-            })
-            .transpose()?
-            .filter(|value| !value.trim().is_empty());
-        Ok(Self { exa_api_key })
-    }
-
-    pub(crate) fn encode_control_line(&self) -> std::io::Result<Vec<u8>> {
-        let payload = serde_json::to_vec(self)
-            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-        let mut line = MANAGED_WORKER_CREDENTIAL_PREFIX.as_bytes().to_vec();
-        line.extend(payload);
-        line.push(b'\n');
-        Ok(line)
-    }
-
-    fn decode_control_line(line: &str) -> Result<Self> {
-        let payload = line
-            .strip_prefix(MANAGED_WORKER_CREDENTIAL_PREFIX)
-            .ok_or_else(|| anyhow::anyhow!("managed worker credential control frame is missing"))?;
-        serde_json::from_str(payload)
-            .map_err(|_| anyhow::anyhow!("managed worker credential control frame is invalid"))
-    }
-
-    pub(crate) fn exact_redactions(&self) -> Vec<String> {
-        self.exa_api_key.iter().cloned().collect()
-    }
-}
 
 pub struct ManagedWorkerRunConfig {
     pub(crate) agent: Agent,
@@ -143,27 +99,13 @@ async fn commit_managed_worker_episode(
     Ok(())
 }
 
-fn spawn_worker_control_listener(
+fn spawn_cancellation_listener(
     command_cancellation: ThreadCancellation,
-    credentials: Option<
-        tokio::sync::oneshot::Sender<std::result::Result<ManagedWorkerNativeCredentials, String>>,
-    >,
     ready: Option<std::sync::mpsc::Sender<()>>,
 ) {
     std::thread::spawn(move || {
         let stdin = std::io::stdin();
-        let mut lines = stdin.lock().lines();
-        if let Some(credentials) = credentials {
-            let decoded = match lines.next() {
-                Some(Ok(line)) => ManagedWorkerNativeCredentials::decode_control_line(&line)
-                    .map_err(|error| error.to_string()),
-                Some(Err(_)) => Err("managed worker credential control read failed".to_string()),
-                None => Err("managed worker credential control channel closed".to_string()),
-            };
-            if credentials.send(decoded).is_err() {
-                return;
-            }
-        }
+        let lines = stdin.lock().lines();
         if let Some(ready) = ready {
             let _ = ready.send(());
         }
@@ -180,20 +122,15 @@ fn spawn_worker_control_listener(
     });
 }
 
-pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()> {
+pub async fn run_managed_worker(
+    run_config: ManagedWorkerRunConfig,
+    credential_receiver: ManagedWorkerCredentialReceiver,
+) -> Result<()> {
     // The CLI builds `run_config`, including every configured MCP transport,
-    // before entering this function. Reading the private control frame here
-    // keeps the credential unavailable to MCP expansion and stdio descendants.
-    let (credentials_tx, credentials_rx) = tokio::sync::oneshot::channel();
-    spawn_worker_control_listener(
-        run_config.agent.command_cancellation(),
-        Some(credentials_tx),
-        None,
-    );
-    let credentials = credentials_rx
-        .await
-        .map_err(|_| anyhow::anyhow!("managed worker credential control listener stopped"))?
-        .map_err(anyhow::Error::msg)?;
+    // before entering this function. Only now does the worker announce
+    // readiness and receive the credential over its non-inherited socket.
+    let credentials = credential_receiver.receive_after_mcp().await?;
+    spawn_cancellation_listener(run_config.agent.command_cancellation(), None);
     run_managed_worker_with_credentials(run_config, credentials).await
 }
 
@@ -209,7 +146,7 @@ async fn run_managed_worker_with_credentials(
         action,
     } = run_config;
 
-    agent.set_worker_web_credential(credentials.exa_api_key);
+    agent.set_worker_web_credential(credentials.into_exa_api_key());
     let send_result = agent.send(&action).await;
     let response = send_result?;
     commit_managed_worker_episode(store_path, session_id, thread_name, action, &response).await?;
@@ -273,28 +210,6 @@ mod tests {
         .expect("worker agent config must be valid")
     }
 
-    #[test]
-    fn native_credential_control_frame_round_trips_without_echoing_invalid_payloads() {
-        let credential = "exa-control-frame-canary";
-        let encoded = ManagedWorkerNativeCredentials {
-            exa_api_key: Some(credential.to_string()),
-        }
-        .encode_control_line()
-        .unwrap();
-        let decoded = ManagedWorkerNativeCredentials::decode_control_line(
-            std::str::from_utf8(&encoded).unwrap().trim_end(),
-        )
-        .unwrap();
-        assert_eq!(decoded.exa_api_key.as_deref(), Some(credential));
-
-        let invalid = format!("{MANAGED_WORKER_CREDENTIAL_PREFIX}{credential}");
-        let error = match ManagedWorkerNativeCredentials::decode_control_line(&invalid) {
-            Ok(_) => panic!("invalid credential control frame was accepted"),
-            Err(error) => error.to_string(),
-        };
-        assert!(!error.contains(credential));
-    }
-
     #[tokio::test]
     async fn managed_worker_credential_is_model_safe_and_absent_from_durable_state() {
         let root = std::env::temp_dir().join(format!(
@@ -328,9 +243,7 @@ mod tests {
 
         run_managed_worker_with_credentials(
             run_config,
-            ManagedWorkerNativeCredentials {
-                exa_api_key: Some(credential.to_string()),
-            },
+            ManagedWorkerNativeCredentials::for_test(Some(credential)),
         )
         .await
         .unwrap();
@@ -376,7 +289,7 @@ mod tests {
         };
         let cancellation = ThreadCancellation::default();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        spawn_worker_control_listener(cancellation.clone(), None, Some(ready_tx));
+        spawn_cancellation_listener(cancellation.clone(), Some(ready_tx));
         ready_rx
             .recv_timeout(Duration::from_secs(2))
             .expect("cancellation listener did not start reading");

@@ -12,7 +12,9 @@ use crate::events::{decode_stderr_event, sanitize_external_agent_event, AgentEve
 use crate::model::{ModelClient, TokenUsage};
 use crate::process::ProcessTreeGuard;
 use crate::tools::{ThreadCancellation, ToolRuntime};
-use crate::worker::ManagedWorkerNativeCredentials;
+use crate::worker_credentials::{
+    prepare_worker_credential_channel, ManagedWorkerNativeCredentials,
+};
 const CANCEL_ACK_GRACE: Duration = Duration::from_millis(250);
 // SSH cleanup can spend five seconds in the kill request; Podman can spend two.
 const COOPERATIVE_CLEANUP_GRACE: Duration = Duration::from_secs(7);
@@ -210,8 +212,8 @@ pub(crate) fn worker_model_arguments_for_test(client: &ModelClient) -> Vec<Strin
 }
 
 /// Native integration credentials never enter the worker process environment.
-/// The worker receives this snapshot through its private control pipe only
-/// after startup-time MCP construction has completed.
+/// The worker receives this snapshot through its private socket only after
+/// startup-time MCP construction has completed.
 fn remove_worker_native_credentials(command: &mut Command) {
     for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
         command.env_remove(name);
@@ -241,7 +243,6 @@ pub(super) async fn run_worker(
     })?;
     let native_credentials = ManagedWorkerNativeCredentials::from_process_environment()?;
     let native_credential_redactions = native_credentials.exact_redactions();
-    let native_credential_control = native_credentials.encode_control_line()?;
     let mut command = Command::new(executable);
     command.arg("__worker");
     remove_worker_native_credentials(&mut command);
@@ -295,15 +296,10 @@ pub(super) async fn run_worker(
     command.args(runtime.backend.worker_cli_args());
     command.kill_on_drop(true);
 
+    let credential_channel = prepare_worker_credential_channel(&mut command)?;
     let (mut child, mut process_tree) = ProcessTreeGuard::spawn_supervised(&mut command)?;
     let mut control_stdin = child.stdin.take();
-    let credential_stdin = control_stdin
-        .as_mut()
-        .ok_or_else(|| std::io::Error::other("supervised worker stdin pipe is unavailable"))?;
-    credential_stdin
-        .write_all(&native_credential_control)
-        .await?;
-    credential_stdin.flush().await?;
+    let credential_sender = credential_channel.into_sender()?;
 
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
     let stderr = child
@@ -416,15 +412,30 @@ pub(super) async fn run_worker(
         Exited(std::io::Result<std::process::ExitStatus>),
         TimedOut,
         Cancelled,
+        CredentialError(std::io::Error),
     }
 
     let deadline = sleep(Duration::from_secs(invocation.timeout_secs));
     tokio::pin!(deadline);
+    let credential_delivery = credential_sender.send_after_ready(&native_credentials);
+    tokio::pin!(credential_delivery);
     let mut outcome = tokio::select! {
         biased;
         _ = cancellation.cancelled() => WaitOutcome::Cancelled,
         result = child.wait() => WaitOutcome::Exited(result),
         _ = &mut deadline => WaitOutcome::TimedOut,
+        result = &mut credential_delivery => match result {
+            Ok(()) => tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => WaitOutcome::Cancelled,
+                result = child.wait() => WaitOutcome::Exited(result),
+                _ = &mut deadline => WaitOutcome::TimedOut,
+            },
+            Err(error) => match timeout(READER_DRAIN_GRACE, child.wait()).await {
+                Ok(status) => WaitOutcome::Exited(status),
+                Err(_) => WaitOutcome::CredentialError(error),
+            },
+        },
     };
     let mut cooperatively_cancelled = false;
     if matches!(outcome, WaitOutcome::Cancelled) {
@@ -461,7 +472,10 @@ pub(super) async fn run_worker(
     let mut cancelled = matches!(outcome, WaitOutcome::Cancelled);
     let mut cleanup_error = None;
     let mut force_reader_shutdown = false;
-    if timed_out || (cancelled && !cooperatively_cancelled) {
+    if timed_out
+        || matches!(outcome, WaitOutcome::CredentialError(_))
+        || (cancelled && !cooperatively_cancelled)
+    {
         match process_tree.terminate(&mut child).await {
             Ok(()) => force_reader_shutdown = true,
             Err(error) => {
@@ -519,6 +533,7 @@ pub(super) async fn run_worker(
     let exit_code = match outcome {
         WaitOutcome::Exited(wait_result) if !cancelled => wait_result?.code().unwrap_or(-1),
         WaitOutcome::Exited(_) | WaitOutcome::TimedOut | WaitOutcome::Cancelled => -1,
+        WaitOutcome::CredentialError(error) => return Err(error),
     };
 
     Ok(WorkerRun {
@@ -553,37 +568,206 @@ mod tests {
     use crate::model::{BackendKind, EffectiveModelSettings};
     use crate::tools::test_runtime;
     use crate::TEST_ENV_LOCK;
+    #[cfg(target_os = "linux")]
+    use std::io::Read;
+    #[cfg(target_os = "linux")]
+    use std::os::unix::fs::OpenOptionsExt;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
+    const NATIVE_CREDENTIAL_CANARY: &str = "exa-worker-private-socket-canary";
+
     #[cfg(unix)]
     #[tokio::test]
-    async fn native_credential_isolated_process_helper() {
+    async fn native_credential_adversarial_descendant_helper() {
         let Some(root) = std::env::var_os("NAC_WORKER_NATIVE_CREDENTIAL_ROOT") else {
             return;
         };
         let root = PathBuf::from(root);
         assert!(std::env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
+        assert!(!std::env::args().any(|argument| argument.contains(NATIVE_CREDENTIAL_CANARY)));
+        #[cfg(target_os = "linux")]
+        {
+            let socket_link = std::env::var("NAC_TEST_CREDENTIAL_SOCKET_LINK").unwrap();
+            let inherited = std::fs::read_dir("/proc/self/fd")
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+                .any(|link| link.to_string_lossy() == socket_link);
+            assert!(!inherited, "credential socket reached an MCP descendant");
+        }
+        std::fs::write(
+            root.join("mcp-descendant"),
+            "env=absent;fd=absent;argv=absent",
+        )
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_credential_adversarial_mcp_helper() {
+        let Some(root) = std::env::var_os("NAC_WORKER_NATIVE_CREDENTIAL_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        assert!(std::env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
+        assert!(!std::env::args().any(|argument| argument.contains(NATIVE_CREDENTIAL_CANARY)));
+
+        #[cfg(target_os = "linux")]
+        {
+            let socket_link = std::env::var("NAC_TEST_CREDENTIAL_SOCKET_LINK").unwrap();
+            // The MCP builder supplies a fresh stdin pipe. Make it nonblocking
+            // so an empty pipe is evidence rather than a reason to hang.
+            // SAFETY: fcntl operates on the process's valid stdin descriptor.
+            let flags = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_GETFL) };
+            assert!(flags >= 0);
+            assert!(
+                // SAFETY: F_SETFL consumes the previously returned flags.
+                unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags | libc::O_NONBLOCK) }
+                    >= 0
+            );
+            let mut stdin_bytes = [0_u8; 4096];
+            let stdin_read = std::io::stdin().read(&mut stdin_bytes).unwrap_or(0);
+            assert!(!stdin_bytes[..stdin_read]
+                .windows(NATIVE_CREDENTIAL_CANARY.len())
+                .any(|bytes| bytes == NATIVE_CREDENTIAL_CANARY.as_bytes()));
+            stdin_bytes.fill(0);
+
+            let inherited_socket = std::fs::read_dir("/proc/self/fd")
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+                .any(|link| link.to_string_lossy() == socket_link);
+            assert!(!inherited_socket, "credential socket was inherited by MCP");
+
+            // SAFETY: getppid takes no arguments and has no memory-safety preconditions.
+            let parent = unsafe { libc::getppid() };
+            let deadline = std::time::Instant::now() + Duration::from_millis(400);
+            let mut reopened_socket = false;
+            let mut observed_credential = false;
+            while std::time::Instant::now() < deadline {
+                if let Ok(entries) = std::fs::read_dir(format!("/proc/{parent}/fd")) {
+                    for entry in entries.filter_map(Result::ok) {
+                        let Ok(link) = std::fs::read_link(entry.path()) else {
+                            continue;
+                        };
+                        if link.to_string_lossy() != socket_link {
+                            continue;
+                        }
+                        let opened = std::fs::OpenOptions::new()
+                            .read(true)
+                            .custom_flags(libc::O_NONBLOCK)
+                            .open(entry.path());
+                        if let Ok(mut opened) = opened {
+                            reopened_socket = true;
+                            let mut bytes = [0_u8; 4096];
+                            let read = opened.read(&mut bytes).unwrap_or(0);
+                            observed_credential |= bytes[..read]
+                                .windows(NATIVE_CREDENTIAL_CANARY.len())
+                                .any(|part| part == NATIVE_CREDENTIAL_CANARY.as_bytes());
+                            bytes.fill(0);
+                        }
+                    }
+                }
+                std::thread::yield_now();
+            }
+            assert!(
+                !reopened_socket,
+                "MCP reopened the worker socket via procfs"
+            );
+            assert!(!observed_credential, "MCP read the credential via procfs");
+            std::fs::write(
+                root.join("mcp-observations"),
+                "env=absent;argv=absent;stdin=absent;inherited-fd=absent;proc-fd=unopenable",
+            )
+            .unwrap();
+        }
+        #[cfg(not(target_os = "linux"))]
+        std::fs::write(
+            root.join("mcp-observations"),
+            "env=absent;argv=absent;proc-fd=unsupported",
+        )
+        .unwrap();
+
+        let descendant = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tools::thread::worker::tests::native_credential_adversarial_descendant_helper",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(descendant.status.success());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_credential_worker_endpoint_helper() {
+        let Some(root) = std::env::var_os("NAC_WORKER_NATIVE_CREDENTIAL_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let fd = std::env::var("NAC_TEST_CREDENTIAL_FD")
+            .unwrap()
+            .parse::<i32>()
+            .unwrap();
+        let receiver =
+            crate::worker_credentials::ManagedWorkerCredentialReceiver::from_inherited_fd(Some(fd))
+                .unwrap();
+        // SAFETY: F_GETFD only reads flags for the owned integer descriptor.
+        let fd_flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        assert!(fd_flags >= 0 && fd_flags & libc::FD_CLOEXEC != 0);
+        #[cfg(target_os = "linux")]
+        {
+            // SAFETY: these prctl getters take no pointer arguments.
+            assert_eq!(unsafe { libc::prctl(libc::PR_GET_DUMPABLE) }, 0);
+            assert_eq!(
+                unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) },
+                1
+            );
+        }
+        assert!(std::env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
         let expansion_error = crate::mcp::test_support::expand_env("${EXA_API_KEY}")
             .expect_err("worker MCP expansion must not observe the native credential")
             .to_string();
-        assert!(!expansion_error.contains("exa-worker-private-control-canary"));
+        assert!(!expansion_error.contains(NATIVE_CREDENTIAL_CANARY));
         std::fs::write(root.join("mcp-expansion"), "absent").unwrap();
 
-        let mut descendant = crate::mcp::test_support::stdio_command(
-            "sh",
+        #[cfg(target_os = "linux")]
+        let socket_link = std::fs::read_link(format!("/proc/self/fd/{fd}"))
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        #[cfg(not(target_os = "linux"))]
+        let socket_link = "unsupported".to_string();
+        let mut mcp = crate::mcp::test_support::stdio_command(
+            std::env::current_exe().unwrap().to_str().unwrap(),
             &[
-                "-c".to_string(),
-                "printf '%s' \"${EXA_API_KEY-unset}\"".to_string(),
+                "--exact".to_string(),
+                "tools::thread::worker::tests::native_credential_adversarial_mcp_helper"
+                    .to_string(),
+                "--nocapture".to_string(),
             ],
             &BTreeMap::new(),
             &root,
         )
         .unwrap();
-        let descendant = descendant.output().await.unwrap();
-        assert!(descendant.status.success());
-        std::fs::write(root.join("descendant-exa"), descendant.stdout).unwrap();
+        mcp.env("NAC_TEST_CREDENTIAL_SOCKET_LINK", &socket_link);
+        let mcp = mcp.spawn().unwrap();
+
+        let credentials = receiver.receive_after_mcp().await.unwrap();
+        let credential = credentials.into_exa_api_key().unwrap();
+        assert_eq!(credential, NATIVE_CREDENTIAL_CANARY);
+        std::fs::write(root.join("credential-delivered"), "yes").unwrap();
+        println!("stdout:{credential}");
+        eprintln!("stderr:{credential}");
+        drop(credential);
+
+        let output = mcp.wait_with_output().await.unwrap();
+        assert!(output.status.success());
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(NATIVE_CREDENTIAL_CANARY));
+        std::fs::write(root.join("mcp-output"), output.stdout).unwrap();
     }
 
     #[cfg(unix)]
@@ -600,13 +784,15 @@ mod tests {
             format!("'{}'", value.to_string_lossy().replace('\'', "'\\''"))
         };
         let script = format!(
-            "#!/bin/sh\nIFS= read -r control\nprintf '%s' \"$control\" > '{}'\n\
-             printf '%s' \"${{EXA_API_KEY-unset}}\" > '{}'\n\
+            "#!/bin/sh\nprintf '%s' \"${{EXA_API_KEY-unset}}\" > '{}'\n\
              printf '%s\\n' \"$@\" > '{}'\n\
-             printf 'stdout:%s\\n' \"$control\"\n\
-             printf 'stderr:%s\\n' \"$control\" >&2\n\
-             exec {} --exact tools::thread::worker::tests::native_credential_isolated_process_helper --nocapture\n",
-            root.join("credential-control").display(),
+             fd=\n\
+             while [ \"$#\" -gt 0 ]; do\n\
+               if [ \"$1\" = --native-credential-fd ]; then fd=$2; break; fi\n\
+               shift\n\
+             done\n\
+             test -n \"$fd\"\n\
+             NAC_TEST_CREDENTIAL_FD=\"$fd\" exec {} --exact tools::thread::worker::tests::native_credential_worker_endpoint_helper --nocapture\n",
             root.join("inherited-exa").display(),
             root.join("argv").display(),
             shell_quote(&current_exe)
@@ -618,6 +804,8 @@ mod tests {
         runtime.workspace_cwd = root.clone();
         runtime.config_cwd = root.clone();
         runtime.worker_executable = Some(executable);
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        runtime.event_sink = crate::events::EventSink::channel(event_tx);
         let no_sources = Vec::<String>::new();
         let no_skills = Vec::<String>::new();
         let run = run_worker(
@@ -639,16 +827,22 @@ mod tests {
         assert_eq!(run.exit_code, 0);
         std::fs::write(root.join("stdout"), run.stdout).unwrap();
         std::fs::write(root.join("stderr"), run.stderr).unwrap();
+        let mut event_log = String::new();
+        while let Ok(event) = event_rx.try_recv() {
+            event_log.push_str(&serde_json::to_string(&event).unwrap());
+            event_log.push('\n');
+        }
+        std::fs::write(root.join("event-log"), event_log).unwrap();
     }
 
     #[cfg(unix)]
     #[test]
-    fn managed_worker_private_control_isolates_exa_from_mcp_and_process_output() {
+    fn managed_worker_private_socket_isolates_exa_from_adversarial_mcp() {
         let root = std::env::temp_dir().join(format!(
             "nac_worker_native_credential_{}",
             uuid::Uuid::new_v4()
         ));
-        let credential = "exa-worker-private-control-canary";
+        let credential = NATIVE_CREDENTIAL_CANARY;
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -674,12 +868,18 @@ mod tests {
             "absent"
         );
         assert_eq!(
-            std::fs::read_to_string(root.join("descendant-exa")).unwrap(),
-            "unset"
+            std::fs::read_to_string(root.join("mcp-descendant")).unwrap(),
+            "env=absent;fd=absent;argv=absent"
         );
-        assert!(std::fs::read_to_string(root.join("credential-control"))
-            .unwrap()
-            .contains(credential));
+        assert_eq!(
+            std::fs::read_to_string(root.join("credential-delivered")).unwrap(),
+            "yes"
+        );
+        let observations = std::fs::read_to_string(root.join("mcp-observations")).unwrap();
+        assert!(!observations.contains(credential));
+        assert!(observations.contains("env=absent"));
+        #[cfg(target_os = "linux")]
+        assert!(observations.contains("proc-fd=unopenable"));
         let argv = std::fs::read_to_string(root.join("argv")).unwrap();
         assert!(!argv.contains(credential));
         for output_path in ["stdout", "stderr"] {
@@ -687,6 +887,9 @@ mod tests {
             assert!(rendered.contains("[REDACTED]"), "{output_path}: {rendered}");
             assert!(!rendered.contains(credential), "{output_path}: {rendered}");
         }
+        assert!(!std::fs::read_to_string(root.join("event-log"))
+            .unwrap()
+            .contains(credential));
         assert!(!String::from_utf8_lossy(&output.stdout).contains(credential));
         assert!(!String::from_utf8_lossy(&output.stderr).contains(credential));
         let _ = std::fs::remove_dir_all(root);
@@ -777,7 +980,7 @@ done
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn cancellation_stops_two_managed_workers_and_their_descendants() {
+    async fn cancellation_before_credential_ready_stops_workers_and_descendants() {
         let root = std::env::temp_dir().join(format!("nac_worker_cancel_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let executable = root.join("worker.sh");
@@ -889,7 +1092,7 @@ wait
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn pidfd_failure_does_not_block_worker_timeout_or_cancellation() {
+    async fn pidfd_failure_does_not_block_pre_ready_timeout_or_cancellation() {
         let _test_lock = crate::process::PIDFD_OPEN_FAILURE_LOCK.lock().await;
         let expected_usage = TokenUsage {
             input_tokens: 7,
