@@ -257,7 +257,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         snapshot.extra_headers.clone(),
         metadata,
     )
-    .and_then(|settings| settings.with_trusted_api_key_file(model.trusted_api_key_file))
+    .and_then(|settings| settings.with_trusted_api_key_file(model.trusted_api_key_file.clone()))
     .map_err(|error| {
         anyhow::anyhow!(
             "stored session model settings are invalid; settings repair required: {error}"
@@ -297,18 +297,16 @@ pub(super) async fn build_resume_config_from_snapshot(
         // credential resolution and is absent from the resumed direct runtime.
         None
     } else {
-        let trusted = snapshot_settings
-            .trusted_api_key_file
-            .as_deref()
-            .map(|path| crate::light_model::TrustedLightCredential {
-                backend: snapshot_settings.backend,
-                base_url: &snapshot_settings.base_url,
-                path,
-            });
         snapshot
             .light_model
             .as_ref()
-            .map(|light| resolve_light_client(light, &snapshot.extra_headers, trusted))
+            .map(|light| {
+                resolve_light_client(
+                    light,
+                    &snapshot.extra_headers,
+                    model.trusted_light_credential.as_ref(),
+                )
+            })
             .transpose()
             .map_err(|error| match error {
                 // The resolver classifies the failure at the source; add the

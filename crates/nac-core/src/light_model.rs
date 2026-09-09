@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -32,11 +32,11 @@ pub struct LightModelSettings {
 
 /// Operator-authorized mounted credential route. Resolution rechecks the
 /// light model's backend and endpoint before attaching the file.
-#[derive(Debug, Clone, Copy)]
-pub struct TrustedLightCredential<'a> {
+#[derive(Debug, Clone)]
+pub struct TrustedLightCredential {
     pub backend: BackendKind,
-    pub base_url: &'a str,
-    pub path: &'a Path,
+    pub base_url: String,
+    pub path: PathBuf,
 }
 
 /// Error resolving a session's light model.
@@ -93,7 +93,7 @@ impl std::error::Error for LightModelError {
 pub(crate) fn resolve_light_client(
     light: &LightModelSettings,
     session_headers: &BTreeMap<String, String>,
-    trusted: Option<TrustedLightCredential<'_>>,
+    trusted: Option<&TrustedLightCredential>,
 ) -> std::result::Result<ModelClient, LightModelError> {
     let backend = light
         .backend
@@ -116,7 +116,7 @@ pub(crate) fn resolve_light_client(
             (settings.backend == credential.backend
                 && settings.base_url == credential.base_url
                 && settings.api_key_env.is_none())
-            .then(|| credential.path.to_path_buf())
+            .then(|| credential.path.clone())
         });
         settings.with_trusted_api_key_file(trusted_file)
     })
@@ -150,7 +150,7 @@ pub fn validate(
 pub fn validate_with_trusted_credential(
     light: &LightModelSettings,
     session_headers: &BTreeMap<String, String>,
-    trusted: TrustedLightCredential<'_>,
+    trusted: &TrustedLightCredential,
 ) -> Result<()> {
     resolve_light_client(light, session_headers, Some(trusted))
         .map(|_| ())
@@ -271,11 +271,11 @@ mod tests {
         unsafe {
             std::env::remove_var("OPENAI_API_KEY");
         }
-        let missing_path = Path::new("/definitely/missing/nac-mounted-light-key");
+        let missing_path = PathBuf::from("/definitely/missing/nac-mounted-light-key");
         let trusted = TrustedLightCredential {
             backend: BackendKind::ArceeApi,
-            base_url: "https://api.arcee.ai/api/v1",
-            path: missing_path,
+            base_url: "https://api.arcee.ai/api/v1".to_string(),
+            path: missing_path.clone(),
         };
 
         let exact = LightModelSettings {
@@ -288,7 +288,7 @@ mod tests {
         let exact_error = format!(
             "{:#}",
             anyhow::Error::from(
-                resolve_light_client(&exact, &BTreeMap::new(), Some(trusted)).unwrap_err()
+                resolve_light_client(&exact, &BTreeMap::new(), Some(&trusted)).unwrap_err()
             )
         );
         assert!(exact_error.contains("trusted model credential file"));
@@ -304,7 +304,7 @@ mod tests {
         let mismatch_error = format!(
             "{:#}",
             anyhow::Error::from(
-                resolve_light_client(&mismatch, &BTreeMap::new(), Some(trusted)).unwrap_err()
+                resolve_light_client(&mismatch, &BTreeMap::new(), Some(&trusted)).unwrap_err()
             )
         );
         assert!(mismatch_error.contains("OPENAI_API_KEY"));

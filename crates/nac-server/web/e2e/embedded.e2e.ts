@@ -722,6 +722,65 @@ test("uses an Advanced saved provider account from the unified composer without 
     .toBe(`fireworks-chat/${saved.api_key_env}`);
 });
 
+test("uses an Advanced saved provider account for the light model without exposing its key", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const canary = "advanced-light-provider-secret-must-stay-server-side";
+  const created = await request.post(`${harness.baseUrl}/model-configs`, {
+    data: {
+      name: "Advanced Fireworks light account",
+      backend: "fireworks-chat",
+      model: "gpt-5.6-sol",
+      base_url: harness.provider.baseUrl,
+      api_key: canary,
+    },
+  });
+  expect(created.ok()).toBe(true);
+  const saved = (await created.json()) as { api_key_env?: string };
+  expect(saved.api_key_env).toMatch(/^NAC_CONFIG_/);
+  expect(JSON.stringify(saved)).not.toContain(canary);
+
+  const projectId = await createProject(request, harness);
+  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Dual" }).click();
+  const lightRow = dialog.getByText("Light model*", { exact: true }).locator("..").locator("..");
+  await lightRow.getByRole("button").click();
+  await page.getByPlaceholder("Search models…").fill("fireworks-chat");
+  await page.getByRole("button", { name: /gpt-5\.6-sol gpt-5\.6-sol/ }).click();
+
+  const mutation = page.waitForRequest(
+    (candidate) => candidate.method() === "POST" && candidate.url().endsWith("/sessions"),
+  );
+  await dialog.getByRole("button", { name: "Create chat" }).click();
+  const body = (await mutation).postDataJSON() as {
+    light_model?: Record<string, unknown> | null;
+  };
+  expect(body.light_model).toMatchObject({
+    backend: "fireworks-chat",
+    model: "gpt-5.6-sol",
+    base_url: harness.provider.baseUrl,
+    api_key_env: saved.api_key_env,
+  });
+  expect(JSON.stringify(body)).not.toContain(canary);
+
+  await expect(page).toHaveURL(/\/session\/[^/]+\/threads$/);
+  const sessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+  expect(sessionId).toBeTruthy();
+  const config = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
+  expect(config.ok()).toBe(true);
+  expect((await config.json()) as { light_model?: unknown }).toMatchObject({
+    light_model: {
+      backend: "fireworks-chat",
+      model: "gpt-5.6-sol",
+      base_url: harness.provider.baseUrl,
+      api_key_env: saved.api_key_env,
+    },
+  });
+});
+
 test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({
   harness,
   page,

@@ -25,17 +25,16 @@ impl<'a> SessionAttachmentApplication<'a> {
             return Ok(runtime::ResumeModelOptions::default());
         };
         let snapshot = sessions::load_session(&self.manager.inner.store_path, session_id)?;
-        if !profile.matches_session(&snapshot) {
-            return Ok(runtime::ResumeModelOptions::default());
+        let primary_matches = profile.matches_session(&snapshot);
+        if primary_matches {
+            let managed = self.manager.managed_host().ok_or_else(|| {
+                anyhow!("managed model profile is missing its host configuration")
+            })?;
+            profile
+                .require_durable_authorization(managed)
+                .context("refusing to resume session without managed model authorization")?;
         }
-        let managed = self
-            .manager
-            .managed_host()
-            .ok_or_else(|| anyhow!("managed model profile is missing its host configuration"))?;
-        profile
-            .require_durable_authorization(managed)
-            .context("refusing to resume session without managed model authorization")?;
-        Ok(profile.resume_options())
+        Ok(profile.resume_options(primary_matches))
     }
 
     pub(crate) fn new(manager: &'a SessionManager) -> Self {

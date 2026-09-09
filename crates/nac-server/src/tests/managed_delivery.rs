@@ -217,7 +217,7 @@ async fn mounted_key_light_model_is_route_bound_across_create_patch_and_resume()
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("managed_mounted_light_model");
     let nac_home = root.join("nac-home");
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("independent-primary-key"));
     write_managed_credential(&root.join("model-token"), "mounted-light-key\n");
     let manager = test_managed_manager(&root);
     let store_path = root.join("store.db");
@@ -237,18 +237,20 @@ async fn mounted_key_light_model_is_route_bound_across_create_patch_and_resume()
         let created = manager
             .create_session(CreateSessionRequest {
                 behavior,
+                model: RequestField::Value("gpt-5.2".to_string()),
+                backend: RequestField::Value("openai-responses".to_string()),
+                base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
+                api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                 light_model: RequestField::Value(light.clone()),
                 ..CreateSessionRequest::default()
             })
             .await
-            .expect("the exact managed light route reuses the mounted key");
+            .expect("the exact managed light route reuses the mounted key independently");
         let session_id = created.metadata.session_id.unwrap();
-        assert_eq!(
-            sessions::load_session(&store_path, &session_id)
-                .unwrap()
-                .light_model,
-            Some(light.clone())
-        );
+        let stored = sessions::load_session(&store_path, &session_id).unwrap();
+        assert_eq!(stored.backend, BackendKind::OpenAiResponses);
+        assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(stored.light_model, Some(light.clone()));
 
         manager
             .update_session_config(
@@ -289,22 +291,48 @@ async fn mounted_key_light_model_is_route_bound_across_create_patch_and_resume()
             .expect("a restarted manager reconstructs the managed dual-model route");
     }
 
-    let mismatch = restarted
+    let wrong_route = restarted
         .create_session(CreateSessionRequest {
+            model: RequestField::Value("gpt-5.2".to_string()),
+            backend: RequestField::Value("openai-responses".to_string()),
+            base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
+            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
             light_model: RequestField::Value(LightModelSettings {
-                model: "gpt-5-mini".to_string(),
-                backend: Some(BackendKind::OpenAiResponses),
-                base_url: Some("https://api.openai.com/v1".to_string()),
+                model: "moonshotai/kimi-k3".to_string(),
+                backend: Some(BackendKind::ArceeApi),
+                base_url: Some("https://api.arcee.ai/not-the-mounted-route".to_string()),
                 api_key_env: None,
                 reasoning_effort: None,
             }),
             ..CreateSessionRequest::default()
         })
         .await
-        .expect_err("a mounted Arcee key must not cross into an OpenAI light route");
+        .expect_err("the mounted Arcee key must not cross into another route");
     assert!(
-        format!("{mismatch:#}").contains("OPENAI_API_KEY"),
-        "{mismatch:#}"
+        format!("{wrong_route:#}").contains("invalid approved Arcee inference path"),
+        "{wrong_route:#}"
+    );
+
+    let explicit_selector = restarted
+        .create_session(CreateSessionRequest {
+            model: RequestField::Value("gpt-5.2".to_string()),
+            backend: RequestField::Value("openai-responses".to_string()),
+            base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
+            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+            light_model: RequestField::Value(LightModelSettings {
+                model: "moonshotai/kimi-k3".to_string(),
+                backend: Some(BackendKind::ArceeApi),
+                base_url: Some("https://api.arcee.ai/api/v1".to_string()),
+                api_key_env: Some("SECOND_API_KEY".to_string()),
+                reasoning_effort: None,
+            }),
+            ..CreateSessionRequest::default()
+        })
+        .await
+        .expect_err("an explicit selector must outrank the mounted light credential");
+    assert!(
+        format!("{explicit_selector:#}").contains("SECOND_API_KEY"),
+        "{explicit_selector:#}"
     );
 
     let _ = std::fs::remove_dir_all(root);
