@@ -209,6 +209,10 @@ struct UpgradeCli {
 
 #[derive(Args)]
 struct ManagedWorkerCli {
+    /// Internal inherited descriptor for the private native-credential socket.
+    #[arg(long, hide = true)]
+    native_credential_fd: Option<i32>,
+
     /// Internal Managed NAC host-secret root used for per-command snapshots.
     #[arg(long, hide = true)]
     managed_secret_root: Option<PathBuf>,
@@ -471,6 +475,10 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
+    if cli.command.is_none() || matches!(&cli.command, Some(RootCommand::ManagedWorker(_))) {
+        runtime::restrict_same_uid_inspection()
+            .context("failed to restrict NAC process inspection")?;
+    }
     match cli.command {
         None => run_server(cli.server).await,
         Some(RootCommand::ManagedWorker(worker)) => run_managed_worker(worker).await,
@@ -654,6 +662,10 @@ fn should_open_dashboard(force_open: bool, no_open: bool) -> bool {
 }
 
 async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
+    // Adopt and mark the private endpoint close-on-exec before any background
+    // refresh or MCP transport can spawn a descendant.
+    let credential_receiver =
+        runtime::ManagedWorkerCredentialReceiver::from_inherited_fd(cli.native_credential_fd)?;
     // Fire-and-forget models.dev catalog overlay refresh; cadence-gated via
     // the sidecar, so usually a no-op read. Keeps the overlay fresh for
     // worker-heavy usage even when the server is not running.
@@ -752,7 +764,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         )) as Arc<dyn nac_contracts::CommandEnvironmentProvider>
     });
     run_config.set_command_environment_provider(command_environment);
-    runtime::run_managed_worker(run_config).await
+    runtime::run_managed_worker(run_config, credential_receiver).await
 }
 fn internal_sandbox_mounts(args: &SandboxArgs) -> Result<Vec<(PathBuf, PathBuf, bool)>> {
     let mut mounts = Vec::new();
@@ -957,6 +969,31 @@ thread_timeout_secs = 7200
         .expect("malformed worker headers must be rejected")
         .to_string();
         assert!(error.contains("expected a JSON object"), "{error}");
+    }
+
+    #[test]
+    fn worker_cli_accepts_private_credential_descriptor_without_exposing_it_in_help() {
+        let cli = Cli::try_parse_from([
+            "nac-web",
+            "__worker",
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--dispatch-id",
+            "dispatch-123",
+            "--action",
+            "work",
+            "--native-credential-fd",
+            "7",
+        ])
+        .unwrap();
+        let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
+            panic!("expected managed worker command");
+        };
+        assert_eq!(worker.native_credential_fd, Some(7));
+        let help = rendered_help(&["nac-web", "__worker", "--help"]);
+        assert!(!help.contains("native-credential-fd"), "{help}");
     }
 
     #[test]

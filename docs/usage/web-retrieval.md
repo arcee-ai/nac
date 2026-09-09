@@ -15,13 +15,26 @@ that produced it admitted the tools. Orchestrator primaries and traditional
 child sessions never receive these capabilities. A top-level direct session
 using managed-orchestrator control tools does receive them.
 
-The orchestrator removes `EXA_API_KEY` from the worker process environment. The
-worker consumes the snapshot from a private control pipe only after its MCP
-configuration and stdio transports are constructed. Model-controlled commands,
-terminals, MCP configuration expansion, and MCP descendants therefore cannot
-read the key. Exact-value redaction also covers retained worker stdout and
-stderr; the key is never included in model-visible tool definitions or durable
-worker episodes.
+The orchestrator removes `EXA_API_KEY` from the worker process environment and
+keeps stdin exclusively for cancellation. On Unix, each dispatch gets an
+anonymous stream socket. The worker marks its inherited endpoint
+close-on-exec before constructing any MCP transport, announces readiness only
+after MCP construction, then receives one bounded credential frame and closes
+the socket. Credential bytes are therefore neither buffered before MCP startup
+nor inherited by MCP descendants, and an ordinary Linux `/proc/<pid>/fd` open
+cannot duplicate the socket as it could the retired stdin pipe. On non-Unix
+hosts, dispatch fails closed when a native credential would need delegation.
+
+On Linux, the server and every worker also become non-dumpable and set
+`no_new_privs` before spawning untrusted descendants. This blocks ordinary
+same-UID ptrace, process-memory, proc-environment, and `pidfd_getfd` inspection.
+It is not a defense against a process with `CAP_SYS_PTRACE`, a privileged
+container, kernel compromise, or a fully compromised NAC process. Deployments
+that run untrusted MCP servers must not grant those capabilities; stronger
+mutual isolation requires separate UIDs or a credential-injecting broker.
+
+Exact-value redaction covers retained worker stdout and stderr; the key is
+never included in model-visible tool definitions or durable worker episodes.
 
 `web_search` sends a bounded semantic-search request to Exa Search.
 `web_fetch` validates one public HTTP or HTTPS target and sends that URL to Exa

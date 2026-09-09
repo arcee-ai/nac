@@ -82,6 +82,7 @@ pub mod types;
 pub mod upgrade;
 pub mod view;
 mod worker;
+mod worker_credentials;
 pub mod workspace;
 
 /// Largest token count that can be persisted exactly and transported through

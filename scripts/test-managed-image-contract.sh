@@ -51,6 +51,8 @@ store_path_count=$(grep -c -- '--store-path' "$entrypoint")
 if grep -Eq '(dev|beta|stable)\.db' "$entrypoint"; then
     fail 'managed entrypoint must not select a build-track local store'
 fi
+require_literal "$entrypoint" 'CapEff:'
+require_literal "$entrypoint" 'must not receive CAP_SYS_PTRACE'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_credential_source = \"managed-bootstrap\"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_auth_issuer = \"https://api.arcee.ai\"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" '/run/secrets/nac/bootstrap.json'
