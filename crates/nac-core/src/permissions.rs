@@ -221,3 +221,7 @@ mod tests;
 #[cfg(test)]
 #[path = "permission_grant_tests.rs"]
 mod grant_tests;
+
+#[cfg(test)]
+#[path = "permission_mode_tests.rs"]
+mod mode_tests;

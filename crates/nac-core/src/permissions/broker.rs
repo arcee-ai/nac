@@ -56,10 +56,34 @@ impl PermissionBroker {
     }
 
     /// Durably changes this session's answer policy. Enabling auto-approval
-    /// claims process-local waiters under the same lock used by new asks and
-    /// manual replies. The durable generation lets independently attached
-    /// brokers claim their own waiters without missing a transition.
+    /// claims the process-local waiters that existed when the transition
+    /// started. The durable generation lets later or independently attached
+    /// waiters observe the transition without a stale enable claiming work
+    /// admitted after a completed disable.
     pub async fn set_approval_mode(&self, mode: PermissionApprovalMode) -> anyhow::Result<()> {
+        self.set_approval_mode_after_commit(mode, || async {}).await
+    }
+
+    pub(super) async fn set_approval_mode_after_commit<AfterCommit, AfterCommitFuture>(
+        &self,
+        mode: PermissionApprovalMode,
+        after_commit: AfterCommit,
+    ) -> anyhow::Result<()>
+    where
+        AfterCommit: FnOnce() -> AfterCommitFuture,
+        AfterCommitFuture: std::future::Future<Output = ()>,
+    {
+        let auto_approval_candidates = if mode == PermissionApprovalMode::AutoApprove {
+            self.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .pending
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
         tokio::task::spawn_blocking(move || {
@@ -69,16 +93,23 @@ impl PermissionBroker {
         .map_err(|error| {
             anyhow::anyhow!("permission approval mode update task failed: {error}")
         })??;
-        let replies = {
+        after_commit().await;
+        let replies = if mode == PermissionApprovalMode::AutoApprove {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if mode == PermissionApprovalMode::AutoApprove {
-                state.pending.drain().collect::<Vec<_>>()
-            } else {
-                Vec::new()
-            }
+            auto_approval_candidates
+                .into_iter()
+                .filter_map(|request_id| {
+                    state
+                        .pending
+                        .remove(&request_id)
+                        .map(|pending| (request_id, pending))
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
         };
 
         self.emit(crate::events::SessionEvent::PermissionApprovalModeChanged { mode });
