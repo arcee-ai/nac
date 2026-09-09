@@ -11,6 +11,7 @@ const INCOMPLETE_ATTEMPT_RETENTION_SECONDS: i64 = 300;
 const MAX_CONTROL_OPERATIONS: i64 = 10_000;
 const MAX_CONTROL_ATTEMPTS: i64 = 10_000;
 const CONTROL_ATTEMPT_LOCK_STRIPES: u8 = 64;
+const PRE_CONTROL_SCHEMA_VERSION: i64 = 24;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -296,6 +297,9 @@ pub fn preflight_managed_forward_start(
         requires_accept: false,
     };
     if !path.exists() {
+        if startup_supersession.is_some() {
+            return Err(ManagedMaintenanceError::MaintenanceConflict);
+        }
         return Ok(empty());
     }
     if let Some(store_version) = super::schema::preflight_schema_version(path)? {
@@ -312,21 +316,31 @@ pub fn preflight_managed_forward_start(
     if store_version > running.schema_version || store_version < running.minimum_schema_version {
         return Err(ManagedMaintenanceError::IncompatibleTarget);
     }
-    let has_ledger: bool = conn
-        .query_row(
-            "SELECT EXISTS(
-                 SELECT 1 FROM sqlite_master
-                 WHERE type = 'table' AND name = 'managed_host_maintenance'
-             )",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(anyhow::Error::new)?;
+    let managed_control_object_count = managed_control_schema_object_count(&conn)?;
+    if managed_control_object_count != 0 && managed_control_object_count != 4 {
+        return Err(ManagedMaintenanceError::MaintenanceConflict);
+    }
+    let has_ledger = managed_control_object_count == 4;
     if !has_ledger {
-        if startup_supersession.is_some() {
+        let Some(supersession) = startup_supersession else {
+            return Ok(empty());
+        };
+        if !supersession.adopt_unbound_previous || store_version != PRE_CONTROL_SCHEMA_VERSION {
             return Err(ManagedMaintenanceError::MaintenanceConflict);
         }
-        return Ok(empty());
+        drop(conn);
+        let accepted = supersede_managed_upgrade_at_startup(
+            path,
+            supersession,
+            store_version,
+            configured_host,
+            true,
+        )?;
+        validate_running_identity(&accepted, running, configured_host)?;
+        return Ok(ManagedStartupPreflight {
+            accepted_identity: Some(accepted),
+            requires_accept: true,
+        });
     }
     let has_accepted_identity: bool = conn
         .query_row(
@@ -373,6 +387,7 @@ pub fn preflight_managed_forward_start(
                 supersession,
                 store_version,
                 configured_host,
+                false,
             )?;
             validate_running_identity(&accepted, running, configured_host)?;
             return Ok(ManagedStartupPreflight {
@@ -391,6 +406,7 @@ pub fn preflight_managed_forward_start(
                 supersession,
                 store_version,
                 configured_host,
+                false,
             )?;
             validate_running_identity(&accepted, running, configured_host)?;
             return Ok(ManagedStartupPreflight {
@@ -443,6 +459,7 @@ pub fn preflight_managed_forward_start(
             supersession,
             store_version,
             configured_host,
+            false,
         )?;
         validate_running_identity(&accepted, running, configured_host)?;
         return Ok(ManagedStartupPreflight {
@@ -925,6 +942,7 @@ fn supersede_managed_upgrade_at_startup(
     supersession: &ManagedUpgradeSupersession,
     store_schema_version: i64,
     configured_host: Option<(&str, &str)>,
+    bootstrap_unbound_ledger: bool,
 ) -> std::result::Result<ManagedAcceptedIdentity, ManagedMaintenanceError> {
     let Some((managed_host_id, host_incarnation_id)) = configured_host else {
         return Err(ManagedMaintenanceError::MaintenanceConflict);
@@ -944,6 +962,20 @@ fn supersede_managed_upgrade_at_startup(
     let transaction = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(anyhow::Error::new)?;
+    if bootstrap_unbound_ledger {
+        let locked_store_version: i64 = transaction
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(anyhow::Error::new)?;
+        if !supersession.adopt_unbound_previous
+            || store_schema_version != PRE_CONTROL_SCHEMA_VERSION
+            || locked_store_version != PRE_CONTROL_SCHEMA_VERSION
+            || !managed_control_schema_absent(&transaction)?
+        {
+            return Err(ManagedMaintenanceError::MaintenanceConflict);
+        }
+        super::schema::create_managed_maintenance_tables(&transaction)
+            .map_err(ManagedMaintenanceError::Store)?;
+    }
     let snapshot = apply_supersession(&transaction, supersession, store_schema_version, true)?;
     let outcome = ManagedSupersedeOutcome::Superseded { snapshot };
     let outcome_json = serde_json::to_string(&outcome).map_err(anyhow::Error::new)?;
@@ -969,6 +1001,30 @@ fn supersede_managed_upgrade_at_startup(
         operation_id: supersession.operation.operation_id.clone(),
         target: supersession.operation.target.clone(),
     })
+}
+
+fn managed_control_schema_absent(
+    transaction: &rusqlite::Transaction<'_>,
+) -> std::result::Result<bool, ManagedMaintenanceError> {
+    Ok(managed_control_schema_object_count(transaction)? == 0)
+}
+
+fn managed_control_schema_object_count(
+    conn: &Connection,
+) -> std::result::Result<i64, ManagedMaintenanceError> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master
+             WHERE name IN (
+                 'managed_host_maintenance',
+                 'managed_control_operations',
+                 'managed_control_attempts',
+                 'idx_managed_control_attempts_operation'
+             )",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .map_err(anyhow::Error::new)
+    .map_err(ManagedMaintenanceError::Store)
 }
 
 fn apply_supersession(

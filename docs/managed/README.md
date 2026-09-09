@@ -200,14 +200,16 @@ A binding before changing A to B. A missing, stale, substituted, or downgrade
 expectation fails before ordinary store migration. The expectation does not give
 NAC Kubernetes access and cannot select a deployment or execution backend.
 
-For the one transition from a pre-control deployment whose maintenance ledger
-is still untouched, the controller may set `adopt_unbound_previous = true`.
-That explicit mode is accepted only while the ledger is serving at maintenance
-revision zero, with no accepted identity and no retained control operation or attempt. In one
-transaction NAC synthesizes A's binding from the configured host, incarnation,
-issuer, actor, beneficiary, and exact previous target; records A and B; and
-enters maintenance for B. Any existing control history rejects adoption. Live
-JWS supersession can never request this mode.
+For the one transition from a pre-control deployment, the controller may set
+`adopt_unbound_previous = true`. That explicit mode is accepted only when the
+schema-24 control ledger is absent or the current ledger is serving at
+maintenance revision zero, with no accepted identity and no retained control
+operation or attempt. In one transaction NAC creates an absent ledger,
+synthesizes A's binding from the configured host, incarnation, issuer, actor,
+beneficiary, and exact previous target, records A and B, and enters maintenance
+for B. Any partial control schema or existing control history rejects adoption.
+Live JWS supersession can never request this mode. A configured startup
+expectation also rejects an absent database instead of initializing one.
 
 Authoritative blockers include active runs and manual compactions, traditional
 children and managed orchestrators, live terminal processes, pending remote
