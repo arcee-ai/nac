@@ -279,7 +279,7 @@ pub(crate) async fn permission_state(
     tag = "permissions",
     params(("session_id" = String, Path)),
     request_body(content = UpdatePermissionApprovalModeRequest, content_type = "application/json"),
-    responses((status = 204, description = "Permission approval mode updated"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+    responses((status = 204, description = "Permission approval mode updated"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Concurrent permission approval mode update", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
 )]
 pub(crate) async fn update_permission_approval_mode(
     State(manager): State<SessionManager>,

@@ -182,12 +182,11 @@ async fn delayed_enable_write_cannot_overwrite_or_emit_after_a_completed_disable
         .await
         .unwrap();
     resume_tx.send(()).unwrap();
-    assert!(enabling
-        .await
-        .unwrap()
-        .unwrap_err()
-        .to_string()
-        .contains("changed concurrently"));
+    let error = enabling.await.unwrap().unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<PermissionApprovalModeUpdateError>(),
+        Some(&PermissionApprovalModeUpdateError::ConcurrentChange)
+    );
     assert_eq!(
         crate::sessions::load_permission_approval_mode(&path, "session-a").unwrap(),
         PermissionApprovalMode::Manual
