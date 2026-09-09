@@ -422,17 +422,20 @@ fn secure_public_router(router: Router, manager: SessionManager) -> Router {
 }
 
 fn managed_migration_recovery_router(manager: SessionManager) -> Router {
-    secure_public_router(
-        Router::new()
-            .route("/healthz", get(managed_status::healthz_handler))
-            .route("/readyz", get(managed_status::readyz_handler))
-            .route(
-                "/managed/status",
-                get(managed_status::managed_status_handler),
-            )
-            .with_state(manager.clone()),
-        manager,
-    )
+    Router::new()
+        .route("/healthz", get(managed_status::healthz_handler))
+        .route("/readyz", get(managed_status::readyz_handler))
+        .route(
+            "/managed/status",
+            get(managed_status::managed_status_handler),
+        )
+        .with_state(manager)
+        .layer(response_compression_layer())
+        .layer(middleware::from_fn(reject_cross_origin_mutation))
+        .layer(middleware::from_fn_with_state(
+            Arc::new(configured_allowed_hosts()),
+            reject_foreign_host,
+        ))
 }
 
 fn embedded_frontend_router() -> Router {
@@ -706,15 +709,17 @@ pub async fn serve_with_policy(
     let bound = listener
         .local_addr()
         .with_context(|| format!("failed to read bound address for {addr}"))?;
-    nac_core::store::check_readiness(&manager.inner.store_path)?;
-    if manager.inner.pending_forward_start {
-        let accepted = manager
-            .inner
-            .managed_identity
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("managed forward-start identity is unavailable"))?;
-        if !nac_core::store::accept_managed_forward_start(&manager.inner.store_path, accepted)? {
-            anyhow::bail!("accepted managed upgrade target changed before startup completed");
+    if !manager.is_recovery_only() {
+        nac_core::store::check_readiness(&manager.inner.store_path)?;
+        if manager.inner.pending_forward_start {
+            let accepted =
+                manager.inner.managed_identity.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("managed forward-start identity is unavailable")
+                })?;
+            if !nac_core::store::accept_managed_forward_start(&manager.inner.store_path, accepted)?
+            {
+                anyhow::bail!("accepted managed upgrade target changed before startup completed");
+            }
         }
     }
     on_listening(bound);

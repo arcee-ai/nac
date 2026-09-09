@@ -122,6 +122,70 @@ This first slice relies on compact-JWS authentication plus the private
 Service/NetworkPolicy boundary. Mutual TLS is intentionally deferred to
 ALL-45 and is not required by managed configuration version 2.
 
+## Upgrade control and maintenance
+
+Each private request carries a compact Ed25519 JWS in `Authorization: Bearer`.
+NAC accepts only the versioned `nac-managed-operation+jwt` protected header,
+`EdDSA`, a known unique JWKS `kid`, unpadded base64url segments, and a canonical
+Ed25519 public key. The assertion lifetime may not exceed 60 seconds. `iat`,
+`nbf`, and `exp` are checked with five seconds of clock skew and checked integer
+arithmetic.
+
+The signed claims bind the controller issuer, host-and-incarnation audience,
+request action, logical host, host incarnation, operation ID, complete target
+(release/build ID, source revision, product version, schema, and minimum
+schema), actor, and beneficiary. Any body, action, key, issuer, audience, host,
+incarnation, operation, target, actor, or beneficiary substitution fails
+closed. The issuer is also retained as the durable origin authority for the
+operation, so future configuration cannot reinterpret an existing operation.
+
+NAC permanently binds an operation ID to that complete authority and target.
+The assertion `jti` is a replay/idempotency key: retrying the same request after
+a lost response returns the original durable result, while reusing it for a
+different binding is rejected. Same-`jti` requests serialize through 64 fixed
+lock stripes; lock files do not grow with request volume. Retained operations
+and attempts each have an explicit 10,000-row fail-closed capacity. Expired
+completed attempts may be pruned, but an operation ID is never made available
+for a different target.
+
+`status` reports the durable maintenance snapshot and current blockers without
+closing admission. `prepare` and `retry` attempt one atomic idle-only handoff.
+If any blocker exists, admission remains open and the response contains a
+structured blocker list. If none exists, NAC commits `maintenance` and returns
+`safe_to_stop`; it never auto-cancels work, forces shutdown, rolls back a
+target, or guesses that a peer is idle.
+
+Authoritative blockers include active runs and manual compactions, traditional
+children and managed orchestrators, live terminal processes, pending remote
+terminal cleanup, repository clones, workspace mutations, process-local HTTP
+admissions, cross-process operation/resource/host leases, background model or
+GitHub device logins, and another maintenance operation. Blocker scans are
+nonwaiting: a contended process-local registry is itself reported as a
+blocker. Dormant goals, browser connections, and already-created SSE response
+bodies are not permanent blockers. A completed local terminal is tombstoned
+and releases its leases while retained output remains readable. Failed remote
+cleanup stays durable and blocks an upgrade across process restart until the
+cleanup succeeds.
+
+Once maintenance is committed, public recovery/static/status routes and
+explicit completion/cancellation paths remain available, while every new-work
+admission seam fails closed. This includes direct and orchestrated runs,
+session creation and attachment, manual compaction, child/orchestrator launch,
+workspace mutations, repository clones, and the full lifetime of background
+login flows. Private authenticated status remains available. Maintenance is
+cleared only by the exact accepted forward replacement after store
+initialization, reconciliation, both listener binds, and readiness succeed.
+The accepted host/incarnation/operation/target identity then fences the old
+process and any same-schema process with a different build from both new work
+and completion mutations.
+
+The public NAC implementation deliberately stops at this host-side contract.
+ALL-44 must supply controller-side assertion minting, operation persistence,
+lost-response retry, and rollout orchestration. ALL-45 may add mutual TLS to the
+private Service without weakening compact-JWS validation. ALL-42 must preserve
+the same forward-only lifecycle and safe-stop evidence when wiring deployment
+rollout behavior.
+
 `model_credential_source` defaults to `mounted-api-key`, preserving existing
 managed configurations. That source requires an API-key backend and a nonblank,
 finite regular file with no access for other users. It may be owned by

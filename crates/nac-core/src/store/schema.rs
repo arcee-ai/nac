@@ -9,6 +9,10 @@ mod wal_preflight;
 #[path = "schema/startup_tests.rs"]
 mod startup_tests;
 
+#[cfg(test)]
+#[path = "schema/connection_capacity_tests.rs"]
+mod connection_capacity_tests;
+
 use wal_preflight::read_schema_version_header;
 
 // 25 adds durable Managed NAC maintenance and authenticated-control replay
@@ -441,6 +445,13 @@ fn read_opened_schema_version(path: &Path) -> Option<i64> {
         .ok()
 }
 
+/// Read the effective SQLite schema version without opening SQLite or creating
+/// sidecars. Managed replacement admission uses this before any read-only
+/// ledger query so a future database is rejected without filesystem mutation.
+pub(super) fn preflight_schema_version(path: &Path) -> Result<Option<i64>> {
+    read_schema_version_header(path)
+}
+
 #[cfg(test)]
 fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     let mut sidecar = path.as_os_str().to_os_string();
@@ -449,7 +460,7 @@ fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
 }
 
 fn reject_future_schema_before_open(path: &Path) -> Result<()> {
-    if let Some(version) = read_schema_version_header(path)? {
+    if let Some(version) = preflight_schema_version(path)? {
         if version > STORE_SCHEMA_VERSION {
             return Err(anyhow!(
                 "unsupported store schema version {version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"

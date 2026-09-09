@@ -272,6 +272,12 @@ pub fn preflight_managed_forward_start(
     if !path.exists() {
         return Ok(empty());
     }
+    if let Some(store_version) = super::schema::preflight_schema_version(path)? {
+        if store_version > running.schema_version || store_version < running.minimum_schema_version
+        {
+            return Err(ManagedMaintenanceError::IncompatibleTarget);
+        }
+    }
     let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(anyhow::Error::new)?;
     let store_version: i64 = conn

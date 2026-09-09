@@ -349,6 +349,12 @@ export interface components {
       model: string;
       reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
     };
+    ManagedAcceptedIdentity: {
+      host_incarnation_id: string;
+      managed_host_id: string;
+      operation_id: string;
+      target: components["schemas"]["ManagedUpgradeTarget"];
+    };
     ManagedAuthListResponse: { providers: components["schemas"]["ManagedAuthStatusResponse"][] };
     ManagedAuthProvider: "arcee" | "codex";
     ManagedAuthStatusResponse: {
@@ -420,6 +426,7 @@ export interface components {
       version: string;
     };
     ManagedMaintenanceSnapshot: {
+      accepted_identity?: null | components["schemas"]["ManagedAcceptedIdentity"];
       blockers: components["schemas"]["ManagedUpgradeBlocker"][];
       operation_id?: string | null;
       prepared_at?: string | null;

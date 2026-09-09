@@ -199,6 +199,9 @@ pub(crate) async fn managed_status_handler(
 fn readiness_snapshot(manager: &SessionManager) -> ReadinessResponse {
     let identity = crate::build_identity::current();
     let migration = nac_core::store::migration_status(&manager.inner.store_path);
+    let maintenance = (migration.state == nac_core::store::StoreMigrationState::Current)
+        .then(|| nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path))
+        .and_then(Result::ok);
     let checks = readiness_checks(
         manager,
         MANAGED_RUNTIME_UID,
@@ -226,13 +229,7 @@ fn readiness_snapshot(manager: &SessionManager) -> ReadinessResponse {
         migration_failure: migration
             .failure
             .map(nac_core::store::StoreMigrationFailure::as_str),
-        maintenance_state: if recovery_only {
-            "recovery-only"
-        } else if migration.state == nac_core::store::StoreMigrationState::Current {
-            "serving"
-        } else {
-            "unavailable"
-        },
+        maintenance_state: maintenance_state(recovery_only, migration.state, maintenance.as_ref()),
         checks,
     }
 }
@@ -293,13 +290,7 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         migration_failure: migration
             .failure
             .map(nac_core::store::StoreMigrationFailure::as_str),
-        maintenance_state: if recovery_only {
-            "recovery-only"
-        } else if store_current {
-            "serving"
-        } else {
-            "unavailable"
-        },
+        maintenance_state: maintenance_state(recovery_only, migration.state, maintenance.as_ref()),
         logical_host_id: managed.logical_host_id.clone(),
         owner: managed.owner.clone(),
         public_hostname: managed.public_hostname.clone(),
@@ -318,6 +309,30 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         maintenance,
         checks,
     })
+}
+
+fn maintenance_state(
+    recovery_only: bool,
+    migration_state: nac_core::store::StoreMigrationState,
+    maintenance: Option<&nac_core::store::ManagedMaintenanceSnapshot>,
+) -> &'static str {
+    if recovery_only {
+        return "recovery-only";
+    }
+    if migration_state != nac_core::store::StoreMigrationState::Current {
+        return "unavailable";
+    }
+    match maintenance {
+        Some(snapshot) if snapshot.state == nac_core::store::ManagedMaintenanceState::Serving => {
+            "serving"
+        }
+        Some(snapshot)
+            if snapshot.state == nac_core::store::ManagedMaintenanceState::Maintenance =>
+        {
+            "maintenance"
+        }
+        _ => "unavailable",
+    }
 }
 
 fn readiness_checks(
