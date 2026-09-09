@@ -99,6 +99,10 @@ done
         printf "%s\n" durable > /var/lib/nac/restart-canary
         printf "%s\n" durable > /repositories/restart-canary
         printf "%s\n" durable > /home/nac/restart-canary
+        chown 10001:10001 \
+            /var/lib/nac/restart-canary \
+            /repositories/restart-canary \
+            /home/nac/restart-canary
     '
 
 fail() {
