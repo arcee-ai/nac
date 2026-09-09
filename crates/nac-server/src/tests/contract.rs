@@ -127,6 +127,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("POST", "/ssh/browse"),
     ("PUT", "/credentials/{name}"),
     ("PUT", "/managed/github/git-identity"),
+    ("PUT", "/sessions/{session_id}/permissions/mode"),
     ("PUT", "/managed/secrets/{name}"),
     ("PUT", "/projects/order"),
     ("PUT", "/sessions/order"),

@@ -4,7 +4,7 @@ use nac_core::{
     events::{SessionEventBoundary, SessionEventEnvelope, SessionReplayGap},
     light_model::LightModelSettings,
     model::{BackendKind, ProviderModel, ReasoningEffort},
-    permissions::{PermissionReply, PermissionRequest},
+    permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
     session_service::{ActiveRunSnapshot, MessagesPageSnapshot, SessionFrontendSnapshot},
     sessions,
     store::{GoalStatus, InboxDelivery, PermissionGrantRecord, SessionInboxRecord},
@@ -476,8 +476,15 @@ pub struct ReplyPermissionRequest {
     pub reply: PermissionReply,
 }
 
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct UpdatePermissionApprovalModeRequest {
+    pub mode: PermissionApprovalMode,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PermissionStateResponse {
+    /// Durable for this session only. `manual` is the compatibility default.
+    pub approval_mode: PermissionApprovalMode,
     pub requests: Vec<PermissionRequest>,
     pub grants: Vec<PermissionGrantRecord>,
 }

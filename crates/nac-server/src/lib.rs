@@ -25,7 +25,7 @@ pub use delivery::contracts::{
     SessionLineageKind, SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse,
     SshBrowseRequest, StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
     ThreadSteeringRequest, ThreadSteeringResponse, UpdateConfigRequest, UpdateGoalRequest,
-    UpdateInboxItemRequest,
+    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
 };
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
@@ -1046,6 +1046,7 @@ impl SessionManager {
     pub async fn permission_state(&self, session_id: &str) -> Result<PermissionStateResponse> {
         let state = self.session_state().permission_state(session_id).await?;
         Ok(PermissionStateResponse {
+            approval_mode: state.approval_mode,
             requests: state.requests,
             grants: state.grants,
         })
@@ -1110,6 +1111,16 @@ impl SessionManager {
     ) -> Result<()> {
         self.session_intents()
             .reply_permission_request(session_id, request_id, reply)
+            .await
+    }
+
+    pub async fn set_permission_approval_mode(
+        &self,
+        session_id: &str,
+        mode: nac_core::permissions::PermissionApprovalMode,
+    ) -> Result<()> {
+        self.session_intents()
+            .set_permission_approval_mode(session_id, mode)
             .await
     }
 

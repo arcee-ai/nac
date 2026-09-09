@@ -20,8 +20,9 @@ mod summary;
 pub use db::MALFORMED_LIGHT_MODEL_DIAGNOSTIC;
 pub use db::{
     create_session, delete_session, increment_run_count, list_sessions, load_last_session,
-    load_session, load_session_config, reorder_sessions, save_session, save_session_run_state,
-    session_exists, update_raw_session_config, update_session_config, update_session_presentation,
+    load_permission_approval_mode, load_session, load_session_config, reorder_sessions,
+    save_session, save_session_run_state, session_exists, update_permission_approval_mode,
+    update_raw_session_config, update_session_config, update_session_presentation,
 };
 pub(crate) use db::{
     insert_new_session_in_transaction, list_sessions_with_connection, load_session_run_state,

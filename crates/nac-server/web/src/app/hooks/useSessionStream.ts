@@ -208,7 +208,8 @@ export function useSessionStream(sessionId: string | null): void {
         if (
           envelope.event.type === "permission_asked" ||
           envelope.event.type === "permission_replied" ||
-          envelope.event.type === "permission_dismissed"
+          envelope.event.type === "permission_dismissed" ||
+          envelope.event.type === "permission_approval_mode_changed"
         ) {
           refreshPermissions();
         }
@@ -263,7 +264,8 @@ export function useDelegatedPermissionStream(sessionId: string, enabled: boolean
         if (
           envelope.event.type === "permission_asked" ||
           envelope.event.type === "permission_replied" ||
-          envelope.event.type === "permission_dismissed"
+          envelope.event.type === "permission_dismissed" ||
+          envelope.event.type === "permission_approval_mode_changed"
         ) {
           refresh();
         }

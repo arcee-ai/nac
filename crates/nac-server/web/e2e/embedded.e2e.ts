@@ -299,6 +299,111 @@ test("keeps approval state and actions reachable with many remembered permission
   harness.provider.assertConsumed();
 });
 
+test("persists session auto-approval, drains pending asks, and restores manual mode", async ({
+  harness,
+  page,
+  request,
+}) => {
+  test.setTimeout(90_000);
+  const fixtureRoot = path.join(harness.runRoot, "auto-approval-fixtures");
+  await fs.mkdir(fixtureRoot, { recursive: true });
+  const first = path.join(fixtureRoot, "first.txt");
+  const second = path.join(fixtureRoot, "second.txt");
+  const manual = path.join(fixtureRoot, "manual.txt");
+  await Promise.all([
+    fs.writeFile(first, "first\n"),
+    fs.writeFile(second, "second\n"),
+    fs.writeFile(manual, "manual\n"),
+  ]);
+
+  harness.provider.enqueue(
+    "auto-approve-pending",
+    { token: "ALL16_AUTO_APPROVE_TOKEN", requiredTools: ["read"] },
+    {
+      kind: "function_call",
+      name: "read",
+      callId: "auto-approve-first",
+      arguments: { path: first },
+      stream: true,
+    },
+  );
+  harness.provider.enqueue(
+    "auto-approve-new",
+    { functionOutputCallId: "auto-approve-first" },
+    {
+      kind: "function_call",
+      name: "read",
+      callId: "auto-approve-second",
+      arguments: { path: second },
+      stream: true,
+    },
+  );
+  harness.provider.enqueue(
+    "auto-approve-complete",
+    { functionOutputCallId: "auto-approve-second" },
+    { kind: "text", text: "automatic approvals complete", stream: true },
+  );
+
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  await page.getByRole("combobox", { name: "Message" }).fill("ALL16_AUTO_APPROVE_TOKEN");
+  await page.getByRole("button", { name: "Send" }).click();
+  await harness.provider.waitForRequestCount(1);
+  await expect(page.locator('[data-tool-call-id="auto-approve-first"]')).toContainText(
+    "Awaiting approval",
+  );
+
+  await page.getByRole("switch", { name: "Approve all automatically" }).click();
+  await expect(
+    page.getByRole("button", { name: "Auto-approve on — open permissions" }),
+  ).toBeVisible();
+  await harness.provider.waitForRequestCount(3);
+  await waitForRunIdle(request, harness, sessionId);
+  await expect(page.locator('[data-tool-call-id="auto-approve-first"]')).toContainText("Succeeded");
+  await expect(page.locator('[data-tool-call-id="auto-approve-second"]')).toContainText(
+    "Succeeded",
+  );
+  await expect(page.getByText("automatic approvals complete")).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Auto-approve on — open permissions" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
+  const toggle = page.getByRole("switch", { name: "Approve all automatically" });
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await toggle.click();
+  await expect(page.getByRole("button", { name: "Permissions" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  harness.provider.enqueue(
+    "manual-after-disable",
+    { token: "ALL16_MANUAL_TOKEN", requiredTools: ["read"] },
+    {
+      kind: "function_call",
+      name: "read",
+      callId: "manual-after-disable",
+      arguments: { path: manual },
+      stream: true,
+    },
+  );
+  harness.provider.enqueue(
+    "manual-after-disable-complete",
+    { functionOutputCallId: "manual-after-disable" },
+    { kind: "text", text: "manual approval restored", stream: true },
+  );
+  await page.getByRole("combobox", { name: "Message" }).fill("ALL16_MANUAL_TOKEN");
+  await page.getByRole("button", { name: "Send" }).click();
+  await harness.provider.waitForRequestCount(4);
+  const manualCard = page.locator('[data-tool-call-id="manual-after-disable"]');
+  await expect(manualCard).toContainText("Awaiting approval");
+  await page.getByRole("button", { name: "Allow once" }).click();
+  await harness.provider.waitForRequestCount(5);
+  await waitForRunIdle(request, harness, sessionId);
+  await expect(page.getByText("manual approval restored")).toBeVisible();
+  harness.provider.assertConsumed();
+});
+
 test("renders an unknown primary tool failure safely after reload", async ({
   harness,
   page,

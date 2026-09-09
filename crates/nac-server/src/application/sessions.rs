@@ -3,7 +3,7 @@ use std::{collections::HashMap, time::Instant};
 use anyhow::{anyhow, Context, Result};
 use nac_core::{
     commands::PreparedUserInput,
-    permissions::{PermissionReply, PermissionRequest},
+    permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
     session_service::{
         FrontendSnapshotLoadOptions, MessagePageRequest, MessagesPageSnapshot,
         SessionFrontendSnapshot, SessionFrontendSnapshotLoad, ThreadEventPage,
@@ -164,6 +164,18 @@ impl<'a> SessionIntentApplication<'a> {
             .reply_permission_request(request_id, reply)
     }
 
+    pub(crate) async fn set_permission_approval_mode(
+        &self,
+        session_id: &str,
+        mode: PermissionApprovalMode,
+    ) -> Result<()> {
+        self.manager.require_primary_direct_session(session_id)?;
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .set_permission_approval_mode(mode)
+    }
+
     pub(crate) async fn delete_permission_grant(
         &self,
         session_id: &str,
@@ -185,6 +197,7 @@ pub(crate) struct SessionCatalogApplication<'a> {
 }
 
 pub(crate) struct PermissionState {
+    pub(crate) approval_mode: PermissionApprovalMode,
     pub(crate) requests: Vec<PermissionRequest>,
     pub(crate) grants: Vec<PermissionGrantRecord>,
 }
@@ -274,6 +287,7 @@ impl<'a> SessionStateApplication<'a> {
     pub(crate) async fn permission_state(&self, session_id: &str) -> Result<PermissionState> {
         let service = self.manager.attach_session(session_id).await?;
         Ok(PermissionState {
+            approval_mode: service.permission_approval_mode()?,
             requests: service.list_permission_requests()?,
             grants: service.list_permission_grants()?,
         })

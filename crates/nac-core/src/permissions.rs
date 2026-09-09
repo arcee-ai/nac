@@ -131,6 +131,19 @@ pub enum PermissionReply {
     Reject,
 }
 
+/// User-selected approval behavior for one durable direct session.
+///
+/// This is deliberately an answer policy at the broker boundary, not an
+/// execution backend or a reusable resource grant.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum PermissionApprovalMode {
+    #[default]
+    Manual,
+    AutoApprove,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AuthorizationOutcome {
     Allowed,
@@ -144,6 +157,7 @@ struct PendingPermission {
 
 #[derive(Default)]
 struct PermissionBrokerState {
+    approval_mode: PermissionApprovalMode,
     pending: HashMap<String, PendingPermission>,
 }
 
