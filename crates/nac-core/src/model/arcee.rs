@@ -13,7 +13,8 @@ use uuid::Uuid;
 pub(super) const LEGACY_CLIENT_ID: &str = "nac-cli";
 pub(super) const MANAGED_CLIENT_ID: &str = "managed-nac";
 pub(super) const AUTH_TYPE: &str = "arcee_device_token";
-const CANONICAL_AUTH_SERVICE_BASE_URL: &str = "https://api.arcee.ai";
+pub const ARCEE_AUTH_PRODUCTION_ISSUER: &str = "https://api.arcee.ai";
+pub const ARCEE_AUTH_DEV2_ISSUER: &str = "https://api2.apps.dev.arcee.ai";
 const DEFAULT_INTERVAL_SECS: u64 = 5;
 const DEFAULT_DEVICE_EXPIRES_IN_SECS: u64 = 900;
 const DEFAULT_TOKEN_EXPIRES_IN_SECS: u64 = 43200;
@@ -298,6 +299,8 @@ pub(super) struct StoredArceeAuth {
     pub(super) base_url: String,
     pub(super) organization_id: String,
     pub(super) workspace_name: String,
+    #[serde(default = "production_auth_issuer")]
+    pub(super) auth_issuer: String,
     #[serde(default = "legacy_client_id")]
     pub(super) client_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -314,6 +317,7 @@ impl std::fmt::Debug for StoredArceeAuth {
             .field("base_url", &self.base_url)
             .field("organization_id", &self.organization_id)
             .field("workspace_name", &self.workspace_name)
+            .field("auth_issuer", &self.auth_issuer)
             .field("client_id", &self.client_id)
             .field("managed_bootstrap", &self.managed_bootstrap)
             .finish_non_exhaustive()
@@ -328,6 +332,10 @@ pub(super) struct ManagedBootstrapProvenance {
 
 fn legacy_client_id() -> String {
     LEGACY_CLIENT_ID.to_string()
+}
+
+fn production_auth_issuer() -> String {
+    ARCEE_AUTH_PRODUCTION_ISSUER.to_string()
 }
 
 #[derive(Deserialize)]
@@ -404,7 +412,7 @@ pub(super) struct ArceeAuthService {
 
 impl ArceeAuthService {
     fn canonical() -> Result<Self> {
-        Self::approved(CANONICAL_AUTH_SERVICE_BASE_URL)
+        Self::approved(ARCEE_AUTH_PRODUCTION_ISSUER)
     }
 
     fn approved(base_url: &str) -> Result<Self> {
@@ -436,21 +444,23 @@ impl ArceeAuthService {
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the canonical Arcee authentication URL is a compile-time invariant"
-)]
 fn validate_auth_service_base_url(base_url: &str) -> Result<()> {
-    let parsed = validate_approved_base_url(base_url)
-        .with_context(|| format!("invalid Arcee auth service URL '{base_url}'"))?;
-    let canonical = Url::parse(CANONICAL_AUTH_SERVICE_BASE_URL)
-        .expect("canonical Arcee auth service URL must remain valid");
-    if parsed.origin() != canonical.origin() || parsed.path() != "/" {
-        return Err(anyhow!(
-            "Arcee auth service URL '{base_url}' is not the canonical origin {CANONICAL_AUTH_SERVICE_BASE_URL}"
-        ));
+    validate_arcee_auth_issuer(base_url)
+}
+
+/// Validate the closed set of authorization issuers whose device credentials
+/// NAC may receive. This policy is intentionally distinct from inference URL
+/// validation: an inference endpoint can never select where a refresh token is
+/// sent.
+pub fn validate_arcee_auth_issuer(auth_issuer: &str) -> Result<()> {
+    if matches!(
+        auth_issuer,
+        ARCEE_AUTH_PRODUCTION_ISSUER | ARCEE_AUTH_DEV2_ISSUER
+    ) {
+        Ok(())
+    } else {
+        Err(anyhow!("Arcee auth issuer is not an approved exact origin"))
     }
-    Ok(())
 }
 
 /// An Arcee device login that has been issued a code and is waiting for the
@@ -474,7 +484,7 @@ impl ArceeDeviceLogin {
 
     pub(super) async fn complete(self) -> Result<ManagedAuthSnapshot> {
         let success = poll_device_code(&self.client, &self.service, &self.device).await?;
-        let auth = stored_auth_from_token_success(success)?;
+        let auth = stored_auth_from_token_success(success, &self.service.base_url)?;
         with_arcee_auth_lock(|| write_stored_auth(&auth))?;
         Ok(snapshot_from_stored(Some(auth), arcee_auth_file_path()?))
     }
@@ -482,6 +492,17 @@ impl ArceeDeviceLogin {
 
 pub(super) async fn begin_arcee_device_login() -> Result<ArceeDeviceLogin> {
     let service = ArceeAuthService::canonical()?;
+    begin_arcee_device_login_with_service(service).await
+}
+
+pub(super) async fn begin_arcee_device_login_at(auth_issuer: &str) -> Result<ArceeDeviceLogin> {
+    let service = ArceeAuthService::approved(auth_issuer)?;
+    begin_arcee_device_login_with_service(service).await
+}
+
+async fn begin_arcee_device_login_with_service(
+    service: ArceeAuthService,
+) -> Result<ArceeDeviceLogin> {
     let client = no_redirect_client()?;
     let device = request_device_code(&client, &service).await?;
     Ok(ArceeDeviceLogin {
@@ -623,9 +644,14 @@ fn remove_auth_path(path: &Path) -> Result<bool> {
     }
 }
 
-fn stored_auth_from_token_success(success: TokenSuccess) -> Result<StoredArceeAuth> {
+fn stored_auth_from_token_success(
+    success: TokenSuccess,
+    auth_issuer: &str,
+) -> Result<StoredArceeAuth> {
     validate_stored_base_url(&success.base_url)
         .context("Arcee login returned an invalid credential base URL")?;
+    validate_arcee_auth_issuer(auth_issuer)
+        .context("Arcee login used an invalid authorization issuer")?;
     let expires_in = success.expires_in.unwrap_or(DEFAULT_TOKEN_EXPIRES_IN_SECS);
     Ok(StoredArceeAuth {
         auth_type: AUTH_TYPE.to_string(),
@@ -636,6 +662,7 @@ fn stored_auth_from_token_success(success: TokenSuccess) -> Result<StoredArceeAu
         base_url: success.base_url,
         organization_id: success.organization_id,
         workspace_name: success.workspace_name,
+        auth_issuer: auth_issuer.to_string(),
         client_id: LEGACY_CLIENT_ID.to_string(),
         managed_bootstrap: None,
     })
@@ -707,16 +734,15 @@ async fn refresh_locked(
     expected_base_url: &str,
     should_refresh: impl Fn(&StoredArceeAuth) -> bool,
 ) -> Result<String> {
-    let service = ArceeAuthService::canonical()?;
     let auth_path = arcee_auth_file_path()?;
     let lock_path = arcee_auth_lock_path()?;
     refresh_locked_with(
         client,
         expected_base_url,
         should_refresh,
-        &service,
         &auth_path,
         &lock_path,
+        ArceeAuthService::approved,
     )
     .await
 }
@@ -725,9 +751,9 @@ async fn refresh_locked_with(
     client: &Client,
     expected_base_url: &str,
     should_refresh: impl Fn(&StoredArceeAuth) -> bool,
-    service: &ArceeAuthService,
     auth_path: &Path,
     lock_path: &Path,
+    resolve_service: impl Fn(&str) -> Result<ArceeAuthService>,
 ) -> Result<String> {
     let _gate = refresh_gate().lock().await;
     let _lock = acquire_refresh_lock(lock_path).await?;
@@ -735,7 +761,8 @@ async fn refresh_locked_with(
     if !should_refresh(&auth) {
         return Ok(auth.access_token);
     }
-    Ok(refresh_and_store_auth_at(client, service, auth_path, auth)
+    let service = resolve_service(&auth.auth_issuer)?;
+    Ok(refresh_and_store_auth_at(client, &service, auth_path, auth)
         .await?
         .access_token)
 }
@@ -780,6 +807,7 @@ pub(super) fn stored_auth_from_refresh(
         base_url: current.base_url,
         organization_id: current.organization_id,
         workspace_name: current.workspace_name,
+        auth_issuer: current.auth_issuer,
         client_id: current.client_id,
         managed_bootstrap: current.managed_bootstrap,
     }
@@ -945,6 +973,12 @@ pub(super) fn parse_stored_auth(raw: &str, path: &Path) -> Result<Option<StoredA
             path.display()
         ))
     })?;
+    validate_arcee_auth_issuer(&auth.auth_issuer).map_err(|_| {
+        stored_auth_configuration_error(format!(
+            "stored Arcee auth in {} has an invalid auth_issuer",
+            path.display()
+        ))
+    })?;
     Ok(Some(auth))
 }
 
@@ -955,6 +989,8 @@ fn write_stored_auth(auth: &StoredArceeAuth) -> Result<()> {
 fn write_stored_auth_at(path: &Path, auth: &StoredArceeAuth) -> Result<()> {
     validate_stored_base_url(&auth.base_url)
         .context("refusing to store Arcee credentials with an invalid base_url")?;
+    validate_arcee_auth_issuer(&auth.auth_issuer)
+        .context("refusing to store Arcee credentials with an invalid auth_issuer")?;
     let raw = serde_json::to_string_pretty(auth).context("failed to serialize Arcee auth")?;
     write_auth_string_to_path(path, &raw)
 }
