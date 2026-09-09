@@ -275,7 +275,7 @@ impl SessionManager {
             }
             _ => begin_login(provider, style).await?,
         };
-        Ok(self.register_managed_login(provider, pending))
+        self.register_managed_login(provider, pending)
     }
 
     #[cfg(test)]
@@ -292,14 +292,14 @@ impl SessionManager {
         let pending = profile
             .begin_interactive_repair_with_auth_service_for_test(managed, auth_service_base_url)
             .await?;
-        Ok(self.register_managed_login(ManagedAuthProvider::Arcee, pending))
+        self.register_managed_login(ManagedAuthProvider::Arcee, pending)
     }
 
     fn register_managed_login(
         &self,
         provider: ManagedAuthProvider,
         pending: PendingDeviceLogin,
-    ) -> DeviceLoginStartedResponse {
+    ) -> Result<DeviceLoginStartedResponse, ApiError> {
         let DeviceLoginPrompt {
             verification_uri,
             user_code,
@@ -338,13 +338,13 @@ impl SessionManager {
             },
         );
 
-        DeviceLoginStartedResponse {
+        Ok(DeviceLoginStartedResponse {
             login_id,
             provider: provider.as_str().to_string(),
             verification_uri,
             user_code,
             expires_in_secs,
-        }
+        })
     }
 
     pub fn poll_managed_login(

@@ -65,16 +65,20 @@ done
 
 "$container_runtime" run --rm \
     --entrypoint /bin/sh \
-    --user 10001:10001 \
+    --user 0:0 \
     --volume "$state_volume:/var/lib/nac" \
     --volume "$repository_volume:/repositories" \
     --volume "$home_volume:/home/nac" \
     --volume "$config_volume:/etc/nac" \
     "$image" -ceu '
         umask 077
+        printf "%s\n" "{\"keys\":[{\"kty\":\"OKP\",\"crv\":\"Ed25519\",\"use\":\"sig\",\"alg\":\"EdDSA\",\"kid\":\"managed-smoke\",\"x\":\"11qYAYKxCrfVS_7TyWTfbp-JhBGHx7lqCMZ73HfAUT8\"}]}" \
+            > /etc/nac/control-jwks.json
+        chmod 0444 /etc/nac/control-jwks.json
         printf "%s\n" \
-            "version = 1" \
+            "version = 2" \
             "logical_host_id = \"21856443-8ed8-40ab-9036-72e837c99f27\"" \
+            "host_incarnation_id = \"managed-smoke-incarnation\"" \
             "owner = \"smoke@example.test\"" \
             "public_hostname = \"managed-smoke.test\"" \
             "repository_root = \"/repositories\"" \
@@ -87,7 +91,11 @@ done
             "model_auth_issuer = \"https://api.arcee.ai\"" \
             "model_credential_file = \"/run/secrets/nac/bootstrap.json\"" \
             "model_credential_source = \"managed-bootstrap\"" \
+            "managed_control_bind = \"0.0.0.0:3211\"" \
+            "managed_control_issuer = \"https://nac-api.managed-smoke.test\"" \
+            "managed_control_jwks_file = \"/etc/nac/control-jwks.json\"" \
             > /etc/nac/managed.toml
+        chmod 0444 /etc/nac/managed.toml
         printf "%s\n" durable > /var/lib/nac/restart-canary
         printf "%s\n" durable > /repositories/restart-canary
         printf "%s\n" durable > /home/nac/restart-canary

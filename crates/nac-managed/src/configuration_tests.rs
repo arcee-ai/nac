@@ -195,6 +195,49 @@ fn managed_bootstrap_is_a_strict_explicit_credential_source() {
 }
 
 #[test]
+fn version_two_composes_managed_bootstrap_auth_and_upgrade_control() {
+    let root = TestDir::new("config-bootstrap-control-v2");
+    let path = root.0.join("managed.toml");
+    std::fs::write(
+        &path,
+        format!(
+            "version = 2\nlogical_host_id = \"21856443-8ed8-40ab-9036-72e837c99f27\"\nhost_incarnation_id = \"incarnation-456\"\nowner = \"owner@example.test\"\npublic_hostname = \"nac.example.test\"\nrepository_root = \"{0}/repositories\"\nstate_root = \"{0}/state\"\nhome_root = \"{0}/home\"\ngithub_client_id = \"Iv1.example\"\nmodel_backend = \"arcee-auth\"\nmodel_id = \"trinity-large-thinking\"\nmodel_endpoint = \"https://api2.apps.dev.arcee.ai\"\nmodel_auth_issuer = \"https://api2.apps.dev.arcee.ai\"\nmodel_credential_file = \"/run/secrets/nac/bootstrap.json\"\nmodel_credential_source = \"managed-bootstrap\"\nmanaged_control_bind = \"0.0.0.0:3211\"\nmanaged_control_issuer = \"https://nac-api.example.test\"\nmanaged_control_jwks_file = \"{0}/control-jwks.json\"\n",
+            root.0.display()
+        ),
+    )
+    .unwrap();
+
+    let config = ManagedHostConfig::load(&path).unwrap();
+    assert_eq!(config.version, MANAGED_CONFIG_VERSION);
+    assert_eq!(
+        config.model_credential_source,
+        ManagedModelCredentialSource::ManagedBootstrap
+    );
+    assert_eq!(
+        config.model_auth_issuer.as_deref(),
+        Some("https://api2.apps.dev.arcee.ai")
+    );
+    assert_eq!(
+        config
+            .managed_control()
+            .unwrap()
+            .unwrap()
+            .host_incarnation_id,
+        "incarnation-456"
+    );
+
+    let legacy_with_control =
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .replacen("version = 2", "version = 1", 1);
+    std::fs::write(&path, legacy_with_control).unwrap();
+    assert!(ManagedHostConfig::load(&path)
+        .unwrap_err()
+        .to_string()
+        .contains("managed control fields require managed configuration version 2"));
+}
+
+#[test]
 fn managed_auth_issuer_is_optional_but_must_be_an_exact_https_origin() {
     let root = TestDir::new("config-auth-issuer");
     let mut config = valid_config(&root.0);

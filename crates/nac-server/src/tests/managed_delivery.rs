@@ -766,6 +766,82 @@ async fn managed_interactive_repair_completes_into_readiness_create_and_resume()
 }
 
 #[tokio::test]
+async fn version_two_managed_repair_holds_upgrade_admission_until_completion() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_v2_repair_admission");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_imported_managed_arcee_state(
+        &nac_home,
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+    );
+    let manager = test_managed_bootstrap_control_manager_with_auth(
+        &root,
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+        Some(nac_core::model::ARCEE_AUTH_DEV2_ISSUER),
+    );
+
+    std::fs::remove_file(nac_home.join("arcee_auth.json")).unwrap();
+    let (auth_service, auth_server) =
+        scripted_managed_arcee_login(nac_core::model::ARCEE_AUTH_DEV2_ISSUER);
+    let started = manager
+        .start_managed_arcee_repair_with_auth_service_for_test(&auth_service)
+        .await
+        .expect("v2 repair should begin from trusted receipt state");
+
+    assert!(matches!(
+        nac_core::sessions::HostMaintenanceLease::try_acquire(&manager.inner.store_path),
+        Err(nac_core::sessions::SessionOperationLeaseError::Busy(_))
+    ));
+
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match manager
+                .poll_managed_login(
+                    nac_core::model::ManagedAuthProvider::Arcee,
+                    &started.login_id,
+                )
+                .unwrap()
+            {
+                crate::DeviceLoginStateResponse::Pending => tokio::task::yield_now().await,
+                outcome => break outcome,
+            }
+        }
+    })
+    .await
+    .expect("v2 repair completion timed out");
+    assert!(matches!(
+        completed,
+        crate::DeviceLoginStateResponse::Complete { .. }
+    ));
+    auth_server.join().unwrap();
+
+    let maintenance = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            match nac_core::sessions::HostMaintenanceLease::try_acquire(&manager.inner.store_path) {
+                Ok(lease) => break lease,
+                Err(nac_core::sessions::SessionOperationLeaseError::Busy(_)) => {
+                    tokio::task::yield_now().await;
+                }
+                Err(error) => panic!("unexpected maintenance admission error: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("completed v2 repair must release upgrade admission");
+    drop(maintenance);
+    manager
+        .managed_model()
+        .unwrap()
+        .credential_ready(manager.managed_host().unwrap())
+        .expect("v2 repair must preserve the authoritative managed binding");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn managed_interactive_repair_preserves_existing_auth_and_requires_matching_receipt() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("managed_repair_preserves_healthy");

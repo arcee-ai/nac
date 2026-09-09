@@ -274,6 +274,23 @@ fn test_managed_bootstrap_manager_with_auth(
     model_endpoint: &str,
     model_auth_issuer: Option<&str>,
 ) -> SessionManager {
+    test_managed_bootstrap_manager_with_contract(root, model_endpoint, model_auth_issuer, false)
+}
+
+fn test_managed_bootstrap_control_manager_with_auth(
+    root: &std::path::Path,
+    model_endpoint: &str,
+    model_auth_issuer: Option<&str>,
+) -> SessionManager {
+    test_managed_bootstrap_manager_with_contract(root, model_endpoint, model_auth_issuer, true)
+}
+
+fn test_managed_bootstrap_manager_with_contract(
+    root: &std::path::Path,
+    model_endpoint: &str,
+    model_auth_issuer: Option<&str>,
+    managed_control: bool,
+) -> SessionManager {
     let state_root = root.join("nac-home");
     let repository_root = root.join("repositories");
     let home_root = root.join("managed-home");
@@ -281,9 +298,14 @@ fn test_managed_bootstrap_manager_with_auth(
         std::fs::create_dir_all(path).unwrap();
     }
     let managed_host = nac_managed::ManagedHostConfig {
-        version: nac_managed::LEGACY_MANAGED_CONFIG_VERSION,
+        version: if managed_control {
+            nac_managed::MANAGED_CONFIG_VERSION
+        } else {
+            nac_managed::LEGACY_MANAGED_CONFIG_VERSION
+        },
         logical_host_id: "21856443-8ed8-40ab-9036-72e837c99f27".to_string(),
-        host_incarnation_id: None,
+        host_incarnation_id: managed_control
+            .then(|| "managed-server-incarnation-canary".to_string()),
         owner: Some("owner@example.test".to_string()),
         public_hostname: "nac.example.test".to_string(),
         repository_root,
@@ -297,9 +319,9 @@ fn test_managed_bootstrap_manager_with_auth(
         model_credential_file: PathBuf::from(nac_core::model::MANAGED_ARCEE_BOOTSTRAP_PATH),
         model_credential_source: nac_managed::ManagedModelCredentialSource::ManagedBootstrap,
         model_credential_environment_names: Vec::new(),
-        managed_control_bind: None,
-        managed_control_issuer: None,
-        managed_control_jwks_file: None,
+        managed_control_bind: managed_control.then(|| "127.0.0.1:3211".to_string()),
+        managed_control_issuer: managed_control.then(|| "https://nac-api.example.test".to_string()),
+        managed_control_jwks_file: managed_control.then(|| root.join("control-jwks.json")),
         managed_upgrade_expectation: None,
     };
     managed_host.validate().unwrap();

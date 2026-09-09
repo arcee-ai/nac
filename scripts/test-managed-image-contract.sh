@@ -66,6 +66,10 @@ for rejected_fixture in capabilities-effective-ptrace.status capabilities-permit
 done
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_credential_source = \"managed-bootstrap\"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_auth_issuer = \"https://api.arcee.ai\"'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'version = 2'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'host_incarnation_id = \"managed-smoke-incarnation\"'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'managed_control_bind = \"0.0.0.0:3211\"'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'managed_control_jwks_file = \"/etc/nac/control-jwks.json\"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" '/run/secrets/nac/bootstrap.json'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assert_bootstrap_required'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'smoke-managed-git-lfs.sh'

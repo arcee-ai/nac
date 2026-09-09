@@ -99,6 +99,7 @@ impl Fixture {
             model_backend: "arcee-api".to_string(),
             model_id: "trinity-large-thinking".to_string(),
             model_endpoint: "https://api.arcee.ai/api/v1".to_string(),
+            model_auth_issuer: None,
             model_credential_file: credential,
             model_credential_source: nac_managed::ManagedModelCredentialSource::MountedApiKey,
             model_credential_environment_names: Vec::new(),

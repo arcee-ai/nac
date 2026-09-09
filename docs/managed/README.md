@@ -113,18 +113,30 @@ model_credential_source = "managed-bootstrap"
 ```
 
 Version 1 remains readable for existing deployments, but it does not enable
-the controller-to-NAC upgrade control surface. Version 2 additionally requires
-host_incarnation_id, managed_control_bind, managed_control_issuer, and
-managed_control_jwks_file:
+the controller-to-NAC upgrade control surface. Version 2 is the composed
+delivery contract: it keeps the same model/bootstrap fields and additionally
+requires `host_incarnation_id`, `managed_control_bind`,
+`managed_control_issuer`, and `managed_control_jwks_file`:
 
 ```toml
 version = 2
 logical_host_id = "21856443-8ed8-40ab-9036-72e837c99f27"
 host_incarnation_id = "01JZ7W4M3X8R0Y6WJ3C2Z1Q9PV"
+owner = "owner@example.com"
+public_hostname = "nac-owner-01.example.com"
+repository_root = "/repositories"
+state_root = "/var/lib/nac"
+home_root = "/home/nac"
+github_client_id = "Iv1.example"
+model_backend = "arcee-auth"
+model_id = "trinity-large-thinking"
+model_endpoint = "https://api.arcee.ai"
+model_auth_issuer = "https://api.arcee.ai"
+model_credential_file = "/run/secrets/nac/bootstrap.json"
+model_credential_source = "managed-bootstrap"
 managed_control_bind = "0.0.0.0:3211"
 managed_control_issuer = "https://nac-api.example.com"
 managed_control_jwks_file = "/run/secrets/nac-control/jwks.json"
-# All version 1 host/model fields remain required as shown above.
 ```
 
 Port 3211 serves only the compact-JWS-authenticated managed upgrade
