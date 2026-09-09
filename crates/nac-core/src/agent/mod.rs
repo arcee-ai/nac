@@ -359,6 +359,13 @@ impl Agent {
         };
         terminal_manager
             .configure_workspace_authority(config.store_path.clone(), workspace_lease_identity);
+        if let Some(session_id) = config.session_id.as_ref() {
+            terminal_manager.configure_remote_cleanup_authority(
+                config.store_path.clone(),
+                session_id.clone(),
+                Arc::clone(&backend),
+            )?;
+        }
         let allowed_tools = Arc::new(
             tool_defs
                 .iter()

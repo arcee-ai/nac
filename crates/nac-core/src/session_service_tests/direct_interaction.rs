@@ -167,6 +167,9 @@ async fn maintenance_prevents_post_settlement_direct_continuation_admission() {
     let binding = crate::store::ManagedOperationBinding {
         managed_host_id: "host".to_string(),
         host_incarnation_id: "incarnation".to_string(),
+        issuer: "https://controller.example.test".to_string(),
+        audience: "urn:nac:managed-control:host:incarnation".to_string(),
+        authority_origin: "https://controller.example.test".to_string(),
         operation_id: "operation".to_string(),
         target: crate::store::ManagedUpgradeTarget {
             release_id: "release".to_string(),

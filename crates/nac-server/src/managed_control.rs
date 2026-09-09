@@ -49,7 +49,10 @@ async fn status(
         Err(_) => return internal_error(),
     };
     let path = manager.inner.store_path.clone();
-    let binding = operation_binding(&request);
+    let binding = match operation_binding(&manager, &request) {
+        Ok(binding) => binding,
+        Err(response) => return response,
+    };
     match tokio::task::spawn_blocking(move || {
         nac_core::store::record_managed_status(
             &path,
@@ -110,7 +113,10 @@ async fn prepare_for_action(
         blockers.extend(manager.active_admission_blockers());
     }
     let path = manager.inner.store_path.clone();
-    let binding = operation_binding(&request);
+    let binding = match operation_binding(&manager, &request) {
+        Ok(binding) => binding,
+        Err(response) => return response,
+    };
     let result = tokio::task::spawn_blocking(move || {
         let _process_gate = process_gate;
         let attempt_action = match action {
@@ -180,10 +186,25 @@ fn validate(
     })
 }
 
-fn operation_binding(request: &ManagedControlRequest) -> ManagedOperationBinding {
-    ManagedOperationBinding {
+fn operation_binding(
+    manager: &SessionManager,
+    request: &ManagedControlRequest,
+) -> Result<ManagedOperationBinding, Response> {
+    let managed = manager.managed_host().ok_or_else(not_found)?;
+    let control = managed
+        .managed_control()
+        .map_err(|_| internal_error())?
+        .ok_or_else(not_found)?;
+    let audience = format!(
+        "urn:nac:managed-control:{}:{}",
+        managed.logical_host_id, control.host_incarnation_id
+    );
+    Ok(ManagedOperationBinding {
         managed_host_id: request.managed_host_id.clone(),
         host_incarnation_id: request.host_incarnation_id.clone(),
+        issuer: control.issuer.clone(),
+        audience,
+        authority_origin: control.issuer,
         operation_id: request.operation_id.clone(),
         target: ManagedUpgradeTarget {
             release_id: request.target.release_id.clone(),
@@ -194,7 +215,7 @@ fn operation_binding(request: &ManagedControlRequest) -> ManagedOperationBinding
         },
         actor: request.actor.clone(),
         beneficiary: request.beneficiary.clone(),
-    }
+    })
 }
 
 fn error(status: StatusCode, message: &'static str) -> Response {
@@ -231,7 +252,8 @@ fn maintenance_error(error_value: ManagedMaintenanceError) -> Response {
         | ManagedMaintenanceError::ReplayConflict
         | ManagedMaintenanceError::MaintenanceConflict
         | ManagedMaintenanceError::IncompatibleTarget
-        | ManagedMaintenanceError::OperationCapacity => StatusCode::CONFLICT,
+        | ManagedMaintenanceError::OperationCapacity
+        | ManagedMaintenanceError::AttemptCapacity => StatusCode::CONFLICT,
         ManagedMaintenanceError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
     };
     error(status, "Managed control request could not be applied")

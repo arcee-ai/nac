@@ -155,6 +155,7 @@ impl TerminalManager {
                         backend,
                         self.output_registry.clone(),
                         extra_envs,
+                        self.remote_cleanup_persistence(),
                     )?;
                     let info = self.session_info(&name, &session);
                     sessions.insert(name.clone(), session);
@@ -171,6 +172,7 @@ impl TerminalManager {
                     backend,
                     self.output_registry.clone(),
                     extra_envs,
+                    self.remote_cleanup_persistence(),
                 )?;
                 let info = self.session_info(&name, &session);
                 sessions.insert(name, session);

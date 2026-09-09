@@ -115,6 +115,7 @@ impl SessionService {
             permission_broker,
             sandbox_resource_lease: Arc::new(StdMutex::new(None)),
             has_sandbox,
+            managed_identity: None,
             inbox_wake: Arc::new(Mutex::new(())),
             #[cfg(test)]
             frontend_snapshot_after_workspace_gate: None,
@@ -130,6 +131,10 @@ impl SessionService {
             init,
             events,
         }
+    }
+
+    pub fn set_managed_identity(&mut self, identity: crate::store::ManagedAcceptedIdentity) {
+        self.managed_identity = Some(Arc::new(identity));
     }
 
     pub fn connect_client(&self) -> SessionClientHandle {

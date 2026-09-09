@@ -520,6 +520,9 @@ fn time_bounds_malformed_unknown_duplicate_and_oversized_inputs_are_rejected() {
         ("nbf", NOW + 10),
         ("iat", NOW + 10),
         ("exp", NOW + 61),
+        ("iat", i64::MIN),
+        ("exp", i64::MAX),
+        ("nbf", i64::MAX),
     ] {
         let mut changed = claims("prepare");
         changed[field] = serde_json::json!(value);

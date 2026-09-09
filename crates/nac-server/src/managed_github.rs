@@ -304,11 +304,15 @@ impl SessionManager {
     async fn start_github_login(&self) -> Result<GitHubLoginStartedResponse, ApiError> {
         let pending = self.managed_github_auth()?.begin_device_login().await?;
         let prompt = pending.prompt();
+        // Keep host admission through token persistence and managed git
+        // configuration, not merely through the HTTP start response.
+        let background_admission = self.managed_work_admission()?;
         let outcome = Arc::new(StdMutex::new(LoginOutcome::Pending));
         let task = tokio::spawn({
             let outcome = Arc::clone(&outcome);
             let manager = self.clone();
             async move {
+                let _background_admission = background_admission;
                 let result = pending.complete().await;
                 *outcome
                     .lock()

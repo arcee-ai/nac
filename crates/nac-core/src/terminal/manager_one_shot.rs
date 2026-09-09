@@ -112,17 +112,15 @@ impl TerminalManager {
         // If cancellation takes the shared gate first, neither a local process
         // nor a remote transport/pidfile owner can appear afterward.
         let mut spawn = || {
-            let remote_transport = pidfile.as_deref().map(|pidfile| {
-                let cleanup = Arc::new(PendingRemoteCleanup {
-                    backend: Arc::clone(backend),
-                    transport_active: AtomicBool::new(true),
-                });
-                self.pending_remote_cleanups
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(pidfile.to_string(), Arc::clone(&cleanup));
-                RemoteTransportOwnership { cleanup }
-            });
+            let remote_transport = match pidfile.as_deref() {
+                Some(pidfile) => {
+                    match self.register_remote_cleanup(pidfile, Arc::clone(backend), true) {
+                        Ok(cleanup) => Some(RemoteTransportOwnership { cleanup }),
+                        Err(error) => return (Err(std::io::Error::other(error.to_string())), None),
+                    }
+                }
+                None => None,
+            };
             let spawned = if self.isolate_process_groups {
                 ProcessTreeGuard::spawn_supervised(&mut command)
             } else {
@@ -155,7 +153,7 @@ impl TerminalManager {
                     remote_transport.stopped();
                 }
                 if let Some(pidfile) = pidfile.as_deref() {
-                    self.forget_remote_cleanup(pidfile);
+                    let _ = self.forget_remote_cleanup(pidfile);
                 }
                 return CommandOutput {
                     status: CommandStatus::SpawnError,

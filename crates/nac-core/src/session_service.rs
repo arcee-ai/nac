@@ -605,6 +605,9 @@ pub struct SessionService {
     /// sandbox services cached so their resource lease continuously excludes
     /// peer deletion and configuration mutation.
     has_sandbox: bool,
+    /// Exact managed release/host fence supplied by server composition. Core
+    /// callers without it retain state-only maintenance admission.
+    managed_identity: Option<Arc<crate::store::ManagedAcceptedIdentity>>,
     /// Serializes process-local idle wake attempts. The cross-process
     /// operation lease remains the authoritative run admission boundary.
     inbox_wake: Arc<Mutex<()>>,

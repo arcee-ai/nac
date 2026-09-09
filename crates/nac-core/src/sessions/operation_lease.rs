@@ -199,6 +199,29 @@ impl SessionOperationLease {
         }
     }
 
+    /// Acquire an exclusive lease, waiting for its current owner to finish.
+    /// This is reserved for idempotency serialization: the owner is a bounded
+    /// synchronous control transaction and the OS releases the lock on crash.
+    pub(crate) fn acquire(
+        store_path: &Path,
+        session_id: &str,
+    ) -> Result<Self, SessionOperationLeaseError> {
+        let canonical_store = canonical_store(store_path).map_err(store_error)?;
+        let lock_path = secure_lock_path(&canonical_store, session_id).map_err(store_error)?;
+        let file = secure_open_lock_file(&lock_path).map_err(store_error)?;
+        file.lock_exclusive().map_err(|error| {
+            store_error(
+                anyhow::Error::new(error)
+                    .context(format!("failed to lock {}", lock_path.display())),
+            )
+        })?;
+        Ok(Self {
+            _file: file,
+            canonical_store,
+            session_id: session_id.to_string(),
+        })
+    }
+
     pub fn validate(
         &self,
         store_path: &Path,

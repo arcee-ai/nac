@@ -24,10 +24,22 @@ fn binding(operation: &str, source: char) -> ManagedOperationBinding {
     ManagedOperationBinding {
         managed_host_id: "host-123".to_string(),
         host_incarnation_id: "incarnation-456".to_string(),
+        issuer: "https://controller.example.test".to_string(),
+        audience: "urn:nac:managed-control:host-123:incarnation-456".to_string(),
+        authority_origin: "https://controller.example.test".to_string(),
         operation_id: operation.to_string(),
         target: target(source),
         actor: "user:owner".to_string(),
         beneficiary: "tenant:host-owner".to_string(),
+    }
+}
+
+fn accepted_identity(binding: &ManagedOperationBinding) -> ManagedAcceptedIdentity {
+    ManagedAcceptedIdentity {
+        managed_host_id: binding.managed_host_id.clone(),
+        host_incarnation_id: binding.host_incarnation_id.clone(),
+        operation_id: binding.operation_id.clone(),
+        target: binding.target.clone(),
     }
 }
 
@@ -225,6 +237,19 @@ fn jti_and_operation_bindings_fail_closed() {
         ),
         Err(ManagedMaintenanceError::OperationBindingConflict)
     ));
+    let mut rotated_authority = first;
+    rotated_authority.issuer = "https://replacement-controller.example.test".to_string();
+    rotated_authority.authority_origin = rotated_authority.issuer.clone();
+    assert!(matches!(
+        record_managed_status(
+            &path,
+            "rotated-authority-jti",
+            &rotated_authority,
+            expires_at(),
+            Vec::new(),
+        ),
+        Err(ManagedMaintenanceError::OperationBindingConflict)
+    ));
     cleanup(&path);
 }
 
@@ -267,6 +292,44 @@ fn retained_operation_capacity_is_explicitly_bounded_and_fail_closed() {
     assert!(operation_capacity_available(MAX_CONTROL_OPERATIONS - 1));
     assert!(!operation_capacity_available(MAX_CONTROL_OPERATIONS));
     assert!(!operation_capacity_available(MAX_CONTROL_OPERATIONS + 1));
+    assert!(attempt_capacity_available(MAX_CONTROL_ATTEMPTS - 1));
+    assert!(!attempt_capacity_available(MAX_CONTROL_ATTEMPTS));
+    assert!(!attempt_capacity_available(MAX_CONTROL_ATTEMPTS + 1));
+}
+
+#[test]
+fn control_attempt_lock_files_are_bounded_to_fixed_stripes() {
+    let path = path("bounded-attempt-locks");
+    initialize(&path).unwrap();
+    let binding = binding("bounded-lock-operation", 'l');
+    for index in 0..256 {
+        record_managed_status(
+            &path,
+            &format!("fresh-jti-{index}"),
+            &binding,
+            expires_at(),
+            Vec::new(),
+        )
+        .unwrap();
+    }
+    let lock_root = path.with_file_name("store.db.run-locks");
+    let encoded_prefix = "managed-control-attempt"
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let attempt_locks = std::fs::read_dir(lock_root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&encoded_prefix)
+        })
+        .count();
+    assert!(attempt_locks <= usize::from(CONTROL_ATTEMPT_LOCK_STRIPES));
+    cleanup(&path);
 }
 
 #[test]
@@ -324,18 +387,117 @@ fn maintenance_survives_restart_and_only_exact_forward_start_clears_it() {
     )
     .unwrap();
 
-    let mut wrong = binding.target.clone();
-    wrong.source_sha = "0".repeat(40);
+    let mut wrong = accepted_identity(&binding);
+    wrong.target.source_sha = "0".repeat(40);
     assert!(!accept_managed_forward_start(&path, &wrong).unwrap());
+    let mut wrong_operation = accepted_identity(&binding);
+    wrong_operation.operation_id = "different-operation".to_string();
+    assert!(matches!(
+        accept_managed_forward_start(&path, &wrong_operation),
+        Err(ManagedMaintenanceError::MaintenanceConflict)
+    ));
     assert_eq!(
         managed_maintenance_snapshot(&path).unwrap().state,
         ManagedMaintenanceState::Maintenance
     );
-    assert!(accept_managed_forward_start(&path, &binding.target).unwrap());
-    assert_eq!(
-        managed_maintenance_snapshot(&path).unwrap().state,
-        ManagedMaintenanceState::Serving
-    );
+    let accepted = accepted_identity(&binding);
+    assert!(accept_managed_forward_start(&path, &accepted).unwrap());
+    let snapshot = managed_maintenance_snapshot(&path).unwrap();
+    assert_eq!(snapshot.state, ManagedMaintenanceState::Serving);
+    assert_eq!(snapshot.accepted_identity, Some(accepted));
+    cleanup(&path);
+}
+
+#[test]
+fn accepted_release_fences_old_process_and_same_schema_restart() {
+    let path = path("accepted-release-fence");
+    initialize(&path).unwrap();
+    let binding = binding("operation-fence", 'n');
+    prepare_managed_upgrade(
+        &path,
+        "jti-fence",
+        &binding,
+        ManagedControlAttemptAction::Prepare,
+        expires_at(),
+        Vec::new(),
+    )
+    .unwrap();
+    let accepted = accepted_identity(&binding);
+    let preflight = preflight_managed_forward_start(
+        &path,
+        &accepted.target,
+        Some((
+            accepted.managed_host_id.as_str(),
+            accepted.host_incarnation_id.as_str(),
+        )),
+    )
+    .unwrap();
+    assert!(preflight.requires_accept);
+    assert_eq!(preflight.accepted_identity.as_ref(), Some(&accepted));
+    for configured in [
+        None,
+        Some(("wrong-host", accepted.host_incarnation_id.as_str())),
+        Some((accepted.managed_host_id.as_str(), "wrong-incarnation")),
+    ] {
+        assert!(matches!(
+            preflight_managed_forward_start(&path, &accepted.target, configured),
+            Err(ManagedMaintenanceError::MaintenanceConflict)
+        ));
+    }
+    assert!(accept_managed_forward_start(&path, &accepted).unwrap());
+
+    let mut old = accepted.clone();
+    old.operation_id.clear();
+    old.target.source_sha = "0".repeat(40);
+    assert!(try_admit_managed_work_for_identity(&path, &old).is_err());
+    assert!(matches!(
+        preflight_managed_forward_start(
+            &path,
+            &old.target,
+            Some((
+                old.managed_host_id.as_str(),
+                old.host_incarnation_id.as_str()
+            )),
+        ),
+        Err(ManagedMaintenanceError::MaintenanceConflict)
+    ));
+    drop(try_admit_managed_work_for_identity(&path, &accepted).unwrap());
+    cleanup(&path);
+}
+
+#[test]
+fn attempt_capacity_is_enforced_after_age_pruning() {
+    let path = path("attempt-capacity");
+    initialize(&path).unwrap();
+    let binding = binding("operation-capacity", 'q');
+    record_managed_status(&path, "seed-jti", &binding, expires_at(), Vec::new()).unwrap();
+    let binding_json = serde_json::to_string(&ManagedControlAttemptBinding {
+        action: ManagedControlAttemptAction::Status,
+        operation: &binding,
+    })
+    .unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute(
+        "WITH digits(value) AS (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9))
+         INSERT INTO managed_control_attempts
+             (jti, operation_id, binding_json, outcome_json, expires_at, created_at)
+         SELECT printf('capacity-%04d', a.value * 1000 + b.value * 100 + c.value * 10 + d.value),
+                ?1, ?2, '{}', ?3, 'now'
+         FROM digits a CROSS JOIN digits b CROSS JOIN digits c CROSS JOIN digits d
+         WHERE a.value * 1000 + b.value * 100 + c.value * 10 + d.value < ?4 - 1",
+        params![
+            binding.operation_id,
+            binding_json,
+            expires_at(),
+            MAX_CONTROL_ATTEMPTS
+        ],
+    )
+    .unwrap();
+    drop(conn);
+    assert!(matches!(
+        record_managed_status(&path, "over-capacity", &binding, expires_at(), Vec::new()),
+        Err(ManagedMaintenanceError::AttemptCapacity)
+    ));
     cleanup(&path);
 }
 
@@ -361,7 +523,14 @@ fn wrong_forward_binary_is_rejected_before_schema_migration() {
     let mut wrong = accepted.target.clone();
     wrong.release_id = "unaccepted-release".to_string();
     assert!(matches!(
-        preflight_managed_forward_start(&path, &wrong),
+        preflight_managed_forward_start(
+            &path,
+            &wrong,
+            Some((
+                accepted.managed_host_id.as_str(),
+                accepted.host_incarnation_id.as_str(),
+            )),
+        ),
         Err(ManagedMaintenanceError::MaintenanceConflict)
     ));
     let conn = Connection::open(&path).unwrap();
