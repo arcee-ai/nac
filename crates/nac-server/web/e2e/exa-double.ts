@@ -156,6 +156,7 @@ export class ExaDouble {
       fs.rm(serverRequest, { force: true }),
       fs.rm(serverKey, { force: true }),
       fs.rm(serverCertificate, { force: true }),
+      fs.rm(path.join(tlsRoot, "ca.srl"), { force: true }),
       fs.rm(`${caCertificate}.srl`, { force: true }),
       fs.rm(caConfig, { force: true }),
       fs.rm(serverConfig, { force: true }),

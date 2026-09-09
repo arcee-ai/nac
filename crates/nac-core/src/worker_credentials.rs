@@ -220,7 +220,11 @@ mod platform {
     ) -> io::Result<PreparedWorkerCredentialChannel> {
         #[cfg(target_os = "linux")]
         {
-            let path = std::env::temp_dir().join(format!(
+            // `TMPDIR` is caller-controlled and can exceed Linux's short
+            // `sockaddr_un.sun_path` limit (for example in isolated CI runs).
+            // `/tmp` keeps the model-visible argument bounded; the random name,
+            // mode 0600, and mutual PID checks remain the access boundary.
+            let path = PathBuf::from("/tmp").join(format!(
                 "nac-worker-credential-{}.sock",
                 uuid::Uuid::new_v4().simple()
             ));
@@ -628,6 +632,61 @@ pub use platform::ManagedWorkerCredentialReceiver;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn long_tmpdir_credential_socket_helper() {
+        let Some(expected_tmpdir) = std::env::var_os("NAC_LONG_TMPDIR_CREDENTIAL_HELPER") else {
+            return;
+        };
+        assert_eq!(
+            std::env::temp_dir(),
+            std::path::PathBuf::from(expected_tmpdir)
+        );
+        let mut command = tokio::process::Command::new("worker");
+        let channel = prepare_worker_credential_channel(&mut command).unwrap();
+        let arguments = command.as_std().get_args().collect::<Vec<_>>();
+        let socket_path = arguments
+            .windows(2)
+            .find(|arguments| arguments[0] == "--native-credential-socket")
+            .map(|arguments| std::path::PathBuf::from(arguments[1]))
+            .expect("Linux credential channel should pass a socket path");
+        assert_eq!(socket_path.parent(), Some(std::path::Path::new("/tmp")));
+        assert!(socket_path.as_os_str().len() < 108);
+        drop(channel);
+        assert!(!socket_path.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_credential_socket_ignores_tmpdir_longer_than_sun_len() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let long_tmpdir = std::env::temp_dir().join(format!(
+            "nac_worker_socket_{}_{}",
+            "x".repeat(160),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&long_tmpdir).unwrap();
+        assert!(long_tmpdir.as_os_str().as_bytes().len() >= 108);
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "worker_credentials::tests::long_tmpdir_credential_socket_helper",
+                "--nocapture",
+            ])
+            .env("TMPDIR", &long_tmpdir)
+            .env("NAC_LONG_TMPDIR_CREDENTIAL_HELPER", &long_tmpdir)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "long-TMPDIR helper failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let _ = std::fs::remove_dir_all(long_tmpdir);
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
