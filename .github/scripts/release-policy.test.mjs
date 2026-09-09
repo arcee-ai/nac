@@ -68,6 +68,7 @@ test("release please is explicitly a dev-targeted root simple release", () => {
   const manifest = JSON.parse(fs.readFileSync(".release-please-manifest.json", "utf8"));
   const workflow = fs.readFileSync(".github/workflows/release-please.yml", "utf8");
   const stableWorkflow = fs.readFileSync(".github/workflows/stable-release.yml", "utf8");
+  const managedWorkflow = fs.readFileSync(".github/workflows/managed-image.yml", "utf8");
   const rollout = fs.readFileSync(".github/scripts/stable-release-rollout.sh", "utf8");
 
   assert.equal(config["release-type"], "simple");
@@ -91,6 +92,7 @@ test("release please is explicitly a dev-targeted root simple release", () => {
   assert.doesNotMatch(stableWorkflow, /^\s*release:/m);
   assert.doesNotMatch(stableWorkflow, /^\s*schedule:/m);
   assert.doesNotMatch(stableWorkflow, /nightly|rc-release|event\.release|inputs\.release_tag/i);
+  assert.equal(managedWorkflow.match(/- version\.txt/g)?.length, 2);
 
   const verifyNewLane = rollout.indexOf("contents/.github/workflows/stable-release.yml?ref=dev");
   const disableLegacy = rollout.indexOf("actions/workflows/$legacy_id/disable");
@@ -168,6 +170,7 @@ test("public protocol identity never uses internal crate versions", () => {
     "crates/nac-core/src/model/arcee.rs",
     "crates/nac-core/src/model/chatgpt_codex.rs",
     "crates/nac-managed/src/github.rs",
+    "crates/nac-server/src/mcp.rs",
   ];
   for (const surface of surfaces) {
     const source = fs.readFileSync(surface, "utf8");

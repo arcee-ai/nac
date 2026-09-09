@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/arcee-ai/nac/actions/workflows/release.yml">
+  <a href="https://github.com/arcee-ai/nac/actions/workflows/stable-release.yml">
     <img src="https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=githubactions&logoColor=white" alt="CI" />
   </a>
   <a href="LICENSE">

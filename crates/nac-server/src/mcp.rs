@@ -9,8 +9,9 @@ use crate::{
     SubmitPromptRequest, UpdateConfigRequest,
 };
 
+use nac_contracts::PRODUCT_VERSION;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo};
 use rmcp::schemars;
 use rmcp::tool;
 use rmcp::tool_handler;
@@ -31,6 +32,14 @@ use serde_json::json;
 #[derive(Clone)]
 pub struct NacMcpService {
     operations: OrchestrationOperations,
+}
+
+const NAC_MCP_INSTRUCTIONS: &str = "nac is an AI coding agent orchestrator. It manages coding sessions where an orchestrator agent receives your prompt, plans the work, and dispatches worker threads to execute tasks autonomously. Each worker operates independently — reading files, writing code, running commands, and calling tools — then reports back with its results. The orchestrator reviews thread output, compacts context when approaching the model's context window limit, and either dispatches more threads or produces a final response. Each worker's final output is retained as an episode you can inspect.\n\nSessions are asynchronous: send_message returns immediately with a run_id and the work continues in the background. Poll get_session_status to check completion, use steer to guide running tasks mid-flight, and inspect results with get_messages, get_thread_episodes, and get_thread_events. Sessions persist across server restarts and you can manage multiple simultaneously.";
+
+fn mcp_server_info_for_version(version: &str) -> ServerInfo {
+    ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        .with_server_info(Implementation::new("nac_server", version))
+        .with_instructions(NAC_MCP_INSTRUCTIONS)
 }
 
 // ---------------------------------------------------------------------------
@@ -557,10 +566,12 @@ impl NacMcpService {
     }
 }
 
-#[tool_handler(
-    instructions = "nac is an AI coding agent orchestrator. It manages coding sessions where an orchestrator agent receives your prompt, plans the work, and dispatches worker threads to execute tasks autonomously. Each worker operates independently — reading files, writing code, running commands, and calling tools — then reports back with its results. The orchestrator reviews thread output, compacts context when approaching the model's context window limit, and either dispatches more threads or produces a final response. Each worker's final output is retained as an episode you can inspect.\n\nSessions are asynchronous: send_message returns immediately with a run_id and the work continues in the background. Poll get_session_status to check completion, use steer to guide running tasks mid-flight, and inspect results with get_messages, get_thread_episodes, and get_thread_events. Sessions persist across server restarts and you can manage multiple simultaneously."
-)]
-impl ServerHandler for NacMcpService {}
+#[tool_handler]
+impl ServerHandler for NacMcpService {
+    fn get_info(&self) -> ServerInfo {
+        mcp_server_info_for_version(PRODUCT_VERSION)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Service factory
@@ -628,5 +639,15 @@ mod tests {
             .into_iter()
             .flatten()
             .any(|field| field == "project_id"));
+    }
+
+    #[test]
+    fn inbound_mcp_identity_uses_injected_product_version() {
+        let info = mcp_server_info_for_version("9.8.7");
+
+        assert_eq!(info.server_info.name, "nac_server");
+        assert_eq!(info.server_info.version, "9.8.7");
+        assert!(info.capabilities.tools.is_some());
+        assert_eq!(info.instructions.as_deref(), Some(NAC_MCP_INSTRUCTIONS));
     }
 }
