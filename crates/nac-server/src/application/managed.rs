@@ -225,6 +225,7 @@ pub(crate) fn managed_startup_plan(
                     actor: expectation.actor.clone(),
                     beneficiary: expectation.beneficiary.clone(),
                 },
+                adopt_unbound_previous: expectation.adopt_unbound_previous,
             })
         })
         .transpose()?;

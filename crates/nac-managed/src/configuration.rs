@@ -75,6 +75,8 @@ pub struct ManagedHostConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedUpgradeExpectation {
+    #[serde(default)]
+    pub adopt_unbound_previous: bool,
     pub previous_operation_id: String,
     pub previous_target: crate::managed_control_assertion::ManagedControlTarget,
     pub operation_id: String,

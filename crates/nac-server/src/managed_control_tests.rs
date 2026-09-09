@@ -1075,6 +1075,7 @@ async fn controller_startup_expectation_recovers_suspended_or_failed_release_and
         let running = crate::managed_running_target().unwrap();
         let mut managed = fixture.manager.managed_host().unwrap().clone();
         managed.managed_upgrade_expectation = Some(nac_managed::ManagedUpgradeExpectation {
+            adopt_unbound_previous: false,
             previous_operation_id: previous.operation_id.clone(),
             previous_target: previous.target.clone(),
             operation_id: "operation-startup-b".to_string(),
@@ -1137,6 +1138,90 @@ async fn controller_startup_expectation_recovers_suspended_or_failed_release_and
         )
         .is_err());
     }
+}
+
+#[test]
+fn controller_startup_expectation_explicitly_adopts_a_virgin_pre_control_release() {
+    let fixture = Fixture::new();
+    let running = crate::managed_running_target().unwrap();
+    let previous_target = nac_managed::ManagedControlTarget {
+        release_id: "release-pre-control-a".to_string(),
+        source_sha: "a".repeat(40),
+        product_version: "0.0.1+legacy.1".to_string(),
+        schema_version: running.schema_version,
+        minimum_schema_version: 0,
+    };
+    let expectation = nac_managed::ManagedUpgradeExpectation {
+        adopt_unbound_previous: true,
+        previous_operation_id: "operation-pre-control-a".to_string(),
+        previous_target,
+        operation_id: "operation-first-controlled-b".to_string(),
+        target: nac_managed::ManagedControlTarget {
+            release_id: running.release_id.clone(),
+            source_sha: running.source_sha.clone(),
+            product_version: running.product_version.clone(),
+            schema_version: running.schema_version,
+            minimum_schema_version: running.minimum_schema_version,
+        },
+        actor: "user:owner".to_string(),
+        beneficiary: "tenant:owner".to_string(),
+    };
+
+    let mut mismatched = fixture.manager.managed_host().unwrap().clone();
+    let mut mismatched_expectation = expectation.clone();
+    mismatched_expectation.target.source_sha = "f".repeat(40);
+    mismatched.managed_upgrade_expectation = Some(mismatched_expectation);
+    assert!(SessionManager::new(crate::ServerOptions {
+        root_cwd: fixture.root.clone(),
+        store_path: Some(fixture.manager.inner.store_path.clone()),
+        worker_executable: None,
+        managed_host: Some(mismatched),
+    })
+    .is_err());
+    let virgin =
+        nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path).unwrap();
+    assert_eq!(
+        virgin.state,
+        nac_core::store::ManagedMaintenanceState::Serving
+    );
+    assert!(virgin.accepted_identity.is_none());
+
+    let mut managed = fixture.manager.managed_host().unwrap().clone();
+    managed.managed_upgrade_expectation = Some(expectation);
+    let replacement = SessionManager::new(crate::ServerOptions {
+        root_cwd: fixture.root.clone(),
+        store_path: Some(fixture.manager.inner.store_path.clone()),
+        worker_executable: None,
+        managed_host: Some(managed.clone()),
+    })
+    .unwrap();
+    let replayed = SessionManager::new(crate::ServerOptions {
+        root_cwd: fixture.root.clone(),
+        store_path: Some(fixture.manager.inner.store_path.clone()),
+        worker_executable: None,
+        managed_host: Some(managed),
+    })
+    .unwrap();
+    assert_eq!(replacement.managed_identity(), replayed.managed_identity());
+    assert_eq!(
+        replacement.managed_identity().unwrap().operation_id,
+        "operation-first-controlled-b"
+    );
+    let snapshot =
+        nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path).unwrap();
+    assert_eq!(
+        snapshot.state,
+        nac_core::store::ManagedMaintenanceState::Maintenance
+    );
+    assert_eq!(
+        snapshot.operation_id.as_deref(),
+        Some("operation-first-controlled-b")
+    );
+    assert!(nac_core::store::accept_managed_forward_start(
+        &fixture.manager.inner.store_path,
+        replacement.managed_identity().unwrap(),
+    )
+    .unwrap());
 }
 
 #[tokio::test]
