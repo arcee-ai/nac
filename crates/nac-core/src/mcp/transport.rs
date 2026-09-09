@@ -38,7 +38,7 @@ pub(super) async fn connect_server(
 /// Stdio servers always run on the host, even when the worker is sandboxed:
 /// the sandbox image does not contain the runtimes (`npx`, `node`, `uvx`, ...)
 /// stdio servers typically need, and `cwd` is already the host workspace path.
-fn build_stdio_command(
+pub(super) fn build_stdio_command(
     program: &str,
     args: &[String],
     envs: &BTreeMap<String, String>,

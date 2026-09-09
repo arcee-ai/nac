@@ -225,11 +225,12 @@ fn delegated_worker_native_search_is_credential_gated_and_model_safe() {
     };
 
     assert_eq!(
-        names(worker.model_request_capabilities_for_test(None)),
+        names(worker.refresh_model_request_capabilities().unwrap()),
         crate::tools::WORKER_TOOL_NAMES
     );
     let credential = "delegated-exa-capability-canary";
-    let definitions = worker.model_request_capabilities_for_test(Some(credential));
+    worker.set_worker_web_credential(Some(credential.to_string()));
+    let definitions = worker.refresh_model_request_capabilities().unwrap();
     let definition_json = serde_json::to_string(&definitions).unwrap();
     assert!(!definition_json.contains(credential));
     let names = names(definitions);
