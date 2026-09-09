@@ -8539,7 +8539,7 @@
           },
           "light_model": {
             "$ref": "#/components/schemas/RequestField_LightModelSettings_LightModelSettings",
-            "description": "Light worker model; omitted or null launches single-model."
+            "description": "Optional light model. Omitted inherits project/session defaults, null\nexplicitly selects single-model operation, and a value replaces the\ninherited selection."
           },
           "model": {
             "$ref": "#/components/schemas/RequestField_String_String"
@@ -9267,7 +9267,7 @@
       },
       "LightModelSettings": {
         "type": "object",
-        "description": "The optional light worker model of a session. `Some` on a session enables\nweight-classified dispatch: light dispatches run this model, heavy\ndispatches run the orchestrator's own model. The model remains a catalog\nid; backend and reasoning effort are typed before entering the domain\nmodel, and the credential is always a selector name, never a key value.",
+        "description": "The optional light model selection stored with a session. Orchestrator\nruntimes use it for weight-classified dispatch, and direct-with-orchestrator\nsessions pass it to the orchestrators they launch. Plain direct sessions\nretain it without a runtime consumer pending ALL-36. The model remains a\ncatalog id; backend and reasoning effort are typed before entering the\ndomain model, and the credential is always a selector name, never a key\nvalue.",
         "required": [
           "model"
         ],
@@ -11216,7 +11216,7 @@
           },
           {
             "type": "object",
-            "description": "The optional light worker model of a session. `Some` on a session enables\nweight-classified dispatch: light dispatches run this model, heavy\ndispatches run the orchestrator's own model. The model remains a catalog\nid; backend and reasoning effort are typed before entering the domain\nmodel, and the credential is always a selector name, never a key value.",
+            "description": "The optional light model selection stored with a session. Orchestrator\nruntimes use it for weight-classified dispatch, and direct-with-orchestrator\nsessions pass it to the orchestrators they launch. Plain direct sessions\nretain it without a runtime consumer pending ALL-36. The model remains a\ncatalog id; backend and reasoning effort are typed before entering the\ndomain model, and the credential is always a selector name, never a key\nvalue.",
             "required": [
               "model"
             ],

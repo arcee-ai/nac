@@ -192,6 +192,15 @@ export async function createSession(
 export async function createProject(
   request: APIRequestContext,
   harness: EmbeddedHarness,
+  options: {
+    lightModel?: {
+      model: string;
+      backend: "openai-responses";
+      base_url: string;
+      api_key_env: string;
+      reasoning_effort: "low";
+    };
+  } = {},
 ): Promise<string> {
   const configuration = await request.post(`${harness.baseUrl}/model-configs`, {
     data: {
@@ -203,6 +212,7 @@ export async function createProject(
       reasoning_effort: "high",
       extra_headers: {},
       orchestrator_compaction_threshold: 0,
+      light_model: options.lightModel,
     },
   });
   if (!configuration.ok()) {

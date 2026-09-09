@@ -291,7 +291,7 @@ pub(super) async fn build_resume_config_from_snapshot(
             }
         })?
         .with_cache_ttl(Some("1h"));
-    let light_client = snapshot
+    let resolved_light_client = snapshot
         .light_model
         .as_ref()
         .map(|light| resolve_light_client(light, &snapshot.extra_headers))
@@ -308,6 +308,14 @@ pub(super) async fn build_resume_config_from_snapshot(
             error @ LightModelError::Other(_) => anyhow::Error::from(error),
         })?
         .map(std::sync::Arc::new);
+    let light_client = if snapshot.behavior == sessions::SessionBehavior::Direct {
+        // Keep this symmetric with fresh construction: ALL-36 owns any future
+        // direct-session use. The durable selection is validated and retained,
+        // but is intentionally absent from the resumed direct runtime.
+        None
+    } else {
+        resolved_light_client
+    };
     let sandbox = if ssh.is_some() {
         None
     } else {

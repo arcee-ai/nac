@@ -270,3 +270,72 @@ it("waits for persisted configurations and managed status before emitting an imp
     client.clear();
   }
 });
+
+it("does not replace a session light model when its primary fields match a saved setup", async () => {
+  vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
+  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
+  vi.spyOn(api, "listModelConfigs").mockResolvedValue({
+    configurations: [
+      {
+        config_id: "saved-config",
+        name: "Saved provider",
+        backend: "openai-responses",
+        model: "gpt-5.6-sol",
+        base_url: "https://api.openai.com/v1",
+        api_key_env: "SAVED_API_KEY",
+        reasoning_effort: "high",
+        extra_headers: {},
+        light_model: {
+          model: "saved-light",
+          backend: "openai-responses",
+          api_key_env: "SAVED_API_KEY",
+        },
+        created_at: "2026-09-08T00:00:00Z",
+        updated_at: "2026-09-08T00:00:00Z",
+      },
+    ],
+  });
+  vi.spyOn(api, "resolveModelConfig").mockResolvedValue({
+    backend: "openai-responses",
+    model: "gpt-5.6-sol",
+    base_url: "https://api.openai.com/v1",
+    api_key_env: "SAVED_API_KEY",
+    reasoning_effort: "high",
+    models: [{ id: "gpt-5.6-sol", display_name: "GPT-5.6 Sol" }],
+    models_error: null,
+  });
+  const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <ConfigurationsPanel
+          invalid={false}
+          initial={{
+            backend: "openai-responses",
+            model: "gpt-5.6-sol",
+            base_url: "https://api.openai.com/v1",
+            api_key_env: "SAVED_API_KEY",
+            reasoning_effort: "high",
+            extra_headers: {},
+          }}
+          onChange={onChange}
+        />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  try {
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          kind: "resolved",
+          config_id: "saved-config",
+          light_model: undefined,
+        }),
+      ),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});

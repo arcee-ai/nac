@@ -955,6 +955,11 @@ impl Agent {
     }
 
     #[cfg(test)]
+    pub(crate) fn has_light_client_for_test(&self) -> bool {
+        self.tool_runtime.light_client.is_some()
+    }
+
+    #[cfg(test)]
     pub(crate) fn ssh_control_path_for_test(&self) -> Option<&std::path::Path> {
         match self.tool_runtime.backend.as_ref() {
             crate::sandbox::ExecutionBackend::Ssh(ssh) => Some(ssh.control_path_for_test()),

@@ -611,7 +611,12 @@ function CreateProjectForm({
             onChange={onSelection}
           >
             <div className="flex flex-col gap-2">
-              <LightModelSection key={savedLightKey} initial={savedLight} onChange={onLight} />
+              <LightModelSection
+                key={savedLightKey}
+                initial={savedLight}
+                behavior={behavior}
+                onChange={onLight}
+              />
               <Separator />
               <ConfigRow
                 label="Reasoning Effort"

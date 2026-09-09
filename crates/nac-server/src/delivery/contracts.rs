@@ -268,7 +268,9 @@ pub struct CreateSessionRequest {
     /// Omitted defaults to 70% of the model's context window; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
-    /// Light worker model; omitted or null launches single-model.
+    /// Optional light model. Omitted inherits project/session defaults, null
+    /// explicitly selects single-model operation, and a value replaces the
+    /// inherited selection.
     #[serde(default)]
     pub light_model: RequestField<LightModelSettings>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
