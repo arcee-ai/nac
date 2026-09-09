@@ -8,6 +8,7 @@ import {
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
+import { PrimaryModelSection } from "@/app/components/modals/PrimaryModelSection";
 import { SessionBehaviorPicker } from "@/app/components/modals/SessionBehaviorPicker";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { inheritPrimaryCredential } from "@/app/lib/modelConfig";
@@ -121,6 +122,7 @@ function NewChatForm({
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [light, setLight] = useState<LightSelection>({ mode: "single", light: null });
   const [error, setError] = useState("");
+  const [advanced, setAdvanced] = useState(false);
 
   const project = projects.data?.projects.find((entry) => entry.project_id === projectId) ?? null;
   const sibling = newestCreatedPrimarySessionForProject(sessions.data ?? [], projectId);
@@ -274,19 +276,38 @@ function NewChatForm({
           Loading the project's model settings…
         </div>
       ) : (
-        <ConfigurationsPanel
-          invalid={Boolean(error)}
-          errorText={error || undefined}
-          initial={inherited?.initial}
-          onChange={onSelection}
-        >
+        <div className="flex flex-col gap-3">
+          {advanced ? (
+            <ConfigurationsPanel
+              invalid={Boolean(error)}
+              errorText={error || undefined}
+              initial={inherited?.initial}
+              onChange={onSelection}
+            />
+          ) : (
+            <PrimaryModelSection initial={inherited?.initial} onChange={onSelection} />
+          )}
+          <Button
+            variant={ButtonVariant.Secondary}
+            onClick={() => {
+              setAdvanced((value) => !value);
+              setError("");
+            }}
+          >
+            {advanced ? "Back to unified models" : "Advanced presets and provider setup"}
+          </Button>
           <LightModelSection
             key={selectedLightKey}
             initial={selectedLight}
             behavior={behavior}
             onChange={onLight}
           />
-        </ConfigurationsPanel>
+          {error && !advanced ? (
+            <p className="text-micro text-error-primary" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </div>
       )}
     </Modal>
   );

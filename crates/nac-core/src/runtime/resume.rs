@@ -291,30 +291,29 @@ pub(super) async fn build_resume_config_from_snapshot(
             }
         })?
         .with_cache_ttl(Some("1h"));
-    let resolved_light_client = snapshot
-        .light_model
-        .as_ref()
-        .map(|light| resolve_light_client(light, &snapshot.extra_headers))
-        .transpose()
-        .map_err(|error| match error {
-            // The resolver classifies the failure at the source; add the
-            // repair context without type-sniffing the chain. The boundary
-            // renders the full chain once with `{:#}`.
-            LightModelError::InvalidSettings(inner) => inner.context(
-                "stored session light-model settings are invalid; settings repair required",
-            ),
-            // Keep the typed wrapper so its top-level context still names
-            // the light model as the failing component.
-            error @ LightModelError::Other(_) => anyhow::Error::from(error),
-        })?
-        .map(std::sync::Arc::new);
     let light_client = if snapshot.behavior == sessions::SessionBehavior::Direct {
         // Keep this symmetric with fresh construction: ALL-36 owns any future
-        // direct-session use. The durable selection is validated and retained,
-        // but is intentionally absent from the resumed direct runtime.
+        // direct-session use. The durable selection is retained without
+        // credential resolution and is absent from the resumed direct runtime.
         None
     } else {
-        resolved_light_client
+        snapshot
+            .light_model
+            .as_ref()
+            .map(|light| resolve_light_client(light, &snapshot.extra_headers))
+            .transpose()
+            .map_err(|error| match error {
+                // The resolver classifies the failure at the source; add the
+                // repair context without type-sniffing the chain. The boundary
+                // renders the full chain once with `{:#}`.
+                LightModelError::InvalidSettings(inner) => inner.context(
+                    "stored session light-model settings are invalid; settings repair required",
+                ),
+                // Keep the typed wrapper so its top-level context still names
+                // the light model as the failing component.
+                error @ LightModelError::Other(_) => anyhow::Error::from(error),
+            })?
+            .map(std::sync::Arc::new)
     };
     let sandbox = if ssh.is_some() {
         None

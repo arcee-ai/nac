@@ -103,6 +103,7 @@ impl<'a> SessionConfigurationApplication<'a> {
         )?;
         self.manager.require_primary_operation_session(session_id)?;
 
+        let behavior = sessions::load_session_behavior(&self.manager.inner.store_path, session_id)?;
         let current = sessions::load_session_config(&self.manager.inner.store_path, session_id)?;
         let mut prospective = current.clone();
         // The light model needs the credential destination policy, which the
@@ -174,10 +175,15 @@ impl<'a> SessionConfigurationApplication<'a> {
             prospective.api_key_env.clone(),
             extra_headers.clone(),
         )?;
-        // Fail a broken light model here, not at the session's next launch.
-        if let Some(light) = prospective.light_model.as_ref() {
-            nac_core::light_model::validate(light, &extra_headers)
-                .map_err(request_configuration_error_from)?;
+        // Plain direct has no ALL-36 light-model consumer: preserve its
+        // normalized durable selection without reading that unused provider's
+        // credentials. Orchestrator-capable sessions still fail before the
+        // next launch when their runnable light model is unavailable.
+        if behavior != sessions::SessionBehavior::Direct {
+            if let Some(light) = prospective.light_model.as_ref() {
+                nac_core::light_model::validate(light, &extra_headers)
+                    .map_err(request_configuration_error_from)?;
+            }
         }
         let mounted_override = self.manager.managed_model().filter(|profile| {
             profile.matches_settings_override(

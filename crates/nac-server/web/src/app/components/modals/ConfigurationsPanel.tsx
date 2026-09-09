@@ -94,6 +94,12 @@ const PROVIDER_ITEMS: SelectItem[] = [
 
 const PATH_DEBOUNCE_MS = 400;
 
+function stringMapsEqual(left: Record<string, string>, right: Record<string, string>): boolean {
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
 /**
  * Picks the provider setup a new session launches with: a model chosen out of
  * the catalog, a fresh setup, one saved earlier, or one read out of a
@@ -188,13 +194,20 @@ export function ConfigurationsPanel({
   // Launching usually means reusing the setup from last time, so the newest
   // saved configuration opens selected. With nothing saved yet the catalog is
   // the only source that asks for nothing up front, so it opens instead.
+  // A saved setup may share its visible provider/model identity with another
+  // setup while carrying different advanced launch settings. Treat a preset
+  // as the inherited source only when its complete primary configuration is
+  // identical; otherwise preserve the exact session/project values until the
+  // user explicitly chooses a preset.
   const initialSaved = initial
     ? configurations.find(
         (entry) =>
           entry.backend === initial.backend &&
           entry.model === initial.model &&
           entry.base_url === initial.base_url &&
-          entry.api_key_env === initial.api_key_env,
+          entry.api_key_env === initial.api_key_env &&
+          (entry.reasoning_effort ?? null) === initial.reasoning_effort &&
+          stringMapsEqual(entry.extra_headers, initial.extra_headers),
       )
     : null;
   const latestSaved = configurations.at(-1);
