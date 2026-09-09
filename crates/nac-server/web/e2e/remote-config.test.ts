@@ -7,7 +7,7 @@ import {
   remoteTarget,
   requireRemoteTarget,
 } from "./remote-config";
-import { assertPortalArtifactSafety } from "./remote-auth";
+import { assertPortalArtifactSafety, sanitizedRemoteOperation } from "./remote-auth";
 
 describe("remote E2E configuration", () => {
   test("keeps the remote lane disabled without a target", () => {
@@ -197,6 +197,20 @@ describe("remote E2E configuration", () => {
         "requires DEBUG and PWDEBUG to be unset",
       );
     }
+  });
+
+  test("replaces URL-bearing remote failures with a fixed safe diagnostic", async () => {
+    const runtimeSecret = randomBytes(32).toString("base64url");
+    let message = "";
+    try {
+      await sanitizedRemoteOperation("production-client", async () => {
+        throw new Error(`https://${runtimeSecret}.private.example.test/${runtimeSecret}`);
+      });
+    } catch (error) {
+      message = error instanceof Error ? error.message : "";
+    }
+    expect(message).toBe("production client check failed without retaining target details");
+    expect(message).not.toContain(runtimeSecret);
   });
 });
 

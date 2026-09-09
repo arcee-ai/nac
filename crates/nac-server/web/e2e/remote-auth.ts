@@ -5,6 +5,15 @@ import type { RemoteTarget } from "./remote-config";
 const OWNER_COOKIE_NAME = "__Host-nac_session";
 const PORTAL_REDEMPTION_FAILURE =
   "portal launch redemption failed without retaining authentication details";
+const remoteFailureMessages = {
+  "authentication-setup": "remote authentication setup failed without retaining target details",
+  "anonymous-gateway-check": "anonymous gateway check failed without retaining target details",
+  "readiness-and-identity":
+    "managed readiness and identity check failed without retaining target details",
+  "production-client": "production client check failed without retaining target details",
+} as const;
+
+export type SanitizedRemoteOperation = keyof typeof remoteFailureMessages;
 
 export type RemoteArtifactUse = {
   trace?: unknown;
@@ -49,6 +58,17 @@ export function assertPortalArtifactSafety(target: RemoteTarget, use: RemoteArti
     throw new Error(
       `portal-launch remote E2E requires artifact recording to be disabled (${unsafe.join(", ")})`,
     );
+  }
+}
+
+export async function sanitizedRemoteOperation<T>(
+  operation: SanitizedRemoteOperation,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch {
+    throw new Error(remoteFailureMessages[operation]);
   }
 }
 

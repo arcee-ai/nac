@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
-import { createRemoteContexts, type RemoteContexts } from "./remote-auth";
+import { createRemoteContexts, sanitizedRemoteOperation, type RemoteContexts } from "./remote-auth";
 import { requireRemoteTarget } from "./remote-config";
 
 type ReleaseIdentity = {
@@ -33,9 +33,11 @@ const target = requireRemoteTarget();
 let contexts: RemoteContexts;
 
 test.beforeAll(async ({ browser }, testInfo) => {
-  contexts = await createRemoteContexts(browser, target, {
-    artifactUse: testInfo.project.use,
-  });
+  contexts = await sanitizedRemoteOperation("authentication-setup", () =>
+    createRemoteContexts(browser, target, {
+      artifactUse: testInfo.project.use,
+    }),
+  );
 });
 
 test.afterAll(async () => {
@@ -44,74 +46,83 @@ test.afterAll(async () => {
 });
 
 test("denies an anonymous browser before it reaches owner-equivalent UI", async () => {
-  const response = await contexts.anonymous.request.get(target.baseUrl, { maxRedirects: 0 });
-  expect([401, 403]).toContain(response.status());
+  await sanitizedRemoteOperation("anonymous-gateway-check", async () => {
+    const response = await contexts.anonymous.request.get(target.baseUrl, { maxRedirects: 0 });
+    expect([401, 403]).toContain(response.status());
+  });
 });
 
 test("reports a responsive, ready managed host and records its release identity", async () => {
-  const request = contexts.authenticated.request;
-  const testInfo = test.info();
-  const health = await request.get(`${target.baseUrl}/healthz`);
-  expect(health.status()).toBe(200);
-  await expect(health.json()).resolves.toMatchObject({ status: "ok" });
+  await sanitizedRemoteOperation("readiness-and-identity", async () => {
+    const request = contexts.authenticated.request;
+    const testInfo = test.info();
+    const health = await request.get(`${target.baseUrl}/healthz`);
+    expect(health.status()).toBe(200);
+    await expect(health.json()).resolves.toMatchObject({ status: "ok" });
 
-  const readiness = await getJson<Readiness>(request, `${target.baseUrl}/readyz`);
-  expect(readiness.status).toBe("ok");
-  expect(readiness.managed).toBe(true);
-  const requireExactIdentity = target.authentication.mode === "portal-launch";
-  const readinessIdentity = requireReleaseIdentity(readiness, requireExactIdentity);
+    const readiness = await getJson<Readiness>(request, `${target.baseUrl}/readyz`);
+    expect(readiness.status).toBe("ok");
+    expect(readiness.managed).toBe(true);
+    const requireExactIdentity = target.authentication.mode === "portal-launch";
+    const readinessIdentity = requireReleaseIdentity(readiness, requireExactIdentity);
 
-  const managed = await getJson<ManagedStatus>(request, `${target.baseUrl}/managed/status`);
-  expect(managed.managed).toBe(true);
-  expect(managed.ready).toBe(true);
-  expect(managed.model_ready).toBe(true);
-  const managedIdentity = requireReleaseIdentity(managed, requireExactIdentity);
-  expect(managedIdentity).toEqual(readinessIdentity);
-  if (target.expectedVersion) expect(managedIdentity.product_version).toBe(target.expectedVersion);
+    const managed = await getJson<ManagedStatus>(request, `${target.baseUrl}/managed/status`);
+    expect(managed.managed).toBe(true);
+    expect(managed.ready).toBe(true);
+    expect(managed.model_ready).toBe(true);
+    const managedIdentity = requireReleaseIdentity(managed, requireExactIdentity);
+    expect(managedIdentity).toEqual(readinessIdentity);
+    if (target.expectedVersion)
+      expect(managedIdentity.product_version).toBe(target.expectedVersion);
 
-  await testInfo.attach("remote release identity", {
-    body: Buffer.from(
-      JSON.stringify(
-        {
-          ...managedIdentity,
-          release_id: managedIdentity.build_id,
-          release_digest_exposed: false,
-          environment: target.environmentName,
-          authentication_mode: target.authentication.mode,
-          owner_cookie: contexts.ownerCookie
-            ? {
-                name: contexts.ownerCookie.name,
-                host_only: true,
-                path: contexts.ownerCookie.path,
-                secure: contexts.ownerCookie.secure,
-                http_only: contexts.ownerCookie.httpOnly,
-                same_site: contexts.ownerCookie.sameSite,
-                persistent: contexts.ownerCookie.persistent,
-              }
-            : null,
-        },
-        null,
-        2,
+    await testInfo.attach("remote release identity", {
+      body: Buffer.from(
+        JSON.stringify(
+          {
+            ...managedIdentity,
+            release_id: managedIdentity.build_id,
+            release_digest_exposed: false,
+            environment: target.environmentName,
+            authentication_mode: target.authentication.mode,
+            owner_cookie: contexts.ownerCookie
+              ? {
+                  name: contexts.ownerCookie.name,
+                  host_only: true,
+                  path: contexts.ownerCookie.path,
+                  secure: contexts.ownerCookie.secure,
+                  http_only: contexts.ownerCookie.httpOnly,
+                  same_site: contexts.ownerCookie.sameSite,
+                  persistent: contexts.ownerCookie.persistent,
+                }
+              : null,
+          },
+          null,
+          2,
+        ),
       ),
-    ),
-    contentType: "application/json",
+      contentType: "application/json",
+    });
   });
 });
 
 test("loads the production client through the authenticated gateway", async () => {
-  const page = await contexts.authenticated.newPage();
-  try {
-    const errors: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
+  await sanitizedRemoteOperation("production-client", async () => {
+    const page = await contexts.authenticated.newPage();
+    try {
+      let pageErrorCount = 0;
+      page.on("pageerror", () => {
+        pageErrorCount += 1;
+      });
 
-    const response = await page.goto(target.baseUrl);
-    expect(response?.status()).toBe(200);
-    await expect(page).toHaveTitle("NAC");
-    await expect(page.getByRole("button", { name: "Open the menu" })).toBeVisible();
-    expect(errors).toEqual([]);
-  } finally {
-    await page.close();
-  }
+      const response = await page.goto(target.baseUrl);
+      expect(response?.status()).toBe(200);
+      await expect(page).toHaveTitle("NAC");
+      await expect(page.getByRole("button", { name: "Open the menu" })).toBeVisible();
+      expect(pageErrorCount).toBe(0);
+    } finally {
+      await page.close();
+    }
+  });
 });
 
 function requireReleaseIdentity(value: ReleaseIdentity, requireExact: boolean) {
