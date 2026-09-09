@@ -134,7 +134,7 @@ mod platform {
     }
 
     pub struct ManagedWorkerCredentialReceiver {
-        stream: StdUnixStream,
+        stream: Option<StdUnixStream>,
     }
 
     pub(crate) fn prepare_worker_credential_channel(
@@ -189,10 +189,11 @@ mod platform {
 
     impl ManagedWorkerCredentialReceiver {
         pub fn from_inherited_fd(fd: Option<i32>) -> Result<Self> {
+            let Some(fd) = fd else {
+                return Ok(Self { stream: None });
+            };
             restrict_same_uid_inspection()
                 .map_err(|_| anyhow!("failed to restrict managed worker process inspection"))?;
-            let fd =
-                fd.ok_or_else(|| anyhow!("managed worker credential descriptor is missing"))?;
             if fd <= libc::STDERR_FILENO {
                 return Err(anyhow!("managed worker credential descriptor is invalid"));
             }
@@ -201,12 +202,17 @@ mod platform {
             // SAFETY: the hidden worker CLI transfers unique ownership of this
             // validated inherited descriptor exactly once.
             let stream = unsafe { StdUnixStream::from_raw_fd(fd) };
-            Ok(Self { stream })
+            Ok(Self {
+                stream: Some(stream),
+            })
         }
 
         pub(crate) async fn receive_after_mcp(self) -> Result<ManagedWorkerNativeCredentials> {
-            self.stream.set_nonblocking(true)?;
-            let mut stream = tokio::net::UnixStream::from_std(self.stream)?;
+            let Some(stream) = self.stream else {
+                return Ok(ManagedWorkerNativeCredentials::default());
+            };
+            stream.set_nonblocking(true)?;
+            let mut stream = tokio::net::UnixStream::from_std(stream)?;
             stream.write_all(MANAGED_WORKER_CREDENTIAL_READY).await?;
             stream.flush().await?;
 
@@ -333,7 +339,9 @@ mod platform {
             WorkerCredentialSender {
                 stream: tokio::net::UnixStream::from_std(parent)?,
             },
-            ManagedWorkerCredentialReceiver { stream: child },
+            ManagedWorkerCredentialReceiver {
+                stream: Some(child),
+            },
         ))
     }
 
@@ -344,7 +352,9 @@ mod platform {
         parent.set_nonblocking(true)?;
         Ok((
             tokio::net::UnixStream::from_std(parent)?,
-            ManagedWorkerCredentialReceiver { stream: child },
+            ManagedWorkerCredentialReceiver {
+                stream: Some(child),
+            },
         ))
     }
 }

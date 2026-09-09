@@ -479,10 +479,6 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
-    if cli.command.is_none() || matches!(&cli.command, Some(RootCommand::ManagedWorker(_))) {
-        runtime::restrict_same_uid_inspection()
-            .context("failed to restrict NAC process inspection")?;
-    }
     match cli.command {
         None => run_server(cli.server).await,
         Some(RootCommand::ManagedWorker(worker)) => run_managed_worker(worker).await,
@@ -539,6 +535,10 @@ async fn resolve_github_credential(
 async fn run_server(cli: ServerCli) -> Result<()> {
     let bind = cli.bind_addr();
     let bind_policy = cli.bind_policy();
+    let managed_config_path = cli
+        .managed_config
+        .or_else(|| std::env::var_os("NAC_MANAGED_CONFIG").map(PathBuf::from));
+    restrict_managed_server_process(managed_config_path.as_deref())?;
     bind_policy.validate(bind)?;
     if !bind.ip().is_loopback() {
         eprintln!("warning: every client that can reach {bind} receives full control of nac-web");
@@ -546,9 +546,6 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     let launch_cwd = std::env::current_dir()?;
     let root_cwd = resolve_project_directory(&launch_cwd, cli.directory.as_deref(), cli.yes)?;
     eprintln!("project: {}", root_cwd.display());
-    let managed_config_path = cli
-        .managed_config
-        .or_else(|| std::env::var_os("NAC_MANAGED_CONFIG").map(PathBuf::from));
     let managed_host =
         nac_managed::ManagedHostConfig::load_optional(managed_config_path.as_deref())?;
     let manager = SessionManager::new(ServerOptions {
@@ -585,6 +582,14 @@ async fn run_server(cli: ServerCli) -> Result<()> {
         }
     })
     .await
+}
+
+fn restrict_managed_server_process(managed_config_path: Option<&Path>) -> Result<()> {
+    if managed_config_path.is_some() {
+        runtime::restrict_same_uid_inspection()
+            .context("failed to restrict Managed NAC process inspection")?;
+    }
+    Ok(())
 }
 
 /// Picks the project root: explicit `-C`, else confirm cwd (or type another path).
@@ -945,6 +950,108 @@ mod tests {
     use super::*;
 
     static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[cfg(target_os = "linux")]
+    fn linux_process_controls() -> (libc::c_int, libc::c_int) {
+        // SAFETY: these prctl getters take no pointer arguments.
+        let dumpable = unsafe { libc::prctl(libc::PR_GET_DUMPABLE) };
+        // SAFETY: PR_GET_NO_NEW_PRIVS takes integer zero placeholders only.
+        let no_new_privs = unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) };
+        assert!(dumpable >= 0);
+        assert!(no_new_privs >= 0);
+        (dumpable, no_new_privs)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_control_child_helper() {
+        let Some(path) = std::env::var_os("NAC_PROCESS_CONTROL_CHILD_REPORT") else {
+            return;
+        };
+        let (dumpable, no_new_privs) = linux_process_controls();
+        std::fs::write(path, format!("dumpable={dumpable};nnp={no_new_privs}")).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn managed_process_control_parent_helper() {
+        let Some(root) = std::env::var_os("NAC_PROCESS_CONTROL_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let managed = std::env::var_os("NAC_PROCESS_CONTROL_MANAGED").is_some();
+        let before = linux_process_controls();
+        restrict_managed_server_process(managed.then_some(Path::new("/managed/config"))).unwrap();
+        let after = linux_process_controls();
+        let child_report = root.join("child");
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::process_control_child_helper",
+                "--nocapture",
+            ])
+            .env("NAC_PROCESS_CONTROL_CHILD_REPORT", &child_report)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "process-control child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let child = std::fs::read_to_string(child_report).unwrap();
+        std::fs::write(
+            root.join("parent"),
+            format!(
+                "before-dump={};before-nnp={};after-dump={};after-nnp={};child={child}",
+                before.0, before.1, after.0, after.1
+            ),
+        )
+        .unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn managed_hardening_is_opt_in_and_precedes_descendants() {
+        for managed in [false, true] {
+            let root = std::env::temp_dir().join(format!(
+                "nac_process_controls_{}_{}",
+                managed,
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "tests::managed_process_control_parent_helper",
+                    "--nocapture",
+                ])
+                .env("NAC_PROCESS_CONTROL_ROOT", &root);
+            if managed {
+                command.env("NAC_PROCESS_CONTROL_MANAGED", "1");
+            }
+            let output = command.output().unwrap();
+            assert!(
+                output.status.success(),
+                "process-control parent failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let report = std::fs::read_to_string(root.join("parent")).unwrap();
+            let fields = report
+                .split(';')
+                .map(|field| field.split_once('=').unwrap())
+                .collect::<std::collections::BTreeMap<_, _>>();
+            if managed {
+                assert!(report.contains("after-dump=0;after-nnp=1"), "{report}");
+                assert_eq!(fields["nnp"], "1", "{report}");
+            } else {
+                assert_eq!(fields["before-dump"], fields["after-dump"], "{report}");
+                assert_eq!(fields["before-nnp"], fields["after-nnp"], "{report}");
+                assert_eq!(fields["before-nnp"], fields["nnp"], "{report}");
+            }
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
 
     #[test]
     fn managed_worker_ignores_invalid_ambient_model_config() {

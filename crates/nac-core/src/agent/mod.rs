@@ -22,6 +22,7 @@ pub(crate) mod preview;
 mod prompt_rendering;
 mod tool_exec;
 mod transcript_state;
+mod web_capabilities;
 
 #[cfg(test)]
 mod compaction_integration_tests;
@@ -52,6 +53,7 @@ use transcript_state::{
     acquire_transcript_operation_lease_and_snapshot, append_to_initial_system_message,
     incomplete_tool_turn_index, missing_tool_result_ids, transcripts_match,
 };
+use web_capabilities::NativeWebCapabilities;
 
 const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
 pub(crate) const RUN_CANCELLED_MARKER: &str = "[run cancelled by user]";
@@ -147,11 +149,7 @@ pub struct Agent {
     tool_defs: Vec<ToolDefinition>,
     admission_controlled_tools: bool,
     direct_primary: bool,
-    web_retrieval_eligible: bool,
-    /// `None` keeps direct-agent environment/store refresh behavior. Workers
-    /// use `Some` so only the credential delivered after startup-time MCP
-    /// construction can enable native web retrieval.
-    worker_web_credential: Option<Option<String>>,
+    native_web_capabilities: NativeWebCapabilities,
     compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
@@ -311,9 +309,8 @@ impl Agent {
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
         }
-        let web_retrieval_eligible =
-            mode == AgentMode::Worker || (mode == AgentMode::Direct && traditional_child.is_none());
-        if web_retrieval_eligible
+        let native_web_capabilities = NativeWebCapabilities::new(mode, traditional_child.is_some());
+        if native_web_capabilities.is_eligible()
             && tool_defs.iter().any(|definition| {
                 tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str())
             })
@@ -385,8 +382,7 @@ impl Agent {
             tool_defs,
             admission_controlled_tools: mode == AgentMode::Direct,
             direct_primary: mode == AgentMode::Direct,
-            web_retrieval_eligible,
-            worker_web_credential: (mode == AgentMode::Worker).then_some(None),
+            native_web_capabilities,
             compaction,
             tool_runtime: ToolRuntime {
                 workspace_cwd: config.workspace_cwd,
@@ -437,23 +433,15 @@ impl Agent {
     }
 
     pub(crate) fn set_worker_web_credential(&mut self, credential: Option<String>) {
-        if let Some(worker_credential) = self.worker_web_credential.as_mut() {
-            *worker_credential = credential.filter(|value| !value.trim().is_empty());
-        }
+        self.native_web_capabilities
+            .set_worker_credential(credential);
     }
 
     /// Build one immutable model-request capability view. The Exa credential
     /// and the tool names are replaced together before the request and the
     /// resulting runtime is cloned into exactly that response's tool round.
     fn refresh_model_request_capabilities(&mut self) -> Result<Vec<ToolDefinition>> {
-        let credential = match (
-            self.web_retrieval_eligible,
-            self.worker_web_credential.as_ref(),
-        ) {
-            (false, _) => None,
-            (true, Some(credential)) => credential.clone(),
-            (true, None) => crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV)?,
-        };
+        let credential = self.native_web_capabilities.resolve_credential()?;
         Ok(self.install_model_request_capabilities(credential))
     }
 
@@ -462,7 +450,7 @@ impl Agent {
         credential: Option<String>,
     ) -> Vec<ToolDefinition> {
         let credential = credential
-            .filter(|_| self.web_retrieval_eligible)
+            .filter(|_| self.native_web_capabilities.is_eligible())
             .map(crate::tools::web::ExaCredential::new)
             .map(Arc::new);
         let mut definitions = self.tool_defs.clone();
