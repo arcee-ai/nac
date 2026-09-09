@@ -1,4 +1,4 @@
-.PHONY: all setup build dev demo release install ci test test-rust test-web test-source-size generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev demo release install ci test test-rust test-web test-release test-source-size generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -94,7 +94,7 @@ install:
 ci: format-check lint test
 
 ## Run workspace Rust tests, frontend tests, source-size, and web asset checks
-test: test-source-size test-rust test-web test-assets test-managed-image-contract
+test: test-source-size test-rust test-web test-release test-assets test-managed-image-contract
 
 test-rust:
 	$(CARGO) test --workspace --locked
@@ -102,6 +102,10 @@ test-rust:
 ## Run frontend unit and component tests
 test-web:
 	npm --prefix $(WEB_DIR) test
+
+## Validate Release Please configuration and pre-1.0 release calculation
+test-release:
+	node --test .github/scripts/release-policy.test.mjs
 
 ## Keep tracked human-authored files within the agent-context budget
 test-source-size:
@@ -234,6 +238,7 @@ help:
 		'  test         Run Rust/frontend tests and web asset checks' \
 		'  test-rust    Run cargo test --workspace --locked' \
 		'  test-web     Run frontend unit and component tests' \
+		'  test-release Validate stable release preparation policy' \
 		'  test-source-size Enforce the 2,000-line human-source ceiling' \
 		'  test-assets  Lint, typecheck and rebuild the web app' \
 		'  test-e2e     Run production-embedded Playwright tests' \

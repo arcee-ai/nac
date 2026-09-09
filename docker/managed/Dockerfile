@@ -7,6 +7,9 @@ FROM --platform=linux/amd64 debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5ce
 ARG RUST_VERSION=1.98.0
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
+ARG NAC_BUILD_TRACK=dev
+ARG NAC_BUILD_ID
+ARG NAC_SOURCE_REVISION
 
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
@@ -35,7 +38,10 @@ RUN test "$(dpkg --print-architecture)" = amd64 \
 
 WORKDIR /src/nac
 COPY . .
-RUN cargo build --release --locked -p nac-server --bin nac-web
+RUN NAC_BUILD_TRACK="${NAC_BUILD_TRACK}" \
+    NAC_BUILD_ID="${NAC_BUILD_ID}" \
+    NAC_SOURCE_REVISION="${NAC_SOURCE_REVISION}" \
+    cargo build --release --locked -p nac-server --bin nac-web
 
 FROM --platform=linux/amd64 debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867 AS runtime
 

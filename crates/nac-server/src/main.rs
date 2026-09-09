@@ -25,11 +25,10 @@ use nac_core::{
 };
 use nac_server::{serve_with_policy, BindPolicy, ServerOptions, SessionManager};
 
-/// Version reported by the binary. Release builds may override the package
-/// version so a prerelease binary exactly matches its immutable RC tag.
-const RELEASE_VERSION: &str = env!("NAC_RELEASE_VERSION");
+/// Root NAC product version, intentionally independent of internal crate versions.
+const RELEASE_VERSION: &str = env!("NAC_PRODUCT_VERSION");
 const BUILD_VERSION: &str = concat!(
-    env!("NAC_RELEASE_VERSION"),
+    env!("NAC_PRODUCT_VERSION"),
     " (",
     env!("NAC_BUILD_REVISION"),
     ")"

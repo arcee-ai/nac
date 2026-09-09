@@ -11,3 +11,4 @@ durable direct-session work.
 - [Traditional child sessions](traditional-children.md)
 - [Managed orchestrator sessions](managed-orchestrators.md)
 - [Native web retrieval](web-retrieval.md)
+- [Release lifecycle](releases.md)

@@ -4,14 +4,38 @@
 fn main() {
     println!("cargo:rerun-if-changed=assets");
 
-    println!("cargo:rerun-if-env-changed=NAC_RELEASE_VERSION");
-    let release_version =
-        std::env::var("NAC_RELEASE_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").into());
-    println!("cargo:rustc-env=NAC_RELEASE_VERSION={release_version}");
+    let version_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../version.txt");
+    println!("cargo:rerun-if-changed={}", version_path.display());
+    let product_version = std::fs::read_to_string(&version_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", version_path.display()));
+    let product_version = product_version.trim();
+    assert_stable_version(product_version);
+    println!("cargo:rustc-env=NAC_PRODUCT_VERSION={product_version}");
 
-    // Embed the source revision so release builds remain commit-identifiable.
-    // Falls back to "unknown" when building from a source archive without git metadata.
-    let revision = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rerun-if-env-changed=NAC_BUILD_TRACK");
+    let build_track = std::env::var("NAC_BUILD_TRACK").unwrap_or_else(|_| "dev".to_string());
+    assert!(
+        matches!(build_track.as_str(), "dev" | "beta" | "stable"),
+        "NAC_BUILD_TRACK must be dev, beta, or stable"
+    );
+    println!("cargo:rustc-env=NAC_BUILD_TRACK={build_track}");
+
+    println!("cargo:rerun-if-env-changed=NAC_SOURCE_REVISION");
+    let source_revision = std::env::var("NAC_SOURCE_REVISION")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| git(&["rev-parse", "HEAD"]))
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=NAC_SOURCE_REVISION={source_revision}");
+
+    println!("cargo:rerun-if-env-changed=NAC_BUILD_ID");
+    let build_id = std::env::var("NAC_BUILD_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("{build_track}-{source_revision}"));
+    println!("cargo:rustc-env=NAC_BUILD_ID={build_id}");
+
+    let revision = source_revision.get(..12).unwrap_or(&source_revision);
     println!("cargo:rustc-env=NAC_BUILD_REVISION={revision}");
 
     // Re-run this script when the revision moves, otherwise incremental
@@ -28,6 +52,21 @@ fn main() {
             }
         }
     }
+}
+
+fn assert_stable_version(version: &str) {
+    let components = version.split('.').collect::<Vec<_>>();
+    assert!(
+        components.len() == 3
+            && components.iter().all(|component| {
+                !component.is_empty()
+                    && component
+                        .chars()
+                        .all(|character| character.is_ascii_digit())
+                    && (component == &"0" || !component.starts_with('0'))
+            }),
+        "version.txt must contain one stable semantic version"
+    );
 }
 
 /// Tells Cargo to watch a path after Git resolves its worktree-aware location.

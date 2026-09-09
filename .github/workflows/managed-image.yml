@@ -12,7 +12,7 @@ on:
       - Cargo.lock
       - crates/**
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - .github/workflows/managed-image.yml
       - .dockerignore
@@ -103,6 +103,10 @@ jobs:
           load: true
           push: false
           tags: nac-managed-smoke:${{ needs.prepare.outputs.short_sha }}
+          build-args: |
+            NAC_BUILD_TRACK=dev
+            NAC_BUILD_ID=dev-${{ needs.prepare.outputs.sha }}
+            NAC_SOURCE_REVISION=${{ needs.prepare.outputs.sha }}
           provenance: false
           sbom: false
       - name: Run credential-independent image smoke

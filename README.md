@@ -46,12 +46,6 @@ and navigate to the interface in your browser (default: [http://127.0.0.1:3210](
 nac-web upgrade
 ```
 
-```sh
-# Upgrade to the latest nightly release candidate
-nac-web upgrade --pre-release
-```
-
-
 ### Model Provider Authentication
 
 Pick one before you start a session, or configure it later from the dashboard.
@@ -79,10 +73,12 @@ curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/uninstall
 ## Documentation
 
 - [Usage](docs/usage/README.md)
+  - [Release lifecycle](docs/usage/releases.md)
   - [AGENTS.md Files](docs/usage/agents-md.md)
   - [Skills](docs/usage/skills.md)
   - [Sandbox](docs/usage/sandbox.md)
 - [Configuration](docs/configuration/README.md)
+  - [Data stores](docs/configuration/data-stores.md)
   - [Example config](docs/configuration/example.md)
   - [Model configuration](docs/configuration/model.md)
   - [Catalog and cost](docs/configuration/catalog.md)

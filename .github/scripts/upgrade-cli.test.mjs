@@ -7,7 +7,9 @@ import { join } from "node:path";
 import test from "node:test";
 
 const SHA = "b".repeat(40);
-const TAG = "v0.1.2-rc.10";
+const PRODUCT_VERSION = (await readFile("version.txt", "utf8")).trim();
+const [PRODUCT_MAJOR, PRODUCT_MINOR, PRODUCT_PATCH] = PRODUCT_VERSION.split(".").map(Number);
+const TAG = `v${PRODUCT_MAJOR}.${PRODUCT_MINOR}.${PRODUCT_PATCH + 1}-rc.10`;
 const ASSET =
   process.platform === "darwin" && process.arch === "arm64"
     ? "nac-aarch64-apple-darwin.tar.gz"
@@ -51,7 +53,7 @@ async function fixture() {
     requests.push(path);
     if (path === "/repos/test/repo/releases?per_page=100&page=1") {
       const releases = [
-        { tag_name: "v0.1.1", draft: false, prerelease: false, assets: [] },
+        { tag_name: `v${PRODUCT_VERSION}`, draft: false, prerelease: false, assets: [] },
         ...(active
           ? [
               {
