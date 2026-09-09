@@ -527,6 +527,68 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
 });
 
+test("shows and persists the optional light model for every chat behavior", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const lightModel = {
+    model: "gpt-5.6-sol",
+    backend: "openai-responses" as const,
+    base_url: harness.provider.baseUrl,
+    api_key_env: "NAC_E2E_API_KEY",
+    reasoning_effort: "low" as const,
+  };
+  const projectId = await createProject(request, harness, { lightModel });
+  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+
+  for (const expected of [
+    {
+      behavior: "orchestrator",
+      label: "NAC orchestrator",
+      routingCopy: "Worker models",
+      route: "threads",
+    },
+    {
+      behavior: "direct",
+      label: "Direct coding agent",
+      routingCopy: "Optional light model",
+      route: "delegated",
+    },
+    {
+      behavior: "direct-with-orchestrator",
+      label: "Direct + NAC orchestration",
+      routingCopy: "Orchestrator models",
+      route: "delegated",
+    },
+  ] as const) {
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("New Chat");
+    await expect(dialog).toContainText("gpt-5.6-sol");
+    if (expected.behavior !== "orchestrator") {
+      await dialog.getByRole("radio").filter({ hasText: expected.label }).click();
+    }
+    await expect(dialog).toContainText(expected.routingCopy);
+    await expect(dialog.getByRole("button", { name: "Dual" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await dialog.getByRole("button", { name: "Create chat" }).click();
+    await expect(page).toHaveURL(new RegExp(`/session/[^/]+/${expected.route}$`));
+    const sessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+    expect(sessionId).toBeTruthy();
+    const config = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
+    expect(config.ok()).toBe(true);
+    expect((await config.json()) as { light_model?: unknown }).toMatchObject({
+      light_model: lightModel,
+    });
+
+    if (expected.behavior !== "direct-with-orchestrator") {
+      await page.getByRole("button", { name: "Create new session", exact: true }).click();
+    }
+  }
+});
+
 test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({
   harness,
   page,

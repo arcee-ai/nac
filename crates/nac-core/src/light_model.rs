@@ -8,11 +8,13 @@ use crate::model::{
     ModelConfigurationError, ReasoningEffort,
 };
 
-/// The optional light worker model of a session. `Some` on a session enables
-/// weight-classified dispatch: light dispatches run this model, heavy
-/// dispatches run the orchestrator's own model. The model remains a catalog
-/// id; backend and reasoning effort are typed before entering the domain
-/// model, and the credential is always a selector name, never a key value.
+/// The optional light model selection stored with a session. Orchestrator
+/// runtimes use it for weight-classified dispatch, and direct-with-orchestrator
+/// sessions pass it to the orchestrators they launch. Plain direct sessions
+/// retain it without a runtime consumer pending ALL-36. The model remains a
+/// catalog id; backend and reasoning effort are typed before entering the
+/// domain model, and the credential is always a selector name, never a key
+/// value.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct LightModelSettings {

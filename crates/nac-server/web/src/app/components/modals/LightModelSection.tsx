@@ -19,7 +19,12 @@ import {
   resolveCatalogModel,
 } from "@/app/lib/catalog";
 import { useModelCatalog, useReadyManagedProviderModels } from "@/app/services/queries";
-import type { LightModelSettings, ModelCatalog, ReasoningEffort } from "@/app/types/api";
+import type {
+  LightModelSettings,
+  ModelCatalog,
+  ReasoningEffort,
+  SessionBehavior,
+} from "@/app/types/api";
 
 export type LightMode = "single" | "dual";
 
@@ -89,10 +94,13 @@ function lightSettings(state: LightState): LightModelSettings | null {
 export function LightModelSection({
   initial,
   onChange,
+  behavior = "orchestrator",
 }: {
   /** Seeds the form; a value opens the section in dual mode. */
   initial?: LightModelSettings | null;
   onChange: (selection: LightSelection) => void;
+  /** Adjusts the promise without changing the stored optional field. */
+  behavior?: SessionBehavior;
 }) {
   const catalog = useModelCatalog();
   const liveByBackend = useReadyManagedProviderModels(catalog.data);
@@ -123,14 +131,30 @@ export function LightModelSection({
     effectiveLight.effort,
     LIGHT_EFFORT_OPTIONS,
   );
+  const copy =
+    behavior === "direct"
+      ? {
+          label: "Optional light model",
+          hint: "Saved with this chat, but plain direct sessions do not use it yet.",
+          modelHint:
+            "Preserved for future direct-session capabilities; it does not route current work.",
+        }
+      : behavior === "direct-with-orchestrator"
+        ? {
+            label: "Orchestrator models",
+            hint: "Dual passes a lighter model to NAC orchestrators launched from this chat.",
+            modelHint: "Runs dispatches that a launched NAC orchestrator classifies as light.",
+          }
+        : {
+            label: "Worker models",
+            hint: "Dual adds a lighter model for simple dispatches; the model above handles everything else.",
+            modelHint: "Runs dispatches the orchestrator classifies as light.",
+          };
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <FieldLabel
-          label="Worker models"
-          hint="Dual adds a lighter model for simple dispatches; the model above handles everything else."
-        />
+        <FieldLabel label={copy.label} hint={copy.hint} />
         <div className="flex items-center gap-2">
           {(["single", "dual"] as const).map((item) => (
             <Button
@@ -153,7 +177,7 @@ export function LightModelSection({
             label="Light model"
             required
             verticalOnMobile
-            hint="Runs dispatches the orchestrator classifies as light."
+            hint={copy.modelHint}
             control={
               <CatalogModelPicker
                 catalog={catalog.data}

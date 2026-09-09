@@ -472,7 +472,15 @@ export function ConfigurationsPanel({
       api_key_env: resolved.api_key_env,
       reasoning_effort: resolved.reasoning_effort,
       extra_headers: savedRecord?.extra_headers ?? null,
-      light_model: savedRecord ? (savedRecord.light_model ?? null) : undefined,
+      // Matching an existing session to a saved setup is presentation only:
+      // the session may have changed its light model independently. Emit the
+      // preset's light model only after the user deliberately chooses it.
+      light_model:
+        initial && picked === null
+          ? undefined
+          : savedRecord
+            ? (savedRecord.light_model ?? null)
+            : undefined,
       config_id: savedRecord?.config_id ?? null,
     };
   }, [
@@ -499,6 +507,7 @@ export function ConfigurationsPanel({
     savedBackend,
     savedBaseUrl,
     savedRecord,
+    picked,
   ]);
 
   useEffect(() => {

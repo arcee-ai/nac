@@ -275,6 +275,7 @@ function SettingsForm({
     mode: initialLight ? "dual" : "single",
     light: initialLight,
   });
+  const [lightSeed, setLightSeed] = useState(initialLight);
   const [advanced, setAdvanced] = useState(false);
 
   // A malformed stored light model loads as null with only a diagnostic; the
@@ -294,6 +295,13 @@ function SettingsForm({
     if (next.kind === "resolved") {
       setReasoning(next.reasoning_effort ?? "");
       setHeaders(headersToText(next.extra_headers ?? {}));
+      if (next.light_model !== undefined) {
+        setLightSeed(next.light_model);
+        setLight({
+          mode: next.light_model ? "dual" : "single",
+          light: next.light_model,
+        });
+      }
     }
   }, []);
 
@@ -366,6 +374,10 @@ function SettingsForm({
 
   const submit = async () => {
     if (busy || !selection) return;
+    if (light.mode === "dual" && !light.light) {
+      setError("Pick the light model before saving.");
+      return;
+    }
 
     interface SelectedModelConfig {
       backend: BackendKind;
@@ -376,7 +388,10 @@ function SettingsForm({
     let selected: SelectedModelConfig;
     try {
       if (selection.kind === "save") {
-        const record = await createModelConfig.mutateAsync(selection.request);
+        const record = await createModelConfig.mutateAsync({
+          ...selection.request,
+          light_model: light.mode === "dual" ? light.light : null,
+        });
         selected = {
           // SAFETY: the server echoes the BackendKind wire value it stored.
           backend: record.backend as BackendKind,
@@ -422,10 +437,8 @@ function SettingsForm({
     }
 
     if (light.mode === "dual") {
-      if (!light.light) {
-        setError("Pick the light model before saving.");
-        return;
-      }
+      // Guarded before a named configuration can be created above.
+      if (!light.light) return;
       const finalLight = inheritPrimaryCredential(
         light.light,
         selected.backend,
@@ -569,7 +582,12 @@ function SettingsForm({
           onChange={onConfigurationChange}
         >
           <div className="flex flex-col gap-2">
-            <LightModelSection initial={initialLight} onChange={setLight} />
+            <LightModelSection
+              key={JSON.stringify(lightSeed)}
+              initial={lightSeed}
+              behavior={openingSummary.behavior ?? "orchestrator"}
+              onChange={setLight}
+            />
             <Separator />
             <button
               type="button"

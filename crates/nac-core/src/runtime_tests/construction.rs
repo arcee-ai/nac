@@ -77,6 +77,15 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     let store_path = temp_store_path("direct_primary");
     let root = store_path.parent().unwrap().to_path_buf();
     std::fs::create_dir_all(&root).unwrap();
+    let light_model = LightModelSettings {
+        model: "gpt-5-mini".to_string(),
+        backend: Some(BackendKind::OpenAiResponses),
+        base_url: Some("https://api.openai.com/v1".to_string()),
+        api_key_env: Some("OPENAI_API_KEY".to_string()),
+        reasoning_effort: Some(ReasoningEffort::Low),
+    };
+    let mut direct_model = test_openai_model_options();
+    direct_model.light_model = Some(light_model.clone());
 
     let created = build_run_config_for_project_with_behavior(
         RunOptions {
@@ -86,7 +95,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
-            model: test_openai_model_options(),
+            model: direct_model,
             orchestrator_compaction_threshold: Some(32_000),
             sandbox: SandboxOptions::default(),
             ssh: SshOptions::default(),
@@ -105,6 +114,10 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
         .map(|definition| definition.function.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(tool_names, crate::tools::DIRECT_TOOL_NAMES);
+    assert!(
+        !created.agent.has_light_client_for_test(),
+        "plain direct sessions retain the choice without installing a consumer"
+    );
     assert!(matches!(
         created.agent.messages.first(),
         Some(Message::System { content })
@@ -113,6 +126,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     ));
     let stored = sessions::load_session(&store_path, &session_id).unwrap();
     assert_eq!(stored.behavior, sessions::SessionBehavior::Direct);
+    assert_eq!(stored.light_model.as_ref(), Some(&light_model));
     drop(created);
 
     let resumed = build_resume_config_for_session(
@@ -138,7 +152,13 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
             .collect::<Vec<_>>(),
         crate::tools::DIRECT_TOOL_NAMES
     );
+    assert!(
+        !resumed.agent.has_light_client_for_test(),
+        "resuming a direct session must not invent ALL-36 semantics"
+    );
 
+    let mut delegating_model = test_openai_model_options();
+    delegating_model.light_model = Some(light_model);
     let delegating = build_run_config_for_project_with_behavior(
         RunOptions {
             workspace_cwd: root.clone(),
@@ -147,7 +167,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
-            model: test_openai_model_options(),
+            model: delegating_model,
             orchestrator_compaction_threshold: Some(32_000),
             sandbox: SandboxOptions::default(),
             ssh: SshOptions::default(),
@@ -167,6 +187,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
             .collect::<Vec<_>>(),
         crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES
     );
+    assert!(delegating.agent.has_light_client_for_test());
     assert!(matches!(
         delegating.agent.messages.first(),
         Some(Message::System { content })
