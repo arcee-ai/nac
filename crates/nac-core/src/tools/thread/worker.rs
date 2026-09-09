@@ -241,7 +241,15 @@ pub(super) async fn run_worker(
             "worker executable path was not configured; cannot spawn managed worker",
         )
     })?;
-    let native_credentials = ManagedWorkerNativeCredentials::from_process_environment()?;
+    // Command-environment providers are attached only for an explicitly
+    // configured Managed NAC host. Ordinary local workers retain their prior
+    // process semantics and do not participate in native credential delegation.
+    let delegates_native_credentials = runtime.command_environment.is_some();
+    let native_credentials = if delegates_native_credentials {
+        ManagedWorkerNativeCredentials::from_process_environment()?
+    } else {
+        ManagedWorkerNativeCredentials::default()
+    };
     let native_credential_redactions = native_credentials.exact_redactions();
     let mut command = Command::new(executable);
     command.arg("__worker");
@@ -296,10 +304,15 @@ pub(super) async fn run_worker(
     command.args(runtime.backend.worker_cli_args());
     command.kill_on_drop(true);
 
-    let credential_channel = prepare_worker_credential_channel(&mut command)?;
+    let credential_channel = delegates_native_credentials
+        .then(|| prepare_worker_credential_channel(&mut command))
+        .transpose()?;
     let (mut child, mut process_tree) = ProcessTreeGuard::spawn_supervised(&mut command)?;
     let mut control_stdin = child.stdin.take();
-    let credential_sender = credential_channel.into_sender()?;
+    let credential_sender = match credential_channel {
+        Some(channel) => Some(channel.into_sender()?),
+        None => None,
+    };
 
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
     let stderr = child
@@ -417,7 +430,12 @@ pub(super) async fn run_worker(
 
     let deadline = sleep(Duration::from_secs(invocation.timeout_secs));
     tokio::pin!(deadline);
-    let credential_delivery = credential_sender.send_after_ready(&native_credentials);
+    let credential_delivery = async {
+        match credential_sender {
+            Some(sender) => sender.send_after_ready(&native_credentials).await,
+            None => Ok(()),
+        }
+    };
     tokio::pin!(credential_delivery);
     let mut outcome = tokio::select! {
         biased;
@@ -804,6 +822,9 @@ mod tests {
         runtime.workspace_cwd = root.clone();
         runtime.config_cwd = root.clone();
         runtime.worker_executable = Some(executable);
+        runtime.command_environment = Some(Arc::new(
+            nac_managed::ManagedCommandEnvironmentProvider::new(None, None, None),
+        ));
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         runtime.event_sink = crate::events::EventSink::channel(event_tx);
         let no_sources = Vec::<String>::new();
@@ -892,6 +913,95 @@ mod tests {
             .contains(credential));
         assert!(!String::from_utf8_lossy(&output.stdout).contains(credential));
         assert!(!String::from_utf8_lossy(&output.stderr).contains(credential));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unmanaged_worker_process_semantics_helper() {
+        let Some(root) = std::env::var_os("NAC_UNMANAGED_WORKER_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        std::fs::create_dir_all(&root).unwrap();
+        #[cfg(target_os = "linux")]
+        {
+            // SAFETY: PR_GET_NO_NEW_PRIVS takes integer zero placeholders only.
+            let no_new_privs = unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) };
+            assert!(no_new_privs >= 0);
+            std::fs::write(root.join("parent-nnp"), no_new_privs.to_string()).unwrap();
+        }
+        let executable = root.join("worker.sh");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s' \"${{EXA_API_KEY-unset}}\" > '{}'\n\
+             printf '%s\\n' \"$@\" > '{}'\n\
+             if [ -r /proc/self/status ]; then awk '$1 == \"NoNewPrivs:\" {{ print $2 }}' /proc/self/status > '{}'; fi\n",
+            root.join("inherited-exa").display(),
+            root.join("argv").display(),
+            root.join("child-nnp").display()
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = test_runtime();
+        runtime.workspace_cwd = root.clone();
+        runtime.config_cwd = root.clone();
+        runtime.worker_executable = Some(executable);
+        let no_sources = Vec::<String>::new();
+        let no_skills = Vec::<String>::new();
+        let run = run_worker(
+            &runtime,
+            &ModelClient::new_for_test(),
+            WorkerInvocation {
+                session_id: "session",
+                thread_name: "worker",
+                dispatch_id: "dispatch",
+                action: "worker",
+                source_threads: &no_sources,
+                scheduled_skills: &no_skills,
+                timeout_secs: 30,
+            },
+            ThreadCancellation::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(run.exit_code, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unmanaged_worker_does_not_delegate_or_change_process_controls() {
+        let root =
+            std::env::temp_dir().join(format!("nac_unmanaged_worker_{}", uuid::Uuid::new_v4()));
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tools::thread::worker::tests::unmanaged_worker_process_semantics_helper",
+                "--nocapture",
+            ])
+            .env("NAC_UNMANAGED_WORKER_ROOT", &root)
+            .env("EXA_API_KEY", NATIVE_CREDENTIAL_CANARY)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "unmanaged worker helper failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("inherited-exa")).unwrap(),
+            "unset"
+        );
+        let argv = std::fs::read_to_string(root.join("argv")).unwrap();
+        assert!(!argv.contains("native-credential-fd"));
+        assert!(!argv.contains(NATIVE_CREDENTIAL_CANARY));
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            std::fs::read_to_string(root.join("parent-nnp")).unwrap(),
+            std::fs::read_to_string(root.join("child-nnp"))
+                .unwrap()
+                .trim()
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

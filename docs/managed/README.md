@@ -31,6 +31,11 @@ These controls do not protect against kernel compromise or a fully compromised
 NAC process; separate UIDs or an external credential broker are required for a
 stronger boundary.
 
+macOS still uses the close-on-exec socket and post-MCP readiness ordering, but
+does not have the Linux `prctl`/procfs boundary described above. Do not treat a
+same-user macOS MCP process as mutually isolated from NAC; use separate
+privileges or an external credential broker when that guarantee is required.
+
 Platform owns the logical-host controller, gateway/SSO, stable URL, volumes,
 runtime confinement, egress, host-scoped model credential, and lifecycle.
 NAC owns Projects and sessions, GitHub user authorization, repository
