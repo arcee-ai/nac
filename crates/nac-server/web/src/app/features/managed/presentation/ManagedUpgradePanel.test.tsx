@@ -183,6 +183,57 @@ describe("ManagedUpgradePanel", () => {
     );
   });
 
+  it("retires an uncertain intent only after rediscovering its durable operation", async () => {
+    const randomUUID = vi
+      .fn()
+      .mockReturnValueOnce("018f47a5-34a7-7c91-bf7e-8f1042757999")
+      .mockReturnValueOnce("018f47a5-34a7-7c91-bf7e-8f1042757888");
+    vi.stubGlobal("crypto", { randomUUID });
+    const discoveredOperation = { ...operation("preparing"), target_release: latest };
+    fakes.snapshot
+      .mockResolvedValueOnce(snapshot())
+      .mockResolvedValueOnce(snapshot(discoveredOperation));
+    fakes.start
+      .mockResolvedValueOnce({ accepted_but_invalid: true })
+      .mockResolvedValueOnce(operation("preparing"));
+    mount();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Upgrade to latest beta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start upgrade" }));
+    await waitFor(() => expect(fakes.snapshot).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Upgrade Managed NAC?" })).toBeNull(),
+    );
+    expect(screen.getByText("Preparing this host")).toBeTruthy();
+
+    const nextLatest = {
+      ...latest,
+      release_id: "0-2-0-beta-3",
+      source_revision: "d".repeat(40),
+      build_id: "build-next",
+      product_version: "0.2.0-beta.3",
+    };
+    if (!client) throw new Error("query client was not created");
+    act(() => {
+      client?.setQueryData<ManagedUpgradeSnapshot>(managedQueryKeys.upgrade, {
+        preview: {
+          current: latest,
+          latest_beta: nextLatest,
+          upgrade_available: true,
+          distance: { accepted_releases: 1 },
+        },
+        operation: null,
+      });
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Upgrade to latest beta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start upgrade" }));
+
+    await waitFor(() => expect(fakes.start).toHaveBeenCalledTimes(2));
+    expect(fakes.start.mock.calls[0]?.[0]).toContain("018f47a5-34a7-7c91-bf7e-8f1042757999");
+    expect(fakes.start.mock.calls[1]?.[0]).toContain("018f47a5-34a7-7c91-bf7e-8f1042757888");
+    expect(fakes.start.mock.calls[1]?.[0]).not.toBe(fakes.start.mock.calls[0]?.[0]);
+  });
+
   it("directs expired sessions back to the portal without offering a blind retry", async () => {
     fakes.snapshot.mockRejectedValue({ status: 401 });
     mount();

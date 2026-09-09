@@ -4,7 +4,10 @@ import { useManagedUpgradeSnapshot, useStartManagedUpgrade } from "@/app/feature
 import {
   managedUpgradeAuthorityChanged,
   managedUpgradeRecovery,
+  sameManagedRelease,
   type ManagedUpgradeBlocker,
+  type ManagedUpgradeOperation,
+  type ManagedUpgradeReleaseIdentity,
 } from "@/app/features/managed/upgrade";
 import { api } from "@/app/services/api";
 
@@ -50,6 +53,22 @@ async function settleBlocker(blocker: ManagedUpgradeBlocker): Promise<void> {
       await api.cancelManagedClone(required(target.clone_operation_id));
       return;
   }
+}
+
+function rediscoveredAcceptedStart(
+  prior: ManagedUpgradeOperation | null,
+  current: ManagedUpgradeOperation | null | undefined,
+  expectedTarget: ManagedUpgradeReleaseIdentity,
+): boolean {
+  if (!current) return false;
+  const currentTarget = current.target_release ?? current.desired_release;
+  if (!currentTarget || !sameManagedRelease(currentTarget, expectedTarget)) return false;
+  return (
+    !prior ||
+    current.operation_id !== prior.operation_id ||
+    current.state !== prior.state ||
+    current.updated_at !== prior.updated_at
+  );
 }
 
 /**
@@ -99,6 +118,8 @@ export function useManagedUpgrade() {
   const confirmStart = useCallback(async () => {
     if (startMutation.isPending) return;
     const key = retryKey.current ?? idempotencyKey();
+    const priorOperation = snapshot.data?.operation ?? null;
+    const expectedTarget = snapshot.data?.preview.latest_beta;
     retryKey.current = key;
     setStartError("");
     try {
@@ -111,7 +132,17 @@ export function useManagedUpgrade() {
         retryKey.current = null;
         setConfirmationOpen(false);
       }
-      await snapshot.refetch();
+      const refreshed = await snapshot.refetch();
+      if (
+        !managedUpgradeAuthorityChanged(error) &&
+        !refreshed.error &&
+        expectedTarget &&
+        rediscoveredAcceptedStart(priorOperation, refreshed.data?.operation, expectedTarget)
+      ) {
+        retryKey.current = null;
+        setStartError("");
+        setConfirmationOpen(false);
+      }
     }
   }, [snapshot, startMutation]);
 
