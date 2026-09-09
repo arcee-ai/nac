@@ -871,6 +871,12 @@ impl SessionManager {
         application::session_runs::SessionRunApplication::new(self)
     }
 
+    pub(crate) fn session_terminals(
+        &self,
+    ) -> application::session_terminals::SessionTerminalApplication<'_> {
+        application::session_terminals::SessionTerminalApplication::new(self)
+    }
+
     pub(crate) fn session_lifecycle(
         &self,
     ) -> application::session_lifecycle::SessionLifecycleApplication<'_> {
@@ -1510,6 +1516,12 @@ impl SessionManager {
 
     pub async fn cancel_active_run(&self, session_id: &str) -> Result<()> {
         self.session_runs().cancel(session_id).await
+    }
+
+    pub async fn terminate_terminal(&self, session_id: &str, terminal_id: &str) -> Result<()> {
+        self.session_terminals()
+            .terminate(session_id, terminal_id)
+            .await
     }
 
     async fn cancel_active_run_unchecked(&self, session_id: &str) -> Result<()> {

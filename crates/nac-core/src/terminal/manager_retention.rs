@@ -48,11 +48,73 @@ impl TerminalManager {
         }
         if cleanup_errors.is_empty() {
             self.completed_sessions.lock().await.clear();
+            self.completed_remote_cleanups.lock().await.clear();
             self.output_registry.clear();
             Ok(())
         } else {
             Err(anyhow!(cleanup_errors.join("; ")))
         }
+    }
+
+    /// Terminates one exact session-owned terminal or recovered remote cleanup
+    /// obligation. Successful local termination archives the bounded output
+    /// tombstone used by `write_stdin`, so explicit process cleanup never
+    /// destroys already-captured output. The create gate makes concurrent
+    /// termination and retry one idempotent ownership transaction.
+    pub async fn terminate(&self, name: &str) -> Result<()> {
+        let _create = self.create_gate.lock().await;
+        if self
+            .completed_sessions
+            .lock()
+            .await
+            .iter()
+            .any(|(session_name, _)| session_name == name)
+            || self
+                .completed_remote_cleanups
+                .lock()
+                .await
+                .iter()
+                .any(|cleanup_name| cleanup_name == name)
+        {
+            return Ok(());
+        }
+
+        if let Some(mut session) = self
+            .kill_owned_session(name, false)
+            .await
+            .with_context(|| format!("terminal session '{name}' cleanup incomplete"))?
+        {
+            self.remember_completed(&mut session).await;
+            return Ok(());
+        }
+
+        let has_remote_cleanup = self
+            .pending_remote_cleanups
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(name);
+        if has_remote_cleanup {
+            self.retry_remote_cleanup(name)
+                .await
+                .with_context(|| format!("terminal session '{name}' cleanup incomplete"))?;
+            let mut completed = self.completed_remote_cleanups.lock().await;
+            completed.retain(|cleanup_name| cleanup_name != name);
+            completed.push_back(name.to_string());
+            while completed.len() > self.max_sessions {
+                completed.pop_front();
+            }
+            return Ok(());
+        }
+
+        // Generated local handles are never reused within one manager. Once a
+        // caller has an exact current-instance handle, absence therefore means
+        // it is already terminated even if its bounded output tombstone was
+        // later evicted. Foreign/pre-restart handles still fail closed below.
+        if name.starts_with(&format!("shell-{}-", self.instance_id)) {
+            return Ok(());
+        }
+
+        Err(self.missing_session_error(name))
     }
 
     pub async fn settle_run(&self) -> Result<()> {

@@ -50,6 +50,7 @@ pub struct TerminalManager {
     #[cfg(test)]
     one_shot_spawn_gate: Arc<Mutex<()>>,
     completed_sessions: Arc<Mutex<VecDeque<(String, CompletedTerminal)>>>,
+    completed_remote_cleanups: Arc<Mutex<VecDeque<String>>>,
     max_sessions: usize,
     isolate_process_groups: bool,
     output_registry: OutputRegistry,
@@ -131,6 +132,7 @@ impl TerminalManager {
             #[cfg(test)]
             one_shot_spawn_gate: Arc::new(Mutex::new(())),
             completed_sessions: Arc::new(Mutex::new(VecDeque::new())),
+            completed_remote_cleanups: Arc::new(Mutex::new(VecDeque::new())),
             max_sessions: 16,
             isolate_process_groups,
             output_registry: OutputRegistry::new(limits)?,
