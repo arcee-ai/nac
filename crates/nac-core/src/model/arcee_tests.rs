@@ -101,6 +101,7 @@ async fn device_code_request_uses_expected_contract_and_parses_complete_uri() {
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
         LEGACY_CLIENT_ID,
+        None,
     )
     .await
     .expect("device-code response should parse");
@@ -138,6 +139,7 @@ async fn device_code_request_supports_fallback_uri_and_default_timing() {
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
         LEGACY_CLIENT_ID,
+        None,
     )
     .await
     .expect("fallback verification URI should parse");
@@ -172,6 +174,7 @@ async fn device_code_request_reports_malformed_and_non_success_responses() {
             &no_redirect_client().unwrap(),
             &ArceeAuthService::for_test(&server.base_url),
             LEGACY_CLIENT_ID,
+            None,
         )
         .await
         .expect_err("invalid device-code response should fail");
@@ -186,6 +189,34 @@ async fn device_code_request_reports_malformed_and_non_success_responses() {
 }
 
 #[tokio::test]
+async fn managed_device_code_request_is_nested_and_redacts_the_repair_intent() {
+    let repair_intent = "managed-repair-intent-secret-canary-0123456789";
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "400 Bad Request",
+        json!({"error": repair_intent}).to_string(),
+    )]);
+
+    let error = request_device_code(
+        &no_redirect_client().unwrap(),
+        &ArceeAuthService::for_test(&server.base_url),
+        MANAGED_CLIENT_ID,
+        Some(repair_intent),
+    )
+    .await
+    .expect_err("managed device-code failure should be reported")
+    .to_string();
+    let requests = server.finish();
+
+    assert!(!error.contains(repair_intent));
+    assert!(error.contains("[REDACTED]"));
+    let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(body["client_id"], MANAGED_CLIENT_ID);
+    assert_eq!(body["managed_repair"]["repair_intent"], repair_intent);
+    assert!(body.get("managed_host_id").is_none());
+    assert!(body.get("bootstrap_id").is_none());
+}
+
+#[tokio::test]
 async fn device_code_same_origin_redirect_is_reported_without_replay() {
     let server = ScriptedServer::start_same_origin_redirect(
         "308 Permanent Redirect",
@@ -197,6 +228,7 @@ async fn device_code_same_origin_redirect_is_reported_without_replay() {
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
         LEGACY_CLIENT_ID,
+        None,
     )
     .await
     .expect_err("Arcee device-code redirects must not be followed")
@@ -251,6 +283,7 @@ async fn device_token_redirect_to_http_destination_does_not_replay_code() {
         &ArceeAuthService::for_test(&source.base_url),
         &device,
         LEGACY_CLIENT_ID,
+        None,
         || 0,
         |_| ready(()),
     )
@@ -315,6 +348,7 @@ async fn token_poll_handles_pending_and_slow_down_then_parses_success_without_wa
         &ArceeAuthService::for_test(&server.base_url),
         &device,
         LEGACY_CLIENT_ID,
+        None,
         move || now_clock.get(),
         move |duration| {
             recorded_sleeps.borrow_mut().push(duration);
@@ -390,6 +424,7 @@ async fn token_poll_reports_denied_expired_malformed_and_unstructured_errors() {
             &ArceeAuthService::for_test(&server.base_url),
             &device,
             LEGACY_CLIENT_ID,
+            None,
             || 0,
             |_| ready(()),
         )
@@ -407,14 +442,14 @@ async fn token_poll_reports_denied_expired_malformed_and_unstructured_errors() {
 }
 
 #[tokio::test]
-async fn token_poll_redacts_device_code_from_structured_error() {
-    let secret = "sensitive-device-code";
+async fn token_poll_redacts_managed_repair_intent_from_structured_error() {
+    let secret = "sensitive-managed-repair-intent";
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
         "400 Bad Request",
         format!(r#"{{"error":"{secret}"}}"#),
     )]);
     let device = DeviceCode {
-        device_code: secret.to_string(),
+        device_code: "device-error".to_string(),
         user_code: "ERROR".to_string(),
         verification_uri_complete: "https://accounts.arcee.ai/device".to_string(),
         interval_secs: 1,
@@ -426,6 +461,7 @@ async fn token_poll_redacts_device_code_from_structured_error() {
         &ArceeAuthService::for_test(&server.base_url),
         &device,
         LEGACY_CLIENT_ID,
+        Some(secret),
         || 0,
         |_| ready(()),
     )
@@ -436,7 +472,7 @@ async fn token_poll_redacts_device_code_from_structured_error() {
 
     assert!(
         !error.contains(secret),
-        "error leaked the echoed device credential: {error}"
+        "error leaked the echoed managed repair credential: {error}"
     );
     assert!(error.contains(crate::model::redact::REDACTED), "{error}");
 }
@@ -756,6 +792,7 @@ fn login_token_base_url_must_be_an_approved_arcee_origin() {
         base_url: "https://capture.attacker.example/v1".to_string(),
         organization_id: "org-1".to_string(),
         workspace_name: "acme".to_string(),
+        managed_binding: None,
     };
 
     let error =
@@ -872,6 +909,7 @@ fn stored_auth_from_token_success_computes_absolute_expiry() {
         base_url: "https://api.arcee.ai".to_string(),
         organization_id: "org-1".to_string(),
         workspace_name: "acme".to_string(),
+        managed_binding: None,
     };
 
     let auth =

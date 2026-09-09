@@ -3,7 +3,7 @@ use super::auth_store::{
     read_auth_string_from_path, with_arcee_auth_lock, write_auth_string_to_path, FileLock,
 };
 use super::*;
-use anyhow::Context;
+use anyhow::{bail, Context};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -347,6 +347,18 @@ struct TokenSuccess {
     base_url: String,
     organization_id: String,
     workspace_name: String,
+    #[serde(default)]
+    managed_binding: Option<ManagedArceeRepairBinding>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ManagedArceeRepairBinding {
+    pub(super) managed_host_id: String,
+    pub(super) bootstrap_id: String,
+    pub(super) host_incarnation_id: String,
+    pub(super) auth_issuer: String,
+    pub(super) inference_base_url: String,
 }
 
 impl std::fmt::Debug for TokenSuccess {
@@ -476,7 +488,7 @@ pub(super) struct ArceeDeviceLogin {
 
 enum ArceeLoginDestination {
     Local,
-    Managed(Box<super::arcee_bootstrap::ManagedArceeRepairContext>),
+    Managed(Box<super::arcee_repair::ManagedArceeRepairContext>),
 }
 
 impl ArceeDeviceLogin {
@@ -491,16 +503,30 @@ impl ArceeDeviceLogin {
     }
 
     pub(super) async fn complete(self) -> Result<ManagedAuthSnapshot> {
-        let success =
-            poll_device_code(&self.client, &self.service, &self.device, self.client_id).await?;
+        let repair_intent = match &self.destination {
+            ArceeLoginDestination::Local => None,
+            ArceeLoginDestination::Managed(context) => Some(context.repair_intent()),
+        };
+        let mut success = poll_device_code(
+            &self.client,
+            &self.service,
+            &self.device,
+            self.client_id,
+            repair_intent,
+        )
+        .await?;
+        let managed_binding = success.managed_binding.take();
         let auth = stored_auth_from_token_success(success, &self.auth_issuer, self.client_id)?;
         let auth = match self.destination {
             ArceeLoginDestination::Local => {
+                if managed_binding.is_some() {
+                    bail!("ordinary Arcee login returned an unexpected managed binding");
+                }
                 with_arcee_auth_lock(|| write_stored_auth(&auth))?;
                 auth
             }
             ArceeLoginDestination::Managed(context) => {
-                super::arcee_bootstrap::complete_managed_arcee_repair(&context, auth)?
+                super::arcee_repair::complete_managed_arcee_repair(&context, auth, managed_binding)?
             }
         };
         Ok(snapshot_from_stored(Some(auth), arcee_auth_file_path()?))
@@ -524,7 +550,7 @@ pub(super) async fn begin_managed_arcee_device_login(
     expected_base_url: &str,
     expected_auth_issuer: &str,
 ) -> Result<ArceeDeviceLogin> {
-    let context = super::arcee_bootstrap::prepare_managed_arcee_repair(
+    let context = super::arcee_repair::prepare_managed_arcee_repair(
         expected_managed_host_id,
         expected_base_url,
         expected_auth_issuer,
@@ -541,7 +567,7 @@ pub(super) async fn begin_managed_arcee_device_login(
 
 #[cfg(any(test, feature = "test-support"))]
 pub(super) async fn begin_managed_arcee_device_login_with_service(
-    context: super::arcee_bootstrap::ManagedArceeRepairContext,
+    context: super::arcee_repair::ManagedArceeRepairContext,
     service: ArceeAuthService,
 ) -> Result<ArceeDeviceLogin> {
     let auth_issuer = context.auth_issuer().to_string();
@@ -561,7 +587,11 @@ async fn begin_arcee_device_login_with_service(
     destination: ArceeLoginDestination,
 ) -> Result<ArceeDeviceLogin> {
     let client = no_redirect_client()?;
-    let device = request_device_code(&client, &service, client_id).await?;
+    let repair_intent = match &destination {
+        ArceeLoginDestination::Local => None,
+        ArceeLoginDestination::Managed(context) => Some(context.repair_intent()),
+    };
+    let device = request_device_code(&client, &service, client_id, repair_intent).await?;
     Ok(ArceeDeviceLogin {
         client,
         service,
@@ -1060,13 +1090,22 @@ async fn request_device_code(
     client: &Client,
     service: &ArceeAuthService,
     client_id: &str,
+    repair_intent: Option<&str>,
 ) -> Result<DeviceCode> {
     let url = service.device_code_url();
+    let request_body = match repair_intent {
+        Some(repair_intent) => json!({
+            "client_id": client_id,
+            "managed_repair": { "repair_intent": repair_intent }
+        }),
+        None => json!({ "client_id": client_id }),
+    };
+    let redaction_secrets = repair_intent.into_iter().collect::<Vec<_>>();
     let response = client
         .post(&url)
         .header("Content-Type", "application/json")
         .header("User-Agent", user_agent())
-        .json(&json!({ "client_id": client_id }))
+        .json(&request_body)
         .send()
         .await
         .context("failed to request Arcee device code")?;
@@ -1088,14 +1127,14 @@ async fn request_device_code(
             status,
             redirect_location.as_deref(),
             &body,
-            &[],
+            &redaction_secrets,
         ));
     }
     if !status.is_success() {
         return Err(anyhow!(
             "Arcee device-code request failed with HTTP {}: {}",
             status.as_u16(),
-            truncate(&redact_credentials(&body, &[]))
+            truncate(&redact_credentials(&body, &redaction_secrets))
         ));
     }
 
@@ -1133,8 +1172,18 @@ async fn poll_device_code(
     service: &ArceeAuthService,
     device: &DeviceCode,
     client_id: &str,
+    repair_intent: Option<&str>,
 ) -> Result<TokenSuccess> {
-    poll_device_code_with(client, service, device, client_id, now_ms, sleep).await
+    poll_device_code_with(
+        client,
+        service,
+        device,
+        client_id,
+        repair_intent,
+        now_ms,
+        sleep,
+    )
+    .await
 }
 
 async fn poll_device_code_with<Now, Sleep, SleepFuture>(
@@ -1142,6 +1191,7 @@ async fn poll_device_code_with<Now, Sleep, SleepFuture>(
     service: &ArceeAuthService,
     device: &DeviceCode,
     client_id: &str,
+    repair_intent: Option<&str>,
     mut now: Now,
     mut sleep_for: Sleep,
 ) -> Result<TokenSuccess>
@@ -1153,6 +1203,8 @@ where
     let url = service.device_token_url();
     let started = now();
     let mut interval_secs = device.interval_secs;
+    let mut redaction_secrets = vec![device.device_code.as_str(), device.user_code.as_str()];
+    redaction_secrets.extend(repair_intent);
 
     loop {
         let response = client
@@ -1182,7 +1234,7 @@ where
                 status,
                 redirect_location.as_deref(),
                 &body,
-                &[device.device_code.as_str()],
+                &redaction_secrets,
             ));
         }
 
@@ -1210,17 +1262,14 @@ where
                 ))
             }
             Some(other) => {
-                let message = redact_credentials(
-                    other,
-                    &[device.device_code.as_str(), device.user_code.as_str()],
-                );
+                let message = redact_credentials(other, &redaction_secrets);
                 return Err(anyhow!("Arcee device authorization failed: {message}"));
             }
             None => {
                 return Err(anyhow!(
                     "Arcee device authorization failed with HTTP {}: {}",
                     status.as_u16(),
-                    truncate(&redact_credentials(&body, &[device.device_code.as_str()]))
+                    truncate(&redact_credentials(&body, &redaction_secrets))
                 ))
             }
         }

@@ -20,13 +20,16 @@ Import and refresh share the existing Arcee cross-process lock. Import first
 checks a separate owner-only receipt. With a receipt, it does not open the
 bootstrap mount. Without one, it reads the input with the hardened mounted-file
 reader, compares under the lock, and never overwrites any existing canonical
-credential content. A fresh import atomically writes the credential before the
-receipt; embedded nonsecret provenance repairs that one crash window without a
-credential rewrite. Existing valid or invalid state is preserved and the
-generation is tombstoned, but a preservation receipt never authorizes managed
-use. The receipt survives logout and revocation; either condition leaves the
-managed profile unavailable rather than allowing an unrelated interactive
-credential to satisfy managed readiness.
+credential content. A fresh v2 import transaction writes the opaque repair
+capability to its own owner-only file, then the credential, then the receipt;
+each file replacement is atomic and the whole sequence is serialized by the
+credential lock. Embedded nonsecret provenance repairs the
+credential-to-receipt crash window without a credential rewrite. Existing
+valid or invalid state is preserved and the generation is tombstoned, but a
+preservation receipt never authorizes managed use. The receipt and repair
+capability survive logout and revocation; either condition leaves the managed
+profile unavailable rather than allowing an unrelated interactive credential
+to satisfy managed readiness.
 
 `nac-managed` owns only the provider-neutral credential-source enum. The server
 composition layer binds `mounted-api-key` to API-key providers and
@@ -49,9 +52,12 @@ ephemeral state.
   tombstoned, but are unavailable to managed catalog, create, and resume paths.
 - Interactive Arcee login remains compatible for ordinary `arcee-auth` use; it
   is not provenance-equivalent to an ArceeFM-minted `managed-nac` generation.
-- `managed_host_id` remains the stable ArceeFM-allocated UUID. No incarnation
-  identifier exists in this version; adding one requires an explicit versioned
-  field and receipt change rather than overloading host identity.
+  Managed repair additionally requires the v2 bootstrap's opaque capability
+  and ArceeFM's authoritative completion binding.
+- `managed_host_id` remains the stable ArceeFM-allocated UUID. NAC does not
+  invent or persist an incarnation assertion; repair requires ArceeFM to return
+  a nonblank authoritative incarnation together with the exact durable host and
+  bootstrap binding before credentials are written.
 - Grants authorize organization-entitled Arcee models generally. Default model
   selection stays an independent managed configuration field.
 - ArceeFM retains grant mint/revoke ownership. NAC gains no provisioning or

@@ -10,5 +10,6 @@
   "inference_base_url": "https://api.arcee.ai",
   "auth_issuer": "https://api.arcee.ai",
   "organization_id": "managed-image-smoke-org",
-  "workspace": "managed-image-smoke-workspace"
+  "workspace": "managed-image-smoke-workspace",
+  "repair_intent": "managed-image-repair-intent-canary-0123456789"
 }

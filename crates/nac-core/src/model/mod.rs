@@ -39,6 +39,7 @@ mod anthropic_stream;
 mod api_key_store;
 mod arcee;
 mod arcee_bootstrap;
+mod arcee_repair;
 pub(crate) mod auth_store;
 mod backend;
 mod catalog;
@@ -393,8 +394,9 @@ pub async fn begin_login(
 }
 
 /// Starts the managed-host Arcee repair flow after proving that the durable
-/// bootstrap receipt is usable and that no credential can be overwritten.
-/// Completion rechecks both conditions before it stores provider tokens.
+/// bootstrap receipt and opaque capability agree and no credential can be
+/// overwritten. Completion rechecks them and ArceeFM's authoritative binding
+/// before it stores provider tokens.
 pub async fn begin_managed_arcee_repair(
     expected_managed_host_id: &str,
     expected_base_url: &str,
@@ -421,7 +423,7 @@ pub async fn begin_managed_arcee_repair_with_auth_service_for_test(
     expected_auth_issuer: &str,
     auth_service_base_url: &str,
 ) -> Result<PendingDeviceLogin> {
-    let context = arcee_bootstrap::prepare_managed_arcee_repair(
+    let context = arcee_repair::prepare_managed_arcee_repair(
         expected_managed_host_id,
         expected_base_url,
         expected_auth_issuer,
