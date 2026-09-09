@@ -218,22 +218,26 @@ async fn mounted_key_light_model_is_route_bound_across_create_patch_and_resume()
     let root = temp_root("managed_mounted_light_model");
     let nac_home = root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, Some("independent-primary-key"));
-    write_managed_credential(&root.join("model-token"), "mounted-light-key\n");
+    unsafe {
+        std::env::set_var("ARCEE_API_KEY", "ambient-light-key-must-not-win");
+    }
+    let credential_path = root.join("model-token");
+    write_managed_credential(&credential_path, "mounted-light-key\n");
     let manager = test_managed_manager(&root);
     let store_path = root.join("store.db");
     let mut session_ids = Vec::new();
+    let light = LightModelSettings {
+        model: "moonshotai/kimi-k3".to_string(),
+        backend: Some(BackendKind::ArceeApi),
+        base_url: Some("https://api.arcee.ai/api/v1".to_string()),
+        api_key_env: None,
+        reasoning_effort: None,
+    };
 
     for behavior in [
         sessions::SessionBehavior::Orchestrator,
         sessions::SessionBehavior::DirectWithOrchestrator,
     ] {
-        let light = LightModelSettings {
-            model: "moonshotai/kimi-k3".to_string(),
-            backend: Some(BackendKind::ArceeApi),
-            base_url: Some("https://api.arcee.ai/api/v1".to_string()),
-            api_key_env: None,
-            reasoning_effort: None,
-        };
         let created = manager
             .create_session(CreateSessionRequest {
                 behavior,
@@ -256,7 +260,7 @@ async fn mounted_key_light_model_is_route_bound_across_create_patch_and_resume()
             .update_session_config(
                 &session_id,
                 UpdateConfigRequest {
-                    light_model: RequestField::Value(light),
+                    light_model: RequestField::Value(light.clone()),
                     ..UpdateConfigRequest::default()
                 },
             )
@@ -334,6 +338,89 @@ async fn mounted_key_light_model_is_route_bound_across_create_patch_and_resume()
         format!("{explicit_selector:#}").contains("SECOND_API_KEY"),
         "{explicit_selector:#}"
     );
+
+    let patch_candidate = restarted
+        .create_session(CreateSessionRequest {
+            behavior: sessions::SessionBehavior::Orchestrator,
+            model: RequestField::Value("gpt-5.2".to_string()),
+            backend: RequestField::Value("openai-responses".to_string()),
+            base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
+            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+            ..CreateSessionRequest::default()
+        })
+        .await
+        .expect("create the primary-only PATCH candidate");
+    let patch_candidate_id = patch_candidate.metadata.session_id.unwrap();
+
+    std::fs::remove_file(&credential_path).unwrap();
+
+    let create_error = restarted
+        .create_session(CreateSessionRequest {
+            behavior: sessions::SessionBehavior::Orchestrator,
+            model: RequestField::Value("gpt-5.2".to_string()),
+            backend: RequestField::Value("openai-responses".to_string()),
+            base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
+            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+            light_model: RequestField::Value(light.clone()),
+            ..CreateSessionRequest::default()
+        })
+        .await
+        .expect_err("ambient ARCEE_API_KEY must not replace the missing mounted key on create");
+    let create_error = format!("{create_error:#}");
+    assert!(
+        create_error.contains("trusted model credential file"),
+        "{create_error}"
+    );
+    assert!(!create_error.contains("ambient-light-key-must-not-win"));
+
+    let patch_error = restarted
+        .update_session_config(
+            &patch_candidate_id,
+            UpdateConfigRequest {
+                light_model: RequestField::Value(light),
+                ..UpdateConfigRequest::default()
+            },
+        )
+        .await
+        .expect_err("ambient ARCEE_API_KEY must not replace the missing mounted key on PATCH");
+    let patch_error = format!("{patch_error:#}");
+    assert!(
+        patch_error.contains("trusted model credential file"),
+        "{patch_error}"
+    );
+    assert!(!patch_error.contains("ambient-light-key-must-not-win"));
+
+    let resumed_id = &session_ids[0];
+    restarted
+        .inner
+        .active_sessions
+        .write()
+        .await
+        .remove(resumed_id);
+    let resume_error = match restarted.attach_session(resumed_id).await {
+        Ok(_) => panic!("ambient ARCEE_API_KEY must not replace the missing mounted key on resume"),
+        Err(error) => error,
+    };
+    let resume_error = format!("{resume_error:#}");
+    assert!(
+        resume_error.contains("trusted model credential file"),
+        "{resume_error}"
+    );
+    assert!(!resume_error.contains("ambient-light-key-must-not-win"));
+
+    let rehydrated = test_managed_manager(&root);
+    let rehydrate_error = match rehydrated.attach_session(resumed_id).await {
+        Ok(_) => {
+            panic!("ambient ARCEE_API_KEY must not replace the missing mounted key after restart")
+        }
+        Err(error) => error,
+    };
+    let rehydrate_error = format!("{rehydrate_error:#}");
+    assert!(
+        rehydrate_error.contains("trusted model credential file"),
+        "{rehydrate_error}"
+    );
+    assert!(!rehydrate_error.contains("ambient-light-key-must-not-win"));
 
     let _ = std::fs::remove_dir_all(root);
 }
