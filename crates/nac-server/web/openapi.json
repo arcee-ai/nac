@@ -10684,6 +10684,25 @@
           "codex_oauth"
         ]
       },
+      "ProviderConnection": {
+        "type": "object",
+        "description": "The server-owned account a unified picker can use for this provider.\n`api_key_env` is a selector only; the credential value never leaves the\nserver. Managed logins therefore carry no selector.",
+        "required": [
+          "base_url",
+          "api_key_env"
+        ],
+        "properties": {
+          "api_key_env": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "base_url": {
+            "type": "string"
+          }
+        }
+      },
       "ProviderListing": {
         "type": "object",
         "description": "One provider group in the `GET /models` listing.",
@@ -10692,6 +10711,7 @@
           "auth",
           "auth_status",
           "auth_hint",
+          "connection",
           "managed_base_url",
           "default_base_url",
           "default_limits",
@@ -10711,6 +10731,17 @@
           "auth_status": {
             "$ref": "#/components/schemas/AuthStatus",
             "description": "Computed per request from the process environment and the managed\ncredential files — never baked into the catalog."
+          },
+          "connection": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderConnection",
+                "description": "The currently selected server-owned account route, if usable. This is\nthe sole routing source for unified selectors; it contains no secret."
+              }
+            ]
           },
           "default_base_url": {
             "type": [

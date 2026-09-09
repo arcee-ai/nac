@@ -12,7 +12,7 @@ import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { type CatalogPick, defaultCatalogPick, resolveCatalogModel } from "@/app/lib/catalog";
 import { providerLabel } from "@/app/lib/providers";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
-import { useModelCatalog, useReadyManagedProviderModels } from "@/app/services/queries";
+import { useModelCatalog, useReadyProviderModels } from "@/app/services/queries";
 import type { ReasoningEffort } from "@/app/types/api";
 
 const PRIMARY_EFFORT_OPTIONS: SelectItem[] = [
@@ -39,7 +39,7 @@ export function PrimaryModelSection({
 }) {
   const catalog = useModelCatalog();
   const managedModel = useManagedModelProfile();
-  const liveByBackend = useReadyManagedProviderModels(catalog.data);
+  const liveByBackend = useReadyProviderModels(catalog.data);
   const [chosen, setChosen] = useState<PrimaryChoice | null>(null);
 
   const initialChoice = useMemo<PrimaryChoice | null>(
@@ -92,12 +92,12 @@ export function PrimaryModelSection({
       base_url: effective.pick.baseUrl,
       // Provider accounts and conventional environment credentials are
       // resolved server-side; the browser never receives credential values.
-      api_key_env: null,
+      api_key_env: provider?.connection?.api_key_env ?? null,
       reasoning_effort: effective.effort || null,
       extra_headers: null,
       light_model: undefined,
     };
-  }, [effective, initial, preservesInitialRoute, providerReady]);
+  }, [effective, initial, preservesInitialRoute, provider, providerReady]);
 
   useEffect(() => onChange(selection), [onChange, selection]);
 

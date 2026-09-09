@@ -18,7 +18,7 @@ import {
   type CatalogPick,
   resolveCatalogModel,
 } from "@/app/lib/catalog";
-import { useModelCatalog, useReadyManagedProviderModels } from "@/app/services/queries";
+import { useModelCatalog, useReadyProviderModels } from "@/app/services/queries";
 import type {
   LightModelSettings,
   ModelCatalog,
@@ -103,7 +103,7 @@ export function LightModelSection({
   behavior?: SessionBehavior;
 }) {
   const catalog = useModelCatalog();
-  const liveByBackend = useReadyManagedProviderModels(catalog.data);
+  const liveByBackend = useReadyProviderModels(catalog.data);
   const [mode, setMode] = useState<LightMode>(initial ? "dual" : "single");
   const [light, setLight] = useState<LightState>(() => lightStateFrom(initial, catalog.data));
 

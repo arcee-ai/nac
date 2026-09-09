@@ -577,10 +577,12 @@ export interface components {
       updated_at: string;
     };
     ProviderAuth: "api_key_env" | "managed_arcee" | "codex_oauth";
+    ProviderConnection: { api_key_env: string | null; base_url: string };
     ProviderListing: {
       auth: components["schemas"]["ProviderAuth"];
       auth_hint: string | null;
       auth_status: components["schemas"]["AuthStatus"];
+      connection: null | components["schemas"]["ProviderConnection"];
       default_base_url: string | null;
       default_limits: components["schemas"]["DefaultLimits"];
       id: components["schemas"]["BackendKind"];

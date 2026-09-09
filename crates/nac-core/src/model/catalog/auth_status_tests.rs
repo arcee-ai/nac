@@ -74,6 +74,10 @@ fn api_key_providers_read_ready_via_their_conventional_env_var() {
     let deepseek = provider(&listing, BackendKind::DeepSeekChat);
     assert_eq!(deepseek.auth_status, AuthStatus::Ready);
     assert_eq!(deepseek.auth_hint, None);
+    assert_eq!(
+        deepseek.connection.as_ref().unwrap().api_key_env.as_deref(),
+        Some("DEEPSEEK_API_KEY")
+    );
 
     // A provider whose conventional var is unset stays no_credential and
     // hints its conventional name.
@@ -100,6 +104,7 @@ fn api_key_providers_without_credentials_hint_the_conventional_var() {
             Some(conventional),
             "{id}"
         );
+        assert_eq!(listing_provider.connection, None, "{id}");
     }
 
     // Managed providers hint their login commands instead.
@@ -150,15 +155,27 @@ fn managed_providers_read_ready_only_with_a_parseable_stored_credential() {
     assert_eq!(arcee.auth_status, AuthStatus::Ready);
     assert_eq!(arcee.auth_hint, None);
     assert_eq!(
+        arcee.connection,
+        Some(ProviderConnection {
+            base_url: "https://api.arcee.ai/api/v1".to_string(),
+            api_key_env: None,
+        })
+    );
+    assert_eq!(
         provider(&listing, BackendKind::ChatGptCodexResponses).auth_status,
         AuthStatus::NoCredential
     );
 
     write_credential(env.path(), "auth.json", stored_codex_auth());
     let listing = api_listing();
+    let codex = provider(&listing, BackendKind::ChatGptCodexResponses);
+    assert_eq!(codex.auth_status, AuthStatus::Ready);
     assert_eq!(
-        provider(&listing, BackendKind::ChatGptCodexResponses).auth_status,
-        AuthStatus::Ready
+        codex.connection,
+        Some(ProviderConnection {
+            base_url: "https://chatgpt.com/backend-api".to_string(),
+            api_key_env: None,
+        })
     );
 
     // A corrupt credential file reads as no credential (the hint points at

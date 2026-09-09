@@ -39,7 +39,7 @@ import {
   useModelCatalog,
   useModelConfigs,
   useProviderModels,
-  useReadyManagedProviderModels,
+  useReadyProviderModels,
   useResolvedModelConfig,
 } from "@/app/services/queries";
 import type {
@@ -59,6 +59,12 @@ export type LaunchModelSelection =
       api_key_env: string | null;
       reasoning_effort: string | null;
       extra_headers: Record<string, string> | null;
+      /**
+       * An explicitly selected saved preset owns its compaction policy. An
+       * omitted value preserves the project/session inheritance already
+       * resolved by the server.
+       */
+      orchestrator_compaction_threshold?: number | null;
       /**
        * Light model for the launch form to seed from. A saved setup is
        * authoritative: its light model, or `null` for an explicitly
@@ -132,7 +138,7 @@ export function ConfigurationsPanel({
   const managedModel = useManagedModelProfile();
   const { data: saved, isPending: savedInitializing } = useModelConfigs();
   const catalog = useModelCatalog();
-  const liveByBackend = useReadyManagedProviderModels(catalog.data);
+  const liveByBackend = useReadyProviderModels(catalog.data);
   const deleteConfig = useDeleteModelConfig();
   const configurations = useMemo(() => saved?.configurations ?? [], [saved]);
 
@@ -391,6 +397,7 @@ export function ConfigurationsPanel({
         api_key_env: initial.api_key_env,
         reasoning_effort: initial.reasoning_effort,
         extra_headers: initial.extra_headers,
+        orchestrator_compaction_threshold: undefined,
         light_model: undefined,
       };
     }
@@ -407,7 +414,7 @@ export function ConfigurationsPanel({
           backend: catalogPick.backend,
           model: catalogPick.model,
           base_url: catalogPick.baseUrl,
-          api_key_env: needsKey ? (catalogProvider?.auth_hint ?? null) : null,
+          api_key_env: needsKey ? (catalogProvider?.connection?.api_key_env ?? null) : null,
           reasoning_effort: null,
           extra_headers: null,
           light_model: undefined,
@@ -485,6 +492,12 @@ export function ConfigurationsPanel({
       api_key_env: resolved.api_key_env,
       reasoning_effort: resolved.reasoning_effort,
       extra_headers: savedRecord?.extra_headers ?? null,
+      orchestrator_compaction_threshold:
+        initial && picked === null
+          ? undefined
+          : savedRecord
+            ? (savedRecord.orchestrator_compaction_threshold ?? null)
+            : undefined,
       // Matching an existing session to a saved setup is presentation only:
       // the session may have changed its light model independently. Emit the
       // preset's light model only after the user deliberately chooses it.

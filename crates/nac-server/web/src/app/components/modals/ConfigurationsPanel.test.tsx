@@ -43,6 +43,10 @@ const catalog = {
       auth: "api_key_env",
       auth_status: "ready",
       auth_hint: null,
+      connection: {
+        base_url: "https://api.arcee.ai/api/v1",
+        api_key_env: "ARCEE_API_KEY",
+      },
       default_base_url: "https://api.arcee.ai/api/v1",
       managed_base_url: null,
       default_limits: { context_window: 128000, max_tokens: 4096, supported_efforts: [] },
@@ -289,6 +293,7 @@ it("preserves exact inherited advanced settings when duplicate presets share bas
         backend: "openai-responses" as const,
         api_key_env: "SAVED_API_KEY",
       },
+      orchestrator_compaction_threshold: index === 0 ? 111 : 222,
       created_at: "2026-09-08T00:00:00Z",
       updated_at: "2026-09-08T00:00:00Z",
     })),
@@ -330,6 +335,17 @@ it("preserves exact inherited advanced settings when duplicate presets share bas
           reasoning_effort: "high",
           extra_headers: { "X-Inherited": "exact" },
           light_model: undefined,
+          orchestrator_compaction_threshold: undefined,
+        }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create New" }));
+    fireEvent.click(await screen.findByText("Saved provider second"));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          config_id: "saved-config-second",
+          orchestrator_compaction_threshold: 222,
         }),
       ),
     );

@@ -213,6 +213,104 @@ async fn managed_host_supplies_default_model_and_mounted_credential() {
 }
 
 #[tokio::test]
+async fn mounted_key_light_model_is_route_bound_across_create_patch_and_resume() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_mounted_light_model");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_managed_credential(&root.join("model-token"), "mounted-light-key\n");
+    let manager = test_managed_manager(&root);
+    let store_path = root.join("store.db");
+    let mut session_ids = Vec::new();
+
+    for behavior in [
+        sessions::SessionBehavior::Orchestrator,
+        sessions::SessionBehavior::DirectWithOrchestrator,
+    ] {
+        let light = LightModelSettings {
+            model: "moonshotai/kimi-k3".to_string(),
+            backend: Some(BackendKind::ArceeApi),
+            base_url: Some("https://api.arcee.ai/api/v1".to_string()),
+            api_key_env: None,
+            reasoning_effort: None,
+        };
+        let created = manager
+            .create_session(CreateSessionRequest {
+                behavior,
+                light_model: RequestField::Value(light.clone()),
+                ..CreateSessionRequest::default()
+            })
+            .await
+            .expect("the exact managed light route reuses the mounted key");
+        let session_id = created.metadata.session_id.unwrap();
+        assert_eq!(
+            sessions::load_session(&store_path, &session_id)
+                .unwrap()
+                .light_model,
+            Some(light.clone())
+        );
+
+        manager
+            .update_session_config(
+                &session_id,
+                UpdateConfigRequest {
+                    light_model: RequestField::Value(light),
+                    ..UpdateConfigRequest::default()
+                },
+            )
+            .await
+            .expect("PATCH validates the exact managed light route with the mounted key");
+        manager
+            .inner
+            .active_sessions
+            .write()
+            .await
+            .remove(&session_id);
+        manager
+            .attach_session(&session_id)
+            .await
+            .expect("resume reconstructs the exact managed light route with the mounted key");
+        session_ids.push(session_id);
+    }
+
+    for session_id in &session_ids {
+        manager
+            .inner
+            .active_sessions
+            .write()
+            .await
+            .remove(session_id);
+    }
+    let restarted = test_managed_manager(&root);
+    for session_id in &session_ids {
+        restarted
+            .attach_session(session_id)
+            .await
+            .expect("a restarted manager reconstructs the managed dual-model route");
+    }
+
+    let mismatch = restarted
+        .create_session(CreateSessionRequest {
+            light_model: RequestField::Value(LightModelSettings {
+                model: "gpt-5-mini".to_string(),
+                backend: Some(BackendKind::OpenAiResponses),
+                base_url: Some("https://api.openai.com/v1".to_string()),
+                api_key_env: None,
+                reasoning_effort: None,
+            }),
+            ..CreateSessionRequest::default()
+        })
+        .await
+        .expect_err("a mounted Arcee key must not cross into an OpenAI light route");
+    assert!(
+        format!("{mismatch:#}").contains("OPENAI_API_KEY"),
+        "{mismatch:#}"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn mounted_key_discovers_every_entitled_model_only_at_its_configured_destination() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("mounted_model_discovery");

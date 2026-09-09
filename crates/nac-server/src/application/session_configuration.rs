@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Result};
 use nac_core::{
-    light_model::LightModelSettings,
+    light_model::{LightModelSettings, TrustedLightCredential},
     model::{validate_model_configuration, EffectiveModelSettings},
     runtime::NacConfig,
     sessions,
@@ -175,16 +175,6 @@ impl<'a> SessionConfigurationApplication<'a> {
             prospective.api_key_env.clone(),
             extra_headers.clone(),
         )?;
-        // Plain direct has no ALL-36 light-model consumer: preserve its
-        // normalized durable selection without reading that unused provider's
-        // credentials. Orchestrator-capable sessions still fail before the
-        // next launch when their runnable light model is unavailable.
-        if behavior != sessions::SessionBehavior::Direct {
-            if let Some(light) = prospective.light_model.as_ref() {
-                nac_core::light_model::validate(light, &extra_headers)
-                    .map_err(request_configuration_error_from)?;
-            }
-        }
         let mounted_override = self.manager.managed_model().filter(|profile| {
             profile.matches_settings_override(
                 backend,
@@ -192,6 +182,32 @@ impl<'a> SessionConfigurationApplication<'a> {
                 prospective.api_key_env.as_deref(),
             )
         });
+        // Plain direct has no ALL-36 light-model consumer: preserve its
+        // normalized durable selection without reading that unused provider's
+        // credentials. Orchestrator-capable sessions validate the same client
+        // they will launch. A mounted key is eligible only for the exact
+        // operator-bound backend and endpoint.
+        if behavior != sessions::SessionBehavior::Direct {
+            if let Some(light) = prospective.light_model.as_ref() {
+                let trusted = mounted_override
+                    .and_then(|profile| profile.trusted_api_key_file().map(|path| (profile, path)));
+                if let Some((profile, path)) = trusted {
+                    nac_core::light_model::validate_with_trusted_credential(
+                        light,
+                        &extra_headers,
+                        TrustedLightCredential {
+                            backend: profile.backend,
+                            base_url: &profile.endpoint,
+                            path: &path,
+                        },
+                    )
+                    .map_err(request_configuration_error_from)?;
+                } else {
+                    nac_core::light_model::validate(light, &extra_headers)
+                        .map_err(request_configuration_error_from)?;
+                }
+            }
+        }
         if let Some(profile) = mounted_override {
             let managed = self.manager.managed_host().ok_or_else(|| {
                 anyhow!("managed model profile is missing its host configuration")

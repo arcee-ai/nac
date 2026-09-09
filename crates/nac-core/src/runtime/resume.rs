@@ -279,7 +279,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         }
         snapshot.config_version = sessions::update_session_config(&store_path, &snapshot)?;
     }
-    let client = ModelClient::from_effective_settings(snapshot_settings)
+    let client = ModelClient::from_effective_settings(snapshot_settings.clone())
         .map_err(|error| {
             if error.downcast_ref::<ModelConfigurationError>().is_some() {
                 let message = format!(
@@ -297,10 +297,18 @@ pub(super) async fn build_resume_config_from_snapshot(
         // credential resolution and is absent from the resumed direct runtime.
         None
     } else {
+        let trusted = snapshot_settings
+            .trusted_api_key_file
+            .as_deref()
+            .map(|path| crate::light_model::TrustedLightCredential {
+                backend: snapshot_settings.backend,
+                base_url: &snapshot_settings.base_url,
+                path,
+            });
         snapshot
             .light_model
             .as_ref()
-            .map(|light| resolve_light_client(light, &snapshot.extra_headers))
+            .map(|light| resolve_light_client(light, &snapshot.extra_headers, trusted))
             .transpose()
             .map_err(|error| match error {
                 // The resolver classifies the failure at the source; add the

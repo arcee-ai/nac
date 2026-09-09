@@ -8,11 +8,7 @@ import { useManagedModelProfile } from "@/app/features/managed/controller/useMan
 import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
-import {
-  useModelCatalog,
-  useReadyManagedProviderModels,
-  useUpdateConfig,
-} from "@/app/services/queries";
+import { useModelCatalog, useReadyProviderModels, useUpdateConfig } from "@/app/services/queries";
 import type { BackendKind, ReasoningEffort, SessionMetadata } from "@/app/types/api";
 
 const COMPOSER_EFFORT_OPTIONS: SelectItem[] = [
@@ -41,7 +37,7 @@ export function ModelPicker({
   const toast = useToast();
   const catalog = useModelCatalog();
   const managedModel = useManagedModelProfile();
-  const liveByBackend = useReadyManagedProviderModels(catalog.data);
+  const liveByBackend = useReadyProviderModels(catalog.data);
   const updateConfig = useUpdateConfig();
   const currentModel = metadata?.model ?? label;
   const currentEffort = metadata?.reasoning_effort ?? "";
@@ -86,7 +82,7 @@ export function ModelPicker({
           base_url: pick.baseUrl,
           // Account credentials remain server-owned. A null selector asks the
           // selected backend to resolve its managed login or conventional env.
-          api_key_env: null,
+          api_key_env: provider?.connection?.api_key_env ?? null,
           reasoning_effort: compatibleEffort,
           // Provider-specific headers must never leak into another backend.
           extra_headers: null,
