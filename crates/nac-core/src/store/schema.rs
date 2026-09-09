@@ -904,7 +904,7 @@ fn create_terminal_remote_cleanups_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn create_managed_maintenance_tables(conn: &Connection) -> Result<()> {
+pub(super) fn create_managed_maintenance_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS managed_host_maintenance (
              singleton INTEGER PRIMARY KEY CHECK (singleton = 1),

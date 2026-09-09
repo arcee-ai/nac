@@ -108,12 +108,8 @@ fn cleanup(path: &Path) {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-#[test]
-fn schema_24_fixture_migrates_without_losing_existing_rows() {
-    let path = path("migration");
-    initialize(&path).unwrap();
-    insert_test_session(&path, "existing");
-    let conn = Connection::open(&path).unwrap();
+fn downgrade_to_schema_24_without_managed_control(path: &Path) {
+    let conn = Connection::open(path).unwrap();
     conn.execute_batch(
         "DROP TABLE terminal_remote_cleanups;
          DROP TABLE managed_control_attempts;
@@ -122,7 +118,14 @@ fn schema_24_fixture_migrates_without_losing_existing_rows() {
          PRAGMA user_version = 24;",
     )
     .unwrap();
-    drop(conn);
+}
+
+#[test]
+fn schema_24_fixture_migrates_without_losing_existing_rows() {
+    let path = path("migration");
+    initialize(&path).unwrap();
+    insert_test_session(&path, "existing");
+    downgrade_to_schema_24_without_managed_control(&path);
 
     initialize(&path).unwrap();
     assert!(crate::sessions::session_exists(&path, "existing").unwrap());
@@ -1187,6 +1190,158 @@ fn explicit_unbound_adoption_records_a_and_b_atomically_and_replays_after_restar
 }
 
 #[test]
+fn explicit_unbound_adoption_bootstraps_schema_24_and_preserves_data_across_restart() {
+    let path = path("unbound-schema-24");
+    initialize(&path).unwrap();
+    insert_test_session(&path, "retained-schema-24");
+    downgrade_to_schema_24_without_managed_control(&path);
+    let mut previous = binding("operation-schema-24-a", 'a');
+    previous.target.product_version = "1.0.0".to_string();
+    previous.target.schema_version = 24;
+    let mut next = binding("operation-schema-24-b", 'b');
+    next.target.product_version = "1.1.0".to_string();
+    let mut request = supersession(&previous, next.clone());
+    request.adopt_unbound_previous = true;
+
+    let first = preflight_managed_forward_start(
+        &path,
+        &next.target,
+        Some(("host-123", "incarnation-456")),
+        Some(&request),
+    )
+    .unwrap();
+    assert!(first.requires_accept);
+    let accepted = first.accepted_identity.unwrap();
+    assert_eq!(accepted, accepted_identity(&next));
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+            .unwrap(),
+        24
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM sessions WHERE session_id = 'retained-schema-24'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM managed_control_operations",
+            [],
+            |row| { row.get::<_, i64>(0) }
+        )
+        .unwrap(),
+        2
+    );
+    drop(conn);
+
+    initialize(&path).unwrap();
+    assert!(crate::sessions::session_exists(&path, "retained-schema-24").unwrap());
+    let replay = preflight_managed_forward_start(
+        &path,
+        &next.target,
+        Some(("host-123", "incarnation-456")),
+        Some(&request),
+    )
+    .unwrap();
+    assert!(replay.requires_accept);
+    assert_eq!(replay.accepted_identity.as_ref(), Some(&accepted));
+    assert!(accept_managed_forward_start(&path, &accepted).unwrap());
+    cleanup(&path);
+}
+
+#[test]
+fn schema_24_unbound_adoption_rejects_partial_control_schema_and_history() {
+    for case in ["partial-ledger", "operation-history", "older-schema"] {
+        let path = path(&format!("unbound-schema-24-{case}"));
+        initialize(&path).unwrap();
+        insert_test_session(&path, "retained-schema-24-conflict");
+        downgrade_to_schema_24_without_managed_control(&path);
+        let conn = Connection::open(&path).unwrap();
+        match case {
+            "partial-ledger" => conn
+                .execute_batch(
+                    "CREATE TABLE managed_host_maintenance (
+                         singleton INTEGER PRIMARY KEY,
+                         state TEXT NOT NULL,
+                         operation_id TEXT,
+                         target_json TEXT,
+                         prepared_at TEXT,
+                         version INTEGER NOT NULL
+                     );",
+                )
+                .unwrap(),
+            "operation-history" => {
+                conn.execute_batch(
+                    "CREATE TABLE managed_control_operations (
+                         operation_id TEXT PRIMARY KEY,
+                         binding_json TEXT NOT NULL,
+                         latest_outcome_json TEXT NOT NULL,
+                         created_at TEXT NOT NULL,
+                         updated_at TEXT NOT NULL,
+                         version INTEGER NOT NULL
+                     );
+                     INSERT INTO managed_control_operations VALUES
+                         ('retained-operation', '{}', '{}', 'created', 'updated', 0);",
+                )
+                .unwrap();
+            }
+            "older-schema" => conn.pragma_update(None, "user_version", 23).unwrap(),
+            _ => unreachable!(),
+        }
+        drop(conn);
+        let mut previous = binding("operation-schema-24-conflict-a", 'c');
+        previous.target.product_version = "2.0.0".to_string();
+        previous.target.schema_version = 24;
+        let mut next = binding("operation-schema-24-conflict-b", 'd');
+        next.target.product_version = "2.1.0".to_string();
+        let mut request = supersession(&previous, next.clone());
+        request.adopt_unbound_previous = true;
+        assert!(matches!(
+            preflight_managed_forward_start(
+                &path,
+                &next.target,
+                Some(("host-123", "incarnation-456")),
+                Some(&request),
+            ),
+            Err(ManagedMaintenanceError::MaintenanceConflict)
+        ));
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(
+            conn.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+                .unwrap(),
+            if case == "older-schema" { 23 } else { 24 },
+            "{case}"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM sessions WHERE session_id = 'retained-schema-24-conflict'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1,
+            "{case}"
+        );
+        let created_operations: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master
+                 WHERE type = 'table' AND name = 'managed_control_operations')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(created_operations, case == "operation-history", "{case}");
+        drop(conn);
+        cleanup(&path);
+    }
+}
+
+#[test]
 fn unbound_adoption_rejects_implicit_downgrade_wrong_host_and_any_operation_history() {
     for case in [
         "implicit",
@@ -1344,8 +1499,32 @@ fn startup_supersession_never_recreates_a_store_that_vanished_before_write_open(
             &request,
             schema_version(),
             Some(("host-123", "incarnation-456")),
+            false,
         ),
         Err(ManagedMaintenanceError::Store(_))
+    ));
+    assert_eq!(snapshot_sqlite_files(&path), before);
+    cleanup(&path);
+}
+
+#[test]
+fn startup_expectation_rejects_an_absent_store_without_creating_sqlite_files() {
+    let path = path("startup-expectation-missing-store");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let previous = binding("operation-absent-a", 'e');
+    let mut next = binding("operation-absent-b", 'f');
+    next.target.product_version = "0.3.0".to_string();
+    let mut request = supersession(&previous, next.clone());
+    request.adopt_unbound_previous = true;
+    let before = snapshot_sqlite_files(&path);
+    assert!(matches!(
+        preflight_managed_forward_start(
+            &path,
+            &next.target,
+            Some(("host-123", "incarnation-456")),
+            Some(&request),
+        ),
+        Err(ManagedMaintenanceError::MaintenanceConflict)
     ));
     assert_eq!(snapshot_sqlite_files(&path), before);
     cleanup(&path);
