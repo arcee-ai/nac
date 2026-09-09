@@ -27,10 +27,12 @@ Commit-compatible squash titles such as `fix(store): reject future schemas` or
 documented release override when history needs an explicit correction.
 
 Release Please requires a narrowly installed GitHub App with repository-only
-Contents and Pull requests write access. The repository variable
-`RELEASE_PLEASE_APP_ID` and secret `RELEASE_PLEASE_APP_PRIVATE_KEY` provide its
-identity. Public NAC must not receive a personal access token, AWS credential,
-or access to the private beta publisher.
+Contents, Pull requests, and Issues write access. Issues write access lets
+Release Please maintain its `autorelease: pending` lifecycle label. The
+repository variable `RELEASE_PLEASE_APP_ID` and secret
+`RELEASE_PLEASE_APP_PRIVATE_KEY` provide its identity. Public NAC must not
+receive a personal access token, AWS credential, or access to the private beta
+publisher.
 
 The first rollout is an explicit transition between two distinct workflow
 paths. Follow this order:
@@ -40,9 +42,11 @@ paths. Follow this order:
    branch. Do not install or enable Release Please first.
 2. From a trusted checkout of that `dev` commit, run
    `.github/scripts/stable-release-rollout.sh --apply arcee-ai/nac` with an
-   administrator-authenticated `gh`. The script verifies the new workflow on
-   `dev` before it disables the legacy default-branch `release.yml`, then reads
-   the legacy workflow state back and requires `disabled_manually`.
+   administrator-authenticated `gh`. The script verifies the new workflow file
+   on `dev`, resolves its distinct Actions registration, and requires that
+   registration to be `active` before it disables the legacy default-branch
+   `release.yml`. It then reads the legacy workflow state back and requires
+   `disabled_manually`.
 3. Only after the script succeeds, install/configure the Release Please App and
    allow it to prepare the first stable PR.
 

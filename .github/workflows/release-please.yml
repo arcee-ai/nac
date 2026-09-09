@@ -16,7 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Human/platform prerequisite: install the narrowly scoped GitHub App on
-      # this repository with Contents:write and Pull requests:write, expose its
+      # this repository with Contents:write, Pull requests:write, and
+      # Issues:write, expose its
       # app id as this repository variable, and store its private key as this
       # repository secret. The App token ensures its PR and release events run
       # normal CI; no PAT or AWS credential belongs in public NAC.
@@ -28,6 +29,9 @@ jobs:
           private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: nac
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
 
       - name: Prepare or create the approved stable release
         uses: googleapis/release-please-action@v4
@@ -36,4 +40,3 @@ jobs:
           target-branch: dev
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          skip-labeling: true

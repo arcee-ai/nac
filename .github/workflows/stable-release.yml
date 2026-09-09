@@ -187,6 +187,17 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: .github/scripts/package-lock.json
+
+      - name: Install pinned release-policy dependencies
+        working-directory: .github/scripts
+        run: npm ci
+
       - name: Run nac-core and nac-catalog-gen tests
         run: cargo test -p nac-core -p nac-catalog-gen --locked
 

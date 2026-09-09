@@ -23,6 +23,14 @@ stable_path=$(gh api \
   --jq .path)
 test "$stable_path" = ".github/workflows/stable-release.yml"
 
+stable_id=$(gh api "repos/$repository/actions/workflows/stable-release.yml" --jq .id)
+stable_registered_path=$(gh api "repos/$repository/actions/workflows/$stable_id" --jq .path)
+stable_state=$(gh api "repos/$repository/actions/workflows/$stable_id" --jq .state)
+if [ "$stable_registered_path" != ".github/workflows/stable-release.yml" ] || [ "$stable_state" != "active" ]; then
+  echo "replacement .github/workflows/stable-release.yml is not registered and active (path=$stable_registered_path state=$stable_state)" >&2
+  exit 1
+fi
+
 legacy_id=$(gh api "repos/$repository/actions/workflows/release.yml" --jq .id)
 legacy_state=$(gh api "repos/$repository/actions/workflows/$legacy_id" --jq .state)
 
@@ -36,4 +44,4 @@ if [ "$legacy_state" != "disabled_manually" ]; then
   exit 1
 fi
 
-echo "stable-release.yml exists on dev and legacy release.yml is disabled"
+echo "stable-release.yml exists on dev, is registered and active, and legacy release.yml is disabled"

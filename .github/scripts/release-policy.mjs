@@ -11,18 +11,6 @@ export function parseVersion(value) {
   return match.slice(1).map(Number);
 }
 
-export function nextVersion(current, commits) {
-  const [major, minor, patch] = parseVersion(current);
-  const breaking = commits.some((commit) =>
-    /(^|\n)BREAKING[ -]CHANGE:/m.test(commit) || /^[a-z][a-z0-9-]*(\([^)]*\))?!:/i.test(commit),
-  );
-  const feature = commits.some((commit) => /^feat(?:\([^)]*\))?:/i.test(commit));
-  if (major === 0 && (breaking || feature)) return `${major}.${minor + 1}.0`;
-  if (breaking) return `${major + 1}.0.0`;
-  if (feature) return `${major}.${minor + 1}.0`;
-  return `${major}.${minor}.${patch + 1}`;
-}
-
 export function validateStable(tag, productVersion) {
   const expected = `v${productVersion.trim()}`;
   if (tag !== expected) throw new Error(`stable tag ${tag} does not match product version ${expected}`);

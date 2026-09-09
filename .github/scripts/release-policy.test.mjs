@@ -1,23 +1,54 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import {
-  nextVersion,
   parseVersion,
   validateDevAncestry,
   validateStable,
 } from "./release-policy.mjs";
 
-test("pre-1.0 release calculation matches the accepted conventional commit policy", () => {
-  assert.equal(nextVersion("0.1.4", ["fix(store): preserve rows"]), "0.1.5");
-  assert.equal(nextVersion("0.1.4", ["feat: add status"]), "0.2.0");
-  assert.equal(nextVersion("0.1.4", ["feat!: replace wire shape"]), "0.2.0");
-  assert.equal(nextVersion("0.1.4", ["fix: change\n\nBREAKING CHANGE: incompatible"]), "0.2.0");
-  assert.equal(nextVersion("1.2.3", ["feat!: replace wire shape"]), "2.0.0");
+const require = createRequire(import.meta.url);
+const { Manifest } = require("release-please");
+const { buildStrategy } = require("release-please/build/src/factory");
+const { parseConventionalCommits } = require("release-please/build/src/commit");
+const { Version } = require("release-please/build/src/version");
+
+test("pinned Release Please parses the checked-in config and calculates versions", async () => {
+  const github = {
+    repository: { owner: "arcee-ai", repo: "nac", defaultBranch: "dev" },
+    async getFileJson(file, branch) {
+      assert.equal(branch, "dev");
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    },
+  };
+  const manifest = await Manifest.fromManifest(github, "dev");
+  const config = manifest.repositoryConfig["."];
+  assert.equal(config.releaseType, "simple");
+  assert.equal(config.bumpMinorPreMajor, true);
+  assert.equal(manifest.releasedVersions["."].toString(), "0.1.4");
+  assert.deepEqual(manifest.labels, ["autorelease: pending"]);
+  assert.notEqual(manifest.skipLabeling, true);
+  const strategy = await buildStrategy({ github, path: ".", targetBranch: "dev", ...config });
+
+  const next = async (current, messages) => {
+    const commits = parseConventionalCommits(
+      messages.map((message, index) => ({ sha: String(index + 1), message })),
+    );
+    return (await strategy.versioningStrategy.bump(Version.parse(current), commits)).toString();
+  };
+  assert.equal(await next("0.1.4", ["fix(store): preserve rows"]), "0.1.5");
+  assert.equal(await next("0.1.4", ["feat: add status"]), "0.2.0");
+  assert.equal(await next("0.1.4", ["feat!: replace wire shape"]), "0.2.0");
+  assert.equal(
+    await next("0.1.4", ["fix: change\n\nBREAKING CHANGE: incompatible"]),
+    "0.2.0",
+  );
+  assert.equal(await next("1.2.3", ["feat!: replace wire shape"]), "2.0.0");
 });
 
 test("stable validation binds the canonical tag to root product identity", () => {
@@ -79,6 +110,10 @@ test("release please is explicitly a dev-targeted root simple release", () => {
   assert.match(workflow, /target-branch: dev/);
   assert.match(workflow, /create-github-app-token@v2/);
   assert.match(workflow, /repositories: nac/);
+  assert.match(workflow, /permission-contents: write/);
+  assert.match(workflow, /permission-pull-requests: write/);
+  assert.match(workflow, /permission-issues: write/);
+  assert.doesNotMatch(workflow, /skip-labeling/);
   assert.doesNotMatch(workflow, /secrets\.(?:PAT|AWS[^ }]*|GITHUB_TOKEN)/i);
   assert.equal(fs.existsSync(".github/workflows/release.yml"), false);
   assert.match(stableWorkflow, /branches: \[main, dev\]/);
@@ -95,8 +130,15 @@ test("release please is explicitly a dev-targeted root simple release", () => {
   assert.equal(managedWorkflow.match(/- version\.txt/g)?.length, 2);
 
   const verifyNewLane = rollout.indexOf("contents/.github/workflows/stable-release.yml?ref=dev");
+  const verifyRegistration = rollout.indexOf("actions/workflows/stable-release.yml");
+  const verifyActive = rollout.indexOf('stable_state" != "active"');
   const disableLegacy = rollout.indexOf("actions/workflows/$legacy_id/disable");
-  assert.ok(verifyNewLane >= 0 && disableLegacy > verifyNewLane);
+  assert.ok(
+    verifyNewLane >= 0 &&
+      verifyRegistration > verifyNewLane &&
+      verifyActive > verifyRegistration &&
+      disableLegacy > verifyActive,
+  );
   assert.match(rollout, /actions\/workflows\/release\.yml/);
   assert.match(rollout, /disabled_manually/);
 });
@@ -113,7 +155,18 @@ set -eu
 echo "$*" >> "$ROLLOUT_LOG"
 case "$*" in
   *"contents/.github/workflows/stable-release.yml?ref=dev --jq .path"*)
+    if [ "\${STABLE_CONTENTS:-yes}" != yes ]; then exit 4; fi
     echo .github/workflows/stable-release.yml
+    ;;
+  *"actions/workflows/stable-release.yml --jq .id"*)
+    if [ "\${STABLE_REGISTERED:-yes}" != yes ]; then exit 5; fi
+    echo 84
+    ;;
+  *"actions/workflows/84 --jq .path"*)
+    echo .github/workflows/stable-release.yml
+    ;;
+  *"actions/workflows/84 --jq .state"*)
+    echo "\${STABLE_STATE:-active}"
     ;;
   *"actions/workflows/release.yml --jq .id"*)
     echo 42
@@ -151,13 +204,28 @@ esac
       { encoding: "utf8", env },
     );
     assert.equal(apply.status, 0, apply.stderr);
-    assert.match(apply.stdout, /legacy release.yml is disabled/);
+    assert.match(apply.stdout, /registered and active.*legacy release.yml is disabled/);
     const calls = fs.readFileSync(log, "utf8");
     assert.ok(
       calls.indexOf("contents/.github/workflows/stable-release.yml?ref=dev") <
         calls.indexOf("--method PUT"),
       calls,
     );
+
+    for (const override of [
+      { STABLE_CONTENTS: "no" },
+      { STABLE_REGISTERED: "no" },
+      { STABLE_STATE: "disabled_manually" },
+    ]) {
+      fs.writeFileSync(log, "");
+      const rejected = spawnSync(
+        ".github/scripts/stable-release-rollout.sh",
+        ["--apply", "test/repo"],
+        { encoding: "utf8", env: { ...env, ...override } },
+      );
+      assert.notEqual(rejected.status, 0, JSON.stringify(override));
+      assert.doesNotMatch(fs.readFileSync(log, "utf8"), /--method PUT/);
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
