@@ -15,7 +15,9 @@ const PUBLIC: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f7
 fn hex(value: &str) -> Vec<u8> {
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect()
 }
@@ -617,5 +619,85 @@ async fn failed_listener_bind_keeps_accepted_candidate_in_maintenance() {
             .unwrap()
             .state,
         nac_core::store::ManagedMaintenanceState::Maintenance
+    );
+}
+
+#[tokio::test]
+async fn accepted_replacement_fences_old_public_completion_and_private_control_routes() {
+    let fixture = Fixture::new();
+    let mut accepted_request = fixture.request();
+    let running = crate::managed_running_target().unwrap();
+    accepted_request.target.release_id = running.release_id;
+    accepted_request.target.source_sha = running.source_sha;
+    accepted_request.target.product_version = running.product_version;
+    accepted_request.target.schema_version = running.schema_version;
+    accepted_request.target.minimum_schema_version = running.minimum_schema_version;
+    let binding = operation_binding(&fixture.manager, &accepted_request).unwrap();
+    nac_core::store::prepare_managed_upgrade(
+        &fixture.manager.inner.store_path,
+        "stale-router-prepare",
+        &binding,
+        nac_core::store::ManagedControlAttemptAction::Prepare,
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 60,
+        Vec::new(),
+    )
+    .unwrap();
+    let replacement = SessionManager::new(crate::ServerOptions {
+        root_cwd: fixture.root.clone(),
+        store_path: Some(fixture.manager.inner.store_path.clone()),
+        worker_executable: None,
+        managed_host: Some(fixture.manager.managed_host().unwrap().clone()),
+    })
+    .unwrap();
+    assert!(nac_core::store::accept_managed_forward_start(
+        &fixture.manager.inner.store_path,
+        replacement.managed_identity().unwrap(),
+    )
+    .unwrap());
+
+    let response = crate::router(fixture.manager.clone())
+        .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let mut next_request = fixture.request();
+    next_request.operation_id = "operation-after-replacement".to_string();
+    let status_assertion = fixture.assertion(
+        ManagedControlAction::Status,
+        &next_request,
+        "stale-private-status",
+    );
+    let (status, _) = call(
+        super::router(fixture.manager.clone()),
+        "/v1/upgrade/status",
+        &next_request,
+        &status_assertion,
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    let prepare_assertion = fixture.assertion(
+        ManagedControlAction::Prepare,
+        &next_request,
+        "stale-private-prepare",
+    );
+    let (status, _) = call(
+        super::router(fixture.manager.clone()),
+        "/v1/upgrade/prepare",
+        &next_request,
+        &prepare_assertion,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path)
+            .unwrap()
+            .state,
+        nac_core::store::ManagedMaintenanceState::Serving
     );
 }

@@ -44,6 +44,10 @@ async fn status(
         Ok(assertion) => assertion,
         Err(response) => return response,
     };
+    let _host_admission = match manager.managed_completion_admission() {
+        Ok(Some(admission)) => admission,
+        _ => return internal_error(),
+    };
     let blockers = match manager.managed_upgrade_blockers().await {
         Ok(blockers) => blockers,
         Err(_) => return internal_error(),
@@ -117,6 +121,9 @@ async fn prepare_for_action(
         Ok(binding) => binding,
         Err(response) => return response,
     };
+    let Some(expected_identity) = manager.managed_identity().cloned() else {
+        return internal_error();
+    };
     let result = tokio::task::spawn_blocking(move || {
         let _process_gate = process_gate;
         let attempt_action = match action {
@@ -124,13 +131,14 @@ async fn prepare_for_action(
             ManagedControlAction::Retry => ManagedControlAttemptAction::Retry,
             ManagedControlAction::Status => unreachable!("status uses its dedicated endpoint"),
         };
-        nac_core::store::prepare_managed_upgrade(
+        nac_core::store::prepare_managed_upgrade_for_identity(
             &path,
             &assertion.jti,
             &binding,
             attempt_action,
             assertion.expires_at,
             blockers,
+            &expected_identity,
         )
     })
     .await;

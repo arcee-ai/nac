@@ -394,11 +394,11 @@ async fn failed_remote_one_shot_cleanup_remains_owned_for_settlement_retry() {
         .stderr_preview
         .contains("remote command cleanup incomplete"));
     assert_eq!(manager.pending_remote_cleanup_count(), 1);
-    assert_eq!(manager.live_terminal_names().await.len(), 1);
+    assert_eq!(manager.live_terminal_names().len(), 1);
 
     manager.settle_run().await.unwrap();
     assert_eq!(manager.pending_remote_cleanup_count(), 0);
-    assert!(manager.live_terminal_names().await.is_empty());
+    assert!(manager.live_terminal_names().is_empty());
     assert_eq!(std::fs::read_to_string(&cleanup_calls).unwrap(), "2");
     let _ = std::fs::remove_dir_all(root);
 }
@@ -611,7 +611,7 @@ async fn pending_remote_cleanup_is_recovered_and_settled_after_manager_restart()
         )
         .unwrap();
     assert_eq!(
-        recovered.live_terminal_names().await,
+        recovered.live_terminal_names(),
         vec!["remote-pidfile".to_string()]
     );
     recovered.settle_run().await.unwrap();
@@ -620,7 +620,7 @@ async fn pending_remote_cleanup_is_recovered_and_settled_after_manager_restart()
             .unwrap()
             .is_empty()
     );
-    assert!(recovered.live_terminal_names().await.is_empty());
+    assert!(recovered.live_terminal_names().is_empty());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1208,25 +1208,28 @@ async fn direct_run_settlement_keeps_only_explicitly_retained_terminals() {
     let info = manager.retain(&retained).await.unwrap();
     assert!(info.retained);
     assert_eq!(
-        manager.live_terminal_names().await,
+        manager.live_terminal_names(),
         vec![foreground.clone(), retained.clone()]
     );
 
     manager.settle_run().await.unwrap();
     assert!(manager.get(&foreground).await.is_none());
     assert!(manager.get(&retained).await.unwrap().retained);
-    assert_eq!(manager.live_terminal_names().await, vec![retained.clone()]);
+    assert_eq!(manager.live_terminal_names(), vec![retained.clone()]);
     manager.remove_all().await.unwrap();
-    assert!(manager.live_terminal_names().await.is_empty());
+    assert!(manager.live_terminal_names().is_empty());
 }
 
 #[tokio::test]
 async fn maintenance_terminal_snapshot_never_waits_for_cleanup_mutex() {
     let manager = TerminalManager::new();
     let _held = manager.sessions.lock().await;
-    let names = tokio::time::timeout(Duration::from_millis(50), manager.live_terminal_names())
-        .await
-        .expect("maintenance blocker scan must not queue behind terminal cleanup");
+    let started = std::time::Instant::now();
+    let names = manager.live_terminal_names();
+    assert!(
+        started.elapsed() < Duration::from_millis(50),
+        "maintenance blocker scan must not queue behind terminal cleanup"
+    );
     assert_eq!(names, vec!["terminal-cleanup-in-progress".to_string()]);
 }
 
@@ -1313,7 +1316,7 @@ async fn exited_retained_terminal_is_archived_and_releases_cross_process_authori
     .await
     .expect("retained terminal did not exit");
 
-    assert!(manager.live_terminal_names().await.is_empty());
+    assert!(manager.live_terminal_names().is_empty());
     drop(crate::sessions::WorkspaceMutationLease::try_acquire(&store_path, &identity).unwrap());
     drop(
         crate::sessions::SessionResourceMutationLease::try_acquire(&store_path, "retained-session")

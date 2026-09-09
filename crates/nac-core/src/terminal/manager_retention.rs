@@ -247,7 +247,7 @@ impl TerminalManager {
 
     /// Process-local terminal identities that can still own a live local or
     /// remote process. Completed retained output is deliberately excluded.
-    pub async fn live_terminal_names(&self) -> Vec<String> {
+    pub fn live_terminal_names(&self) -> Vec<String> {
         // Preparation is a non-waiting query. A concurrent terminal cleanup
         // is itself a blocker rather than something the controller queues
         // behind for seconds.
@@ -259,13 +259,18 @@ impl TerminalManager {
         };
         let mut names = Vec::new();
         let mut reap = Vec::new();
-        for (name, session) in sessions.iter_mut() {
+        let mut session_names = sessions.keys().cloned().collect::<Vec<_>>();
+        session_names.sort();
+        for name in session_names {
+            let Some(session) = sessions.get_mut(&name) else {
+                continue;
+            };
             session.refresh_status();
             if session.is_alive() || session.has_backend_cleanup() || session.exit_code().is_none()
             {
-                names.push(name.clone());
+                names.push(name);
             } else {
-                reap.push(name.clone());
+                reap.push(name);
             }
         }
         for name in reap {

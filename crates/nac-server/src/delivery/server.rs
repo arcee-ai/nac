@@ -242,6 +242,19 @@ async fn enforce_managed_admission(
         return next.run(request).await;
     }
     if remains_available_during_maintenance(request.method(), request.uri().path()) {
+        let _host_lease = match manager.managed_completion_admission() {
+            Ok(Some(lease)) => lease,
+            Ok(None) => return next.run(request).await,
+            Err(_) => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ApiErrorBody {
+                        error: "Managed NAC admission state is unavailable".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        };
         return next.run(request).await;
     }
     let _process_gate = Arc::clone(&manager.inner.maintenance_gate)

@@ -606,6 +606,24 @@ impl SessionManager {
         }
     }
 
+    fn managed_completion_admission(
+        &self,
+    ) -> Result<Option<nac_core::store::ManagedWorkAdmission>> {
+        match (self.managed_host(), self.inner.managed_identity.as_ref()) {
+            (None, _) => Ok(None),
+            (Some(_), Some(identity)) => {
+                nac_core::store::try_admit_managed_completion_for_identity(
+                    &self.inner.store_path,
+                    identity,
+                )
+                .map(Some)
+            }
+            (Some(_), None) => {
+                nac_core::store::try_admit_managed_completion(&self.inner.store_path).map(Some)
+            }
+        }
+    }
+
     async fn managed_upgrade_blockers(
         &self,
     ) -> Result<Vec<nac_core::store::ManagedUpgradeBlocker>> {
@@ -631,7 +649,7 @@ impl SessionManager {
                     detail: "session compaction is active".to_string(),
                 });
             }
-            for terminal in service.live_terminal_names().await {
+            for terminal in service.live_terminal_names() {
                 blockers.push(ManagedUpgradeBlocker {
                     kind: ManagedBlockerKind::TerminalProcess,
                     id: terminal,

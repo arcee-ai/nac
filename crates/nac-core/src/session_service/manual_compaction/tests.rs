@@ -28,7 +28,9 @@ fn persisted_response_state(
 
 #[test]
 fn manual_compaction_cannot_start_after_host_maintenance_closes() {
-    let (parts, store_path) = test_active_service("compaction_maintenance", "maintenance-session");
+    let (mut parts, store_path) =
+        test_active_service("compaction_maintenance", "maintenance-session");
+    parts.service.enable_managed_admission(None);
     let binding = crate::store::ManagedOperationBinding {
         managed_host_id: "host".to_string(),
         host_incarnation_id: "incarnation".to_string(),
