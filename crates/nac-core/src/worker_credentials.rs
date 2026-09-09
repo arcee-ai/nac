@@ -29,6 +29,7 @@ pub fn restrict_same_uid_inspection() -> io::Result<()> {
         }
         // Executing an ordinary binary resets dumpability, so this function is
         // called independently by the server and each managed worker.
+        // SAFETY: PR_SET_DUMPABLE takes an integer flag and no pointers.
         if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
             return Err(io::Error::last_os_error());
         }
