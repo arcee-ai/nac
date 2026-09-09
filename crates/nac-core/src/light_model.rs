@@ -95,6 +95,11 @@ pub(crate) fn resolve_light_client(
     session_headers: &BTreeMap<String, String>,
     trusted: Option<&TrustedLightCredential>,
 ) -> std::result::Result<ModelClient, LightModelError> {
+    // Preserve the caller's explicit selector intent before effective-model
+    // resolution can auto-select a conventional environment variable. An
+    // operator-mounted credential owns its exact route when the durable light
+    // settings omit a selector; ambient process state must not displace it.
+    let has_explicit_api_key_env = light.api_key_env.is_some();
     let backend = light
         .backend
         .or_else(|| provider_for_model(light.model.as_str()));
@@ -111,13 +116,19 @@ pub(crate) fn resolve_light_client(
         light.api_key_env.clone(),
         session_headers.clone(),
     )
-    .and_then(|settings| {
+    .and_then(|mut settings| {
         let trusted_file = trusted.and_then(|credential| {
             (settings.backend == credential.backend
                 && settings.base_url == credential.base_url
-                && settings.api_key_env.is_none())
-            .then(|| credential.path.clone())
+                && !has_explicit_api_key_env)
+                .then(|| credential.path.clone())
         });
+        if trusted_file.is_some() {
+            // `from_optional` may have selected the provider's conventional
+            // variable. The exact operator-bound file takes precedence only
+            // because the caller omitted an explicit selector above.
+            settings.api_key_env = None;
+        }
         settings.with_trusted_api_key_file(trusted_file)
     })
     .and_then(ModelClient::from_effective_settings)
@@ -267,15 +278,31 @@ mod tests {
     #[test]
     fn trusted_light_credential_is_attached_only_to_the_exact_route() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_arcee = std::env::var_os("ARCEE_API_KEY");
         let original_openai = std::env::var_os("OPENAI_API_KEY");
+        let original_second = std::env::var_os("SECOND_API_KEY");
         unsafe {
+            std::env::set_var("ARCEE_API_KEY", "ambient-review-canary");
             std::env::remove_var("OPENAI_API_KEY");
+            std::env::set_var("SECOND_API_KEY", "explicit-review-canary");
         }
-        let missing_path = PathBuf::from("/definitely/missing/nac-mounted-light-key");
+        let root = std::env::temp_dir().join(format!(
+            "nac-trusted-light-credential-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let credential_path = root.join("model-token");
+        std::fs::write(&credential_path, "mounted-review-canary\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&credential_path, std::fs::Permissions::from_mode(0o400))
+                .unwrap();
+        }
         let trusted = TrustedLightCredential {
             backend: BackendKind::ArceeApi,
             base_url: "https://api.arcee.ai/api/v1".to_string(),
-            path: missing_path.clone(),
+            path: credential_path.clone(),
         };
 
         let exact = LightModelSettings {
@@ -285,14 +312,21 @@ mod tests {
             api_key_env: None,
             reasoning_effort: None,
         };
-        let exact_error = format!(
-            "{:#}",
-            anyhow::Error::from(
-                resolve_light_client(&exact, &BTreeMap::new(), Some(&trusted)).unwrap_err()
-            )
+        let exact_client = resolve_light_client(&exact, &BTreeMap::new(), Some(&trusted)).unwrap();
+        assert_eq!(exact_client.api_key_env(), None);
+        assert_eq!(
+            exact_client.trusted_api_key_file(),
+            Some(credential_path.as_path())
         );
-        assert!(exact_error.contains("trusted model credential file"));
-        assert!(exact_error.contains(missing_path.to_str().unwrap()));
+
+        let explicit = LightModelSettings {
+            api_key_env: Some("SECOND_API_KEY".to_string()),
+            ..exact.clone()
+        };
+        let explicit_client =
+            resolve_light_client(&explicit, &BTreeMap::new(), Some(&trusted)).unwrap();
+        assert_eq!(explicit_client.api_key_env(), Some("SECOND_API_KEY"));
+        assert_eq!(explicit_client.trusted_api_key_file(), None);
 
         let mismatch = LightModelSettings {
             model: "gpt-5-mini".to_string(),
@@ -308,8 +342,11 @@ mod tests {
             )
         );
         assert!(mismatch_error.contains("OPENAI_API_KEY"));
-        assert!(!mismatch_error.contains(missing_path.to_str().unwrap()));
+        assert!(!mismatch_error.contains(credential_path.to_str().unwrap()));
 
+        let _ = std::fs::remove_dir_all(root);
+        restore_env("ARCEE_API_KEY", original_arcee);
         restore_env("OPENAI_API_KEY", original_openai);
+        restore_env("SECOND_API_KEY", original_second);
     }
 }
