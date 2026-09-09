@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,15 @@ pub struct LightModelSettings {
     pub api_key_env: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+/// Operator-authorized mounted credential route. Resolution rechecks the
+/// light model's backend and endpoint before attaching the file.
+#[derive(Debug, Clone, Copy)]
+pub struct TrustedLightCredential<'a> {
+    pub backend: BackendKind,
+    pub base_url: &'a str,
+    pub path: &'a Path,
 }
 
 /// Error resolving a session's light model.
@@ -83,6 +93,7 @@ impl std::error::Error for LightModelError {
 pub(crate) fn resolve_light_client(
     light: &LightModelSettings,
     session_headers: &BTreeMap<String, String>,
+    trusted: Option<TrustedLightCredential<'_>>,
 ) -> std::result::Result<ModelClient, LightModelError> {
     let backend = light
         .backend
@@ -100,6 +111,15 @@ pub(crate) fn resolve_light_client(
         light.api_key_env.clone(),
         session_headers.clone(),
     )
+    .and_then(|settings| {
+        let trusted_file = trusted.and_then(|credential| {
+            (settings.backend == credential.backend
+                && settings.base_url == credential.base_url
+                && settings.api_key_env.is_none())
+            .then(|| credential.path.to_path_buf())
+        });
+        settings.with_trusted_api_key_file(trusted_file)
+    })
     .and_then(ModelClient::from_effective_settings)
     .map_err(|error| {
         // Classify at the source, while the typed configuration error is
@@ -120,7 +140,19 @@ pub fn validate(
     light: &LightModelSettings,
     session_headers: &BTreeMap<String, String>,
 ) -> Result<()> {
-    resolve_light_client(light, session_headers)
+    resolve_light_client(light, session_headers, None)
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
+}
+
+/// Validate a runnable light model while allowing the exact primary
+/// provider/destination to reuse its operator-mounted credential file.
+pub fn validate_with_trusted_credential(
+    light: &LightModelSettings,
+    session_headers: &BTreeMap<String, String>,
+    trusted: TrustedLightCredential<'_>,
+) -> Result<()> {
+    resolve_light_client(light, session_headers, Some(trusted))
         .map(|_| ())
         .map_err(anyhow::Error::from)
 }
@@ -157,7 +189,7 @@ mod tests {
             reasoning_effort: Some(ReasoningEffort::Low),
         };
         let headers = BTreeMap::from([("X-Proxy-Org".to_string(), "arcee".to_string())]);
-        let client = resolve_light_client(&light, &headers).unwrap();
+        let client = resolve_light_client(&light, &headers, None).unwrap();
         assert_eq!(client.model, "gpt-5-mini");
         assert_eq!(client.reasoning_effort(), Some(ReasoningEffort::Low));
         assert_eq!(client.extra_headers(), &headers);
@@ -169,7 +201,7 @@ mod tests {
             api_key_env: None,
             reasoning_effort: None,
         };
-        let error = resolve_light_client(&light, &BTreeMap::new())
+        let error = resolve_light_client(&light, &BTreeMap::new(), None)
             .map(|_| ())
             .unwrap_err()
             .to_string();
@@ -193,7 +225,7 @@ mod tests {
             api_key_env: None,
             reasoning_effort: None,
         };
-        let error = resolve_light_client(&light, &BTreeMap::new())
+        let error = resolve_light_client(&light, &BTreeMap::new(), None)
             .map(|_| ())
             .unwrap_err();
 
@@ -230,5 +262,54 @@ mod tests {
             rendered,
             "failed to resolve the light model: middle context: leaf diagnostic"
         );
+    }
+
+    #[test]
+    fn trusted_light_credential_is_attached_only_to_the_exact_route() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_openai = std::env::var_os("OPENAI_API_KEY");
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+        let missing_path = Path::new("/definitely/missing/nac-mounted-light-key");
+        let trusted = TrustedLightCredential {
+            backend: BackendKind::ArceeApi,
+            base_url: "https://api.arcee.ai/api/v1",
+            path: missing_path,
+        };
+
+        let exact = LightModelSettings {
+            model: "moonshotai/kimi-k3".to_string(),
+            backend: Some(BackendKind::ArceeApi),
+            base_url: Some("https://api.arcee.ai/api/v1".to_string()),
+            api_key_env: None,
+            reasoning_effort: None,
+        };
+        let exact_error = format!(
+            "{:#}",
+            anyhow::Error::from(
+                resolve_light_client(&exact, &BTreeMap::new(), Some(trusted)).unwrap_err()
+            )
+        );
+        assert!(exact_error.contains("trusted model credential file"));
+        assert!(exact_error.contains(missing_path.to_str().unwrap()));
+
+        let mismatch = LightModelSettings {
+            model: "gpt-5-mini".to_string(),
+            backend: Some(BackendKind::OpenAiResponses),
+            base_url: Some("https://api.openai.com/v1".to_string()),
+            api_key_env: None,
+            reasoning_effort: None,
+        };
+        let mismatch_error = format!(
+            "{:#}",
+            anyhow::Error::from(
+                resolve_light_client(&mismatch, &BTreeMap::new(), Some(trusted)).unwrap_err()
+            )
+        );
+        assert!(mismatch_error.contains("OPENAI_API_KEY"));
+        assert!(!mismatch_error.contains(missing_path.to_str().unwrap()));
+
+        restore_env("OPENAI_API_KEY", original_openai);
     }
 }

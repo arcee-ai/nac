@@ -203,6 +203,7 @@ function NewChatForm({
         api_key_env: string | null;
         reasoning_effort: string | null;
         extra_headers: Record<string, string> | null;
+        orchestrator_compaction_threshold?: number | null;
       };
       if (selection.kind === "save") {
         const record = await createModelConfig.mutateAsync({
@@ -217,6 +218,7 @@ function NewChatForm({
           api_key_env: record.api_key_env ?? null,
           reasoning_effort: record.reasoning_effort ?? null,
           extra_headers: record.extra_headers,
+          orchestrator_compaction_threshold: record.orchestrator_compaction_threshold ?? null,
         };
       } else {
         selected = selection;
@@ -240,6 +242,9 @@ function NewChatForm({
         // project default into a single-model chat without changing the project.
         light_model: finalLight,
       };
+      if (selected.orchestrator_compaction_threshold !== undefined) {
+        request.orchestrator_compaction_threshold = selected.orchestrator_compaction_threshold;
+      }
       const snapshot = await createSession.mutateAsync(request);
       const sessionId = snapshot.metadata.session_id;
       onClose();

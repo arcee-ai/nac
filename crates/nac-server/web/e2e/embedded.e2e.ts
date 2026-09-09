@@ -639,7 +639,7 @@ test("switches the active chat across configured providers from the unified comp
     backend: "deepseek-chat",
     model: "deepseek-v4-flash",
     base_url: "https://api.deepseek.com",
-    api_key_env: null,
+    api_key_env: "DEEPSEEK_API_KEY",
     extra_headers: null,
   });
   expect(JSON.stringify(body)).not.toContain("nac-e2e-deepseek-dummy-only");
@@ -651,6 +651,75 @@ test("switches the active chat across configured providers from the unified comp
       return `${config.backend}/${config.model}`;
     })
     .toBe("deepseek-chat/deepseek-v4-flash");
+});
+
+test("uses an Advanced saved provider account from the unified composer without exposing its key", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const sessionId = await createDirectSession(request, harness);
+  const canary = "advanced-provider-secret-must-stay-server-side";
+  const created = await request.post(`${harness.baseUrl}/model-configs`, {
+    data: {
+      name: "Advanced Fireworks account",
+      backend: "fireworks-chat",
+      model: "gpt-5.6-sol",
+      base_url: harness.provider.baseUrl,
+      api_key: canary,
+    },
+  });
+  expect(created.ok()).toBe(true);
+  const saved = (await created.json()) as { api_key_env?: string };
+  expect(saved.api_key_env).toMatch(/^NAC_CONFIG_/);
+  expect(JSON.stringify(saved)).not.toContain(canary);
+
+  const catalog = await request.get(`${harness.baseUrl}/models`);
+  const provider = (
+    (await catalog.json()) as {
+      providers: Array<{
+        id: string;
+        auth_status: string;
+        connection: { base_url: string; api_key_env: string | null } | null;
+      }>;
+    }
+  ).providers.find((entry) => entry.id === "fireworks-chat");
+  expect(provider).toMatchObject({
+    auth_status: "ready",
+    connection: {
+      base_url: harness.provider.baseUrl,
+      api_key_env: saved.api_key_env,
+    },
+  });
+
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  await page.getByRole("button", { name: "Model" }).click();
+  await page.getByPlaceholder("Search models…").fill("fireworks-chat");
+  const mutation = page.waitForRequest(
+    (candidate) =>
+      candidate.method() === "PATCH" && candidate.url().endsWith(`/sessions/${sessionId}/config`),
+  );
+  await page.getByRole("button", { name: /gpt-5\.6-sol gpt-5\.6-sol/ }).click();
+  const body = (await mutation).postDataJSON() as Record<string, unknown>;
+  expect(body).toMatchObject({
+    backend: "fireworks-chat",
+    model: "gpt-5.6-sol",
+    base_url: harness.provider.baseUrl,
+    api_key_env: saved.api_key_env,
+    extra_headers: null,
+  });
+  expect(JSON.stringify(body)).not.toContain(canary);
+
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
+      const config = (await response.json()) as {
+        backend?: string;
+        api_key_env?: string | null;
+      };
+      return `${config.backend}/${config.api_key_env}`;
+    })
+    .toBe(`fireworks-chat/${saved.api_key_env}`);
 });
 
 test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({

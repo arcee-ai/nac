@@ -48,6 +48,25 @@ vi.mock("@/app/components/modals/ConfigurationsPanel", async () => {
       return (
         <section>
           <p>Primary model: {initial?.model ?? "none"}</p>
+          <button
+            type="button"
+            onClick={() =>
+              onChange({
+                kind: "resolved",
+                backend: "deepseek-chat",
+                model: "deepseek-chat",
+                base_url: "https://api.deepseek.com",
+                api_key_env: "PRESET_KEY",
+                reasoning_effort: null,
+                extra_headers: null,
+                light_model: null,
+                config_id: "explicit-preset",
+                orchestrator_compaction_threshold: 222,
+              })
+            }
+          >
+            Select explicit preset
+          </button>
           {children}
         </section>
       );
@@ -235,6 +254,34 @@ it("sends null when one chat clears an inherited light model", async () => {
     fireEvent.click(screen.getByRole("button", { name: "Create chat" }));
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create.mock.calls[0]?.[0].light_model).toBeNull();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("sends an explicitly selected preset's compaction threshold instead of inheriting", async () => {
+  const create = vi.spyOn(api, "createSession").mockResolvedValue({
+    metadata: { session_id: "preset-chat" },
+    messages: [],
+    message_created_at: [],
+  } as unknown as SessionSnapshotResponse);
+  const { client, view } = renderModal();
+
+  try {
+    await screen.findByText("Primary model: gpt-5.6-sol");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced presets and provider setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Select explicit preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create chat" }));
+
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        backend: "deepseek-chat",
+        model: "deepseek-chat",
+        orchestrator_compaction_threshold: 222,
+      }),
+    );
   } finally {
     view.unmount();
     client.clear();
