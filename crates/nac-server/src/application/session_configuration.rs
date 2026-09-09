@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Result};
 use nac_core::{
-    light_model::{LightModelSettings, TrustedLightCredential},
+    light_model::LightModelSettings,
     model::{validate_model_configuration, EffectiveModelSettings},
     runtime::NacConfig,
     sessions,
@@ -182,6 +182,10 @@ impl<'a> SessionConfigurationApplication<'a> {
                 prospective.api_key_env.as_deref(),
             )
         });
+        let trusted_light = self
+            .manager
+            .managed_model()
+            .and_then(super::managed::ManagedModelProfile::trusted_light_credential);
         // Plain direct has no ALL-36 light-model consumer: preserve its
         // normalized durable selection without reading that unused provider's
         // credentials. Orchestrator-capable sessions validate the same client
@@ -189,17 +193,11 @@ impl<'a> SessionConfigurationApplication<'a> {
         // operator-bound backend and endpoint.
         if behavior != sessions::SessionBehavior::Direct {
             if let Some(light) = prospective.light_model.as_ref() {
-                let trusted = mounted_override
-                    .and_then(|profile| profile.trusted_api_key_file().map(|path| (profile, path)));
-                if let Some((profile, path)) = trusted {
+                if let Some(trusted) = trusted_light.as_ref() {
                     nac_core::light_model::validate_with_trusted_credential(
                         light,
                         &extra_headers,
-                        TrustedLightCredential {
-                            backend: profile.backend,
-                            base_url: &profile.endpoint,
-                            path: &path,
-                        },
+                        trusted,
                     )
                     .map_err(request_configuration_error_from)?;
                 } else {

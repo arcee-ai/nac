@@ -193,7 +193,8 @@ export function LightModelSection({
                     apiKeyEnv:
                       pick.backend === effectiveLight.pick?.backend
                         ? effectiveLight.apiKeyEnv
-                        : null,
+                        : (catalog.data?.providers.find((provider) => provider.id === pick.backend)
+                            ?.connection?.api_key_env ?? null),
                   })
                 }
               />

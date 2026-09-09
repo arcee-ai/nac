@@ -70,16 +70,15 @@ async fn build_run_config_inner(
         // design has been explicitly accepted.
         None
     } else {
-        let trusted = settings.trusted_api_key_file.as_deref().map(|path| {
-            crate::light_model::TrustedLightCredential {
-                backend: settings.backend,
-                base_url: &settings.base_url,
-                path,
-            }
-        });
         light_model
             .as_ref()
-            .map(|light| resolve_light_client(light, &settings.extra_headers, trusted))
+            .map(|light| {
+                resolve_light_client(
+                    light,
+                    &settings.extra_headers,
+                    options.model.trusted_light_credential.as_ref(),
+                )
+            })
             .transpose()?
             .map(std::sync::Arc::new)
     };
