@@ -624,20 +624,25 @@ impl SessionManager {
         }
     }
 
-    async fn managed_upgrade_blockers(
-        &self,
-    ) -> Result<Vec<nac_core::store::ManagedUpgradeBlocker>> {
+    fn managed_upgrade_blockers(&self) -> Result<Vec<nac_core::store::ManagedUpgradeBlocker>> {
         use nac_core::store::{ManagedBlockerKind, ManagedUpgradeBlocker};
 
-        let services = self
-            .inner
-            .active_sessions
-            .read()
-            .await
-            .iter()
-            .map(|(id, service)| (id.clone(), Arc::clone(service)))
-            .collect::<Vec<_>>();
         let mut blockers = Vec::new();
+        let services = match self.inner.active_sessions.try_read() {
+            Ok(sessions) => sessions
+                .iter()
+                .map(|(id, service)| (id.clone(), Arc::clone(service)))
+                .collect::<Vec<_>>(),
+            Err(_) => {
+                blockers.push(ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::OperationLease,
+                    id: "process-active-sessions-snapshot".to_string(),
+                    session_id: None,
+                    detail: "this process is updating its active session registry".to_string(),
+                });
+                Vec::new()
+            }
+        };
         for (session_id, service) in services {
             if let Some(ActiveSessionOperationSnapshot::ManualCompaction { compaction }) =
                 service.active_operation()

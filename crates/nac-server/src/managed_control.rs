@@ -48,7 +48,7 @@ async fn status(
         Ok(Some(admission)) => admission,
         _ => return internal_error(),
     };
-    let blockers = match manager.managed_upgrade_blockers().await {
+    let blockers = match manager.managed_upgrade_blockers() {
         Ok(blockers) => blockers,
         Err(_) => return internal_error(),
     };
@@ -103,7 +103,7 @@ async fn prepare_for_action(
     let process_gate = Arc::clone(&manager.inner.maintenance_gate)
         .try_write_owned()
         .ok();
-    let mut blockers = match manager.managed_upgrade_blockers().await {
+    let mut blockers = match manager.managed_upgrade_blockers() {
         Ok(blockers) => blockers,
         Err(_) => return internal_error(),
     };
