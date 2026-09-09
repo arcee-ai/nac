@@ -8,42 +8,7 @@ use axum::Json;
 use nac_managed::ReadinessCheck;
 use serde::Serialize;
 
-use crate::SessionManager;
-
-const MANAGED_RUNTIME_UID: u32 = 10_001;
-const MANAGED_RUNTIME_GID: u32 = 10_001;
-const REQUIRED_RUNTIME_TOOLS: &[&str] = &[
-    "bash",
-    "git",
-    "git-lfs",
-    "gh",
-    "ssh",
-    "curl",
-    "jq",
-    "rg",
-    "fd",
-    "rsync",
-    "make",
-    "pkg-config",
-    "cmake",
-    "cc",
-    "python3",
-    "uv",
-    "node",
-    "npm",
-    "corepack",
-    "rustc",
-    "cargo",
-    "rustfmt",
-    "cargo-clippy",
-    "go",
-    "tar",
-    "gzip",
-    "xz",
-    "zip",
-    "unzip",
-    "tini",
-];
+use crate::{application::managed::ManagedReadinessPolicy, SessionManager};
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub(crate) struct ReadinessResponse {
@@ -202,12 +167,7 @@ fn readiness_snapshot(manager: &SessionManager) -> ReadinessResponse {
     let maintenance = (migration.state == nac_core::store::StoreMigrationState::Current)
         .then(|| nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path))
         .and_then(Result::ok);
-    let checks = readiness_checks(
-        manager,
-        MANAGED_RUNTIME_UID,
-        MANAGED_RUNTIME_GID,
-        REQUIRED_RUNTIME_TOOLS,
-    );
+    let checks = readiness_checks(manager);
     let recovery_only = manager.is_recovery_only();
     ReadinessResponse {
         status: if !recovery_only && checks.iter().all(|check| check.ready) {
@@ -243,12 +203,7 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         .ok_or_else(|| anyhow::anyhow!("managed model profile is unavailable"))?;
     let identity = crate::build_identity::current();
     let migration = nac_core::store::migration_status(&manager.inner.store_path);
-    let checks = readiness_checks(
-        manager,
-        MANAGED_RUNTIME_UID,
-        MANAGED_RUNTIME_GID,
-        REQUIRED_RUNTIME_TOOLS,
-    );
+    let checks = readiness_checks(manager);
     let model_ready = checks
         .iter()
         .find(|check| check.name == "model-credential")
@@ -335,23 +290,13 @@ fn maintenance_state(
     }
 }
 
-fn readiness_checks(
-    manager: &SessionManager,
-    expected_uid: u32,
-    expected_gid: u32,
-    required_tools: &[&str],
-) -> Vec<ReadinessCheck> {
-    let mut checks = vec![
-        match nac_core::store::check_readiness(&manager.inner.store_path) {
-            Ok(()) => ReadinessCheck::pass("store", "SQLite store is open and migrated"),
-            Err(_) => {
-                let migration = nac_core::store::migration_status(&manager.inner.store_path);
-                let reason = migration
-                    .failure
-                    .map_or(migration.state.as_str(), |failure| failure.as_str());
-                ReadinessCheck::fail("store", format!("SQLite store is unavailable ({reason})"))
-            }
-        },
+fn readiness_checks(manager: &SessionManager) -> Vec<ReadinessCheck> {
+    let mut checks = crate::application::managed::runtime_readiness_checks(
+        manager,
+        ManagedReadinessPolicy::production(),
+    );
+    checks.insert(
+        1,
         match nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path) {
             Ok(snapshot) if snapshot.state == nac_core::store::ManagedMaintenanceState::Serving => {
                 ReadinessCheck::pass("maintenance", "host admission is open")
@@ -364,38 +309,13 @@ fn readiness_checks(
                 ReadinessCheck::fail("maintenance", "managed maintenance state is unavailable")
             }
         },
-    ];
-
-    let Some(managed) = manager.managed_host() else {
-        return checks;
-    };
-
-    checks.extend(nac_managed::host_checks(
-        managed,
-        expected_uid,
-        expected_gid,
-        required_tools,
-    ));
-    if let Some(model) = manager.managed_model() {
-        if model.credential_source == nac_managed::ManagedModelCredentialSource::ManagedBootstrap {
-            checks.push(match model.credential_ready(managed) {
-                Ok(()) => ReadinessCheck::pass(
-                    "model-credential",
-                    "durable managed model authorization is present",
-                ),
-                Err(error) => ReadinessCheck::fail(
-                    "model-credential",
-                    format!("durable managed model authorization is unavailable: {error}"),
-                ),
-            });
-        }
-    }
+    );
     checks
 }
 
 #[cfg(test)]
 mod tests {
-    use super::REQUIRED_RUNTIME_TOOLS;
+    use crate::application::managed::REQUIRED_RUNTIME_TOOLS;
 
     #[test]
     fn managed_readiness_requires_git_lfs_executable() {

@@ -659,30 +659,54 @@ pub async fn serve_with_policy(
     manager: SessionManager,
     on_listening: impl FnOnce(SocketAddr),
 ) -> Result<()> {
+    serve_with_policy_and_readiness(
+        addr,
+        policy,
+        manager,
+        on_listening,
+        application::managed::ManagedReadinessPolicy::production(),
+    )
+    .await
+}
+
+pub(crate) async fn serve_with_policy_and_readiness(
+    addr: SocketAddr,
+    policy: BindPolicy,
+    manager: SessionManager,
+    on_listening: impl FnOnce(SocketAddr),
+    readiness_policy: application::managed::ManagedReadinessPolicy,
+) -> Result<()> {
     policy.validate(addr)?;
     // Establish the durable store before serving requests. Readiness probes
     // then verify this store in place and never create a blank replacement if
     // it disappears while the process is running. A managed host keeps only
     // its credential-free diagnostic surface available after a migration
     // failure; every route that could admit or mutate work remains absent.
-    let app = match nac_core::store::initialize(&manager.inner.store_path) {
-        Ok(()) => {
-            nac_core::reconcile_podman_creation_records(&manager.inner.store_path).await?;
-            router(manager.clone())
+    let recovery_router = |manager: &SessionManager| {
+        manager.enter_recovery_only();
+        let status = nac_core::store::migration_status(&manager.inner.store_path);
+        let reason = status
+            .failure
+            .map_or(status.state.as_str(), |failure| failure.as_str());
+        eprintln!("nac: managed store unavailable ({reason}); serving recovery status only");
+        managed_migration_recovery_router(manager.clone())
+    };
+    let app = if manager.is_recovery_only() {
+        recovery_router(&manager)
+    } else {
+        match nac_core::store::initialize(&manager.inner.store_path) {
+            Ok(()) => {
+                nac_core::reconcile_podman_creation_records(&manager.inner.store_path).await?;
+                router(manager.clone())
+            }
+            Err(_) if manager.managed_host().is_some() => {
+                // This process never constructed the full router. Keep its mode
+                // unavailable even if another process later repairs or migrates
+                // the shared store; a restart is required to admit work routes.
+                recovery_router(&manager)
+            }
+            Err(error) => return Err(error),
         }
-        Err(_) if manager.managed_host().is_some() => {
-            // This process never constructed the full router. Keep its mode
-            // unavailable even if another process later repairs or migrates
-            // the shared store; a restart is required to admit work routes.
-            manager.enter_recovery_only();
-            let status = nac_core::store::migration_status(&manager.inner.store_path);
-            let reason = status
-                .failure
-                .map_or(status.state.as_str(), |failure| failure.as_str());
-            eprintln!("nac: managed store unavailable ({reason}); serving recovery status only");
-            managed_migration_recovery_router(manager.clone())
-        }
-        Err(error) => return Err(error),
     };
     let control_listener = match manager
         .managed_host()
@@ -710,8 +734,8 @@ pub async fn serve_with_policy(
         .local_addr()
         .with_context(|| format!("failed to read bound address for {addr}"))?;
     if !manager.is_recovery_only() {
-        nac_core::store::check_readiness(&manager.inner.store_path)?;
         if manager.inner.pending_forward_start {
+            application::managed::require_replacement_readiness(&manager, readiness_policy)?;
             let accepted =
                 manager.inner.managed_identity.as_ref().ok_or_else(|| {
                     anyhow::anyhow!("managed forward-start identity is unavailable")
@@ -720,6 +744,8 @@ pub async fn serve_with_policy(
             {
                 anyhow::bail!("accepted managed upgrade target changed before startup completed");
             }
+        } else {
+            nac_core::store::check_readiness(&manager.inner.store_path)?;
         }
     }
     on_listening(bound);

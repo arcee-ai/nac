@@ -174,7 +174,9 @@ session creation and attachment, manual compaction, child/orchestrator launch,
 workspace mutations, repository clones, and the full lifetime of background
 login flows. Private authenticated status remains available. Maintenance is
 cleared only by the exact accepted forward replacement after store
-initialization, reconciliation, both listener binds, and readiness succeed.
+initialization, reconciliation, both listener binds, and the full managed
+readiness contract (paths, runtime tools, command backend, and model
+credential) succeeds.
 The accepted host/incarnation/operation/target identity then fences the old
 process and any same-schema process with a different build from both new work
 and completion mutations.
@@ -273,10 +275,12 @@ a separate credential-injecting broker.
   schema, schema-owned minimum migratable version, and sanitized
   migration/maintenance state alongside counts, GitHub state, and readiness
   details without credential values.
-- A managed process that cannot initialize its store starts a recovery-only
-  diagnostic router. It remains unready with `maintenance_state` set to
-  `recovery-only` until restart, even if another process repairs the store;
-  work routes are never admitted by that process.
+- A managed process, including a version-2 control configuration, that cannot
+  safely preflight or initialize its store starts a recovery-only diagnostic
+  router without migrating or opening an incompatible database. It remains
+  unready with `maintenance_state` set to `recovery-only` until restart, even if
+  another process repairs the store; work routes are never admitted by that
+  process.
 
 Channel switching is intentionally unsupported in NAC, ArceeFM/RCFM, nac-api,
 and the CRD. A future product decision must define it before implementation.

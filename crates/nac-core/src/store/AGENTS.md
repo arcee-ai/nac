@@ -44,7 +44,13 @@ workspace revisions, recovery markers, and cross-process coordination.
 transactional migration ledger for every supported database revision; splitting
 the sequence would obscure upgrade order and rollback. `transcript.rs` is the
 single append/revision/scan/repair owner for the durable model conversation.
-Neither file may acquire network, process, HTTP, or unrelated lifecycle logic.
+`managed_maintenance.rs` is intentionally above 800 lines because it is the
+single transaction owner for the host maintenance state machine: admission,
+blocker snapshots, authenticated-attempt replay, accepted-target fencing, and
+forward-start settlement must share exact SQLite transaction and lock ordering.
+Splitting those operations would obscure the atomic no-new-work/safe-to-stop
+invariant. None of these files may acquire network, process, HTTP, or unrelated
+lifecycle logic.
 
 ## Verification
 
