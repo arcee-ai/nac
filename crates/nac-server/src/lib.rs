@@ -482,17 +482,16 @@ impl SessionManager {
         // reconciliation, or listener setup. An unaccepted replacement must
         // be rejected by a read-only check before it can mutate host state.
         let running_target = managed_running_target()?;
-        let configured_identity = options.managed_host.as_ref().and_then(|managed| {
-            (managed.version == nac_managed::MANAGED_CONFIG_VERSION).then(|| {
-                (
-                    managed.logical_host_id.as_str(),
-                    managed
-                        .host_incarnation_id
-                        .as_deref()
-                        .expect("validated v2 managed config has an incarnation"),
-                )
-            })
-        });
+        let configured_identity = match options.managed_host.as_ref() {
+            Some(managed) if managed.version == nac_managed::MANAGED_CONFIG_VERSION => Some((
+                managed.logical_host_id.as_str(),
+                managed
+                    .host_incarnation_id
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("managed v2 host incarnation is unavailable"))?,
+            )),
+            _ => None,
+        };
         let preflight = if configured_identity.is_some() {
             nac_core::store::preflight_managed_forward_start(
                 &store_path,
