@@ -248,6 +248,7 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
         managed_control_bind: None,
         managed_control_issuer: None,
         managed_control_jwks_file: None,
+        managed_upgrade_expectation: None,
     };
     managed_host.validate().unwrap();
     SessionManager::new(ServerOptions {
@@ -285,6 +286,7 @@ fn test_managed_bootstrap_manager(root: &std::path::Path) -> SessionManager {
         managed_control_bind: None,
         managed_control_issuer: None,
         managed_control_jwks_file: None,
+        managed_upgrade_expectation: None,
     };
     managed_host.validate().unwrap();
     SessionManager::new(ServerOptions {

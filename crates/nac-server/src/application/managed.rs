@@ -166,6 +166,115 @@ pub(crate) fn require_replacement_readiness(
     }
 }
 
+pub(crate) struct ManagedStartupPlan {
+    pub(crate) preflight: nac_core::store::ManagedStartupPreflight,
+    pub(crate) recovery_only: bool,
+    pub(crate) configured_identity: Option<(String, String)>,
+}
+
+/// Resolve the trusted controller-authored startup CAS before model/bootstrap
+/// or clone initialization. The expectation is nonsecret Deployment metadata:
+/// it authorizes only an exact durable A-to-embedded-B transition and carries
+/// no Kubernetes or controller credential into NAC.
+pub(crate) fn managed_startup_plan(
+    store_path: &Path,
+    managed: Option<&ManagedHostConfig>,
+    running: &nac_core::store::ManagedUpgradeTarget,
+) -> Result<ManagedStartupPlan> {
+    let Some(managed) =
+        managed.filter(|managed| managed.version == nac_managed::MANAGED_CONFIG_VERSION)
+    else {
+        return Ok(ManagedStartupPlan {
+            preflight: nac_core::store::ManagedStartupPreflight {
+                accepted_identity: None,
+                requires_accept: false,
+            },
+            recovery_only: false,
+            configured_identity: None,
+        });
+    };
+    let control = managed
+        .managed_control()?
+        .ok_or_else(|| anyhow::anyhow!("managed v2 control configuration is unavailable"))?;
+    let configured_identity = (
+        managed.logical_host_id.clone(),
+        control.host_incarnation_id.clone(),
+    );
+    let supersession = managed
+        .managed_upgrade_expectation
+        .as_ref()
+        .map(|expectation| {
+            let target = upgrade_target(&expectation.target);
+            if target != *running {
+                bail!("managed startup expectation does not match the embedded release");
+            }
+            Ok(nac_core::store::ManagedUpgradeSupersession {
+                previous_operation_id: expectation.previous_operation_id.clone(),
+                previous_target: upgrade_target(&expectation.previous_target),
+                operation: nac_core::store::ManagedOperationBinding {
+                    managed_host_id: configured_identity.0.clone(),
+                    host_incarnation_id: configured_identity.1.clone(),
+                    issuer: control.issuer.clone(),
+                    audience: format!(
+                        "urn:nac:managed-control:{}:{}",
+                        configured_identity.0, configured_identity.1
+                    ),
+                    authority_origin: control.issuer.clone(),
+                    operation_id: expectation.operation_id.clone(),
+                    target,
+                    actor: expectation.actor.clone(),
+                    beneficiary: expectation.beneficiary.clone(),
+                },
+            })
+        })
+        .transpose()?;
+    let configured = Some((
+        configured_identity.0.as_str(),
+        configured_identity.1.as_str(),
+    ));
+    match nac_core::store::preflight_managed_forward_start(
+        store_path,
+        running,
+        configured,
+        supersession.as_ref(),
+    ) {
+        Ok(preflight) => Ok(ManagedStartupPlan {
+            preflight,
+            recovery_only: false,
+            configured_identity: Some(configured_identity),
+        }),
+        Err(error) => {
+            if supersession.is_some() {
+                return Err(error.into());
+            }
+            let migration = nac_core::store::migration_status(store_path);
+            if migration.state == nac_core::store::StoreMigrationState::Current {
+                return Err(error.into());
+            }
+            Ok(ManagedStartupPlan {
+                preflight: nac_core::store::ManagedStartupPreflight {
+                    accepted_identity: None,
+                    requires_accept: false,
+                },
+                recovery_only: true,
+                configured_identity: Some(configured_identity),
+            })
+        }
+    }
+}
+
+fn upgrade_target(
+    target: &nac_managed::ManagedControlTarget,
+) -> nac_core::store::ManagedUpgradeTarget {
+    nac_core::store::ManagedUpgradeTarget {
+        release_id: target.release_id.clone(),
+        source_sha: target.source_sha.clone(),
+        product_version: target.product_version.clone(),
+        schema_version: target.schema_version,
+        minimum_schema_version: target.minimum_schema_version,
+    }
+}
+
 /// Core-facing interpretation of the nonsecret managed model contract.
 ///
 /// `nac-managed` deliberately owns only provider-neutral configuration. The
@@ -385,6 +494,7 @@ mod tests {
             managed_control_bind: None,
             managed_control_issuer: None,
             managed_control_jwks_file: None,
+            managed_upgrade_expectation: None,
         }
     }
 

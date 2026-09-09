@@ -101,7 +101,7 @@ managed_control_jwks_file = "/run/secrets/nac-control/jwks.json"
 ```
 
 Port 3211 serves only the compact-JWS-authenticated managed upgrade
-status/prepare/retry contract. Those routes are never registered on the
+status/prepare/retry/supersede contract. Those routes are never registered on the
 ordinary port 3210 router. The mounted controller-facing Service and
 NetworkPolicy are platform responsibilities; exposing 3211 through the
 user-facing ingress is unsupported. NAC reloads the public JWKS document per
@@ -134,7 +134,9 @@ arithmetic.
 The signed claims bind the controller issuer, host-and-incarnation audience,
 request action, logical host, host incarnation, operation ID, complete target
 (release/build ID, source revision, product version, schema, and minimum
-schema), actor, and beneficiary. Any body, action, key, issuer, audience, host,
+schema), actor, and beneficiary. Product versions use bounded SemVer 2 syntax;
+build metadata such as `1.2.3+linux.amd64` is valid and is ignored only when
+comparing forward precedence. Any body, action, key, issuer, audience, host,
 incarnation, operation, target, actor, or beneficiary substitution fails
 closed. The issuer is also retained as the durable origin authority for the
 operation, so future configuration cannot reinterpret an existing operation.
@@ -154,6 +156,48 @@ If any blocker exists, admission remains open and the response contains a
 structured blocker list. If none exists, NAC commits `maintenance` and returns
 `safe_to_stop`; it never auto-cancels work, forces shutdown, rolls back a
 target, or guesses that a peer is idle.
+
+If an accepted target cannot start, `supersede` performs an authenticated,
+forward-only A-to-B recovery while the private listener is still available.
+Its signed claims additionally bind A's exact operation ID and complete target.
+NAC requires the same host, incarnation, authority, actor, and beneficiary,
+rejects product or schema downgrades, atomically replaces the maintenance target,
+and retains A's operation as a superseded tombstone. It never reopens admission;
+only an exact B start can leave maintenance. Concurrent attempts from the same A
+have one durable winner, and exact lost-response retries return that winner's
+stored result.
+
+When A is suspended or cannot serve the private listener, the controller may
+place the same nonsecret compare-and-swap expectation in the version 2 managed
+configuration before starting B:
+
+```toml
+[managed_upgrade_expectation]
+previous_operation_id = "operation-failed-a"
+operation_id = "operation-corrected-b"
+actor = "user:owner"
+beneficiary = "tenant:host-owner"
+
+[managed_upgrade_expectation.previous_target]
+release_id = "release-a"
+source_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+product_version = "1.2.3+failed.1"
+schema_version = 25
+minimum_schema_version = 0
+
+[managed_upgrade_expectation.target]
+release_id = "release-b"
+source_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+product_version = "1.2.4+recovery.1"
+schema_version = 25
+minimum_schema_version = 0
+```
+
+This controller-authored field contains no credential. At startup NAC requires
+B to exactly match the embedded build identity and atomically checks the durable
+A binding before changing A to B. A missing, stale, substituted, or downgrade
+expectation fails before ordinary store migration. The expectation does not give
+NAC Kubernetes access and cannot select a deployment or execution backend.
 
 Authoritative blockers include active runs and manual compactions, traditional
 children and managed orchestrators, live terminal processes, pending remote

@@ -88,6 +88,17 @@ fn accepted_identity(binding: &ManagedOperationBinding) -> ManagedAcceptedIdenti
     }
 }
 
+fn supersession(
+    previous: &ManagedOperationBinding,
+    operation: ManagedOperationBinding,
+) -> ManagedUpgradeSupersession {
+    ManagedUpgradeSupersession {
+        previous_operation_id: previous.operation_id.clone(),
+        previous_target: previous.target.clone(),
+        operation,
+    }
+}
+
 fn expires_at() -> i64 {
     current_epoch_seconds().unwrap() + 60
 }
@@ -511,6 +522,7 @@ fn accepted_release_fences_old_process_and_same_schema_restart() {
             accepted.managed_host_id.as_str(),
             accepted.host_incarnation_id.as_str(),
         )),
+        None,
     )
     .unwrap();
     assert!(preflight.requires_accept);
@@ -521,7 +533,7 @@ fn accepted_release_fences_old_process_and_same_schema_restart() {
         Some((accepted.managed_host_id.as_str(), "wrong-incarnation")),
     ] {
         assert!(matches!(
-            preflight_managed_forward_start(&path, &accepted.target, configured),
+            preflight_managed_forward_start(&path, &accepted.target, configured, None),
             Err(ManagedMaintenanceError::MaintenanceConflict)
         ));
     }
@@ -540,6 +552,7 @@ fn accepted_release_fences_old_process_and_same_schema_restart() {
                 old.managed_host_id.as_str(),
                 old.host_incarnation_id.as_str()
             )),
+            None,
         ),
         Err(ManagedMaintenanceError::MaintenanceConflict)
     ));
@@ -581,6 +594,8 @@ fn attempt_capacity_is_enforced_after_age_pruning() {
     let binding_json = serde_json::to_string(&ManagedControlAttemptBinding {
         action: ManagedControlAttemptAction::Status,
         operation: &binding,
+        previous_operation_id: None,
+        previous_target: None,
     })
     .unwrap();
     let conn = Connection::open(&path).unwrap();
@@ -637,6 +652,7 @@ fn wrong_forward_binary_is_rejected_before_schema_migration() {
                 accepted.managed_host_id.as_str(),
                 accepted.host_incarnation_id.as_str(),
             )),
+            None,
         ),
         Err(ManagedMaintenanceError::MaintenanceConflict)
     ));
@@ -680,6 +696,7 @@ fn future_schema_preflight_preserves_main_wal_and_shm_exactly() {
                 &path,
                 &target('f'),
                 Some(("host-123", "incarnation-456")),
+                None,
             ),
             Err(ManagedMaintenanceError::IncompatibleTarget)
         ));
@@ -764,4 +781,317 @@ fn running_child_and_managed_orchestrator_are_distinct_blockers() {
         .iter()
         .any(|blocker| blocker.kind == ManagedBlockerKind::ManagedOrchestrator));
     cleanup(&path);
+}
+
+#[test]
+fn live_supersession_is_durable_replay_safe_and_fences_the_failed_target() {
+    let path = path("live-supersession");
+    initialize(&path).unwrap();
+    insert_test_session(&path, "retained-session");
+
+    let mut serving = binding("operation-serving", 'a');
+    serving.target.product_version = "0.2.0".to_string();
+    prepare_managed_upgrade(
+        &path,
+        "jti-serving",
+        &serving,
+        ManagedControlAttemptAction::Prepare,
+        expires_at(),
+        Vec::new(),
+    )
+    .unwrap();
+    let serving_identity = accepted_identity(&serving);
+    assert!(accept_managed_forward_start(&path, &serving_identity).unwrap());
+
+    let mut failed = binding("operation-failed-a", 'b');
+    failed.target.product_version = "0.3.0+attempt.1".to_string();
+    prepare_managed_upgrade_for_identity(
+        &path,
+        "jti-failed-a",
+        &failed,
+        ManagedControlAttemptAction::Prepare,
+        expires_at(),
+        Vec::new(),
+        &serving_identity,
+    )
+    .unwrap();
+
+    let mut corrected = binding("operation-corrected-b", 'c');
+    corrected.target.product_version = "0.3.1+recovery.2".to_string();
+    let request = supersession(&failed, corrected.clone());
+    assert!(matches!(
+        preflight_managed_forward_start(
+            &path,
+            &corrected.target,
+            Some(("host-123", "incarnation-456")),
+            None,
+        ),
+        Err(ManagedMaintenanceError::MaintenanceConflict)
+    ));
+
+    let first = supersede_managed_upgrade_for_identity(
+        &path,
+        "jti-supersede",
+        &request,
+        expires_at(),
+        &serving_identity,
+    )
+    .unwrap();
+    drop(Connection::open(&path).unwrap());
+    let replay = supersede_managed_upgrade_for_identity(
+        &path,
+        "jti-supersede",
+        &request,
+        expires_at(),
+        &serving_identity,
+    )
+    .unwrap();
+    assert_eq!(first, replay);
+    assert!(crate::sessions::session_exists(&path, "retained-session").unwrap());
+
+    let snapshot = managed_maintenance_snapshot(&path).unwrap();
+    assert_eq!(snapshot.state, ManagedMaintenanceState::Maintenance);
+    assert_eq!(
+        snapshot.operation_id.as_deref(),
+        Some("operation-corrected-b")
+    );
+    assert_eq!(snapshot.target.as_ref(), Some(&corrected.target));
+    assert!(try_admit_managed_work_for_identity(&path, &serving_identity).is_err());
+    assert!(matches!(
+        preflight_managed_forward_start(
+            &path,
+            &failed.target,
+            Some(("host-123", "incarnation-456")),
+            None,
+        ),
+        Err(ManagedMaintenanceError::MaintenanceConflict)
+    ));
+
+    let preflight = preflight_managed_forward_start(
+        &path,
+        &corrected.target,
+        Some(("host-123", "incarnation-456")),
+        None,
+    )
+    .unwrap();
+    let corrected_identity = preflight.accepted_identity.unwrap();
+    assert!(preflight.requires_accept);
+    assert!(accept_managed_forward_start(&path, &corrected_identity).unwrap());
+    assert!(try_admit_managed_work_for_identity(&path, &serving_identity).is_err());
+
+    let conn = Connection::open(&path).unwrap();
+    let old_outcome: String = conn
+        .query_row(
+            "SELECT latest_outcome_json FROM managed_control_operations WHERE operation_id = ?1",
+            [&failed.operation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(old_outcome.contains("superseded"));
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM managed_control_operations WHERE operation_id IN (?1, ?2)",
+            params![failed.operation_id, corrected.operation_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        2
+    );
+    cleanup(&path);
+}
+
+#[test]
+fn supersession_rejects_wrong_prior_and_forward_downgrades_without_leaving_maintenance() {
+    let path = path("supersession-downgrades");
+    initialize(&path).unwrap();
+    let mut prior = binding("operation-prior", 'd');
+    prior.target.product_version = "2.4.0+failed.1".to_string();
+    prepare_managed_upgrade(
+        &path,
+        "jti-prior",
+        &prior,
+        ManagedControlAttemptAction::Prepare,
+        expires_at(),
+        Vec::new(),
+    )
+    .unwrap();
+
+    let mut next = binding("operation-next", 'e');
+    next.target.product_version = "2.3.9".to_string();
+    let mut request = supersession(&prior, next);
+    let expected = ManagedAcceptedIdentity {
+        managed_host_id: prior.managed_host_id.clone(),
+        host_incarnation_id: prior.host_incarnation_id.clone(),
+        operation_id: String::new(),
+        target: target('z'),
+    };
+
+    // Startup recovery exercises the same monotonic transition without requiring
+    // a live process identity from an earlier accepted release.
+    assert!(matches!(
+        preflight_managed_forward_start(
+            &path,
+            &request.operation.target,
+            Some(("host-123", "incarnation-456")),
+            Some(&request),
+        ),
+        Err(ManagedMaintenanceError::IncompatibleTarget)
+    ));
+    request.operation.target.product_version = "2.4.1".to_string();
+    request.operation.target.schema_version = prior.target.schema_version - 1;
+    assert!(matches!(
+        preflight_managed_forward_start(
+            &path,
+            &request.operation.target,
+            Some(("host-123", "incarnation-456")),
+            Some(&request),
+        ),
+        Err(ManagedMaintenanceError::IncompatibleTarget)
+    ));
+    request.operation.target.schema_version = prior.target.schema_version;
+    request.previous_target.source_sha = "f".repeat(40);
+    assert!(matches!(
+        preflight_managed_forward_start(
+            &path,
+            &request.operation.target,
+            Some(("host-123", "incarnation-456")),
+            Some(&request),
+        ),
+        Err(ManagedMaintenanceError::OperationBindingConflict)
+    ));
+    let snapshot = managed_maintenance_snapshot(&path).unwrap();
+    assert_eq!(snapshot.state, ManagedMaintenanceState::Maintenance);
+    assert_eq!(
+        snapshot.operation_id.as_deref(),
+        Some(prior.operation_id.as_str())
+    );
+    assert!(try_admit_managed_work_for_identity(&path, &expected).is_err());
+    cleanup(&path);
+}
+
+#[test]
+fn concurrent_supersessions_from_one_prior_have_one_winner() {
+    let path = path("concurrent-supersession");
+    initialize(&path).unwrap();
+    let prior = binding("operation-race-a", 'g');
+    prepare_managed_upgrade(
+        &path,
+        "jti-race-a",
+        &prior,
+        ManagedControlAttemptAction::Prepare,
+        expires_at(),
+        Vec::new(),
+    )
+    .unwrap();
+    let mut next_b = binding("operation-race-b", 'h');
+    next_b.target.product_version = "0.2.1".to_string();
+    let mut next_c = binding("operation-race-c", 'i');
+    next_c.target.product_version = "0.2.2".to_string();
+    let requests = [supersession(&prior, next_b), supersession(&prior, next_c)];
+    let barrier = Arc::new(Barrier::new(3));
+    let mut workers = Vec::new();
+    for request in requests {
+        let path = path.clone();
+        let barrier = Arc::clone(&barrier);
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            preflight_managed_forward_start(
+                &path,
+                &request.operation.target,
+                Some(("host-123", "incarnation-456")),
+                Some(&request),
+            )
+        }));
+    }
+    barrier.wait();
+    let outcomes = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, Err(ManagedMaintenanceError::MaintenanceConflict)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        managed_maintenance_snapshot(&path).unwrap().state,
+        ManagedMaintenanceState::Maintenance
+    );
+    cleanup(&path);
+}
+
+#[test]
+fn startup_supersession_recovers_both_suspended_serving_and_failed_maintenance() {
+    for failed_in_maintenance in [false, true] {
+        let path = path(&format!("startup-supersession-{failed_in_maintenance}"));
+        initialize(&path).unwrap();
+        let mut serving = binding("operation-startup-a", 'j');
+        serving.target.product_version = "1.0.0".to_string();
+        prepare_managed_upgrade(
+            &path,
+            "jti-startup-a",
+            &serving,
+            ManagedControlAttemptAction::Prepare,
+            expires_at(),
+            Vec::new(),
+        )
+        .unwrap();
+        let serving_identity = accepted_identity(&serving);
+        assert!(accept_managed_forward_start(&path, &serving_identity).unwrap());
+
+        let previous = if failed_in_maintenance {
+            let mut failed = binding("operation-startup-failed", 'k');
+            failed.target.product_version = "1.1.0".to_string();
+            prepare_managed_upgrade_for_identity(
+                &path,
+                "jti-startup-failed",
+                &failed,
+                ManagedControlAttemptAction::Prepare,
+                expires_at(),
+                Vec::new(),
+                &serving_identity,
+            )
+            .unwrap();
+            failed
+        } else {
+            serving
+        };
+        let mut corrected = binding("operation-startup-b", 'l');
+        corrected.target.product_version = "1.2.0+recovery.1".to_string();
+        let request = supersession(&previous, corrected.clone());
+
+        assert!(matches!(
+            preflight_managed_forward_start(
+                &path,
+                &corrected.target,
+                Some(("host-123", "incarnation-456")),
+                None,
+            ),
+            Err(ManagedMaintenanceError::MaintenanceConflict)
+        ));
+        let first = preflight_managed_forward_start(
+            &path,
+            &corrected.target,
+            Some(("host-123", "incarnation-456")),
+            Some(&request),
+        )
+        .unwrap();
+        assert!(first.requires_accept);
+        let corrected_identity = first.accepted_identity.unwrap();
+        let replay = preflight_managed_forward_start(
+            &path,
+            &corrected.target,
+            Some(("host-123", "incarnation-456")),
+            Some(&request),
+        )
+        .unwrap();
+        assert_eq!(replay.accepted_identity.as_ref(), Some(&corrected_identity));
+        assert!(replay.requires_accept);
+        assert!(accept_managed_forward_start(&path, &corrected_identity).unwrap());
+        assert!(try_admit_managed_work_for_identity(&path, &serving_identity).is_err());
+        cleanup(&path);
+    }
 }

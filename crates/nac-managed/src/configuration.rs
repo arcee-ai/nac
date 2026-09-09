@@ -66,6 +66,21 @@ pub struct ManagedHostConfig {
     pub managed_control_issuer: Option<String>,
     #[serde(default)]
     pub managed_control_jwks_file: Option<PathBuf>,
+    #[serde(default)]
+    pub managed_upgrade_expectation: Option<ManagedUpgradeExpectation>,
+}
+
+/// Controller-authored, nonsecret desired-release CAS used when a suspended or
+/// failed host has no old process available to serve the private control API.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedUpgradeExpectation {
+    pub previous_operation_id: String,
+    pub previous_target: crate::managed_control_assertion::ManagedControlTarget,
+    pub operation_id: String,
+    pub target: crate::managed_control_assertion::ManagedControlTarget,
+    pub actor: String,
+    pub beneficiary: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,6 +151,7 @@ impl ManagedHostConfig {
                 || self.managed_control_bind.is_some()
                 || self.managed_control_issuer.is_some()
                 || self.managed_control_jwks_file.is_some()
+                || self.managed_upgrade_expectation.is_some()
             {
                 bail!("managed control fields require managed configuration version 2");
             }
@@ -145,6 +161,9 @@ impl ManagedHostConfig {
                 control.is_some(),
                 "version 2 validation constructs control config"
             );
+            if let Some(expectation) = &self.managed_upgrade_expectation {
+                validate_upgrade_expectation(expectation)?;
+            }
         }
         Ok(())
     }
@@ -211,6 +230,61 @@ impl ManagedHostConfig {
         }
         Ok(value)
     }
+}
+
+fn validate_upgrade_expectation(expectation: &ManagedUpgradeExpectation) -> Result<()> {
+    validate_identifier(
+        "managed_upgrade_expectation.previous_operation_id",
+        &expectation.previous_operation_id,
+        128,
+    )?;
+    validate_identifier(
+        "managed_upgrade_expectation.operation_id",
+        &expectation.operation_id,
+        128,
+    )?;
+    if expectation.previous_operation_id == expectation.operation_id {
+        bail!("managed upgrade expectation must change operation_id");
+    }
+    validate_control_target("previous_target", &expectation.previous_target)?;
+    validate_control_target("target", &expectation.target)?;
+    validate_nonblank("managed_upgrade_expectation.actor", &expectation.actor)?;
+    validate_nonblank(
+        "managed_upgrade_expectation.beneficiary",
+        &expectation.beneficiary,
+    )?;
+    if expectation.actor.len() > 256
+        || expectation.beneficiary.len() > 256
+        || expectation.actor.chars().any(char::is_control)
+        || expectation.beneficiary.chars().any(char::is_control)
+    {
+        bail!("managed upgrade expectation principals are invalid");
+    }
+    Ok(())
+}
+
+fn validate_control_target(
+    field: &str,
+    target: &crate::managed_control_assertion::ManagedControlTarget,
+) -> Result<()> {
+    validate_identifier(
+        &format!("managed_upgrade_expectation.{field}.release_id"),
+        &target.release_id,
+        256,
+    )?;
+    if !nac_contracts::valid_product_version(&target.product_version)
+        || !matches!(target.source_sha.len(), 40 | 64)
+        || !target
+            .source_sha
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        || target.schema_version < 0
+        || target.minimum_schema_version < 0
+        || target.minimum_schema_version > target.schema_version
+    {
+        bail!("managed upgrade expectation {field} is invalid");
+    }
+    Ok(())
 }
 
 fn managed_home_dir() -> Option<PathBuf> {

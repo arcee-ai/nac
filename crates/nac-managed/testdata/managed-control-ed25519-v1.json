@@ -24,7 +24,7 @@
         "use": "sig",
         "alg": "EdDSA",
         "kid": "test-key",
-        "x": "11qYAYKxCrfVS_7TyWQHOu4XLz2qYjJa8CGlj3B1EaA"
+        "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
       }
     ]
   },

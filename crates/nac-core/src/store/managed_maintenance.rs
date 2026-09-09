@@ -62,18 +62,30 @@ pub struct ManagedOperationBinding {
     pub beneficiary: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedUpgradeSupersession {
+    pub previous_operation_id: String,
+    pub previous_target: ManagedUpgradeTarget,
+    pub operation: ManagedOperationBinding,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ManagedControlAttemptAction {
     Status,
     Prepare,
     Retry,
+    Supersede,
 }
 
 #[derive(Serialize)]
 struct ManagedControlAttemptBinding<'a> {
     action: ManagedControlAttemptAction,
     operation: &'a ManagedOperationBinding,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_operation_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_target: Option<&'a ManagedUpgradeTarget>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -126,6 +138,15 @@ pub enum ManagedPrepareOutcome {
         blockers: Vec<ManagedUpgradeBlocker>,
     },
     SafeToStop {
+        snapshot: ManagedMaintenanceSnapshot,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum ManagedSupersedeOutcome {
+    Superseded {
         snapshot: ManagedMaintenanceSnapshot,
     },
 }
@@ -264,6 +285,7 @@ pub fn preflight_managed_forward_start(
     path: &Path,
     running: &ManagedUpgradeTarget,
     configured_host: Option<(&str, &str)>,
+    startup_supersession: Option<&ManagedUpgradeSupersession>,
 ) -> std::result::Result<ManagedStartupPreflight, ManagedMaintenanceError> {
     let empty = || ManagedStartupPreflight {
         accepted_identity: None,
@@ -297,6 +319,9 @@ pub fn preflight_managed_forward_start(
         )
         .map_err(anyhow::Error::new)?;
     if !has_ledger {
+        if startup_supersession.is_some() {
+            return Err(ManagedMaintenanceError::MaintenanceConflict);
+        }
         return Ok(empty());
     }
     let has_accepted_identity: bool = conn
@@ -332,11 +357,29 @@ pub fn preflight_managed_forward_start(
     };
     if state == "serving" {
         let Some(json) = accepted_identity_json else {
+            if startup_supersession.is_some() {
+                return Err(ManagedMaintenanceError::MaintenanceConflict);
+            }
             return Ok(empty());
         };
         let accepted: ManagedAcceptedIdentity =
             serde_json::from_str(&json).map_err(anyhow::Error::new)?;
-        validate_running_identity(&accepted, running, configured_host)?;
+        if validate_running_identity(&accepted, running, configured_host).is_err() {
+            drop(conn);
+            let supersession =
+                startup_supersession.ok_or(ManagedMaintenanceError::MaintenanceConflict)?;
+            let accepted = supersede_managed_upgrade_at_startup(
+                path,
+                supersession,
+                store_version,
+                configured_host,
+            )?;
+            validate_running_identity(&accepted, running, configured_host)?;
+            return Ok(ManagedStartupPreflight {
+                accepted_identity: Some(accepted),
+                requires_accept: true,
+            });
+        }
         return Ok(ManagedStartupPreflight {
             accepted_identity: Some(accepted),
             requires_accept: false,
@@ -373,7 +416,22 @@ pub fn preflight_managed_forward_start(
         operation_id: binding.operation_id,
         target: binding.target,
     };
-    validate_running_identity(&accepted, running, configured_host)?;
+    if validate_running_identity(&accepted, running, configured_host).is_err() {
+        drop(conn);
+        let supersession =
+            startup_supersession.ok_or(ManagedMaintenanceError::MaintenanceConflict)?;
+        let accepted = supersede_managed_upgrade_at_startup(
+            path,
+            supersession,
+            store_version,
+            configured_host,
+        )?;
+        validate_running_identity(&accepted, running, configured_host)?;
+        return Ok(ManagedStartupPreflight {
+            accepted_identity: Some(accepted),
+            requires_accept: true,
+        });
+    }
     Ok(ManagedStartupPreflight {
         accepted_identity: Some(accepted),
         requires_accept: true,
@@ -557,6 +615,8 @@ pub fn record_managed_status(
     let attempt_binding_json = serde_json::to_string(&ManagedControlAttemptBinding {
         action: ManagedControlAttemptAction::Status,
         operation: binding,
+        previous_operation_id: None,
+        previous_target: None,
     })
     .map_err(anyhow::Error::new)?;
     if let Some(outcome) = burn_control_attempt(
@@ -668,6 +728,8 @@ fn prepare_managed_upgrade_inner(
     let attempt_binding_json = serde_json::to_string(&ManagedControlAttemptBinding {
         action,
         operation: binding,
+        previous_operation_id: None,
+        previous_target: None,
     })
     .map_err(anyhow::Error::new)?;
     if let Some(outcome) = burn_control_attempt(
@@ -779,6 +841,288 @@ fn prepare_managed_upgrade_inner(
     Ok(outcome)
 }
 
+/// Authenticated recovery transition from a failed accepted target to an exact
+/// corrected/newer target. This never leaves maintenance or changes the last
+/// successfully accepted serving identity.
+pub fn supersede_managed_upgrade_for_identity(
+    path: &Path,
+    jti: &str,
+    supersession: &ManagedUpgradeSupersession,
+    expires_at: i64,
+    expected_identity: &ManagedAcceptedIdentity,
+) -> std::result::Result<ManagedSupersedeOutcome, ManagedMaintenanceError> {
+    let _attempt_lease = acquire_control_attempt_lease(path, jti)?;
+    let binding = &supersession.operation;
+    let operation_binding_json = serde_json::to_string(binding).map_err(anyhow::Error::new)?;
+    let attempt_binding_json = serde_json::to_string(&ManagedControlAttemptBinding {
+        action: ManagedControlAttemptAction::Supersede,
+        operation: binding,
+        previous_operation_id: Some(&supersession.previous_operation_id),
+        previous_target: Some(&supersession.previous_target),
+    })
+    .map_err(anyhow::Error::new)?;
+    if let Some(outcome) = burn_control_attempt(
+        path,
+        jti,
+        binding,
+        &operation_binding_json,
+        &attempt_binding_json,
+        expires_at,
+        Some(expected_identity),
+    )? {
+        return serde_json::from_str(&outcome)
+            .map_err(anyhow::Error::new)
+            .map_err(ManagedMaintenanceError::Store);
+    }
+    let _host_maintenance = crate::sessions::HostMaintenanceLease::acquire(path)
+        .map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))?;
+    let mut conn = open_runtime_connection(path).map_err(ManagedMaintenanceError::Store)?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(anyhow::Error::new)?;
+    if let Some(outcome) = attempt_outcome(&transaction, jti, binding, &attempt_binding_json)? {
+        return serde_json::from_str(&outcome)
+            .map_err(anyhow::Error::new)
+            .map_err(ManagedMaintenanceError::Store);
+    }
+    let snapshot = apply_supersession(&transaction, supersession, schema_version(), false)?;
+    let outcome = ManagedSupersedeOutcome::Superseded { snapshot };
+    let outcome_json = serde_json::to_string(&outcome).map_err(anyhow::Error::new)?;
+    let now = now_utc();
+    persist_serialized_outcome(&transaction, jti, binding, &outcome_json, &now)?;
+    persist_superseded_tombstone(
+        &transaction,
+        &supersession.previous_operation_id,
+        &outcome_json,
+        &now,
+    )?;
+    transaction.commit().map_err(anyhow::Error::new)?;
+    conn.execute_batch("PRAGMA wal_checkpoint(FULL);")
+        .map_err(anyhow::Error::new)?;
+    Ok(outcome)
+}
+
+fn supersede_managed_upgrade_at_startup(
+    path: &Path,
+    supersession: &ManagedUpgradeSupersession,
+    store_schema_version: i64,
+    configured_host: Option<(&str, &str)>,
+) -> std::result::Result<ManagedAcceptedIdentity, ManagedMaintenanceError> {
+    let Some((managed_host_id, host_incarnation_id)) = configured_host else {
+        return Err(ManagedMaintenanceError::MaintenanceConflict);
+    };
+    if supersession.operation.managed_host_id != managed_host_id
+        || supersession.operation.host_incarnation_id != host_incarnation_id
+    {
+        return Err(ManagedMaintenanceError::MaintenanceConflict);
+    }
+    let _host_maintenance = crate::sessions::HostMaintenanceLease::acquire(path)
+        .map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))?;
+    let mut conn = Connection::open(path).map_err(anyhow::Error::new)?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(anyhow::Error::new)?;
+    let snapshot = apply_supersession(&transaction, supersession, store_schema_version, true)?;
+    let outcome = ManagedSupersedeOutcome::Superseded { snapshot };
+    let outcome_json = serde_json::to_string(&outcome).map_err(anyhow::Error::new)?;
+    let now = now_utc();
+    persist_operation_outcome(
+        &transaction,
+        &supersession.operation.operation_id,
+        &outcome_json,
+        &now,
+    )?;
+    persist_superseded_tombstone(
+        &transaction,
+        &supersession.previous_operation_id,
+        &outcome_json,
+        &now,
+    )?;
+    transaction.commit().map_err(anyhow::Error::new)?;
+    conn.execute_batch("PRAGMA wal_checkpoint(FULL);")
+        .map_err(anyhow::Error::new)?;
+    Ok(ManagedAcceptedIdentity {
+        managed_host_id: supersession.operation.managed_host_id.clone(),
+        host_incarnation_id: supersession.operation.host_incarnation_id.clone(),
+        operation_id: supersession.operation.operation_id.clone(),
+        target: supersession.operation.target.clone(),
+    })
+}
+
+fn apply_supersession(
+    transaction: &rusqlite::Transaction<'_>,
+    supersession: &ManagedUpgradeSupersession,
+    store_schema_version: i64,
+    allow_serving_prior: bool,
+) -> std::result::Result<ManagedMaintenanceSnapshot, ManagedMaintenanceError> {
+    validate_forward_supersession(supersession, store_schema_version)?;
+    let previous_binding_json = transaction
+        .query_row(
+            "SELECT binding_json FROM managed_control_operations WHERE operation_id = ?1",
+            params![supersession.previous_operation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(anyhow::Error::new)?
+        .ok_or(ManagedMaintenanceError::MaintenanceConflict)?;
+    let previous_binding: ManagedOperationBinding =
+        serde_json::from_str(&previous_binding_json).map_err(anyhow::Error::new)?;
+    if previous_binding.operation_id != supersession.previous_operation_id
+        || previous_binding.target != supersession.previous_target
+        || !same_operation_authority(&previous_binding, &supersession.operation)
+    {
+        return Err(ManagedMaintenanceError::OperationBindingConflict);
+    }
+    ensure_operation_binding(transaction, &supersession.operation)?;
+
+    let current = snapshot_with_connection(transaction, Vec::new())
+        .map_err(ManagedMaintenanceError::Store)?;
+    let exact_previous = match current.state {
+        ManagedMaintenanceState::Maintenance => {
+            current.operation_id.as_deref() == Some(supersession.previous_operation_id.as_str())
+                && current.target.as_ref() == Some(&supersession.previous_target)
+        }
+        ManagedMaintenanceState::Serving if allow_serving_prior => {
+            current.accepted_identity.as_ref().is_some_and(|accepted| {
+                accepted.managed_host_id == previous_binding.managed_host_id
+                    && accepted.host_incarnation_id == previous_binding.host_incarnation_id
+                    && accepted.operation_id == supersession.previous_operation_id
+                    && accepted.target == supersession.previous_target
+            })
+        }
+        ManagedMaintenanceState::Serving => false,
+    };
+    if !exact_previous {
+        return Err(ManagedMaintenanceError::MaintenanceConflict);
+    }
+    let target_json =
+        serde_json::to_string(&supersession.operation.target).map_err(anyhow::Error::new)?;
+    let now = now_utc();
+    let changed = transaction
+        .execute(
+            "UPDATE managed_host_maintenance
+             SET state = 'maintenance', operation_id = ?1, target_json = ?2,
+                 prepared_at = ?3, version = version + 1
+             WHERE singleton = 1 AND version = ?4",
+            params![
+                supersession.operation.operation_id,
+                target_json,
+                now,
+                current.version
+            ],
+        )
+        .map_err(anyhow::Error::new)?;
+    if changed != 1 {
+        return Err(ManagedMaintenanceError::MaintenanceConflict);
+    }
+    snapshot_with_connection(transaction, Vec::new()).map_err(ManagedMaintenanceError::Store)
+}
+
+fn validate_forward_supersession(
+    supersession: &ManagedUpgradeSupersession,
+    store_schema_version: i64,
+) -> std::result::Result<(), ManagedMaintenanceError> {
+    let previous = &supersession.previous_target;
+    let next = &supersession.operation.target;
+    if supersession.previous_operation_id == supersession.operation.operation_id
+        || previous == next
+        || next.schema_version < previous.schema_version
+        || next.schema_version < store_schema_version
+        || next.minimum_schema_version > store_schema_version
+        || next.minimum_schema_version > next.schema_version
+        || nac_contracts::compare_product_versions(&next.product_version, &previous.product_version)
+            .is_none_or(|ordering| ordering == std::cmp::Ordering::Less)
+    {
+        return Err(ManagedMaintenanceError::IncompatibleTarget);
+    }
+    Ok(())
+}
+
+fn same_operation_authority(
+    previous: &ManagedOperationBinding,
+    next: &ManagedOperationBinding,
+) -> bool {
+    previous.managed_host_id == next.managed_host_id
+        && previous.host_incarnation_id == next.host_incarnation_id
+        && previous.issuer == next.issuer
+        && previous.audience == next.audience
+        && previous.authority_origin == next.authority_origin
+        && previous.actor == next.actor
+        && previous.beneficiary == next.beneficiary
+}
+
+fn ensure_operation_binding(
+    transaction: &rusqlite::Transaction<'_>,
+    binding: &ManagedOperationBinding,
+) -> std::result::Result<(), ManagedMaintenanceError> {
+    let binding_json = serde_json::to_string(binding).map_err(anyhow::Error::new)?;
+    match transaction
+        .query_row(
+            "SELECT binding_json FROM managed_control_operations WHERE operation_id = ?1",
+            params![binding.operation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(anyhow::Error::new)?
+    {
+        Some(stored) if stored != binding_json => {
+            Err(ManagedMaintenanceError::OperationBindingConflict)
+        }
+        Some(_) => Ok(()),
+        None => {
+            let operation_count = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM managed_control_operations",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(anyhow::Error::new)?;
+            if !operation_capacity_available(operation_count) {
+                return Err(ManagedMaintenanceError::OperationCapacity);
+            }
+            let now = now_utc();
+            transaction
+                .execute(
+                    "INSERT INTO managed_control_operations
+                         (operation_id, binding_json, latest_outcome_json, created_at, updated_at)
+                     VALUES (?1, ?2, '{}', ?3, ?3)",
+                    params![binding.operation_id, binding_json, now],
+                )
+                .map_err(anyhow::Error::new)?;
+            Ok(())
+        }
+    }
+}
+
+fn persist_superseded_tombstone(
+    transaction: &rusqlite::Transaction<'_>,
+    operation_id: &str,
+    outcome_json: &str,
+    now: &str,
+) -> std::result::Result<(), ManagedMaintenanceError> {
+    persist_operation_outcome(transaction, operation_id, outcome_json, now)
+}
+
+fn persist_operation_outcome(
+    transaction: &rusqlite::Transaction<'_>,
+    operation_id: &str,
+    outcome_json: &str,
+    now: &str,
+) -> std::result::Result<(), ManagedMaintenanceError> {
+    let changed = transaction
+        .execute(
+            "UPDATE managed_control_operations
+             SET latest_outcome_json = ?2, updated_at = ?3, version = version + 1
+             WHERE operation_id = ?1",
+            params![operation_id, outcome_json, now],
+        )
+        .map_err(anyhow::Error::new)?;
+    if changed != 1 {
+        return Err(ManagedMaintenanceError::MaintenanceConflict);
+    }
+    Ok(())
+}
+
 fn current_epoch_seconds() -> std::result::Result<i64, ManagedMaintenanceError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -865,6 +1209,16 @@ fn persist_outcome(
     now: &str,
 ) -> std::result::Result<(), ManagedMaintenanceError> {
     let json = serde_json::to_string(outcome).map_err(anyhow::Error::new)?;
+    persist_serialized_outcome(transaction, jti, binding, &json, now)
+}
+
+fn persist_serialized_outcome(
+    transaction: &rusqlite::Transaction<'_>,
+    jti: &str,
+    binding: &ManagedOperationBinding,
+    json: &str,
+    now: &str,
+) -> std::result::Result<(), ManagedMaintenanceError> {
     transaction
         .execute(
             "UPDATE managed_control_attempts SET outcome_json = ?2 WHERE jti = ?1",
