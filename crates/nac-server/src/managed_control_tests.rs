@@ -50,10 +50,12 @@ impl Fixture {
             "nac-server-managed-control-{}",
             uuid::Uuid::new_v4()
         ));
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
         let repository_root = root.join("repositories");
         let state_root = root.join("state");
         let home_root = root.join("home");
-        for path in [&root, &repository_root, &state_root, &home_root] {
+        for path in [&repository_root, &state_root, &home_root] {
             std::fs::create_dir_all(path).unwrap();
         }
         let environment = crate::tests::ScopedModelEnv::isolated(&state_root, None);
@@ -80,6 +82,7 @@ impl Fixture {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&credential, std::fs::Permissions::from_mode(0o600)).unwrap();
             std::fs::set_permissions(&jwks, std::fs::Permissions::from_mode(0o444)).unwrap();
             std::fs::set_permissions(&key_mount, std::fs::Permissions::from_mode(0o555)).unwrap();
         }
@@ -182,6 +185,61 @@ impl Fixture {
             URL_SAFE_NO_PAD.encode(key.sign(signed.as_bytes()).as_ref())
         )
     }
+
+    fn running_request(&self) -> ManagedControlRequest {
+        let mut request = self.request();
+        let running = crate::managed_running_target().unwrap();
+        request.target.release_id = running.release_id;
+        request.target.source_sha = running.source_sha;
+        request.target.product_version = running.product_version;
+        request.target.schema_version = running.schema_version;
+        request.target.minimum_schema_version = running.minimum_schema_version;
+        request
+    }
+
+    fn prepare_running_replacement(&self, jti: &str) -> SessionManager {
+        let request = self.running_request();
+        let binding = operation_binding(&self.manager, &request).unwrap();
+        assert!(matches!(
+            nac_core::store::prepare_managed_upgrade(
+                &self.manager.inner.store_path,
+                jti,
+                &binding,
+                nac_core::store::ManagedControlAttemptAction::Prepare,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64
+                    + 60,
+                Vec::new(),
+            )
+            .unwrap(),
+            nac_core::store::ManagedPrepareOutcome::SafeToStop { .. }
+        ));
+        SessionManager::new(crate::ServerOptions {
+            root_cwd: self.root.clone(),
+            store_path: Some(self.manager.inner.store_path.clone()),
+            worker_executable: None,
+            managed_host: Some(self.manager.managed_host().unwrap().clone()),
+        })
+        .unwrap()
+    }
+
+    #[cfg(unix)]
+    fn readiness_policy(
+        &self,
+        forced_failure: Option<&'static str>,
+    ) -> crate::application::managed::ManagedReadinessPolicy {
+        use std::os::unix::fs::MetadataExt;
+
+        let metadata = std::fs::metadata(&self.root).unwrap();
+        crate::application::managed::ManagedReadinessPolicy::for_test(
+            metadata.uid(),
+            metadata.gid(),
+            &[],
+            forced_failure,
+        )
+    }
 }
 
 impl Drop for Fixture {
@@ -274,6 +332,22 @@ async fn call(
     let status = response.status();
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     (status, String::from_utf8(body.to_vec()).unwrap())
+}
+
+async fn raw_get(address: std::net::SocketAddr, path: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    stream
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    String::from_utf8(response).unwrap()
 }
 
 #[tokio::test]
@@ -524,22 +598,6 @@ async fn real_listeners_enforce_private_block_settle_retry_and_public_maintenanc
         String::from_utf8(response).unwrap()
     }
 
-    async fn raw_get(address: std::net::SocketAddr, path: &str) -> String {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
-        stream
-            .write_all(
-                format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n")
-                    .as_bytes(),
-            )
-            .await
-            .unwrap();
-        let mut response = Vec::new();
-        stream.read_to_end(&mut response).await.unwrap();
-        String::from_utf8(response).unwrap()
-    }
-
     let public_response =
         raw_call(public_address, "/v1/upgrade/status", &request, &assertion).await;
     assert!(public_response.starts_with("HTTP/1.1 404"));
@@ -629,6 +687,78 @@ fn wrong_candidate_is_rejected_before_any_managed_state_mutation() {
 }
 
 #[tokio::test]
+async fn managed_v2_future_and_invalid_stores_serve_immutable_recovery_diagnostics() {
+    for (case, expected_failure) in [
+        ("future", "future-schema"),
+        ("invalid", "store-unavailable"),
+    ] {
+        let fixture = Fixture::new();
+        if case == "future" {
+            nac_core::test_support::store::set_test_schema_version(
+                &fixture.manager.inner.store_path,
+                nac_core::store::schema_version() + 1,
+            )
+            .unwrap();
+        } else {
+            std::fs::write(&fixture.manager.inner.store_path, b"not a SQLite database").unwrap();
+        }
+        let before = std::fs::read(&fixture.manager.inner.store_path).unwrap();
+        let recovery = SessionManager::new(crate::ServerOptions {
+            root_cwd: fixture.root.clone(),
+            store_path: Some(fixture.manager.inner.store_path.clone()),
+            worker_executable: None,
+            managed_host: Some(fixture.manager.managed_host().unwrap().clone()),
+        })
+        .expect("managed v2 store failure must construct recovery-only state");
+        assert!(recovery.is_recovery_only());
+
+        let (listening_tx, listening_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            crate::serve_with_policy(
+                "127.0.0.1:0".parse().unwrap(),
+                crate::BindPolicy::LoopbackOnly,
+                recovery,
+                move |address| {
+                    let _ = listening_tx.send(address);
+                },
+            )
+            .await
+        });
+        let address = tokio::time::timeout(std::time::Duration::from_secs(2), listening_rx)
+            .await
+            .expect("managed v2 recovery server bind timed out")
+            .expect("managed v2 recovery server stopped before binding");
+
+        let health = raw_get(address, "/healthz").await;
+        assert!(health.starts_with("HTTP/1.1 200"), "{health}");
+        let ready = raw_get(address, "/readyz").await;
+        assert!(ready.starts_with("HTTP/1.1 503"), "{ready}");
+        assert!(ready.contains(expected_failure), "{ready}");
+        assert!(
+            ready.contains("\"maintenance_state\":\"recovery-only\""),
+            "{ready}"
+        );
+        let status = raw_get(address, "/managed/status").await;
+        assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+        assert!(status.contains(expected_failure), "{status}");
+        assert!(
+            status.contains("\"maintenance_state\":\"recovery-only\""),
+            "{status}"
+        );
+        let sessions = raw_get(address, "/sessions").await;
+        assert!(sessions.starts_with("HTTP/1.1 404"), "{sessions}");
+        assert_eq!(
+            std::fs::read(&fixture.manager.inner.store_path).unwrap(),
+            before,
+            "recovery diagnostics mutated the {case} database"
+        );
+
+        server.abort();
+        let _ = server.await;
+    }
+}
+
+#[tokio::test]
 async fn failed_listener_bind_keeps_accepted_candidate_in_maintenance() {
     let fixture = Fixture::new();
     let mut request = fixture.request();
@@ -676,6 +806,99 @@ async fn failed_listener_bind_keeps_accepted_candidate_in_maintenance() {
             .state,
         nac_core::store::ManagedMaintenanceState::Maintenance
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn every_replacement_readiness_failure_keeps_maintenance_and_diagnostics() {
+    for failed_check in [
+        "store",
+        "state-root",
+        "repository-root",
+        "home-root",
+        "model-credential",
+        "runtime-tools",
+        "local-command",
+    ] {
+        let fixture = Fixture::new();
+        let replacement = fixture.prepare_running_replacement(&format!("readiness-{failed_check}"));
+        let error = crate::delivery::server::serve_with_policy_and_readiness(
+            "127.0.0.1:0".parse().unwrap(),
+            crate::BindPolicy::LoopbackOnly,
+            replacement,
+            |_| {},
+            fixture.readiness_policy(Some(failed_check)),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains(failed_check), "{error:#}");
+
+        let snapshot =
+            nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path)
+                .unwrap();
+        assert_eq!(
+            snapshot.state,
+            nac_core::store::ManagedMaintenanceState::Maintenance
+        );
+        assert!(snapshot.accepted_identity.is_none());
+        assert_eq!(snapshot.operation_id.as_deref(), Some("operation-789"));
+
+        let response = crate::router(fixture.manager.clone())
+            .oneshot(Request::get("/managed/status").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let status: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(status["maintenance_state"], "maintenance");
+        assert_eq!(status["maintenance"]["state"], "maintenance");
+        assert_eq!(
+            status["maintenance"]["accepted_identity"],
+            serde_json::Value::Null
+        );
+        assert_eq!(status["maintenance"]["operation_id"], "operation-789");
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn fully_ready_replacement_accepts_only_after_both_listeners_bind() {
+    let fixture = Fixture::new();
+    let replacement = fixture.prepare_running_replacement("readiness-success");
+    let policy = fixture.readiness_policy(None);
+    let (listening_tx, listening_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        crate::delivery::server::serve_with_policy_and_readiness(
+            "127.0.0.1:0".parse().unwrap(),
+            crate::BindPolicy::LoopbackOnly,
+            replacement,
+            move |address| {
+                let _ = listening_tx.send(address);
+            },
+            policy,
+        )
+        .await
+    });
+    match tokio::time::timeout(std::time::Duration::from_secs(2), listening_rx).await {
+        Ok(Ok(_)) => {}
+        outcome => panic!(
+            "ready replacement did not accept ({outcome:?}): {:?}",
+            server.await
+        ),
+    }
+    let snapshot =
+        nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path).unwrap();
+    assert_eq!(
+        snapshot.state,
+        nac_core::store::ManagedMaintenanceState::Serving
+    );
+    assert_eq!(
+        snapshot.accepted_identity.as_ref().unwrap().operation_id,
+        fixture.request().operation_id
+    );
+    server.abort();
+    let _ = server.await;
 }
 
 #[tokio::test]

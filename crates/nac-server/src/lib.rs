@@ -492,17 +492,35 @@ impl SessionManager {
             )),
             _ => None,
         };
-        let preflight = if configured_identity.is_some() {
-            nac_core::store::preflight_managed_forward_start(
+        let (preflight, startup_recovery_only) = if configured_identity.is_some() {
+            match nac_core::store::preflight_managed_forward_start(
                 &store_path,
                 &running_target,
                 configured_identity,
-            )?
-        } else {
-            nac_core::store::ManagedStartupPreflight {
-                accepted_identity: None,
-                requires_accept: false,
+            ) {
+                Ok(preflight) => (preflight, false),
+                Err(error) => {
+                    let migration = nac_core::store::migration_status(&store_path);
+                    if migration.state == nac_core::store::StoreMigrationState::Current {
+                        return Err(error.into());
+                    }
+                    (
+                        nac_core::store::ManagedStartupPreflight {
+                            accepted_identity: None,
+                            requires_accept: false,
+                        },
+                        true,
+                    )
+                }
             }
+        } else {
+            (
+                nac_core::store::ManagedStartupPreflight {
+                    accepted_identity: None,
+                    requires_accept: false,
+                },
+                false,
+            )
         };
         let managed_identity = match (preflight.accepted_identity, configured_identity) {
             (Some(accepted), _) => Some(accepted),
@@ -522,27 +540,23 @@ impl SessionManager {
             .as_ref()
             .map(application::managed::ManagedModelProfile::from_config)
             .transpose()?;
-        if let (Some(managed), Some(model)) =
-            (options.managed_host.as_ref(), managed_model.as_ref())
-        {
-            model.initialize(managed)?;
+        if !startup_recovery_only {
+            if let (Some(managed), Some(model)) =
+                (options.managed_host.as_ref(), managed_model.as_ref())
+            {
+                model.initialize(managed)?;
+            }
         }
 
-        let managed_clones = options
-            .managed_host
-            .as_ref()
-            .map(|managed| {
-                nac_managed::ManagedCloneService::new(
-                    &managed.repository_root,
-                    &managed.state_root,
-                    &managed.home_root,
-                    Arc::new(application::managed::StoreProjectRegistrar::new(
-                        &store_path,
-                    )),
-                    Some(managed.github_auth()?),
-                )
-            })
-            .transpose()?;
+        let managed_clones = if startup_recovery_only {
+            None
+        } else {
+            options
+                .managed_host
+                .as_ref()
+                .map(|managed| application::managed::clone_service(managed, &store_path))
+                .transpose()?
+        };
         let manager = Self {
             inner: Arc::new(SessionManagerInner {
                 root_cwd,
@@ -558,7 +572,7 @@ impl SessionManager {
                 git_probe_cache: RwLock::new(HashMap::new()),
                 managed_logins: managed_auth::ManagedLoginRegistry::default(),
                 managed_github_logins: managed_github::ManagedGitHubLoginRegistry::default(),
-                recovery_only: AtomicBool::new(false),
+                recovery_only: AtomicBool::new(startup_recovery_only),
                 maintenance_gate: Arc::new(RwLock::new(())),
                 active_admissions: Arc::new(StdMutex::new(HashMap::new())),
                 managed_identity,

@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{bail, Context, Result};
 use nac_contracts::{NewProject, ProjectRecord};
@@ -9,8 +12,159 @@ use nac_core::{
 };
 use nac_managed::{
     HostSecretStore, HostSecretSummary, ManagedHostConfig, ManagedModelCredentialSource,
-    ProjectRegistrar,
+    ProjectRegistrar, ReadinessCheck,
 };
+
+use crate::SessionManager;
+
+const MANAGED_RUNTIME_UID: u32 = 10_001;
+const MANAGED_RUNTIME_GID: u32 = 10_001;
+pub(crate) const REQUIRED_RUNTIME_TOOLS: &[&str] = &[
+    "bash",
+    "git",
+    "git-lfs",
+    "gh",
+    "ssh",
+    "curl",
+    "jq",
+    "rg",
+    "fd",
+    "rsync",
+    "make",
+    "pkg-config",
+    "cmake",
+    "cc",
+    "python3",
+    "uv",
+    "node",
+    "npm",
+    "corepack",
+    "rustc",
+    "cargo",
+    "rustfmt",
+    "cargo-clippy",
+    "go",
+    "tar",
+    "gzip",
+    "xz",
+    "zip",
+    "unzip",
+    "tini",
+];
+
+#[derive(Clone, Copy)]
+pub(crate) struct ManagedReadinessPolicy {
+    expected_uid: u32,
+    expected_gid: u32,
+    required_tools: &'static [&'static str],
+    #[cfg(test)]
+    forced_failure: Option<&'static str>,
+}
+
+impl ManagedReadinessPolicy {
+    pub(crate) const fn production() -> Self {
+        Self {
+            expected_uid: MANAGED_RUNTIME_UID,
+            expected_gid: MANAGED_RUNTIME_GID,
+            required_tools: REQUIRED_RUNTIME_TOOLS,
+            #[cfg(test)]
+            forced_failure: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn for_test(
+        expected_uid: u32,
+        expected_gid: u32,
+        required_tools: &'static [&'static str],
+        forced_failure: Option<&'static str>,
+    ) -> Self {
+        Self {
+            expected_uid,
+            expected_gid,
+            required_tools,
+            forced_failure,
+        }
+    }
+}
+
+/// Application-owned managed runtime readiness contract shared by status and
+/// accepted-replacement startup. Maintenance admission is reported separately:
+/// a replacement proves these checks while the host remains in maintenance,
+/// before it is allowed to clear that durable state.
+pub(crate) fn runtime_readiness_checks(
+    manager: &SessionManager,
+    policy: ManagedReadinessPolicy,
+) -> Vec<ReadinessCheck> {
+    let mut checks = vec![
+        match nac_core::store::check_readiness(&manager.inner.store_path) {
+            Ok(()) => ReadinessCheck::pass("store", "SQLite store is open and migrated"),
+            Err(_) => {
+                let migration = nac_core::store::migration_status(&manager.inner.store_path);
+                let reason = migration
+                    .failure
+                    .map_or(migration.state.as_str(), |failure| failure.as_str());
+                ReadinessCheck::fail("store", format!("SQLite store is unavailable ({reason})"))
+            }
+        },
+    ];
+
+    if let Some(managed) = manager.managed_host() {
+        checks.extend(nac_managed::host_checks(
+            managed,
+            policy.expected_uid,
+            policy.expected_gid,
+            policy.required_tools,
+        ));
+        if let Some(model) = manager.managed_model() {
+            if model.credential_source == ManagedModelCredentialSource::ManagedBootstrap {
+                checks.push(match model.credential_ready(managed) {
+                    Ok(()) => ReadinessCheck::pass(
+                        "model-credential",
+                        "durable managed model authorization is present",
+                    ),
+                    Err(error) => ReadinessCheck::fail(
+                        "model-credential",
+                        format!("durable managed model authorization is unavailable: {error}"),
+                    ),
+                });
+            }
+        }
+    }
+
+    #[cfg(test)]
+    if let Some(name) = policy.forced_failure {
+        if let Some(check) = checks.iter_mut().find(|check| check.name == name) {
+            *check = ReadinessCheck::fail(name, "injected deterministic readiness failure");
+        } else {
+            checks.push(ReadinessCheck::fail(
+                name,
+                "injected deterministic readiness failure",
+            ));
+        }
+    }
+
+    checks
+}
+
+pub(crate) fn require_replacement_readiness(
+    manager: &SessionManager,
+    policy: ManagedReadinessPolicy,
+) -> Result<()> {
+    let failed = runtime_readiness_checks(manager, policy)
+        .into_iter()
+        .filter(|check| !check.ready)
+        .map(|check| check.name)
+        .collect::<Vec<_>>();
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        bail!(
+            "managed replacement readiness failed: {}",
+            failed.join(", ")
+        )
+    }
+}
 
 /// Core-facing interpretation of the nonsecret managed model contract.
 ///
@@ -158,6 +312,19 @@ impl ProjectRegistrar for StoreProjectRegistrar {
     fn register_project(&self, project: NewProject) -> Result<ProjectRecord> {
         nac_core::projects::insert_project(&self.store_path, project).map_err(anyhow::Error::new)
     }
+}
+
+pub(crate) fn clone_service(
+    config: &ManagedHostConfig,
+    store_path: &Path,
+) -> Result<nac_managed::ManagedCloneService> {
+    nac_managed::ManagedCloneService::new(
+        &config.repository_root,
+        &config.state_root,
+        &config.home_root,
+        Arc::new(StoreProjectRegistrar::new(store_path)),
+        Some(config.github_auth()?),
+    )
 }
 
 /// Managed secret administration use cases. Values remain write-only and the
