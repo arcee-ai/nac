@@ -307,7 +307,8 @@ impl Agent {
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
         }
-        let web_retrieval_eligible = mode == AgentMode::Direct && traditional_child.is_none();
+        let web_retrieval_eligible =
+            mode == AgentMode::Worker || (mode == AgentMode::Direct && traditional_child.is_none());
         if web_retrieval_eligible
             && tool_defs.iter().any(|definition| {
                 tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str())

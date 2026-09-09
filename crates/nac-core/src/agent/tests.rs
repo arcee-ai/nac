@@ -187,6 +187,66 @@ fn direct_topologies_expose_exact_capability_boundaries() {
 }
 
 #[test]
+fn delegated_worker_native_search_is_credential_gated_and_model_safe() {
+    let mut worker = Agent::with_config(
+        ModelClient::new_for_test(),
+        AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
+            mode: AgentMode::Worker,
+            session_behavior: None,
+            store_path: crate::store::default_store_path(),
+            session_id: None,
+            orchestrator_compaction_threshold: None,
+            initial_messages: Vec::new(),
+            thread_name: Some("delegated".to_string()),
+            dispatch_id: Some("dispatch".to_string()),
+            event_sink: EventSink::none(),
+            workspace_cwd: PathBuf::from("."),
+            config_cwd: PathBuf::from("."),
+            working_directory: ".".to_string(),
+            worker_executable: None,
+            sandbox: None,
+            ssh: None,
+            mcp: None,
+            skills: None,
+            extra_tool_defs: Vec::new(),
+            agents_md_message: None,
+            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            light_client: None,
+            permission_rules: Vec::new(),
+        },
+    )
+    .unwrap();
+    let names = |definitions: Vec<ToolDefinition>| {
+        definitions
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        names(worker.model_request_capabilities_for_test(None)),
+        crate::tools::WORKER_TOOL_NAMES
+    );
+    let credential = "delegated-exa-capability-canary";
+    let definitions = worker.model_request_capabilities_for_test(Some(credential));
+    let definition_json = serde_json::to_string(&definitions).unwrap();
+    assert!(!definition_json.contains(credential));
+    let names = names(definitions);
+    assert_eq!(
+        &names[..crate::tools::WORKER_TOOL_NAMES.len()],
+        crate::tools::WORKER_TOOL_NAMES
+    );
+    assert_eq!(
+        &names[crate::tools::WORKER_TOOL_NAMES.len()..],
+        crate::tools::WEB_TOOL_NAMES
+    );
+    let credential_debug = format!("{:?}", worker.tool_runtime.web_credential);
+    assert!(credential_debug.contains("[REDACTED]"));
+    assert!(!credential_debug.contains(credential));
+}
+
+#[test]
 fn restore_messages_refreshes_leading_system_prompt() {
     let client = ModelClient::new_for_test();
     let mut agent = Agent::with_config(
