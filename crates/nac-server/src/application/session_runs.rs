@@ -241,6 +241,38 @@ impl<'a> SessionRunApplication<'a> {
         self.cancel_unchecked(session_id).await
     }
 
+    pub(crate) async fn cancel_exact(&self, session_id: &str, expected_run_id: &str) -> Result<()> {
+        const MAX_RUN_ID_BYTES: usize = 128;
+        if expected_run_id.is_empty() || expected_run_id.len() > MAX_RUN_ID_BYTES {
+            return Err(anyhow!("run_id is invalid"));
+        }
+        self.manager.require_primary_operation_session(session_id)?;
+        let service = self.manager.attach_session(session_id).await?;
+        let Some(active) = service.active_run() else {
+            return match sessions::SessionOperationLease::try_acquire(
+                &self.manager.inner.store_path,
+                session_id,
+            ) {
+                Ok(_idle) => Ok(()),
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => Err(anyhow!(
+                    "session '{session_id}' is running in another process and cannot be cancelled from this process"
+                )),
+                Err(error) => Err(anyhow::Error::new(error)),
+            };
+        };
+        if active.run_id.as_str() != expected_run_id {
+            return Ok(());
+        }
+        match service
+            .connect_client()
+            .request_cancel(&active.run_id)
+            .await
+        {
+            Ok(()) | Err(SessionCancelError::NotActive { .. }) => Ok(()),
+            Err(SessionCancelError::Cleanup { message, .. }) => Err(anyhow!(message)),
+        }
+    }
+
     pub(crate) async fn cancel_unchecked(&self, session_id: &str) -> Result<()> {
         let service = self.manager.attach_session(session_id).await?;
         let Some(active) = service.active_run() else {
@@ -263,5 +295,11 @@ impl<'a> SessionRunApplication<'a> {
             Ok(()) | Err(SessionCancelError::NotActive { .. }) => Ok(()),
             Err(SessionCancelError::Cleanup { message, .. }) => Err(anyhow!(message)),
         }
+    }
+}
+
+impl SessionManager {
+    pub async fn cancel_active_run_exact(&self, session_id: &str, run_id: &str) -> Result<()> {
+        self.session_runs().cancel_exact(session_id, run_id).await
     }
 }

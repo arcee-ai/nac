@@ -197,6 +197,31 @@ pub(crate) async fn cancel_active_run(
     manager.cancel_active_run(&session_id).await?;
     Ok(StatusCode::ACCEPTED)
 }
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{session_id}/runs/{run_id}/cancel",
+    operation_id = "post_sessions_session_id_runs_run_id_cancel",
+    tag = "conversation",
+    params(("session_id" = String, Path), ("run_id" = String, Path)),
+    responses(
+        (status = 202, description = "The exact run was cancelled or was already inactive"),
+        (status = 400, description = "Path extraction or run identity validation failed", body = String, content_type = "text/plain"),
+        (status = 404, description = "Session was not found", body = ApiErrorBody, content_type = "application/json"),
+        (status = 409, description = "Cancellation is owned by another process", body = ApiErrorBody, content_type = "application/json"),
+        (status = 500, description = "Cancellation cleanup failed", body = ApiErrorBody, content_type = "application/json"),
+    )
+)]
+pub(crate) async fn cancel_exact_run(
+    State(manager): State<SessionManager>,
+    AxumPath((session_id, run_id)): AxumPath<(String, String)>,
+) -> std::result::Result<StatusCode, ApiError> {
+    manager
+        .cancel_active_run_exact(&session_id, &run_id)
+        .await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
 pub(crate) fn session_event_stream(
     epoch_id: String,
     replay_boundary_sequence_id: u64,

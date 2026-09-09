@@ -33,3 +33,11 @@ impl<'a> SessionTerminalApplication<'a> {
         service.terminate_terminal(terminal_id).await
     }
 }
+
+impl SessionManager {
+    pub async fn terminate_terminal(&self, session_id: &str, terminal_id: &str) -> Result<()> {
+        self.session_terminals()
+            .terminate(session_id, terminal_id)
+            .await
+    }
+}

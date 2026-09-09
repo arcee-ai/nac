@@ -147,6 +147,119 @@ async fn cancel_active_run_route_is_idempotent() {
 }
 
 #[tokio::test]
+async fn exact_run_cancellation_never_cancels_a_replacement_run() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("cancel_exact_run");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+    seed_editable_session(&root, "session");
+    let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+    let manager = test_manager(&root);
+    let first = manager
+        .submit_prompt(
+            "session",
+            SubmitPromptRequest {
+                prompt: "first run".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let app = router(manager.clone());
+    let cancel = |run_id: &str| {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/sessions/session/runs/{run_id}/cancel"))
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    assert_eq!(
+        app.clone()
+            .oneshot(cancel(&first.run_id))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let second = manager
+        .submit_prompt(
+            "session",
+            SubmitPromptRequest {
+                prompt: "replacement run".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        app.clone()
+            .oneshot(cancel(&first.run_id))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED,
+        "a stale retry is idempotent"
+    );
+    assert_eq!(
+        manager
+            .snapshot("session")
+            .await
+            .unwrap()
+            .active_run
+            .as_ref()
+            .map(|run| run.run_id.as_str()),
+        Some(second.run_id.as_str()),
+        "the exact old-run request must not cancel its replacement"
+    );
+
+    let (left, right) = tokio::join!(
+        app.clone().oneshot(cancel(&second.run_id)),
+        app.clone().oneshot(cancel(&second.run_id))
+    );
+    assert_eq!(left.unwrap().status(), StatusCode::ACCEPTED);
+    assert_eq!(right.unwrap().status(), StatusCode::ACCEPTED);
+    assert!(manager
+        .snapshot("session")
+        .await
+        .unwrap()
+        .active_run
+        .is_none());
+
+    assert_eq!(
+        app.clone()
+            .oneshot(cancel(&"x".repeat(129)))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let missing = Request::builder()
+        .method("POST")
+        .uri("/sessions/missing/runs/run-1/cancel")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(missing).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+
+    drop(app);
+    drop(manager);
+    let restarted = router(test_manager(&root));
+    assert_eq!(
+        restarted
+            .oneshot(cancel(&second.run_id))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED,
+        "restart retry remains idempotent for the exact settled run"
+    );
+    endpoint.abort();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn deletion_winning_lifecycle_gate_prevents_late_submission_recreation() {
     let root = temp_root("delete_before_submit");
     seed_editable_session(&root, "session");

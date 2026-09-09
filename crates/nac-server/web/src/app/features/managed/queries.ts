@@ -6,6 +6,14 @@ import { useMemo } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { readyManagedModelRequests } from "@/app/features/managed/model";
+import {
+  managedUpgradeIsActive,
+  type ManagedUpgradeSnapshot,
+} from "@/app/features/managed/upgrade";
+import {
+  decodeManagedUpgradeOperation,
+  decodeManagedUpgradeSnapshot,
+} from "@/app/features/managed/upgradeContract";
 import { api } from "@/app/services/api";
 import type {
   BackendKind,
@@ -23,6 +31,7 @@ export const managedQueryKeys = {
   github: ["managed-github"] as const,
   secrets: ["managed-secrets"] as const,
   auth: ["managed-auth"] as const,
+  upgrade: ["managed-upgrade"] as const,
   providerModels: (backend: string, baseUrl?: string | null) =>
     baseUrl
       ? (["managed-provider-models", backend, baseUrl] as const)
@@ -37,6 +46,36 @@ export function useManagedHostStatus() {
     staleTime: 5_000,
     refetchInterval: 15_000,
     retry: false,
+  });
+}
+
+export function useManagedUpgradeSnapshot(enabled = true) {
+  return useQuery<ManagedUpgradeSnapshot>({
+    queryKey: managedQueryKeys.upgrade,
+    queryFn: async ({ signal }) =>
+      decodeManagedUpgradeSnapshot(await api.getManagedUpgrade(signal)),
+    enabled,
+    staleTime: 0,
+    refetchInterval: (query) =>
+      query.state.data?.operation && managedUpgradeIsActive(query.state.data.operation.state)
+        ? 1_000
+        : 15_000,
+    refetchIntervalInBackground: true,
+    retry: false,
+  });
+}
+
+export function useStartManagedUpgrade() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (idempotencyKey: string) =>
+      decodeManagedUpgradeOperation(await api.startManagedUpgrade(idempotencyKey)),
+    onSuccess: (operation) => {
+      client.setQueryData<ManagedUpgradeSnapshot>(managedQueryKeys.upgrade, (snapshot) =>
+        snapshot ? { ...snapshot, operation } : snapshot,
+      );
+      return client.invalidateQueries({ queryKey: managedQueryKeys.upgrade });
+    },
   });
 }
 

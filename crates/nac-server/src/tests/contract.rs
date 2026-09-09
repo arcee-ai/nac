@@ -15,6 +15,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("DELETE", "/sessions/{session_id}/goal/{goal_id}"),
     ("DELETE", "/sessions/{session_id}/inbox/{item_id}"),
     ("DELETE", "/sessions/{session_id}/terminals/{terminal_id}"),
+    ("POST", "/sessions/{session_id}/runs/{run_id}/cancel"),
     (
         "DELETE",
         "/sessions/{session_id}/permissions/grants/{grant_id}",
@@ -473,6 +474,7 @@ async fn openapi_special_wire_schemas_and_docs_are_live() {
         ("delete", "/credentials/{name}", "400"),
         ("get", "/sessions/{session_id}/workspace/revisions", "400"),
         ("post", "/sessions/{session_id}/cancel-active-run", "400"),
+        ("post", "/sessions/{session_id}/runs/{run_id}/cancel", "400"),
         ("delete", "/sessions/{session_id}", "400"),
         (
             "delete",

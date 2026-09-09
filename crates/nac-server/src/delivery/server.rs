@@ -147,6 +147,7 @@ fn remains_available_during_maintenance(method: &axum::http::Method, path: &str)
                     parts.as_slice(),
                     ["sessions", _, "orchestrators", _, "cancel"]
                 )
+                || matches!(parts.as_slice(), ["sessions", _, "runs", _, "cancel"])
                 || matches!(parts.as_slice(), ["sessions", _, "permissions", _])))
         || ((method == axum::http::Method::DELETE)
             && (is_delete_cancellation(path)
@@ -162,6 +163,7 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
         (Method::POST, "/sessions/s/cancel-active-run"),
         (Method::POST, "/sessions/s/children/c/cancel"),
         (Method::POST, "/sessions/s/orchestrators/o/cancel"),
+        (Method::POST, "/sessions/s/runs/r/cancel"),
         (Method::DELETE, "/auth/arcee/login/l"),
         (Method::DELETE, "/managed/github/login/l"),
         (Method::DELETE, "/managed/github/clone-operations/operation"),
@@ -619,6 +621,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::session_runs::recent_events))
         .routes(routes!(delivery::session_runs::stream_events))
         .routes(routes!(delivery::session_runs::cancel_active_run))
+        .routes(routes!(delivery::session_runs::cancel_exact_run))
         .routes(routes!(delivery::session_terminals::terminate_handler))
 }
 

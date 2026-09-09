@@ -1518,12 +1518,6 @@ impl SessionManager {
         self.session_runs().cancel(session_id).await
     }
 
-    pub async fn terminate_terminal(&self, session_id: &str, terminal_id: &str) -> Result<()> {
-        self.session_terminals()
-            .terminate(session_id, terminal_id)
-            .await
-    }
-
     async fn cancel_active_run_unchecked(&self, session_id: &str) -> Result<()> {
         self.session_runs().cancel_unchecked(session_id).await
     }

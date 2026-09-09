@@ -317,6 +317,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           ref={cardRef}
           role="dialog"
           aria-modal="true"
+          aria-label={typeof title === "string" ? title : undefined}
           tabIndex={-1}
           data-modal-open={open ? "true" : undefined}
           className={cn(

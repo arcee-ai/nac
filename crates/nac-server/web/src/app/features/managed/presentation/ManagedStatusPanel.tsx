@@ -1,5 +1,6 @@
 import { Loader, LoaderSize } from "@/app/atoms";
 import { useManagedHostStatus } from "@/app/features/managed/queries";
+import { ManagedUpgradePanel } from "@/app/features/managed/presentation/ManagedUpgradePanel";
 
 export function StatusDot({ ready }: { ready: boolean }) {
   return (
@@ -23,6 +24,7 @@ export function ManagedStatusPanel() {
         <p className="header-xl text-basic-primary">{host.logical_host_id}</p>
         <p className="text-small text-basic-tertiary">Managed NAC · {host.public_hostname}</p>
       </div>
+      <ManagedUpgradePanel />
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <StatusCard
           label={host.model.display_name}

@@ -11,7 +11,79 @@ type ManagedDoubleState = {
   cloneRequest: Record<string, unknown> | null;
   cloneBranch: string;
   providerRequests: Record<string, unknown>[];
+  upgradeState: "available" | "blocked" | "replacing" | "verifying" | "succeeded" | "failed";
+  upgradeStarts: number;
+  upgradeBodies: string[];
+  upgradeKeys: string[];
+  upgradeFacadeStatus: number | null;
+  terminalStops: string[];
 };
+
+const currentRelease = {
+  release_id: "0-1-4",
+  source_revision: "a".repeat(40),
+  build_id: "managed-e2e-current",
+  product_version: "0.1.4",
+  schema_version: 24,
+};
+
+const latestRelease = {
+  release_id: "0-2-0-beta-2",
+  source_revision: "b".repeat(40),
+  build_id: "managed-e2e-latest",
+  product_version: "0.2.0-beta.2",
+  schema_version: 25,
+};
+
+const upgradeOperation = (state: ManagedDoubleState) => {
+  if (state.upgradeState === "available") return null;
+  const blockers =
+    state.upgradeState === "blocked"
+      ? [
+          {
+            selection_key: `sha256:${"1".repeat(64)}`,
+            kind: "terminal_process",
+            message: "An active terminal process must finish before maintenance can start",
+            actionable: true,
+            action: "terminate_terminal",
+            target: { session_id: "managed-upgrade-session", terminal_id: "shell-upgrade-1" },
+          },
+          {
+            selection_key: `sha256:${"2".repeat(64)}`,
+            kind: "compaction",
+            message: "An active compaction must finish before maintenance can start",
+            actionable: false,
+            action: "wait",
+            target: null,
+          },
+        ]
+      : [];
+  return {
+    operation_id: `018f47a5-34a7-7c91-bf7e-${String(state.upgradeStarts).padStart(12, "0")}`,
+    managed_host_id: "018f47a5-34a7-7c91-bf7e-8f1042757301",
+    kind: "upgrade",
+    state: state.upgradeState,
+    reason: state.upgradeState === "failed" ? "VerificationFailed" : "UpgradeProgress",
+    message:
+      state.upgradeState === "failed"
+        ? "The replacement could not be verified"
+        : "The accepted release is progressing safely",
+    target_release: latestRelease,
+    blockers,
+    created_at: "2026-09-09T12:00:00Z",
+    updated_at: "2026-09-09T12:01:00Z",
+  };
+};
+
+const upgradeSnapshot = (state: ManagedDoubleState) => ({
+  preview: {
+    current: state.upgradeState === "succeeded" ? latestRelease : currentRelease,
+    latest_beta: latestRelease,
+    upgrade_available: state.upgradeState !== "succeeded",
+    distance: { accepted_releases: state.upgradeState === "succeeded" ? 0 : 2 },
+  },
+  operation: upgradeOperation(state),
+});
 
 const alternateBranch = "feature/platform.v2/long-prefix-hot-fix";
 const branchFixture = [
@@ -28,7 +100,18 @@ const hostStatus = (state: ManagedDoubleState) => ({
   managed: true,
   ready: true,
   version: "0.1.3",
+  product_version: "0.1.4",
+  source_revision: currentRelease.source_revision,
+  build_id: currentRelease.build_id,
+  build_track: "beta",
   schema_version: 23,
+  supported_schema_version: 25,
+  minimum_migratable_schema_version: 0,
+  opened_schema_version: 23,
+  migration_state: "ready",
+  migration_failure: null,
+  maintenance_state: "serving",
+  maintenance: null,
   logical_host_id: "managed-e2e-host",
   owner: "owner@example.test",
   public_hostname: "managed.example.test",
@@ -100,6 +183,12 @@ async function installManagedDouble(page: Page, initiallyConnected = false) {
     cloneRequest: null,
     cloneBranch: "main",
     providerRequests: [],
+    upgradeState: "available",
+    upgradeStarts: 0,
+    upgradeBodies: [],
+    upgradeKeys: [],
+    upgradeFacadeStatus: null,
+    terminalStops: [],
   };
   await page.route(
     (url) => url.pathname === "/models",
@@ -277,6 +366,45 @@ async function installManagedDouble(page: Page, initiallyConnected = false) {
       json: { error: `unhandled managed double ${method} ${path}` },
     });
   });
+  await page.route(
+    (url) => url.pathname === "/__managed/control/v0/upgrade",
+    async (route: Route) => {
+      const request = route.request();
+      if (state.upgradeFacadeStatus !== null) {
+        return route.fulfill({
+          status: state.upgradeFacadeStatus,
+          contentType: "application/problem+json",
+          json: {
+            title: "Managed upgrade unavailable",
+            detail: "The managed control facade rejected this request",
+          },
+        });
+      }
+      if (request.method() === "GET") {
+        return route.fulfill({
+          status: 200,
+          headers: { "Cache-Control": "no-store" },
+          json: upgradeSnapshot(state),
+        });
+      }
+      if (request.method() === "POST") {
+        state.upgradeStarts += 1;
+        state.upgradeBodies.push(request.postData() ?? "");
+        state.upgradeKeys.push(request.headers()["idempotency-key"] ?? "");
+        state.upgradeState = state.upgradeState === "failed" ? "verifying" : "blocked";
+        return route.fulfill({ status: 202, json: upgradeOperation(state) });
+      }
+      return route.fulfill({ status: 405 });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === "/sessions/managed-upgrade-session/terminals/shell-upgrade-1",
+    async (route: Route) => {
+      state.terminalStops.push(route.request().method());
+      state.upgradeState = "replacing";
+      return route.fulfill({ status: 204 });
+    },
+  );
   return state;
 }
 
@@ -345,6 +473,100 @@ test("completes the managed first-run, write-only secret, and clone journey", as
     project_name: "managed-demo",
     project_description: null,
   });
+});
+
+test("runs and reload-recovers a durable latest-beta upgrade through the same-origin facade", async ({
+  harness,
+  page,
+}) => {
+  const state = await installManagedDouble(page, true);
+  await page.goto(harness.baseUrl);
+  await page.getByRole("button", { name: "Open the menu" }).click();
+  await page.getByRole("button", { name: "Managed host" }).click();
+
+  await expect(page.getByTestId("managed-upgrade")).toContainText("2 accepted releases ahead");
+  await expect(page.getByText(currentRelease.source_revision)).toBeVisible();
+  await expect(page.getByText(latestRelease.source_revision)).toBeVisible();
+  await page.getByRole("button", { name: "Upgrade to latest beta" }).click();
+  await expect(page.getByRole("dialog", { name: "Upgrade Managed NAC?" })).toContainText(
+    "Active work must finish or be explicitly stopped",
+  );
+  await page.getByRole("button", { name: "Start upgrade" }).click();
+
+  await expect.poll(() => state.upgradeBodies).toEqual(["{}"]);
+  expect(state.upgradeKeys).toHaveLength(1);
+  expect(state.upgradeKeys[0]).toMatch(/^nac-upgrade-[0-9a-f-]{36}$/);
+  await expect(page.getByText("Waiting for active work")).toBeVisible();
+  await expect(page.getByText("Wait only")).toBeVisible();
+  await page.getByRole("button", { name: "Stop terminal" }).click();
+  await expect.poll(() => state.terminalStops).toEqual(["DELETE"]);
+  await expect(page.getByText("Replacing NAC")).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Open the menu" }).click();
+  await page.getByRole("button", { name: "Managed host" }).click();
+  await expect(page.getByText("Replacing NAC")).toBeVisible();
+  await expect(
+    page.getByText("018f47a5-34a7-7c91-bf7e-000000000001", { exact: true }),
+  ).toBeVisible();
+
+  state.upgradeState = "verifying";
+  await expect(page.getByText("Verifying the replacement")).toBeVisible();
+  state.upgradeState = "succeeded";
+  await expect(page.getByText("Upgrade complete")).toBeVisible();
+  await expect(page.getByText("Up to date")).toBeVisible();
+});
+
+test("retries a retained failed upgrade as a new explicit intent", async ({ harness, page }) => {
+  const state = await installManagedDouble(page, true);
+  state.upgradeState = "failed";
+  state.upgradeStarts = 1;
+  await page.goto(harness.baseUrl);
+  await page.getByRole("button", { name: "Open the menu" }).click();
+  await page.getByRole("button", { name: "Managed host" }).click();
+
+  await expect(page.getByText("Upgrade failed")).toBeVisible();
+  await page.getByRole("button", { name: "Retry upgrade to latest beta" }).click();
+  await page.getByRole("button", { name: "Start upgrade" }).click();
+  await expect(page.getByText("Verifying the replacement")).toBeVisible();
+  expect(state.upgradeStarts).toBe(2);
+  expect(state.upgradeBodies).toEqual(["{}"]);
+  expect(state.upgradeKeys[0]).toMatch(/^nac-upgrade-[0-9a-f-]{36}$/);
+
+  state.upgradeState = "succeeded";
+  await expect(page.getByText("Upgrade complete")).toBeVisible();
+});
+
+test("explains managed upgrade authorization, incarnation, and availability recovery", async ({
+  harness,
+  page,
+}) => {
+  const state = await installManagedDouble(page, true);
+  state.upgradeFacadeStatus = 401;
+
+  const reopenManagedHost = async () => {
+    await page.goto(harness.baseUrl);
+    await page.getByRole("button", { name: "Open the menu" }).click();
+    await page.getByRole("button", { name: "Managed host" }).click();
+  };
+
+  await reopenManagedHost();
+  await expect(page.getByText(/Reopen this host from the Arcee portal/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
+
+  state.upgradeFacadeStatus = 409;
+  await reopenManagedHost();
+  await expect(page.getByText(/This host session changed/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
+
+  state.upgradeFacadeStatus = 503;
+  await reopenManagedHost();
+  await expect(page.getByText(/temporarily unavailable/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+
+  state.upgradeFacadeStatus = null;
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("button", { name: "Upgrade to latest beta" })).toBeVisible();
 });
 
 test("keeps device authorization and repository selection usable at 390 by 844", async ({
