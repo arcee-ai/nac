@@ -118,7 +118,7 @@ impl PermissionBroker {
             anyhow::anyhow!("permission approval mode update task failed: {error}")
         })??;
         if !updated {
-            anyhow::bail!("permission approval mode changed concurrently; refresh and try again");
+            return Err(PermissionApprovalModeUpdateError::ConcurrentChange.into());
         }
 
         // Publish immediately after the durable transition. Test hooks and

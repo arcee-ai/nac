@@ -1,6 +1,21 @@
 use super::*;
 
 #[tokio::test]
+async fn lost_permission_mode_cas_is_an_http_conflict() {
+    let response = ApiError::from(anyhow::Error::new(
+        nac_core::permissions::PermissionApprovalModeUpdateError::ConcurrentChange,
+    ))
+    .into_response();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = response_body(response).await;
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("changed concurrently"));
+}
+
+#[tokio::test]
 async fn attaching_direct_session_wakes_oldest_persisted_inbox_item() {
     let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("direct_inbox_reattach");

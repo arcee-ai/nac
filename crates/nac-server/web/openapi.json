@@ -5268,6 +5268,16 @@
               }
             }
           },
+          "409": {
+            "description": "Concurrent permission approval mode update",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Request failed",
             "content": {

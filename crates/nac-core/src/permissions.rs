@@ -145,6 +145,22 @@ pub enum PermissionApprovalMode {
     AutoApprove,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionApprovalModeUpdateError {
+    ConcurrentChange,
+}
+
+impl std::fmt::Display for PermissionApprovalModeUpdateError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConcurrentChange => formatter
+                .write_str("permission approval mode changed concurrently; refresh and try again"),
+        }
+    }
+}
+
+impl std::error::Error for PermissionApprovalModeUpdateError {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AuthorizationOutcome {
     Allowed,
