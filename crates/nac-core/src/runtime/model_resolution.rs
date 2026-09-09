@@ -138,11 +138,22 @@ pub(super) fn default_config_cwd(workspace_cwd: &Path, ssh_host: Option<&str>) -
 
 /// Resolve the SQLite store path against the caller's local base cwd.
 pub fn resolve_store_path(cwd: &Path, options: StoreOptions, config: &NacConfig) -> PathBuf {
+    resolve_store_path_for_track(cwd, options, config, store::StoreTrack::Dev)
+}
+
+/// Resolve the SQLite store path with a track-specific default. Explicit CLI
+/// and config paths remain authoritative and are never rewritten by track.
+pub fn resolve_store_path_for_track(
+    cwd: &Path,
+    options: StoreOptions,
+    config: &NacConfig,
+    track: store::StoreTrack,
+) -> PathBuf {
     absolute_store_path(
         cwd,
         options
             .store_path
             .or_else(|| config.storage.store_path.clone())
-            .unwrap_or_else(store::default_store_path),
+            .unwrap_or_else(|| store::default_store_path_for_track(track)),
     )
 }

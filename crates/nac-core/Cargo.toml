@@ -24,7 +24,6 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 bytes = "1"
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
-semver = "1"
 anyhow.workspace = true
 rusqlite = { version = "0.32", features = ["bundled"] }
 uuid = { workspace = true, features = ["serde", "v4"] }

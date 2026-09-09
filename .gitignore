@@ -1,4 +1,5 @@
 **/target/
+.github/scripts/node_modules/
 .env
 images/nac
 nac.db

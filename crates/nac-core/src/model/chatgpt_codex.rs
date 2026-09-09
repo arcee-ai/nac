@@ -1629,7 +1629,11 @@ fn expiry_status(expires_at_ms: u64) -> String {
 }
 
 fn codex_user_agent() -> String {
-    format!("nac/{}", env!("CARGO_PKG_VERSION"))
+    codex_user_agent_for_version(nac_contracts::PRODUCT_VERSION)
+}
+
+fn codex_user_agent_for_version(product_version: &str) -> String {
+    nac_contracts::product_user_agent_for_version("nac", product_version)
 }
 
 fn truncate(value: &str) -> String {

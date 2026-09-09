@@ -214,6 +214,9 @@ curl -fsS --noproxy '*' --connect-timeout 1 --max-time 5 \
 status_json=$(curl -fsS --noproxy '*' --connect-timeout 1 --max-time 5 \
     -H 'Host: managed-smoke.test' "http://127.0.0.1:$port/managed/status")
 printf '%s' "$status_json" | grep -F '"ready":true' >/dev/null || fail 'managed status is not ready'
+printf '%s' "$status_json" | grep -F '"build_track":"dev"' >/dev/null || fail 'managed status build track is not dev'
+printf '%s' "$status_json" | grep -F '"migration_state":"current"' >/dev/null || fail 'managed status migration is not current'
+printf '%s' "$status_json" | grep -F '"maintenance_state":"serving"' >/dev/null || fail 'managed status maintenance state is not serving'
 bootstrap_access=$(jq -r '.access_token' "$repo_root/docker/managed/fixtures/bootstrap.json")
 bootstrap_refresh=$(jq -r '.refresh_token' "$repo_root/docker/managed/fixtures/bootstrap.json")
 case "$status_json" in

@@ -177,9 +177,10 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         Some("nac-cli"),
         "arcee-api should send x-arcee-client header for logging"
     );
+    let expected_user_agent = nac_contracts::product_user_agent("nac");
     assert_eq!(
         request.headers.get("user-agent").map(String::as_str),
-        Some(concat!("nac/", env!("CARGO_PKG_VERSION"))),
+        Some(expected_user_agent.as_str()),
         "arcee-api should send user-agent header for logging"
     );
     assert_eq!(
@@ -205,6 +206,11 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         body["tools"],
         serde_json::to_value(&tools).expect("tool definitions serialize")
     );
+}
+
+#[test]
+fn simulated_product_version_bump_updates_arcee_api_header_exactly() {
+    assert_eq!(arcee_api_user_agent("9.8.7"), "nac/9.8.7");
 }
 
 #[tokio::test]

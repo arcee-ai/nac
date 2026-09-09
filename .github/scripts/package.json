@@ -1,0 +1,10 @@
+{
+  "name": "nac-release-policy-tests",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "release-please": "17.11.2"
+  }
+}

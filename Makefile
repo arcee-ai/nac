@@ -1,9 +1,10 @@
-.PHONY: all setup build dev demo release install ci test test-rust test-web test-source-size generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev demo release install ci test test-rust test-web test-release test-stable-binary test-source-size generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
 BIN := nac-web
 WEB_DIR := crates/$(PKG)/web
+RELEASE_TEST_DIR := .github/scripts
 MANAGED_IMAGE ?= nac-managed:local
 
 DEV_BIND ?= 127.0.0.1:3210
@@ -37,6 +38,7 @@ setup:
 		exit 1; \
 	}
 	$(CARGO) fetch --locked
+	npm --prefix $(RELEASE_TEST_DIR) ci
 	npm --prefix $(WEB_DIR) ci
 	npm --prefix $(WEB_DIR) exec -- playwright install chromium
 
@@ -94,7 +96,7 @@ install:
 ci: format-check lint test
 
 ## Run workspace Rust tests, frontend tests, source-size, and web asset checks
-test: test-source-size test-rust test-web test-assets test-managed-image-contract
+test: test-source-size test-rust test-web test-release test-assets test-managed-image-contract
 
 test-rust:
 	$(CARGO) test --workspace --locked
@@ -102,6 +104,19 @@ test-rust:
 ## Run frontend unit and component tests
 test-web:
 	npm --prefix $(WEB_DIR) test
+
+## Validate Release Please configuration and pre-1.0 release calculation
+test-release:
+	sh -n .github/scripts/stable-release-rollout.sh
+	node --test .github/scripts/release-policy.test.mjs
+	$(MAKE) test-stable-binary
+
+## Build a stable binary and exercise its real readiness/status identity contract
+test-stable-binary:
+	@version="$$(tr -d '[:space:]' < version.txt)"; \
+	source_revision="$$(git rev-parse HEAD)"; \
+	NAC_BUILD_TRACK=stable NAC_BUILD_ID="v$$version" NAC_SOURCE_REVISION="$$source_revision" \
+		$(CARGO) test --locked -p nac-server --test stable_binary_contract -- --nocapture
 
 ## Keep tracked human-authored files within the agent-context budget
 test-source-size:
@@ -141,6 +156,10 @@ test-e2e-remote:
 
 ## Run focused deterministic lifecycle and crash-window regressions
 test-durability:
+	$(CARGO) test --locked -p nac-core current_schema_initialize_is_byte_exact_and_does_not_enter_a_writer_transaction
+	$(CARGO) test --locked -p nac-core current_schema_delete_mode_initialize_is_read_only_even_during_a_writer_transaction
+	$(CARGO) test --locked -p nac-core invalid_wal_cannot_mask_future_main_schema_or_mutate_any_file
+	$(CARGO) test --locked -p nac-core killed_migrator_rolls_back_and_waiting_process_migrates_exactly_once
 	$(CARGO) test --locked -p nac-core cancellation_adopts_a_committed_single_direct_steer_after_async_abort
 	$(CARGO) test --locked -p nac-core canonical_terminal_recovery_is_retained_until_relationship_settlement
 	$(CARGO) test --locked -p nac-core child_terminal_crash_window_recovers_report_and_delivers_once
@@ -234,6 +253,7 @@ help:
 		'  test         Run Rust/frontend tests and web asset checks' \
 		'  test-rust    Run cargo test --workspace --locked' \
 		'  test-web     Run frontend unit and component tests' \
+		'  test-release Validate stable release preparation policy' \
 		'  test-source-size Enforce the 2,000-line human-source ceiling' \
 		'  test-assets  Lint, typecheck and rebuild the web app' \
 		'  test-e2e     Run production-embedded Playwright tests' \

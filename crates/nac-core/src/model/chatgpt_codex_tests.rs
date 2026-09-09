@@ -1,5 +1,10 @@
 use super::*;
 
+#[test]
+fn simulated_product_version_bump_updates_chatgpt_codex_header_exactly() {
+    assert_eq!(codex_user_agent_for_version("9.8.7"), "nac/9.8.7");
+}
+
 #[cfg(unix)]
 use std::io::{Read, Seek, SeekFrom};
 #[cfg(unix)]

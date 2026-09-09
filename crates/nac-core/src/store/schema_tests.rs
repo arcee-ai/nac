@@ -1320,28 +1320,546 @@ fn checkpoint_table_enforces_completed_row_constraints() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-#[test]
-fn future_schema_version_is_rejected_without_changes() {
-    let path = temp_store_path("future");
+#[derive(Debug, PartialEq, Eq)]
+struct FileSnapshot {
+    bytes: Option<Vec<u8>>,
+    sha256: Option<[u8; 32]>,
+    created: Option<std::time::SystemTime>,
+    modified: Option<std::time::SystemTime>,
+}
+
+fn sqlite_sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut sidecar = path.as_os_str().to_os_string();
+    sidecar.push(suffix);
+    PathBuf::from(sidecar)
+}
+
+fn snapshot_file(path: &Path) -> FileSnapshot {
+    use sha2::{Digest, Sha256};
+
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let metadata = std::fs::metadata(path).unwrap();
+            let sha256 = Sha256::digest(&bytes).into();
+            FileSnapshot {
+                bytes: Some(bytes),
+                sha256: Some(sha256),
+                created: metadata.created().ok(),
+                modified: Some(metadata.modified().unwrap()),
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => FileSnapshot {
+            bytes: None,
+            sha256: None,
+            created: None,
+            modified: None,
+        },
+        Err(error) => panic!("failed to snapshot {}: {error}", path.display()),
+    }
+}
+
+fn snapshot_sqlite_files(path: &Path) -> [FileSnapshot; 3] {
+    [
+        snapshot_file(path),
+        snapshot_file(&sqlite_sidecar(path, "-wal")),
+        snapshot_file(&sqlite_sidecar(path, "-shm")),
+    ]
+}
+
+fn prepare_future_schema_store(
+    path: &Path,
+    with_sidecars: bool,
+) -> (i64, String, Option<Connection>) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let future_version = STORE_SCHEMA_VERSION + 1;
-    let future = Connection::open(&path).unwrap();
+    let future = Connection::open(path).unwrap();
     future
-        .pragma_update(None, "user_version", future_version)
+        .execute_batch(
+            "CREATE TABLE future_sentinel (value TEXT NOT NULL);\n\
+             INSERT INTO future_sentinel VALUES ('future-data-canary');",
+        )
+        .unwrap();
+    future
+        .pragma_update(None, "user_version", STORE_SCHEMA_VERSION)
         .unwrap();
     drop(future);
 
-    let error = initialize(&path).unwrap_err();
-    assert!(error.to_string().contains(&format!(
-        "unsupported store schema version {future_version}"
-    )));
-    let unchanged = Connection::open(&path).unwrap();
-    let version: i64 = unchanged
-        .pragma_query_value(None, "user_version", |row| row.get(0))
+    let future = Connection::open(path).unwrap();
+    future
+        .pragma_update(
+            None,
+            "journal_mode",
+            if with_sidecars { "WAL" } else { "DELETE" },
+        )
         .unwrap();
-    assert_eq!(version, future_version);
-    assert!(!table_exists(&unchanged, "sessions").unwrap());
+    let journal_mode: String = future
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
+        .unwrap();
+    if with_sidecars {
+        future.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+        future
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .unwrap();
+    }
+    future
+        .pragma_update(None, "user_version", future_version)
+        .unwrap();
+    if with_sidecars {
+        assert!(sqlite_sidecar(path, "-wal").exists());
+        assert!(sqlite_sidecar(path, "-shm").exists());
+        let main = std::fs::read(path).unwrap();
+        assert_eq!(
+            u32::from_be_bytes(main[60..64].try_into().unwrap()),
+            STORE_SCHEMA_VERSION as u32,
+            "the future schema must exist only in the uncheckpointed WAL"
+        );
+        (future_version, journal_mode, Some(future))
+    } else {
+        drop(future);
+        (future_version, journal_mode, None)
+    }
+}
+
+fn assert_future_store_contents(
+    path: &Path,
+    future_version: i64,
+    journal_mode: &str,
+    open: Option<&Connection>,
+) {
+    let reopened;
+    let unchanged = if let Some(open) = open {
+        open
+    } else {
+        reopened = Connection::open(path).unwrap();
+        &reopened
+    };
+    assert_eq!(
+        unchanged
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        future_version
+    );
+    assert_eq!(
+        unchanged
+            .pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))
+            .unwrap(),
+        journal_mode
+    );
+    assert_eq!(
+        unchanged
+            .query_row("SELECT value FROM future_sentinel", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+        "future-data-canary"
+    );
+}
+
+#[test]
+fn every_future_schema_refusal_preserves_database_and_sidecars_exactly() {
+    assert_eq!(MINIMUM_MIGRATABLE_SCHEMA_VERSION, 0);
+    for with_sidecars in [false, true] {
+        for action in ["initialize", "normal-open", "migration-status", "readiness"] {
+            let path = temp_store_path(&format!("future_{action}_{with_sidecars}"));
+            let (future_version, journal_mode, open) =
+                prepare_future_schema_store(&path, with_sidecars);
+            let before = snapshot_sqlite_files(&path);
+
+            match action {
+                "initialize" => {
+                    let error = initialize(&path).unwrap_err();
+                    assert!(error.to_string().contains(&format!(
+                        "unsupported store schema version {future_version}"
+                    )));
+                }
+                "normal-open" => {
+                    let error = crate::store::list_projects(&path).unwrap_err();
+                    assert!(error.to_string().contains(&format!(
+                        "unsupported store schema version {future_version}"
+                    )));
+                }
+                "migration-status" => assert_eq!(
+                    migration_status(&path),
+                    StoreMigrationStatus {
+                        supported_schema_version: STORE_SCHEMA_VERSION,
+                        opened_schema_version: Some(future_version),
+                        state: StoreMigrationState::Failed,
+                        failure: Some(StoreMigrationFailure::FutureSchema),
+                    }
+                ),
+                "readiness" => {
+                    let error = check_readiness(&path).unwrap_err();
+                    assert!(error.to_string().contains(&format!(
+                        "unsupported store schema version {future_version}"
+                    )));
+                }
+                _ => unreachable!(),
+            }
+
+            let after = snapshot_sqlite_files(&path);
+            assert_eq!(after, before, "{action} changed future-schema files");
+            assert_future_store_contents(&path, future_version, &journal_mode, open.as_ref());
+            drop(open);
+            let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        }
+    }
+}
+
+fn prepare_populated_v23_store(path: &Path) {
+    initialize(path).unwrap();
+    let connection = open_runtime_connection(path).unwrap();
+    insert_legacy_session(&connection, "preserved-session");
+    connection
+        .execute_batch("DROP TABLE session_forks; PRAGMA user_version = 23;")
+        .unwrap();
+}
+
+#[test]
+fn migration_restart_process_helper() {
+    let Some(store_path) = std::env::var_os("NAC_TEST_SCHEMA_MIGRATION_STORE") else {
+        return;
+    };
+    match std::env::var("NAC_TEST_SCHEMA_MIGRATION_MODE").as_deref() {
+        Ok("fail") => {
+            initialize_with_hooks(
+                Path::new(&store_path),
+                || {},
+                || Err(anyhow!("injected subprocess migration failure")),
+            )
+            .expect_err("subprocess migration failure must be injected");
+        }
+        Ok("succeed") => initialize(Path::new(&store_path)).unwrap(),
+        Ok("hold-before-commit") => {
+            let ready = std::env::var_os("NAC_TEST_SCHEMA_MIGRATION_READY").unwrap();
+            initialize_with_hooks(
+                Path::new(&store_path),
+                || {},
+                || {
+                    std::fs::write(&ready, b"locked").unwrap();
+                    loop {
+                        std::thread::park();
+                    }
+                },
+            )
+            .unwrap();
+        }
+        Ok("count-succeed") => {
+            use std::io::Write as _;
+
+            let started = std::env::var_os("NAC_TEST_SCHEMA_MIGRATION_STARTED").unwrap();
+            let counter = std::env::var_os("NAC_TEST_SCHEMA_MIGRATION_COUNTER").unwrap();
+            std::fs::write(started, b"started").unwrap();
+            initialize_with_hooks(
+                Path::new(&store_path),
+                || {},
+                || {
+                    writeln!(
+                        std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(counter)
+                            .unwrap(),
+                        "committed"
+                    )
+                    .unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap();
+        }
+        mode => panic!("unexpected subprocess migration mode: {mode:?}"),
+    }
+}
+
+fn wait_for_file(path: &Path) {
+    for _ in 0..500 {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("timed out waiting for {}", path.display());
+}
+
+fn wait_for_child(child: &mut std::process::Child) -> std::process::ExitStatus {
+    for _ in 0..500 {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let _ = child.kill();
+    panic!("timed out waiting for migration subprocess");
+}
+
+fn run_migration_restart_process(path: &Path, mode: &str) {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "store::schema::tests::migration_restart_process_helper",
+            "--nocapture",
+        ])
+        .env("NAC_TEST_SCHEMA_MIGRATION_STORE", path)
+        .env("NAC_TEST_SCHEMA_MIGRATION_MODE", mode)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "migration restart helper failed in {mode} mode:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn failed_migration_recovers_across_real_process_restarts() {
+    let path = temp_store_path("process_restart");
+    prepare_populated_v23_store(&path);
+
+    run_migration_restart_process(&path, "fail");
+    let unchanged = Connection::open(&path).unwrap();
+    assert_eq!(
+        unchanged
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        23
+    );
+    assert!(!table_exists(&unchanged, "session_forks").unwrap());
+    assert_eq!(
+        unchanged
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
     drop(unchanged);
+
+    run_migration_restart_process(&path, "succeed");
+    run_migration_restart_process(&path, "succeed");
+    let reopened = Connection::open(&path).unwrap();
+    assert_current_schema(&reopened);
+    assert!(table_exists(&reopened, "session_forks").unwrap());
+    assert_eq!(
+        reopened
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(reopened);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn killed_migrator_rolls_back_and_waiting_process_migrates_exactly_once() {
+    let path = temp_store_path("killed_migrator");
+    prepare_populated_v23_store(&path);
+    let root = path.parent().unwrap();
+    let ready = root.join("first-ready");
+    let started = root.join("second-started");
+    let counter = root.join("commit-count");
+    let helper_args = [
+        "--exact",
+        "store::schema::tests::migration_restart_process_helper",
+        "--nocapture",
+    ];
+
+    let mut first = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(helper_args)
+        .env("NAC_TEST_SCHEMA_MIGRATION_STORE", &path)
+        .env("NAC_TEST_SCHEMA_MIGRATION_MODE", "hold-before-commit")
+        .env("NAC_TEST_SCHEMA_MIGRATION_READY", &ready)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    wait_for_file(&ready);
+
+    let mut second = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(helper_args)
+        .env("NAC_TEST_SCHEMA_MIGRATION_STORE", &path)
+        .env("NAC_TEST_SCHEMA_MIGRATION_MODE", "count-succeed")
+        .env("NAC_TEST_SCHEMA_MIGRATION_STARTED", &started)
+        .env("NAC_TEST_SCHEMA_MIGRATION_COUNTER", &counter)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    wait_for_file(&started);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert!(
+        second.try_wait().unwrap().is_none(),
+        "the second process must wait for the first writer transaction"
+    );
+
+    first.kill().unwrap();
+    assert!(!first.wait().unwrap().success());
+    assert!(wait_for_child(&mut second).success());
+    assert_eq!(std::fs::read_to_string(&counter).unwrap(), "committed\n");
+
+    let connection = Connection::open(&path).unwrap();
+    assert_current_schema(&connection);
+    assert!(table_exists(&connection, "session_forks").unwrap());
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(connection);
+
+    initialize(&path).unwrap();
+    assert_eq!(std::fs::read_to_string(&counter).unwrap(), "committed\n");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn injected_migration_failure_rolls_back_and_restart_completes_forward() {
+    let path = temp_store_path("injected_failure");
+    prepare_populated_v23_store(&path);
+
+    let error = initialize_with_hooks(
+        &path,
+        || {},
+        || Err(anyhow!("injected failure containing secret-canary")),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("secret-canary"));
+
+    let unchanged = Connection::open(&path).unwrap();
+    assert_eq!(
+        unchanged
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        23
+    );
+    assert!(!table_exists(&unchanged, "session_forks").unwrap());
+    assert_eq!(
+        unchanged
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(unchanged);
+    let failed = migration_status(&path);
+    assert_eq!(failed.state, StoreMigrationState::Failed);
+    assert_eq!(failed.failure, Some(StoreMigrationFailure::MigrationFailed));
+    assert!(!format!("{failed:?}").contains("secret-canary"));
+    assert!(has_migration_observation(&path));
+
+    initialize(&path).unwrap();
+    initialize(&path).unwrap();
+    assert!(!has_migration_observation(&path));
+    let restarted = open_runtime_connection(&path).unwrap();
+    assert_current_schema(&restarted);
+    assert!(table_exists(&restarted, "session_forks").unwrap());
+    assert_eq!(
+        restarted
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(migration_status(&path).state, StoreMigrationState::Current);
+    drop(restarted);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn migration_observation_retention_is_bounded_without_evicting_active_work() {
+    let status = StoreMigrationStatus {
+        supported_schema_version: STORE_SCHEMA_VERSION,
+        opened_schema_version: Some(23),
+        state: StoreMigrationState::Failed,
+        failure: Some(StoreMigrationFailure::MigrationFailed),
+    };
+    let mut observations = HashMap::new();
+    for index in 0..(MIGRATION_OBSERVATION_LIMIT + 10) {
+        observations.insert(
+            PathBuf::from(format!("failed-{index}")),
+            MigrationObservation { active: 0, status },
+        );
+    }
+    let active_path = PathBuf::from("active");
+    observations.insert(
+        active_path.clone(),
+        MigrationObservation {
+            active: 1,
+            status: StoreMigrationStatus {
+                state: StoreMigrationState::Migrating,
+                failure: None,
+                ..status
+            },
+        },
+    );
+
+    prune_inactive_observations(&mut observations, MIGRATION_OBSERVATION_LIMIT, None);
+
+    assert_eq!(observations.len(), MIGRATION_OBSERVATION_LIMIT);
+    assert_eq!(observations[&active_path].active, 1);
+}
+
+#[test]
+fn concurrent_migrations_serialize_at_the_immediate_transaction() {
+    let path = temp_store_path("concurrent_migration");
+    prepare_populated_v23_store(&path);
+
+    let (first_locked_tx, first_locked_rx) = std::sync::mpsc::channel();
+    let (release_first_tx, release_first_rx) = std::sync::mpsc::channel();
+    let first_path = path.clone();
+    let first = std::thread::spawn(move || {
+        initialize_with_hooks(
+            &first_path,
+            || {
+                first_locked_tx.send(()).unwrap();
+                release_first_rx.recv().unwrap();
+            },
+            || Ok(()),
+        )
+    });
+    first_locked_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap();
+    assert_eq!(
+        migration_status(&path).state,
+        StoreMigrationState::Migrating
+    );
+
+    let (second_started_tx, second_started_rx) = std::sync::mpsc::channel();
+    let (second_locked_tx, second_locked_rx) = std::sync::mpsc::channel();
+    let second_path = path.clone();
+    let second = std::thread::spawn(move || {
+        second_started_tx.send(()).unwrap();
+        initialize_with_hooks(
+            &second_path,
+            || second_locked_tx.send(()).unwrap(),
+            || Ok(()),
+        )
+    });
+    second_started_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap();
+    assert!(second_locked_rx.try_recv().is_err());
+
+    release_first_tx.send(()).unwrap();
+    first.join().unwrap().unwrap();
+    second_locked_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap();
+    second.join().unwrap().unwrap();
+
+    let connection = open_runtime_connection(&path).unwrap();
+    assert_current_schema(&connection);
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(connection);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

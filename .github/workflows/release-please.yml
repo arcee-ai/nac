@@ -1,0 +1,42 @@
+name: Prepare stable release
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please-dev
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # Human/platform prerequisite: install the narrowly scoped GitHub App on
+      # this repository with Contents:write, Pull requests:write, and
+      # Issues:write, expose its
+      # app id as this repository variable, and store its private key as this
+      # repository secret. The App token ensures its PR and release events run
+      # normal CI; no PAT or AWS credential belongs in public NAC.
+      - name: Mint repository-scoped release token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: nac
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+
+      - name: Prepare or create the approved stable release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          target-branch: dev
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

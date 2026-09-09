@@ -145,6 +145,27 @@ fn repository_json(id: u64, name: &str) -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn simulated_product_version_bump_updates_managed_github_header_exactly() {
+    let (endpoints, requests, server) = scripted_server(vec![json_response(serde_json::json!({}))]);
+    let client = managed_github_http_client("9.8.7").unwrap();
+    client
+        .get(endpoints.api_base_url)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    server.join().unwrap();
+    let request = &requests.lock().unwrap()[0];
+    assert!(
+        request
+            .lines()
+            .any(|line| line.eq_ignore_ascii_case("user-agent: nac-web/9.8.7")),
+        "{request}"
+    );
+}
+
+#[tokio::test]
 async fn device_login_persists_metadata_and_discovers_paginated_repositories_and_branches() {
     let mut first_page = Vec::new();
     for id in 0..100 {

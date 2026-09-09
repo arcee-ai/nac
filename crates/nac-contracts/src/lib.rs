@@ -7,6 +7,26 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
+/// Canonical public NAC product version sourced from the repository root.
+///
+/// Internal crate versions are dependency metadata and must not be exposed on
+/// public protocol or provider surfaces.
+pub const PRODUCT_VERSION: &str = env!("NAC_PRODUCT_VERSION");
+pub const NAC_USER_AGENT: &str = concat!("nac/", env!("NAC_PRODUCT_VERSION"));
+pub const NAC_WEB_USER_AGENT: &str = concat!("nac-web/", env!("NAC_PRODUCT_VERSION"));
+
+/// Formats a public product user agent from the canonical product version.
+pub fn product_user_agent(product: &str) -> String {
+    product_user_agent_for_version(product, PRODUCT_VERSION)
+}
+
+/// Version-injected formatter used to prove future product bumps propagate
+/// byte-for-byte without coupling public identity to Cargo package versions.
+#[doc(hidden)]
+pub fn product_user_agent_for_version(product: &str, version: &str) -> String {
+    format!("{product}/{version}")
+}
+
 /// Stable project projection shared by persistence, managed workflows, and
 /// delivery without exposing a SQLite implementation.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -133,6 +153,18 @@ pub trait CommandEnvironmentProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn simulated_product_version_bump_updates_public_user_agents_exactly() {
+        assert_eq!(product_user_agent_for_version("nac", "9.8.7"), "nac/9.8.7");
+        assert_eq!(
+            product_user_agent_for_version("nac-web", "9.8.7"),
+            "nac-web/9.8.7"
+        );
+        assert_eq!(PRODUCT_VERSION, include_str!("../../../version.txt").trim());
+        assert_eq!(NAC_USER_AGENT, product_user_agent("nac"));
+        assert_eq!(NAC_WEB_USER_AGENT, product_user_agent("nac-web"));
+    }
 
     #[test]
     fn snapshot_redacts_longest_distinct_values_and_keeps_environment_private() {

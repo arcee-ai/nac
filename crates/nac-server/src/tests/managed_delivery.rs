@@ -35,6 +35,38 @@ fn scripted_model_index(body: &'static str) -> (String, std::sync::mpsc::Receive
     (base_url, receiver)
 }
 
+async fn live_get_json(address: std::net::SocketAddr, path: &str) -> (u16, serde_json::Value) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut stream = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("connect to live test server");
+    stream
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .expect("write live test request");
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .await
+        .expect("read live test response");
+    let response = String::from_utf8(response).expect("UTF-8 live test response");
+    let (head, body) = response
+        .split_once("\r\n\r\n")
+        .expect("HTTP response separator");
+    let status = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .expect("HTTP response status");
+    let body = serde_json::from_str(body).unwrap_or_else(|_| serde_json::json!({ "body": body }));
+    (status, body)
+}
+
 /// A key the UI supplies is filed away under a name the server picks, and
 /// from then on that name stands in for the secret: the value never comes
 /// back out, and the caller reaches the provider by naming it instead.
@@ -207,8 +239,152 @@ async fn managed_host_supplies_default_model_and_mounted_credential() {
     assert_eq!(status["model"]["backend"], "arcee-api");
     assert_eq!(status["model"]["id"], "trinity-large-thinking");
     assert!(status["model_ready"].is_boolean());
+    assert_eq!(
+        status["version"],
+        include_str!("../../../../version.txt").trim()
+    );
+    assert_eq!(status["product_version"], status["version"]);
+    assert_eq!(status["build_track"], env!("NAC_BUILD_TRACK"));
+    assert_eq!(status["build_id"], env!("NAC_BUILD_ID"));
+    assert_eq!(status["source_revision"], env!("NAC_SOURCE_REVISION"));
+    assert_eq!(
+        status["supported_schema_version"],
+        nac_core::store::schema_version()
+    );
+    assert_eq!(
+        status["minimum_migratable_schema_version"],
+        nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION
+    );
+    assert_eq!(
+        status["opened_schema_version"],
+        nac_core::store::schema_version()
+    );
+    assert_eq!(status["migration_state"], "current");
+    assert_eq!(status["migration_failure"], serde_json::Value::Null);
+    assert_eq!(status["maintenance_state"], "serving");
     assert!(!status.to_string().contains("host-model-key"));
 
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn readiness_and_managed_status_sanitize_future_schema_failure() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_future_schema_status");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_managed_credential(&root.join("model-token"), "future-schema-secret-canary\n");
+    let store_path = root.join("store.db");
+    nac_core::store::initialize(&store_path).unwrap();
+    let future = nac_core::store::schema_version() + 1;
+    nac_core::test_support::store::set_test_schema_version(&store_path, future).unwrap();
+    let app = router(test_managed_manager(&root));
+
+    let ready = get_response(app.clone(), "/readyz", None).await;
+    assert_eq!(ready.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let ready = response_json(ready).await;
+    assert_eq!(
+        ready["supported_schema_version"],
+        nac_core::store::schema_version()
+    );
+    assert_eq!(
+        ready["minimum_migratable_schema_version"],
+        nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION
+    );
+    assert_eq!(ready["opened_schema_version"], future);
+    assert_eq!(ready["migration_state"], "failed");
+    assert_eq!(ready["migration_failure"], "future-schema");
+    assert_eq!(ready["maintenance_state"], "unavailable");
+
+    let status = response_json(get_response(app, "/managed/status", None).await).await;
+    assert_eq!(status["ready"], false);
+    assert_eq!(
+        status["minimum_migratable_schema_version"],
+        nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION
+    );
+    assert_eq!(status["opened_schema_version"], future);
+    assert_eq!(status["migration_state"], "failed");
+    assert_eq!(status["migration_failure"], "future-schema");
+    let encoded = status.to_string();
+    assert!(!encoded.contains("future-schema-secret-canary"));
+    assert!(!encoded.contains(&store_path.display().to_string()));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn managed_recovery_listener_stays_unready_after_external_store_repair() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_startup_migration_recovery");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_managed_credential(&root.join("model-token"), "startup-secret-canary\n");
+    let store_path = root.join("store.db");
+    nac_core::store::initialize(&store_path).unwrap();
+    let future = nac_core::store::schema_version() + 1;
+    nac_core::test_support::store::set_test_schema_version(&store_path, future).unwrap();
+    let manager = test_managed_manager(&root);
+    let (listening_tx, listening_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        serve_with_policy(
+            "127.0.0.1:0".parse().unwrap(),
+            BindPolicy::LoopbackOnly,
+            manager,
+            move |address| {
+                let _ = listening_tx.send(address);
+            },
+        )
+        .await
+    });
+    let address = tokio::time::timeout(std::time::Duration::from_secs(2), listening_rx)
+        .await
+        .expect("managed recovery server bind timed out")
+        .expect("managed recovery server stopped before binding");
+
+    let (status, ready) = live_get_json(address, "/readyz").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE.as_u16());
+    assert_eq!(ready["migration_failure"], "future-schema");
+    assert_eq!(ready["maintenance_state"], "recovery-only");
+
+    let (status, managed) = live_get_json(address, "/managed/status").await;
+    assert_eq!(status, StatusCode::OK.as_u16());
+    assert_eq!(managed["opened_schema_version"], future);
+    assert_eq!(managed["migration_failure"], "future-schema");
+    assert_eq!(managed["maintenance_state"], "recovery-only");
+    let encoded = managed.to_string();
+    assert!(!encoded.contains("startup-secret-canary"));
+    assert!(!encoded.contains(&store_path.display().to_string()));
+
+    let (status, _) = live_get_json(address, "/sessions").await;
+    assert_eq!(status, StatusCode::NOT_FOUND.as_u16());
+
+    // Model a peer completing the shared-store repair after this process has
+    // permanently selected its recovery-only router. It must not advertise
+    // readiness or serving until a restart constructs the full router.
+    nac_core::test_support::store::set_test_schema_version(
+        &store_path,
+        nac_core::store::schema_version(),
+    )
+    .unwrap();
+    nac_core::store::check_readiness(&store_path).unwrap();
+
+    let (status, ready) = live_get_json(address, "/readyz").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE.as_u16());
+    assert_eq!(ready["migration_state"], "current");
+    assert_eq!(ready["migration_failure"], serde_json::Value::Null);
+    assert_eq!(ready["maintenance_state"], "recovery-only");
+
+    let (status, managed) = live_get_json(address, "/managed/status").await;
+    assert_eq!(status, StatusCode::OK.as_u16());
+    assert_eq!(managed["ready"], false);
+    assert_eq!(managed["migration_state"], "current");
+    assert_eq!(managed["maintenance_state"], "recovery-only");
+
+    let (status, _) = live_get_json(address, "/sessions").await;
+    assert_eq!(status, StatusCode::NOT_FOUND.as_u16());
+
+    server.abort();
+    let _ = server.await;
     let _ = std::fs::remove_dir_all(root);
 }
 

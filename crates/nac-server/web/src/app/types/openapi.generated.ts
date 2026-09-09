@@ -381,13 +381,21 @@ export interface components {
     };
     ManagedCloneStatus: "running" | "completed" | "failed" | "cancelled" | "interrupted";
     ManagedHostStatusResponse: {
+      build_id: string;
+      build_track: string;
       checks: components["schemas"]["ReadinessCheck"][];
       github_status: string;
       logical_host_id: string;
+      maintenance_state: string;
       managed: boolean;
+      migration_failure?: string | null;
+      migration_state: string;
+      minimum_migratable_schema_version: number;
       model: components["schemas"]["ManagedModelStatus"];
       model_ready: boolean;
+      opened_schema_version?: number | null;
       owner?: string | null;
+      product_version: string;
       project_count: number;
       public_hostname: string;
       ready: boolean;
@@ -395,6 +403,8 @@ export interface components {
       schema_version: number;
       secret_count: number;
       session_count: number;
+      source_revision: string;
+      supported_schema_version: number;
       version: string;
     };
     ManagedModelStatus: {
@@ -609,10 +619,20 @@ export interface components {
     };
     ReadinessCheck: { detail: string; name: string; ready: boolean };
     ReadinessResponse: {
+      build_id: string;
+      build_track: string;
       checks: components["schemas"]["ReadinessCheck"][];
+      maintenance_state: string;
       managed: boolean;
+      migration_failure?: string | null;
+      migration_state: string;
+      minimum_migratable_schema_version: number;
+      opened_schema_version?: number | null;
+      product_version: string;
       schema_version: number;
+      source_revision: string;
       status: string;
+      supported_schema_version: number;
       version: string;
     };
     ReasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

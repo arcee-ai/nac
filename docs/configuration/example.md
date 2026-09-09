@@ -11,8 +11,9 @@ fallback_filenames = []
 max_bytes = 4194304
 
 # SQLite session store. Relative paths resolve against process cwd.
-# If omitted: $NAC_HOME/store.db, else $XDG_CONFIG_HOME/nac/store.db,
-# else ~/.config/nac/store.db; last-resort fallback is .nac/store.db.
+# If omitted, NAC selects dev.db, beta.db, or stable.db for its build track
+# under $NAC_HOME, $XDG_CONFIG_HOME/nac, or ~/.config/nac; last-resort fallback
+# is .nac/<track>.db.
 [storage]
 store_path = ".nac/store.db"
 

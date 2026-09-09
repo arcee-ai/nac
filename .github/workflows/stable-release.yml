@@ -1,73 +1,60 @@
-name: Release
+name: Stable release
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
+    tags: ["v*.*.*"]
   pull_request:
-  release:
-    types: [published]
-  schedule:
-    - cron: "17 6 * * *"
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Existing stable release tag to upload binaries to
-        required: false
-        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event_name == 'schedule' && 'release-nightly-rc' || format('{0}-{1}', github.workflow, github.run_id) }}
+  group: ${{ github.workflow }}-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
   prepare:
-    if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     outputs:
-      run: ${{ steps.rc.outputs.run || steps.stable.outputs.run || steps.ci.outputs.run }}
-      sha: ${{ steps.rc.outputs.sha || steps.stable.outputs.sha || steps.ci.outputs.sha }}
-      base: ${{ steps.rc.outputs.base || steps.stable.outputs.version || steps.ci.outputs.version }}
-      version: ${{ steps.rc.outputs.version || steps.stable.outputs.version || steps.ci.outputs.version }}
-      tag: ${{ steps.rc.outputs.tag || steps.stable.outputs.tag }}
-      is_rc: ${{ github.event_name == 'schedule' }}
-      latest_stable_tag: ${{ steps.rc.outputs.latest_stable_tag }}
-      latest_stable_sha: ${{ steps.rc.outputs.latest_stable_sha }}
+      run: ${{ steps.stable.outputs.run || steps.ci.outputs.run }}
+      sha: ${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}
+      version: ${{ steps.stable.outputs.version || steps.ci.outputs.version }}
+      tag: ${{ steps.stable.outputs.tag }}
 
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')) && github.event.repository.default_branch || github.sha }}
-
-      - name: Prepare immutable nightly candidate
-        id: rc
-        if: github.event_name == 'schedule'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node .github/scripts/rc-release.mjs prepare
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - name: Validate stable release target
         id: stable
-        if: >-
-          github.event_name == 'release' ||
-          (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
-        run: node .github/scripts/rc-release.mjs validate-stable
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --no-tags origin dev:refs/remotes/origin/dev
+          source_sha="$(git rev-parse HEAD)"
+          SOURCE_SHA="$source_sha" DEV_REF=refs/remotes/origin/dev node .github/scripts/release-policy.mjs validate-stable
+          {
+            echo "run=true"
+            echo "sha=$source_sha"
+            echo "version=$(tr -d '[:space:]' < version.txt)"
+            echo "tag=$RELEASE_TAG"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Capture CI source identity
         id: ci
         if: >-
-          github.event_name == 'push' ||
+          (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) ||
           github.event_name == 'pull_request' ||
-          (github.event_name == 'workflow_dispatch' && inputs.release_tag == '')
+          github.event_name == 'workflow_dispatch'
         env:
           SOURCE_SHA: ${{ github.sha }}
         run: |
-          version="$(node -e 'const fs = require("fs"); const text = fs.readFileSync("crates/nac-server/Cargo.toml", "utf8"); const match = text.match(/^\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m); if (!match) process.exit(1); process.stdout.write(match[1])')"
+          version="$(tr -d '[:space:]' < version.txt)"
           {
             echo "run=true"
             echo "sha=$SOURCE_SHA"
@@ -162,6 +149,9 @@ jobs:
       - name: Run nac-server tests
         run: cargo test -p nac-server --locked
 
+      - name: Exercise stable binary readiness and status identity
+        run: make test-stable-binary
+
       - name: Install Playwright Chromium
         working-directory: crates/nac-server/web
         run: npx playwright install --with-deps chromium
@@ -178,14 +168,6 @@ jobs:
           name: nac-web-playwright
           path: crates/nac-server/web/test-results
           if-no-files-found: ignore
-
-      - name: Smoke exact prerelease consent and installation
-        env:
-          NAC_RELEASE_VERSION: 0.1.1
-        run: |
-          cargo build -p nac-server --bin nac-web --locked
-          NAC_WEB_BINARY="$PWD/target/debug/nac-web" \
-            node --test .github/scripts/upgrade-cli.test.mjs
 
   test-core:
     if: ${{ needs.prepare.outputs.run == 'true' }}
@@ -205,13 +187,26 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: .github/scripts/package-lock.json
+
+      - name: Install pinned release-policy dependencies
+        working-directory: .github/scripts
+        run: npm ci
+
       - name: Run nac-core and nac-catalog-gen tests
         run: cargo test -p nac-core -p nac-catalog-gen --locked
 
-      - name: Test nightly release planning
-        run: node --test .github/scripts/rc-release.test.mjs
+      - name: Test stable release policy and configuration
+        run: |
+          sh -n .github/scripts/stable-release-rollout.sh
+          node --test .github/scripts/release-policy.test.mjs
 
-      - name: Test stable and prerelease installer routing
+      - name: Test stable installer routing
         run: |
           sh -n scripts/install.sh
           sh .github/scripts/install.test.sh
@@ -265,12 +260,10 @@ jobs:
 
       - name: Build nac-web binary
         env:
-          IS_RC: ${{ needs.prepare.outputs.is_rc }}
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          NAC_BUILD_TRACK: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) && 'stable' || 'dev' }}
+          NAC_BUILD_ID: ${{ needs.prepare.outputs.tag || format('dev-{0}', needs.prepare.outputs.sha) }}
+          NAC_SOURCE_REVISION: ${{ needs.prepare.outputs.sha }}
         run: |
-          if [ "$IS_RC" = true ]; then
-            export NAC_RELEASE_VERSION="$RELEASE_VERSION"
-          fi
           cargo build --release --locked \
             -p nac-server --bin nac-web \
             --target ${{ matrix.target }}
@@ -287,7 +280,7 @@ jobs:
           tar -czf "dist/nac-${{ matrix.target }}.tar.gz" \
             -C dist/pkg nac-web LICENSE
 
-          short_revision="$(git rev-parse --short "$SOURCE_SHA")"
+          short_revision="$(git rev-parse --short=12 "$SOURCE_SHA")"
           test "$(dist/pkg/nac-web -V)" = "nac-web $RELEASE_VERSION"
           test "$(dist/pkg/nac-web --version)" = "nac-web $RELEASE_VERSION ($short_revision)"
           test "$(tar -tzf "dist/nac-${{ matrix.target }}.tar.gz" | sort)" = "$(printf 'LICENSE\nnac-web')"
@@ -301,9 +294,8 @@ jobs:
   publish:
     if: >-
       needs.prepare.outputs.run == 'true' &&
-      (github.event_name == 'schedule' ||
-       github.event_name == 'release' ||
-       (github.event_name == 'workflow_dispatch' && inputs.release_tag != ''))
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/v')
     needs: [prepare, test, build]
     runs-on: ubuntu-latest
     permissions:
@@ -321,19 +313,7 @@ jobs:
           pattern: nac-*
           merge-multiple: true
 
-      - name: Publish verified nightly candidate
-        if: github.event_name == 'schedule'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-          LATEST_STABLE_TAG: ${{ needs.prepare.outputs.latest_stable_tag }}
-          LATEST_STABLE_SHA: ${{ needs.prepare.outputs.latest_stable_sha }}
-          ASSET_DIR: dist
-        run: node .github/scripts/rc-release.mjs publish
-
       - name: Upload stable release archives
-        if: github.event_name != 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}

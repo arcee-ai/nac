@@ -168,8 +168,17 @@ a separate credential-injecting broker.
   mount. GitHub connection and generic-secret presence are intentionally not
   readiness requirements.
 - `GET /managed/status` is owner-facing and exists only in managed mode. It
-  reports host/version/schema metadata, counts, GitHub state, and readiness
+  reports exact product, build, track, full source revision, supported/opened
+  schema, schema-owned minimum migratable version, and sanitized
+  migration/maintenance state alongside counts, GitHub state, and readiness
   details without credential values.
+- A managed process that cannot initialize its store starts a recovery-only
+  diagnostic router. It remains unready with `maintenance_state` set to
+  `recovery-only` until restart, even if another process repairs the store;
+  work routes are never admitted by that process.
+
+Channel switching is intentionally unsupported in NAC, ArceeFM/RCFM, nac-api,
+and the CRD. A future product decision must define it before implementation.
 
 Tini forwards SIGTERM. NAC performs graceful HTTP shutdown and asks every
 locally owned active run to cancel through its durable interruption path. The
@@ -207,7 +216,7 @@ account.
 ## Image CI and publication ownership
 
 `.github/workflows/managed-image.yml` builds and smokes pull-request, `main`,
-and manually dispatched candidates without registry credentials or
+`dev`, and manually dispatched candidates without registry credentials or
 publication. Every lane checks out the triggering commit, builds the exact
 `linux/amd64` image with `push: false`, and runs the source-owned smoke
 contract. The public NAC repository has no AWS identity, ECR configuration,
@@ -220,6 +229,10 @@ repository's smoke contract, and publishes the accepted image to private ECR
 inside that repository's AWS/OIDC trust boundary. Neither repository triggers
 the other or shares publishing credentials. Deployment selects the resulting
 private image by immutable digest.
+
+The publisher must pass `NAC_BUILD_TRACK=beta`, the immutable beta build ID,
+and the exact full source revision as Docker build arguments. Public CI uses
+the `dev` track; the stable binary archive workflow embeds `stable`.
 
 ## First dogfood and external gaps
 

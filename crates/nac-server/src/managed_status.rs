@@ -51,6 +51,16 @@ pub(crate) struct ReadinessResponse {
     managed: bool,
     version: &'static str,
     schema_version: i64,
+    product_version: &'static str,
+    build_id: &'static str,
+    build_track: &'static str,
+    source_revision: &'static str,
+    supported_schema_version: i64,
+    minimum_migratable_schema_version: i64,
+    opened_schema_version: Option<i64>,
+    migration_state: &'static str,
+    migration_failure: Option<&'static str>,
+    maintenance_state: &'static str,
     checks: Vec<ReadinessCheck>,
 }
 
@@ -60,6 +70,16 @@ pub(crate) struct ManagedHostStatusResponse {
     ready: bool,
     version: &'static str,
     schema_version: i64,
+    product_version: &'static str,
+    build_id: &'static str,
+    build_track: &'static str,
+    source_revision: &'static str,
+    supported_schema_version: i64,
+    minimum_migratable_schema_version: i64,
+    opened_schema_version: Option<i64>,
+    migration_state: &'static str,
+    migration_failure: Option<&'static str>,
+    maintenance_state: &'static str,
     logical_host_id: String,
     owner: Option<String>,
     public_hostname: String,
@@ -110,16 +130,30 @@ pub(crate) async fn readyz_handler(
     let snapshot = tokio::task::spawn_blocking(move || readiness_snapshot(&manager)).await;
     let response = match snapshot {
         Ok(response) => response,
-        Err(error) => ReadinessResponse {
-            status: "unavailable",
-            managed,
-            version: env!("CARGO_PKG_VERSION"),
-            schema_version: nac_core::store::schema_version(),
-            checks: vec![ReadinessCheck::fail(
-                "readiness-task",
-                format!("readiness task failed: {error}"),
-            )],
-        },
+        Err(error) => {
+            let identity = crate::build_identity::current();
+            ReadinessResponse {
+                status: "unavailable",
+                managed,
+                version: identity.product_version,
+                schema_version: nac_core::store::schema_version(),
+                product_version: identity.product_version,
+                build_id: identity.build_id,
+                build_track: identity.track,
+                source_revision: identity.source_revision,
+                supported_schema_version: nac_core::store::schema_version(),
+                minimum_migratable_schema_version:
+                    nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+                opened_schema_version: None,
+                migration_state: "failed",
+                migration_failure: Some("readiness-task-failed"),
+                maintenance_state: "unavailable",
+                checks: vec![ReadinessCheck::fail(
+                    "readiness-task",
+                    format!("readiness task failed: {error}"),
+                )],
+            }
+        }
     };
     let status = if response.status == "ok" {
         StatusCode::OK
@@ -162,21 +196,42 @@ pub(crate) async fn managed_status_handler(
 }
 
 fn readiness_snapshot(manager: &SessionManager) -> ReadinessResponse {
+    let identity = crate::build_identity::current();
+    let migration = nac_core::store::migration_status(&manager.inner.store_path);
     let checks = readiness_checks(
         manager,
         MANAGED_RUNTIME_UID,
         MANAGED_RUNTIME_GID,
         REQUIRED_RUNTIME_TOOLS,
     );
+    let recovery_only = manager.is_recovery_only();
     ReadinessResponse {
-        status: if checks.iter().all(|check| check.ready) {
+        status: if !recovery_only && checks.iter().all(|check| check.ready) {
             "ok"
         } else {
             "unavailable"
         },
         managed: manager.managed_host().is_some(),
-        version: env!("CARGO_PKG_VERSION"),
+        version: identity.product_version,
         schema_version: nac_core::store::schema_version(),
+        product_version: identity.product_version,
+        build_id: identity.build_id,
+        build_track: identity.track,
+        source_revision: identity.source_revision,
+        supported_schema_version: migration.supported_schema_version,
+        minimum_migratable_schema_version: nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+        opened_schema_version: migration.opened_schema_version,
+        migration_state: migration.state.as_str(),
+        migration_failure: migration
+            .failure
+            .map(nac_core::store::StoreMigrationFailure::as_str),
+        maintenance_state: if recovery_only {
+            "recovery-only"
+        } else if migration.state == nac_core::store::StoreMigrationState::Current {
+            "serving"
+        } else {
+            "unavailable"
+        },
         checks,
     }
 }
@@ -188,6 +243,8 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
     let model = manager
         .managed_model()
         .ok_or_else(|| anyhow::anyhow!("managed model profile is unavailable"))?;
+    let identity = crate::build_identity::current();
+    let migration = nac_core::store::migration_status(&manager.inner.store_path);
     let checks = readiness_checks(
         manager,
         MANAGED_RUNTIME_UID,
@@ -204,13 +261,41 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         Err(_) => "reauth-required",
     };
     let secret_count = managed.secret_store().list()?.len();
-    let project_count = nac_core::store::list_projects(&manager.inner.store_path)?.len();
-    let session_count = nac_core::sessions::list_sessions(&manager.inner.store_path)?.len();
+    let store_current = migration.state == nac_core::store::StoreMigrationState::Current;
+    let recovery_only = manager.is_recovery_only();
+    let project_count = if store_current {
+        nac_core::store::list_projects(&manager.inner.store_path)?.len()
+    } else {
+        0
+    };
+    let session_count = if store_current {
+        nac_core::sessions::list_sessions(&manager.inner.store_path)?.len()
+    } else {
+        0
+    };
     Ok(ManagedHostStatusResponse {
         managed: true,
-        ready: checks.iter().all(|check| check.ready),
-        version: env!("CARGO_PKG_VERSION"),
+        ready: !recovery_only && checks.iter().all(|check| check.ready),
+        version: identity.product_version,
         schema_version: nac_core::store::schema_version(),
+        product_version: identity.product_version,
+        build_id: identity.build_id,
+        build_track: identity.track,
+        source_revision: identity.source_revision,
+        supported_schema_version: migration.supported_schema_version,
+        minimum_migratable_schema_version: nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+        opened_schema_version: migration.opened_schema_version,
+        migration_state: migration.state.as_str(),
+        migration_failure: migration
+            .failure
+            .map(nac_core::store::StoreMigrationFailure::as_str),
+        maintenance_state: if recovery_only {
+            "recovery-only"
+        } else if store_current {
+            "serving"
+        } else {
+            "unavailable"
+        },
         logical_host_id: managed.logical_host_id.clone(),
         owner: managed.owner.clone(),
         public_hostname: managed.public_hostname.clone(),
@@ -239,8 +324,12 @@ fn readiness_checks(
     let mut checks = vec![
         match nac_core::store::check_readiness(&manager.inner.store_path) {
             Ok(()) => ReadinessCheck::pass("store", "SQLite store is open and migrated"),
-            Err(error) => {
-                ReadinessCheck::fail("store", format!("SQLite store is unavailable: {error}"))
+            Err(_) => {
+                let migration = nac_core::store::migration_status(&manager.inner.store_path);
+                let reason = migration
+                    .failure
+                    .map_or(migration.state.as_str(), |failure| failure.as_str());
+                ReadinessCheck::fail("store", format!("SQLite store is unavailable ({reason})"))
             }
         },
     ];
