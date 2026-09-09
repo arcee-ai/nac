@@ -21,20 +21,30 @@ arbitrary-shell agent can enumerate and transmit those secrets. Managed v0 is
 an owner-wide trust boundary, not a per-Project or per-agent sandbox.
 
 The image must run unprivileged and without `CAP_SYS_PTRACE`; its entrypoint
-fails closed if that capability is effective. The server and managed workers
-set Linux `no_new_privs` and become non-dumpable before spawning untrusted
-commands or MCP servers. Together with the worker's close-on-exec credential
-socket, that blocks ordinary same-UID procfs, ptrace, and `pidfd_getfd`
-inspection of server/worker secrets. The controller must not use a privileged
-pod, add ptrace capability, or weaken the host's process-inspection controls.
-These controls do not protect against kernel compromise or a fully compromised
-NAC process; separate UIDs or an external credential broker are required for a
-stronger boundary.
+fails closed if that bit appears in the inheritable, permitted, effective,
+bounding, or ambient capability set, or if those sets cannot be parsed. The
+server captures `EXA_API_KEY` into its native-web-only memory and removes it
+from the environment before loading configuration, constructing MCP servers,
+or starting background work. Managed workers do not inherit a credential
+descriptor on Linux: they first set `no_new_privs` and become non-dumpable,
+then connect to a filesystem Unix socket whose peers authenticate both the
+worker and parent PIDs. The parent sends the credential only after the worker
+has constructed MCP transports and closed the endpoint to descendants.
+Together these controls block ordinary same-UID environment, procfs, ptrace,
+and `pidfd_getfd` inspection of server/worker native credentials. A same-UID
+process can still discover, unlink, or flood the socket path and cause denial
+of service, but cannot authenticate as either peer to read or inject the
+credential. The controller must not use a privileged pod, add ptrace
+capability, or weaken the host's process-inspection controls. These controls do
+not protect against kernel compromise or a fully compromised NAC process;
+separate UIDs or an external credential broker are required for a stronger
+boundary.
 
-macOS still uses the close-on-exec socket and post-MCP readiness ordering, but
-does not have the Linux `prctl`/procfs boundary described above. Do not treat a
-same-user macOS MCP process as mutually isolated from NAC; use separate
-privileges or an external credential broker when that guarantee is required.
+macOS still uses an inherited close-on-exec socket and post-MCP readiness
+ordering, but does not have the Linux `prctl`/procfs boundary described above.
+Do not treat a same-user macOS MCP process as mutually isolated from NAC; use
+separate privileges or an external credential broker when that guarantee is
+required.
 
 Platform owns the logical-host controller, gateway/SSO, stable URL, volumes,
 runtime confinement, egress, host-scoped model credential, and lifecycle.

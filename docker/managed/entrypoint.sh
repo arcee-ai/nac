@@ -8,20 +8,9 @@ if [ "$(id -u)" -ne 10001 ] || [ "$(id -g)" -ne 10001 ]; then
     exit 78
 fi
 
-# CAP_SYS_PTRACE bypasses the server/worker non-dumpable boundary. Managed NAC
-# fails closed if the controller grants it, including through a privileged pod.
-cap_eff=$(awk '$1 == "CapEff:" { print $2 }' /proc/self/status)
-if [ -z "$cap_eff" ]; then
-    printf '%s\n' 'error: Managed NAC could not verify effective Linux capabilities' >&2
-    exit 78
-fi
-ptrace_nibble=$(printf '%s' "$cap_eff" | rev | cut -c 5)
-case "$ptrace_nibble" in
-    [89a-fA-F])
-        printf '%s\n' 'error: Managed NAC must not receive CAP_SYS_PTRACE' >&2
-        exit 78
-        ;;
-esac
+# CAP_SYS_PTRACE in any inheritable, permitted, effective, bounding, or ambient
+# set can undermine the server/worker non-dumpable boundary now or after exec.
+/usr/local/libexec/nac/check-process-capabilities /proc/self/status
 
 for managed_path in /var/lib/nac /repositories /home/nac /tmp /run/nac; do
     if [ ! -d "$managed_path" ] || [ "$(readlink -f "$managed_path")" != "$managed_path" ]; then

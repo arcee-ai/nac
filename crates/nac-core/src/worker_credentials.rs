@@ -1,12 +1,13 @@
 //! Private native-credential transport for managed workers.
 //!
-//! The worker endpoint is inherited only across the `__worker` exec, marked
-//! close-on-exec before any MCP transport is constructed, and backed by an
-//! anonymous Unix socket rather than stdin or a pipe. The worker announces
-//! readiness only after MCP construction; credential bytes are not written
-//! before that handshake.
+//! On Linux the worker hardens itself before connecting to a filesystem Unix
+//! socket, then both peers authenticate process IDs. Other Unix hosts inherit
+//! an anonymous socket only across the `__worker` exec and mark it close-on-exec
+//! before MCP construction. Every worker announces readiness only after MCP
+//! construction; credential bytes are not written before that handshake.
 
 use std::io;
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -37,14 +38,49 @@ pub fn restrict_same_uid_inspection() -> io::Result<()> {
     Ok(())
 }
 
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ManagedWorkerNativeCredentials {
     exa_api_key: Option<String>,
 }
 
+static MANAGED_NATIVE_CREDENTIALS: OnceLock<ManagedWorkerNativeCredentials> = OnceLock::new();
+
+/// Capture native integration credentials before managed server construction
+/// and remove them from the generic process environment. Only the native web
+/// capability and the private worker transport can consult this snapshot.
+pub fn capture_managed_native_credentials_from_environment() -> io::Result<()> {
+    let credentials = ManagedWorkerNativeCredentials::read_process_environment()?;
+    if let Some(existing) = MANAGED_NATIVE_CREDENTIALS.get() {
+        if existing != &credentials {
+            return Err(io::Error::other(
+                "managed native credentials were already captured",
+            ));
+        }
+    } else {
+        let _ = MANAGED_NATIVE_CREDENTIALS.set(credentials);
+    }
+    // SAFETY: managed startup calls this before constructing the SessionManager,
+    // MCP registries, refresh tasks, or any other application threads.
+    unsafe { std::env::remove_var(crate::model::EXA_API_KEY_ENV) };
+    Ok(())
+}
+
+pub(crate) fn managed_exa_api_key() -> Option<String> {
+    MANAGED_NATIVE_CREDENTIALS
+        .get()
+        .and_then(|credentials| credentials.exa_api_key.clone())
+}
+
 impl ManagedWorkerNativeCredentials {
     pub(crate) fn from_process_environment() -> io::Result<Self> {
+        if let Some(credentials) = MANAGED_NATIVE_CREDENTIALS.get() {
+            return Ok(credentials.clone());
+        }
+        Self::read_process_environment()
+    }
+
+    fn read_process_environment() -> io::Result<Self> {
         let exa_api_key = std::env::var_os(crate::model::EXA_API_KEY_ENV)
             .map(|value| {
                 value.into_string().map_err(|_| {
@@ -120,17 +156,59 @@ impl Drop for CredentialFrame {
 #[cfg(unix)]
 mod platform {
     use super::*;
-    use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+    #[cfg(not(target_os = "linux"))]
+    use std::os::fd::FromRawFd;
+    use std::os::fd::{AsRawFd, RawFd};
+    #[cfg(target_os = "linux")]
+    use std::os::unix::fs::PermissionsExt;
+    #[cfg(target_os = "linux")]
+    use std::os::unix::net::UnixListener as StdUnixListener;
     use std::os::unix::net::UnixStream as StdUnixStream;
+    #[cfg(not(target_os = "linux"))]
     use std::os::unix::process::CommandExt;
+    #[cfg(target_os = "linux")]
+    use std::path::PathBuf;
 
     pub(crate) struct PreparedWorkerCredentialChannel {
+        #[cfg(target_os = "linux")]
+        listener: StdUnixListener,
+        #[cfg(target_os = "linux")]
+        socket_path: SocketPathGuard,
+        #[cfg(not(target_os = "linux"))]
         parent: StdUnixStream,
+        #[cfg(not(target_os = "linux"))]
         child: StdUnixStream,
     }
 
     pub(crate) struct WorkerCredentialSender {
-        stream: tokio::net::UnixStream,
+        transport: WorkerCredentialTransport,
+    }
+
+    enum WorkerCredentialTransport {
+        #[cfg_attr(
+            target_os = "linux",
+            allow(
+                dead_code,
+                reason = "constructed by credential protocol tests on Linux"
+            )
+        )]
+        Connected(tokio::net::UnixStream),
+        #[cfg(target_os = "linux")]
+        Listener {
+            listener: tokio::net::UnixListener,
+            expected_pid: u32,
+            socket_path: SocketPathGuard,
+        },
+    }
+
+    #[cfg(target_os = "linux")]
+    struct SocketPathGuard(PathBuf);
+
+    #[cfg(target_os = "linux")]
+    impl Drop for SocketPathGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
     }
 
     pub struct ManagedWorkerCredentialReceiver {
@@ -140,40 +218,99 @@ mod platform {
     pub(crate) fn prepare_worker_credential_channel(
         command: &mut Command,
     ) -> io::Result<PreparedWorkerCredentialChannel> {
-        let (parent, child) = StdUnixStream::pair()?;
-        set_cloexec(parent.as_raw_fd(), true)?;
-        set_cloexec(child.as_raw_fd(), true)?;
-        let child_fd = child.as_raw_fd();
-        command
-            .arg("--native-credential-fd")
-            .arg(child_fd.to_string());
-        // SAFETY: the callback invokes only async-signal-safe `fcntl` calls
-        // between fork and exec, and captures only an integer descriptor.
-        unsafe {
-            command
-                .as_std_mut()
-                .pre_exec(move || set_cloexec(child_fd, false));
+        #[cfg(target_os = "linux")]
+        {
+            let path = std::env::temp_dir().join(format!(
+                "nac-worker-credential-{}.sock",
+                uuid::Uuid::new_v4().simple()
+            ));
+            let listener = StdUnixListener::bind(&path)?;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+            command.arg("--native-credential-socket").arg(&path);
+            return Ok(PreparedWorkerCredentialChannel {
+                listener,
+                socket_path: SocketPathGuard(path),
+            });
         }
-        Ok(PreparedWorkerCredentialChannel { parent, child })
+        #[cfg(not(target_os = "linux"))]
+        {
+            let (parent, child) = StdUnixStream::pair()?;
+            set_cloexec(parent.as_raw_fd(), true)?;
+            set_cloexec(child.as_raw_fd(), true)?;
+            let child_fd = child.as_raw_fd();
+            command
+                .arg("--native-credential-fd")
+                .arg(child_fd.to_string());
+            // SAFETY: the callback invokes only async-signal-safe `fcntl` calls
+            // between fork and exec, and captures only an integer descriptor.
+            unsafe {
+                command
+                    .as_std_mut()
+                    .pre_exec(move || set_cloexec(child_fd, false));
+            }
+            Ok(PreparedWorkerCredentialChannel { parent, child })
+        }
     }
 
     impl PreparedWorkerCredentialChannel {
-        pub(crate) fn into_sender(self) -> io::Result<WorkerCredentialSender> {
-            drop(self.child);
-            self.parent.set_nonblocking(true)?;
-            Ok(WorkerCredentialSender {
-                stream: tokio::net::UnixStream::from_std(self.parent)?,
-            })
+        pub(crate) fn into_sender(
+            self,
+            expected_pid: Option<u32>,
+        ) -> io::Result<WorkerCredentialSender> {
+            #[cfg(target_os = "linux")]
+            {
+                let expected_pid = expected_pid
+                    .ok_or_else(|| io::Error::other("managed worker process ID is unavailable"))?;
+                self.listener.set_nonblocking(true)?;
+                return Ok(WorkerCredentialSender {
+                    transport: WorkerCredentialTransport::Listener {
+                        listener: tokio::net::UnixListener::from_std(self.listener)?,
+                        expected_pid,
+                        socket_path: self.socket_path,
+                    },
+                });
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = expected_pid;
+                drop(self.child);
+                self.parent.set_nonblocking(true)?;
+                Ok(WorkerCredentialSender {
+                    transport: WorkerCredentialTransport::Connected(
+                        tokio::net::UnixStream::from_std(self.parent)?,
+                    ),
+                })
+            }
         }
     }
 
     impl WorkerCredentialSender {
         pub(crate) async fn send_after_ready(
-            mut self,
+            self,
             credentials: &ManagedWorkerNativeCredentials,
         ) -> io::Result<()> {
+            #[cfg(target_os = "linux")]
+            let mut stream = match self.transport {
+                WorkerCredentialTransport::Connected(stream) => stream,
+                WorkerCredentialTransport::Listener {
+                    listener,
+                    expected_pid,
+                    socket_path,
+                } => {
+                    let stream = loop {
+                        let (stream, _) = listener.accept().await?;
+                        if peer_pid(stream.as_raw_fd())? == expected_pid {
+                            break stream;
+                        }
+                    };
+                    drop(socket_path);
+                    stream
+                }
+            };
+            #[cfg(not(target_os = "linux"))]
+            let WorkerCredentialTransport::Connected(mut stream) = self.transport;
             let mut ready = vec![0; MANAGED_WORKER_CREDENTIAL_READY.len()];
-            self.stream.read_exact(&mut ready).await?;
+            stream.read_exact(&mut ready).await?;
             if ready != MANAGED_WORKER_CREDENTIAL_READY {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -181,30 +318,70 @@ mod platform {
                 ));
             }
             let frame = credentials.encode_control_frame()?;
-            self.stream.write_all(frame.as_bytes()).await?;
-            self.stream.flush().await?;
-            self.stream.shutdown().await
+            stream.write_all(frame.as_bytes()).await?;
+            stream.flush().await?;
+            stream.shutdown().await
         }
     }
 
     impl ManagedWorkerCredentialReceiver {
-        pub fn from_inherited_fd(fd: Option<i32>) -> Result<Self> {
-            let Some(fd) = fd else {
-                return Ok(Self { stream: None });
-            };
-            restrict_same_uid_inspection()
-                .map_err(|_| anyhow!("failed to restrict managed worker process inspection"))?;
-            if fd <= libc::STDERR_FILENO {
-                return Err(anyhow!("managed worker credential descriptor is invalid"));
+        pub fn from_private_channel(
+            fd: Option<i32>,
+            socket_path: Option<std::path::PathBuf>,
+        ) -> Result<Self> {
+            #[cfg(target_os = "linux")]
+            {
+                if fd.is_some() {
+                    return Err(anyhow!(
+                        "inherited managed worker credential descriptors are disabled on Linux"
+                    ));
+                }
+                let Some(socket_path) = socket_path else {
+                    return Ok(Self { stream: None });
+                };
+                // Harden before opening the channel, so no credential endpoint
+                // exists during the post-exec dumpability window.
+                restrict_same_uid_inspection()
+                    .map_err(|_| anyhow!("failed to restrict managed worker process inspection"))?;
+                let stream = StdUnixStream::connect(socket_path)?;
+                // Authenticate the listener as this worker's actual parent as
+                // well as having the parent authenticate our PID on accept.
+                // SAFETY: getppid takes no arguments and returns the parent PID.
+                let expected_parent = u32::try_from(unsafe { libc::getppid() })
+                    .map_err(|_| anyhow!("managed worker parent process ID is invalid"))?;
+                if peer_pid(stream.as_raw_fd())? != expected_parent {
+                    return Err(anyhow!(
+                        "managed worker credential listener identity is invalid"
+                    ));
+                }
+                set_cloexec(stream.as_raw_fd(), true)?;
+                validate_unix_stream(stream.as_raw_fd())?;
+                return Ok(Self {
+                    stream: Some(stream),
+                });
             }
-            validate_unix_stream(fd)?;
-            set_cloexec(fd, true)?;
-            // SAFETY: the hidden worker CLI transfers unique ownership of this
-            // validated inherited descriptor exactly once.
-            let stream = unsafe { StdUnixStream::from_raw_fd(fd) };
-            Ok(Self {
-                stream: Some(stream),
-            })
+            #[cfg(not(target_os = "linux"))]
+            {
+                if socket_path.is_some() {
+                    return Err(anyhow!(
+                        "managed worker credential socket paths are unsupported on this host"
+                    ));
+                }
+                let Some(fd) = fd else {
+                    return Ok(Self { stream: None });
+                };
+                if fd <= libc::STDERR_FILENO {
+                    return Err(anyhow!("managed worker credential descriptor is invalid"));
+                }
+                validate_unix_stream(fd)?;
+                set_cloexec(fd, true)?;
+                // SAFETY: the hidden worker CLI transfers unique ownership of this
+                // validated inherited descriptor exactly once.
+                let stream = unsafe { StdUnixStream::from_raw_fd(fd) };
+                Ok(Self {
+                    stream: Some(stream),
+                })
+            }
         }
 
         pub(crate) async fn receive_after_mcp(self) -> Result<ManagedWorkerNativeCredentials> {
@@ -261,6 +438,33 @@ mod platform {
             frame.fill(0);
             decoded
         }
+
+        #[cfg(test)]
+        pub(crate) fn raw_fd_for_test(&self) -> Option<RawFd> {
+            self.stream.as_ref().map(AsRawFd::as_raw_fd)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn peer_pid(fd: RawFd) -> io::Result<u32> {
+        // SAFETY: all-zero is valid storage for ucred before getsockopt fills it.
+        let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
+        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        // SAFETY: credentials and len are valid writable storage.
+        let result = unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                (&mut credentials as *mut libc::ucred).cast(),
+                &mut len,
+            )
+        };
+        if result < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        u32::try_from(credentials.pid)
+            .map_err(|_| io::Error::other("managed worker peer process ID is invalid"))
     }
 
     fn set_cloexec(fd: RawFd, enabled: bool) -> io::Result<()> {
@@ -337,7 +541,9 @@ mod platform {
         parent.set_nonblocking(true)?;
         Ok((
             WorkerCredentialSender {
-                stream: tokio::net::UnixStream::from_std(parent)?,
+                transport: WorkerCredentialTransport::Connected(tokio::net::UnixStream::from_std(
+                    parent,
+                )?),
             },
             ManagedWorkerCredentialReceiver {
                 stream: Some(child),
@@ -374,7 +580,10 @@ mod platform {
     }
 
     impl PreparedWorkerCredentialChannel {
-        pub(crate) fn into_sender(self) -> io::Result<WorkerCredentialSender> {
+        pub(crate) fn into_sender(
+            self,
+            _expected_pid: Option<u32>,
+        ) -> io::Result<WorkerCredentialSender> {
             Ok(WorkerCredentialSender)
         }
     }
@@ -395,8 +604,11 @@ mod platform {
     }
 
     impl ManagedWorkerCredentialReceiver {
-        pub fn from_inherited_fd(fd: Option<i32>) -> Result<Self> {
-            if fd.is_some() {
+        pub fn from_private_channel(
+            fd: Option<i32>,
+            socket_path: Option<std::path::PathBuf>,
+        ) -> Result<Self> {
+            if fd.is_some() || socket_path.is_some() {
                 return Err(anyhow!(
                     "managed worker credential descriptors are unsupported on this host"
                 ));

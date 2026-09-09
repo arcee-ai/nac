@@ -310,7 +310,7 @@ pub(super) async fn run_worker(
     let (mut child, mut process_tree) = ProcessTreeGuard::spawn_supervised(&mut command)?;
     let mut control_stdin = child.stdin.take();
     let credential_sender = match credential_channel {
-        Some(channel) => Some(channel.into_sender()?),
+        Some(channel) => Some(channel.into_sender(child.id())?),
         None => None,
     };
 
@@ -596,6 +596,25 @@ mod tests {
 
     const NATIVE_CREDENTIAL_CANARY: &str = "exa-worker-private-socket-canary";
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn credential_socket_startup_racer_helper() {
+        let Some(root) = std::env::var_os("NAC_WORKER_NATIVE_CREDENTIAL_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let socket = std::env::var_os("NAC_TEST_CREDENTIAL_SOCKET").unwrap();
+        let mut stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
+        std::fs::write(root.join("racer-connected"), "yes").unwrap();
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).unwrap();
+        assert!(!bytes
+            .windows(NATIVE_CREDENTIAL_CANARY.len())
+            .any(|part| part == NATIVE_CREDENTIAL_CANARY.as_bytes()));
+        bytes.fill(0);
+        std::fs::write(root.join("racer-observation"), "credential=absent").unwrap();
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn native_credential_adversarial_descendant_helper() {
@@ -727,12 +746,16 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let fd = std::env::var("NAC_TEST_CREDENTIAL_FD")
-            .unwrap()
-            .parse::<i32>()
-            .unwrap();
+            .ok()
+            .map(|value| value.parse::<i32>().unwrap());
+        let socket_path = std::env::var_os("NAC_TEST_CREDENTIAL_SOCKET").map(PathBuf::from);
         let receiver =
-            crate::worker_credentials::ManagedWorkerCredentialReceiver::from_inherited_fd(Some(fd))
-                .unwrap();
+            crate::worker_credentials::ManagedWorkerCredentialReceiver::from_private_channel(
+                fd,
+                socket_path,
+            )
+            .unwrap();
+        let fd = receiver.raw_fd_for_test().unwrap();
         // SAFETY: F_GETFD only reads flags for the owned integer descriptor.
         let fd_flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
         assert!(fd_flags >= 0 && fd_flags & libc::FD_CLOEXEC != 0);
@@ -801,6 +824,26 @@ mod tests {
         let shell_quote = |value: &std::path::Path| {
             format!("'{}'", value.to_string_lossy().replace('\'', "'\\''"))
         };
+        #[cfg(target_os = "linux")]
+        let script = format!(
+            "#!/bin/sh\nprintf '%s' \"${{EXA_API_KEY-unset}}\" > '{}'\n\
+             printf '%s\\n' \"$@\" > '{}'\n\
+             socket=\n\
+             while [ \"$#\" -gt 0 ]; do\n\
+               if [ \"$1\" = --native-credential-socket ]; then socket=$2; break; fi\n\
+               shift\n\
+             done\n\
+             test -n \"$socket\"\n\
+             NAC_TEST_CREDENTIAL_SOCKET=\"$socket\" {} --exact tools::thread::worker::tests::credential_socket_startup_racer_helper --nocapture &\n\
+             while [ ! -f '{}' ]; do sleep 0.01; done\n\
+             NAC_TEST_CREDENTIAL_SOCKET=\"$socket\" exec {} --exact tools::thread::worker::tests::native_credential_worker_endpoint_helper --nocapture\n",
+            root.join("inherited-exa").display(),
+            root.join("argv").display(),
+            shell_quote(&current_exe),
+            root.join("racer-connected").display(),
+            shell_quote(&current_exe)
+        );
+        #[cfg(not(target_os = "linux"))]
         let script = format!(
             "#!/bin/sh\nprintf '%s' \"${{EXA_API_KEY-unset}}\" > '{}'\n\
              printf '%s\\n' \"$@\" > '{}'\n\
@@ -896,6 +939,11 @@ mod tests {
             std::fs::read_to_string(root.join("credential-delivered")).unwrap(),
             "yes"
         );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            std::fs::read_to_string(root.join("racer-observation")).unwrap(),
+            "credential=absent"
+        );
         let observations = std::fs::read_to_string(root.join("mcp-observations")).unwrap();
         assert!(!observations.contains(credential));
         assert!(observations.contains("env=absent"));
@@ -903,6 +951,11 @@ mod tests {
         assert!(observations.contains("proc-fd=unopenable"));
         let argv = std::fs::read_to_string(root.join("argv")).unwrap();
         assert!(!argv.contains(credential));
+        #[cfg(target_os = "linux")]
+        {
+            assert!(argv.contains("native-credential-socket"));
+            assert!(!argv.contains("native-credential-fd"));
+        }
         for output_path in ["stdout", "stderr"] {
             let rendered = std::fs::read_to_string(root.join(output_path)).unwrap();
             assert!(rendered.contains("[REDACTED]"), "{output_path}: {rendered}");
@@ -994,6 +1047,7 @@ mod tests {
         );
         let argv = std::fs::read_to_string(root.join("argv")).unwrap();
         assert!(!argv.contains("native-credential-fd"));
+        assert!(!argv.contains("native-credential-socket"));
         assert!(!argv.contains(NATIVE_CREDENTIAL_CANARY));
         #[cfg(target_os = "linux")]
         assert_eq!(
