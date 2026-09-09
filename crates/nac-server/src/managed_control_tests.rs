@@ -423,6 +423,19 @@ async fn prepare_never_queues_behind_an_active_reader_or_blocks_later_requests()
 }
 
 #[tokio::test]
+async fn blocker_scan_never_queues_behind_active_session_registry_updates() {
+    let fixture = Fixture::new();
+    let _writer = fixture.manager.inner.active_sessions.write().await;
+    let started = std::time::Instant::now();
+    let blockers = fixture.manager.managed_upgrade_blockers().unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_millis(50));
+    assert!(blockers.iter().any(|blocker| {
+        blocker.kind == nac_core::store::ManagedBlockerKind::OperationLease
+            && blocker.id == "process-active-sessions-snapshot"
+    }));
+}
+
+#[tokio::test]
 async fn durable_operation_and_resource_leases_are_reported_together() {
     let fixture = Fixture::new();
     let session_id = "leased-session";
@@ -450,7 +463,7 @@ async fn durable_operation_and_resource_leases_are_reported_together() {
         session_id,
     )
     .unwrap();
-    let blockers = fixture.manager.managed_upgrade_blockers().await.unwrap();
+    let blockers = fixture.manager.managed_upgrade_blockers().unwrap();
     assert!(blockers.iter().any(|blocker| {
         blocker.kind == nac_core::store::ManagedBlockerKind::OperationLease
             && blocker.session_id.as_deref() == Some(session_id)
