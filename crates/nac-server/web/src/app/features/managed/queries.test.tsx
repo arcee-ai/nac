@@ -3,11 +3,65 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
-import { managedQueryKeys, useReadyManagedProviderModels } from "@/app/features/managed/queries";
+import {
+  managedQueryKeys,
+  settleManagedUpgradeBlocker,
+  useReadyManagedProviderModels,
+} from "@/app/features/managed/queries";
 import { api } from "@/app/services/api";
 import type { ManagedHostStatus, ModelCatalog } from "@/app/types/api";
+
+afterEach(() => vi.restoreAllMocks());
+
+it("dispatches each actionable upgrade blocker through its ordinary exact resource API", async () => {
+  const cancelRun = vi.spyOn(api, "cancelActiveRun").mockResolvedValue(undefined);
+  const cancelChild = vi.spyOn(api, "cancelTraditionalChild").mockResolvedValue({} as never);
+  const cancelOrchestrator = vi
+    .spyOn(api, "cancelManagedOrchestrator")
+    .mockResolvedValue({} as never);
+  const terminate = vi.spyOn(api, "terminateTerminal").mockResolvedValue(undefined);
+  const cancelClone = vi.spyOn(api, "cancelManagedClone").mockResolvedValue({} as never);
+
+  const fixtures = [
+    {
+      action: "cancel_active_run" as const,
+      target: { session_id: "session-1", run_id: "run-1" },
+    },
+    {
+      action: "cancel_traditional_child" as const,
+      target: { session_id: "session-2", child_session_id: "child-2" },
+    },
+    {
+      action: "cancel_managed_orchestrator" as const,
+      target: { session_id: "session-3", orchestrator_session_id: "orchestrator-3" },
+    },
+    {
+      action: "terminate_terminal" as const,
+      target: { session_id: "session-4", terminal_id: "terminal-4" },
+    },
+    {
+      action: "cancel_clone_operation" as const,
+      target: { clone_operation_id: "clone-5" },
+    },
+  ];
+  for (const [index, fixture] of fixtures.entries()) {
+    await settleManagedUpgradeBlocker({
+      selection_key: `sha256:${String(index).repeat(64)}`,
+      kind: "fixture",
+      message: "fixture",
+      actionable: true,
+      ...fixture,
+    });
+  }
+
+  expect(cancelRun).toHaveBeenCalledExactlyOnceWith("session-1");
+  expect(cancelChild).toHaveBeenCalledExactlyOnceWith("session-2", "child-2");
+  expect(cancelOrchestrator).toHaveBeenCalledExactlyOnceWith("session-3", "orchestrator-3");
+  expect(terminate).toHaveBeenCalledExactlyOnceWith("session-4", "terminal-4");
+  expect(cancelClone).toHaveBeenCalledExactlyOnceWith("clone-5");
+});
 
 it("loads all mounted-key models without sending a browser credential", async () => {
   // The hook reads only the model/auth fields in these response fixtures.

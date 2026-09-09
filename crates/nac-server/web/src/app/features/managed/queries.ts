@@ -13,6 +13,9 @@ import type {
   ManagedGitHubStatus,
   ManagedHostStatus,
   ManagedSecretList,
+  ManagedUpgradeBlocker,
+  ManagedUpgradeOperation,
+  ManagedUpgradeSnapshot,
   ModelCatalog,
   ProviderModel,
   ProviderModelList,
@@ -23,6 +26,7 @@ export const managedQueryKeys = {
   github: ["managed-github"] as const,
   secrets: ["managed-secrets"] as const,
   auth: ["managed-auth"] as const,
+  upgrade: ["managed-upgrade"] as const,
   providerModels: (backend: string, baseUrl?: string | null) =>
     baseUrl
       ? (["managed-provider-models", backend, baseUrl] as const)
@@ -37,6 +41,81 @@ export function useManagedHostStatus() {
     staleTime: 5_000,
     refetchInterval: 15_000,
     retry: false,
+  });
+}
+
+const terminalUpgradeStates = new Set(["succeeded", "failed"]);
+
+export function useManagedUpgrade(enabled = true) {
+  return useQuery<ManagedUpgradeSnapshot>({
+    queryKey: managedQueryKeys.upgrade,
+    queryFn: ({ signal }) => api.getManagedUpgrade(signal),
+    enabled,
+    retry: false,
+    refetchInterval: (query) => {
+      const operation = query.state.data?.operation;
+      return operation && !terminalUpgradeStates.has(operation.state) ? 1_000 : false;
+    },
+  });
+}
+
+export function useStartManagedUpgrade() {
+  const client = useQueryClient();
+  return useMutation<ManagedUpgradeOperation, Error, string>({
+    mutationFn: (idempotencyKey) => api.startManagedUpgrade(idempotencyKey),
+    onSuccess: (operation) => {
+      client.setQueryData<ManagedUpgradeSnapshot>(managedQueryKeys.upgrade, (snapshot) =>
+        snapshot ? { ...snapshot, operation } : snapshot,
+      );
+    },
+    onSettled: () => client.invalidateQueries({ queryKey: managedQueryKeys.upgrade }),
+  });
+}
+
+export async function settleManagedUpgradeBlocker(blocker: ManagedUpgradeBlocker): Promise<void> {
+  const target = blocker.target;
+  if (!blocker.actionable || target == null) return;
+  switch (blocker.action) {
+    case "cancel_active_run":
+      if (target.session_id == null) throw new Error("Active run blocker has no session");
+      return api.cancelActiveRun(target.session_id);
+    case "cancel_traditional_child":
+      if (target.session_id == null || target.child_session_id == null) {
+        throw new Error("Child blocker is incomplete");
+      }
+      await api.cancelTraditionalChild(target.session_id, target.child_session_id);
+      return;
+    case "cancel_managed_orchestrator":
+      if (target.session_id == null || target.orchestrator_session_id == null) {
+        throw new Error("Orchestrator blocker is incomplete");
+      }
+      await api.cancelManagedOrchestrator(target.session_id, target.orchestrator_session_id);
+      return;
+    case "terminate_terminal":
+      if (target.session_id == null || target.terminal_id == null) {
+        throw new Error("Terminal blocker is incomplete");
+      }
+      return api.terminateTerminal(target.session_id, target.terminal_id);
+    case "cancel_clone_operation":
+      if (target.clone_operation_id == null) throw new Error("Clone blocker has no operation");
+      await api.cancelManagedClone(target.clone_operation_id);
+      return;
+    case "wait":
+      return;
+  }
+}
+
+export function useSettleManagedUpgradeBlockers() {
+  const client = useQueryClient();
+  return useMutation<void, Error, ManagedUpgradeBlocker[]>({
+    mutationFn: async (blockers) => {
+      const results = await Promise.allSettled(blockers.map(settleManagedUpgradeBlocker));
+      const failures = results.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : [],
+      );
+      if (failures.length > 0) throw new AggregateError(failures, "Some work could not be stopped");
+    },
+    onSettled: () => client.invalidateQueries({ queryKey: managedQueryKeys.upgrade }),
   });
 }
 

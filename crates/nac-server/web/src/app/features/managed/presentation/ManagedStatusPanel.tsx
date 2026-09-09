@@ -1,5 +1,6 @@
 import { Loader, LoaderSize } from "@/app/atoms";
 import { useManagedHostStatus } from "@/app/features/managed/queries";
+import { ManagedUpgradePanel } from "@/app/features/managed/presentation/ManagedUpgradePanel";
 
 export function StatusDot({ ready }: { ready: boolean }) {
   return (
@@ -65,6 +66,7 @@ export function ManagedStatusPanel() {
           </div>
         ))}
       </div>
+      <ManagedUpgradePanel />
     </div>
   );
 }

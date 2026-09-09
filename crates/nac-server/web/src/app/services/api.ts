@@ -34,6 +34,8 @@ import type {
   ManagedGitHubRepositoryList,
   ManagedGitHubStatus,
   ManagedHostStatus,
+  ManagedUpgradeOperation,
+  ManagedUpgradeSnapshot,
   ManagedSecretList,
   ManagedSecretSummary,
   StartManagedCloneRequest,
@@ -123,6 +125,7 @@ type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 interface RequestOptions {
   body?: unknown;
   signal?: AbortSignal;
+  headers?: Record<string, string>;
 }
 
 /** Every handler that fails answers with `{ "error": string }`. */
@@ -137,6 +140,8 @@ async function errorDetail(res: Response): Promise<string> {
         const record = parsed as JsonObject;
         const error = record.error;
         if (isString(error)) return error;
+        const title = record.title;
+        if (isString(title)) return title;
       }
     } catch {
       // Not JSON; the raw body is the best detail available.
@@ -150,11 +155,14 @@ async function errorDetail(res: Response): Promise<string> {
 async function request<T>(
   method: Method,
   path: string,
-  { body, signal }: RequestOptions = {},
+  { body, signal, headers }: RequestOptions = {},
 ): Promise<T> {
   const res = await fetch(path, {
     method,
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...headers,
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
@@ -223,6 +231,16 @@ export const api = {
 
   getManagedStatus: (signal?: AbortSignal) =>
     request<ManagedHostStatus>("GET", "/managed/status", { signal }),
+
+  getManagedUpgrade: (signal?: AbortSignal) =>
+    request<ManagedUpgradeSnapshot>("GET", "/__managed/control/v0/upgrade", { signal }),
+
+  startManagedUpgrade: (idempotencyKey: string, signal?: AbortSignal) =>
+    request<ManagedUpgradeOperation>("POST", "/__managed/control/v0/upgrade", {
+      body: {},
+      signal,
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
 
   getManagedGitHub: (signal?: AbortSignal) =>
     request<ManagedGitHubStatus>("GET", "/managed/github", { signal }),
@@ -712,6 +730,9 @@ export const api = {
     }),
 
   cancelActiveRun: (id: string) => request<void>("POST", `${sessionPath(id)}/cancel-active-run`),
+
+  terminateTerminal: (id: string, terminalId: string) =>
+    request<void>("DELETE", `${sessionPath(id)}/terminals/${encodeURIComponent(terminalId)}`),
 
   compactSession: (id: string) =>
     request<CompactSessionResponse>("POST", `${sessionPath(id)}/compact`),

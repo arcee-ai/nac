@@ -43,6 +43,82 @@ export type ManagedCloneOperation = ApiSchema<"ManagedCloneOperation">;
 
 export type StartManagedCloneRequest = ApiSchema<"StartManagedCloneRequest">;
 
+/**
+ * Browser-safe projection served by the reserved managed-control origin. This
+ * is not a nac-server route, so it intentionally does not appear in NAC's
+ * generated OpenAPI contract. The private facade validates this closed wire
+ * shape before it reaches the browser.
+ */
+export interface ManagedReleaseIdentity {
+  release_id: string;
+  source_revision: string;
+  build_id: string;
+  product_version: string;
+  schema_version: number;
+}
+
+export type ManagedUpgradeState =
+  | "pending"
+  | "preparing"
+  | "blocked"
+  | "safe-to-stop"
+  | "replacing"
+  | "starting/migrating"
+  | "verifying"
+  | "succeeded"
+  | "failed";
+
+export interface ManagedUpgradeBlockerTarget {
+  session_id?: string;
+  run_id?: string;
+  child_session_id?: string;
+  orchestrator_session_id?: string;
+  terminal_id?: string;
+  clone_operation_id?: string;
+}
+
+export type ManagedUpgradeBlockerAction =
+  | "wait"
+  | "cancel_active_run"
+  | "cancel_traditional_child"
+  | "cancel_managed_orchestrator"
+  | "terminate_terminal"
+  | "cancel_clone_operation";
+
+export interface ManagedUpgradeBlocker {
+  selection_key: string;
+  kind: string;
+  message: string;
+  actionable: boolean;
+  action: ManagedUpgradeBlockerAction;
+  target: ManagedUpgradeBlockerTarget | null;
+}
+
+export interface ManagedUpgradeOperation {
+  operation_id: string;
+  managed_host_id: string;
+  kind: "upgrade";
+  state: ManagedUpgradeState;
+  reason?: string;
+  message?: string;
+  target_release?: ManagedReleaseIdentity;
+  desired_release?: ManagedReleaseIdentity;
+  observed_release?: ManagedReleaseIdentity;
+  blockers?: ManagedUpgradeBlocker[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ManagedUpgradeSnapshot {
+  preview: {
+    current: ManagedReleaseIdentity;
+    latest_beta: ManagedReleaseIdentity;
+    upgrade_available: boolean;
+    distance: { accepted_releases: number } | null;
+  };
+  operation: ManagedUpgradeOperation | null;
+}
+
 export type SandboxAvailabilityStatus = ApiSchema<"SandboxAvailabilityStatus">;
 
 export type SandboxAvailability = ApiSchema<"SandboxAvailability">;
