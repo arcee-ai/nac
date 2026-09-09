@@ -8,12 +8,6 @@ impl PermissionBroker {
         session_config_version: i64,
         configured_rules: impl IntoIterator<Item = PermissionRule>,
     ) -> Self {
-        let approval_mode =
-            crate::sessions::load_permission_approval_mode(&store_path, &session_id)
-                // A malformed or unavailable durable option must never broaden
-                // authority. Later durable mutations still surface storage
-                // failures instead of silently changing the in-memory policy.
-                .unwrap_or(PermissionApprovalMode::Manual);
         Self {
             policy: PermissionPolicy::for_backend(backend, configured_rules),
             store_path,
@@ -25,10 +19,7 @@ impl PermissionBroker {
             },
             session_config_version,
             event_bus: StdMutex::new(None),
-            state: StdMutex::new(PermissionBrokerState {
-                approval_mode,
-                ..PermissionBrokerState::default()
-            }),
+            state: StdMutex::new(PermissionBrokerState::default()),
         }
     }
 
@@ -56,29 +47,25 @@ impl PermissionBroker {
         requests
     }
 
-    pub fn approval_mode(&self) -> PermissionApprovalMode {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .approval_mode
+    pub fn approval_mode(&self) -> anyhow::Result<PermissionApprovalMode> {
+        crate::sessions::load_permission_approval_mode(&self.store_path, &self.session_id)
     }
 
     /// Durably changes this session's answer policy. Enabling auto-approval
-    /// claims every currently pending waiter under the same lock used by new
-    /// asks and manual replies, so no request can be replied to twice or miss
-    /// the transition.
+    /// claims process-local waiters under the same lock used by new asks and
+    /// manual replies. The durable generation lets independently attached
+    /// brokers claim their own waiters without missing a transition.
     pub fn set_approval_mode(&self, mode: PermissionApprovalMode) -> anyhow::Result<()> {
         let replies = {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            crate::sessions::update_permission_approval_mode(
+            crate::sessions::update_permission_approval_state(
                 &self.store_path,
                 &self.session_id,
                 mode,
             )?;
-            state.approval_mode = mode;
             if mode == PermissionApprovalMode::AutoApprove {
                 state.pending.drain().collect::<Vec<_>>()
             } else {
@@ -186,18 +173,16 @@ impl PermissionBroker {
             return AuthorizationOutcome::Denied("run was cancelled before approval".to_string());
         }
 
-        // The mode is consulted only after ordered configured and hard policy
-        // has produced Ask. Claiming this read before a concurrent disable is
-        // the linearization point for this invocation.
-        if self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .approval_mode
-            == PermissionApprovalMode::AutoApprove
-        {
-            return AuthorizationOutcome::Allowed;
-        }
+        // The durable mode is consulted only after ordered configured and hard
+        // policy has produced Ask. It is never cached: independent managers and
+        // processes may attach the same durable session.
+        let (_, initial_auto_generation) = match self.approval_state() {
+            Ok((PermissionApprovalMode::AutoApprove, _)) => {
+                return AuthorizationOutcome::Allowed;
+            }
+            Ok(state) => state,
+            Err(reason) => return AuthorizationOutcome::Denied(reason),
+        };
         let interactive = self
             .event_bus
             .lock()
@@ -230,17 +215,30 @@ impl PermissionBroker {
             created_at_epoch_ms: epoch_millis_now(),
         };
         let (sender, receiver) = tokio::sync::oneshot::channel();
+        let approval_generation;
         {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            // Recheck while holding the same lock as set_approval_mode. If the
-            // mode changed while ownership/connectivity was resolved, this
-            // invocation is answered exactly once without becoming pending.
-            if state.approval_mode == PermissionApprovalMode::AutoApprove {
-                return AuthorizationOutcome::Allowed;
-            }
+            // Recheck after ownership/connectivity resolution. The generation
+            // lets a waiter observe even a fast enable-then-disable performed
+            // through another process after this point.
+            approval_generation = match self.approval_state() {
+                Ok((PermissionApprovalMode::AutoApprove, _)) => {
+                    return AuthorizationOutcome::Allowed;
+                }
+                Ok((PermissionApprovalMode::Manual, generation))
+                    if generation > initial_auto_generation =>
+                {
+                    // Auto-approve was enabled and then disabled while this Ask
+                    // was already resolving broker ownership. The enable still
+                    // owns this invocation even though it never became pending.
+                    return AuthorizationOutcome::Allowed;
+                }
+                Ok((PermissionApprovalMode::Manual, generation)) => generation,
+                Err(reason) => return AuthorizationOutcome::Denied(reason),
+            };
             if !interactive && !delegated_child {
                 return AuthorizationOutcome::Denied(
                     "approval is required, but no interactive session client is connected; the operation was not executed"
@@ -277,6 +275,24 @@ impl PermissionBroker {
                     AuthorizationOutcome::Denied(reason)
                 } else {
                     self.reply_outcome(receiver.await, &request, &waiter_live).await
+                }
+            },
+            approval = self.auto_approval_after(approval_generation) => {
+                match approval {
+                    Ok(()) => {
+                        // A local manual reply or cancellation may have claimed
+                        // the request after the durable generation was read.
+                        // Whichever removes it first owns the sole reply.
+                        let _ = self.reply(&request.id, PermissionReply::Once);
+                        self.reply_outcome(receiver.await, &request, &waiter_live).await
+                    }
+                    Err(reason) => {
+                        if self.dismiss_pending(&request.id, reason.clone()) {
+                            AuthorizationOutcome::Denied(reason)
+                        } else {
+                            self.reply_outcome(receiver.await, &request, &waiter_live).await
+                        }
+                    }
                 }
             },
             reason = self.interactive_subscriber_unavailable(interactive) => {
@@ -378,6 +394,21 @@ impl PermissionBroker {
             });
         }
         dismissed
+    }
+
+    fn approval_state(&self) -> Result<(PermissionApprovalMode, i64), String> {
+        crate::sessions::load_permission_approval_state(&self.store_path, &self.session_id)
+            .map_err(|error| format!("permission approval mode could not be read: {error}"))
+    }
+
+    async fn auto_approval_after(&self, generation: i64) -> Result<(), String> {
+        loop {
+            tokio::time::sleep(APPROVAL_MODE_POLL_INTERVAL).await;
+            let (_, observed_generation) = self.approval_state()?;
+            if observed_generation > generation {
+                return Ok(());
+            }
+        }
     }
 
     async fn interactive_subscriber_lost(&self) {

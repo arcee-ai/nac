@@ -1426,7 +1426,7 @@ async fn session_auto_approve_answers_asks_headlessly_without_creating_grants() 
         [],
     );
     assert_eq!(
-        restarted.approval_mode(),
+        restarted.approval_mode().unwrap(),
         PermissionApprovalMode::AutoApprove
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -1535,6 +1535,110 @@ async fn enabling_auto_approve_claims_pending_once_and_disabling_restores_manual
     assert!(
         matches!(outcome, AuthorizationOutcome::Denied(reason) if reason.contains("no interactive"))
     );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn independent_brokers_observe_mode_changes_and_drain_cross_process_waiters() {
+    let (path, owner) = broker_fixture();
+    let peer = Arc::new(PermissionBroker::new(
+        path.clone(),
+        "session-a".to_string(),
+        PermissionBackend::Local,
+        0,
+        [],
+    ));
+    let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+    let interactive = bus.subscribe_assistant_deltas();
+    owner.attach_event_bus(bus);
+    let authorize = {
+        let owner = Arc::clone(&owner);
+        tokio::spawn(async move {
+            owner
+                .authorize(
+                    "exec_command",
+                    &[PermissionResource::new(
+                        "execute",
+                        "command:[curl][example.com]",
+                    )],
+                    &crate::tools::kernel::ToolCallContext::default(),
+                    &crate::tools::ThreadCancellation::default(),
+                )
+                .await
+        })
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while owner.pending().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("owner broker should publish its pending request");
+
+    // A fast enable-then-disable in another broker must still drain the waiter
+    // that was pending for that enable transition.
+    peer.set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .unwrap();
+    peer.set_approval_mode(PermissionApprovalMode::Manual)
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), authorize)
+            .await
+            .expect("owner should observe the durable auto-approve generation")
+            .unwrap(),
+        AuthorizationOutcome::Allowed
+    );
+    assert!(owner.pending().is_empty());
+
+    drop(interactive);
+    let manual = owner
+        .authorize(
+            "exec_command",
+            &[PermissionResource::new(
+                "execute",
+                "command:[curl][example.com]",
+            )],
+            &crate::tools::kernel::ToolCallContext::default(),
+            &crate::tools::ThreadCancellation::default(),
+        )
+        .await;
+    assert!(
+        matches!(manual, AuthorizationOutcome::Denied(reason) if reason.contains("no interactive"))
+    );
+
+    peer.set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .unwrap();
+    assert_eq!(
+        owner
+            .authorize(
+                "exec_command",
+                &[PermissionResource::new(
+                    "execute",
+                    "command:[curl][example.com]",
+                )],
+                &crate::tools::kernel::ToolCallContext::default(),
+                &crate::tools::ThreadCancellation::default(),
+            )
+            .await,
+        AuthorizationOutcome::Allowed
+    );
+    peer.set_approval_mode(PermissionApprovalMode::Manual)
+        .unwrap();
+    let restored = owner
+        .authorize(
+            "exec_command",
+            &[PermissionResource::new(
+                "execute",
+                "command:[curl][example.com]",
+            )],
+            &crate::tools::kernel::ToolCallContext::default(),
+            &crate::tools::ThreadCancellation::default(),
+        )
+        .await;
+    assert!(
+        matches!(restored, AuthorizationOutcome::Denied(reason) if reason.contains("no interactive"))
+    );
+    assert!(owner.grants().unwrap().is_empty());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

@@ -460,6 +460,12 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
         "permission_approval_mode",
         "TEXT NOT NULL DEFAULT 'manual' CHECK (permission_approval_mode IN ('manual', 'auto_approve'))",
     )?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "permission_auto_approve_generation",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (permission_auto_approve_generation >= 0)",
+    )?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
     }
@@ -575,6 +581,8 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
                  CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator')),
              permission_approval_mode TEXT NOT NULL DEFAULT 'manual'
                  CHECK (permission_approval_mode IN ('manual', 'auto_approve')),
+             permission_auto_approve_generation INTEGER NOT NULL DEFAULT 0
+                 CHECK (permission_auto_approve_generation >= 0),
              cwd TEXT NOT NULL,
              store_path TEXT NOT NULL,
              model TEXT NOT NULL,
