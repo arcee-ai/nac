@@ -4,6 +4,10 @@ use super::*;
 async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
+    let root = std::env::temp_dir().join(format!(
+        "nac_agent_worker_compaction_{}",
+        uuid::Uuid::new_v4()
+    ));
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
         "200 OK",
         scripted_responses_text("worker answer", 100, 0, 5, 1),
@@ -14,7 +18,7 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
             session_behavior: None,
-            store_path: PathBuf::from("unused.db"),
+            store_path: root.join("store.db"),
             session_id: None,
             orchestrator_compaction_threshold: Some(1),
             initial_messages: Vec::new(),
@@ -47,6 +51,7 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
             .is_some_and(|tools| !tools.is_empty())
     );
     assert_eq!(worker.last_usage.unwrap().orchestrator_context_tokens, 0);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test]

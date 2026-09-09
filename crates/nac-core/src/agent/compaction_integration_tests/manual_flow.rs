@@ -341,7 +341,11 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
 
 #[tokio::test]
 async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events() {
-    let path = PathBuf::from("unused.db");
+    let root = std::env::temp_dir().join(format!(
+        "nac_agent_unavailable_compaction_{}",
+        uuid::Uuid::new_v4()
+    ));
+    let path = root.join("store.db");
     let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut sessionless = compaction_test_agent(
         ModelClient::new_for_test(),
@@ -391,4 +395,5 @@ async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events(
         Err(CompactionError::Unavailable)
     ));
     assert!(drain_events(&mut events_rx).is_empty());
+    let _ = std::fs::remove_dir_all(root);
 }
