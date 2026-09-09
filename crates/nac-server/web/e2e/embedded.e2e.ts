@@ -393,7 +393,7 @@ test("persists session auto-approval, drains pending asks, and restores manual m
     { kind: "text", text: "manual approval restored", stream: true },
   );
   await page.getByRole("combobox", { name: "Message" }).fill("ALL16_MANUAL_TOKEN");
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await harness.provider.waitForRequestCount(4);
   const manualCard = page.locator('[data-tool-call-id="manual-after-disable"]');
   await expect(manualCard).toContainText("Awaiting approval");
