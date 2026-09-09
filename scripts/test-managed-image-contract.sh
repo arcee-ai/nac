@@ -58,6 +58,7 @@ require_literal "$managed_status" '"git-lfs"'
 require_literal "$repo_root/docker/managed/fixtures/bootstrap.json" '"client_id": "managed-nac"'
 require_literal "$repo_root/docker/managed/fixtures/bootstrap.json" '"version": 2'
 require_literal "$repo_root/docker/managed/fixtures/bootstrap.json" '"auth_issuer": "https://api.arcee.ai"'
+require_literal "$repo_root/docker/managed/fixtures/bootstrap.json" '"repair_intent": "managed-image-repair-intent-canary-0123456789"'
 if grep -Eq '(^|[[:space:]])(sudo|su)([[:space:]]|$)' "$dockerfile" "$entrypoint"; then
     fail 'image or entrypoint grants an escalation command'
 fi

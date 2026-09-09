@@ -39,7 +39,7 @@ Mount these paths with the stated ownership:
 
 | Path | Lifetime | Contents |
 | --- | --- | --- |
-| `/var/lib/nac` | durable | SQLite store, imported model auth and receipt, GitHub tokens, host secrets |
+| `/var/lib/nac` | durable | SQLite store, imported model auth, receipt and repair capability, GitHub tokens, host secrets |
 | `/repositories` | durable | repository checkouts |
 | `/home/nac` | durable | Git identity, caches, owner-installed tools |
 | `/etc/nac/managed.toml` | read-only config | nonsecret host contract |
@@ -105,10 +105,11 @@ credential. Ordinary non-managed login continues to use production.
 
 The controller must project the single Secret key with a
 Kubernetes `subPath` mount so the final path is a regular file, not a projected
-volume symlink. NAC reads it with `O_NOFOLLOW`, imports under the normal Arcee
-credential lock, writes the credential and a separate nonsecret receipt
-atomically, then uses only writable durable state. Reconciliation may leave or
-replace the input, and the mount may disappear on later starts; none can
+volume symlink. NAC reads it with `O_NOFOLLOW` and imports under the normal
+Arcee credential lock. V2 writes the owner-only repair capability, the
+credential, and a separate nonsecret receipt as ordered atomic file
+replacements, then uses only writable durable state. Reconciliation may leave
+or replace the input, and the mount may disappear on later starts; none can
 overwrite a locally rotated credential.
 
 The strict v2 JSON object has exactly these fields (no extras):
@@ -126,7 +127,8 @@ The strict v2 JSON object has exactly these fields (no extras):
   "inference_base_url": "https://api.arcee.ai",
   "auth_issuer": "https://api.arcee.ai",
   "organization_id": "<nonsecret Arcee organization id>",
-  "workspace": "<nonsecret workspace name>"
+  "workspace": "<nonsecret workspace name>",
+  "repair_intent": "<opaque secret correlation, 32-512 characters>"
 }
 ```
 
@@ -149,32 +151,44 @@ session creation, and resume require an `imported` receipt and a stored
 receipt exactly. Receipt and credential are checked together under the normal
 Arcee lock. A crash after the credential write but before its receipt is
 repaired from nonsecret provenance on retry without rewriting the credential.
-Local logout or provider revocation removes the usable credential while the
-receipt remains a tombstone, so the managed profile fails closed. The existing
-interactive **Sign in with Arcee** flow remains available for ordinary
-`arcee-auth` use and managed repair. Managed repair is a stricter transaction:
-it requires a valid imported receipt for the configured logical host and no
+For v2, NAC stores `repair_intent` separately in owner-only
+`$NAC_HOME/arcee_managed_repair.json`; it never appears in auth status, errors,
+logs, the nonsecret receipt, or the browser. Strict v1 remains import-compatible
+but cannot start managed repair because it has no such capability. Local logout
+or provider revocation removes the usable credential while both the receipt and
+repair capability remain, so the managed profile fails closed but its owner can
+repair it.
+
+Managed repair is a stricter specialization of **Sign in with Arcee**. It
+requires a valid imported receipt, a matching repair capability, and no
 credential file, so it cannot overwrite or downgrade a healthy managed grant.
 The owner must log out before starting repair if a credential still exists.
-Both device-code requests use registered client `managed-nac`. Completion
-rechecks the same receipt generation and empty credential path under the
-credential lock, verifies the configured production/dev2 issuer and inference
-origin, then restores `client_id = "managed-nac"` and `managed_bootstrap`
-provenance from that receipt. Missing, invalid, changed, or host-mismatched
-provenance fails before NAC reports the login complete. No browser or API caller
-can supply replacement inference or provenance fields.
+NAC sends only `{ "client_id": "managed-nac", "managed_repair": {
+"repair_intent": "<opaque>" } }`; it sends no host, bootstrap, incarnation,
+organization, profile, issuer, or inference assertion. ArceeFM resolves those
+authoritatively during browser approval.
+
+Completion must include `managed_binding` with `managed_host_id`,
+`bootstrap_id`, `host_incarnation_id`, `auth_issuer`, and
+`inference_base_url`. Under the credential lock, NAC rechecks the unchanged
+receipt and capability, requires exact host/bootstrap identity, a nonblank
+server incarnation, the configured exact issuer, and the same normalized
+configured/binding/token inference URL before writing. Missing, malformed,
+unexpected, or mismatched proof fails without a credential write. Ordinary
+device login rejects an unexpected managed binding.
 
 ArceeFM alone mints and revokes the grant. For v2, ArceeFM must populate
-`auth_issuer` from a dedicated trusted deployment setting rather than from the
-inference URL. It must also keep `managed-nac` registered for the interactive
-device-code and refresh endpoints in both production and dev2; repaired tokens
-must return the configured inference origin. The controller/nac-api must carry
+`auth_issuer`, `inference_base_url`, and `repair_intent` from its durable managed
+host workflow rather than from NAC or the browser. `managed-nac` is accepted
+only through the repair specialization of the device-code endpoint; ordinary
+device clients remain unbound. Repaired tokens must return the authoritative
+binding described above. The controller/nac-api must carry
 `model_auth_issuer` in managed configuration and transport strict v1/v2
-bootstrap JSON opaquely; any private schema or fixture validation must accept
-the v2 field without copying secrets into CR spec/status, API responses, or
-logs. The controller must not replace or delete NAC's durable receipt during
-revocation or repair. If that provenance is lost, recovery requires a newly
-minted bootstrap generation rather than caller-constructed repair metadata.
+bootstrap JSON opaquely; private schema or fixture validation must accept the
+v2 repair field without copying secrets into CR spec/status, API responses, or
+logs. The controller must not replace or delete NAC's durable receipt or repair
+capability during revocation or repair. If either is lost, recovery requires a
+newly minted bootstrap generation rather than caller-constructed metadata.
 NAC receives no Kubernetes,
 service-account, or provisioning credential and exposes no bootstrap HTTP
 endpoint. The grant authorizes all Arcee models entitled to its organization;

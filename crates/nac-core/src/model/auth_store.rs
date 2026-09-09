@@ -30,6 +30,14 @@ pub(super) fn arcee_managed_bootstrap_receipt_path() -> Result<PathBuf> {
         })
 }
 
+pub(super) fn arcee_managed_repair_capability_path() -> Result<PathBuf> {
+    crate::paths::nac_home_dir()
+        .map(|dir| dir.join("arcee_managed_repair.json"))
+        .ok_or_else(|| {
+            anyhow!("could not determine NAC_HOME or HOME for managed Arcee repair storage")
+        })
+}
+
 fn acquire_arcee_auth_lock() -> Result<FileLock> {
     acquire_credential_lock(&arcee_auth_lock_path()?)
 }

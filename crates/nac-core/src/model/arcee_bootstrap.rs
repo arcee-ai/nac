@@ -21,8 +21,13 @@ use super::arcee::{
     ManagedBootstrapProvenance, StoredArceeAuth, ARCEE_AUTH_PRODUCTION_ISSUER, AUTH_TYPE,
     MANAGED_CLIENT_ID,
 };
+use super::arcee_repair::{
+    read_repair_capability, validate_repair_intent, write_repair_capability, AuthorizationPaths,
+    RepairCapability, REPAIR_CAPABILITY_VERSION,
+};
 use super::auth_store::{
     arcee_auth_file_path, arcee_auth_lock_path, arcee_managed_bootstrap_receipt_path,
+    arcee_managed_repair_capability_path,
 };
 
 pub const MANAGED_ARCEE_BOOTSTRAP_PATH: &str = "/run/secrets/nac/bootstrap.json";
@@ -51,6 +56,7 @@ struct BootstrapPayload {
     auth_issuer: String,
     organization_id: String,
     workspace: String,
+    repair_intent: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -84,6 +90,7 @@ struct BootstrapWireV2 {
     auth_issuer: String,
     organization_id: String,
     workspace: String,
+    repair_intent: String,
 }
 
 #[derive(Deserialize)]
@@ -103,11 +110,12 @@ struct BootstrapWire {
     auth_issuer: String,
     organization_id: String,
     workspace: String,
+    repair_intent: Option<String>,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum ReceiptDisposition {
+pub(super) enum ReceiptDisposition {
     Imported,
     PreservedExisting,
     PreservedInvalid,
@@ -115,46 +123,21 @@ enum ReceiptDisposition {
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct BootstrapReceipt {
-    version: u32,
-    bootstrap_id: Uuid,
-    managed_host_id: Uuid,
-    client_id: String,
-    disposition: ReceiptDisposition,
+pub(super) struct BootstrapReceipt {
+    pub(super) version: u32,
+    pub(super) bootstrap_id: Uuid,
+    pub(super) managed_host_id: Uuid,
+    pub(super) client_id: String,
+    pub(super) disposition: ReceiptDisposition,
 }
 
+#[derive(Clone, Copy)]
 struct ImportPaths<'a> {
     input: &'a Path,
     auth: &'a Path,
     receipt: &'a Path,
+    repair: &'a Path,
     lock: &'a Path,
-}
-
-struct AuthorizationPaths<'a> {
-    auth: &'a Path,
-    receipt: &'a Path,
-    lock: &'a Path,
-}
-
-/// Nonsecret durable identity captured before a managed interactive repair.
-/// Completion revalidates every field under the credential lock before it may
-/// write provider-returned tokens.
-#[derive(Debug)]
-pub(super) struct ManagedArceeRepairContext {
-    expected_managed_host_id: Uuid,
-    expected_base_url: String,
-    expected_auth_issuer: String,
-    bootstrap_id: Uuid,
-    auth_path: PathBuf,
-    receipt_path: PathBuf,
-    lock_path: PathBuf,
-}
-
-impl ManagedArceeRepairContext {
-    #[cfg(any(test, feature = "test-support"))]
-    pub(super) fn auth_issuer(&self) -> &str {
-        &self.expected_auth_issuer
-    }
 }
 
 /// Import the fixed managed bootstrap input into NAC's normal Arcee store.
@@ -176,6 +159,7 @@ pub fn import_managed_arcee_bootstrap_for_issuer(
 ) -> Result<ManagedArceeBootstrapOutcome> {
     let auth = arcee_auth_file_path()?;
     let receipt = arcee_managed_bootstrap_receipt_path()?;
+    let repair = arcee_managed_repair_capability_path()?;
     let lock = arcee_auth_lock_path()?;
     import_with_paths(
         expected_managed_host_id,
@@ -184,6 +168,7 @@ pub fn import_managed_arcee_bootstrap_for_issuer(
             input: Path::new(MANAGED_ARCEE_BOOTSTRAP_PATH),
             auth: &auth,
             receipt: &receipt,
+            repair: &repair,
             lock: &lock,
         },
         || Ok(()),
@@ -195,139 +180,6 @@ pub fn managed_arcee_auth_storage_root() -> Result<PathBuf> {
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| anyhow!("managed Arcee credential path has no parent directory"))
-}
-
-pub(super) fn prepare_managed_arcee_repair(
-    expected_managed_host_id: &str,
-    expected_base_url: &str,
-    expected_auth_issuer: &str,
-) -> Result<ManagedArceeRepairContext> {
-    let auth = arcee_auth_file_path()?;
-    let receipt = arcee_managed_bootstrap_receipt_path()?;
-    let lock = arcee_auth_lock_path()?;
-    prepare_managed_arcee_repair_with_paths(
-        expected_managed_host_id,
-        expected_base_url,
-        expected_auth_issuer,
-        AuthorizationPaths {
-            auth: &auth,
-            receipt: &receipt,
-            lock: &lock,
-        },
-    )
-}
-
-pub(super) fn complete_managed_arcee_repair(
-    context: &ManagedArceeRepairContext,
-    auth: StoredArceeAuth,
-) -> Result<StoredArceeAuth> {
-    complete_managed_arcee_repair_with_paths(
-        context,
-        auth,
-        AuthorizationPaths {
-            auth: &context.auth_path,
-            receipt: &context.receipt_path,
-            lock: &context.lock_path,
-        },
-    )
-}
-
-fn prepare_managed_arcee_repair_with_paths(
-    expected_managed_host_id: &str,
-    expected_base_url: &str,
-    expected_auth_issuer: &str,
-    paths: AuthorizationPaths<'_>,
-) -> Result<ManagedArceeRepairContext> {
-    let expected_host = Uuid::parse_str(expected_managed_host_id)
-        .map_err(|_| anyhow!("managed logical_host_id must be a UUID for managed repair"))?;
-    validate_stored_base_url(expected_base_url)
-        .map_err(|_| anyhow!("managed model endpoint is not approved for Arcee repair"))?;
-    validate_arcee_auth_issuer(expected_auth_issuer)
-        .map_err(|_| anyhow!("managed expected auth issuer is not approved"))?;
-
-    with_credential_lock(paths.lock, || {
-        let receipt = require_repair_receipt(paths.receipt, expected_host)?;
-        require_empty_repair_target(paths.auth)?;
-        Ok(ManagedArceeRepairContext {
-            expected_managed_host_id: expected_host,
-            expected_base_url: expected_base_url.to_string(),
-            expected_auth_issuer: expected_auth_issuer.to_string(),
-            bootstrap_id: receipt.bootstrap_id,
-            auth_path: paths.auth.to_path_buf(),
-            receipt_path: paths.receipt.to_path_buf(),
-            lock_path: paths.lock.to_path_buf(),
-        })
-    })
-}
-
-fn complete_managed_arcee_repair_with_paths(
-    context: &ManagedArceeRepairContext,
-    mut auth: StoredArceeAuth,
-    paths: AuthorizationPaths<'_>,
-) -> Result<StoredArceeAuth> {
-    with_credential_lock(paths.lock, || {
-        let receipt = require_repair_receipt(paths.receipt, context.expected_managed_host_id)?;
-        if receipt.bootstrap_id != context.bootstrap_id {
-            bail!("managed Arcee repair receipt changed while authorization was pending");
-        }
-        require_empty_repair_target(paths.auth)?;
-
-        if auth.auth_issuer != context.expected_auth_issuer {
-            bail!("managed Arcee repair authorization issuer does not match managed configuration");
-        }
-        let expected_url = validate_stored_base_url(&context.expected_base_url)
-            .map_err(|_| anyhow!("managed model endpoint is not approved for Arcee repair"))?;
-        let returned_url = validate_stored_base_url(&auth.base_url)
-            .map_err(|_| anyhow!("managed Arcee repair returned an invalid inference URL"))?;
-        if expected_url.origin() != returned_url.origin() {
-            bail!("managed Arcee repair returned an inference origin that does not match managed configuration");
-        }
-        if auth.access_token.trim().is_empty()
-            || auth.refresh_token.trim().is_empty()
-            || auth.token_type != "bearer"
-            || auth.organization_id.trim().is_empty()
-            || auth.workspace_name.trim().is_empty()
-        {
-            bail!("managed Arcee repair returned a structurally invalid authorization");
-        }
-
-        auth.client_id = MANAGED_CLIENT_ID.to_string();
-        auth.managed_bootstrap = Some(ManagedBootstrapProvenance {
-            bootstrap_id: receipt.bootstrap_id,
-            managed_host_id: receipt.managed_host_id,
-        });
-        write_stored_auth_to_path(paths.auth, &auth)?;
-        Ok(auth)
-    })
-}
-
-fn require_repair_receipt(path: &Path, expected_host: Uuid) -> Result<BootstrapReceipt> {
-    let receipt = match read_receipt(path)? {
-        ReceiptState::Valid(receipt) => receipt,
-        ReceiptState::Missing => {
-            bail!("managed Arcee repair requires its durable bootstrap receipt")
-        }
-        ReceiptState::Invalid => bail!("managed Arcee repair bootstrap receipt is invalid"),
-    };
-    if receipt.managed_host_id != expected_host {
-        bail!("managed Arcee repair receipt belongs to a different logical host");
-    }
-    if !matches!(receipt.disposition, ReceiptDisposition::Imported) {
-        bail!("managed Arcee repair receipt has no imported credential provenance");
-    }
-    Ok(receipt)
-}
-
-fn require_empty_repair_target(path: &Path) -> Result<()> {
-    match read_auth_bytes_from_path(path) {
-        Ok(None) => Ok(()),
-        Ok(Some(_)) => bail!(
-            "managed Arcee repair will not replace an existing credential; log out before starting repair"
-        ),
-        Err(_) => bail!(
-            "managed Arcee repair cannot safely inspect the credential path; correct or remove it before retrying"
-        ),
-    }
 }
 
 /// Validate one bound durable managed authorization without consulting the
@@ -354,6 +206,7 @@ pub fn validate_managed_arcee_authorization_for_issuer(
 ) -> Result<()> {
     let auth = arcee_auth_file_path()?;
     let receipt = arcee_managed_bootstrap_receipt_path()?;
+    let repair = arcee_managed_repair_capability_path()?;
     let lock = arcee_auth_lock_path()?;
     validate_authorization_with_paths(
         expected_managed_host_id,
@@ -362,6 +215,7 @@ pub fn validate_managed_arcee_authorization_for_issuer(
         AuthorizationPaths {
             auth: &auth,
             receipt: &receipt,
+            repair: &repair,
             lock: &lock,
         },
     )
@@ -462,6 +316,12 @@ fn import_with_paths(
             if auth_issuer != expected_auth_issuer {
                 bail!("durable managed Arcee credential auth issuer does not match managed configuration");
             }
+            recover_repair_capability_if_available(
+                paths,
+                expected_host,
+                expected_auth_issuer,
+                provenance,
+            )?;
             write_receipt(
                 paths.receipt,
                 BootstrapReceipt {
@@ -495,7 +355,21 @@ fn import_with_paths(
                 Ok(ManagedArceeBootstrapOutcome::ExistingCredentialPreserved)
             }
             ExistingAuthState::Missing => {
+                let repair_intent = payload.repair_intent.clone();
+                let bootstrap_id = payload.bootstrap_id;
+                let managed_host_id = payload.managed_host_id;
                 let auth = stored_auth_from_payload(payload);
+                if let Some(repair_intent) = repair_intent {
+                    write_repair_capability(
+                        paths.repair,
+                        &RepairCapability {
+                            version: REPAIR_CAPABILITY_VERSION,
+                            bootstrap_id,
+                            managed_host_id,
+                            repair_intent,
+                        },
+                    )?;
+                }
                 write_stored_auth_to_path(paths.auth, &auth)?;
                 after_credential_write()?;
                 write_receipt(paths.receipt, receipt)?;
@@ -503,6 +377,44 @@ fn import_with_paths(
             }
         }
     })
+}
+
+fn recover_repair_capability_if_available(
+    paths: ImportPaths<'_>,
+    expected_host: Uuid,
+    expected_auth_issuer: &str,
+    provenance: &ManagedBootstrapProvenance,
+) -> Result<()> {
+    if let Some(capability) = read_repair_capability(paths.repair)? {
+        if capability.managed_host_id != provenance.managed_host_id
+            || capability.bootstrap_id != provenance.bootstrap_id
+        {
+            bail!("managed Arcee repair capability does not match durable credential provenance");
+        }
+        return Ok(());
+    }
+
+    let Some(raw) = read_mounted_credential_string(paths.input)? else {
+        return Ok(());
+    };
+    let payload = parse_bootstrap(&raw, expected_host, expected_auth_issuer)?;
+    if payload.managed_host_id != provenance.managed_host_id
+        || payload.bootstrap_id != provenance.bootstrap_id
+    {
+        return Ok(());
+    }
+    if let Some(repair_intent) = payload.repair_intent {
+        write_repair_capability(
+            paths.repair,
+            &RepairCapability {
+                version: REPAIR_CAPABILITY_VERSION,
+                bootstrap_id: payload.bootstrap_id,
+                managed_host_id: payload.managed_host_id,
+                repair_intent,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 enum ExistingAuthState {
@@ -562,11 +474,19 @@ fn read_bootstrap(
 ) -> Result<BootstrapPayload> {
     let raw = read_mounted_credential_string(path)?
         .ok_or_else(|| anyhow!("managed Arcee bootstrap input is unavailable"))?;
-    let version: BootstrapVersion = serde_json::from_str(&raw)
+    parse_bootstrap(&raw, expected_host, expected_auth_issuer)
+}
+
+fn parse_bootstrap(
+    raw: &str,
+    expected_host: Uuid,
+    expected_auth_issuer: &str,
+) -> Result<BootstrapPayload> {
+    let version: BootstrapVersion = serde_json::from_str(raw)
         .map_err(|_| anyhow!("managed Arcee bootstrap input is not valid JSON"))?;
     let wire = match version.version {
         BOOTSTRAP_VERSION_V1 => {
-            let wire: BootstrapWireV1 = serde_json::from_str(&raw).map_err(|_| {
+            let wire: BootstrapWireV1 = serde_json::from_str(raw).map_err(|_| {
                 anyhow!("managed Arcee bootstrap input is not valid strict v1 JSON")
             })?;
             if wire.version != BOOTSTRAP_VERSION_V1 {
@@ -584,10 +504,11 @@ fn read_bootstrap(
                 auth_issuer: ARCEE_AUTH_PRODUCTION_ISSUER.to_string(),
                 organization_id: wire.organization_id,
                 workspace: wire.workspace,
+                repair_intent: None,
             }
         }
         BOOTSTRAP_VERSION_V2 => {
-            let wire: BootstrapWireV2 = serde_json::from_str(&raw).map_err(|_| {
+            let wire: BootstrapWireV2 = serde_json::from_str(raw).map_err(|_| {
                 anyhow!("managed Arcee bootstrap input is not valid strict v2 JSON")
             })?;
             if wire.version != BOOTSTRAP_VERSION_V2 {
@@ -605,6 +526,7 @@ fn read_bootstrap(
                 auth_issuer: wire.auth_issuer,
                 organization_id: wire.organization_id,
                 workspace: wire.workspace,
+                repair_intent: Some(wire.repair_intent),
             }
         }
         _ => bail!("managed Arcee bootstrap input has an unsupported version"),
@@ -626,6 +548,9 @@ fn read_bootstrap(
     require_nonblank(&wire.refresh_token, "refresh_token")?;
     require_nonblank(&wire.organization_id, "organization_id")?;
     require_nonblank(&wire.workspace, "workspace")?;
+    if let Some(repair_intent) = wire.repair_intent.as_deref() {
+        validate_repair_intent(repair_intent)?;
+    }
     validate_stored_base_url(&wire.inference_base_url)
         .map_err(|_| anyhow!("managed Arcee bootstrap inference_base_url is not approved"))?;
     validate_arcee_auth_issuer(&wire.auth_issuer)
@@ -646,6 +571,7 @@ fn read_bootstrap(
         auth_issuer: wire.auth_issuer,
         organization_id: wire.organization_id,
         workspace: wire.workspace,
+        repair_intent: wire.repair_intent,
     })
 }
 
@@ -656,13 +582,13 @@ fn require_nonblank(value: &str, field: &str) -> Result<()> {
     Ok(())
 }
 
-enum ReceiptState {
+pub(super) enum ReceiptState {
     Missing,
     Valid(BootstrapReceipt),
     Invalid,
 }
 
-fn read_receipt(path: &Path) -> Result<ReceiptState> {
+pub(super) fn read_receipt(path: &Path) -> Result<ReceiptState> {
     let raw = match read_auth_bytes_from_path(path) {
         Ok(Some(raw)) => raw,
         Ok(None) => return Ok(ReceiptState::Missing),

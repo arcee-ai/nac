@@ -36,6 +36,16 @@ fn write_imported_managed_arcee_state(
         })
         .to_string(),
     );
+    write_managed_credential(
+        &nac_home.join("arcee_managed_repair.json"),
+        serde_json::json!({
+            "version": 1,
+            "bootstrap_id": "4712bc5e-30d5-421a-b416-8291d9f7d8f9",
+            "managed_host_id": "21856443-8ed8-40ab-9036-72e837c99f27",
+            "repair_intent": "managed-server-repair-intent-canary-0123456789"
+        })
+        .to_string(),
+    );
 }
 
 fn scripted_managed_arcee_login(inference_base_url: &str) -> (String, std::thread::JoinHandle<()>) {
@@ -61,7 +71,14 @@ fn scripted_managed_arcee_login(inference_base_url: &str) -> (String, std::threa
                 "expires_in": 3600,
                 "base_url": inference_base_url,
                 "organization_id": "org-repaired-server-test",
-                "workspace_name": "repaired-server-test"
+                "workspace_name": "repaired-server-test",
+                "managed_binding": {
+                    "managed_host_id": "21856443-8ed8-40ab-9036-72e837c99f27",
+                    "bootstrap_id": "4712bc5e-30d5-421a-b416-8291d9f7d8f9",
+                    "host_incarnation_id": "managed-server-incarnation-canary",
+                    "auth_issuer": nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+                    "inference_base_url": inference_base_url
+                }
             })
             .to_string(),
         ];
@@ -771,10 +788,16 @@ async fn managed_interactive_repair_completes_into_readiness_create_and_resume()
         .write()
         .await
         .remove(&session_id);
-    manager
+    drop(manager);
+    let restarted = test_managed_bootstrap_manager_with_auth(
+        &root,
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+        Some(nac_core::model::ARCEE_AUTH_DEV2_ISSUER),
+    );
+    restarted
         .attach_session(&session_id)
         .await
-        .expect("repaired authorization must admit session resume");
+        .expect("repaired authorization must admit session resume after restart");
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -805,7 +828,10 @@ async fn managed_interactive_repair_preserves_existing_auth_and_requires_matchin
     assert!(error.contains("will not replace an existing credential"));
     assert_eq!(std::fs::read(&auth_path).unwrap(), before);
 
-    std::fs::remove_file(&auth_path).unwrap();
+    assert!(
+        nac_core::model::managed_auth_logout(nac_core::model::ManagedAuthProvider::Arcee).unwrap()
+    );
+    assert!(nac_home.join("arcee_managed_repair.json").exists());
     std::fs::remove_file(nac_home.join("arcee_managed_bootstrap_receipt.json")).unwrap();
     let error = manager
         .start_managed_login(
