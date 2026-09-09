@@ -191,7 +191,7 @@ async fn secure_docs(request: axum::extract::Request, next: Next) -> Response {
 #[openapi(
     info(
         title = "nac-web HTTP API",
-        version = env!("CARGO_PKG_VERSION"),
+        version = env!("NAC_PRODUCT_VERSION"),
         description = "Live OpenAPI 3.1 contract for nac-web's REST and SSE surface. nac-web binds to loopback by default. Non-loopback binds require --allow-remote and an authenticated, encrypted network boundary; every reachable client receives control equivalent to the local user because the API has no client authentication. IP-literal Host values bypass only the DNS-name allowlist, not authentication. DNS names must be listed in NAC_ALLOWED_HOSTS. Cross-origin browser mutations are rejected independently. Finite JSON responses may be gzip-compressed. The SSE stream is text/event-stream and is never gzip-compressed. Credential values are write-only. /mcp is streamable-HTTP MCP (JSON-RPC), not REST, and is intentionally out of band."
     ),
     components(schemas(
@@ -220,14 +220,30 @@ pub fn router(manager: SessionManager) -> Router {
                 .config(SwaggerConfig::default().validator_url("none")),
         )
         .layer(middleware::from_fn(secure_docs));
-    api.merge(docs)
-        .merge(embedded_frontend_router())
+    secure_public_router(api.merge(docs).merge(embedded_frontend_router()))
+}
+
+fn secure_public_router(router: Router) -> Router {
+    router
         .layer(response_compression_layer())
         .layer(middleware::from_fn(reject_cross_origin_mutation))
         .layer(middleware::from_fn_with_state(
             Arc::new(configured_allowed_hosts()),
             reject_foreign_host,
         ))
+}
+
+fn managed_migration_recovery_router(manager: SessionManager) -> Router {
+    secure_public_router(
+        Router::new()
+            .route("/healthz", get(managed_status::healthz_handler))
+            .route("/readyz", get(managed_status::readyz_handler))
+            .route(
+                "/managed/status",
+                get(managed_status::managed_status_handler),
+            )
+            .with_state(manager),
+    )
 }
 
 fn embedded_frontend_router() -> Router {
@@ -453,10 +469,29 @@ pub async fn serve_with_policy(
 ) -> Result<()> {
     policy.validate(addr)?;
     // Establish the durable store before serving requests. Readiness probes
-    // then verify this store in place and never create a blank replacement
-    // if it disappears while the process is running.
-    nac_core::store::initialize(&manager.inner.store_path)?;
-    nac_core::reconcile_podman_creation_records(&manager.inner.store_path).await?;
+    // then verify this store in place and never create a blank replacement if
+    // it disappears while the process is running. A managed host keeps only
+    // its credential-free diagnostic surface available after a migration
+    // failure; every route that could admit or mutate work remains absent.
+    let app = match nac_core::store::initialize(&manager.inner.store_path) {
+        Ok(()) => {
+            nac_core::reconcile_podman_creation_records(&manager.inner.store_path).await?;
+            router(manager.clone())
+        }
+        Err(_) if manager.managed_host().is_some() => {
+            // This process never constructed the full router. Keep its mode
+            // unavailable even if another process later repairs or migrates
+            // the shared store; a restart is required to admit work routes.
+            manager.enter_recovery_only();
+            let status = nac_core::store::migration_status(&manager.inner.store_path);
+            let reason = status
+                .failure
+                .map_or(status.state.as_str(), |failure| failure.as_str());
+            eprintln!("nac: managed store unavailable ({reason}); serving recovery status only");
+            managed_migration_recovery_router(manager.clone())
+        }
+        Err(error) => return Err(error),
+    };
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {addr}"))?;
@@ -464,8 +499,9 @@ pub async fn serve_with_policy(
         .local_addr()
         .with_context(|| format!("failed to read bound address for {addr}"))?;
     on_listening(bound);
-    serve_listener_with_shutdown(
+    serve_router_listener_with_shutdown(
         listener,
+        app,
         manager,
         shutdown_signal(),
         COMPLETE_SHUTDOWN_TIMEOUT,
@@ -474,12 +510,37 @@ pub async fn serve_with_policy(
     .await
 }
 
+#[cfg(test)]
+pub(crate) async fn serve_listener_with_shutdown<F, X>(
+    listener: TcpListener,
+    manager: SessionManager,
+    shutdown: F,
+    complete_shutdown_timeout: Duration,
+    force_shutdown: X,
+) -> Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+    X: FnOnce() + Send + 'static,
+{
+    let app = router(manager.clone());
+    serve_router_listener_with_shutdown(
+        listener,
+        app,
+        manager,
+        shutdown,
+        complete_shutdown_timeout,
+        force_shutdown,
+    )
+    .await
+}
+
 #[expect(
     clippy::expect_used,
     reason = "the single forced-shutdown callback is moved only after graceful shutdown starts"
 )]
-pub(crate) async fn serve_listener_with_shutdown<F, X>(
+async fn serve_router_listener_with_shutdown<F, X>(
     listener: TcpListener,
+    app: Router,
     manager: SessionManager,
     shutdown: F,
     complete_shutdown_timeout: Duration,
@@ -493,7 +554,7 @@ where
     let shutdown_manager = manager.clone();
     let (graceful_tx, graceful_rx) = tokio::sync::oneshot::channel();
     let mut server = tokio::spawn(
-        axum::serve(listener, router(manager))
+        axum::serve(listener, app)
             .with_graceful_shutdown(async move {
                 let _ = graceful_rx.await;
             })

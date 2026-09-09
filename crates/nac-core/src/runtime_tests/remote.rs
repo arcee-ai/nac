@@ -563,7 +563,7 @@ async fn ssh_fresh_run_resume_base_and_resume_control_socket_use_local_config_cw
     assert_eq!(run_config.resume_base_cwd(), config_cwd.as_path());
     assert_eq!(
         run_config.session.store_path(),
-        expected_nac_home.join("store.db")
+        expected_nac_home.join("dev.db")
     );
     let fresh_control_path = run_config
         .agent

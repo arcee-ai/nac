@@ -38,7 +38,11 @@ pub use run_recovery::{
     clear_settled_run_recovery, load_run_recovery, reconcile_active_run, ActiveRunReconciliation,
     RunRecoveryRecord, RunRecoveryStatus, RunTerminalDisposition,
 };
-pub use schema::{check_readiness, default_store_path, initialize, schema_version};
+pub use schema::{
+    check_readiness, default_store_path, default_store_path_for_track, initialize,
+    migration_status, schema_version, StoreMigrationFailure, StoreMigrationState,
+    StoreMigrationStatus, StoreTrack,
+};
 pub use session_forks::{
     clone_session_conversation_artifacts, dismiss_session_fork, insert_session_fork,
     list_session_forks, SessionForkLink, SessionForkOrigin,
@@ -91,6 +95,13 @@ pub fn is_sqlite_busy(error: &anyhow::Error) -> bool {
                 )
         )
     })
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub fn set_test_schema_version(path: &Path, version: i64) -> Result<()> {
+    let connection = Connection::open(path)?;
+    connection.pragma_update(None, "user_version", version)?;
+    Ok(())
 }
 
 /// Retry a store write that hit SQLITE_BUSY / SQLITE_LOCKED. `busy_timeout`

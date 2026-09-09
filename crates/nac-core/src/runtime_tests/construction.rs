@@ -1162,7 +1162,7 @@ fn nac_config_load_from_cwd_resolves_relative_nac_home_against_explicit_cwd() {
 }
 
 #[test]
-fn resolve_store_path_defaults_to_single_global_store_for_any_cwd() {
+fn resolve_store_path_defaults_to_single_global_dev_store_for_any_cwd() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let original_nac_home = std::env::var_os("NAC_HOME");
     let nac_home = std::env::temp_dir().join(format!(
@@ -1185,7 +1185,7 @@ fn resolve_store_path_defaults_to_single_global_store_for_any_cwd() {
         &config,
     );
 
-    assert_eq!(from_repo_a, nac_home.join("store.db"));
+    assert_eq!(from_repo_a, nac_home.join("dev.db"));
     assert_eq!(
         from_repo_a, from_repo_b,
         "default store must be identical regardless of launch directory"
@@ -1212,11 +1212,81 @@ fn resolve_store_path_falls_back_to_workspace_store_without_home() {
         StoreOptions::default(),
         &NacConfig::default(),
     );
-    assert_eq!(resolved, Path::new("/repo/.nac/store.db"));
+    assert_eq!(resolved, Path::new("/repo/.nac/dev.db"));
 
     restore_env("NAC_HOME", original_nac_home);
     restore_env("XDG_CONFIG_HOME", original_xdg_config_home);
     restore_env("HOME", original_home);
+}
+
+#[test]
+fn resolve_store_path_isolates_dev_beta_and_stable_without_copying_data() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let original_nac_home = std::env::var_os("NAC_HOME");
+    let nac_home = std::env::temp_dir().join(format!(
+        "nac_track_store_home_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&nac_home).unwrap();
+    unsafe { std::env::set_var("NAC_HOME", &nac_home) };
+
+    let cwd = Path::new("/workspace/repo");
+    let config = NacConfig::default();
+    let dev = resolve_store_path_for_track(
+        cwd,
+        StoreOptions::default(),
+        &config,
+        crate::store::StoreTrack::Dev,
+    );
+    let beta = resolve_store_path_for_track(
+        cwd,
+        StoreOptions::default(),
+        &config,
+        crate::store::StoreTrack::Beta,
+    );
+    let stable = resolve_store_path_for_track(
+        cwd,
+        StoreOptions::default(),
+        &config,
+        crate::store::StoreTrack::Stable,
+    );
+    assert_eq!(dev, nac_home.join("dev.db"));
+    assert_eq!(beta, nac_home.join("beta.db"));
+    assert_eq!(stable, nac_home.join("stable.db"));
+    assert_ne!(dev, beta);
+    assert_ne!(beta, stable);
+
+    for track in [
+        crate::store::StoreTrack::Dev,
+        crate::store::StoreTrack::Beta,
+        crate::store::StoreTrack::Stable,
+    ] {
+        assert_eq!(
+            resolve_store_path_for_track(
+                cwd,
+                StoreOptions {
+                    store_path: Some(PathBuf::from("/expert/override.db")),
+                },
+                &config,
+                track,
+            ),
+            Path::new("/expert/override.db"),
+            "explicit store path must remain authoritative for {track:?}"
+        );
+    }
+
+    std::fs::write(&dev, b"dev-only-canary").unwrap();
+    assert!(!beta.exists());
+    assert!(
+        !stable.exists(),
+        "resolving stable must never copy dev data"
+    );
+
+    restore_env("NAC_HOME", original_nac_home);
+    let _ = std::fs::remove_dir_all(nac_home);
 }
 
 #[test]

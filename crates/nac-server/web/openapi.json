@@ -9416,6 +9416,13 @@
           "ready",
           "version",
           "schema_version",
+          "product_version",
+          "build_id",
+          "build_track",
+          "source_revision",
+          "supported_schema_version",
+          "migration_state",
+          "maintenance_state",
           "logical_host_id",
           "public_hostname",
           "repository_root",
@@ -9428,6 +9435,12 @@
           "checks"
         ],
         "properties": {
+          "build_id": {
+            "type": "string"
+          },
+          "build_track": {
+            "type": "string"
+          },
           "checks": {
             "type": "array",
             "items": {
@@ -9440,8 +9453,20 @@
           "logical_host_id": {
             "type": "string"
           },
+          "maintenance_state": {
+            "type": "string"
+          },
           "managed": {
             "type": "boolean"
+          },
+          "migration_failure": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "migration_state": {
+            "type": "string"
           },
           "model": {
             "$ref": "#/components/schemas/ManagedModelStatus"
@@ -9449,11 +9474,21 @@
           "model_ready": {
             "type": "boolean"
           },
+          "opened_schema_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
           "owner": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "product_version": {
+            "type": "string"
           },
           "project_count": {
             "type": "integer",
@@ -9479,6 +9514,13 @@
           "session_count": {
             "type": "integer",
             "minimum": 0
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "supported_schema_version": {
+            "type": "integer",
+            "format": "int64"
           },
           "version": {
             "type": "string"
@@ -10841,24 +10883,66 @@
           "managed",
           "version",
           "schema_version",
+          "product_version",
+          "build_id",
+          "build_track",
+          "source_revision",
+          "supported_schema_version",
+          "migration_state",
+          "maintenance_state",
           "checks"
         ],
         "properties": {
+          "build_id": {
+            "type": "string"
+          },
+          "build_track": {
+            "type": "string"
+          },
           "checks": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ReadinessCheck"
             }
           },
+          "maintenance_state": {
+            "type": "string"
+          },
           "managed": {
             "type": "boolean"
+          },
+          "migration_failure": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "migration_state": {
+            "type": "string"
+          },
+          "opened_schema_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "product_version": {
+            "type": "string"
           },
           "schema_version": {
             "type": "integer",
             "format": "int64"
           },
+          "source_revision": {
+            "type": "string"
+          },
           "status": {
             "type": "string"
+          },
+          "supported_schema_version": {
+            "type": "integer",
+            "format": "int64"
           },
           "version": {
             "type": "string"

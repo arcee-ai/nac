@@ -1,4 +1,5 @@
 mod application;
+mod build_identity;
 mod compaction;
 mod delegation_runtime;
 mod delivery;
@@ -78,7 +79,10 @@ use std::{
     future::{Future, IntoFuture},
     net::SocketAddr,
     path::PathBuf,
-    sync::{Arc, Mutex as StdMutex, Weak},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex as StdMutex, Weak,
+    },
     time::{Duration, Instant},
 };
 
@@ -316,6 +320,7 @@ struct SessionManagerInner {
     git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
     managed_logins: managed_auth::ManagedLoginRegistry,
     managed_github_logins: managed_github::ManagedGitHubLoginRegistry,
+    recovery_only: AtomicBool,
     #[cfg(test)]
     managed_monitor_peer_observed: tokio::sync::Notify,
 }
@@ -454,12 +459,13 @@ impl SessionManager {
     pub fn new(options: ServerOptions) -> Result<Self> {
         let root_cwd = canonicalize_dir(options.root_cwd)?;
         let config = NacConfig::load_without_model_from_cwd(&root_cwd)?;
-        let store_path = runtime::resolve_store_path(
+        let store_path = runtime::resolve_store_path_for_track(
             &root_cwd,
             StoreOptions {
                 store_path: options.store_path,
             },
             &config,
+            build_identity::store_track(),
         );
         let worker_executable = options
             .worker_executable
@@ -508,6 +514,7 @@ impl SessionManager {
                 git_probe_cache: RwLock::new(HashMap::new()),
                 managed_logins: managed_auth::ManagedLoginRegistry::default(),
                 managed_github_logins: managed_github::ManagedGitHubLoginRegistry::default(),
+                recovery_only: AtomicBool::new(false),
                 #[cfg(test)]
                 managed_monitor_peer_observed: tokio::sync::Notify::new(),
             }),
@@ -541,6 +548,14 @@ impl SessionManager {
 
     pub(crate) fn managed_model(&self) -> Option<&application::managed::ManagedModelProfile> {
         self.inner.managed_model.as_ref()
+    }
+
+    pub(crate) fn enter_recovery_only(&self) {
+        self.inner.recovery_only.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn is_recovery_only(&self) -> bool {
+        self.inner.recovery_only.load(Ordering::Acquire)
     }
 
     fn attach_managed_command_environment(

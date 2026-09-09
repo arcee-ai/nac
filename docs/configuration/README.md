@@ -6,3 +6,4 @@
 - [Model configuration](model.md)
 - [Catalog and cost](catalog.md)
 - [Providers and logins](credentials.md)
+- [Data stores](data-stores.md)

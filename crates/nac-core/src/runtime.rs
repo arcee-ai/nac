@@ -66,7 +66,7 @@ use model_resolution::{
 };
 pub use model_resolution::{
     effective_model_settings, effective_orchestrator_compaction_threshold,
-    parse_extra_headers_json, resolve_store_path,
+    parse_extra_headers_json, resolve_store_path, resolve_store_path_for_track,
 };
 pub use remote::browse_ssh_directory;
 use remote::{canonical_remote_session_cwd, remote_cwd_or_home, trim_ssh_host};
