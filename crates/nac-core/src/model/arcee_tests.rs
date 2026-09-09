@@ -77,6 +77,11 @@ fn assert_device_request(request: &super::super::test_http::CapturedRequest, pat
     );
 }
 
+#[test]
+fn simulated_product_version_bump_updates_arcee_auth_header_exactly() {
+    assert_eq!(user_agent_for_version("9.8.7"), "nac/9.8.7");
+}
+
 #[tokio::test]
 async fn device_code_request_uses_expected_contract_and_parses_complete_uri() {
     let server = ScriptedServer::start(vec![ScriptedResponse::json(

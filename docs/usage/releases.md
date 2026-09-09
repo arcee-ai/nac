@@ -9,13 +9,16 @@ nightly, or standing release-candidate channels.
 Stable release preparation uses one Release Please PR targeting `dev`. The
 repository-level `simple` strategy owns root [`version.txt`](../../version.txt)
 and [`CHANGELOG.md`](../../CHANGELOG.md); internal Cargo crate versions remain
-independent implementation metadata. Merging the Release Please PR is the
-human stable-release approval and creates the canonical `vX.Y.Z` tag and
-GitHub Release. The release workflow tests and packages that exact source and
-uploads its binary archives to the existing release. Publication runs only
-from the tag-push workflow stored in that tagged commit. The workflow fetches
-`origin/dev` and rejects a tag whose commit is not an ancestor of that branch,
-even when its `version.txt` matches.
+independent implementation metadata and never appear in public protocol or
+provider identity. Root `version.txt` is injected at build time into the
+server, shared MCP registration, and provider user-agent surfaces. Merging the
+Release Please PR is the human stable-release approval and creates the
+canonical `vX.Y.Z` tag and GitHub Release. The release workflow tests and
+packages that exact source and uploads its binary archives to the existing
+release. Publication runs only from the separately identified
+`stable-release.yml` tag-push workflow stored in that tagged commit. The
+workflow fetches `origin/dev` and rejects a tag whose commit is not an ancestor
+of that branch, even when its `version.txt` matches.
 
 Before 1.0, `fix:` squash titles produce a patch, while `feat:` and breaking
 changes produce a minor release. Pull requests should use Conventional
@@ -29,13 +32,25 @@ Contents and Pull requests write access. The repository variable
 identity. Public NAC must not receive a personal access token, AWS credential,
 or access to the private beta publisher.
 
-Until the repository default branch contains this tag-only publication
-workflow, an administrator must disable the legacy default-branch Release
-workflow before installing the App or approving the first stable Release
-Please PR. This prevents a GitHub `release` event from running the obsolete
-default-branch publication definition. Keep it disabled until the tag-only
-workflow is also present on the default branch; do not treat a future default
-branch transition as implicit.
+The first rollout is an explicit transition between two distinct workflow
+paths. Follow this order:
+
+1. Merge the foundation PR into `dev`, making
+   `.github/workflows/stable-release.yml` available on the release source
+   branch. Do not install or enable Release Please first.
+2. From a trusted checkout of that `dev` commit, run
+   `.github/scripts/stable-release-rollout.sh --apply arcee-ai/nac` with an
+   administrator-authenticated `gh`. The script verifies the new workflow on
+   `dev` before it disables the legacy default-branch `release.yml`, then reads
+   the legacy workflow state back and requires `disabled_manually`.
+3. Only after the script succeeds, install/configure the Release Please App and
+   allow it to prepare the first stable PR.
+
+Disabling `release.yml` cannot disable the new publisher because
+`stable-release.yml` has a different GitHub Actions workflow identity. The
+checked-in release-policy test rejects reintroduction of the legacy path,
+`release` events, schedules, or prerelease inputs. No default-branch transition
+is assumed.
 
 `nac-web upgrade --pre-release` is retained only as a command-line
 compatibility parser and returns an explicit unsupported error. NAC does not

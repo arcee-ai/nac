@@ -38,4 +38,6 @@ utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum
 flate2 = "1"
 nac-core = { path = "../nac-core", features = ["test-support"] }
 nac-managed = { path = "../nac-managed", features = ["openapi", "test-support"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2.workspace = true
 tower = { version = "0.5", features = ["util"] }

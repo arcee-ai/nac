@@ -1,4 +1,4 @@
-.PHONY: all setup build dev demo release install ci test test-rust test-web test-release test-source-size generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev demo release install ci test test-rust test-web test-release test-stable-binary test-source-size generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -105,7 +105,16 @@ test-web:
 
 ## Validate Release Please configuration and pre-1.0 release calculation
 test-release:
+	sh -n .github/scripts/stable-release-rollout.sh
 	node --test .github/scripts/release-policy.test.mjs
+	$(MAKE) test-stable-binary
+
+## Build a stable binary and exercise its real readiness/status identity contract
+test-stable-binary:
+	@version="$$(tr -d '[:space:]' < version.txt)"; \
+	source_revision="$$(git rev-parse HEAD)"; \
+	NAC_BUILD_TRACK=stable NAC_BUILD_ID="v$$version" NAC_SOURCE_REVISION="$$source_revision" \
+		$(CARGO) test --locked -p nac-server --test stable_binary_contract -- --nocapture
 
 ## Keep tracked human-authored files within the agent-context budget
 test-source-size:
@@ -145,6 +154,7 @@ test-e2e-remote:
 
 ## Run focused deterministic lifecycle and crash-window regressions
 test-durability:
+	$(CARGO) test --locked -p nac-core killed_migrator_rolls_back_and_waiting_process_migrates_exactly_once
 	$(CARGO) test --locked -p nac-core cancellation_adopts_a_committed_single_direct_steer_after_async_abort
 	$(CARGO) test --locked -p nac-core canonical_terminal_recovery_is_retained_until_relationship_settlement
 	$(CARGO) test --locked -p nac-core child_terminal_crash_window_recovers_report_and_delivers_once

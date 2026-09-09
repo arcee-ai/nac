@@ -1,4 +1,4 @@
-name: Release
+name: Stable release
 
 on:
   push:
@@ -149,6 +149,9 @@ jobs:
       - name: Run nac-server tests
         run: cargo test -p nac-server --locked
 
+      - name: Exercise stable binary readiness and status identity
+        run: make test-stable-binary
+
       - name: Install Playwright Chromium
         working-directory: crates/nac-server/web
         run: npx playwright install --with-deps chromium
@@ -188,7 +191,9 @@ jobs:
         run: cargo test -p nac-core -p nac-catalog-gen --locked
 
       - name: Test stable release policy and configuration
-        run: node --test .github/scripts/release-policy.test.mjs
+        run: |
+          sh -n .github/scripts/stable-release-rollout.sh
+          node --test .github/scripts/release-policy.test.mjs
 
       - name: Test stable installer routing
         run: |

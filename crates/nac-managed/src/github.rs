@@ -145,12 +145,7 @@ impl ManagedGitHubAuth {
         if client_id.trim().is_empty() {
             bail!("managed GitHub client ID must not be blank");
         }
-        let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
-            .user_agent(format!("nac-web/{}", env!("CARGO_PKG_VERSION")))
-            .build()
-            .context("failed to build managed GitHub HTTP client")?;
+        let http = managed_github_http_client(nac_contracts::PRODUCT_VERSION)?;
         let state_root = state_root.as_ref();
         Ok(Self {
             state_root: state_root.to_path_buf(),
@@ -594,6 +589,18 @@ impl ManagedGitHubAuth {
             organization: ORGANIZATION.to_string(),
         })
     }
+}
+
+fn managed_github_http_client(product_version: &str) -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .user_agent(nac_contracts::product_user_agent_for_version(
+            "nac-web",
+            product_version,
+        ))
+        .build()
+        .context("failed to build managed GitHub HTTP client")
 }
 
 #[derive(Clone)]

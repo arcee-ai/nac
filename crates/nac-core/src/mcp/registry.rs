@@ -329,7 +329,7 @@ impl ClientHandler for NacMcpClientHandler {
         };
         ClientInfo::new(
             serde_json::from_value(capabilities).expect("valid MCP client capabilities"),
-            Implementation::new("nac", env!("CARGO_PKG_VERSION")),
+            mcp_implementation(nac_contracts::PRODUCT_VERSION),
         )
     }
 
@@ -339,6 +339,10 @@ impl ClientHandler for NacMcpClientHandler {
     ) -> std::result::Result<ListRootsResult, rmcp::model::ErrorData> {
         Ok(ListRootsResult::new(self.roots.clone()))
     }
+}
+
+fn mcp_implementation(product_version: &str) -> Implementation {
+    Implementation::new("nac", product_version)
 }
 
 pub(super) fn mcp_roots_for_policy(
@@ -402,5 +406,17 @@ pub(super) fn tool_definition(full_name: &str, server_name: &str, tool: &Tool) -
             description,
             parameters: tool.schema_as_json_value(),
         },
+    }
+}
+
+#[cfg(test)]
+mod product_identity_tests {
+    use super::*;
+
+    #[test]
+    fn simulated_product_version_bump_updates_mcp_registration_exactly() {
+        let implementation = mcp_implementation("9.8.7");
+        assert_eq!(implementation.name, "nac");
+        assert_eq!(implementation.version, "9.8.7");
     }
 }

@@ -573,7 +573,7 @@ impl ModelClient {
         reasoning_field: &str,
         on_delta: DeltaSink<'_>,
     ) -> Result<Value> {
-        const USER_AGENT: &str = concat!("nac/", env!("CARGO_PKG_VERSION"));
+        let user_agent = nac_contracts::NAC_USER_AGENT;
         let api_key = self.api_key.as_str();
         let set_user_agent = !self.extra_headers_contains("user-agent");
         let set_client = !self.extra_headers_contains("x-arcee-client");
@@ -581,7 +581,7 @@ impl ModelClient {
         let apply_headers = move |mut req: reqwest::RequestBuilder| {
             req = req.header("Authorization", format!("Bearer {api_key}"));
             if set_user_agent {
-                req = req.header("User-Agent", USER_AGENT);
+                req = req.header("User-Agent", user_agent);
             }
             if set_client {
                 req = req.header("X-Arcee-Client", "nac-cli");
@@ -1052,6 +1052,11 @@ impl ModelClient {
         }
         Ok(request)
     }
+}
+
+#[cfg(test)]
+fn arcee_api_user_agent(product_version: &str) -> String {
+    nac_contracts::product_user_agent_for_version("nac", product_version)
 }
 
 #[cfg(test)]

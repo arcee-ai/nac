@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -67,7 +67,8 @@ test("release please is explicitly a dev-targeted root simple release", () => {
   const config = JSON.parse(fs.readFileSync("release-please-config.json", "utf8"));
   const manifest = JSON.parse(fs.readFileSync(".release-please-manifest.json", "utf8"));
   const workflow = fs.readFileSync(".github/workflows/release-please.yml", "utf8");
-  const releaseWorkflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
+  const stableWorkflow = fs.readFileSync(".github/workflows/stable-release.yml", "utf8");
+  const rollout = fs.readFileSync(".github/scripts/stable-release-rollout.sh", "utf8");
 
   assert.equal(config["release-type"], "simple");
   assert.equal(config["bump-minor-pre-major"], true);
@@ -78,15 +79,99 @@ test("release please is explicitly a dev-targeted root simple release", () => {
   assert.match(workflow, /create-github-app-token@v2/);
   assert.match(workflow, /repositories: nac/);
   assert.doesNotMatch(workflow, /secrets\.(?:PAT|AWS[^ }]*|GITHUB_TOKEN)/i);
-  assert.match(releaseWorkflow, /branches: \[main, dev\]/);
-  assert.match(releaseWorkflow, /tags: \["v\*\.\*\.\*"\]/);
+  assert.equal(fs.existsSync(".github/workflows/release.yml"), false);
+  assert.match(stableWorkflow, /branches: \[main, dev\]/);
+  assert.match(stableWorkflow, /tags: \["v\*\.\*\.\*"\]/);
   assert.match(
-    releaseWorkflow,
+    stableWorkflow,
     /git fetch --no-tags origin dev:refs\/remotes\/origin\/dev/,
   );
-  assert.match(releaseWorkflow, /DEV_REF=refs\/remotes\/origin\/dev/);
-  assert.match(releaseWorkflow, /startsWith\(github\.ref, 'refs\/tags\/v'\)/);
-  assert.doesNotMatch(releaseWorkflow, /^\s*release:/m);
-  assert.doesNotMatch(releaseWorkflow, /^\s*schedule:/m);
-  assert.doesNotMatch(releaseWorkflow, /nightly|rc-release|event\.release|inputs\.release_tag/i);
+  assert.match(stableWorkflow, /DEV_REF=refs\/remotes\/origin\/dev/);
+  assert.match(stableWorkflow, /startsWith\(github\.ref, 'refs\/tags\/v'\)/);
+  assert.doesNotMatch(stableWorkflow, /^\s*release:/m);
+  assert.doesNotMatch(stableWorkflow, /^\s*schedule:/m);
+  assert.doesNotMatch(stableWorkflow, /nightly|rc-release|event\.release|inputs\.release_tag/i);
+
+  const verifyNewLane = rollout.indexOf("contents/.github/workflows/stable-release.yml?ref=dev");
+  const disableLegacy = rollout.indexOf("actions/workflows/$legacy_id/disable");
+  assert.ok(verifyNewLane >= 0 && disableLegacy > verifyNewLane);
+  assert.match(rollout, /actions\/workflows\/release\.yml/);
+  assert.match(rollout, /disabled_manually/);
+});
+
+test("stable rollout verifies the distinct dev workflow before disabling legacy publication", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nac-stable-rollout-"));
+  const fakeGh = path.join(root, "gh");
+  const log = path.join(root, "calls.log");
+  const state = path.join(root, "disabled");
+  fs.writeFileSync(
+    fakeGh,
+    `#!/bin/sh
+set -eu
+echo "$*" >> "$ROLLOUT_LOG"
+case "$*" in
+  *"contents/.github/workflows/stable-release.yml?ref=dev --jq .path"*)
+    echo .github/workflows/stable-release.yml
+    ;;
+  *"actions/workflows/release.yml --jq .id"*)
+    echo 42
+    ;;
+  *"--method PUT repos/test/repo/actions/workflows/42/disable"*)
+    : > "$ROLLOUT_STATE"
+    ;;
+  *"actions/workflows/42 --jq .state"*)
+    if [ -f "$ROLLOUT_STATE" ]; then echo disabled_manually; else echo active; fi
+    ;;
+  *) exit 9 ;;
+esac
+`,
+  );
+  fs.chmodSync(fakeGh, 0o755);
+  const env = {
+    ...process.env,
+    PATH: `${root}:${process.env.PATH}`,
+    ROLLOUT_LOG: log,
+    ROLLOUT_STATE: state,
+  };
+  try {
+    const check = spawnSync(
+      ".github/scripts/stable-release-rollout.sh",
+      ["--check", "test/repo"],
+      { encoding: "utf8", env },
+    );
+    assert.equal(check.status, 1);
+    assert.match(check.stderr, /rerun with --apply/);
+    assert.doesNotMatch(fs.readFileSync(log, "utf8"), /--method PUT/);
+
+    const apply = spawnSync(
+      ".github/scripts/stable-release-rollout.sh",
+      ["--apply", "test/repo"],
+      { encoding: "utf8", env },
+    );
+    assert.equal(apply.status, 0, apply.stderr);
+    assert.match(apply.stdout, /legacy release.yml is disabled/);
+    const calls = fs.readFileSync(log, "utf8");
+    assert.ok(
+      calls.indexOf("contents/.github/workflows/stable-release.yml?ref=dev") <
+        calls.indexOf("--method PUT"),
+      calls,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("public protocol identity never uses internal crate versions", () => {
+  const surfaces = [
+    "crates/nac-core/src/mcp/registry.rs",
+    "crates/nac-core/src/model/client/mod.rs",
+    "crates/nac-core/src/model/arcee.rs",
+    "crates/nac-core/src/model/chatgpt_codex.rs",
+    "crates/nac-managed/src/github.rs",
+  ];
+  for (const surface of surfaces) {
+    const source = fs.readFileSync(surface, "utf8");
+    assert.doesNotMatch(source, /CARGO_PKG_VERSION/, surface);
+    assert.match(source, /PRODUCT_VERSION|product_user_agent_for_version/, surface);
+  }
 });

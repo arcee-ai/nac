@@ -1,4 +1,5 @@
 use super::*;
+use std::io::{Read, Seek};
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -421,10 +422,129 @@ fn has_migration_observation(path: &Path) -> bool {
 }
 
 fn read_opened_schema_version(path: &Path) -> Option<i64> {
+    if let Ok(Some(version)) = read_schema_version_header(path) {
+        if version > STORE_SCHEMA_VERSION {
+            return Some(version);
+        }
+    }
     let connection = connect_existing(path).ok()?;
     connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .ok()
+}
+
+/// Read the schema version from page one without opening SQLite. A future
+/// schema must be refused before SQLite can create, remove, or update journal
+/// sidecars merely as a consequence of opening the database.
+fn read_schema_version_header(path: &Path) -> Result<Option<i64>> {
+    const HEADER_LENGTH: usize = 64;
+    const USER_VERSION_OFFSET: usize = 60;
+    const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
+
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mut header = [0_u8; HEADER_LENGTH];
+    match file.read_exact(&mut header) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }
+    if &header[..SQLITE_MAGIC.len()] != SQLITE_MAGIC {
+        return Ok(None);
+    }
+    let main_version = u32::from_be_bytes([
+        header[USER_VERSION_OFFSET],
+        header[USER_VERSION_OFFSET + 1],
+        header[USER_VERSION_OFFSET + 2],
+        header[USER_VERSION_OFFSET + 3],
+    ]);
+    Ok(Some(
+        read_wal_schema_version(path)?.unwrap_or_else(|| i64::from(main_version)),
+    ))
+}
+
+/// Return page one's user_version from the latest committed WAL frame. This
+/// keeps the no-open preflight correct when a future writer has not checkpointed
+/// page one into the main database yet.
+fn read_wal_schema_version(path: &Path) -> Result<Option<i64>> {
+    const WAL_HEADER_LENGTH: u64 = 32;
+    const FRAME_HEADER_LENGTH: u64 = 24;
+    const USER_VERSION_OFFSET: u64 = 60;
+    const WAL_MAGIC_BIG_CHECKSUM: u32 = 0x377f_0682;
+    const WAL_MAGIC_LITTLE_CHECKSUM: u32 = 0x377f_0683;
+
+    let wal_path = sqlite_sidecar_path(path, "-wal");
+    let mut wal = match std::fs::File::open(&wal_path) {
+        Ok(wal) => wal,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mut header = [0_u8; WAL_HEADER_LENGTH as usize];
+    if wal.read_exact(&mut header).is_err() {
+        return Ok(None);
+    }
+    let magic = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
+    if !matches!(magic, WAL_MAGIC_BIG_CHECKSUM | WAL_MAGIC_LITTLE_CHECKSUM) {
+        return Ok(None);
+    }
+    let encoded_page_size = u32::from_be_bytes([header[8], header[9], header[10], header[11]]);
+    let page_size = if encoded_page_size == 1 {
+        65_536_u64
+    } else {
+        u64::from(encoded_page_size)
+    };
+    if !(512..=65_536).contains(&page_size) || !page_size.is_power_of_two() {
+        return Ok(None);
+    }
+    let salts = &header[16..24];
+    let frame_size = FRAME_HEADER_LENGTH + page_size;
+    let frame_count = wal.metadata()?.len().saturating_sub(WAL_HEADER_LENGTH) / frame_size;
+    let mut candidate_page_one = None;
+    let mut committed_page_one = None;
+    for _ in 0..frame_count {
+        let mut frame = [0_u8; FRAME_HEADER_LENGTH as usize];
+        wal.read_exact(&mut frame)?;
+        if &frame[8..16] != salts {
+            break;
+        }
+        let page_number = u32::from_be_bytes([frame[0], frame[1], frame[2], frame[3]]);
+        let committed_pages = u32::from_be_bytes([frame[4], frame[5], frame[6], frame[7]]);
+        if page_number == 1 {
+            wal.seek(std::io::SeekFrom::Current(USER_VERSION_OFFSET as i64))?;
+            let mut version = [0_u8; 4];
+            wal.read_exact(&mut version)?;
+            candidate_page_one = Some(i64::from(u32::from_be_bytes(version)));
+            wal.seek(std::io::SeekFrom::Current(
+                (page_size - USER_VERSION_OFFSET - 4) as i64,
+            ))?;
+        } else {
+            wal.seek(std::io::SeekFrom::Current(page_size as i64))?;
+        }
+        if committed_pages != 0 {
+            committed_page_one = candidate_page_one;
+        }
+    }
+    Ok(committed_page_one)
+}
+
+fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
+    let mut sidecar = path.as_os_str().to_os_string();
+    sidecar.push(suffix);
+    PathBuf::from(sidecar)
+}
+
+fn reject_future_schema_before_open(path: &Path) -> Result<()> {
+    if let Some(version) = read_schema_version_header(path)? {
+        if version > STORE_SCHEMA_VERSION {
+            return Err(anyhow!(
+                "unsupported store schema version {version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Inspect exact schema/migration state without applying a migration. Failure
@@ -506,6 +626,7 @@ pub fn migration_status(path: &Path) -> StoreMigrationStatus {
 /// Verify that session-serving traffic can check out, open, and query the
 /// initialized store without creating or migrating a replacement database.
 pub fn check_readiness(path: &Path) -> Result<()> {
+    reject_future_schema_before_open(path)?;
     let conn = connect_existing(path)?;
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version != STORE_SCHEMA_VERSION {
@@ -597,6 +718,7 @@ fn connect_existing(path: &Path) -> Result<StoreConnection> {
 }
 
 pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
+    reject_future_schema_before_open(path)?;
     let conn = connect(path)?;
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version > STORE_SCHEMA_VERSION {
@@ -653,6 +775,7 @@ fn open_connection_with_hooks(
     after_lock: impl FnOnce(),
     before_commit: impl FnOnce() -> Result<()>,
 ) -> Result<StoreConnection> {
+    reject_future_schema_before_open(path)?;
     let mut conn = connect(path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let preflight_schema_version: i64 =

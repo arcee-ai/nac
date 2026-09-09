@@ -36,6 +36,7 @@ mod tests {
             identity.product_version,
             include_str!("../../../version.txt").trim()
         );
+        assert_eq!(identity.product_version, nac_contracts::PRODUCT_VERSION);
         assert!(matches!(identity.track, "dev" | "beta" | "stable"));
         assert!(!identity.build_id.is_empty());
         assert!(!identity.source_revision.is_empty());
