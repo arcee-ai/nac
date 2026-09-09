@@ -52,6 +52,10 @@ pub struct ManagedHostConfig {
     pub model_backend: String,
     pub model_id: String,
     pub model_endpoint: String,
+    /// Expected authorization-service origin for login-backed managed model
+    /// credentials. Provider-specific policy is enforced by composition.
+    #[serde(default)]
+    pub model_auth_issuer: Option<String>,
     pub model_credential_file: PathBuf,
     #[serde(default)]
     pub model_credential_source: ManagedModelCredentialSource,
@@ -102,6 +106,22 @@ impl ManagedHostConfig {
             .map_err(|_| anyhow!("managed model_endpoint must be a valid HTTPS URL"))?;
         if endpoint.scheme() != "https" || endpoint.host_str().is_none() {
             bail!("managed model_endpoint must be a valid HTTPS URL");
+        }
+        if let Some(auth_issuer) = self.model_auth_issuer.as_deref() {
+            let issuer = Url::parse(auth_issuer)
+                .map_err(|_| anyhow!("managed model_auth_issuer must be a valid HTTPS origin"))?;
+            if issuer.scheme() != "https"
+                || issuer.host_str().is_none()
+                || !issuer.username().is_empty()
+                || issuer.password().is_some()
+                || issuer.port().is_some()
+                || issuer.path() != "/"
+                || issuer.query().is_some()
+                || issuer.fragment().is_some()
+                || auth_issuer != issuer.origin().ascii_serialization()
+            {
+                bail!("managed model_auth_issuer must be a valid exact HTTPS origin");
+            }
         }
         for name in &self.model_credential_environment_names {
             if !is_valid_environment_name(name) {

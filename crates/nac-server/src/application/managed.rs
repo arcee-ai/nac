@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use nac_contracts::{NewProject, ProjectRecord};
 use nac_core::{
     light_model::TrustedLightCredential,
@@ -23,6 +23,7 @@ pub(crate) struct ManagedModelProfile {
     pub(crate) backend: BackendKind,
     pub(crate) model_id: String,
     pub(crate) endpoint: String,
+    pub(crate) auth_issuer: Option<String>,
     pub(crate) credential_file: PathBuf,
     pub(crate) credential_source: ManagedModelCredentialSource,
 }
@@ -57,10 +58,25 @@ impl ManagedModelProfile {
             }
             _ => {}
         }
+        let auth_issuer = match (backend, config.model_auth_issuer.as_deref()) {
+            (BackendKind::ArceeAuth, Some(auth_issuer)) => {
+                nac_core::model::validate_arcee_auth_issuer(auth_issuer)
+                    .context("managed model_auth_issuer is not approved")?;
+                Some(auth_issuer.to_string())
+            }
+            (BackendKind::ArceeAuth, None) => {
+                Some(nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER.to_string())
+            }
+            (_, Some(_)) => {
+                bail!("managed model_auth_issuer requires model_backend 'arcee-auth'")
+            }
+            (_, None) => None,
+        };
         Ok(Self {
             backend,
             model_id: config.model_id.clone(),
             endpoint: config.model_endpoint.clone(),
+            auth_issuer,
             credential_file: config.model_credential_file.clone(),
             credential_source: config.model_credential_source,
         })
@@ -76,8 +92,15 @@ impl ManagedModelProfile {
                 "managed bootstrap requires NAC_HOME to equal managed state_root so rotated credentials remain on durable storage"
             );
         }
-        nac_core::model::import_managed_arcee_bootstrap(&config.logical_host_id)
-            .context("failed to import managed Arcee bootstrap")?;
+        let auth_issuer = self
+            .auth_issuer
+            .as_deref()
+            .ok_or_else(|| anyhow!("managed bootstrap profile is missing its auth issuer"))?;
+        nac_core::model::import_managed_arcee_bootstrap_for_issuer(
+            &config.logical_host_id,
+            auth_issuer,
+        )
+        .context("failed to import managed Arcee bootstrap")?;
         Ok(())
     }
 
@@ -85,9 +108,13 @@ impl ManagedModelProfile {
         match self.credential_source {
             ManagedModelCredentialSource::MountedApiKey => config.model_credential().map(|_| ()),
             ManagedModelCredentialSource::ManagedBootstrap => {
-                nac_core::model::validate_managed_arcee_authorization(
+                let auth_issuer = self.auth_issuer.as_deref().ok_or_else(|| {
+                    anyhow!("managed bootstrap profile is missing its auth issuer")
+                })?;
+                nac_core::model::validate_managed_arcee_authorization_for_issuer(
                     &config.logical_host_id,
                     &self.endpoint,
+                    auth_issuer,
                 )
             }
         }
@@ -217,6 +244,7 @@ mod tests {
             model_backend: backend.to_string(),
             model_id: "trinity-large-thinking".to_string(),
             model_endpoint: "https://api.arcee.ai".to_string(),
+            model_auth_issuer: None,
             model_credential_file: match source {
                 ManagedModelCredentialSource::MountedApiKey => {
                     PathBuf::from("/run/secrets/model/credential")
@@ -252,6 +280,10 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(profile.backend, BackendKind::ArceeAuth);
+        assert_eq!(
+            profile.auth_issuer.as_deref(),
+            Some(nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER)
+        );
         assert!(profile.trusted_api_key_file().is_none());
         let options = profile.resume_options(true);
         assert!(options.trusted_api_key_file.is_none());
@@ -275,5 +307,29 @@ mod tests {
         assert!(error
             .to_string()
             .contains(nac_core::model::MANAGED_ARCEE_BOOTSTRAP_PATH));
+    }
+
+    #[test]
+    fn managed_bootstrap_auth_issuer_is_exact_and_arcee_auth_only() {
+        let mut managed = config(ManagedModelCredentialSource::ManagedBootstrap, "arcee-auth");
+        managed.model_auth_issuer = Some(nac_core::model::ARCEE_AUTH_DEV2_ISSUER.to_string());
+        let profile = ManagedModelProfile::from_config(&managed).unwrap();
+        assert_eq!(
+            profile.auth_issuer.as_deref(),
+            Some(nac_core::model::ARCEE_AUTH_DEV2_ISSUER)
+        );
+
+        managed.model_auth_issuer = Some("https://tenant.arcee.ai".to_string());
+        assert!(ManagedModelProfile::from_config(&managed)
+            .unwrap_err()
+            .to_string()
+            .contains("not approved"));
+
+        let mut api_key = config(ManagedModelCredentialSource::MountedApiKey, "arcee-api");
+        api_key.model_auth_issuer = Some(nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER.to_string());
+        assert!(ManagedModelProfile::from_config(&api_key)
+            .unwrap_err()
+            .to_string()
+            .contains("requires model_backend 'arcee-auth'"));
     }
 }

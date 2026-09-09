@@ -34,6 +34,7 @@ fn valid_config(root: &Path) -> ManagedHostConfig {
         model_backend: "arcee-api".to_string(),
         model_id: "trinity-large-thinking".to_string(),
         model_endpoint: "https://models.example.test/v1".to_string(),
+        model_auth_issuer: None,
         model_credential_file: root.join("model-token"),
         model_credential_source: ManagedModelCredentialSource::MountedApiKey,
         model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
@@ -99,6 +100,25 @@ fn managed_bootstrap_is_a_strict_explicit_credential_source() {
         .replace("managed-bootstrap", "unknown-source");
     std::fs::write(&path, invalid).unwrap();
     assert!(ManagedHostConfig::load(&path).is_err());
+}
+
+#[test]
+fn managed_auth_issuer_is_optional_but_must_be_an_exact_https_origin() {
+    let root = TestDir::new("config-auth-issuer");
+    let mut config = valid_config(&root.0);
+    config.model_auth_issuer = Some("https://api2.apps.dev.arcee.ai".to_string());
+    config.validate().unwrap();
+
+    for invalid in [
+        "http://api2.apps.dev.arcee.ai",
+        "https://api2.apps.dev.arcee.ai/",
+        "https://api2.apps.dev.arcee.ai/path",
+        "https://user@api2.apps.dev.arcee.ai",
+        "https://api2.apps.dev.arcee.ai:443",
+    ] {
+        config.model_auth_issuer = Some(invalid.to_string());
+        assert!(config.validate().is_err(), "{invalid}");
+    }
 }
 
 #[test]

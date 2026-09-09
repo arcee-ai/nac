@@ -44,6 +44,7 @@ require_literal "$entrypoint" '--store-path /var/lib/nac/nac.sqlite3'
 require_literal "$entrypoint" '--managed-config "$managed_config"'
 require_literal "$entrypoint" 'without requiring the bootstrap mount'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_credential_source = \"managed-bootstrap\"'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_auth_issuer = \"https://api.arcee.ai\"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" '/run/secrets/nac/bootstrap.json'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assert_bootstrap_required'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'smoke-managed-git-lfs.sh'
@@ -55,6 +56,8 @@ require_literal "$lfs_smoke" 'git lfs fsck'
 sh -n "$lfs_smoke"
 require_literal "$managed_status" '"git-lfs"'
 require_literal "$repo_root/docker/managed/fixtures/bootstrap.json" '"client_id": "managed-nac"'
+require_literal "$repo_root/docker/managed/fixtures/bootstrap.json" '"version": 2'
+require_literal "$repo_root/docker/managed/fixtures/bootstrap.json" '"auth_issuer": "https://api.arcee.ai"'
 if grep -Eq '(^|[[:space:]])(sudo|su)([[:space:]]|$)' "$dockerfile" "$entrypoint"; then
     fail 'image or entrypoint grants an escalation command'
 fi
