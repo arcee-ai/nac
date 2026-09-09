@@ -493,11 +493,18 @@ impl SessionManager {
                 )
             })
         });
-        let preflight = nac_core::store::preflight_managed_forward_start(
-            &store_path,
-            &running_target,
-            configured_identity,
-        )?;
+        let preflight = if configured_identity.is_some() {
+            nac_core::store::preflight_managed_forward_start(
+                &store_path,
+                &running_target,
+                configured_identity,
+            )?
+        } else {
+            nac_core::store::ManagedStartupPreflight {
+                accepted_identity: None,
+                requires_accept: false,
+            }
+        };
         let managed_identity = match (preflight.accepted_identity, configured_identity) {
             (Some(accepted), _) => Some(accepted),
             (None, Some((managed_host_id, host_incarnation_id))) => {

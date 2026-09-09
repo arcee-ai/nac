@@ -9236,6 +9236,29 @@
           }
         }
       },
+      "ManagedAcceptedIdentity": {
+        "type": "object",
+        "required": [
+          "managed_host_id",
+          "host_incarnation_id",
+          "operation_id",
+          "target"
+        ],
+        "properties": {
+          "host_incarnation_id": {
+            "type": "string"
+          },
+          "managed_host_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ManagedUpgradeTarget"
+          }
+        }
+      },
       "ManagedAuthListResponse": {
         "type": "object",
         "required": [
@@ -9565,6 +9588,16 @@
           "blockers"
         ],
         "properties": {
+          "accepted_identity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ManagedAcceptedIdentity"
+              }
+            ]
+          },
           "blockers": {
             "type": "array",
             "items": {

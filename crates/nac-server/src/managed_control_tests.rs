@@ -12,6 +12,20 @@ use tower::ServiceExt;
 const SEED: &str = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
 const PUBLIC: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
 
+#[test]
+fn managed_target_uses_the_canonical_build_and_schema_identity() {
+    let target = crate::managed_running_target().unwrap();
+    let identity = crate::build_identity::current();
+    assert_eq!(target.release_id, identity.build_id);
+    assert_eq!(target.source_sha, identity.source_revision);
+    assert_eq!(target.product_version, identity.product_version);
+    assert_eq!(target.schema_version, nac_core::store::schema_version());
+    assert_eq!(
+        target.minimum_schema_version,
+        nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION
+    );
+}
+
 fn hex(value: &str) -> Vec<u8> {
     value
         .as_bytes()
@@ -510,6 +524,22 @@ async fn real_listeners_enforce_private_block_settle_retry_and_public_maintenanc
         String::from_utf8(response).unwrap()
     }
 
+    async fn raw_get(address: std::net::SocketAddr, path: &str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        stream
+            .write_all(
+                format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.unwrap();
+        String::from_utf8(response).unwrap()
+    }
+
     let public_response =
         raw_call(public_address, "/v1/upgrade/status", &request, &assertion).await;
     assert!(public_response.starts_with("HTTP/1.1 404"));
@@ -542,6 +572,19 @@ async fn real_listeners_enforce_private_block_settle_retry_and_public_maintenanc
     assert!(safe.contains("safe_to_stop"));
     let mutation = raw_call(public_address, "/projects", &request, &retry).await;
     assert!(mutation.starts_with("HTTP/1.1 503"), "{mutation}");
+    let readiness = raw_get(public_address, "/readyz").await;
+    assert!(readiness.starts_with("HTTP/1.1 503"), "{readiness}");
+    assert!(
+        readiness.contains("\"maintenance_state\":\"maintenance\""),
+        "{readiness}"
+    );
+    let status = raw_get(public_address, "/managed/status").await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+    assert!(
+        status.contains("\"maintenance_state\":\"maintenance\""),
+        "{status}"
+    );
+    assert!(status.contains("\"state\":\"maintenance\""), "{status}");
     public.abort();
     private.abort();
 }

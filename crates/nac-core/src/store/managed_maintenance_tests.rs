@@ -1,6 +1,51 @@
 use super::*;
 use std::sync::{Arc, Barrier};
 
+#[derive(Debug, PartialEq, Eq)]
+struct SqliteFileSnapshot {
+    bytes: Option<Vec<u8>>,
+    sha256: Option<[u8; 32]>,
+    created: Option<std::time::SystemTime>,
+    modified: Option<std::time::SystemTime>,
+}
+
+fn sqlite_sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut sidecar = path.as_os_str().to_os_string();
+    sidecar.push(suffix);
+    PathBuf::from(sidecar)
+}
+
+fn snapshot_sqlite_file(path: &Path) -> SqliteFileSnapshot {
+    use sha2::{Digest, Sha256};
+
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let metadata = std::fs::metadata(path).unwrap();
+            SqliteFileSnapshot {
+                sha256: Some(Sha256::digest(&bytes).into()),
+                bytes: Some(bytes),
+                created: metadata.created().ok(),
+                modified: Some(metadata.modified().unwrap()),
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => SqliteFileSnapshot {
+            bytes: None,
+            sha256: None,
+            created: None,
+            modified: None,
+        },
+        Err(error) => panic!("failed to snapshot {}: {error}", path.display()),
+    }
+}
+
+fn snapshot_sqlite_files(path: &Path) -> [SqliteFileSnapshot; 3] {
+    [
+        snapshot_sqlite_file(path),
+        snapshot_sqlite_file(&sqlite_sidecar(path, "-wal")),
+        snapshot_sqlite_file(&sqlite_sidecar(path, "-shm")),
+    ]
+}
+
 fn path(label: &str) -> PathBuf {
     std::env::temp_dir()
         .join(format!(
@@ -58,7 +103,8 @@ fn schema_24_fixture_migrates_without_losing_existing_rows() {
     insert_test_session(&path, "existing");
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch(
-        "DROP TABLE managed_control_attempts;
+        "DROP TABLE terminal_remote_cleanups;
+         DROP TABLE managed_control_attempts;
          DROP TABLE managed_control_operations;
          DROP TABLE managed_host_maintenance;
          PRAGMA user_version = 24;",
@@ -601,6 +647,51 @@ fn wrong_forward_binary_is_rejected_before_schema_migration() {
         schema_version() - 1
     );
     cleanup(&path);
+}
+
+#[test]
+fn future_schema_preflight_preserves_main_wal_and_shm_exactly() {
+    for with_sidecars in [false, true] {
+        let path = path(&format!("future-schema-preflight-{with_sidecars}"));
+        initialize(&path).unwrap();
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(
+                None,
+                "journal_mode",
+                if with_sidecars { "WAL" } else { "DELETE" },
+            )
+            .unwrap();
+        if with_sidecars {
+            connection
+                .pragma_update(None, "wal_autocheckpoint", 0)
+                .unwrap();
+            connection
+                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+                .unwrap();
+        }
+        connection
+            .pragma_update(None, "user_version", schema_version() + 1)
+            .unwrap();
+        let before = snapshot_sqlite_files(&path);
+
+        assert!(matches!(
+            preflight_managed_forward_start(
+                &path,
+                &target('f'),
+                Some(("host-123", "incarnation-456")),
+            ),
+            Err(ManagedMaintenanceError::IncompatibleTarget)
+        ));
+
+        assert_eq!(
+            snapshot_sqlite_files(&path),
+            before,
+            "managed preflight changed SQLite files with_sidecars={with_sidecars}"
+        );
+        drop(connection);
+        cleanup(&path);
+    }
 }
 
 #[test]
