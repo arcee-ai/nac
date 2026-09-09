@@ -117,6 +117,10 @@ pub struct ManagedMaintenanceSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "result", rename_all = "snake_case")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "this serialized control response stays allocation-free and preserves the public schema"
+)]
 pub enum ManagedPrepareOutcome {
     Blocked {
         blockers: Vec<ManagedUpgradeBlocker>,
@@ -165,14 +169,45 @@ pub fn try_admit_managed_work_for_identity(
     if snapshot.state == ManagedMaintenanceState::Maintenance {
         return Err(anyhow!("managed host is in maintenance"));
     }
+    validate_accepted_identity(&snapshot, running)?;
+    Ok(ManagedWorkAdmission { _lease: lease })
+}
+
+/// Retain shared host authority for a maintenance-time completion request.
+/// Completion remains available while the ledger is in maintenance, but a
+/// process whose accepted release identity is stale cannot mutate the store
+/// after a replacement begins serving.
+pub fn try_admit_managed_completion_for_identity(
+    path: &Path,
+    running: &ManagedAcceptedIdentity,
+) -> Result<ManagedWorkAdmission> {
+    let lease =
+        crate::sessions::HostAdmissionLease::try_acquire(path).map_err(|error| anyhow!(error))?;
+    let snapshot = managed_maintenance_snapshot(path)?;
+    validate_accepted_identity(&snapshot, running)?;
+    Ok(ManagedWorkAdmission { _lease: lease })
+}
+
+/// Version-1 managed hosts have no immutable release identity, but completion
+/// requests still retain shared admission authority through their mutation.
+pub fn try_admit_managed_completion(path: &Path) -> Result<ManagedWorkAdmission> {
+    let lease =
+        crate::sessions::HostAdmissionLease::try_acquire(path).map_err(|error| anyhow!(error))?;
+    Ok(ManagedWorkAdmission { _lease: lease })
+}
+
+fn validate_accepted_identity(
+    snapshot: &ManagedMaintenanceSnapshot,
+    running: &ManagedAcceptedIdentity,
+) -> Result<()> {
     if snapshot
         .accepted_identity
         .as_ref()
         .is_some_and(|accepted| accepted != running)
     {
-        return Err(anyhow!("managed host release identity is stale"));
+        anyhow::bail!("managed host release identity is stale");
     }
-    Ok(ManagedWorkAdmission { _lease: lease })
+    Ok(())
 }
 
 impl std::fmt::Display for ManagedMaintenanceError {
@@ -364,11 +399,19 @@ fn burn_control_attempt(
     operation_binding_json: &str,
     attempt_binding_json: &str,
     expires_at: i64,
+    expected_identity: Option<&ManagedAcceptedIdentity>,
 ) -> std::result::Result<Option<String>, ManagedMaintenanceError> {
     let mut conn = open_runtime_connection(path).map_err(ManagedMaintenanceError::Store)?;
     let transaction = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(anyhow::Error::new)?;
+    if let Some(expected) = expected_identity {
+        let snapshot = snapshot_with_connection(&transaction, Vec::new())
+            .map_err(ManagedMaintenanceError::Store)?;
+        if validate_accepted_identity(&snapshot, expected).is_err() {
+            return Err(ManagedMaintenanceError::MaintenanceConflict);
+        }
+    }
     let now_epoch = current_epoch_seconds()?;
     transaction
         .execute(
@@ -517,6 +560,7 @@ pub fn record_managed_status(
         &operation_binding_json,
         &attempt_binding_json,
         expires_at,
+        None,
     )? {
         return serde_json::from_str(&outcome)
             .map_err(anyhow::Error::new)
@@ -564,7 +608,47 @@ pub fn prepare_managed_upgrade(
     binding: &ManagedOperationBinding,
     action: ManagedControlAttemptAction,
     expires_at: i64,
+    process_blockers: Vec<ManagedUpgradeBlocker>,
+) -> std::result::Result<ManagedPrepareOutcome, ManagedMaintenanceError> {
+    prepare_managed_upgrade_inner(
+        path,
+        jti,
+        binding,
+        action,
+        expires_at,
+        process_blockers,
+        None,
+    )
+}
+
+pub fn prepare_managed_upgrade_for_identity(
+    path: &Path,
+    jti: &str,
+    binding: &ManagedOperationBinding,
+    action: ManagedControlAttemptAction,
+    expires_at: i64,
+    process_blockers: Vec<ManagedUpgradeBlocker>,
+    expected_identity: &ManagedAcceptedIdentity,
+) -> std::result::Result<ManagedPrepareOutcome, ManagedMaintenanceError> {
+    prepare_managed_upgrade_inner(
+        path,
+        jti,
+        binding,
+        action,
+        expires_at,
+        process_blockers,
+        Some(expected_identity),
+    )
+}
+
+fn prepare_managed_upgrade_inner(
+    path: &Path,
+    jti: &str,
+    binding: &ManagedOperationBinding,
+    action: ManagedControlAttemptAction,
+    expires_at: i64,
     mut process_blockers: Vec<ManagedUpgradeBlocker>,
+    expected_identity: Option<&ManagedAcceptedIdentity>,
 ) -> std::result::Result<ManagedPrepareOutcome, ManagedMaintenanceError> {
     let _attempt_lease = acquire_control_attempt_lease(path, jti)?;
     debug_assert!(
@@ -587,6 +671,7 @@ pub fn prepare_managed_upgrade(
         &operation_binding_json,
         &attempt_binding_json,
         expires_at,
+        expected_identity,
     )? {
         return serde_json::from_str(&outcome)
             .map_err(anyhow::Error::new)
@@ -615,6 +700,14 @@ pub fn prepare_managed_upgrade(
     let transaction = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(anyhow::Error::new)?;
+
+    if let Some(expected) = expected_identity {
+        let snapshot = snapshot_with_connection(&transaction, Vec::new())
+            .map_err(ManagedMaintenanceError::Store)?;
+        if validate_accepted_identity(&snapshot, expected).is_err() {
+            return Err(ManagedMaintenanceError::MaintenanceConflict);
+        }
+    }
 
     if let Some(outcome) = attempt_outcome(&transaction, jti, binding, &attempt_binding_json)? {
         return serde_json::from_str(&outcome)
@@ -707,6 +800,8 @@ pub fn accept_managed_forward_start(
     path: &Path,
     accepted: &ManagedAcceptedIdentity,
 ) -> std::result::Result<bool, ManagedMaintenanceError> {
+    let _host_maintenance = crate::sessions::HostMaintenanceLease::acquire(path)
+        .map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))?;
     let mut conn = open_runtime_connection(path).map_err(ManagedMaintenanceError::Store)?;
     let transaction = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)

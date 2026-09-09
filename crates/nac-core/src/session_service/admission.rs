@@ -343,7 +343,7 @@ impl SessionService {
         enforce_coordination: bool,
         admission: RunAdmissionKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
-        let _host_admission = enforce_coordination
+        let _host_admission = (enforce_coordination && self.managed_admission_enabled)
             .then(|| match self.managed_identity.as_deref() {
                 Some(identity) => crate::store::try_admit_managed_work_for_identity(
                     &self.metadata.store_path,

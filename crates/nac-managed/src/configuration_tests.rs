@@ -65,7 +65,7 @@ fn version_two_requires_exact_managed_control_identity_and_listener_fields() {
     assert_eq!(control.bind, "0.0.0.0:3211".parse().unwrap());
     assert_eq!(control.host_incarnation_id, "incarnation-456");
 
-    let mut legacy = config.clone();
+    let mut legacy = config;
     legacy.version = LEGACY_MANAGED_CONFIG_VERSION;
     assert!(legacy.validate().is_err());
     legacy.host_incarnation_id = None;

@@ -409,13 +409,13 @@ fn maintenance_survives_restart_and_only_exact_forward_start_clears_it() {
 }
 
 #[test]
-fn accepted_release_fences_old_process_and_same_schema_restart() {
-    let path = path("accepted-release-fence");
+fn accepted_start_waits_for_maintenance_completion_admissions_to_drain() {
+    let path = path("accepted-start-drain");
     initialize(&path).unwrap();
-    let binding = binding("operation-fence", 'n');
+    let binding = binding("operation-drain", 'm');
     prepare_managed_upgrade(
         &path,
-        "jti-fence",
+        "jti-drain",
         &binding,
         ManagedControlAttemptAction::Prepare,
         expires_at(),
@@ -423,6 +423,41 @@ fn accepted_release_fences_old_process_and_same_schema_restart() {
     )
     .unwrap();
     let accepted = accepted_identity(&binding);
+    let completion = try_admit_managed_completion_for_identity(&path, &accepted).unwrap();
+    let (finished, result) = std::sync::mpsc::channel();
+    let accept_path = path.clone();
+    let accept_identity = accepted.clone();
+    let worker = std::thread::spawn(move || {
+        let accepted = accept_managed_forward_start(&accept_path, &accept_identity);
+        finished.send(accepted).unwrap();
+    });
+    assert!(result
+        .recv_timeout(std::time::Duration::from_millis(50))
+        .is_err());
+    drop(completion);
+    assert!(result
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap()
+        .unwrap());
+    worker.join().unwrap();
+    cleanup(&path);
+}
+
+#[test]
+fn accepted_release_fences_old_process_and_same_schema_restart() {
+    let path = path("accepted-release-fence");
+    initialize(&path).unwrap();
+    let accepted_binding = binding("operation-fence", 'n');
+    prepare_managed_upgrade(
+        &path,
+        "jti-fence",
+        &accepted_binding,
+        ManagedControlAttemptAction::Prepare,
+        expires_at(),
+        Vec::new(),
+    )
+    .unwrap();
+    let accepted = accepted_identity(&accepted_binding);
     let preflight = preflight_managed_forward_start(
         &path,
         &accepted.target,
@@ -450,6 +485,7 @@ fn accepted_release_fences_old_process_and_same_schema_restart() {
     old.operation_id.clear();
     old.target.source_sha = "0".repeat(40);
     assert!(try_admit_managed_work_for_identity(&path, &old).is_err());
+    assert!(try_admit_managed_completion_for_identity(&path, &old).is_err());
     assert!(matches!(
         preflight_managed_forward_start(
             &path,
@@ -462,6 +498,31 @@ fn accepted_release_fences_old_process_and_same_schema_restart() {
         Err(ManagedMaintenanceError::MaintenanceConflict)
     ));
     drop(try_admit_managed_work_for_identity(&path, &accepted).unwrap());
+    drop(try_admit_managed_completion_for_identity(&path, &accepted).unwrap());
+
+    let next = binding("operation-after-fence", 'p');
+    assert!(matches!(
+        prepare_managed_upgrade_for_identity(
+            &path,
+            "stale-private-prepare",
+            &next,
+            ManagedControlAttemptAction::Prepare,
+            expires_at(),
+            Vec::new(),
+            &old,
+        ),
+        Err(ManagedMaintenanceError::MaintenanceConflict)
+    ));
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM managed_control_operations WHERE operation_id = ?1",
+            [&next.operation_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        0
+    );
     cleanup(&path);
 }
 

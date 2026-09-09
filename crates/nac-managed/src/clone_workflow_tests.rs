@@ -79,22 +79,24 @@ impl Fixture {
     }
 
     fn service(&self) -> ManagedCloneService {
+        let registrar = Arc::<TestProjectRegistrar>::clone(&self.registrar);
         ManagedCloneService::new(
             &self.repository_root,
             &self.state_root,
             &self.home_root,
-            self.registrar.clone(),
+            registrar,
             None,
         )
         .unwrap()
     }
 
     fn service_with_git(&self, git_executable: PathBuf) -> ManagedCloneService {
+        let registrar = Arc::<TestProjectRegistrar>::clone(&self.registrar);
         ManagedCloneService::new_with_git_executable(
             &self.repository_root,
             &self.state_root,
             &self.home_root,
-            self.registrar.clone(),
+            registrar,
             None,
             git_executable,
         )

@@ -363,7 +363,9 @@ fn trusted_owner(metadata: &std::fs::Metadata) -> bool {
     }
     #[cfg(any(test, feature = "test-support"))]
     {
-        return metadata.uid() == unsafe { libc::geteuid() } && metadata.mode() & 0o222 == 0;
+        // SAFETY: `geteuid` has no arguments, pointer access, or caller-side
+        // preconditions and only returns the current process identity.
+        metadata.uid() == unsafe { libc::geteuid() } && metadata.mode() & 0o222 == 0
     }
     #[cfg(not(any(test, feature = "test-support")))]
     false

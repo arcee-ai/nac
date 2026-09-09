@@ -253,6 +253,18 @@ impl HostAdmissionLease {
 }
 
 impl HostMaintenanceLease {
+    /// Wait for all admitted host work to drain before changing the accepted
+    /// serving identity. The controller's prepare path remains non-blocking;
+    /// this blocking form is reserved for replacement startup after both
+    /// listeners and readiness prerequisites are complete.
+    pub(crate) fn acquire(store_path: &Path) -> Result<Self, SessionOperationLeaseError> {
+        let file = open_host_admission_lock_file(store_path)?;
+        file.lock_exclusive().map_err(|error| {
+            store_error(anyhow::Error::new(error).context("failed to lock host maintenance lease"))
+        })?;
+        Ok(Self { _file: file })
+    }
+
     pub fn try_acquire(store_path: &Path) -> Result<Self, SessionOperationLeaseError> {
         let file = open_host_admission_lock_file(store_path)?;
         match file.try_lock_exclusive() {
