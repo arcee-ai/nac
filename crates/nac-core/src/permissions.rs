@@ -39,6 +39,7 @@ use shell_parser::{canonical_command, command_grant_candidate, parse_shell, Pars
 
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const APPROVAL_SUBSCRIBER_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const APPROVAL_MODE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const DELEGATED_APPROVAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -157,7 +158,6 @@ struct PendingPermission {
 
 #[derive(Default)]
 struct PermissionBrokerState {
-    approval_mode: PermissionApprovalMode,
     pending: HashMap<String, PendingPermission>,
 }
 

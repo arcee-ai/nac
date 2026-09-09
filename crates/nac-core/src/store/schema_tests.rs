@@ -467,6 +467,7 @@ fn v24_store_adds_manual_session_permission_approval_mode() {
     legacy
         .execute_batch(
             "ALTER TABLE sessions DROP COLUMN permission_approval_mode;
+             ALTER TABLE sessions DROP COLUMN permission_auto_approve_generation;
              PRAGMA user_version = 24;",
         )
         .unwrap();
@@ -482,6 +483,14 @@ fn v24_store_adds_manual_session_permission_approval_mode() {
         )
         .unwrap();
     assert_eq!(mode, "manual");
+    let generation: i64 = migrated
+        .query_row(
+            "SELECT permission_auto_approve_generation FROM sessions WHERE session_id = 'legacy-session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(generation, 0);
     assert_eq!(
         migrated
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))

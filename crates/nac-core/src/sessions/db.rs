@@ -484,22 +484,39 @@ pub fn load_permission_approval_mode(
     path: &Path,
     session_id: &str,
 ) -> Result<crate::permissions::PermissionApprovalMode> {
+    load_permission_approval_state(path, session_id).map(|(mode, _)| mode)
+}
+
+/// Loads both the current mode and a monotonic generation incremented by each
+/// auto-approve write. The generation lets a waiter in another process observe
+/// a short-lived enable even if a later disable wins before its next read.
+pub(crate) fn load_permission_approval_state(
+    path: &Path,
+    session_id: &str,
+) -> Result<(crate::permissions::PermissionApprovalMode, i64)> {
     let conn = crate::store::open_connection(path)?;
-    let stored = conn
+    let (stored, generation) = conn
         .query_row(
-            "SELECT permission_approval_mode FROM sessions WHERE session_id = ?1",
+            "SELECT permission_approval_mode, permission_auto_approve_generation
+             FROM sessions WHERE session_id = ?1",
             params![session_id],
-            |row| row.get::<_, String>(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         )
         .optional()?
         .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
-    match stored.as_str() {
-        "manual" => Ok(crate::permissions::PermissionApprovalMode::Manual),
-        "auto_approve" => Ok(crate::permissions::PermissionApprovalMode::AutoApprove),
+    let mode = match stored.as_str() {
+        "manual" => crate::permissions::PermissionApprovalMode::Manual,
+        "auto_approve" => crate::permissions::PermissionApprovalMode::AutoApprove,
         _ => Err(anyhow!(
             "unsupported stored permission approval mode '{stored}'"
-        )),
+        ))?,
+    };
+    if generation < 0 {
+        return Err(anyhow!(
+            "stored permission auto-approve generation cannot be negative"
+        ));
     }
+    Ok((mode, generation))
 }
 
 /// Changes only the session-local permission answer policy. This does not
@@ -510,19 +527,38 @@ pub fn update_permission_approval_mode(
     session_id: &str,
     mode: crate::permissions::PermissionApprovalMode,
 ) -> Result<()> {
-    let conn = crate::store::open_runtime_connection(path)?;
+    update_permission_approval_state(path, session_id, mode).map(|_| ())
+}
+
+pub(crate) fn update_permission_approval_state(
+    path: &Path,
+    session_id: &str,
+    mode: crate::permissions::PermissionApprovalMode,
+) -> Result<i64> {
+    let mut conn = crate::store::open_runtime_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let stored = match mode {
         crate::permissions::PermissionApprovalMode::Manual => "manual",
         crate::permissions::PermissionApprovalMode::AutoApprove => "auto_approve",
     };
-    let updated = conn.execute(
-        "UPDATE sessions SET permission_approval_mode = ?1 WHERE session_id = ?2",
-        params![stored, session_id],
+    let increment = i64::from(mode == crate::permissions::PermissionApprovalMode::AutoApprove);
+    let updated = tx.execute(
+        "UPDATE sessions
+         SET permission_approval_mode = ?1,
+             permission_auto_approve_generation = permission_auto_approve_generation + ?2
+         WHERE session_id = ?3",
+        params![stored, increment, session_id],
     )?;
     if updated == 0 {
         return Err(anyhow!("session '{session_id}' was not found"));
     }
-    Ok(())
+    let generation = tx.query_row(
+        "SELECT permission_auto_approve_generation FROM sessions WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    tx.commit()?;
+    Ok(generation)
 }
 
 pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {

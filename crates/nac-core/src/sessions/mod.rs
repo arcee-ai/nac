@@ -25,7 +25,8 @@ pub use db::{
     update_raw_session_config, update_session_config, update_session_presentation,
 };
 pub(crate) use db::{
-    insert_new_session_in_transaction, list_sessions_with_connection, load_session_run_state,
+    insert_new_session_in_transaction, list_sessions_with_connection,
+    load_permission_approval_state, load_session_run_state, update_permission_approval_state,
 };
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,

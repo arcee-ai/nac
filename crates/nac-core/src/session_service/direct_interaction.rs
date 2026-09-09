@@ -64,7 +64,7 @@ impl SessionService {
     }
 
     pub fn permission_approval_mode(&self) -> Result<crate::permissions::PermissionApprovalMode> {
-        Ok(self.direct_permission_broker()?.approval_mode())
+        self.direct_permission_broker()?.approval_mode()
     }
 
     pub fn set_permission_approval_mode(
