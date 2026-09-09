@@ -383,6 +383,51 @@ impl ManagedModelProfile {
         }
     }
 
+    pub(crate) async fn begin_interactive_repair(
+        &self,
+        config: &ManagedHostConfig,
+    ) -> Result<nac_core::model::PendingDeviceLogin> {
+        if self.backend != BackendKind::ArceeAuth
+            || self.credential_source != ManagedModelCredentialSource::ManagedBootstrap
+        {
+            bail!("managed interactive repair requires an Arcee bootstrap profile");
+        }
+        let auth_issuer = self
+            .auth_issuer
+            .as_deref()
+            .ok_or_else(|| anyhow!("managed bootstrap profile is missing its auth issuer"))?;
+        nac_core::model::begin_managed_arcee_repair(
+            &config.logical_host_id,
+            &self.endpoint,
+            auth_issuer,
+        )
+        .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn begin_interactive_repair_with_auth_service_for_test(
+        &self,
+        config: &ManagedHostConfig,
+        auth_service_base_url: &str,
+    ) -> Result<nac_core::model::PendingDeviceLogin> {
+        if self.backend != BackendKind::ArceeAuth
+            || self.credential_source != ManagedModelCredentialSource::ManagedBootstrap
+        {
+            bail!("managed interactive repair requires an Arcee bootstrap profile");
+        }
+        let auth_issuer = self
+            .auth_issuer
+            .as_deref()
+            .ok_or_else(|| anyhow!("managed bootstrap profile is missing its auth issuer"))?;
+        nac_core::model::begin_managed_arcee_repair_with_auth_service_for_test(
+            &config.logical_host_id,
+            &self.endpoint,
+            auth_issuer,
+            auth_service_base_url,
+        )
+        .await
+    }
+
     /// Fail closed before a session uses the durable managed authorization.
     /// Mounted API-key sessions retain their existing launch-time file check.
     pub(crate) fn require_durable_authorization(&self, config: &ManagedHostConfig) -> Result<()> {

@@ -6,8 +6,8 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::model::arcee::{
-    request_token_refresh, stored_auth_from_refresh, ArceeAuthService, RefreshOutcome,
-    ARCEE_AUTH_DEV2_ISSUER, LEGACY_CLIENT_ID,
+    begin_managed_arcee_device_login_with_service, request_token_refresh, stored_auth_from_refresh,
+    ArceeAuthService, RefreshOutcome, ARCEE_AUTH_DEV2_ISSUER, LEGACY_CLIENT_ID,
 };
 use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
@@ -133,6 +133,22 @@ fn read_auth(paths: &OwnedPaths) -> StoredArceeAuth {
     parse_stored_auth(&raw, &paths.auth).unwrap().unwrap()
 }
 
+fn interactive_auth(base_url: &str, auth_issuer: &str) -> StoredArceeAuth {
+    StoredArceeAuth {
+        auth_type: AUTH_TYPE.to_string(),
+        access_token: "repair-access-canary".to_string(),
+        refresh_token: "repair-refresh-canary".to_string(),
+        token_type: "bearer".to_string(),
+        expires_at_ms: u64::MAX,
+        base_url: base_url.to_string(),
+        organization_id: "org-repaired".to_string(),
+        workspace_name: "workspace-repaired".to_string(),
+        auth_issuer: auth_issuer.to_string(),
+        client_id: LEGACY_CLIENT_ID.to_string(),
+        managed_bootstrap: None,
+    }
+}
+
 #[test]
 fn first_import_is_durable_and_restart_does_not_need_the_mount() {
     let dir = TestDir::new("first-import");
@@ -189,6 +205,250 @@ fn receipt_prevents_reconciliation_or_a_new_generation_from_overwriting_rotation
     assert_eq!(reopened.access_token, "rotated-access-canary");
     assert_eq!(reopened.refresh_token, "rotated-refresh-canary");
     validate(&paths).unwrap();
+}
+
+#[test]
+fn managed_repair_requires_trusted_receipt_and_never_replaces_existing_auth() {
+    let missing_dir = TestDir::new("repair-missing-receipt");
+    let missing = missing_dir.paths();
+    let error = prepare_managed_arcee_repair_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        missing.authorization(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("requires its durable bootstrap receipt"));
+
+    let healthy_dir = TestDir::new("repair-preserve-healthy");
+    let healthy = healthy_dir.paths();
+    write_bootstrap(&healthy, BOOTSTRAP_ID);
+    import(&healthy).unwrap();
+    let before = fs::read(&healthy.auth).unwrap();
+    let error = prepare_managed_arcee_repair_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        healthy.authorization(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("will not replace an existing credential"));
+    assert_eq!(fs::read(&healthy.auth).unwrap(), before);
+
+    fs::remove_file(&healthy.auth).unwrap();
+    let mut receipt: Value = serde_json::from_slice(&fs::read(&healthy.receipt).unwrap()).unwrap();
+    receipt["managed_host_id"] = json!("27062ca7-2fca-49ad-b6c4-fe1e5d9ae6fa");
+    write_private(&healthy.receipt, serde_json::to_vec(&receipt).unwrap());
+    let error = prepare_managed_arcee_repair_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        healthy.authorization(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("different logical host"));
+    assert!(!healthy.auth.exists());
+}
+
+#[test]
+fn managed_repair_completion_restores_identity_provenance_and_readiness() {
+    let dir = TestDir::new("repair-complete");
+    let paths = dir.paths();
+    write_bootstrap(&paths, BOOTSTRAP_ID);
+    import(&paths).unwrap();
+    fs::remove_file(&paths.auth).unwrap();
+
+    let context = prepare_managed_arcee_repair_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        paths.authorization(),
+    )
+    .unwrap();
+    let repaired = complete_managed_arcee_repair_with_paths(
+        &context,
+        interactive_auth(ARCEE_AUTH_PRODUCTION_ISSUER, ARCEE_AUTH_PRODUCTION_ISSUER),
+        paths.authorization(),
+    )
+    .unwrap();
+
+    assert_eq!(repaired.client_id, MANAGED_CLIENT_ID);
+    assert_eq!(
+        repaired.managed_bootstrap,
+        Some(ManagedBootstrapProvenance {
+            bootstrap_id: Uuid::parse_str(BOOTSTRAP_ID).unwrap(),
+            managed_host_id: Uuid::parse_str(HOST_ID).unwrap(),
+        })
+    );
+    assert_eq!(read_auth(&paths), repaired);
+    validate(&paths).unwrap();
+}
+
+#[tokio::test]
+async fn managed_device_login_completes_with_managed_identity_and_provenance() {
+    let dir = TestDir::new("repair-device-flow");
+    let paths = dir.paths();
+    write_bootstrap(&paths, BOOTSTRAP_ID);
+    import(&paths).unwrap();
+    fs::remove_file(&paths.auth).unwrap();
+    let context = prepare_managed_arcee_repair_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        paths.authorization(),
+    )
+    .unwrap();
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json(
+            "200 OK",
+            json!({
+                "device_code": "managed-device-code",
+                "user_code": "MANAGED-CODE",
+                "verification_uri_complete": "https://accounts.arcee.ai/device?code=MANAGED-CODE",
+                "interval": 1,
+                "expires_in": 60
+            })
+            .to_string(),
+        ),
+        ScriptedResponse::json(
+            "200 OK",
+            json!({
+                "access_token": "repaired-access-canary",
+                "refresh_token": "repaired-refresh-canary",
+                "token_type": "bearer",
+                "expires_in": 3600,
+                "base_url": ARCEE_AUTH_PRODUCTION_ISSUER,
+                "organization_id": "org-repaired",
+                "workspace_name": "workspace-repaired"
+            })
+            .to_string(),
+        ),
+    ]);
+
+    let login = begin_managed_arcee_device_login_with_service(
+        context,
+        ArceeAuthService::for_test(&server.base_url),
+    )
+    .await
+    .unwrap();
+    let snapshot = login.complete().await.unwrap();
+    assert!(snapshot.signed_in);
+    validate(&paths).unwrap();
+
+    let requests = server.finish();
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        let body: Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["client_id"], MANAGED_CLIENT_ID);
+    }
+    let repaired = read_auth(&paths);
+    assert_eq!(repaired.client_id, MANAGED_CLIENT_ID);
+    assert!(repaired.managed_bootstrap.is_some());
+}
+
+#[test]
+fn managed_repair_completion_rechecks_receipt_and_empty_target() {
+    let receipt_dir = TestDir::new("repair-recheck-receipt");
+    let receipt_paths = receipt_dir.paths();
+    write_bootstrap(&receipt_paths, BOOTSTRAP_ID);
+    import(&receipt_paths).unwrap();
+    fs::remove_file(&receipt_paths.auth).unwrap();
+    let context = prepare_managed_arcee_repair_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        receipt_paths.authorization(),
+    )
+    .unwrap();
+    fs::remove_file(&receipt_paths.receipt).unwrap();
+    let error = complete_managed_arcee_repair_with_paths(
+        &context,
+        interactive_auth(ARCEE_AUTH_PRODUCTION_ISSUER, ARCEE_AUTH_PRODUCTION_ISSUER),
+        receipt_paths.authorization(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("requires its durable bootstrap receipt"));
+    assert!(!receipt_paths.auth.exists());
+
+    let changed_dir = TestDir::new("repair-changed-receipt");
+    let changed = changed_dir.paths();
+    write_bootstrap(&changed, BOOTSTRAP_ID);
+    import(&changed).unwrap();
+    fs::remove_file(&changed.auth).unwrap();
+    let context = prepare_managed_arcee_repair_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        changed.authorization(),
+    )
+    .unwrap();
+    let mut receipt: Value = serde_json::from_slice(&fs::read(&changed.receipt).unwrap()).unwrap();
+    receipt["bootstrap_id"] = json!("27062ca7-2fca-49ad-b6c4-fe1e5d9ae6fa");
+    write_private(&changed.receipt, serde_json::to_vec(&receipt).unwrap());
+    let error = complete_managed_arcee_repair_with_paths(
+        &context,
+        interactive_auth(ARCEE_AUTH_PRODUCTION_ISSUER, ARCEE_AUTH_PRODUCTION_ISSUER),
+        changed.authorization(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("receipt changed"));
+    assert!(!changed.auth.exists());
+
+    let origin_dir = TestDir::new("repair-wrong-inference-origin");
+    let origin = origin_dir.paths();
+    write_bootstrap(&origin, BOOTSTRAP_ID);
+    import(&origin).unwrap();
+    fs::remove_file(&origin.auth).unwrap();
+    let context = prepare_managed_arcee_repair_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        origin.authorization(),
+    )
+    .unwrap();
+    let error = complete_managed_arcee_repair_with_paths(
+        &context,
+        interactive_auth(ARCEE_AUTH_DEV2_ISSUER, ARCEE_AUTH_PRODUCTION_ISSUER),
+        origin.authorization(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("inference origin"));
+    assert!(!error.contains("repair-access-canary"));
+    assert!(!error.contains("repair-refresh-canary"));
+    assert!(!origin.auth.exists());
+
+    let raced_dir = TestDir::new("repair-raced-auth");
+    let raced = raced_dir.paths();
+    write_bootstrap(&raced, BOOTSTRAP_ID);
+    import(&raced).unwrap();
+    fs::remove_file(&raced.auth).unwrap();
+    let context = prepare_managed_arcee_repair_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        raced.authorization(),
+    )
+    .unwrap();
+    let mut conflicting =
+        interactive_auth(ARCEE_AUTH_PRODUCTION_ISSUER, ARCEE_AUTH_PRODUCTION_ISSUER);
+    conflicting.access_token = "concurrent-access-canary".to_string();
+    write_stored_auth_to_path(&raced.auth, &conflicting).unwrap();
+    let before = fs::read(&raced.auth).unwrap();
+    let error = complete_managed_arcee_repair_with_paths(
+        &context,
+        interactive_auth(ARCEE_AUTH_PRODUCTION_ISSUER, ARCEE_AUTH_PRODUCTION_ISSUER),
+        raced.authorization(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("will not replace an existing credential"));
+    assert_eq!(fs::read(&raced.auth).unwrap(), before);
 }
 
 #[test]

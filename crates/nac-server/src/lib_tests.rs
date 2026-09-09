@@ -262,6 +262,18 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
 }
 
 fn test_managed_bootstrap_manager(root: &std::path::Path) -> SessionManager {
+    test_managed_bootstrap_manager_with_auth(
+        root,
+        nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER,
+        None,
+    )
+}
+
+fn test_managed_bootstrap_manager_with_auth(
+    root: &std::path::Path,
+    model_endpoint: &str,
+    model_auth_issuer: Option<&str>,
+) -> SessionManager {
     let state_root = root.join("nac-home");
     let repository_root = root.join("repositories");
     let home_root = root.join("managed-home");
@@ -280,8 +292,8 @@ fn test_managed_bootstrap_manager(root: &std::path::Path) -> SessionManager {
         github_client_id: "Iv1.test".to_string(),
         model_backend: "arcee-auth".to_string(),
         model_id: "trinity-large-thinking".to_string(),
-        model_endpoint: "https://api.arcee.ai".to_string(),
-        model_auth_issuer: None,
+        model_endpoint: model_endpoint.to_string(),
+        model_auth_issuer: model_auth_issuer.map(str::to_string),
         model_credential_file: PathBuf::from(nac_core::model::MANAGED_ARCEE_BOOTSTRAP_PATH),
         model_credential_source: nac_managed::ManagedModelCredentialSource::ManagedBootstrap,
         model_credential_environment_names: Vec::new(),

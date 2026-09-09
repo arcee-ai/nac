@@ -311,17 +311,30 @@ repaired from nonsecret provenance on retry without rewriting the credential.
 Local logout or provider revocation removes the usable credential while the
 receipt remains a tombstone, so the managed profile fails closed. The existing
 interactive **Sign in with Arcee** flow remains available for ordinary
-`arcee-auth` use and managed repair. Managed configuration selects the expected
-production or dev2 authorization service even when the durable credential is
-missing or invalid; its `nac-cli` credential cannot impersonate a managed
-bootstrap generation.
+`arcee-auth` use and managed repair. Managed repair is a stricter transaction:
+it requires a valid imported receipt for the configured logical host and no
+credential file, so it cannot overwrite or downgrade a healthy managed grant.
+The owner must log out before starting repair if a credential still exists.
+Both device-code requests use registered client `managed-nac`. Completion
+rechecks the same receipt generation and empty credential path under the
+credential lock, verifies the configured production/dev2 issuer and inference
+origin, then restores `client_id = "managed-nac"` and `managed_bootstrap`
+provenance from that receipt. Missing, invalid, changed, or host-mismatched
+provenance fails before NAC reports the login complete. No browser or API caller
+can supply replacement inference or provenance fields.
 
 ArceeFM alone mints and revokes the grant. For v2, ArceeFM must populate
 `auth_issuer` from a dedicated trusted deployment setting rather than from the
-inference URL. The controller/nac-api must carry `model_auth_issuer` in managed
-configuration and transport strict v1/v2 bootstrap JSON opaquely; any private
-schema or fixture validation must accept the v2 field without copying secrets
-into CR spec/status, API responses, or logs. NAC receives no Kubernetes,
+inference URL. It must also keep `managed-nac` registered for the interactive
+device-code and refresh endpoints in both production and dev2; repaired tokens
+must return the configured inference origin. The controller/nac-api must carry
+`model_auth_issuer` in managed configuration and transport strict v1/v2
+bootstrap JSON opaquely; any private schema or fixture validation must accept
+the v2 field without copying secrets into CR spec/status, API responses, or
+logs. The controller must not replace or delete NAC's durable receipt during
+revocation or repair. If that provenance is lost, recovery requires a newly
+minted bootstrap generation rather than caller-constructed repair metadata.
+NAC receives no Kubernetes,
 service-account, or provisioning credential and exposes no bootstrap HTTP
 endpoint. The grant authorizes all Arcee models entitled to its organization;
 `model_id` remains only the independent deployment default. GitHub access and

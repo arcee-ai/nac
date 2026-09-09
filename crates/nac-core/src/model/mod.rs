@@ -376,36 +376,9 @@ pub async fn begin_login(
     provider: ManagedAuthProvider,
     style: LoginStyle,
 ) -> Result<PendingDeviceLogin> {
-    begin_login_with_optional_arcee_auth_issuer(provider, style, None).await
-}
-
-/// Starts an Arcee login against one explicitly approved authorization issuer.
-/// Other providers reject this provider-specific selector.
-pub async fn begin_login_with_arcee_auth_issuer(
-    provider: ManagedAuthProvider,
-    style: LoginStyle,
-    auth_issuer: &str,
-) -> Result<PendingDeviceLogin> {
-    if provider != ManagedAuthProvider::Arcee {
-        return Err(anyhow!(
-            "an Arcee auth issuer cannot be selected for provider '{provider}'"
-        ));
-    }
-    begin_login_with_optional_arcee_auth_issuer(provider, style, Some(auth_issuer)).await
-}
-
-async fn begin_login_with_optional_arcee_auth_issuer(
-    provider: ManagedAuthProvider,
-    style: LoginStyle,
-    arcee_auth_issuer: Option<&str>,
-) -> Result<PendingDeviceLogin> {
     let inner = match (provider, style) {
         (ManagedAuthProvider::Arcee, _) => {
-            let login = match arcee_auth_issuer {
-                Some(auth_issuer) => arcee::begin_arcee_device_login_at(auth_issuer).await?,
-                None => arcee::begin_arcee_device_login().await?,
-            };
-            PendingDeviceLoginKind::Arcee(login)
+            PendingDeviceLoginKind::Arcee(arcee::begin_arcee_device_login().await?)
         }
         (ManagedAuthProvider::Codex, LoginStyle::Loopback) => {
             PendingDeviceLoginKind::CodexLoopback(
@@ -417,6 +390,50 @@ async fn begin_login_with_optional_arcee_auth_issuer(
         }
     };
     Ok(PendingDeviceLogin { inner })
+}
+
+/// Starts the managed-host Arcee repair flow after proving that the durable
+/// bootstrap receipt is usable and that no credential can be overwritten.
+/// Completion rechecks both conditions before it stores provider tokens.
+pub async fn begin_managed_arcee_repair(
+    expected_managed_host_id: &str,
+    expected_base_url: &str,
+    expected_auth_issuer: &str,
+) -> Result<PendingDeviceLogin> {
+    let login = arcee::begin_managed_arcee_device_login(
+        expected_managed_host_id,
+        expected_base_url,
+        expected_auth_issuer,
+    )
+    .await?;
+    Ok(PendingDeviceLogin {
+        inner: PendingDeviceLoginKind::Arcee(login),
+    })
+}
+
+/// Test-support entry point for exercising the real managed repair lifecycle
+/// against a loopback authorization service while retaining the configured
+/// issuer as the credential's security identity.
+#[cfg(feature = "test-support")]
+pub async fn begin_managed_arcee_repair_with_auth_service_for_test(
+    expected_managed_host_id: &str,
+    expected_base_url: &str,
+    expected_auth_issuer: &str,
+    auth_service_base_url: &str,
+) -> Result<PendingDeviceLogin> {
+    let context = arcee_bootstrap::prepare_managed_arcee_repair(
+        expected_managed_host_id,
+        expected_base_url,
+        expected_auth_issuer,
+    )?;
+    let login = arcee::begin_managed_arcee_device_login_with_service(
+        context,
+        arcee::ArceeAuthService::for_test(auth_service_base_url),
+    )
+    .await?;
+    Ok(PendingDeviceLogin {
+        inner: PendingDeviceLoginKind::Arcee(login),
+    })
 }
 
 pub fn managed_auth_snapshot(provider: ManagedAuthProvider) -> Result<ManagedAuthSnapshot> {
