@@ -206,7 +206,7 @@ pub(crate) async fn cancel_active_run(
     params(("session_id" = String, Path), ("run_id" = String, Path)),
     responses(
         (status = 202, description = "The exact run was cancelled or was already inactive"),
-        (status = 400, description = "Path extraction or run identity validation failed", body = String, content_type = "text/plain"),
+        (status = 400, description = "Path extraction or run identity validation failed", content((ApiErrorBody = "application/json"), (String = "text/plain"))),
         (status = 404, description = "Session was not found", body = ApiErrorBody, content_type = "application/json"),
         (status = 409, description = "Cancellation is owned by another process", body = ApiErrorBody, content_type = "application/json"),
         (status = 500, description = "Cancellation cleanup failed", body = ApiErrorBody, content_type = "application/json"),

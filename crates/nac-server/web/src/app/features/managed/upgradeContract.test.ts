@@ -167,4 +167,36 @@ describe("managed upgrade facade decoder", () => {
       ManagedUpgradeContractError,
     );
   });
+
+  it("keeps SSH and Podman terminal cleanup paths wait-only and out of action targets", () => {
+    for (const [index, rawTerminalPath] of [
+      "~/.cache/nac/exec/0123456789abcdef0123456789abcdef.pid",
+      "/tmp/nac-exec-0123456789abcdef0123456789abcdef.pid",
+    ].entries()) {
+      // The exact controller contract hashes an unsafe raw ID into selection_key
+      // and deliberately omits it from the browser-facing wait-only blocker.
+      const projected = {
+        selection_key: `sha256:${String(index + 3).repeat(64)}`,
+        kind: "terminal_process",
+        message: "An active terminal process must finish before maintenance can start",
+        actionable: false,
+        action: "wait",
+        target: null,
+      };
+      expect(JSON.stringify(projected)).not.toContain(rawTerminalPath);
+      expect(
+        decodeManagedUpgradeOperation({ ...clone(operation), blockers: [projected] }).blockers,
+      ).toEqual([projected]);
+
+      const unsafeAction = {
+        ...projected,
+        actionable: true,
+        action: "terminate_terminal",
+        target: { session_id: "session-1", terminal_id: rawTerminalPath },
+      };
+      expect(() =>
+        decodeManagedUpgradeOperation({ ...clone(operation), blockers: [unsafeAction] }),
+      ).toThrow(ManagedUpgradeContractError);
+    }
+  });
 });

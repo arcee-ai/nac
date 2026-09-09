@@ -494,6 +494,20 @@ async fn openapi_special_wire_schemas_and_docs_are_live() {
         );
     }
     for (method, path) in [
+        ("post", "/sessions/{session_id}/runs/{run_id}/cancel"),
+        ("delete", "/sessions/{session_id}/terminals/{terminal_id}"),
+    ] {
+        let content = &document["paths"][path][method]["responses"]["400"]["content"];
+        assert!(
+            content["application/json"].is_object(),
+            "missing JSON validation error for {method} {path}"
+        );
+        assert!(
+            content["text/plain"].is_object(),
+            "missing extraction error for {method} {path}"
+        );
+    }
+    for (method, path) in [
         ("post", "/model-configs"),
         ("patch", "/model-configs/{config_id}"),
         ("post", "/mcp_library/servers"),

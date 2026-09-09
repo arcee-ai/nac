@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -178,6 +178,45 @@ describe("ManagedUpgradePanel", () => {
 
     expect(await screen.findByText(/This host session changed/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refresh status" })).toBeTruthy();
+  });
+
+  it.each([401, 403, 409])(
+    "suppresses cached upgrade state and actions after a later %s response",
+    async (status) => {
+      fakes.snapshot.mockResolvedValueOnce(snapshot()).mockRejectedValue({ status });
+      mount();
+
+      expect(await screen.findByRole("button", { name: "Upgrade to latest beta" })).toBeTruthy();
+      if (!client) throw new Error("query client was not created");
+      await act(async () => {
+        await client?.refetchQueries({ queryKey: managedQueryKeys.upgrade });
+      });
+
+      expect(await screen.findByTestId("managed-upgrade-unavailable")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Upgrade to latest beta" })).toBeNull();
+      if (status === 409) {
+        expect(screen.getByRole("button", { name: "Refresh status" })).toBeTruthy();
+      } else {
+        expect(screen.getByText(/Reopen this host from the Arcee portal/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+      }
+    },
+  );
+
+  it("retains cached in-progress state across a transient service failure", async () => {
+    fakes.snapshot.mockResolvedValueOnce(snapshot(operation("replacing"))).mockRejectedValue({
+      status: 503,
+    });
+    mount();
+
+    expect(await screen.findByText("Replacing NAC")).toBeTruthy();
+    if (!client) throw new Error("query client was not created");
+    await act(async () => {
+      await client?.refetchQueries({ queryKey: managedQueryKeys.upgrade });
+    });
+
+    expect(screen.getByText("Replacing NAC")).toBeTruthy();
+    expect(screen.queryByTestId("managed-upgrade-unavailable")).toBeNull();
   });
 
   it("offers a safe retry for service and network availability failures", async () => {

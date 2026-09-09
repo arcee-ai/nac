@@ -13,7 +13,7 @@ use crate::{ApiError, ApiErrorBody, SessionManager};
     ),
     responses(
         (status = 204, description = "Terminal stopped; repeated requests for the same current-service handle are safe"),
-        (status = 400, description = "Path extraction or terminal identity validation failed", body = String, content_type = "text/plain"),
+        (status = 400, description = "Path extraction or terminal identity validation failed", content((ApiErrorBody = "application/json"), (String = "text/plain"))),
         (status = 404, description = "Session or terminal was not found", body = ApiErrorBody, content_type = "application/json"),
         (status = 409, description = "Terminal belongs to another or previous service owner", body = ApiErrorBody, content_type = "application/json"),
         (status = 500, description = "Terminal cleanup failed", body = ApiErrorBody, content_type = "application/json"),

@@ -5760,6 +5760,11 @@
           "400": {
             "description": "Path extraction or run identity validation failed",
             "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              },
               "text/plain": {
                 "schema": {
                   "type": "string"
@@ -5979,6 +5984,11 @@
           "400": {
             "description": "Path extraction or terminal identity validation failed",
             "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              },
               "text/plain": {
                 "schema": {
                   "type": "string"

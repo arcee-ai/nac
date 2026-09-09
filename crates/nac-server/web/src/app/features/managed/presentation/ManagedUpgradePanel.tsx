@@ -15,6 +15,7 @@ import {
   managedUpgradeIsActive,
   managedUpgradePhaseLabel,
   managedUpgradeRecovery,
+  managedUpgradeRequiresFreshSnapshot,
   sameManagedRelease,
   type ManagedUpgradeBlocker,
   type ManagedUpgradeOperation,
@@ -24,6 +25,7 @@ import {
 export function ManagedUpgradePanel() {
   const upgrade = useManagedUpgrade();
   const snapshot = upgrade.snapshot;
+  const requiresFreshSnapshot = managedUpgradeRequiresFreshSnapshot(snapshot.error);
 
   if (snapshot.isLoading) {
     return (
@@ -41,7 +43,7 @@ export function ManagedUpgradePanel() {
     );
   }
 
-  if (!snapshot.data) {
+  if (!snapshot.data || requiresFreshSnapshot) {
     const recovery = managedUpgradeRecovery(snapshot.error);
     return (
       <section

@@ -88,11 +88,24 @@ export interface ManagedUpgradeRecovery {
   retryLabel: string | null;
 }
 
+function managedUpgradeErrorStatus(error: unknown): unknown {
+  return error !== null && typeof error === "object" && "status" in error
+    ? (error as { status?: unknown }).status
+    : null;
+}
+
+export function managedUpgradeRequiresFreshSnapshot(error: unknown): boolean {
+  const status = managedUpgradeErrorStatus(error);
+  return (
+    status === 401 ||
+    status === 403 ||
+    status === 409 ||
+    (error instanceof Error && error.name === "ManagedUpgradeContractError")
+  );
+}
+
 export function managedUpgradeRecovery(error: unknown): ManagedUpgradeRecovery {
-  const status =
-    error !== null && typeof error === "object" && "status" in error
-      ? (error as { status?: unknown }).status
-      : null;
+  const status = managedUpgradeErrorStatus(error);
   if (status === 401 || status === 403) {
     return {
       message:

@@ -6,6 +6,7 @@ import {
   managedUpgradeIsActive,
   managedUpgradePhaseLabel,
   managedUpgradeRecovery,
+  managedUpgradeRequiresFreshSnapshot,
   sameManagedRelease,
   type ManagedUpgradeReleaseIdentity,
 } from "@/app/features/managed/upgrade";
@@ -73,5 +74,16 @@ describe("managed upgrade model", () => {
         retryLabel: "Try again",
       });
     }
+  });
+
+  it("requires a fresh snapshot after authority, incarnation, or contract failures", () => {
+    for (const error of [{ status: 401 }, { status: 403 }, { status: 409 }]) {
+      expect(managedUpgradeRequiresFreshSnapshot(error)).toBe(true);
+    }
+    const contractError = new Error("invalid controller response");
+    contractError.name = "ManagedUpgradeContractError";
+    expect(managedUpgradeRequiresFreshSnapshot(contractError)).toBe(true);
+    expect(managedUpgradeRequiresFreshSnapshot({ status: 503 })).toBe(false);
+    expect(managedUpgradeRequiresFreshSnapshot(new TypeError("network interrupted"))).toBe(false);
   });
 });
