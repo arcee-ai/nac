@@ -479,55 +479,25 @@ impl SessionManager {
             .unwrap_or(std::env::current_exe().context("failed to resolve current executable")?);
 
         // This is deliberately before any managed model, credential, clone,
-        // reconciliation, or listener setup. An unaccepted replacement must
-        // be rejected by a read-only check before it can mutate host state.
+        // reconciliation, or listener setup. Only an exact controller-authored
+        // startup CAS may advance the durable target before ordinary startup.
         let running_target = managed_running_target()?;
-        let configured_identity = match options.managed_host.as_ref() {
-            Some(managed) if managed.version == nac_managed::MANAGED_CONFIG_VERSION => Some((
-                managed.logical_host_id.as_str(),
-                managed
-                    .host_incarnation_id
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("managed v2 host incarnation is unavailable"))?,
-            )),
-            _ => None,
-        };
-        let (preflight, startup_recovery_only) = if configured_identity.is_some() {
-            match nac_core::store::preflight_managed_forward_start(
-                &store_path,
-                &running_target,
-                configured_identity,
-            ) {
-                Ok(preflight) => (preflight, false),
-                Err(error) => {
-                    let migration = nac_core::store::migration_status(&store_path);
-                    if migration.state == nac_core::store::StoreMigrationState::Current {
-                        return Err(error.into());
-                    }
-                    (
-                        nac_core::store::ManagedStartupPreflight {
-                            accepted_identity: None,
-                            requires_accept: false,
-                        },
-                        true,
-                    )
-                }
-            }
-        } else {
-            (
-                nac_core::store::ManagedStartupPreflight {
-                    accepted_identity: None,
-                    requires_accept: false,
-                },
-                false,
-            )
-        };
-        let managed_identity = match (preflight.accepted_identity, configured_identity) {
+        let startup = application::managed::managed_startup_plan(
+            &store_path,
+            options.managed_host.as_ref(),
+            &running_target,
+        )?;
+        let startup_recovery_only = startup.recovery_only;
+        let pending_forward_start = startup.preflight.requires_accept;
+        let managed_identity = match (
+            startup.preflight.accepted_identity,
+            startup.configured_identity,
+        ) {
             (Some(accepted), _) => Some(accepted),
             (None, Some((managed_host_id, host_incarnation_id))) => {
                 Some(nac_core::store::ManagedAcceptedIdentity {
-                    managed_host_id: managed_host_id.to_string(),
-                    host_incarnation_id: host_incarnation_id.to_string(),
+                    managed_host_id,
+                    host_incarnation_id,
                     operation_id: String::new(),
                     target: running_target,
                 })
@@ -576,7 +546,7 @@ impl SessionManager {
                 maintenance_gate: Arc::new(RwLock::new(())),
                 active_admissions: Arc::new(StdMutex::new(HashMap::new())),
                 managed_identity,
-                pending_forward_start: preflight.requires_accept,
+                pending_forward_start,
                 #[cfg(test)]
                 managed_monitor_peer_observed: tokio::sync::Notify::new(),
             }),

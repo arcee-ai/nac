@@ -877,6 +877,7 @@ mod tests {
             managed_control_bind: None,
             managed_control_issuer: None,
             managed_control_jwks_file: None,
+            managed_upgrade_expectation: None,
         };
         for path in [
             &config.repository_root,

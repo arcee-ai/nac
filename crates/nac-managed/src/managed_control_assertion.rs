@@ -26,6 +26,7 @@ pub enum ManagedControlAction {
     Status,
     Prepare,
     Retry,
+    Supersede,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -43,6 +44,10 @@ pub struct ManagedControlTarget {
 pub struct ManagedControlRequest {
     pub managed_host_id: String,
     pub host_incarnation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_operation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_target: Option<ManagedControlTarget>,
     pub operation_id: String,
     pub target: ManagedControlTarget,
     pub actor: String,
@@ -112,6 +117,10 @@ struct Claims {
     action: ManagedControlAction,
     managed_host_id: String,
     host_incarnation_id: String,
+    #[serde(default)]
+    previous_operation_id: Option<String>,
+    #[serde(default)]
+    previous_target: Option<ManagedControlTarget>,
     operation_id: String,
     target: ManagedControlTarget,
     actor: String,
@@ -246,6 +255,8 @@ impl ManagedControlVerifier {
         let request = ManagedControlRequest {
             managed_host_id: claims.managed_host_id,
             host_incarnation_id: claims.host_incarnation_id,
+            previous_operation_id: claims.previous_operation_id,
+            previous_target: claims.previous_target,
             operation_id: claims.operation_id,
             target: claims.target,
             actor: claims.actor,
@@ -377,6 +388,22 @@ fn read_trusted_jwks(_path: &Path) -> Result<Vec<u8>, ManagedControlAssertionErr
 }
 
 fn validate_claim_shapes(claims: &Claims) -> Result<(), ManagedControlAssertionError> {
+    let has_previous = match (&claims.previous_operation_id, &claims.previous_target) {
+        (Some(operation_id), Some(target)) => {
+            if !valid_identifier(operation_id, 128) || !valid_target(target) {
+                return Err(ManagedControlAssertionError::Malformed);
+            }
+            true
+        }
+        (None, None) => false,
+        _ => return Err(ManagedControlAssertionError::Malformed),
+    };
+    if matches!(claims.action, ManagedControlAction::Supersede) != has_previous
+        || has_previous
+            && claims.previous_operation_id.as_deref() == Some(claims.operation_id.as_str())
+    {
+        return Err(ManagedControlAssertionError::Malformed);
+    }
     if !valid_identifier(&claims.jti, 128)
         || !valid_identifier(&claims.managed_host_id, 128)
         || !valid_identifier(&claims.host_incarnation_id, 128)
@@ -385,21 +412,24 @@ fn validate_claim_shapes(claims: &Claims) -> Result<(), ManagedControlAssertionE
         || !valid_text(&claims.aud, 512)
         || !valid_text(&claims.actor, 256)
         || !valid_text(&claims.beneficiary, 256)
-        || !valid_identifier(&claims.target.release_id, 256)
-        || !valid_identifier(&claims.target.product_version, 128)
-        || !matches!(claims.target.source_sha.len(), 40 | 64)
-        || !claims
-            .target
-            .source_sha
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        || claims.target.schema_version < 0
-        || claims.target.minimum_schema_version < 0
-        || claims.target.minimum_schema_version > claims.target.schema_version
+        || !valid_target(&claims.target)
     {
         return Err(ManagedControlAssertionError::Malformed);
     }
     Ok(())
+}
+
+fn valid_target(target: &ManagedControlTarget) -> bool {
+    valid_identifier(&target.release_id, 256)
+        && nac_contracts::valid_product_version(&target.product_version)
+        && matches!(target.source_sha.len(), 40 | 64)
+        && target
+            .source_sha
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        && target.schema_version >= 0
+        && target.minimum_schema_version >= 0
+        && target.minimum_schema_version <= target.schema_version
 }
 
 #[cfg(test)]

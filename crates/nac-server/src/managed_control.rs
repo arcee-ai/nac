@@ -18,7 +18,7 @@ use axum::{
 };
 use nac_core::store::{
     ManagedControlAttemptAction, ManagedMaintenanceError, ManagedOperationBinding,
-    ManagedPrepareOutcome, ManagedUpgradeTarget,
+    ManagedPrepareOutcome, ManagedUpgradeSupersession, ManagedUpgradeTarget,
 };
 use nac_managed::{ManagedControlAction, ManagedControlRequest, ManagedControlVerifier};
 
@@ -31,6 +31,7 @@ pub(crate) fn router(manager: SessionManager) -> Router {
         .route("/v1/upgrade/status", post(status))
         .route("/v1/upgrade/prepare", post(prepare))
         .route("/v1/upgrade/retry", post(retry))
+        .route("/v1/upgrade/supersede", post(supersede))
         .layer(DefaultBodyLimit::max(MAX_CONTROL_BODY_BYTES))
         .with_state(manager)
 }
@@ -90,6 +91,45 @@ async fn retry(
     prepare_for_action(manager, headers, request, ManagedControlAction::Retry).await
 }
 
+async fn supersede(
+    State(manager): State<SessionManager>,
+    headers: HeaderMap,
+    Json(request): Json<ManagedControlRequest>,
+) -> Response {
+    let assertion = match validate(
+        &manager,
+        &headers,
+        ManagedControlAction::Supersede,
+        &request,
+    ) {
+        Ok(assertion) => assertion,
+        Err(response) => return response,
+    };
+    let supersession = match upgrade_supersession(&manager, &request) {
+        Ok(supersession) => supersession,
+        Err(status) => return control_configuration_error(status),
+    };
+    let Some(expected_identity) = manager.managed_identity().cloned() else {
+        return internal_error();
+    };
+    let path = manager.inner.store_path.clone();
+    match tokio::task::spawn_blocking(move || {
+        nac_core::store::supersede_managed_upgrade_for_identity(
+            &path,
+            &assertion.jti,
+            &supersession,
+            assertion.expires_at,
+            &expected_identity,
+        )
+    })
+    .await
+    {
+        Ok(Ok(outcome)) => (StatusCode::OK, Json(outcome)).into_response(),
+        Ok(Err(error)) => maintenance_error(error),
+        Err(_) => internal_error(),
+    }
+}
+
 async fn prepare_for_action(
     manager: SessionManager,
     headers: HeaderMap,
@@ -129,7 +169,9 @@ async fn prepare_for_action(
         let attempt_action = match action {
             ManagedControlAction::Prepare => ManagedControlAttemptAction::Prepare,
             ManagedControlAction::Retry => ManagedControlAttemptAction::Retry,
-            ManagedControlAction::Status => unreachable!("status uses its dedicated endpoint"),
+            ManagedControlAction::Status | ManagedControlAction::Supersede => {
+                unreachable!("action uses its dedicated endpoint")
+            }
         };
         nac_core::store::prepare_managed_upgrade_for_identity(
             &path,
@@ -152,6 +194,31 @@ async fn prepare_for_action(
         Ok(Err(error)) => maintenance_error(error),
         Err(_) => internal_error(),
     }
+}
+
+fn upgrade_supersession(
+    manager: &SessionManager,
+    request: &ManagedControlRequest,
+) -> Result<ManagedUpgradeSupersession, StatusCode> {
+    let previous_operation_id = request
+        .previous_operation_id
+        .clone()
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let previous = request
+        .previous_target
+        .as_ref()
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    Ok(ManagedUpgradeSupersession {
+        previous_operation_id,
+        previous_target: ManagedUpgradeTarget {
+            release_id: previous.release_id.clone(),
+            source_sha: previous.source_sha.clone(),
+            product_version: previous.product_version.clone(),
+            schema_version: previous.schema_version,
+            minimum_schema_version: previous.minimum_schema_version,
+        },
+        operation: operation_binding(manager, request)?,
+    })
 }
 
 #[expect(

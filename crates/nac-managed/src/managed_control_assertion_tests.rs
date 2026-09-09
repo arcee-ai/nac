@@ -19,6 +19,8 @@ fn request() -> ManagedControlRequest {
     ManagedControlRequest {
         managed_host_id: "host-123".to_string(),
         host_incarnation_id: "incarnation-456".to_string(),
+        previous_operation_id: None,
+        previous_target: None,
         operation_id: "operation-789".to_string(),
         target: ManagedControlTarget {
             release_id: "beta-42".to_string(),
@@ -190,6 +192,116 @@ fn fixed_go_rust_vector_verifies() {
     assert_eq!(validated.request, request());
 }
 
+#[cfg(unix)]
+#[test]
+fn committed_vector_verifies_with_its_own_embedded_jwks() {
+    let fixture = Fixture::new();
+    let golden: serde_json::Value =
+        serde_json::from_str(include_str!("../testdata/managed-control-ed25519-v1.json")).unwrap();
+    fixture.replace_jwks(&serde_json::to_vec(&golden["jwks"]).unwrap());
+    let request: ManagedControlRequest = serde_json::from_value(golden["request"].clone()).unwrap();
+    let compact = golden["compact_jws"].as_str().unwrap();
+    let validated = fixture
+        .verifier
+        .verify(compact, ManagedControlAction::Prepare, &request, NOW + 30)
+        .unwrap();
+    assert_eq!(validated.request, request);
+}
+
+#[test]
+fn semver_build_metadata_is_accepted_and_invalid_versions_fail_closed() {
+    let fixture = Fixture::new();
+    let mut request = request();
+    request.target.product_version = "1.2.3-rc.1+linux.amd64".to_string();
+    let mut bound_claims = claims("prepare");
+    bound_claims["target"]["product_version"] = serde_json::json!(request.target.product_version);
+    fixture
+        .verifier
+        .verify(
+            &sign(&header(), &bound_claims),
+            ManagedControlAction::Prepare,
+            &request,
+            NOW,
+        )
+        .unwrap();
+
+    for invalid in ["1.2", "01.2.3", "1.2.3-01", "1.2.3+", "1.2.3+bad_value"] {
+        request.target.product_version = invalid.to_string();
+        let mut malformed_claims = claims("prepare");
+        malformed_claims["target"]["product_version"] = serde_json::json!(invalid);
+        assert_eq!(
+            fixture.verifier.verify(
+                &sign(&header(), &malformed_claims),
+                ManagedControlAction::Prepare,
+                &request,
+                NOW,
+            ),
+            Err(ManagedControlAssertionError::Malformed),
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
+fn supersede_assertions_bind_the_exact_previous_operation_and_target() {
+    let fixture = Fixture::new();
+    let mut request = request();
+    request.operation_id = "operation-corrected".to_string();
+    request.target.source_sha = "b".repeat(40);
+    request.target.product_version = "0.2.1+recovery.1".to_string();
+    request.previous_operation_id = Some("operation-failed".to_string());
+    request.previous_target = Some(ManagedControlTarget {
+        release_id: "beta-41".to_string(),
+        source_sha: "a".repeat(40),
+        product_version: "0.2.0+failed.1".to_string(),
+        schema_version: 25,
+        minimum_schema_version: 0,
+    });
+    let mut bound_claims = claims("supersede");
+    bound_claims["operation_id"] = serde_json::json!(request.operation_id);
+    bound_claims["target"] = serde_json::to_value(&request.target).unwrap();
+    bound_claims["previous_operation_id"] =
+        serde_json::json!(request.previous_operation_id.clone().unwrap());
+    bound_claims["previous_target"] =
+        serde_json::to_value(request.previous_target.as_ref().unwrap()).unwrap();
+    let compact = sign(&header(), &bound_claims);
+    fixture
+        .verifier
+        .verify(&compact, ManagedControlAction::Supersede, &request, NOW)
+        .unwrap();
+
+    let mut substituted = request.clone();
+    substituted.previous_operation_id = Some("operation-other".to_string());
+    assert_eq!(
+        fixture
+            .verifier
+            .verify(&compact, ManagedControlAction::Supersede, &substituted, NOW,),
+        Err(ManagedControlAssertionError::BindingMismatch)
+    );
+    let mut missing = request.clone();
+    missing.previous_target = None;
+    let mut missing_claims = bound_claims.clone();
+    missing_claims
+        .as_object_mut()
+        .unwrap()
+        .remove("previous_target");
+    assert_eq!(
+        fixture.verifier.verify(
+            &sign(&header(), &missing_claims),
+            ManagedControlAction::Supersede,
+            &missing,
+            NOW,
+        ),
+        Err(ManagedControlAssertionError::Malformed)
+    );
+    assert_eq!(
+        fixture
+            .verifier
+            .verify(&compact, ManagedControlAction::Prepare, &request, NOW,),
+        Err(ManagedControlAssertionError::BindingMismatch)
+    );
+}
+
 #[test]
 fn every_request_binding_substitution_is_rejected() {
     let fixture = Fixture::new();
@@ -230,6 +342,7 @@ fn every_request_binding_substitution_is_rejected() {
             "schema_version" => serde_json::json!(26),
             "minimum_schema_version" => serde_json::json!(1),
             "source_sha" => serde_json::json!("b".repeat(40)),
+            "product_version" => serde_json::json!("0.2.1"),
             _ => serde_json::json!(format!("changed-{field}")),
         };
         assert_eq!(

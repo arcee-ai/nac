@@ -20,9 +20,9 @@ pub use clone_workflow::{
 pub use configuration::{
     is_reserved_environment_name, is_valid_environment_name, CommandEnvironmentSnapshot,
     HostSecretStore, HostSecretSummary, ManagedCommandEnvironmentProvider, ManagedControlConfig,
-    ManagedHostConfig, ManagedModelCredentialSource, LEGACY_MANAGED_CONFIG_VERSION,
-    MANAGED_CONFIG_VERSION, MAX_HOST_SECRETS, MAX_HOST_SECRET_TOTAL_BYTES,
-    MAX_HOST_SECRET_VALUE_BYTES,
+    ManagedHostConfig, ManagedModelCredentialSource, ManagedUpgradeExpectation,
+    LEGACY_MANAGED_CONFIG_VERSION, MANAGED_CONFIG_VERSION, MAX_HOST_SECRETS,
+    MAX_HOST_SECRET_TOTAL_BYTES, MAX_HOST_SECRET_VALUE_BYTES,
 };
 pub use github::{
     GitHubAccessToken, GitHubAuthError, GitHubAuthFailureKind, GitHubConnectionStatus,

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
+use crate::ManagedControlTarget;
 
 struct TestDir(PathBuf);
 
@@ -41,6 +42,7 @@ fn valid_config(root: &Path) -> ManagedHostConfig {
         managed_control_bind: None,
         managed_control_issuer: None,
         managed_control_jwks_file: None,
+        managed_upgrade_expectation: None,
     }
 }
 
@@ -74,6 +76,58 @@ fn version_two_requires_exact_managed_control_identity_and_listener_fields() {
     legacy.managed_control_jwks_file = None;
     legacy.validate().unwrap();
     assert_eq!(legacy.managed_control().unwrap(), None);
+}
+
+#[test]
+fn version_two_upgrade_expectation_is_exact_nonsecret_forward_metadata() {
+    let root = TestDir::new("upgrade-expectation");
+    let mut config = valid_config(&root.0);
+    config.version = MANAGED_CONFIG_VERSION;
+    config.host_incarnation_id = Some("incarnation-456".to_string());
+    config.managed_control_bind = Some("0.0.0.0:3211".to_string());
+    config.managed_control_issuer = Some("https://nac-api.example.test".to_string());
+    config.managed_control_jwks_file = Some(root.0.join("jwks.json"));
+    config.managed_upgrade_expectation = Some(ManagedUpgradeExpectation {
+        previous_operation_id: "operation-failed".to_string(),
+        previous_target: ManagedControlTarget {
+            release_id: "release-a".to_string(),
+            source_sha: "a".repeat(40),
+            product_version: "1.2.3+failed.1".to_string(),
+            schema_version: 25,
+            minimum_schema_version: 0,
+        },
+        operation_id: "operation-corrected".to_string(),
+        target: ManagedControlTarget {
+            release_id: "release-b".to_string(),
+            source_sha: "b".repeat(40),
+            product_version: "1.2.4+recovery.1".to_string(),
+            schema_version: 25,
+            minimum_schema_version: 0,
+        },
+        actor: "user:owner".to_string(),
+        beneficiary: "tenant:owner".to_string(),
+    });
+    config.validate().unwrap();
+
+    let mut same_operation = config.clone();
+    same_operation
+        .managed_upgrade_expectation
+        .as_mut()
+        .unwrap()
+        .operation_id = "operation-failed".to_string();
+    assert!(same_operation.validate().is_err());
+
+    let mut malformed = config.clone();
+    malformed
+        .managed_upgrade_expectation
+        .as_mut()
+        .unwrap()
+        .target
+        .product_version = "1.2+invalid".to_string();
+    assert!(malformed.validate().is_err());
+
+    config.version = LEGACY_MANAGED_CONFIG_VERSION;
+    assert!(config.validate().is_err());
 }
 
 #[test]

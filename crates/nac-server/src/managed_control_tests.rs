@@ -105,6 +105,7 @@ impl Fixture {
             managed_control_bind: Some("127.0.0.1:3211".to_string()),
             managed_control_issuer: Some("https://nac-api.example.test".to_string()),
             managed_control_jwks_file: Some(jwks),
+            managed_upgrade_expectation: None,
         };
         managed_host.validate().unwrap();
         let manager = SessionManager::new(crate::ServerOptions {
@@ -127,6 +128,8 @@ impl Fixture {
         ManagedControlRequest {
             managed_host_id: "host-123".to_string(),
             host_incarnation_id: "incarnation-456".to_string(),
+            previous_operation_id: None,
+            previous_target: None,
             operation_id: "operation-789".to_string(),
             target: nac_managed::ManagedControlTarget {
                 release_id: "beta-42".to_string(),
@@ -154,8 +157,9 @@ impl Fixture {
             ManagedControlAction::Status => "status",
             ManagedControlAction::Prepare => "prepare",
             ManagedControlAction::Retry => "retry",
+            ManagedControlAction::Supersede => "supersede",
         };
-        let claims = serde_json::json!({
+        let mut claims = serde_json::json!({
             "iss": "https://nac-api.example.test",
             "aud": "urn:nac:managed-control:host-123:incarnation-456",
             "jti": jti,
@@ -170,6 +174,12 @@ impl Fixture {
             "nbf": now,
             "exp": now + 60
         });
+        if let Some(previous_operation_id) = &request.previous_operation_id {
+            claims["previous_operation_id"] = serde_json::json!(previous_operation_id);
+        }
+        if let Some(previous_target) = &request.previous_target {
+            claims["previous_target"] = serde_json::json!(previous_target);
+        }
         let header = serde_json::json!({
             "alg": "EdDSA",
             "kid": "control-key",
@@ -421,6 +431,87 @@ async fn lost_response_retry_and_binding_failures_are_sanitized() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(!body.contains("jti-status"));
     assert!(!body.contains(&assertion));
+}
+
+#[tokio::test]
+async fn signed_supersede_route_recovers_forward_and_is_private_replay_safe() {
+    let fixture = Fixture::new();
+    let replacement = fixture.prepare_running_replacement("supersede-serving");
+    let serving_identity = replacement.managed_identity().unwrap().clone();
+    assert!(nac_core::store::accept_managed_forward_start(
+        &fixture.manager.inner.store_path,
+        &serving_identity,
+    )
+    .unwrap());
+    let response = crate::router(replacement.clone())
+        .oneshot(
+            Request::post("/v1/upgrade/supersede")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let mut failed = fixture.running_request();
+    failed.operation_id = "operation-failed-a".to_string();
+    failed.target.release_id = "release-failed-a".to_string();
+    failed.target.source_sha = "b".repeat(40);
+    let failed_binding = operation_binding(&replacement, &failed).unwrap();
+    assert!(matches!(
+        nac_core::store::prepare_managed_upgrade_for_identity(
+            &fixture.manager.inner.store_path,
+            "jti-route-failed-a",
+            &failed_binding,
+            nac_core::store::ManagedControlAttemptAction::Prepare,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+                + 60,
+            Vec::new(),
+            &serving_identity,
+        )
+        .unwrap(),
+        nac_core::store::ManagedPrepareOutcome::SafeToStop { .. }
+    ));
+
+    let mut corrected = fixture.running_request();
+    corrected.operation_id = "operation-corrected-b".to_string();
+    corrected.target.release_id = "release-corrected-b".to_string();
+    corrected.target.source_sha = "c".repeat(40);
+    corrected.previous_operation_id = Some(failed.operation_id.clone());
+    corrected.previous_target = Some(failed.target.clone());
+    let assertion = fixture.assertion(
+        ManagedControlAction::Supersede,
+        &corrected,
+        "jti-route-supersede",
+    );
+    let app = super::router(replacement.clone());
+    let first = call(app.clone(), "/v1/upgrade/supersede", &corrected, &assertion).await;
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    assert!(first.1.contains("superseded"));
+    let replay = call(app.clone(), "/v1/upgrade/supersede", &corrected, &assertion).await;
+    assert_eq!(replay, first);
+
+    let mut substituted = corrected.clone();
+    substituted.previous_operation_id = Some("operation-substituted".to_string());
+    let (status, body) = call(app, "/v1/upgrade/supersede", &substituted, &assertion).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(!body.contains("operation-failed-a"));
+    assert!(!body.contains(&assertion));
+
+    let snapshot =
+        nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path).unwrap();
+    assert_eq!(
+        snapshot.operation_id.as_deref(),
+        Some("operation-corrected-b")
+    );
+    assert_eq!(
+        snapshot.state,
+        nac_core::store::ManagedMaintenanceState::Maintenance
+    );
 }
 
 #[tokio::test]
@@ -899,6 +990,153 @@ async fn fully_ready_replacement_accepts_only_after_both_listeners_bind() {
     );
     server.abort();
     let _ = server.await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn controller_startup_expectation_recovers_suspended_or_failed_release_and_can_accept_b() {
+    for failed_in_maintenance in [false, true] {
+        let fixture = Fixture::new();
+        let mut prior = fixture.request();
+        prior.operation_id = "operation-startup-a".to_string();
+        prior.target.release_id = "release-startup-a".to_string();
+        prior.target.source_sha = "d".repeat(40);
+        prior.target.product_version = "0.0.1".to_string();
+        let prior_binding = operation_binding(&fixture.manager, &prior).unwrap();
+        nac_core::store::prepare_managed_upgrade(
+            &fixture.manager.inner.store_path,
+            "jti-startup-a",
+            &prior_binding,
+            nac_core::store::ManagedControlAttemptAction::Prepare,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+                + 60,
+            Vec::new(),
+        )
+        .unwrap();
+        let prior_identity = nac_core::store::ManagedAcceptedIdentity {
+            managed_host_id: prior.managed_host_id.clone(),
+            host_incarnation_id: prior.host_incarnation_id.clone(),
+            operation_id: prior.operation_id.clone(),
+            target: prior_binding.target.clone(),
+        };
+        assert!(nac_core::store::accept_managed_forward_start(
+            &fixture.manager.inner.store_path,
+            &prior_identity,
+        )
+        .unwrap());
+
+        if !failed_in_maintenance {
+            let unexpected = SessionManager::new(crate::ServerOptions {
+                root_cwd: fixture.root.clone(),
+                store_path: Some(fixture.manager.inner.store_path.clone()),
+                worker_executable: None,
+                managed_host: Some(fixture.manager.managed_host().unwrap().clone()),
+            });
+            assert!(unexpected.is_err());
+            let snapshot =
+                nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path)
+                    .unwrap();
+            assert_eq!(
+                snapshot.state,
+                nac_core::store::ManagedMaintenanceState::Serving
+            );
+            assert_eq!(snapshot.accepted_identity.as_ref(), Some(&prior_identity));
+        }
+
+        let previous = if failed_in_maintenance {
+            let mut failed = prior.clone();
+            failed.operation_id = "operation-startup-failed".to_string();
+            failed.target.release_id = "release-startup-failed".to_string();
+            failed.target.source_sha = "e".repeat(40);
+            failed.target.product_version = "0.0.2+failed.1".to_string();
+            let binding = operation_binding(&fixture.manager, &failed).unwrap();
+            nac_core::store::prepare_managed_upgrade_for_identity(
+                &fixture.manager.inner.store_path,
+                "jti-startup-failed",
+                &binding,
+                nac_core::store::ManagedControlAttemptAction::Prepare,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64
+                    + 60,
+                Vec::new(),
+                &prior_identity,
+            )
+            .unwrap();
+            failed
+        } else {
+            prior
+        };
+
+        let running = crate::managed_running_target().unwrap();
+        let mut managed = fixture.manager.managed_host().unwrap().clone();
+        managed.managed_upgrade_expectation = Some(nac_managed::ManagedUpgradeExpectation {
+            previous_operation_id: previous.operation_id.clone(),
+            previous_target: previous.target.clone(),
+            operation_id: "operation-startup-b".to_string(),
+            target: nac_managed::ManagedControlTarget {
+                release_id: running.release_id.clone(),
+                source_sha: running.source_sha.clone(),
+                product_version: running.product_version.clone(),
+                schema_version: running.schema_version,
+                minimum_schema_version: running.minimum_schema_version,
+            },
+            actor: previous.actor.clone(),
+            beneficiary: previous.beneficiary.clone(),
+        });
+        let replacement = SessionManager::new(crate::ServerOptions {
+            root_cwd: fixture.root.clone(),
+            store_path: Some(fixture.manager.inner.store_path.clone()),
+            worker_executable: None,
+            managed_host: Some(managed.clone()),
+        })
+        .unwrap();
+        let replayed = SessionManager::new(crate::ServerOptions {
+            root_cwd: fixture.root.clone(),
+            store_path: Some(fixture.manager.inner.store_path.clone()),
+            worker_executable: None,
+            managed_host: Some(managed),
+        })
+        .unwrap();
+        assert_eq!(replacement.managed_identity(), replayed.managed_identity());
+        let snapshot =
+            nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path)
+                .unwrap();
+        assert_eq!(
+            snapshot.state,
+            nac_core::store::ManagedMaintenanceState::Maintenance
+        );
+        assert_eq!(
+            snapshot.operation_id.as_deref(),
+            Some("operation-startup-b")
+        );
+
+        assert!(nac_core::store::accept_managed_forward_start(
+            &fixture.manager.inner.store_path,
+            replayed.managed_identity().unwrap(),
+        )
+        .unwrap());
+        let snapshot =
+            nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path)
+                .unwrap();
+        assert_eq!(
+            snapshot.state,
+            nac_core::store::ManagedMaintenanceState::Serving
+        );
+        assert_eq!(
+            snapshot.accepted_identity.as_ref().unwrap().operation_id,
+            "operation-startup-b"
+        );
+        assert!(nac_core::store::try_admit_managed_work_for_identity(
+            &fixture.manager.inner.store_path,
+            &prior_identity,
+        )
+        .is_err());
+    }
 }
 
 #[tokio::test]
