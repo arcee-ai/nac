@@ -22,7 +22,8 @@ export function useSessionPermissions(sessionId: string, enabled: boolean) {
     queryKey: queryKeys.sessionPermissions(sessionId),
     queryFn: ({ signal }) => api.getPermissions(sessionId, signal),
     enabled,
-    staleTime: Infinity,
+    refetchInterval: enabled ? 1_000 : false,
+    staleTime: 0,
     retry: false,
   });
 }

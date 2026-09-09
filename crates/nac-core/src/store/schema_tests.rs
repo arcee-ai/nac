@@ -10,6 +10,15 @@ fn temp_store_path(label: &str) -> PathBuf {
         .join("store.db")
 }
 
+#[test]
+fn initialized_read_connection_never_creates_a_missing_store_parent() {
+    let path = temp_store_path("missing_read_only");
+    assert!(!path.parent().unwrap().exists());
+
+    assert!(open_initialized_read_connection(&path).is_err());
+    assert!(!path.parent().unwrap().exists());
+}
+
 fn create_legacy_base(conn: &Connection) {
     conn.execute_batch(
         "CREATE TABLE sessions (

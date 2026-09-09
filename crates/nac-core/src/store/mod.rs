@@ -55,7 +55,9 @@ pub use transcript::*;
 pub use worksets::*;
 pub use workspace_revisions::*;
 
-pub(crate) use schema::{open_connection, open_runtime_connection, StoreConnection};
+pub(crate) use schema::{
+    open_connection, open_initialized_read_connection, open_runtime_connection, StoreConnection,
+};
 #[cfg(test)]
 pub(crate) use schema::{track_connection_opens, tracked_connection_opens};
 pub(crate) use steering::list_thread_steering_with_connection;
