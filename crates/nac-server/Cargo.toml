@@ -35,9 +35,11 @@ utoipa-axum = "0.2"
 utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum", "vendored"] }
 
 [dev-dependencies]
+base64.workspace = true
 flate2 = "1"
 nac-core = { path = "../nac-core", features = ["test-support"] }
 nac-managed = { path = "../nac-managed", features = ["openapi", "test-support"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 sha2.workspace = true
+ring.workspace = true
 tower = { version = "0.5", features = ["util"] }

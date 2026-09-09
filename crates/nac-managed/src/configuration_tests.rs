@@ -23,8 +23,9 @@ impl Drop for TestDir {
 
 fn valid_config(root: &Path) -> ManagedHostConfig {
     ManagedHostConfig {
-        version: MANAGED_CONFIG_VERSION,
+        version: LEGACY_MANAGED_CONFIG_VERSION,
         logical_host_id: "host-123".to_string(),
+        host_incarnation_id: None,
         owner: Some("owner@example.test".to_string()),
         public_hostname: "nac.example.test".to_string(),
         repository_root: root.join("repositories"),
@@ -37,12 +38,42 @@ fn valid_config(root: &Path) -> ManagedHostConfig {
         model_credential_file: root.join("model-token"),
         model_credential_source: ManagedModelCredentialSource::MountedApiKey,
         model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
+        managed_control_bind: None,
+        managed_control_issuer: None,
+        managed_control_jwks_file: None,
     }
 }
 
 #[test]
 fn optional_managed_configuration_is_absent_without_an_explicit_path() {
     assert_eq!(ManagedHostConfig::load_optional(None).unwrap(), None);
+}
+
+#[test]
+fn version_two_requires_exact_managed_control_identity_and_listener_fields() {
+    let root = TestDir::new("control-v2");
+    let mut config = valid_config(&root.0);
+    config.version = MANAGED_CONFIG_VERSION;
+    assert!(config.validate().is_err());
+
+    config.host_incarnation_id = Some("incarnation-456".to_string());
+    config.managed_control_bind = Some("0.0.0.0:3211".to_string());
+    config.managed_control_issuer = Some("https://nac-api.example.test".to_string());
+    config.managed_control_jwks_file = Some(root.0.join("jwks.json"));
+    config.validate().unwrap();
+    let control = config.managed_control().unwrap().unwrap();
+    assert_eq!(control.bind, "0.0.0.0:3211".parse().unwrap());
+    assert_eq!(control.host_incarnation_id, "incarnation-456");
+
+    let mut legacy = config.clone();
+    legacy.version = LEGACY_MANAGED_CONFIG_VERSION;
+    assert!(legacy.validate().is_err());
+    legacy.host_incarnation_id = None;
+    legacy.managed_control_bind = None;
+    legacy.managed_control_issuer = None;
+    legacy.managed_control_jwks_file = None;
+    legacy.validate().unwrap();
+    assert_eq!(legacy.managed_control().unwrap(), None);
 }
 
 #[test]

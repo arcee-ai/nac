@@ -177,6 +177,19 @@ impl ManagedCloneService {
         &self.inner.repository_root
     }
 
+    /// Durable clone operations that can still mutate repository/workspace
+    /// state. Restart reconciliation changes orphaned `running` records to
+    /// `interrupted`, so this remains honest across process replacement.
+    pub fn active_operations(&self) -> Result<Vec<ManagedCloneOperation>> {
+        Ok(self
+            .inner
+            .operation_store
+            .all()?
+            .into_iter()
+            .filter(|operation| operation.status == ManagedCloneStatus::Running)
+            .collect())
+    }
+
     pub fn start(&self, request: ManagedCloneRequest) -> Result<ManagedCloneOperation> {
         let identity = validate_github_clone_request(&request)?;
         self.start_validated(request, identity)

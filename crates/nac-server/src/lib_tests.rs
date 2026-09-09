@@ -21,7 +21,7 @@ use nac_core::store::{GoalStatus, InboxDelivery};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
 
-static SERVER_MODEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static SERVER_MODEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 async fn point_session_at_hanging_endpoint(
     root: &std::path::Path,
@@ -66,12 +66,12 @@ async fn put_json(app: Router, uri: &str, body: serde_json::Value) -> Response {
     .await
     .unwrap()
 }
-struct ScopedModelEnv {
+pub(crate) struct ScopedModelEnv {
     original: Vec<(&'static str, Option<std::ffi::OsString>)>,
 }
 
 impl ScopedModelEnv {
-    fn isolated(nac_home: &std::path::Path, openai_api_key: Option<&str>) -> Self {
+    pub(crate) fn isolated(nac_home: &std::path::Path, openai_api_key: Option<&str>) -> Self {
         Self::with_config_home(Some(nac_home), None, None, openai_api_key)
     }
 
@@ -230,8 +230,9 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
         std::fs::create_dir_all(path).unwrap();
     }
     let managed_host = nac_managed::ManagedHostConfig {
-        version: nac_managed::MANAGED_CONFIG_VERSION,
+        version: nac_managed::LEGACY_MANAGED_CONFIG_VERSION,
         logical_host_id: "test-host".to_string(),
+        host_incarnation_id: None,
         owner: Some("owner@example.test".to_string()),
         public_hostname: "nac.example.test".to_string(),
         repository_root,
@@ -244,6 +245,9 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
         model_credential_file: root.join("model-token"),
         model_credential_source: nac_managed::ManagedModelCredentialSource::MountedApiKey,
         model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
+        managed_control_bind: None,
+        managed_control_issuer: None,
+        managed_control_jwks_file: None,
     };
     managed_host.validate().unwrap();
     SessionManager::new(ServerOptions {
@@ -263,8 +267,9 @@ fn test_managed_bootstrap_manager(root: &std::path::Path) -> SessionManager {
         std::fs::create_dir_all(path).unwrap();
     }
     let managed_host = nac_managed::ManagedHostConfig {
-        version: nac_managed::MANAGED_CONFIG_VERSION,
+        version: nac_managed::LEGACY_MANAGED_CONFIG_VERSION,
         logical_host_id: "21856443-8ed8-40ab-9036-72e837c99f27".to_string(),
+        host_incarnation_id: None,
         owner: Some("owner@example.test".to_string()),
         public_hostname: "nac.example.test".to_string(),
         repository_root,
@@ -277,6 +282,9 @@ fn test_managed_bootstrap_manager(root: &std::path::Path) -> SessionManager {
         model_credential_file: PathBuf::from(nac_core::model::MANAGED_ARCEE_BOOTSTRAP_PATH),
         model_credential_source: nac_managed::ManagedModelCredentialSource::ManagedBootstrap,
         model_credential_environment_names: Vec::new(),
+        managed_control_bind: None,
+        managed_control_issuer: None,
+        managed_control_jwks_file: None,
     };
     managed_host.validate().unwrap();
     SessionManager::new(ServerOptions {

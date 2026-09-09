@@ -85,6 +85,43 @@ model_credential_file = "/run/secrets/nac/bootstrap.json"
 model_credential_source = "managed-bootstrap"
 ```
 
+Version 1 remains readable for existing deployments, but it does not enable
+the controller-to-NAC upgrade control surface. Version 2 additionally requires
+host_incarnation_id, managed_control_bind, managed_control_issuer, and
+managed_control_jwks_file:
+
+```toml
+version = 2
+logical_host_id = "21856443-8ed8-40ab-9036-72e837c99f27"
+host_incarnation_id = "01JZ7W4M3X8R0Y6WJ3C2Z1Q9PV"
+managed_control_bind = "0.0.0.0:3211"
+managed_control_issuer = "https://nac-api.example.com"
+managed_control_jwks_file = "/run/secrets/nac-control/jwks.json"
+# All version 1 host/model fields remain required as shown above.
+```
+
+Port 3211 serves only the compact-JWS-authenticated managed upgrade
+status/prepare/retry contract. Those routes are never registered on the
+ordinary port 3210 router. The mounted controller-facing Service and
+NetworkPolicy are platform responsibilities; exposing 3211 through the
+user-facing ingress is unsupported. NAC reloads the public JWKS document per
+request for safe key rotation and never stores or returns the raw assertion.
+
+The JWKS mount is a public-key trust root, not ordinary runtime configuration.
+In production its file and containing mount directories must be root-owned and
+not group/world-writable; the final key file must not be writable. NAC opens
+the resolved file atomically with `O_NOFOLLOW` and validates the opened
+descriptor. A normal Kubernetes projected volume is supported: the configured
+`jwks.json` leaf may use Kubernetes' relative `..data/jwks.json` symlink, whose
+resolved version directory and file satisfy the same ownership/mode checks.
+Other symlink layouts fail closed. An atomic root-owned regular-file projection
+is also supported. The application container must not be able to replace or
+chmod this trust root.
+
+This first slice relies on compact-JWS authentication plus the private
+Service/NetworkPolicy boundary. Mutual TLS is intentionally deferred to
+ALL-45 and is not required by managed configuration version 2.
+
 `model_credential_source` defaults to `mounted-api-key`, preserving existing
 managed configurations. That source requires an API-key backend and a nonblank,
 finite regular file with no access for other users. It may be owned by

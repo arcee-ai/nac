@@ -91,6 +91,7 @@ pub(crate) struct ManagedHostStatusResponse {
     secret_count: usize,
     project_count: usize,
     session_count: usize,
+    maintenance: Option<nac_core::store::ManagedMaintenanceSnapshot>,
     checks: Vec<ReadinessCheck>,
 }
 
@@ -273,6 +274,9 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
     } else {
         0
     };
+    let maintenance = store_current
+        .then(|| nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path))
+        .transpose()?;
     Ok(ManagedHostStatusResponse {
         managed: true,
         ready: !recovery_only && checks.iter().all(|check| check.ready),
@@ -311,6 +315,7 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         secret_count,
         project_count,
         session_count,
+        maintenance,
         checks,
     })
 }
@@ -330,6 +335,18 @@ fn readiness_checks(
                     .failure
                     .map_or(migration.state.as_str(), |failure| failure.as_str());
                 ReadinessCheck::fail("store", format!("SQLite store is unavailable ({reason})"))
+            }
+        },
+        match nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path) {
+            Ok(snapshot) if snapshot.state == nac_core::store::ManagedMaintenanceState::Serving => {
+                ReadinessCheck::pass("maintenance", "host admission is open")
+            }
+            Ok(_) => ReadinessCheck::fail(
+                "maintenance",
+                "host is safely stopped for a managed upgrade",
+            ),
+            Err(_) => {
+                ReadinessCheck::fail("maintenance", "managed maintenance state is unavailable")
             }
         },
     ];

@@ -9312,6 +9312,21 @@
           }
         }
       },
+      "ManagedBlockerKind": {
+        "type": "string",
+        "enum": [
+          "active_run",
+          "compaction",
+          "traditional_child",
+          "managed_orchestrator",
+          "terminal_process",
+          "clone_operation",
+          "workspace_mutation",
+          "operation_lease",
+          "resource_lease",
+          "maintenance_operation"
+        ]
+      },
       "ManagedCloneOperation": {
         "type": "object",
         "required": [
@@ -9454,6 +9469,16 @@
           "logical_host_id": {
             "type": "string"
           },
+          "maintenance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ManagedMaintenanceSnapshot"
+              }
+            ]
+          },
           "maintenance_state": {
             "type": "string"
           },
@@ -9531,6 +9556,59 @@
             "type": "string"
           }
         }
+      },
+      "ManagedMaintenanceSnapshot": {
+        "type": "object",
+        "required": [
+          "state",
+          "version",
+          "blockers"
+        ],
+        "properties": {
+          "blockers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedUpgradeBlocker"
+            }
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "prepared_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/ManagedMaintenanceState"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ManagedUpgradeTarget"
+              }
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ManagedMaintenanceState": {
+        "type": "string",
+        "enum": [
+          "serving",
+          "maintenance"
+        ]
       },
       "ManagedModelStatus": {
         "type": "object",
@@ -9714,6 +9792,60 @@
                 "$ref": "#/components/schemas/WorkspaceDiffTotals"
               }
             ]
+          }
+        }
+      },
+      "ManagedUpgradeBlocker": {
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "detail"
+        ],
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ManagedBlockerKind"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ManagedUpgradeTarget": {
+        "type": "object",
+        "required": [
+          "release_id",
+          "source_sha",
+          "product_version",
+          "schema_version",
+          "minimum_schema_version"
+        ],
+        "properties": {
+          "minimum_schema_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "product_version": {
+            "type": "string"
+          },
+          "release_id": {
+            "type": "string"
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "source_sha": {
+            "type": "string"
           }
         }
       },

@@ -270,6 +270,39 @@ fn assert_current_schema(conn: &Connection) {
             "version",
         ]
     );
+    assert_eq!(
+        table_columns(conn, "managed_host_maintenance"),
+        [
+            "singleton",
+            "state",
+            "operation_id",
+            "target_json",
+            "prepared_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        table_columns(conn, "managed_control_operations"),
+        [
+            "operation_id",
+            "binding_json",
+            "latest_outcome_json",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        table_columns(conn, "managed_control_attempts"),
+        [
+            "jti",
+            "operation_id",
+            "binding_json",
+            "outcome_json",
+            "expires_at",
+            "created_at",
+        ]
+    );
     for table in [
         "thread_steering",
         "thread_events",
@@ -453,7 +486,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 24);
+    assert_eq!(STORE_SCHEMA_VERSION, 25);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

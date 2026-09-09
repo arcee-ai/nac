@@ -53,6 +53,21 @@ pub struct SessionResourceMutationLease {
     _file: File,
 }
 
+/// Shared cross-process admission authority for one host store.
+///
+/// Ordinary mutation requests retain this lease through their admission
+/// transaction. Upgrade preparation takes the exclusive twin, making the
+/// blocker observation and maintenance commit one race-free host boundary.
+#[derive(Debug)]
+pub struct HostAdmissionLease {
+    _file: File,
+}
+
+#[derive(Debug)]
+pub struct HostMaintenanceLease {
+    _file: File,
+}
+
 impl Drop for SessionRelationshipLease {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self._file);
@@ -84,6 +99,18 @@ impl Drop for SessionResourceLease {
 }
 
 impl Drop for SessionResourceMutationLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
+impl Drop for HostAdmissionLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
+impl Drop for HostMaintenanceLease {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self._file);
     }
@@ -184,6 +211,59 @@ impl SessionOperationLease {
         } else {
             Err(SessionOperationLeaseValidationError::IdentityMismatch)
         }
+    }
+}
+
+impl HostAdmissionLease {
+    pub fn try_acquire(store_path: &Path) -> Result<Self, SessionOperationLeaseError> {
+        let file = open_host_admission_lock_file(store_path)?;
+        match FileExt::try_lock_shared(&file) {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Err(
+                SessionOperationLeaseError::Busy("host maintenance".to_string()),
+            ),
+            Err(error) => Err(store_error(
+                anyhow::Error::new(error).context("failed to lock host admission lease"),
+            )),
+        }
+    }
+}
+
+impl HostMaintenanceLease {
+    pub fn try_acquire(store_path: &Path) -> Result<Self, SessionOperationLeaseError> {
+        let file = open_host_admission_lock_file(store_path)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Err(
+                SessionOperationLeaseError::Busy("host admission".to_string()),
+            ),
+            Err(error) => Err(store_error(
+                anyhow::Error::new(error).context("failed to lock host maintenance lease"),
+            )),
+        }
+    }
+}
+
+fn open_host_admission_lock_file(store_path: &Path) -> Result<File, SessionOperationLeaseError> {
+    let canonical_store = canonical_store_identity(store_path).map_err(store_error)?;
+    let lock_path = secure_lock_path_with_suffix(&canonical_store, "managed-host", ".admission")
+        .map_err(store_error)?;
+    secure_open_lock_file(&lock_path).map_err(store_error)
+}
+
+fn canonical_store_identity(store_path: &Path) -> anyhow::Result<PathBuf> {
+    match fs::canonicalize(store_path) {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let file_name = store_path.file_name().ok_or_else(|| {
+                anyhow::anyhow!("store path has no file name: {}", store_path.display())
+            })?;
+            let parent = store_path.parent().ok_or_else(|| {
+                anyhow::anyhow!("store path has no parent: {}", store_path.display())
+            })?;
+            Ok(fs::canonicalize(parent)?.join(file_name))
+        }
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -593,6 +673,71 @@ mod tests {
         child.kill().unwrap();
         child.wait().unwrap();
         SessionOperationLease::try_acquire(&store_path, "crash-session").unwrap();
+        let _ = fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn host_admission_process_helper() {
+        let Some(store_path) = std::env::var_os("NAC_TEST_HOST_ADMISSION_STORE") else {
+            return;
+        };
+        let ready_path = PathBuf::from(std::env::var_os("NAC_TEST_HOST_ADMISSION_READY").unwrap());
+        let _lease = HostAdmissionLease::try_acquire(Path::new(&store_path)).unwrap();
+        fs::write(ready_path, b"ready").unwrap();
+        thread::sleep(Duration::from_secs(30));
+    }
+
+    #[test]
+    fn host_admission_can_guard_initial_store_creation() {
+        let store_path = test_store("host_admission_before_store");
+        fs::create_dir_all(store_path.parent().unwrap()).unwrap();
+        assert!(!store_path.exists());
+        let _lease = HostAdmissionLease::try_acquire(&store_path).unwrap();
+        store::initialize(&store_path).unwrap();
+        assert!(matches!(
+            HostMaintenanceLease::try_acquire(&store_path),
+            Err(SessionOperationLeaseError::Busy(_))
+        ));
+        let _ = fs::remove_dir_all(store_path.parent().unwrap());
+    }
+
+    #[test]
+    fn peer_host_admission_blocks_prepare_and_crash_releases_authority() {
+        let store_path = test_store("host_admission_process");
+        store::initialize(&store_path).unwrap();
+        let ready_path = store_path.parent().unwrap().join("host-ready");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "sessions::operation_lease::tests::host_admission_process_helper",
+                "--nocapture",
+            ])
+            .env("NAC_TEST_HOST_ADMISSION_STORE", &store_path)
+            .env("NAC_TEST_HOST_ADMISSION_READY", &ready_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        for _ in 0..200 {
+            if ready_path.exists() {
+                break;
+            }
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "host helper exited early"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ready_path.exists(), "host helper never became ready");
+        assert!(matches!(
+            HostMaintenanceLease::try_acquire(&store_path),
+            Err(SessionOperationLeaseError::Busy(_))
+        ));
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        HostMaintenanceLease::try_acquire(&store_path).unwrap();
         let _ = fs::remove_dir_all(store_path.parent().unwrap());
     }
 
