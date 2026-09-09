@@ -23,6 +23,19 @@ fn broker_fixture() -> (PathBuf, Arc<PermissionBroker>) {
     (path, broker)
 }
 
+async fn wait_for_pending(broker: &PermissionBroker) -> PermissionRequest {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some(request) = broker.pending().into_iter().next() {
+                return request;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("permission request should become pending")
+}
+
 #[test]
 fn wildcard_matching_and_last_rule_win() {
     assert!(wildcard_match("*.env.*", "/repo/.env.local"));
@@ -1399,6 +1412,7 @@ async fn session_auto_approve_answers_asks_headlessly_without_creating_grants() 
     let (path, broker) = broker_fixture();
     broker
         .set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
         .unwrap();
     let outcome = broker
         .authorize(
@@ -1426,9 +1440,29 @@ async fn session_auto_approve_answers_asks_headlessly_without_creating_grants() 
         [],
     );
     assert_eq!(
-        restarted.approval_mode().unwrap(),
+        restarted.approval_mode().await.unwrap(),
         PermissionApprovalMode::AutoApprove
     );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn permission_mode_reads_do_not_require_sqlite_write_admission() {
+    let (path, broker) = broker_fixture();
+    let mut writer = rusqlite::Connection::open(&path).unwrap();
+    let transaction = writer
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), broker.approval_mode())
+            .await
+            .expect("read-only mode observation must not wait for the writer lock")
+            .unwrap(),
+        PermissionApprovalMode::Manual
+    );
+
+    drop(transaction);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -1452,6 +1486,7 @@ async fn session_auto_approve_never_overrides_configured_or_hard_denials() {
     ));
     broker
         .set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
         .unwrap();
 
     let configured = broker
@@ -1509,10 +1544,10 @@ async fn enabling_auto_approve_claims_pending_once_and_disabling_restores_manual
                 .await
         })
     };
-    tokio::task::yield_now().await;
-    let request = broker.pending().pop().expect("pending approval");
+    let request = wait_for_pending(&broker).await;
     broker
         .set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
         .unwrap();
     assert_eq!(authorize.await.unwrap(), AuthorizationOutcome::Allowed);
     assert!(broker.reply(&request.id, PermissionReply::Once).is_err());
@@ -1520,6 +1555,7 @@ async fn enabling_auto_approve_claims_pending_once_and_disabling_restores_manual
     drop(interactive);
     broker
         .set_approval_mode(PermissionApprovalMode::Manual)
+        .await
         .unwrap();
     let outcome = broker
         .authorize(
@@ -1578,8 +1614,10 @@ async fn independent_brokers_observe_mode_changes_and_drain_cross_process_waiter
     // A fast enable-then-disable in another broker must still drain the waiter
     // that was pending for that enable transition.
     peer.set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
         .unwrap();
     peer.set_approval_mode(PermissionApprovalMode::Manual)
+        .await
         .unwrap();
     assert_eq!(
         tokio::time::timeout(std::time::Duration::from_secs(1), authorize)
@@ -1607,6 +1645,7 @@ async fn independent_brokers_observe_mode_changes_and_drain_cross_process_waiter
     );
 
     peer.set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
         .unwrap();
     assert_eq!(
         owner
@@ -1623,6 +1662,7 @@ async fn independent_brokers_observe_mode_changes_and_drain_cross_process_waiter
         AuthorizationOutcome::Allowed
     );
     peer.set_approval_mode(PermissionApprovalMode::Manual)
+        .await
         .unwrap();
     let restored = owner
         .authorize(
@@ -1639,6 +1679,62 @@ async fn independent_brokers_observe_mode_changes_and_drain_cross_process_waiter
         matches!(restored, AuthorizationOutcome::Denied(reason) if reason.contains("no interactive"))
     );
     assert!(owner.grants().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn pending_waiters_share_one_bounded_broker_mode_observer() {
+    let (path, broker) = broker_fixture();
+    let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+    let interactive = bus.subscribe_assistant_deltas();
+    broker.attach_event_bus(bus);
+    let mut authorizations = Vec::new();
+    for index in 0..8 {
+        let broker = Arc::clone(&broker);
+        authorizations.push(tokio::spawn(async move {
+            broker
+                .authorize(
+                    "exec_command",
+                    &[PermissionResource::new(
+                        "execute",
+                        format!("command:[curl][example-{index}.com]"),
+                    )],
+                    &crate::tools::kernel::ToolCallContext::default(),
+                    &crate::tools::ThreadCancellation::default(),
+                )
+                .await
+        }));
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while broker.pending().len() != authorizations.len() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("all authorization requests should become pending");
+
+    crate::store::track_connection_opens(&path);
+    tokio::time::sleep(std::time::Duration::from_millis(450)).await;
+    let observer_opens = crate::store::tracked_connection_opens(&path);
+    assert!(
+        observer_opens <= 6,
+        "one broker observer should bound polling independent of waiter count; opened {observer_opens} connections"
+    );
+
+    broker
+        .set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
+        .unwrap();
+    for authorization in authorizations {
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), authorization)
+                .await
+                .expect("automatic approval should release every waiter")
+                .unwrap(),
+            AuthorizationOutcome::Allowed
+        );
+    }
+    drop(interactive);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -1679,8 +1775,7 @@ async fn delegated_child_allows_its_parent_ui_time_to_connect_and_reply() {
                 .await
         })
     };
-    tokio::task::yield_now().await;
-    let request = broker.pending().pop().expect("deferred child approval");
+    let request = wait_for_pending(&broker).await;
     let _parent_ui = bus.subscribe_assistant_deltas();
     broker.reply(&request.id, PermissionReply::Once).unwrap();
     assert_eq!(authorize.await.unwrap(), AuthorizationOutcome::Allowed);
@@ -1709,8 +1804,7 @@ async fn interactive_once_releases_exact_waiting_call_without_saving() {
                 .await
         })
     };
-    tokio::task::yield_now().await;
-    let request = broker.pending().pop().expect("pending approval");
+    let request = wait_for_pending(&broker).await;
     broker.reply(&request.id, PermissionReply::Once).unwrap();
     assert_eq!(authorize.await.unwrap(), AuthorizationOutcome::Allowed);
     assert!(broker.grants().unwrap().is_empty());
@@ -1742,7 +1836,7 @@ async fn cancellation_dismisses_the_live_prompt_and_waiting_call() {
                 .await
         })
     };
-    tokio::task::yield_now().await;
+    let _ = wait_for_pending(&broker).await;
     cancellation.cancel();
     assert!(matches!(
         authorize.await.unwrap(),
@@ -1783,8 +1877,7 @@ async fn aborting_authorization_dismisses_prompt_before_any_stale_grant_reply() 
                 .await
         })
     };
-    tokio::task::yield_now().await;
-    let request = broker.pending().pop().expect("pending approval");
+    let request = wait_for_pending(&broker).await;
     authorize.abort();
     let _ = authorize.await;
     assert!(broker.pending().is_empty());
@@ -1816,7 +1909,7 @@ async fn losing_the_sole_interactive_subscriber_dismisses_approval_prompt() {
                 .await
         })
     };
-    tokio::task::yield_now().await;
+    let _ = wait_for_pending(&broker).await;
     assert_eq!(broker.pending().len(), 1);
     drop(interactive);
     let outcome = tokio::time::timeout(Duration::from_secs(1), authorize)
@@ -1837,142 +1930,5 @@ async fn losing_the_sole_interactive_subscriber_dismisses_approval_prompt() {
         crate::events::SessionEvent::PermissionDismissed { reason, .. }
             if reason.contains("disconnected")
     ));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[tokio::test]
-async fn claimed_always_reply_wins_over_later_cancellation() {
-    let (path, broker) = broker_fixture();
-    let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
-    let _interactive = bus.subscribe_assistant_deltas();
-    broker.attach_event_bus(bus);
-    let cancellation = crate::tools::ThreadCancellation::default();
-    let resources = vec![
-        PermissionResource::new("execute", "command:[curl][example.com]")
-            .with_save_resource("command:[curl][example.com]*"),
-        PermissionResource::new("read", "/outside/Cargo.toml")
-            .with_save_resource("/outside/Cargo.toml"),
-    ];
-    let authorize = {
-        let broker = Arc::clone(&broker);
-        let cancellation = cancellation.clone();
-        let resources = resources.clone();
-        tokio::spawn(async move {
-            broker
-                .authorize(
-                    "exec_command",
-                    &resources,
-                    &crate::tools::kernel::ToolCallContext::default(),
-                    &cancellation,
-                )
-                .await
-        })
-    };
-    tokio::task::yield_now().await;
-    let request = broker.pending().pop().expect("pending approval");
-
-    let lock = rusqlite::Connection::open(&path).unwrap();
-    lock.busy_timeout(Duration::from_secs(5)).unwrap();
-    lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-    let reply = {
-        let broker = Arc::clone(&broker);
-        tokio::task::spawn_blocking(move || broker.reply(&request.id, PermissionReply::Always))
-    };
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while !broker.pending().is_empty() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("reply must claim the pending request before persistence");
-    cancellation.cancel();
-    lock.execute_batch("ROLLBACK").unwrap();
-    reply.await.unwrap().unwrap();
-
-    assert_eq!(authorize.await.unwrap(), AuthorizationOutcome::Allowed);
-    let grants = broker.grants().unwrap();
-    assert_eq!(grants.len(), 2);
-    assert!(grants.iter().any(|grant| grant.action == "execute"));
-    assert!(grants.iter().any(|grant| grant.action == "read"));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[tokio::test]
-async fn abort_after_reply_claim_rolls_back_blocked_always_grant() {
-    let (path, broker) = broker_fixture();
-    let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
-    let _interactive = bus.subscribe_assistant_deltas();
-    broker.attach_event_bus(bus);
-    let authorize = {
-        let broker = Arc::clone(&broker);
-        tokio::spawn(async move {
-            broker
-                .authorize(
-                    "exec_command",
-                    &[
-                        PermissionResource::new("execute", "command:[curl][example.com]")
-                            .with_save_resource("command:[curl]*"),
-                    ],
-                    &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
-                )
-                .await
-        })
-    };
-    tokio::task::yield_now().await;
-    let request = broker.pending().pop().expect("pending approval");
-    let lock = rusqlite::Connection::open(&path).unwrap();
-    lock.busy_timeout(Duration::from_secs(5)).unwrap();
-    lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-
-    broker.reply(&request.id, PermissionReply::Always).unwrap();
-    tokio::time::sleep(Duration::from_millis(25)).await;
-    authorize.abort();
-    let _ = authorize.await;
-    lock.execute_batch("ROLLBACK").unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(broker.grants().unwrap().is_empty());
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[tokio::test]
-async fn always_saves_harness_candidate_and_authorizes_headless_retry() {
-    let (path, broker) = broker_fixture();
-    let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
-    let interactive = bus.subscribe_assistant_deltas();
-    broker.attach_event_bus(bus);
-    let resource = PermissionResource::new("execute", "command:[curl][example.com][status]")
-        .with_save_resource("command:[curl][example.com]*");
-    let authorize = {
-        let broker = Arc::clone(&broker);
-        let resource = resource.clone();
-        tokio::spawn(async move {
-            broker
-                .authorize(
-                    "exec_command",
-                    &[resource],
-                    &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
-                )
-                .await
-        })
-    };
-    tokio::task::yield_now().await;
-    let request = broker.pending().pop().expect("pending approval");
-    broker.reply(&request.id, PermissionReply::Always).unwrap();
-    assert_eq!(authorize.await.unwrap(), AuthorizationOutcome::Allowed);
-    assert_eq!(broker.grants().unwrap().len(), 1);
-    drop(interactive);
-    assert_eq!(
-        broker
-            .authorize(
-                "exec_command",
-                &[resource],
-                &crate::tools::kernel::ToolCallContext::default(),
-                &crate::tools::ThreadCancellation::default(),
-            )
-            .await,
-        AuthorizationOutcome::Allowed
-    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

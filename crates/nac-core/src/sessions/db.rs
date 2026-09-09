@@ -494,7 +494,7 @@ pub(crate) fn load_permission_approval_state(
     path: &Path,
     session_id: &str,
 ) -> Result<(crate::permissions::PermissionApprovalMode, i64)> {
-    let conn = crate::store::open_connection(path)?;
+    let conn = crate::store::open_initialized_read_connection(path)?;
     let (stored, generation) = conn
         .query_row(
             "SELECT permission_approval_mode, permission_auto_approve_generation

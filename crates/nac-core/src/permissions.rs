@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -161,6 +161,12 @@ struct PermissionBrokerState {
     pending: HashMap<String, PendingPermission>,
 }
 
+#[derive(Default)]
+struct PermissionApprovalObserver {
+    last_checked: Option<Instant>,
+    observed_generation: Option<Result<i64, String>>,
+}
+
 struct PendingPermissionGuard {
     broker: Weak<PermissionBroker>,
     request_id: String,
@@ -202,6 +208,7 @@ pub struct PermissionBroker {
     session_config_version: i64,
     event_bus: StdMutex<Option<crate::events::SessionEventBus>>,
     state: StdMutex<PermissionBrokerState>,
+    approval_observer: tokio::sync::Mutex<PermissionApprovalObserver>,
 }
 
 /// Project one validated backend path into the action being performed plus an
@@ -210,3 +217,7 @@ pub struct PermissionBroker {
 #[cfg(test)]
 #[path = "permissions_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "permission_grant_tests.rs"]
+mod grant_tests;

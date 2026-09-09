@@ -174,6 +174,7 @@ impl<'a> SessionIntentApplication<'a> {
             .attach_session(session_id)
             .await?
             .set_permission_approval_mode(mode)
+            .await
     }
 
     pub(crate) async fn delete_permission_grant(
@@ -287,7 +288,7 @@ impl<'a> SessionStateApplication<'a> {
     pub(crate) async fn permission_state(&self, session_id: &str) -> Result<PermissionState> {
         let service = self.manager.attach_session(session_id).await?;
         Ok(PermissionState {
-            approval_mode: service.permission_approval_mode()?,
+            approval_mode: service.permission_approval_mode().await?,
             requests: service.list_permission_requests()?,
             grants: service.list_permission_grants()?,
         })

@@ -296,6 +296,42 @@ fn connect_existing(path: &Path) -> Result<StoreConnection> {
     )
 }
 
+fn connect_read_only(path: &Path) -> Result<StoreConnection> {
+    let path = std::fs::canonicalize(path).with_context(|| {
+        format!(
+            "failed to resolve initialized SQLite store {}",
+            path.display()
+        )
+    })?;
+    connect_with_capacity_using(
+        &path,
+        &CONNECTION_CAPACITY,
+        CONNECTION_WAIT_TIMEOUT,
+        |path| {
+            Connection::open_with_flags(
+                path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+        },
+    )
+}
+
+/// Opens an already initialized store for read-only runtime observation.
+/// Unlike `open_connection`, this never takes migration/write admission or
+/// repairs database-wide pragmas. Callers fail closed if initialization is not
+/// complete.
+pub(crate) fn open_initialized_read_connection(path: &Path) -> Result<StoreConnection> {
+    let conn = connect_read_only(path)?;
+    let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if schema_version != STORE_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "store schema version {schema_version} is not initialized for runtime reads; expected {STORE_SCHEMA_VERSION}"
+        ));
+    }
+    Ok(conn)
+}
+
 pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
     let conn = connect(path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;

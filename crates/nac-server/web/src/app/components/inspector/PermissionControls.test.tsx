@@ -172,6 +172,24 @@ describe("direct permission controls", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy());
   });
 
+  it("reconciles a mode change made through another server process", async () => {
+    const manual = pendingState();
+    manual.requests = [];
+    const automatic = { ...manual, approval_mode: "auto_approve" as const };
+    fakes.getPermissions.mockResolvedValueOnce(manual).mockResolvedValue(automatic);
+    mount(manual);
+
+    expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy();
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole("button", { name: "Auto-approve on — open permissions" }),
+        ).toBeTruthy(),
+      { timeout: 2_500 },
+    );
+    expect(fakes.getPermissions.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("keeps always unavailable when the harness cannot derive a safe grant", () => {
     const state = pendingState();
     delete state.requests[0].resources[0].save_resource;
