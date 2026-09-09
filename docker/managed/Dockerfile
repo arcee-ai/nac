@@ -125,8 +125,9 @@ COPY --from=build /usr/local/rustup /usr/local/rustup
 COPY --from=build /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=build /src/nac/target/release/nac-web /usr/local/bin/nac-web
 COPY docker/managed/entrypoint.sh /usr/local/bin/nac-managed-entrypoint
+COPY docker/managed/check-process-capabilities.sh /usr/local/libexec/nac/check-process-capabilities
 
-RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint \
+RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint /usr/local/libexec/nac/check-process-capabilities \
     && chmod -R a+rX /usr/local/rustup /usr/local/cargo/bin \
     && rustc --version \
     && cargo --version \

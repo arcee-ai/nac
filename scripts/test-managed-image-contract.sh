@@ -7,6 +7,8 @@ entrypoint="$repo_root/docker/managed/entrypoint.sh"
 workflow="$repo_root/.github/workflows/managed-image.yml"
 lfs_smoke="$repo_root/scripts/smoke-managed-git-lfs.sh"
 managed_status="$repo_root/crates/nac-server/src/managed_status.rs"
+capability_check="$repo_root/docker/managed/check-process-capabilities.sh"
+capability_fixtures="$repo_root/docker/managed/fixtures"
 
 fail() {
     printf 'managed image contract: %s\n' "$1" >&2
@@ -51,8 +53,17 @@ store_path_count=$(grep -c -- '--store-path' "$entrypoint")
 if grep -Eq '(dev|beta|stable)\.db' "$entrypoint"; then
     fail 'managed entrypoint must not select a build-track local store'
 fi
-require_literal "$entrypoint" 'CapEff:'
-require_literal "$entrypoint" 'must not receive CAP_SYS_PTRACE'
+require_literal "$entrypoint" '/usr/local/libexec/nac/check-process-capabilities /proc/self/status'
+require_literal "$dockerfile" 'check-process-capabilities.sh /usr/local/libexec/nac/check-process-capabilities'
+require_literal "$capability_check" 'CapInh CapPrm CapEff CapBnd CapAmb'
+require_literal "$capability_check" 'must not receive CAP_SYS_PTRACE'
+sh -n "$capability_check"
+"$capability_check" "$capability_fixtures/capabilities-benign.status"
+for rejected_fixture in capabilities-effective-ptrace.status capabilities-permitted-ptrace.status capabilities-missing.status capabilities-malformed.status; do
+    if "$capability_check" "$capability_fixtures/$rejected_fixture" >/dev/null 2>&1; then
+        fail "capability fixture must be rejected: $rejected_fixture"
+    fi
+done
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_credential_source = \"managed-bootstrap\"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'model_auth_issuer = \"https://api.arcee.ai\"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" '/run/secrets/nac/bootstrap.json'

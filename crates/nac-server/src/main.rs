@@ -210,8 +210,12 @@ struct UpgradeCli {
 #[derive(Args)]
 struct ManagedWorkerCli {
     /// Internal inherited descriptor for the private native-credential socket.
-    #[arg(long, hide = true)]
+    #[arg(long, hide = true, conflicts_with = "native_credential_socket")]
     native_credential_fd: Option<i32>,
+
+    /// Internal filesystem endpoint for the private native-credential socket.
+    #[arg(long, hide = true, conflicts_with = "native_credential_fd")]
+    native_credential_socket: Option<PathBuf>,
 
     /// Internal Managed NAC host-secret root used for per-command snapshots.
     #[arg(long, hide = true)]
@@ -535,6 +539,10 @@ async fn run_server(cli: ServerCli) -> Result<()> {
         .managed_config
         .or_else(|| std::env::var_os("NAC_MANAGED_CONFIG").map(PathBuf::from));
     restrict_managed_server_process(managed_config_path.as_deref())?;
+    if managed_config_path.is_some() {
+        runtime::capture_managed_native_credentials_from_environment()
+            .context("failed to capture Managed NAC native credentials")?;
+    }
     bind_policy.validate(bind)?;
     if !bind.ip().is_loopback() {
         eprintln!("warning: every client that can reach {bind} receives full control of nac-web");
@@ -667,10 +675,13 @@ fn should_open_dashboard(force_open: bool, no_open: bool) -> bool {
 }
 
 async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
-    // Adopt and mark the private endpoint close-on-exec before any background
-    // refresh or MCP transport can spawn a descendant.
-    let credential_receiver =
-        runtime::ManagedWorkerCredentialReceiver::from_inherited_fd(cli.native_credential_fd)?;
+    // On Linux, harden before connecting to the authenticated parent endpoint.
+    // Other Unix hosts adopt and mark the inherited endpoint close-on-exec.
+    // Both happen before background refresh or MCP can spawn a descendant.
+    let credential_receiver = runtime::ManagedWorkerCredentialReceiver::from_private_channel(
+        cli.native_credential_fd,
+        cli.native_credential_socket,
+    )?;
     // Fire-and-forget models.dev catalog overlay refresh; cadence-gated via
     // the sidecar, so usually a no-op read. Keeps the overlay fresh for
     // worker-heavy usage even when the server is not running.
@@ -1079,7 +1090,7 @@ thread_timeout_secs = 7200
     }
 
     #[test]
-    fn worker_cli_accepts_private_credential_descriptor_without_exposing_it_in_help() {
+    fn worker_cli_accepts_private_credential_channels_without_exposing_them_in_help() {
         let cli = Cli::try_parse_from([
             "nac-web",
             "__worker",
@@ -1099,8 +1110,33 @@ thread_timeout_secs = 7200
             panic!("expected managed worker command");
         };
         assert_eq!(worker.native_credential_fd, Some(7));
+        assert!(worker.native_credential_socket.is_none());
+        let cli = Cli::try_parse_from([
+            "nac-web",
+            "__worker",
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--dispatch-id",
+            "dispatch-123",
+            "--action",
+            "work",
+            "--native-credential-socket",
+            "/tmp/private.sock",
+        ])
+        .unwrap();
+        let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
+            panic!("expected managed worker command");
+        };
+        assert_eq!(
+            worker.native_credential_socket.as_deref(),
+            Some(Path::new("/tmp/private.sock"))
+        );
+        assert!(worker.native_credential_fd.is_none());
         let help = rendered_help(&["nac-web", "__worker", "--help"]);
         assert!(!help.contains("native-credential-fd"), "{help}");
+        assert!(!help.contains("native-credential-socket"), "{help}");
     }
 
     #[test]
