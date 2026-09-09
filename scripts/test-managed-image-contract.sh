@@ -72,6 +72,7 @@ require_literal "$workflow" 'push: false'
 require_literal "$workflow" 'provenance: false'
 require_literal "$workflow" 'sbom: false'
 require_literal "$workflow" 'run: make ci'
+require_literal "$workflow" 'npm --prefix .github/scripts ci'
 require_literal "$workflow" 'NAC_BUILD_TRACK=dev'
 require_literal "$workflow" 'NAC_SOURCE_REVISION=${{ needs.prepare.outputs.sha }}'
 if grep -Eq '(id-token:[[:space:]]*write|aws-actions/|amazon-ecr|ECR_|push:[[:space:]]*true|environment:[[:space:]]*dev)' "$workflow"; then

@@ -82,9 +82,13 @@ jobs:
         with:
           node-version: 24.20.0
           cache: npm
-          cache-dependency-path: crates/nac-server/web/package-lock.json
-      - name: Install frontend dependencies
-        run: npm --prefix crates/nac-server/web ci
+          cache-dependency-path: |
+            crates/nac-server/web/package-lock.json
+            .github/scripts/package-lock.json
+      - name: Install test dependencies
+        run: |
+          npm --prefix crates/nac-server/web ci
+          npm --prefix .github/scripts ci
       - name: Run the repository acceptance gates
         run: make ci
 
