@@ -143,7 +143,7 @@ RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint \
 # The system installation above remains available after dropping privileges.
 USER 10001:10001
 WORKDIR /repositories
-EXPOSE 3210
+EXPOSE 3210 3211
 VOLUME ["/var/lib/nac", "/repositories", "/home/nac", "/etc/nac", "/tmp", "/run/nac"]
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/nac-managed-entrypoint"]

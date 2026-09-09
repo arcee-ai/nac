@@ -11,7 +11,8 @@ mod startup_tests;
 
 use wal_preflight::read_schema_version_header;
 
-// 24 adds session_forks (conversation clones plus deleted tombstones). 22 adds
+// 25 adds durable Managed NAC maintenance and authenticated-control replay
+// records. 24 adds session_forks (conversation clones plus deleted tombstones). 22 adds
 // durable direct-parent managed orchestrator relationships. 21 adds
 // durable traditional child sessions. 20 added durable direct-session
 // goals. 19 added revision/backend-bound direct permission grants. 18 added the durable
@@ -26,7 +27,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 24;
+const STORE_SCHEMA_VERSION: i64 = 25;
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
 /// Current durable-store schema version for credential-free readiness and
@@ -752,7 +753,7 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -863,12 +864,57 @@ fn open_connection_with_hooks(
         "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
     )?;
     create_session_forks_table(&transaction)?;
+    create_managed_maintenance_tables(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
     transaction.commit()?;
     Ok(conn)
+}
+
+fn create_managed_maintenance_tables(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS managed_host_maintenance (
+             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+             state TEXT NOT NULL CHECK (state IN ('serving', 'maintenance')),
+             operation_id TEXT,
+             target_json TEXT,
+             prepared_at TEXT,
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+             CHECK (
+                 (state = 'serving' AND operation_id IS NULL AND target_json IS NULL AND prepared_at IS NULL)
+                 OR
+                 (state = 'maintenance' AND operation_id IS NOT NULL AND target_json IS NOT NULL AND prepared_at IS NOT NULL)
+             )
+         );
+         INSERT OR IGNORE INTO managed_host_maintenance
+             (singleton, state, operation_id, target_json, prepared_at, version)
+         VALUES (1, 'serving', NULL, NULL, NULL, 0);
+
+         CREATE TABLE IF NOT EXISTS managed_control_operations (
+             operation_id TEXT PRIMARY KEY,
+             binding_json TEXT NOT NULL,
+             latest_outcome_json TEXT NOT NULL,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0)
+         );
+
+         CREATE TABLE IF NOT EXISTS managed_control_attempts (
+             jti TEXT PRIMARY KEY,
+             operation_id TEXT NOT NULL,
+             binding_json TEXT NOT NULL,
+             outcome_json TEXT,
+             expires_at INTEGER NOT NULL,
+             created_at TEXT NOT NULL,
+             FOREIGN KEY (operation_id) REFERENCES managed_control_operations(operation_id)
+                 ON DELETE RESTRICT
+         );
+         CREATE INDEX IF NOT EXISTS idx_managed_control_attempts_operation
+             ON managed_control_attempts(operation_id);",
+    )?;
+    Ok(())
 }
 
 fn create_base_schema(conn: &Connection) -> Result<()> {

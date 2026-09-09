@@ -193,8 +193,9 @@ mod tests {
 
     fn config(source: ManagedModelCredentialSource, backend: &str) -> ManagedHostConfig {
         ManagedHostConfig {
-            version: nac_managed::MANAGED_CONFIG_VERSION,
+            version: nac_managed::LEGACY_MANAGED_CONFIG_VERSION,
             logical_host_id: "21856443-8ed8-40ab-9036-72e837c99f27".to_string(),
+            host_incarnation_id: None,
             owner: None,
             public_hostname: "nac.example.test".to_string(),
             repository_root: PathBuf::from("/var/lib/nac/repositories"),
@@ -214,6 +215,9 @@ mod tests {
             },
             model_credential_source: source,
             model_credential_environment_names: Vec::new(),
+            managed_control_bind: None,
+            managed_control_issuer: None,
+            managed_control_jwks_file: None,
         }
     }
 

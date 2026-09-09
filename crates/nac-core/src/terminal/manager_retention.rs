@@ -211,6 +211,38 @@ impl TerminalManager {
             .unwrap_or(true)
     }
 
+    /// Process-local terminal identities that can still own a live local or
+    /// remote process. Completed retained output is deliberately excluded.
+    pub async fn live_terminal_names(&self) -> Vec<String> {
+        let mut names = {
+            let mut sessions = self.sessions.lock().await;
+            sessions
+                .iter_mut()
+                .filter_map(|(name, session)| {
+                    session.refresh_status();
+                    session.is_alive().then(|| name.clone())
+                })
+                .collect::<Vec<_>>()
+        };
+        let remote = self
+            .pending_remote_cleanups
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        names.extend(
+            remote
+                .iter()
+                .filter(|(_, cleanup)| {
+                    cleanup
+                        .transport_active
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                })
+                .map(|(name, _)| name.clone()),
+        );
+        names.sort();
+        names.dedup();
+        names
+    }
+
     #[cfg(test)]
     pub(crate) async fn get(&self, name: &str) -> Option<TerminalInfo> {
         let mut sessions = self.sessions.lock().await;

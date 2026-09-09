@@ -361,6 +361,17 @@ export interface components {
       provider: components["schemas"]["ManagedAuthProvider"];
       signed_in: boolean;
     };
+    ManagedBlockerKind:
+      | "active_run"
+      | "compaction"
+      | "traditional_child"
+      | "managed_orchestrator"
+      | "terminal_process"
+      | "clone_operation"
+      | "workspace_mutation"
+      | "operation_lease"
+      | "resource_lease"
+      | "maintenance_operation";
     ManagedCloneOperation: {
       branch: string;
       created_at_unix_ms: number;
@@ -386,6 +397,7 @@ export interface components {
       checks: components["schemas"]["ReadinessCheck"][];
       github_status: string;
       logical_host_id: string;
+      maintenance?: null | components["schemas"]["ManagedMaintenanceSnapshot"];
       maintenance_state: string;
       managed: boolean;
       migration_failure?: string | null;
@@ -407,6 +419,15 @@ export interface components {
       supported_schema_version: number;
       version: string;
     };
+    ManagedMaintenanceSnapshot: {
+      blockers: components["schemas"]["ManagedUpgradeBlocker"][];
+      operation_id?: string | null;
+      prepared_at?: string | null;
+      state: components["schemas"]["ManagedMaintenanceState"];
+      target?: null | components["schemas"]["ManagedUpgradeTarget"];
+      version: number;
+    };
+    ManagedMaintenanceState: "serving" | "maintenance";
     ManagedModelStatus: {
       backend: components["schemas"]["BackendKind"];
       display_name: string;
@@ -440,6 +461,19 @@ export interface components {
       lineage?: null | components["schemas"]["SessionLineageSnapshot"];
       summary: components["schemas"]["SessionSummarySnapshot"];
       workspace_diff?: null | components["schemas"]["WorkspaceDiffTotals"];
+    };
+    ManagedUpgradeBlocker: {
+      detail: string;
+      id: string;
+      kind: components["schemas"]["ManagedBlockerKind"];
+      session_id?: string | null;
+    };
+    ManagedUpgradeTarget: {
+      minimum_schema_version: number;
+      product_version: string;
+      release_id: string;
+      schema_version: number;
+      source_sha: string;
     };
     McpLibraryAuth: "none" | "optional_header" | "required_header";
     McpLibraryEntry: {

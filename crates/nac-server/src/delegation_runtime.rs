@@ -22,6 +22,7 @@ impl nac_core::traditional_children::TraditionalChildController
     {
         Box::pin(async move {
             let manager = self.manager()?;
+            let _host_admission = manager.managed_work_admission()?;
             nac_core::traditional_children::validate_general_profile(&request.profile)?;
             if request.prompt.trim().is_empty() {
                 return Err(anyhow!("traditional child prompt is empty"));
@@ -190,6 +191,7 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
     ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
         Box::pin(async move {
             let manager = self.manager()?;
+            let _host_admission = manager.managed_work_admission()?;
             if request.prompt.trim().is_empty() {
                 return Err(anyhow!("managed orchestrator prompt is empty"));
             }

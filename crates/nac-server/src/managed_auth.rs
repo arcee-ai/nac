@@ -138,6 +138,28 @@ pub(crate) struct ManagedLoginRegistry {
 }
 
 impl ManagedLoginRegistry {
+    pub(crate) fn pending_ids(&self) -> Vec<String> {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut ids = entries
+            .iter()
+            .filter(|(_, entry)| {
+                matches!(
+                    *entry
+                        .outcome
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                    LoginOutcome::Pending
+                )
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+
     fn insert(&self, id: String, login: PendingLogin) {
         let mut entries = self
             .entries

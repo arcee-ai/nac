@@ -27,9 +27,9 @@ pub(crate) use db::{
     insert_new_session_in_transaction, list_sessions_with_connection, load_session_run_state,
 };
 pub use operation_lease::{
-    SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
-    SessionRelationshipLease, SessionResourceLease, SessionResourceMutationLease,
-    WorkspaceActivityLease, WorkspaceMutationLease,
+    HostAdmissionLease, HostMaintenanceLease, SessionOperationLease, SessionOperationLeaseError,
+    SessionOperationLeaseValidationError, SessionRelationshipLease, SessionResourceLease,
+    SessionResourceMutationLease, WorkspaceActivityLease, WorkspaceMutationLease,
 };
 // Compatibility aliases for callers that have not yet adopted operation-wide naming.
 pub type SessionRunLease = SessionOperationLease;

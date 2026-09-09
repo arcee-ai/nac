@@ -343,6 +343,14 @@ impl SessionService {
         enforce_coordination: bool,
         admission: RunAdmissionKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
+        let _host_admission = enforce_coordination
+            .then(|| crate::store::try_admit_managed_work(&self.metadata.store_path))
+            .transpose()
+            .map_err(|error| SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store(format!(
+                    "failed to acquire managed host run admission: {error:#}"
+                )),
+            })?;
         let RunAdmissionKind {
             inbox_item_id,
             goal_continuation,

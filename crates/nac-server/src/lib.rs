@@ -7,6 +7,7 @@ mod filesystem;
 mod fork;
 mod light_model;
 mod managed_auth;
+mod managed_control;
 mod managed_github;
 mod managed_status;
 mod mcp;
@@ -118,9 +119,9 @@ use nac_core::{
     permissions::PermissionReply,
     runtime::{self, NacConfig, StoreOptions},
     session_service::{
-        FrontendSnapshotLoadOptions, MessagePageRequest, MessagesPageSnapshot,
-        SessionEventReceiver, SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
-        SessionRunHandle, SessionService, ThreadEventPage,
+        ActiveSessionOperationSnapshot, FrontendSnapshotLoadOptions, MessagePageRequest,
+        MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
+        SessionFrontendSnapshotLoad, SessionRunHandle, SessionService, ThreadEventPage,
     },
     sessions,
     store::{
@@ -321,6 +322,8 @@ struct SessionManagerInner {
     managed_logins: managed_auth::ManagedLoginRegistry,
     managed_github_logins: managed_github::ManagedGitHubLoginRegistry,
     recovery_only: AtomicBool,
+    maintenance_gate: Arc<RwLock<()>>,
+    active_admissions: Arc<StdMutex<HashMap<String, nac_core::store::ManagedUpgradeBlocker>>>,
     #[cfg(test)]
     managed_monitor_peer_observed: tokio::sync::Notify,
 }
@@ -515,6 +518,8 @@ impl SessionManager {
                 managed_logins: managed_auth::ManagedLoginRegistry::default(),
                 managed_github_logins: managed_github::ManagedGitHubLoginRegistry::default(),
                 recovery_only: AtomicBool::new(false),
+                maintenance_gate: Arc::new(RwLock::new(())),
+                active_admissions: Arc::new(StdMutex::new(HashMap::new())),
                 #[cfg(test)]
                 managed_monitor_peer_observed: tokio::sync::Notify::new(),
             }),
@@ -544,6 +549,130 @@ impl SessionManager {
 
     pub fn managed_host(&self) -> Option<&nac_managed::ManagedHostConfig> {
         self.inner.managed_host.as_ref()
+    }
+
+    fn managed_work_admission(&self) -> Result<Option<nac_core::store::ManagedWorkAdmission>> {
+        self.managed_host()
+            .map(|_| nac_core::store::try_admit_managed_work(&self.inner.store_path))
+            .transpose()
+    }
+
+    async fn managed_upgrade_blockers(
+        &self,
+    ) -> Result<Vec<nac_core::store::ManagedUpgradeBlocker>> {
+        use nac_core::store::{ManagedBlockerKind, ManagedUpgradeBlocker};
+
+        let services = self
+            .inner
+            .active_sessions
+            .read()
+            .await
+            .iter()
+            .map(|(id, service)| (id.clone(), Arc::clone(service)))
+            .collect::<Vec<_>>();
+        let mut blockers = Vec::new();
+        for (session_id, service) in services {
+            if let Some(ActiveSessionOperationSnapshot::ManualCompaction { compaction }) =
+                service.active_operation()
+            {
+                blockers.push(ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::Compaction,
+                    id: compaction.compaction_id.to_string(),
+                    session_id: Some(session_id.clone()),
+                    detail: "session compaction is active".to_string(),
+                });
+            }
+            for terminal in service.live_terminal_names().await {
+                blockers.push(ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::TerminalProcess,
+                    id: terminal,
+                    session_id: Some(session_id.clone()),
+                    detail: "terminal process is live".to_string(),
+                });
+            }
+        }
+        if let Some(clones) = self.inner.managed_clones.as_ref() {
+            blockers.extend(clones.active_operations()?.into_iter().map(|operation| {
+                ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::CloneOperation,
+                    id: operation.operation_id,
+                    session_id: None,
+                    detail: "managed repository clone is running".to_string(),
+                }
+            }));
+        }
+        blockers.extend(
+            self.inner
+                .managed_logins
+                .pending_ids()
+                .into_iter()
+                .map(|id| ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::OperationLease,
+                    id: format!("model-login:{id}"),
+                    session_id: None,
+                    detail: "managed model login is pending".to_string(),
+                }),
+        );
+        blockers.extend(
+            self.inner
+                .managed_github_logins
+                .pending_ids()
+                .into_iter()
+                .map(|id| ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::OperationLease,
+                    id: format!("github-login:{id}"),
+                    session_id: None,
+                    detail: "managed GitHub login is pending".to_string(),
+                }),
+        );
+        for snapshot in sessions::list_sessions(&self.inner.store_path)? {
+            let session_id = snapshot.session_id;
+            match sessions::SessionOperationLease::try_acquire(&self.inner.store_path, &session_id)
+            {
+                Ok(lease) => drop(lease),
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                    blockers.push(ManagedUpgradeBlocker {
+                        kind: ManagedBlockerKind::OperationLease,
+                        id: session_id.clone(),
+                        session_id: Some(session_id.clone()),
+                        detail: "cross-process session operation lease is active".to_string(),
+                    });
+                }
+                Err(error) => return Err(anyhow::Error::new(error)),
+            }
+            match sessions::SessionResourceMutationLease::try_acquire(
+                &self.inner.store_path,
+                &session_id,
+            ) {
+                Ok(lease) => drop(lease),
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                    blockers.push(ManagedUpgradeBlocker {
+                        kind: ManagedBlockerKind::ResourceLease,
+                        id: session_id.clone(),
+                        session_id: Some(session_id),
+                        detail: "cross-process session resource lease is active".to_string(),
+                    });
+                }
+                Err(error) => return Err(anyhow::Error::new(error)),
+            }
+        }
+        blockers.sort();
+        blockers.dedup();
+        Ok(blockers)
+    }
+
+    fn active_admission_blockers(&self) -> Vec<nac_core::store::ManagedUpgradeBlocker> {
+        let mut blockers = self
+            .inner
+            .active_admissions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        blockers.sort();
+        blockers.dedup();
+        blockers
     }
 
     pub(crate) fn managed_model(&self) -> Option<&application::managed::ManagedModelProfile> {
@@ -848,6 +977,7 @@ impl SessionManager {
         &self,
         request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
+        let _host_admission = self.managed_work_admission()?;
         self.session_creation()
             .create_session(request.into_application())
             .await

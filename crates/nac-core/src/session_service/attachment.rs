@@ -280,6 +280,10 @@ impl SessionService {
         self.terminal_manager.has_retained()
     }
 
+    pub async fn live_terminal_names(&self) -> Vec<String> {
+        self.terminal_manager.live_terminal_names().await
+    }
+
     pub fn active_run(&self) -> Option<ActiveRunSnapshot> {
         match self.lock_active_operation().as_ref() {
             Some(ActiveSessionOperation::Run(active_run)) => Some(active_run.snapshot.clone()),

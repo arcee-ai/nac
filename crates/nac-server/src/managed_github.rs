@@ -147,6 +147,28 @@ pub(crate) struct ManagedGitHubLoginRegistry {
 }
 
 impl ManagedGitHubLoginRegistry {
+    pub(crate) fn pending_ids(&self) -> Vec<String> {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut ids = entries
+            .iter()
+            .filter(|(_, entry)| {
+                matches!(
+                    *entry
+                        .outcome
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                    LoginOutcome::Pending
+                )
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+
     fn insert(&self, id: String, login: PendingLogin) {
         let mut entries = self
             .entries
@@ -833,8 +855,9 @@ mod tests {
 
     fn managed_config(root: &Path) -> nac_managed::ManagedHostConfig {
         let config = nac_managed::ManagedHostConfig {
-            version: nac_managed::MANAGED_CONFIG_VERSION,
+            version: nac_managed::LEGACY_MANAGED_CONFIG_VERSION,
             logical_host_id: "git-config-test".to_string(),
+            host_incarnation_id: None,
             owner: Some("owner@example.test".to_string()),
             public_hostname: "nac.example.test".to_string(),
             repository_root: root.join("repositories"),
@@ -847,6 +870,9 @@ mod tests {
             model_credential_file: root.join("model-token"),
             model_credential_source: nac_managed::ManagedModelCredentialSource::MountedApiKey,
             model_credential_environment_names: Vec::new(),
+            managed_control_bind: None,
+            managed_control_issuer: None,
+            managed_control_jwks_file: None,
         };
         for path in [
             &config.repository_root,

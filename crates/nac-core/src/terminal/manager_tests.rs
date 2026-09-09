@@ -1152,11 +1152,17 @@ async fn direct_run_settlement_keeps_only_explicitly_retained_terminals() {
         .unwrap();
     let info = manager.retain(&retained).await.unwrap();
     assert!(info.retained);
+    assert_eq!(
+        manager.live_terminal_names().await,
+        vec![foreground.clone(), retained.clone()]
+    );
 
     manager.settle_run().await.unwrap();
     assert!(manager.get(&foreground).await.is_none());
     assert!(manager.get(&retained).await.unwrap().retained);
+    assert_eq!(manager.live_terminal_names().await, vec![retained.clone()]);
     manager.remove_all().await.unwrap();
+    assert!(manager.live_terminal_names().await.is_empty());
 }
 
 #[tokio::test]
