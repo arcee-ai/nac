@@ -212,6 +212,93 @@ fn managed_monitor_peer_lease_process_helper() {
     std::thread::sleep(Duration::from_secs(30));
 }
 
+const MANAGED_LIBRARY_EXA_CANARY: &str = "managed-library-startup-exa-canary";
+
+#[test]
+fn managed_library_startup_child_helper() {
+    let Some(report_path) = std::env::var_os("NAC_TEST_MANAGED_LIBRARY_REPORT") else {
+        return;
+    };
+    assert_eq!(
+        std::env::var("EXA_API_KEY").unwrap(),
+        MANAGED_LIBRARY_EXA_CANARY
+    );
+    let root = temp_root("managed_library_startup_child");
+    write_managed_credential(root.join("model-token").as_path(), b"mounted-model-token");
+
+    let _manager = test_managed_manager(&root);
+    assert!(
+        std::env::var_os("EXA_API_KEY").is_none(),
+        "managed library construction must remove the ambient native credential"
+    );
+
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: these prctl getters take no pointer arguments.
+        assert_eq!(unsafe { libc::prctl(libc::PR_GET_DUMPABLE) }, 0);
+        // SAFETY: PR_GET_NO_NEW_PRIVS takes integer zero placeholders only.
+        assert_eq!(
+            unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) },
+            1
+        );
+        let probe = std::process::Command::new("/bin/sh")
+            .args(["-c", "cat /proc/$PPID/environ"])
+            .output()
+            .unwrap();
+        assert!(
+            !probe
+                .stdout
+                .windows(MANAGED_LIBRARY_EXA_CANARY.len())
+                .any(|bytes| bytes == MANAGED_LIBRARY_EXA_CANARY.as_bytes()),
+            "a same-UID child read the managed server credential from procfs"
+        );
+    }
+
+    let second_root = temp_root("managed_library_startup_second");
+    write_managed_credential(
+        second_root.join("model-token").as_path(),
+        b"second-mounted-model-token",
+    );
+    let _second_manager = test_managed_manager(&second_root);
+
+    std::fs::write(report_path, b"managed-library-startup-hardened").unwrap();
+}
+
+#[test]
+fn managed_library_startup_captures_and_hardens_native_credentials() {
+    let root = temp_root("managed_library_startup_parent");
+    let report_path = root.join("report");
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::managed_library_startup_child_helper",
+            "--nocapture",
+        ])
+        .env("NAC_TEST_MANAGED_LIBRARY_REPORT", &report_path)
+        .env("NAC_HOME", &root)
+        .env("EXA_API_KEY", MANAGED_LIBRARY_EXA_CANARY)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "managed library startup helper failed without exposing its credential: {}",
+        String::from_utf8_lossy(&output.stderr).replace(MANAGED_LIBRARY_EXA_CANARY, "[REDACTED]")
+    );
+    assert!(!output
+        .stdout
+        .windows(MANAGED_LIBRARY_EXA_CANARY.len())
+        .any(|bytes| bytes == MANAGED_LIBRARY_EXA_CANARY.as_bytes()));
+    assert!(!output
+        .stderr
+        .windows(MANAGED_LIBRARY_EXA_CANARY.len())
+        .any(|bytes| bytes == MANAGED_LIBRARY_EXA_CANARY.as_bytes()));
+    assert_eq!(
+        std::fs::read_to_string(&report_path).unwrap(),
+        "managed-library-startup-hardened"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn test_manager(root: &std::path::Path) -> SessionManager {
     SessionManager::new(ServerOptions {
         root_cwd: root.to_path_buf(),

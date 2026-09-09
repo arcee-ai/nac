@@ -82,7 +82,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex as StdMutex, Weak,
+        Arc, Mutex as StdMutex, OnceLock, Weak,
     },
     time::{Duration, Instant},
 };
@@ -456,12 +456,38 @@ impl GitProbeCacheEntry {
 /// deleting one never removes a key the operator manages themselves.
 const GENERATED_CREDENTIAL_PREFIX: &str = "NAC_CONFIG_";
 
+static MANAGED_SERVER_PROCESS_PREPARATION: OnceLock<std::result::Result<(), String>> =
+    OnceLock::new();
+
+fn prepare_managed_server_process() -> Result<()> {
+    MANAGED_SERVER_PROCESS_PREPARATION
+        .get_or_init(|| {
+            runtime::restrict_same_uid_inspection().map_err(|error| {
+                format!("failed to restrict Managed NAC process inspection: {error}")
+            })?;
+            runtime::capture_managed_native_credentials_from_environment().map_err(|error| {
+                format!("failed to capture Managed NAC native credentials: {error}")
+            })?;
+            Ok(())
+        })
+        .as_ref()
+        .map_err(|message| anyhow!(message.clone()))
+        .copied()
+}
+
 impl SessionManager {
     pub(crate) fn root_cwd(&self) -> &std::path::Path {
         &self.inner.root_cwd
     }
 
     pub fn new(options: ServerOptions) -> Result<Self> {
+        if options.managed_host.is_some() {
+            // Managed construction is the security boundary, including for
+            // embedders that never enter the nac-web CLI. Harden and capture
+            // before reading project configuration, opening the store, or
+            // constructing any model-visible runtime components.
+            prepare_managed_server_process()?;
+        }
         let root_cwd = canonicalize_dir(options.root_cwd)?;
         let config = NacConfig::load_without_model_from_cwd(&root_cwd)?;
         let store_path = runtime::resolve_store_path_for_track(

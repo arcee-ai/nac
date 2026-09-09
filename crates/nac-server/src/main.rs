@@ -538,11 +538,6 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     let managed_config_path = cli
         .managed_config
         .or_else(|| std::env::var_os("NAC_MANAGED_CONFIG").map(PathBuf::from));
-    restrict_managed_server_process(managed_config_path.as_deref())?;
-    if managed_config_path.is_some() {
-        runtime::capture_managed_native_credentials_from_environment()
-            .context("failed to capture Managed NAC native credentials")?;
-    }
     bind_policy.validate(bind)?;
     if !bind.ip().is_loopback() {
         eprintln!("warning: every client that can reach {bind} receives full control of nac-web");
@@ -588,6 +583,7 @@ async fn run_server(cli: ServerCli) -> Result<()> {
     .await
 }
 
+#[cfg(all(test, target_os = "linux"))]
 fn restrict_managed_server_process(managed_config_path: Option<&Path>) -> Result<()> {
     if managed_config_path.is_some() {
         runtime::restrict_same_uid_inspection()
