@@ -95,13 +95,15 @@ function managedUpgradeErrorStatus(error: unknown): unknown {
 }
 
 export function managedUpgradeRequiresFreshSnapshot(error: unknown): boolean {
-  const status = managedUpgradeErrorStatus(error);
   return (
-    status === 401 ||
-    status === 403 ||
-    status === 409 ||
+    managedUpgradeAuthorityChanged(error) ||
     (error instanceof Error && error.name === "ManagedUpgradeContractError")
   );
+}
+
+export function managedUpgradeAuthorityChanged(error: unknown): boolean {
+  const status = managedUpgradeErrorStatus(error);
+  return status === 401 || status === 403 || status === 409;
 }
 
 export function managedUpgradeRecovery(error: unknown): ManagedUpgradeRecovery {

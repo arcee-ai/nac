@@ -164,6 +164,25 @@ describe("ManagedUpgradePanel", () => {
     );
   });
 
+  it("reuses the same intent when an accepted start response fails contract decoding", async () => {
+    fakes.start
+      .mockResolvedValueOnce({ accepted_but_invalid: true })
+      .mockResolvedValueOnce(operation("preparing"));
+    mount();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Upgrade to latest beta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start upgrade" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("temporarily unavailable");
+    expect(screen.getByRole("dialog", { name: "Upgrade Managed NAC?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start upgrade" }));
+
+    await waitFor(() => expect(fakes.start).toHaveBeenCalledTimes(2));
+    expect(fakes.start.mock.calls[1]?.[0]).toBe(fakes.start.mock.calls[0]?.[0]);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Upgrade Managed NAC?" })).toBeNull(),
+    );
+  });
+
   it("directs expired sessions back to the portal without offering a blind retry", async () => {
     fakes.snapshot.mockRejectedValue({ status: 401 });
     mount();

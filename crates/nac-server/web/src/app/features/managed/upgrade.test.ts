@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   managedUpgradeActionLabel,
+  managedUpgradeAuthorityChanged,
   managedUpgradeDistanceLabel,
   managedUpgradeIsActive,
   managedUpgradePhaseLabel,
@@ -78,6 +79,7 @@ describe("managed upgrade model", () => {
 
   it("requires a fresh snapshot after authority, incarnation, or contract failures", () => {
     for (const error of [{ status: 401 }, { status: 403 }, { status: 409 }]) {
+      expect(managedUpgradeAuthorityChanged(error)).toBe(true);
       expect(managedUpgradeRequiresFreshSnapshot(error)).toBe(true);
     }
     const contractError = new Error("invalid controller response");
@@ -85,5 +87,7 @@ describe("managed upgrade model", () => {
     expect(managedUpgradeRequiresFreshSnapshot(contractError)).toBe(true);
     expect(managedUpgradeRequiresFreshSnapshot({ status: 503 })).toBe(false);
     expect(managedUpgradeRequiresFreshSnapshot(new TypeError("network interrupted"))).toBe(false);
+    expect(managedUpgradeAuthorityChanged(contractError)).toBe(false);
+    expect(managedUpgradeAuthorityChanged({ status: 503 })).toBe(false);
   });
 });

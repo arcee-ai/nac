@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useManagedUpgradeSnapshot, useStartManagedUpgrade } from "@/app/features/managed/queries";
 import {
+  managedUpgradeAuthorityChanged,
   managedUpgradeRecovery,
-  managedUpgradeRequiresFreshSnapshot,
   type ManagedUpgradeBlocker,
 } from "@/app/features/managed/upgrade";
 import { api } from "@/app/services/api";
@@ -107,7 +107,7 @@ export function useManagedUpgrade() {
       setConfirmationOpen(false);
     } catch (error) {
       setStartError(managedUpgradeRecovery(error).message);
-      if (managedUpgradeRequiresFreshSnapshot(error)) {
+      if (managedUpgradeAuthorityChanged(error)) {
         retryKey.current = null;
         setConfirmationOpen(false);
       }
