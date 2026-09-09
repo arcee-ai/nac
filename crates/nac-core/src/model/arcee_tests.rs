@@ -95,6 +95,7 @@ async fn device_code_request_uses_expected_contract_and_parses_complete_uri() {
     let device = request_device_code(
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
+        LEGACY_CLIENT_ID,
     )
     .await
     .expect("device-code response should parse");
@@ -131,6 +132,7 @@ async fn device_code_request_supports_fallback_uri_and_default_timing() {
     let device = request_device_code(
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
+        LEGACY_CLIENT_ID,
     )
     .await
     .expect("fallback verification URI should parse");
@@ -164,6 +166,7 @@ async fn device_code_request_reports_malformed_and_non_success_responses() {
         let error = request_device_code(
             &no_redirect_client().unwrap(),
             &ArceeAuthService::for_test(&server.base_url),
+            LEGACY_CLIENT_ID,
         )
         .await
         .expect_err("invalid device-code response should fail");
@@ -188,6 +191,7 @@ async fn device_code_same_origin_redirect_is_reported_without_replay() {
     let error = request_device_code(
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
+        LEGACY_CLIENT_ID,
     )
     .await
     .expect_err("Arcee device-code redirects must not be followed")
@@ -241,6 +245,7 @@ async fn device_token_redirect_to_http_destination_does_not_replay_code() {
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&source.base_url),
         &device,
+        LEGACY_CLIENT_ID,
         || 0,
         |_| ready(()),
     )
@@ -304,6 +309,7 @@ async fn token_poll_handles_pending_and_slow_down_then_parses_success_without_wa
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
         &device,
+        LEGACY_CLIENT_ID,
         move || now_clock.get(),
         move |duration| {
             recorded_sleeps.borrow_mut().push(duration);
@@ -378,6 +384,7 @@ async fn token_poll_reports_denied_expired_malformed_and_unstructured_errors() {
             &no_redirect_client().unwrap(),
             &ArceeAuthService::for_test(&server.base_url),
             &device,
+            LEGACY_CLIENT_ID,
             || 0,
             |_| ready(()),
         )
@@ -413,6 +420,7 @@ async fn token_poll_redacts_device_code_from_structured_error() {
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
         &device,
+        LEGACY_CLIENT_ID,
         || 0,
         |_| ready(()),
     )
@@ -745,7 +753,9 @@ fn login_token_base_url_must_be_an_approved_arcee_origin() {
         workspace_name: "acme".to_string(),
     };
 
-    let error = stored_auth_from_token_success(success, ARCEE_AUTH_PRODUCTION_ISSUER).unwrap_err();
+    let error =
+        stored_auth_from_token_success(success, ARCEE_AUTH_PRODUCTION_ISSUER, LEGACY_CLIENT_ID)
+            .unwrap_err();
     assert!(
         error.to_string().contains("invalid credential base URL"),
         "unexpected error: {error:#}"
@@ -859,7 +869,8 @@ fn stored_auth_from_token_success_computes_absolute_expiry() {
         workspace_name: "acme".to_string(),
     };
 
-    let auth = stored_auth_from_token_success(success, ARCEE_AUTH_DEV2_ISSUER).unwrap();
+    let auth =
+        stored_auth_from_token_success(success, ARCEE_AUTH_DEV2_ISSUER, LEGACY_CLIENT_ID).unwrap();
 
     assert_eq!(auth.access_token, "jwt-access");
     assert_eq!(auth.refresh_token, "opaque-refresh");

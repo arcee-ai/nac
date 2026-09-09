@@ -1,5 +1,91 @@
 use super::*;
 
+fn write_imported_managed_arcee_state(
+    nac_home: &std::path::Path,
+    inference_base_url: &str,
+    auth_issuer: &str,
+) {
+    write_managed_credential(
+        &nac_home.join("arcee_auth.json"),
+        serde_json::json!({
+            "type": "arcee_device_token",
+            "access_token": "managed-access-server-test",
+            "refresh_token": "managed-refresh-server-test",
+            "token_type": "bearer",
+            "expires_at_ms": u64::MAX,
+            "base_url": inference_base_url,
+            "organization_id": "org-managed-server-test",
+            "workspace_name": "managed-server-test",
+            "auth_issuer": auth_issuer,
+            "client_id": "managed-nac",
+            "managed_bootstrap": {
+                "bootstrap_id": "4712bc5e-30d5-421a-b416-8291d9f7d8f9",
+                "managed_host_id": "21856443-8ed8-40ab-9036-72e837c99f27"
+            }
+        })
+        .to_string(),
+    );
+    write_managed_credential(
+        &nac_home.join("arcee_managed_bootstrap_receipt.json"),
+        serde_json::json!({
+            "version": 1,
+            "bootstrap_id": "4712bc5e-30d5-421a-b416-8291d9f7d8f9",
+            "managed_host_id": "21856443-8ed8-40ab-9036-72e837c99f27",
+            "client_id": "managed-nac",
+            "disposition": "imported"
+        })
+        .to_string(),
+    );
+}
+
+fn scripted_managed_arcee_login(inference_base_url: &str) -> (String, std::thread::JoinHandle<()>) {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let inference_base_url = inference_base_url.to_string();
+    let handle = std::thread::spawn(move || {
+        let responses = [
+            serde_json::json!({
+                "device_code": "managed-device-server-test",
+                "user_code": "MANAGED-SERVER",
+                "verification_uri_complete": "https://accounts.arcee.ai/device?code=MANAGED-SERVER",
+                "interval": 1,
+                "expires_in": 60
+            })
+            .to_string(),
+            serde_json::json!({
+                "access_token": "repaired-access-server-test",
+                "refresh_token": "repaired-refresh-server-test",
+                "token_type": "bearer",
+                "expires_in": 3600,
+                "base_url": inference_base_url,
+                "organization_id": "org-repaired-server-test",
+                "workspace_name": "repaired-server-test"
+            })
+            .to_string(),
+        ];
+        for body in responses {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let count = socket.read(&mut buffer).unwrap();
+                if count == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).unwrap();
+        }
+    });
+    (base_url, handle)
+}
+
 /// One-shot stand-in for a provider's model index, answering the first
 /// request with `body` and reporting the `Authorization` header it saw — so
 /// a test can tell which credential actually went out on the wire.
@@ -604,6 +690,156 @@ async fn managed_session_settings_override_read_only_defaults_and_resume_with_th
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn managed_interactive_repair_completes_into_readiness_create_and_resume() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_interactive_repair");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_imported_managed_arcee_state(
+        &nac_home,
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+    );
+    let manager = test_managed_bootstrap_manager_with_auth(
+        &root,
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER,
+        Some(nac_core::model::ARCEE_AUTH_DEV2_ISSUER),
+    );
+
+    std::fs::remove_file(nac_home.join("arcee_auth.json")).unwrap();
+    let (auth_service, auth_server) =
+        scripted_managed_arcee_login(nac_core::model::ARCEE_AUTH_DEV2_ISSUER);
+    let started = manager
+        .start_managed_arcee_repair_with_auth_service_for_test(&auth_service)
+        .await
+        .expect("repair should begin from trusted receipt state");
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match manager
+                .poll_managed_login(
+                    nac_core::model::ManagedAuthProvider::Arcee,
+                    &started.login_id,
+                )
+                .unwrap()
+            {
+                crate::DeviceLoginStateResponse::Pending => tokio::task::yield_now().await,
+                outcome => break outcome,
+            }
+        }
+    })
+    .await
+    .expect("managed repair completion timed out");
+    match completed {
+        crate::DeviceLoginStateResponse::Complete { auth } => assert!(auth.signed_in),
+        crate::DeviceLoginStateResponse::Failed { error } => {
+            panic!("managed repair unexpectedly failed: {error}")
+        }
+        crate::DeviceLoginStateResponse::Pending => unreachable!(),
+    }
+    auth_server.join().unwrap();
+
+    manager
+        .managed_model()
+        .unwrap()
+        .credential_ready(manager.managed_host().unwrap())
+        .expect("completed repair must pass managed readiness");
+    let repaired: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(nac_home.join("arcee_auth.json")).unwrap()).unwrap();
+    assert_eq!(repaired["client_id"], "managed-nac");
+    assert_eq!(
+        repaired["auth_issuer"],
+        nac_core::model::ARCEE_AUTH_DEV2_ISSUER
+    );
+    assert_eq!(
+        repaired["managed_bootstrap"]["bootstrap_id"],
+        "4712bc5e-30d5-421a-b416-8291d9f7d8f9"
+    );
+
+    let created = manager
+        .create_session(CreateSessionRequest::default())
+        .await
+        .expect("repaired authorization must admit session creation");
+    let session_id = created.metadata.session_id.unwrap();
+    manager
+        .inner
+        .active_sessions
+        .write()
+        .await
+        .remove(&session_id);
+    manager
+        .attach_session(&session_id)
+        .await
+        .expect("repaired authorization must admit session resume");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn managed_interactive_repair_preserves_existing_auth_and_requires_matching_receipt() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_repair_preserves_healthy");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_imported_managed_arcee_state(
+        &nac_home,
+        nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER,
+        nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER,
+    );
+    let manager = test_managed_bootstrap_manager(&root);
+    let auth_path = nac_home.join("arcee_auth.json");
+    let before = std::fs::read(&auth_path).unwrap();
+    let error = manager
+        .start_managed_login(
+            nac_core::model::ManagedAuthProvider::Arcee,
+            nac_core::model::LoginStyle::DeviceCode,
+        )
+        .await
+        .expect_err("healthy managed auth must not be replaced")
+        .message;
+    assert!(error.contains("will not replace an existing credential"));
+    assert_eq!(std::fs::read(&auth_path).unwrap(), before);
+
+    std::fs::remove_file(&auth_path).unwrap();
+    std::fs::remove_file(nac_home.join("arcee_managed_bootstrap_receipt.json")).unwrap();
+    let error = manager
+        .start_managed_login(
+            nac_core::model::ManagedAuthProvider::Arcee,
+            nac_core::model::LoginStyle::DeviceCode,
+        )
+        .await
+        .expect_err("missing receipt must fail before provider contact")
+        .message;
+    assert!(error.contains("requires its durable bootstrap receipt"));
+    assert!(!auth_path.exists());
+
+    write_imported_managed_arcee_state(
+        &nac_home,
+        nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER,
+        nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER,
+    );
+    std::fs::remove_file(&auth_path).unwrap();
+    let receipt_path = nac_home.join("arcee_managed_bootstrap_receipt.json");
+    let mut receipt: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&receipt_path).unwrap()).unwrap();
+    receipt["managed_host_id"] = serde_json::json!("27062ca7-2fca-49ad-b6c4-fe1e5d9ae6fa");
+    write_managed_credential(&receipt_path, receipt.to_string());
+    let error = manager
+        .start_managed_login(
+            nac_core::model::ManagedAuthProvider::Arcee,
+            nac_core::model::LoginStyle::DeviceCode,
+        )
+        .await
+        .expect_err("mismatched receipt must fail before provider contact")
+        .message;
+    assert!(error.contains("different logical host"));
+    assert!(!auth_path.exists());
+
     let _ = std::fs::remove_dir_all(root);
 }
 
