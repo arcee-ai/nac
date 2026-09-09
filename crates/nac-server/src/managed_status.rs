@@ -56,6 +56,7 @@ pub(crate) struct ReadinessResponse {
     build_track: &'static str,
     source_revision: &'static str,
     supported_schema_version: i64,
+    minimum_migratable_schema_version: i64,
     opened_schema_version: Option<i64>,
     migration_state: &'static str,
     migration_failure: Option<&'static str>,
@@ -74,6 +75,7 @@ pub(crate) struct ManagedHostStatusResponse {
     build_track: &'static str,
     source_revision: &'static str,
     supported_schema_version: i64,
+    minimum_migratable_schema_version: i64,
     opened_schema_version: Option<i64>,
     migration_state: &'static str,
     migration_failure: Option<&'static str>,
@@ -140,6 +142,8 @@ pub(crate) async fn readyz_handler(
                 build_track: identity.track,
                 source_revision: identity.source_revision,
                 supported_schema_version: nac_core::store::schema_version(),
+                minimum_migratable_schema_version:
+                    nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
                 opened_schema_version: None,
                 migration_state: "failed",
                 migration_failure: Some("readiness-task-failed"),
@@ -215,6 +219,7 @@ fn readiness_snapshot(manager: &SessionManager) -> ReadinessResponse {
         build_track: identity.track,
         source_revision: identity.source_revision,
         supported_schema_version: migration.supported_schema_version,
+        minimum_migratable_schema_version: nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
         opened_schema_version: migration.opened_schema_version,
         migration_state: migration.state.as_str(),
         migration_failure: migration
@@ -278,6 +283,7 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         build_track: identity.track,
         source_revision: identity.source_revision,
         supported_schema_version: migration.supported_schema_version,
+        minimum_migratable_schema_version: nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
         opened_schema_version: migration.opened_schema_version,
         migration_state: migration.state.as_str(),
         migration_failure: migration

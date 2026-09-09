@@ -9421,6 +9421,7 @@
           "build_track",
           "source_revision",
           "supported_schema_version",
+          "minimum_migratable_schema_version",
           "migration_state",
           "maintenance_state",
           "logical_host_id",
@@ -9467,6 +9468,10 @@
           },
           "migration_state": {
             "type": "string"
+          },
+          "minimum_migratable_schema_version": {
+            "type": "integer",
+            "format": "int64"
           },
           "model": {
             "$ref": "#/components/schemas/ManagedModelStatus"
@@ -10888,6 +10893,7 @@
           "build_track",
           "source_revision",
           "supported_schema_version",
+          "minimum_migratable_schema_version",
           "migration_state",
           "maintenance_state",
           "checks"
@@ -10919,6 +10925,10 @@
           },
           "migration_state": {
             "type": "string"
+          },
+          "minimum_migratable_schema_version": {
+            "type": "integer",
+            "format": "int64"
           },
           "opened_schema_version": {
             "type": [

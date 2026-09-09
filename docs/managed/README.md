@@ -169,8 +169,9 @@ a separate credential-injecting broker.
   readiness requirements.
 - `GET /managed/status` is owner-facing and exists only in managed mode. It
   reports exact product, build, track, full source revision, supported/opened
-  schema and sanitized migration/maintenance state alongside counts, GitHub
-  state, and readiness details without credential values.
+  schema, schema-owned minimum migratable version, and sanitized
+  migration/maintenance state alongside counts, GitHub state, and readiness
+  details without credential values.
 - A managed process that cannot initialize its store starts a recovery-only
   diagnostic router. It remains unready with `maintenance_state` set to
   `recovery-only` until restart, even if another process repairs the store;

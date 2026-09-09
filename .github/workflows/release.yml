@@ -3,15 +3,9 @@ name: Release
 on:
   push:
     branches: [main, dev]
+    tags: ["v*.*.*"]
   pull_request:
-  release:
-    types: [published]
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Existing stable release tag to upload binaries to
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -22,7 +16,6 @@ concurrency:
 
 jobs:
   prepare:
-    if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.stable.outputs.run || steps.ci.outputs.run }}
@@ -33,21 +26,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.release_tag || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Validate stable release target
         id: stable
-        if: >-
-          github.event_name == 'release' ||
-          (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          node .github/scripts/release-policy.mjs validate-stable
+          git fetch --no-tags origin dev:refs/remotes/origin/dev
+          source_sha="$(git rev-parse HEAD)"
+          SOURCE_SHA="$source_sha" DEV_REF=refs/remotes/origin/dev node .github/scripts/release-policy.mjs validate-stable
           {
             echo "run=true"
-            echo "sha=$(git rev-parse HEAD)"
+            echo "sha=$source_sha"
             echo "version=$(tr -d '[:space:]' < version.txt)"
             echo "tag=$RELEASE_TAG"
           } >> "$GITHUB_OUTPUT"
@@ -55,9 +48,9 @@ jobs:
       - name: Capture CI source identity
         id: ci
         if: >-
-          github.event_name == 'push' ||
+          (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) ||
           github.event_name == 'pull_request' ||
-          (github.event_name == 'workflow_dispatch' && inputs.release_tag == '')
+          github.event_name == 'workflow_dispatch'
         env:
           SOURCE_SHA: ${{ github.sha }}
         run: |
@@ -173,12 +166,6 @@ jobs:
           path: crates/nac-server/web/test-results
           if-no-files-found: ignore
 
-      - name: Smoke exact prerelease consent and installation
-        run: |
-          cargo build -p nac-server --bin nac-web --locked
-          NAC_WEB_BINARY="$PWD/target/debug/nac-web" \
-            node --test .github/scripts/upgrade-cli.test.mjs
-
   test-core:
     if: ${{ needs.prepare.outputs.run == 'true' }}
     needs: [prepare, lint]
@@ -203,7 +190,7 @@ jobs:
       - name: Test stable release policy and configuration
         run: node --test .github/scripts/release-policy.test.mjs
 
-      - name: Test stable and prerelease installer routing
+      - name: Test stable installer routing
         run: |
           sh -n scripts/install.sh
           sh .github/scripts/install.test.sh
@@ -257,7 +244,7 @@ jobs:
 
       - name: Build nac-web binary
         env:
-          NAC_BUILD_TRACK: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')) && 'stable' || 'dev' }}
+          NAC_BUILD_TRACK: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) && 'stable' || 'dev' }}
           NAC_BUILD_ID: ${{ needs.prepare.outputs.tag || format('dev-{0}', needs.prepare.outputs.sha) }}
           NAC_SOURCE_REVISION: ${{ needs.prepare.outputs.sha }}
         run: |
@@ -291,8 +278,8 @@ jobs:
   publish:
     if: >-
       needs.prepare.outputs.run == 'true' &&
-      (github.event_name == 'release' ||
-       (github.event_name == 'workflow_dispatch' && inputs.release_tag != ''))
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/v')
     needs: [prepare, test, build]
     runs-on: ubuntu-latest
     permissions:

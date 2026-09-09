@@ -1322,6 +1322,7 @@ fn checkpoint_table_enforces_completed_row_constraints() {
 
 #[test]
 fn future_schema_version_is_rejected_without_changes() {
+    assert_eq!(MINIMUM_MIGRATABLE_SCHEMA_VERSION, 0);
     let path = temp_store_path("future");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let future_version = STORE_SCHEMA_VERSION + 1;
@@ -1348,6 +1349,22 @@ fn future_schema_version_is_rejected_without_changes() {
         .unwrap();
     assert_eq!(unchanged_journal_mode, journal_mode);
     assert!(!table_exists(&unchanged, "sessions").unwrap());
+    drop(unchanged);
+
+    let read_error = crate::store::list_projects(&path).unwrap_err();
+    assert!(read_error.to_string().contains(&format!(
+        "unsupported store schema version {future_version}"
+    )));
+    let after_normal_read = Connection::open(&path).unwrap();
+    let version_after_read: i64 = after_normal_read
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    let journal_after_read: String = after_normal_read
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version_after_read, future_version);
+    assert_eq!(journal_after_read, journal_mode);
+    assert!(!table_exists(&after_normal_read, "sessions").unwrap());
     assert_eq!(
         migration_status(&path),
         StoreMigrationStatus {
@@ -1357,7 +1374,7 @@ fn future_schema_version_is_rejected_without_changes() {
             failure: Some(StoreMigrationFailure::FutureSchema),
         }
     );
-    drop(unchanged);
+    drop(after_normal_read);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

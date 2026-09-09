@@ -390,6 +390,7 @@ export interface components {
       managed: boolean;
       migration_failure?: string | null;
       migration_state: string;
+      minimum_migratable_schema_version: number;
       model: components["schemas"]["ManagedModelStatus"];
       model_ready: boolean;
       opened_schema_version?: number | null;
@@ -625,6 +626,7 @@ export interface components {
       managed: boolean;
       migration_failure?: string | null;
       migration_state: string;
+      minimum_migratable_schema_version: number;
       opened_schema_version?: number | null;
       product_version: string;
       schema_version: number;

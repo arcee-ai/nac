@@ -252,6 +252,10 @@ async fn managed_host_supplies_default_model_and_mounted_credential() {
         nac_core::store::schema_version()
     );
     assert_eq!(
+        status["minimum_migratable_schema_version"],
+        nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION
+    );
+    assert_eq!(
         status["opened_schema_version"],
         nac_core::store::schema_version()
     );
@@ -283,6 +287,10 @@ async fn readiness_and_managed_status_sanitize_future_schema_failure() {
         ready["supported_schema_version"],
         nac_core::store::schema_version()
     );
+    assert_eq!(
+        ready["minimum_migratable_schema_version"],
+        nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION
+    );
     assert_eq!(ready["opened_schema_version"], future);
     assert_eq!(ready["migration_state"], "failed");
     assert_eq!(ready["migration_failure"], "future-schema");
@@ -290,6 +298,10 @@ async fn readiness_and_managed_status_sanitize_future_schema_failure() {
 
     let status = response_json(get_response(app, "/managed/status", None).await).await;
     assert_eq!(status["ready"], false);
+    assert_eq!(
+        status["minimum_migratable_schema_version"],
+        nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION
+    );
     assert_eq!(status["opened_schema_version"], future);
     assert_eq!(status["migration_state"], "failed");
     assert_eq!(status["migration_failure"], "future-schema");

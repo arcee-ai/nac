@@ -18,10 +18,7 @@ use nac_core::{
         self, ManagedWorkerOptions, ModelOptions, OptionalModelOption, SandboxOptions,
         StoreOptions, WorkerDispatchOptions,
     },
-    upgrade::{
-        execute_prerelease_upgrade, resolve_prerelease_upgrade, run_upgrade, UpgradeRequest,
-        UpgradeTarget,
-    },
+    upgrade::{run_upgrade, UpgradeRequest},
 };
 use nac_server::{serve_with_policy, BindPolicy, ServerOptions, SessionManager};
 
@@ -201,11 +198,11 @@ struct UpgradeCli {
     #[arg(long)]
     install_dir: Option<PathBuf>,
 
-    /// Explicitly test the newest active candidate once without joining a prerelease channel
+    /// Deprecated compatibility flag; prerelease upgrades are unsupported.
     #[arg(long)]
     pre_release: bool,
 
-    /// Proceed without an interactive prompt (requires --pre-release)
+    /// Deprecated compatibility flag accepted only with --pre-release.
     #[arg(short = 'y', long, requires = "pre_release")]
     yes: bool,
 }
@@ -840,6 +837,12 @@ fn arcee_auth_action(command: ArceeAuthCommand) -> ArceeAuthAction {
 }
 
 async fn run_upgrade_cli(cli: UpgradeCli) -> Result<()> {
+    if cli.pre_release {
+        let _compatibility_confirmation = cli.yes;
+        return Err(anyhow!(
+            "prerelease upgrades are unsupported; NAC has no RC, nightly, or preview channel"
+        ));
+    }
     let request = UpgradeRequest {
         install_dir: cli.install_dir,
         executable_path: Some(
@@ -847,65 +850,7 @@ async fn run_upgrade_cli(cli: UpgradeCli) -> Result<()> {
         ),
         package_version: RELEASE_VERSION.to_string(),
     };
-    if !cli.pre_release {
-        return run_upgrade(request).await;
-    }
-
-    let target = resolve_prerelease_upgrade(request).await?;
-    eprintln!("{}", prerelease_warning(&target));
-    let proceed = if cli.yes {
-        true
-    } else {
-        if !io::stdin().is_terminal() {
-            return Err(anyhow!(
-                "prerelease upgrade requires interactive confirmation; automation must pass --yes"
-            ));
-        }
-        eprint!("Continue with prerelease upgrade? [y/N] ");
-        io::stderr()
-            .flush()
-            .context("failed to flush upgrade prompt")?;
-        let mut input = String::new();
-        let read = io::stdin()
-            .read_line(&mut input)
-            .context("failed to read prerelease upgrade confirmation")?;
-        affirmative_prerelease_consent((read != 0).then_some(input.as_str()))
-    };
-    if !proceed {
-        eprintln!("Prerelease upgrade cancelled.");
-        return Ok(());
-    }
-    execute_prerelease_upgrade(target).await
-}
-
-fn prerelease_warning(target: &UpgradeTarget) -> String {
-    let short_sha = target
-        .commit_sha
-        .get(..7)
-        .unwrap_or(target.commit_sha.as_str());
-    format!(
-        "WARNING: prerelease upgrade requested\n\
-         Current version: {}\n\
-         Target: {} ({})\n\
-         Source: {} ({})\n\
-         Install directory: {}\n\
-         Prerelease builds are unstable and may change local state in ways a stable build cannot roll back.\n\
-         Restart nac-web after the upgrade completes.",
-        target.current_version,
-        target.tag,
-        target.version,
-        target.commit_sha,
-        short_sha,
-        target.install_dir.display()
-    )
-}
-
-fn affirmative_prerelease_consent(input: Option<&str>) -> bool {
-    let Some(input) = input else {
-        return false;
-    };
-    let input = input.trim();
-    input.eq_ignore_ascii_case("y") || input.eq_ignore_ascii_case("yes")
+    run_upgrade(request).await
 }
 
 fn load_managed_worker_runtime_config(config_cwd: &std::path::Path) -> Result<runtime::NacConfig> {
@@ -1153,56 +1098,26 @@ thread_timeout_secs = 7200
     }
 
     #[test]
-    fn upgrade_help_describes_one_shot_prerelease_testing() {
+    fn upgrade_help_marks_prerelease_compatibility_as_unsupported() {
         let help = rendered_help(&["nac-web", "upgrade", "--help"]);
-        assert!(help.contains("Explicitly test"), "{help}");
-        assert!(help.contains("once"), "{help}");
+        assert!(help.contains("Deprecated compatibility flag"), "{help}");
         assert!(
-            help.contains("without joining a prerelease channel"),
+            help.contains("prerelease upgrades are unsupported"),
             "{help}"
         );
     }
 
-    #[test]
-    fn prerelease_consent_is_fail_closed() {
-        assert!(affirmative_prerelease_consent(Some("y\n")));
-        assert!(affirmative_prerelease_consent(Some("YES\n")));
-        for input in [Some("\n"), None, Some("n"), Some("no"), Some("later")] {
-            assert!(!affirmative_prerelease_consent(input));
-        }
-    }
-
-    #[test]
-    fn prerelease_warning_identifies_exact_target_even_with_yes() {
-        let target = UpgradeTarget {
-            current_version: "0.1.1".to_string(),
-            tag: "v0.1.2-rc.10".to_string(),
-            version: "0.1.2-rc.10".to_string(),
-            commit_sha: "0123456789abcdef0123456789abcdef01234567".to_string(),
-            install_dir: PathBuf::from("/tmp/nac"),
-            asset_name: "nac-aarch64-apple-darwin.tar.gz".to_string(),
-            uninstall_url: "https://example.test/uninstall.sh".to_string(),
-            install_url: "https://example.test/install.sh".to_string(),
-            asset_base_url: "https://example.test/release".to_string(),
-        };
-        let warning = prerelease_warning(&target);
-        for expected in [
-            "0.1.1",
-            "v0.1.2-rc.10",
-            "0123456789abcdef0123456789abcdef01234567",
-            "0123456",
-            "/tmp/nac",
-            "unstable",
-            "local state",
-            "Restart",
-        ] {
-            assert!(warning.contains(expected), "missing {expected}: {warning}");
-        }
+    #[tokio::test]
+    async fn prerelease_upgrade_fails_before_resolution_or_installation() {
         let cli = Cli::try_parse_from(["nac-web", "upgrade", "--pre-release", "--yes"]).unwrap();
         let Some(RootCommand::Upgrade(upgrade)) = cli.command else {
             panic!("expected upgrade command");
         };
-        assert!(upgrade.yes);
+        let error = run_upgrade_cli(upgrade).await.unwrap_err().to_string();
+        assert!(
+            error.contains("no RC, nightly, or preview channel"),
+            "{error}"
+        );
     }
 
     #[test]

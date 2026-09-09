@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
 const STORE_SCHEMA_VERSION: i64 = 24;
+pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
 /// Current durable-store schema version for credential-free readiness and
 /// operational status reporting.
@@ -271,9 +272,28 @@ pub fn default_store_path() -> PathBuf {
 
 /// Default SQLite store path isolated by immutable runtime build track.
 pub fn default_store_path_for_track(track: StoreTrack) -> PathBuf {
-    crate::paths::nac_home_dir()
+    let root = crate::paths::nac_home_dir()
         .map(|home| home.join(track.filename()))
-        .unwrap_or_else(|| PathBuf::from(".nac").join(track.filename()))
+        .unwrap_or_else(|| PathBuf::from(".nac").join(track.filename()));
+    if track != StoreTrack::Stable || path_entry_exists(&root) {
+        return root;
+    }
+    let legacy = root.with_file_name("store.db");
+    if path_entry_exists(&legacy) {
+        eprintln!(
+            "nac: using legacy stable store {}; stable.db is absent and no data was copied",
+            legacy.display()
+        );
+        return legacy;
+    }
+    root
+}
+
+fn path_entry_exists(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => true,
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
 }
 
 pub fn initialize(path: &Path) -> Result<()> {
@@ -578,6 +598,12 @@ fn connect_existing(path: &Path) -> Result<StoreConnection> {
 
 pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
     let conn = connect(path)?;
+    let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if schema_version > STORE_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "unsupported store schema version {schema_version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
+        ));
+    }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let journal_mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
     if !journal_mode.eq_ignore_ascii_case("wal") {
@@ -586,7 +612,6 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
         // performs the transition once.
         conn.pragma_update(None, "journal_mode", "WAL")?;
     }
-    let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version != STORE_SCHEMA_VERSION {
         drop(conn);
         return open_connection(path);
@@ -634,7 +659,7 @@ fn open_connection_with_hooks(
         conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if preflight_schema_version > STORE_SCHEMA_VERSION {
         return Err(anyhow!(
-            "unsupported store schema version {preflight_schema_version}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
+            "unsupported store schema version {preflight_schema_version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
         ));
     }
     // journal_mode is database-wide and persistent, so future schemas must be
@@ -692,7 +717,7 @@ fn open_connection_with_hooks(
         | 21 | 22 | 23 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
-                "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
+                "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
             ));
         }
     }

@@ -1290,6 +1290,53 @@ fn resolve_store_path_isolates_dev_beta_and_stable_without_copying_data() {
 }
 
 #[test]
+fn stable_default_adopts_legacy_store_without_copying_and_prefers_explicit_stable_collision() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let original_nac_home = std::env::var_os("NAC_HOME");
+    let nac_home = std::env::temp_dir().join(format!(
+        "nac_legacy_stable_store_home_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&nac_home).unwrap();
+    unsafe { std::env::set_var("NAC_HOME", &nac_home) };
+
+    let legacy = nac_home.join("store.db");
+    let stable = nac_home.join("stable.db");
+    std::fs::write(&legacy, b"legacy-stable-canary").unwrap();
+    let resolved = resolve_store_path_for_track(
+        Path::new("/workspace/repo"),
+        StoreOptions::default(),
+        &NacConfig::default(),
+        crate::store::StoreTrack::Stable,
+    );
+    assert_eq!(resolved, legacy);
+    assert!(
+        !stable.exists(),
+        "legacy adoption must not copy or rename data"
+    );
+    assert_eq!(std::fs::read(&resolved).unwrap(), b"legacy-stable-canary");
+
+    std::fs::write(&stable, b"explicit-stable-canary").unwrap();
+    let collided = resolve_store_path_for_track(
+        Path::new("/workspace/repo"),
+        StoreOptions::default(),
+        &NacConfig::default(),
+        crate::store::StoreTrack::Stable,
+    );
+    assert_eq!(collided, stable, "stable.db wins an explicit collision");
+    assert_eq!(std::fs::read(&legacy).unwrap(), b"legacy-stable-canary");
+    assert_eq!(std::fs::read(&collided).unwrap(), b"explicit-stable-canary");
+    assert!(!nac_home.join("dev.db").exists());
+    assert!(!nac_home.join("beta.db").exists());
+
+    restore_env("NAC_HOME", original_nac_home);
+    let _ = std::fs::remove_dir_all(nac_home);
+}
+
+#[test]
 fn resolve_store_path_overrides_beat_global_default_and_resolve_against_cwd() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let original_nac_home = std::env::var_os("NAC_HOME");
