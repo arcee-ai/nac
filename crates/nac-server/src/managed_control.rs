@@ -218,6 +218,7 @@ fn upgrade_supersession(
             minimum_schema_version: previous.minimum_schema_version,
         },
         operation: operation_binding(manager, request)?,
+        adopt_unbound_previous: false,
     })
 }
 

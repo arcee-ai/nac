@@ -96,6 +96,7 @@ fn supersession(
         previous_operation_id: previous.operation_id.clone(),
         previous_target: previous.target.clone(),
         operation,
+        adopt_unbound_previous: false,
     }
 }
 
@@ -1094,4 +1095,258 @@ fn startup_supersession_recovers_both_suspended_serving_and_failed_maintenance()
         assert!(try_admit_managed_work_for_identity(&path, &serving_identity).is_err());
         cleanup(&path);
     }
+}
+
+#[test]
+fn explicit_unbound_adoption_records_a_and_b_atomically_and_replays_after_restart() {
+    let path = path("unbound-adoption");
+    initialize(&path).unwrap();
+    insert_test_session(&path, "retained-before-control");
+    let mut previous = binding("operation-unbound-a", 'a');
+    previous.target.product_version = "1.0.0+legacy.1".to_string();
+    let mut next = binding("operation-unbound-b", 'b');
+    next.target.product_version = "1.1.0+recovery.1".to_string();
+    let mut request = supersession(&previous, next.clone());
+    request.adopt_unbound_previous = true;
+
+    let first = preflight_managed_forward_start(
+        &path,
+        &next.target,
+        Some(("host-123", "incarnation-456")),
+        Some(&request),
+    )
+    .unwrap();
+    assert!(first.requires_accept);
+    let accepted = first.accepted_identity.unwrap();
+    assert_eq!(accepted.operation_id, next.operation_id);
+    assert!(crate::sessions::session_exists(&path, "retained-before-control").unwrap());
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM managed_control_operations WHERE operation_id IN (?1, ?2)",
+            params![previous.operation_id, next.operation_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        2
+    );
+    let previous_outcome: String = conn
+        .query_row(
+            "SELECT latest_outcome_json FROM managed_control_operations WHERE operation_id = ?1",
+            [&previous.operation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(previous_outcome.contains("superseded"));
+    let stored_previous: ManagedOperationBinding = serde_json::from_str(
+        &conn
+            .query_row(
+                "SELECT binding_json FROM managed_control_operations WHERE operation_id = ?1",
+                [&previous.operation_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let stored_next: ManagedOperationBinding = serde_json::from_str(
+        &conn
+            .query_row(
+                "SELECT binding_json FROM managed_control_operations WHERE operation_id = ?1",
+                [&next.operation_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stored_previous.target, previous.target);
+    assert_eq!(stored_next, next);
+    assert!(same_operation_authority(&stored_previous, &stored_next));
+    drop(conn);
+
+    let replay = preflight_managed_forward_start(
+        &path,
+        &next.target,
+        Some(("host-123", "incarnation-456")),
+        Some(&request),
+    )
+    .unwrap();
+    assert!(replay.requires_accept);
+    assert_eq!(replay.accepted_identity.as_ref(), Some(&accepted));
+    assert!(accept_managed_forward_start(&path, &accepted).unwrap());
+    assert!(try_admit_managed_work_for_identity(&path, &accepted_identity(&previous)).is_err());
+    assert!(matches!(
+        preflight_managed_forward_start(
+            &path,
+            &previous.target,
+            Some(("host-123", "incarnation-456")),
+            None,
+        ),
+        Err(ManagedMaintenanceError::MaintenanceConflict)
+    ));
+    cleanup(&path);
+}
+
+#[test]
+fn unbound_adoption_rejects_implicit_downgrade_wrong_host_and_any_operation_history() {
+    for case in [
+        "implicit",
+        "product-downgrade",
+        "schema-downgrade",
+        "wrong-host",
+        "wrong-incarnation",
+        "operation-history",
+        "wrong-authority-history",
+    ] {
+        let path = path(&format!("unbound-invalid-{case}"));
+        initialize(&path).unwrap();
+        let mut previous = binding("operation-unbound-invalid-a", 'c');
+        previous.target.product_version = "2.0.0".to_string();
+        let mut next = binding("operation-unbound-invalid-b", 'd');
+        next.target.product_version = "2.1.0".to_string();
+        let mut request = supersession(&previous, next);
+        request.adopt_unbound_previous = case != "implicit";
+        let configured = match case {
+            "product-downgrade" => {
+                request.operation.target.product_version = "1.9.9".to_string();
+                Some(("host-123", "incarnation-456"))
+            }
+            "schema-downgrade" => {
+                request.operation.target.schema_version = schema_version() - 1;
+                Some(("host-123", "incarnation-456"))
+            }
+            "wrong-host" => Some(("host-other", "incarnation-456")),
+            "wrong-incarnation" => Some(("host-123", "incarnation-other")),
+            "operation-history" | "wrong-authority-history" => {
+                let mut history = if case == "wrong-authority-history" {
+                    previous.clone()
+                } else {
+                    binding("operation-history", 'e')
+                };
+                if case == "wrong-authority-history" {
+                    history.issuer = "https://attacker.example.test".to_string();
+                    history.authority_origin = history.issuer.clone();
+                }
+                record_managed_status(
+                    &path,
+                    "jti-unbound-history",
+                    &history,
+                    expires_at(),
+                    Vec::new(),
+                )
+                .unwrap();
+                Some(("host-123", "incarnation-456"))
+            }
+            _ => Some(("host-123", "incarnation-456")),
+        };
+        assert!(
+            preflight_managed_forward_start(
+                &path,
+                &request.operation.target,
+                configured,
+                Some(&request),
+            )
+            .is_err(),
+            "{case}"
+        );
+        let snapshot = managed_maintenance_snapshot(&path).unwrap();
+        assert_eq!(snapshot.state, ManagedMaintenanceState::Serving, "{case}");
+        assert!(snapshot.accepted_identity.is_none(), "{case}");
+        assert!(snapshot.operation_id.is_none(), "{case}");
+        let conn = Connection::open(&path).unwrap();
+        let expected_operations = i64::from(matches!(
+            case,
+            "operation-history" | "wrong-authority-history"
+        ));
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM managed_control_operations",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            expected_operations,
+            "{case}"
+        );
+        cleanup(&path);
+    }
+}
+
+#[test]
+fn concurrent_unbound_adoptions_have_exactly_one_durable_winner() {
+    let path = path("unbound-adoption-race");
+    initialize(&path).unwrap();
+    let mut previous = binding("operation-unbound-race-a", 'f');
+    previous.target.product_version = "3.0.0".to_string();
+    let mut next_b = binding("operation-unbound-race-b", 'a');
+    next_b.target.product_version = "3.1.0".to_string();
+    let mut next_c = binding("operation-unbound-race-c", 'b');
+    next_c.target.product_version = "3.2.0".to_string();
+    let mut requests = [
+        supersession(&previous, next_b),
+        supersession(&previous, next_c),
+    ];
+    for request in &mut requests {
+        request.adopt_unbound_previous = true;
+    }
+    let barrier = Arc::new(Barrier::new(3));
+    let mut workers = Vec::new();
+    for request in requests {
+        let path = path.clone();
+        let barrier = Arc::clone(&barrier);
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            preflight_managed_forward_start(
+                &path,
+                &request.operation.target,
+                Some(("host-123", "incarnation-456")),
+                Some(&request),
+            )
+        }));
+    }
+    barrier.wait();
+    let outcomes = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+    assert_eq!(
+        outcomes.iter().filter(|outcome| outcome.is_err()).count(),
+        1
+    );
+    let snapshot = managed_maintenance_snapshot(&path).unwrap();
+    assert_eq!(snapshot.state, ManagedMaintenanceState::Maintenance);
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM managed_control_operations",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        2
+    );
+    cleanup(&path);
+}
+
+#[test]
+fn startup_supersession_never_recreates_a_store_that_vanished_before_write_open() {
+    let path = path("startup-missing-write-open");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let previous = binding("operation-missing-a", 'c');
+    let mut next = binding("operation-missing-b", 'd');
+    next.target.product_version = "0.3.0".to_string();
+    let mut request = supersession(&previous, next);
+    request.adopt_unbound_previous = true;
+    let before = snapshot_sqlite_files(&path);
+    assert!(matches!(
+        supersede_managed_upgrade_at_startup(
+            &path,
+            &request,
+            schema_version(),
+            Some(("host-123", "incarnation-456")),
+        ),
+        Err(ManagedMaintenanceError::Store(_))
+    ));
+    assert_eq!(snapshot_sqlite_files(&path), before);
+    cleanup(&path);
 }

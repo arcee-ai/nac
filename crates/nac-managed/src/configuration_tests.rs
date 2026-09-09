@@ -88,6 +88,7 @@ fn version_two_upgrade_expectation_is_exact_nonsecret_forward_metadata() {
     config.managed_control_issuer = Some("https://nac-api.example.test".to_string());
     config.managed_control_jwks_file = Some(root.0.join("jwks.json"));
     config.managed_upgrade_expectation = Some(ManagedUpgradeExpectation {
+        adopt_unbound_previous: false,
         previous_operation_id: "operation-failed".to_string(),
         previous_target: ManagedControlTarget {
             release_id: "release-a".to_string(),
@@ -107,6 +108,12 @@ fn version_two_upgrade_expectation_is_exact_nonsecret_forward_metadata() {
         actor: "user:owner".to_string(),
         beneficiary: "tenant:owner".to_string(),
     });
+    config.validate().unwrap();
+    config
+        .managed_upgrade_expectation
+        .as_mut()
+        .unwrap()
+        .adopt_unbound_previous = true;
     config.validate().unwrap();
 
     let mut same_operation = config.clone();
