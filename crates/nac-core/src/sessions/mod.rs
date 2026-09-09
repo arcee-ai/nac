@@ -18,15 +18,16 @@ mod snapshot;
 mod summary;
 
 pub use db::MALFORMED_LIGHT_MODEL_DIAGNOSTIC;
+pub(crate) use db::{
+    compare_and_update_permission_approval_state, insert_new_session_in_transaction,
+    list_sessions_with_connection, load_permission_approval_state, load_session_run_state,
+    reserve_permission_approval_transition,
+};
 pub use db::{
     create_session, delete_session, increment_run_count, list_sessions, load_last_session,
     load_permission_approval_mode, load_session, load_session_config, reorder_sessions,
     save_session, save_session_run_state, session_exists, update_permission_approval_mode,
     update_raw_session_config, update_session_config, update_session_presentation,
-};
-pub(crate) use db::{
-    insert_new_session_in_transaction, list_sessions_with_connection,
-    load_permission_approval_state, load_session_run_state, update_permission_approval_state,
 };
 pub use operation_lease::{
     SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,

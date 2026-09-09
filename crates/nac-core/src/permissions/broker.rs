@@ -51,7 +51,7 @@ impl PermissionBroker {
     pub async fn approval_mode(&self) -> anyhow::Result<PermissionApprovalMode> {
         self.load_approval_state()
             .await
-            .map(|(mode, _)| mode)
+            .map(|(mode, _, _)| mode)
             .map_err(anyhow::Error::msg)
     }
 
@@ -61,18 +61,36 @@ impl PermissionBroker {
     /// waiters observe the transition without a stale enable claiming work
     /// admitted after a completed disable.
     pub async fn set_approval_mode(&self, mode: PermissionApprovalMode) -> anyhow::Result<()> {
-        self.set_approval_mode_after_commit(mode, || async {}).await
+        self.set_approval_mode_with_hooks(mode, || async {}, || async {})
+            .await
     }
 
-    pub(super) async fn set_approval_mode_after_commit<AfterCommit, AfterCommitFuture>(
+    pub(super) async fn set_approval_mode_with_hooks<
+        BeforeUpdate,
+        BeforeUpdateFuture,
+        AfterCommit,
+        AfterCommitFuture,
+    >(
         &self,
         mode: PermissionApprovalMode,
+        before_update: BeforeUpdate,
         after_commit: AfterCommit,
     ) -> anyhow::Result<()>
     where
+        BeforeUpdate: FnOnce() -> BeforeUpdateFuture,
+        BeforeUpdateFuture: std::future::Future<Output = ()>,
         AfterCommit: FnOnce() -> AfterCommitFuture,
         AfterCommitFuture: std::future::Future<Output = ()>,
     {
+        let store_path = self.store_path.clone();
+        let session_id = self.session_id.clone();
+        let revision = tokio::task::spawn_blocking(move || {
+            crate::sessions::reserve_permission_approval_transition(&store_path, &session_id)
+        })
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!("permission approval mode reservation task failed: {error}")
+        })??;
         let auto_approval_candidates = if mode == PermissionApprovalMode::AutoApprove {
             self.state
                 .lock()
@@ -84,15 +102,29 @@ impl PermissionBroker {
         } else {
             Vec::new()
         };
+        before_update().await;
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
-        tokio::task::spawn_blocking(move || {
-            crate::sessions::update_permission_approval_state(&store_path, &session_id, mode)
+        let updated = tokio::task::spawn_blocking(move || {
+            crate::sessions::compare_and_update_permission_approval_state(
+                &store_path,
+                &session_id,
+                revision,
+                mode,
+            )
         })
         .await
         .map_err(|error| {
             anyhow::anyhow!("permission approval mode update task failed: {error}")
         })??;
+        if !updated {
+            anyhow::bail!("permission approval mode changed concurrently; refresh and try again");
+        }
+
+        // Publish immediately after the durable transition. Test hooks and
+        // process-local waiter delivery must not let an older mode event trail
+        // a later completed transition.
+        self.emit(crate::events::SessionEvent::PermissionApprovalModeChanged { mode });
         after_commit().await;
         let replies = if mode == PermissionApprovalMode::AutoApprove {
             let mut state = self
@@ -112,7 +144,6 @@ impl PermissionBroker {
             Vec::new()
         };
 
-        self.emit(crate::events::SessionEvent::PermissionApprovalModeChanged { mode });
         for (request_id, pending) in replies {
             if pending.reply.send(PermissionReply::Once).is_ok() {
                 self.emit(crate::events::SessionEvent::PermissionReplied {
@@ -215,8 +246,8 @@ impl PermissionBroker {
         // The durable mode is consulted only after ordered configured and hard
         // policy has produced Ask. It is never cached: independent managers and
         // processes may attach the same durable session.
-        let (_, initial_auto_generation) = match self.load_approval_state().await {
-            Ok((PermissionApprovalMode::AutoApprove, _)) => {
+        let (_, initial_auto_generation, _) = match self.load_approval_state().await {
+            Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
                 return AuthorizationOutcome::Allowed;
             }
             Ok(state) => state,
@@ -255,10 +286,10 @@ impl PermissionBroker {
         };
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let approval_generation = match self.load_approval_state().await {
-            Ok((PermissionApprovalMode::AutoApprove, _)) => {
+            Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
                 return AuthorizationOutcome::Allowed;
             }
-            Ok((PermissionApprovalMode::Manual, generation))
+            Ok((PermissionApprovalMode::Manual, generation, _))
                 if generation > initial_auto_generation =>
             {
                 // Auto-approve was enabled and then disabled while this Ask
@@ -266,7 +297,7 @@ impl PermissionBroker {
                 // owns this invocation even though it never became pending.
                 return AuthorizationOutcome::Allowed;
             }
-            Ok((PermissionApprovalMode::Manual, generation)) => generation,
+            Ok((PermissionApprovalMode::Manual, generation, _)) => generation,
             Err(reason) => return AuthorizationOutcome::Denied(reason),
         };
         {
@@ -312,23 +343,12 @@ impl PermissionBroker {
                     self.reply_outcome(receiver.await, &request, &waiter_live).await
                 }
             },
-            approval = self.auto_approval_after(approval_generation) => {
-                match approval {
-                    Ok(()) => {
-                        // A local manual reply or cancellation may have claimed
-                        // the request after the durable generation was read.
-                        // Whichever removes it first owns the sole reply.
-                        let _ = self.reply(&request.id, PermissionReply::Once);
-                        self.reply_outcome(receiver.await, &request, &waiter_live).await
-                    }
-                    Err(reason) => {
-                        if self.dismiss_pending(&request.id, reason.clone()) {
-                            AuthorizationOutcome::Denied(reason)
-                        } else {
-                            self.reply_outcome(receiver.await, &request, &waiter_live).await
-                        }
-                    }
-                }
+            () = self.auto_approval_after(approval_generation) => {
+                // A local manual reply or cancellation may have claimed the
+                // request after the durable generation was read. Whichever
+                // removes it first owns the sole reply.
+                let _ = self.reply(&request.id, PermissionReply::Once);
+                self.reply_outcome(receiver.await, &request, &waiter_live).await
             },
             reason = self.interactive_subscriber_unavailable(interactive) => {
                 if self.dismiss_pending(&request.id, reason.clone()) {
@@ -431,7 +451,7 @@ impl PermissionBroker {
         dismissed
     }
 
-    async fn load_approval_state(&self) -> Result<(PermissionApprovalMode, i64), String> {
+    async fn load_approval_state(&self) -> Result<(PermissionApprovalMode, i64, i64), String> {
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
         tokio::task::spawn_blocking(move || {
@@ -454,18 +474,24 @@ impl PermissionBroker {
         let observation = self
             .load_approval_state()
             .await
-            .map(|(_, generation)| generation);
+            .map(|(_, generation, _)| generation);
         observer.last_checked = Some(Instant::now());
         observer.observed_generation = Some(observation.clone());
         observation
     }
 
-    async fn auto_approval_after(&self, generation: i64) -> Result<(), String> {
+    async fn auto_approval_after(&self, generation: i64) {
         loop {
             tokio::time::sleep(APPROVAL_MODE_POLL_INTERVAL).await;
-            let observed_generation = self.observed_auto_generation().await?;
-            if observed_generation > generation {
-                return Ok(());
+            // Read failures are fail-closed observations, not permission
+            // answers. Keep the waiter live and retry on the bounded broker
+            // cadence so one transient timeout cannot dismiss every Ask.
+            if self
+                .observed_auto_generation()
+                .await
+                .is_ok_and(|observed_generation| observed_generation > generation)
+            {
+                return;
             }
         }
     }

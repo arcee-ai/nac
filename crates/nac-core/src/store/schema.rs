@@ -3,6 +3,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+// 26 adds a durable revision for linearizable permission-mode transitions.
 // 25 adds the durable per-session permission approval mode. 24 adds
 // session_forks (conversation clones plus deleted tombstones). 22 adds
 // durable direct-parent managed orchestrator relationships. 21 adds
@@ -19,7 +20,7 @@ use std::time::{Duration, Instant};
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 25;
+const STORE_SCHEMA_VERSION: i64 = 26;
 
 /// Current durable-store schema version for credential-free readiness and
 /// operational status reporting.
@@ -429,7 +430,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | 25 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions 0 through {STORE_SCHEMA_VERSION}"
@@ -501,6 +502,12 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
         "sessions",
         "permission_auto_approve_generation",
         "INTEGER NOT NULL DEFAULT 0 CHECK (permission_auto_approve_generation >= 0)",
+    )?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "permission_approval_revision",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (permission_approval_revision >= 0)",
     )?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
@@ -619,6 +626,8 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
                  CHECK (permission_approval_mode IN ('manual', 'auto_approve')),
              permission_auto_approve_generation INTEGER NOT NULL DEFAULT 0
                  CHECK (permission_auto_approve_generation >= 0),
+             permission_approval_revision INTEGER NOT NULL DEFAULT 0
+                 CHECK (permission_approval_revision >= 0),
              cwd TEXT NOT NULL,
              store_path TEXT NOT NULL,
              model TEXT NOT NULL,
