@@ -1,4 +1,5 @@
-//! Credential-gated native Exa web retrieval for top-level direct agents.
+//! Credential-gated native Exa web retrieval for top-level direct agents and
+//! delegated workers.
 //!
 //! `web_fetch` sends a public target URL to Exa Contents. NAC never connects
 //! to the target itself. The Exa credential is captured by the admitting
