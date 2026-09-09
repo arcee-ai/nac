@@ -77,8 +77,10 @@ export async function settleManagedUpgradeBlocker(blocker: ManagedUpgradeBlocker
   if (!blocker.actionable || target == null) return;
   switch (blocker.action) {
     case "cancel_active_run":
-      if (target.session_id == null) throw new Error("Active run blocker has no session");
-      return api.cancelActiveRun(target.session_id);
+      if (target.session_id == null || target.run_id == null) {
+        throw new Error("Active run blocker is incomplete");
+      }
+      return api.cancelActiveRun(target.session_id, target.run_id);
     case "cancel_traditional_child":
       if (target.session_id == null || target.child_session_id == null) {
         throw new Error("Child blocker is incomplete");

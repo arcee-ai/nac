@@ -37,6 +37,18 @@ it("uses the exact empty-body and idempotency contract for a managed upgrade", a
   });
 });
 
+it("targets the exact active run when settling a managed upgrade blocker", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetch);
+
+  await api.cancelActiveRun("session/one", "run two");
+
+  expect(fetch).toHaveBeenCalledExactlyOnceWith(
+    "/sessions/session%2Fone/cancel-active-run?run_id=run%20two",
+    { method: "POST", headers: {}, signal: undefined },
+  );
+});
+
 it.each([
   ["GET", 401, "Authentication failed"],
   ["POST", 403, "Request denied"],

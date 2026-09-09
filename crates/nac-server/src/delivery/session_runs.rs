@@ -14,7 +14,7 @@ use nac_core::{
     },
     session_service::SessionEventReceiver,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     validate_steering_instruction, ApiError, ApiErrorBody, EventsQuery, LaggedEvent,
@@ -182,19 +182,38 @@ pub(crate) async fn stream_events(
     ))
 }
 
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct CancelActiveRunQuery {
+    pub(crate) run_id: Option<String>,
+}
+
 #[utoipa::path(
     post,
     path = "/sessions/{session_id}/cancel-active-run",
     operation_id = "post_sessions_session_id_cancel_active_run",
     tag = "conversation",
-    params(("session_id" = String, Path)),
-    responses((status = 202, description = "Success with no response body"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 501, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+    params(CancelActiveRunQuery, ("session_id" = String, Path)),
+    responses((status = 202, description = "Success with no response body"), (status = 400, description = "Path or query extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 501, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
 )]
 pub(crate) async fn cancel_active_run(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<CancelActiveRunQuery>,
 ) -> std::result::Result<StatusCode, ApiError> {
-    manager.cancel_active_run(&session_id).await?;
+    if let Some(run_id) = query.run_id {
+        if run_id.trim().is_empty() {
+            return Err(ApiError::bad_request(
+                "run_id must not be blank".to_string(),
+            ));
+        }
+        manager
+            .session_runs()
+            .cancel_expected(&session_id, &run_id)
+            .await?;
+    } else {
+        manager.cancel_active_run(&session_id).await?;
+    }
     Ok(StatusCode::ACCEPTED)
 }
 pub(crate) fn session_event_stream(

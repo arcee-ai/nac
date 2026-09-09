@@ -3207,6 +3207,14 @@
         "operationId": "post_sessions_session_id_cancel_active_run",
         "parameters": [
           {
+            "name": "run_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "session_id",
             "in": "path",
             "required": true,
@@ -3220,7 +3228,7 @@
             "description": "Success with no response body"
           },
           "400": {
-            "description": "Path extraction failed",
+            "description": "Path or query extraction failed",
             "content": {
               "text/plain": {
                 "schema": {

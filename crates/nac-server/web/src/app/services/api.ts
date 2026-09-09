@@ -729,7 +729,11 @@ export const api = {
       body: { prompt },
     }),
 
-  cancelActiveRun: (id: string) => request<void>("POST", `${sessionPath(id)}/cancel-active-run`),
+  cancelActiveRun: (id: string, runId?: string) =>
+    request<void>(
+      "POST",
+      `${sessionPath(id)}/cancel-active-run${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
+    ),
 
   terminateTerminal: (id: string, terminalId: string) =>
     request<void>("DELETE", `${sessionPath(id)}/terminals/${encodeURIComponent(terminalId)}`),

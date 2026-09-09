@@ -56,7 +56,7 @@ it("dispatches each actionable upgrade blocker through its ordinary exact resour
     });
   }
 
-  expect(cancelRun).toHaveBeenCalledExactlyOnceWith("session-1");
+  expect(cancelRun).toHaveBeenCalledExactlyOnceWith("session-1", "run-1");
   expect(cancelChild).toHaveBeenCalledExactlyOnceWith("session-2", "child-2");
   expect(cancelOrchestrator).toHaveBeenCalledExactlyOnceWith("session-3", "orchestrator-3");
   expect(terminate).toHaveBeenCalledExactlyOnceWith("session-4", "terminal-4");

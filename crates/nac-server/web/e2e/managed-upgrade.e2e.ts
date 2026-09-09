@@ -112,14 +112,15 @@ async function installUpgradeDouble(page: Page) {
     return route.fulfill({ status: 202, json: state.operation });
   });
   await page.route("**/sessions/**", async (route: Route) => {
-    const path = new URL(route.request().url()).pathname;
+    const url = new URL(route.request().url());
+    const path = url.pathname;
     if (
       path.endsWith("/cancel-active-run") ||
       path.includes("/children/") ||
       path.includes("/orchestrators/") ||
       path.includes("/terminals/")
     ) {
-      state.actions.push(`${route.request().method()} ${path}`);
+      state.actions.push(`${route.request().method()} ${path}${url.search}`);
       return path.includes("/terminals/")
         ? route.fulfill({ status: 204 })
         : route.fulfill({ status: 200, json: {} });
@@ -261,7 +262,7 @@ test("settles actionable blockers, preserves wait-only markers, and retries a fa
   await expect.poll(() => state.actions.length).toBe(3);
   expect(state.actions).toEqual(
     expect.arrayContaining([
-      "POST /sessions/session-1/cancel-active-run",
+      "POST /sessions/session-1/cancel-active-run?run_id=run-1",
       "DELETE /sessions/session-2/terminals/terminal-2",
       "DELETE /managed/github/clone-operations/clone-3",
     ]),

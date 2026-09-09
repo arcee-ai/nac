@@ -147,6 +147,68 @@ async fn cancel_active_run_route_is_idempotent() {
 }
 
 #[tokio::test]
+async fn expected_run_cancellation_never_cancels_a_different_active_run() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("cancel_expected_run");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+    seed_editable_session(&root, "session");
+    let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
+    let manager = test_manager(&root);
+    let service = manager.attach_session("session").await.unwrap();
+    let submitted = manager
+        .submit_prompt(
+            "session",
+            SubmitPromptRequest {
+                prompt: "begin the exact run".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let app = router(manager);
+
+    let stale = Request::builder()
+        .method("POST")
+        .uri("/sessions/session/cancel-active-run?run_id=stale-run")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(stale).await.unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        service.active_run().unwrap().run_id.as_str(),
+        submitted.run_id
+    );
+
+    let exact = Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/sessions/session/cancel-active-run?run_id={}",
+            submitted.run_id
+        ))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(exact).await.unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+    assert!(service.active_run().is_none());
+
+    let blank = Request::builder()
+        .method("POST")
+        .uri("/sessions/session/cancel-active-run?run_id=%20")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.oneshot(blank).await.unwrap().status(),
+        StatusCode::BAD_REQUEST
+    );
+    endpoint.abort();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn deletion_winning_lifecycle_gate_prevents_late_submission_recreation() {
     let root = temp_root("delete_before_submit");
     seed_editable_session(&root, "session");

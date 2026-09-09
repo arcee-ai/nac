@@ -241,6 +241,25 @@ impl<'a> SessionRunApplication<'a> {
         self.cancel_unchecked(session_id).await
     }
 
+    pub(crate) async fn cancel_expected(&self, session_id: &str, run_id: &str) -> Result<()> {
+        self.manager.require_primary_operation_session(session_id)?;
+        let service = self.manager.attach_session(session_id).await?;
+        let Some(active) = service.active_run() else {
+            return Ok(());
+        };
+        if active.run_id.as_str() != run_id {
+            return Ok(());
+        }
+        match service
+            .connect_client()
+            .request_cancel(&active.run_id)
+            .await
+        {
+            Ok(()) | Err(SessionCancelError::NotActive { .. }) => Ok(()),
+            Err(SessionCancelError::Cleanup { message, .. }) => Err(anyhow!(message)),
+        }
+    }
+
     pub(crate) async fn cancel_unchecked(&self, session_id: &str) -> Result<()> {
         let service = self.manager.attach_session(session_id).await?;
         let Some(active) = service.active_run() else {
