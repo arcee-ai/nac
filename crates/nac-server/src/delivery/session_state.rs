@@ -15,8 +15,8 @@ use crate::{
     CreateInboxItemRequest, InboxItemResponse, MessagesPageResponse, MessagesQuery,
     PermissionStateResponse, ReplyPermissionRequest, SessionManager, SessionSnapshotQuery,
     SessionSnapshotResponse, ThreadEventsQuery, UpdateGoalRequest, UpdateInboxItemRequest,
-    DEFAULT_MESSAGE_PAGE_LIMIT, DEFAULT_THREAD_EVENT_PAGE_LIMIT, MAX_MESSAGE_PAGE_LIMIT,
-    MAX_THREAD_EVENT_PAGE_LIMIT,
+    UpdatePermissionApprovalModeRequest, DEFAULT_MESSAGE_PAGE_LIMIT,
+    DEFAULT_THREAD_EVENT_PAGE_LIMIT, MAX_MESSAGE_PAGE_LIMIT, MAX_THREAD_EVENT_PAGE_LIMIT,
 };
 
 #[utoipa::path(
@@ -270,6 +270,27 @@ pub(crate) async fn permission_state(
     AxumPath(session_id): AxumPath<String>,
 ) -> std::result::Result<Json<PermissionStateResponse>, ApiError> {
     Ok(Json(manager.permission_state(&session_id).await?))
+}
+
+#[utoipa::path(
+    put,
+    path = "/sessions/{session_id}/permissions/mode",
+    operation_id = "put_sessions_session_id_permissions_mode",
+    tag = "permissions",
+    params(("session_id" = String, Path)),
+    request_body(content = UpdatePermissionApprovalModeRequest, content_type = "application/json"),
+    responses((status = 204, description = "Permission approval mode updated"), (status = 400, description = "Bad request", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn update_permission_approval_mode(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+    payload: std::result::Result<Json<UpdatePermissionApprovalModeRequest>, JsonRejection>,
+) -> std::result::Result<StatusCode, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    manager
+        .set_permission_approval_mode(&session_id, request.mode)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

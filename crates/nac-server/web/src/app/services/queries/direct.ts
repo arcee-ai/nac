@@ -7,6 +7,7 @@ import type {
   InboxDelivery,
   InboxItem,
   ManagedOrchestratorRecord,
+  PermissionApprovalMode,
   PermissionReply,
   PermissionStateResponse,
   SessionGoalRecord,
@@ -40,6 +41,27 @@ export function useReplyPermission() {
     }) => api.replyPermission(sessionId, requestId, reply),
     onSuccess: (_data, variables) =>
       client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
+  });
+}
+
+export function useSetPermissionApprovalMode() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, mode }: { sessionId: string; mode: PermissionApprovalMode }) =>
+      api.setPermissionApprovalMode(sessionId, mode),
+    onSuccess: (_data, variables) => {
+      client.setQueryData<PermissionStateResponse>(
+        queryKeys.sessionPermissions(variables.sessionId),
+        (current) =>
+          current
+            ? {
+                ...current,
+                approval_mode: variables.mode,
+                requests: variables.mode === "auto_approve" ? [] : current.requests,
+              }
+            : current,
+      );
+    },
   });
 }
 

@@ -8,6 +8,12 @@ impl PermissionBroker {
         session_config_version: i64,
         configured_rules: impl IntoIterator<Item = PermissionRule>,
     ) -> Self {
+        let approval_mode =
+            crate::sessions::load_permission_approval_mode(&store_path, &session_id)
+                // A malformed or unavailable durable option must never broaden
+                // authority. Later durable mutations still surface storage
+                // failures instead of silently changing the in-memory policy.
+                .unwrap_or(PermissionApprovalMode::Manual);
         Self {
             policy: PermissionPolicy::for_backend(backend, configured_rules),
             store_path,
@@ -19,7 +25,10 @@ impl PermissionBroker {
             },
             session_config_version,
             event_bus: StdMutex::new(None),
-            state: StdMutex::new(PermissionBrokerState::default()),
+            state: StdMutex::new(PermissionBrokerState {
+                approval_mode,
+                ..PermissionBrokerState::default()
+            }),
         }
     }
 
@@ -45,6 +54,55 @@ impl PermissionBroker {
                 .then_with(|| left.id.cmp(&right.id))
         });
         requests
+    }
+
+    pub fn approval_mode(&self) -> PermissionApprovalMode {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .approval_mode
+    }
+
+    /// Durably changes this session's answer policy. Enabling auto-approval
+    /// claims every currently pending waiter under the same lock used by new
+    /// asks and manual replies, so no request can be replied to twice or miss
+    /// the transition.
+    pub fn set_approval_mode(&self, mode: PermissionApprovalMode) -> anyhow::Result<()> {
+        let replies = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            crate::sessions::update_permission_approval_mode(
+                &self.store_path,
+                &self.session_id,
+                mode,
+            )?;
+            state.approval_mode = mode;
+            if mode == PermissionApprovalMode::AutoApprove {
+                state.pending.drain().collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            }
+        };
+
+        self.emit(crate::events::SessionEvent::PermissionApprovalModeChanged { mode });
+        for (request_id, pending) in replies {
+            if pending.reply.send(PermissionReply::Once).is_ok() {
+                self.emit(crate::events::SessionEvent::PermissionReplied {
+                    request_id,
+                    reply: PermissionReply::Once,
+                });
+            } else {
+                self.emit(crate::events::SessionEvent::PermissionDismissed {
+                    request_id,
+                    reason:
+                        "the operation awaiting automatic approval ended before the mode changed"
+                            .to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn grants(&self) -> anyhow::Result<Vec<crate::store::PermissionGrantRecord>> {
@@ -127,6 +185,19 @@ impl PermissionBroker {
         if cancellation.is_cancelled() {
             return AuthorizationOutcome::Denied("run was cancelled before approval".to_string());
         }
+
+        // The mode is consulted only after ordered configured and hard policy
+        // has produced Ask. Claiming this read before a concurrent disable is
+        // the linearization point for this invocation.
+        if self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .approval_mode
+            == PermissionApprovalMode::AutoApprove
+        {
+            return AuthorizationOutcome::Allowed;
+        }
         let interactive = self
             .event_bus
             .lock()
@@ -142,13 +213,6 @@ impl PermissionBroker {
                     ));
                 }
             };
-        if !interactive && !delegated_child {
-            return AuthorizationOutcome::Denied(
-                "approval is required, but no interactive session client is connected; the operation was not executed"
-                    .to_string(),
-            );
-        }
-
         let request = PermissionRequest {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: self.session_id.clone(),
@@ -166,17 +230,31 @@ impl PermissionBroker {
             created_at_epoch_ms: epoch_millis_now(),
         };
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pending
-            .insert(
+        {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // Recheck while holding the same lock as set_approval_mode. If the
+            // mode changed while ownership/connectivity was resolved, this
+            // invocation is answered exactly once without becoming pending.
+            if state.approval_mode == PermissionApprovalMode::AutoApprove {
+                return AuthorizationOutcome::Allowed;
+            }
+            if !interactive && !delegated_child {
+                return AuthorizationOutcome::Denied(
+                    "approval is required, but no interactive session client is connected; the operation was not executed"
+                        .to_string(),
+                );
+            }
+            state.pending.insert(
                 request.id.clone(),
                 PendingPermission {
                     request: request.clone(),
                     reply: sender,
                 },
             );
+        }
         let _pending_guard = PendingPermissionGuard {
             broker: Arc::downgrade(self),
             request_id: request.id.clone(),

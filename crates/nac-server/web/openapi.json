@@ -5218,6 +5218,69 @@
         }
       }
     },
+    "/sessions/{session_id}/permissions/mode": {
+      "put": {
+        "tags": [
+          "permissions"
+        ],
+        "operationId": "put_sessions_session_id_permissions_mode",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePermissionApprovalModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Permission approval mode updated"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/permissions/{request_id}": {
       "post": {
         "tags": [
@@ -10373,6 +10436,14 @@
           }
         }
       },
+      "PermissionApprovalMode": {
+        "type": "string",
+        "description": "User-selected approval behavior for one durable direct session.\n\nThis is deliberately an answer policy at the broker boundary, not an\nexecution backend or a reusable resource grant.",
+        "enum": [
+          "manual",
+          "auto_approve"
+        ]
+      },
       "PermissionGrantRecord": {
         "type": "object",
         "required": [
@@ -10483,10 +10554,15 @@
       "PermissionStateResponse": {
         "type": "object",
         "required": [
+          "approval_mode",
           "requests",
           "grants"
         ],
         "properties": {
+          "approval_mode": {
+            "$ref": "#/components/schemas/PermissionApprovalMode",
+            "description": "Durable for this session only. `manual` is the compatibility default."
+          },
           "grants": {
             "type": "array",
             "items": {
@@ -11751,6 +11827,25 @@
                 "type": "string",
                 "enum": [
                   "permission_dismissed"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The durable answer policy for this direct session changed. No request\nresources or credential-bearing payloads are included.",
+            "required": [
+              "mode",
+              "type"
+            ],
+            "properties": {
+              "mode": {
+                "$ref": "#/components/schemas/PermissionApprovalMode"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "permission_approval_mode_changed"
                 ]
               }
             }
@@ -13609,6 +13704,17 @@
           },
           "reasoning_effort": {
             "$ref": "#/components/schemas/RequestField_ReasoningEffort_ReasoningEffort"
+          }
+        }
+      },
+      "UpdatePermissionApprovalModeRequest": {
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/PermissionApprovalMode"
           }
         }
       },

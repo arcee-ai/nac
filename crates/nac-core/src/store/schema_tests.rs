@@ -453,8 +453,41 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 24);
+    assert_eq!(STORE_SCHEMA_VERSION, 25);
     drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v24_store_adds_manual_session_permission_approval_mode() {
+    let path = temp_store_path("v24_permission_approval_mode");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    insert_legacy_session(&legacy, "legacy-session");
+    legacy
+        .execute_batch(
+            "ALTER TABLE sessions DROP COLUMN permission_approval_mode;
+             PRAGMA user_version = 24;",
+        )
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    let mode: String = migrated
+        .query_row(
+            "SELECT permission_approval_mode FROM sessions WHERE session_id = 'legacy-session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(mode, "manual");
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

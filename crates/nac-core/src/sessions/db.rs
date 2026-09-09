@@ -478,6 +478,53 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
     Ok(config)
 }
 
+/// Loads the durable answer policy for exactly one session. Legacy rows are
+/// migrated to manual, preserving headless fail-closed behavior by default.
+pub fn load_permission_approval_mode(
+    path: &Path,
+    session_id: &str,
+) -> Result<crate::permissions::PermissionApprovalMode> {
+    let conn = crate::store::open_connection(path)?;
+    let stored = conn
+        .query_row(
+            "SELECT permission_approval_mode FROM sessions WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
+    match stored.as_str() {
+        "manual" => Ok(crate::permissions::PermissionApprovalMode::Manual),
+        "auto_approve" => Ok(crate::permissions::PermissionApprovalMode::AutoApprove),
+        _ => Err(anyhow!(
+            "unsupported stored permission approval mode '{stored}'"
+        )),
+    }
+}
+
+/// Changes only the session-local permission answer policy. This does not
+/// increment model config_version, invalidate remembered grants, or rewrite
+/// backend selection.
+pub fn update_permission_approval_mode(
+    path: &Path,
+    session_id: &str,
+    mode: crate::permissions::PermissionApprovalMode,
+) -> Result<()> {
+    let conn = crate::store::open_runtime_connection(path)?;
+    let stored = match mode {
+        crate::permissions::PermissionApprovalMode::Manual => "manual",
+        crate::permissions::PermissionApprovalMode::AutoApprove => "auto_approve",
+    };
+    let updated = conn.execute(
+        "UPDATE sessions SET permission_approval_mode = ?1 WHERE session_id = ?2",
+        params![stored, session_id],
+    )?;
+    if updated == 0 {
+        return Err(anyhow!("session '{session_id}' was not found"));
+    }
+    Ok(())
+}
+
 pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn

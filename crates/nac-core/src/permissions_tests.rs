@@ -1395,6 +1395,150 @@ async fn headless_ask_fails_closed_without_creating_a_waiter() {
 }
 
 #[tokio::test]
+async fn session_auto_approve_answers_asks_headlessly_without_creating_grants() {
+    let (path, broker) = broker_fixture();
+    broker
+        .set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .unwrap();
+    let outcome = broker
+        .authorize(
+            "exec_command",
+            &[
+                PermissionResource::new("execute", "command:[curl][example.com]")
+                    .with_save_resource("command:[curl]*"),
+            ],
+            &crate::tools::kernel::ToolCallContext::default(),
+            &crate::tools::ThreadCancellation::default(),
+        )
+        .await;
+    assert_eq!(outcome, AuthorizationOutcome::Allowed);
+    assert!(broker.pending().is_empty());
+    assert!(broker.grants().unwrap().is_empty());
+    assert_eq!(
+        crate::sessions::load_permission_approval_mode(&path, "session-a").unwrap(),
+        PermissionApprovalMode::AutoApprove
+    );
+    let restarted = PermissionBroker::new(
+        path.clone(),
+        "session-a".to_string(),
+        PermissionBackend::Local,
+        0,
+        [],
+    );
+    assert_eq!(
+        restarted.approval_mode(),
+        PermissionApprovalMode::AutoApprove
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn session_auto_approve_never_overrides_configured_or_hard_denials() {
+    let path = std::env::temp_dir()
+        .join(format!("nac-permission-auto-deny-{}", uuid::Uuid::new_v4()))
+        .join("store.db");
+    crate::store::initialize(&path).unwrap();
+    crate::store::insert_test_session(&path, "session-a");
+    let broker = Arc::new(PermissionBroker::new(
+        path.clone(),
+        "session-a".to_string(),
+        PermissionBackend::Local,
+        0,
+        [PermissionRule::new(
+            "execute",
+            "command:[curl]*",
+            PermissionEffect::Deny,
+        )],
+    ));
+    broker
+        .set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .unwrap();
+
+    let configured = broker
+        .authorize(
+            "exec_command",
+            &[PermissionResource::new(
+                "execute",
+                "command:[curl][example.com]",
+            )],
+            &crate::tools::kernel::ToolCallContext::default(),
+            &crate::tools::ThreadCancellation::default(),
+        )
+        .await;
+    assert!(
+        matches!(configured, AuthorizationOutcome::Denied(reason) if reason.contains("configured"))
+    );
+
+    let hard = broker
+        .authorize(
+            "edit",
+            &[PermissionResource::new("edit", "/workspace/.git/config")
+                .with_hard_denial("protected target")],
+            &crate::tools::kernel::ToolCallContext::default(),
+            &crate::tools::ThreadCancellation::default(),
+        )
+        .await;
+    assert_eq!(
+        hard,
+        AuthorizationOutcome::Denied("protected target".to_string())
+    );
+    assert!(broker.pending().is_empty());
+    assert!(broker.grants().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn enabling_auto_approve_claims_pending_once_and_disabling_restores_manual_mode() {
+    let (path, broker) = broker_fixture();
+    let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+    let interactive = bus.subscribe_assistant_deltas();
+    broker.attach_event_bus(bus);
+    let authorize = {
+        let broker = Arc::clone(&broker);
+        tokio::spawn(async move {
+            broker
+                .authorize(
+                    "exec_command",
+                    &[PermissionResource::new(
+                        "execute",
+                        "command:[curl][example.com]",
+                    )],
+                    &crate::tools::kernel::ToolCallContext::default(),
+                    &crate::tools::ThreadCancellation::default(),
+                )
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    let request = broker.pending().pop().expect("pending approval");
+    broker
+        .set_approval_mode(PermissionApprovalMode::AutoApprove)
+        .unwrap();
+    assert_eq!(authorize.await.unwrap(), AuthorizationOutcome::Allowed);
+    assert!(broker.reply(&request.id, PermissionReply::Once).is_err());
+
+    drop(interactive);
+    broker
+        .set_approval_mode(PermissionApprovalMode::Manual)
+        .unwrap();
+    let outcome = broker
+        .authorize(
+            "exec_command",
+            &[PermissionResource::new(
+                "execute",
+                "command:[curl][example.com]",
+            )],
+            &crate::tools::kernel::ToolCallContext::default(),
+            &crate::tools::ThreadCancellation::default(),
+        )
+        .await;
+    assert!(
+        matches!(outcome, AuthorizationOutcome::Denied(reason) if reason.contains("no interactive"))
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn delegated_child_allows_its_parent_ui_time_to_connect_and_reply() {
     let (path, broker) = broker_fixture();
     crate::store::insert_test_session(&path, "parent");

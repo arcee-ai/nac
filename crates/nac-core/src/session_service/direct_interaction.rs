@@ -63,6 +63,17 @@ impl SessionService {
         self.direct_permission_broker()?.reply(request_id, reply)
     }
 
+    pub fn permission_approval_mode(&self) -> Result<crate::permissions::PermissionApprovalMode> {
+        Ok(self.direct_permission_broker()?.approval_mode())
+    }
+
+    pub fn set_permission_approval_mode(
+        &self,
+        mode: crate::permissions::PermissionApprovalMode,
+    ) -> Result<()> {
+        self.direct_permission_broker()?.set_approval_mode(mode)
+    }
+
     pub fn delete_permission_grant(&self, grant_id: &str) -> Result<()> {
         self.direct_permission_broker()?.delete_grant(grant_id)
     }
