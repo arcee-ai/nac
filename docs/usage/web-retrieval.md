@@ -17,13 +17,15 @@ child sessions never receive these capabilities. A top-level direct session
 using managed-orchestrator control tools does receive them.
 
 The orchestrator removes `EXA_API_KEY` from the worker process environment and
-keeps stdin exclusively for cancellation. On Unix, each managed dispatch gets
-an anonymous stream socket. The worker marks its inherited endpoint
-close-on-exec before constructing any MCP transport, announces readiness only
+keeps stdin exclusively for cancellation. On Linux, each managed dispatch gets
+a mode-0600 filesystem Unix socket. The worker first reapplies the managed
+process hardening, connects without inheriting a credential descriptor, and
+authenticates the server PID with `SO_PEERCRED`; the server likewise accepts
+only the PID of the worker it spawned. The worker announces readiness only
 after MCP construction, then receives one bounded credential frame and closes
 the socket. Credential bytes are therefore neither buffered before MCP startup
-nor inherited by MCP descendants, and an ordinary Linux `/proc/<pid>/fd` open
-cannot duplicate the socket as it could the retired stdin pipe. On non-Unix
+nor available to MCP descendants. Other Unix hosts retain an anonymous
+close-on-exec socket with the same post-MCP readiness ordering. On non-Unix
 hosts, dispatch fails closed when a native credential would need delegation.
 
 On Linux, an explicitly configured Managed NAC server and its workers also

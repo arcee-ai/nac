@@ -508,7 +508,7 @@ async fn request_json<T: serde::de::DeserializeOwned>(
 ) -> Result<T> {
     let origin = provider_origin(&endpoint)?;
     let redirect_origin = origin.clone();
-    let client = reqwest::Client::builder()
+    let client_builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
@@ -519,7 +519,25 @@ async fn request_json<T: serde::de::DeserializeOwned>(
             } else {
                 attempt.stop()
             }
-        }))
+        }));
+    #[cfg(debug_assertions)]
+    let client_builder = if let Some(path) = std::env::var_os("NAC_E2E_EXA_CA_CERT") {
+        let pem = std::fs::read(&path).context("failed to read the Exa E2E CA certificate")?;
+        let certificates = reqwest::tls::Certificate::from_pem_bundle(&pem)
+            .context("failed to parse the Exa E2E CA certificate")?;
+        client_builder.tls_certs_merge(certificates)
+    } else {
+        client_builder
+    };
+    #[cfg(debug_assertions)]
+    let client_builder = if let Ok(proxy) = std::env::var("NAC_E2E_EXA_HTTPS_PROXY") {
+        client_builder.proxy(
+            reqwest::Proxy::https(proxy).context("failed to configure the Exa E2E HTTPS proxy")?,
+        )
+    } else {
+        client_builder
+    };
+    let client = client_builder
         .build()
         .context("failed to initialize Exa HTTP client")?;
     let operation = async {
