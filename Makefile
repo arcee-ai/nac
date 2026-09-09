@@ -150,7 +150,7 @@ test-e2e:
 	$(CARGO) build --locked -p $(PKG) --bin $(BIN)
 	NAC_E2E_BINARY="$(CURDIR)/target/debug/$(BIN)" npm --prefix $(WEB_DIR) run test:e2e
 
-## Run non-destructive browser smoke checks against an authenticated remote Managed NAC
+## Run non-destructive BasicAuth or portal-launch smoke checks against a remote Managed NAC
 test-e2e-remote:
 	npm --prefix $(WEB_DIR) run test:e2e:remote
 
