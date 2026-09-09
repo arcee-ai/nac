@@ -227,10 +227,10 @@ mod platform {
             let listener = StdUnixListener::bind(&path)?;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
             command.arg("--native-credential-socket").arg(&path);
-            return Ok(PreparedWorkerCredentialChannel {
+            Ok(PreparedWorkerCredentialChannel {
                 listener,
                 socket_path: SocketPathGuard(path),
-            });
+            })
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -262,13 +262,13 @@ mod platform {
                 let expected_pid = expected_pid
                     .ok_or_else(|| io::Error::other("managed worker process ID is unavailable"))?;
                 self.listener.set_nonblocking(true)?;
-                return Ok(WorkerCredentialSender {
+                Ok(WorkerCredentialSender {
                     transport: WorkerCredentialTransport::Listener {
                         listener: tokio::net::UnixListener::from_std(self.listener)?,
                         expected_pid,
                         socket_path: self.socket_path,
                     },
-                });
+                })
             }
             #[cfg(not(target_os = "linux"))]
             {
@@ -356,9 +356,9 @@ mod platform {
                 }
                 set_cloexec(stream.as_raw_fd(), true)?;
                 validate_unix_stream(stream.as_raw_fd())?;
-                return Ok(Self {
+                Ok(Self {
                     stream: Some(stream),
-                });
+                })
             }
             #[cfg(not(target_os = "linux"))]
             {

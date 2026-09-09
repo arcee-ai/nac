@@ -33,9 +33,10 @@ impl NativeWebCapabilities {
     pub(super) fn resolve_credential(&self) -> Result<Option<String>> {
         match self {
             Self::Disabled => Ok(None),
-            Self::Direct => Ok(crate::worker_credentials::managed_exa_api_key().or(
-                crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV)?,
-            )),
+            Self::Direct => match crate::worker_credentials::managed_exa_api_key() {
+                Some(credential) => Ok(Some(credential)),
+                None => crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV),
+            },
             Self::Worker(credential) => Ok(credential.clone()),
         }
     }
@@ -54,6 +55,28 @@ mod tests {
         }
         crate::worker_credentials::capture_managed_native_credentials_from_environment().unwrap();
         assert!(std::env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
+        let nac_home = std::path::PathBuf::from(std::env::var_os("NAC_HOME").unwrap());
+        std::fs::create_dir_all(&nac_home).unwrap();
+        let credential_file = nac_home.join("credentials.json");
+        let fixture = std::env::var("NAC_MANAGED_DIRECT_WEB_CREDENTIAL_FIXTURE").unwrap();
+        std::fs::write(
+            &credential_file,
+            if fixture == "corrupt" {
+                b"not valid JSON".as_slice()
+            } else {
+                br#"{"api_keys":{"EXA_API_KEY":"must-not-be-read"}}"#.as_slice()
+            },
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                &credential_file,
+                std::fs::Permissions::from_mode(if fixture == "insecure" { 0o644 } else { 0o600 }),
+            )
+            .unwrap();
+        }
         let capability = NativeWebCapabilities::new(AgentMode::Direct, false);
         assert_eq!(
             capability.resolve_credential().unwrap().as_deref(),
@@ -70,23 +93,37 @@ mod tests {
 
     #[test]
     fn managed_snapshot_remains_available_to_direct_native_web_only() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "agent::web_capabilities::tests::managed_snapshot_direct_web_helper",
-                "--nocapture",
-            ])
-            .env("NAC_MANAGED_DIRECT_WEB_HELPER", "1")
-            .env(crate::model::EXA_API_KEY_ENV, CANARY)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "managed direct-web helper failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(!String::from_utf8_lossy(&output.stdout).contains(CANARY));
-        assert!(!String::from_utf8_lossy(&output.stderr).contains(CANARY));
+        let fixtures = if cfg!(unix) {
+            &["corrupt", "insecure"][..]
+        } else {
+            &["corrupt"][..]
+        };
+        for fixture in fixtures {
+            let nac_home = std::env::temp_dir().join(format!(
+                "nac_managed_direct_web_{fixture}_{}",
+                uuid::Uuid::new_v4().simple()
+            ));
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "agent::web_capabilities::tests::managed_snapshot_direct_web_helper",
+                    "--nocapture",
+                ])
+                .env("NAC_MANAGED_DIRECT_WEB_HELPER", "1")
+                .env("NAC_MANAGED_DIRECT_WEB_CREDENTIAL_FIXTURE", fixture)
+                .env("NAC_HOME", &nac_home)
+                .env(crate::model::EXA_API_KEY_ENV, CANARY)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "managed direct-web {fixture} helper failed: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!String::from_utf8_lossy(&output.stdout).contains(CANARY));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains(CANARY));
+            let _ = std::fs::remove_dir_all(nac_home);
+        }
     }
 }
