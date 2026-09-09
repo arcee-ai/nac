@@ -61,9 +61,11 @@ mod types;
 
 pub use api_key_store::{list_stored_api_keys, remove_api_key, store_api_key, StoredApiKeySummary};
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
+pub use arcee::{validate_arcee_auth_issuer, ARCEE_AUTH_DEV2_ISSUER, ARCEE_AUTH_PRODUCTION_ISSUER};
 pub use arcee_bootstrap::{
-    import_managed_arcee_bootstrap, managed_arcee_auth_storage_root,
-    validate_managed_arcee_authorization, ManagedArceeBootstrapOutcome,
+    import_managed_arcee_bootstrap, import_managed_arcee_bootstrap_for_issuer,
+    managed_arcee_auth_storage_root, validate_managed_arcee_authorization,
+    validate_managed_arcee_authorization_for_issuer, ManagedArceeBootstrapOutcome,
     MANAGED_ARCEE_BOOTSTRAP_PATH,
 };
 pub use backend::{
@@ -374,9 +376,36 @@ pub async fn begin_login(
     provider: ManagedAuthProvider,
     style: LoginStyle,
 ) -> Result<PendingDeviceLogin> {
+    begin_login_with_optional_arcee_auth_issuer(provider, style, None).await
+}
+
+/// Starts an Arcee login against one explicitly approved authorization issuer.
+/// Other providers reject this provider-specific selector.
+pub async fn begin_login_with_arcee_auth_issuer(
+    provider: ManagedAuthProvider,
+    style: LoginStyle,
+    auth_issuer: &str,
+) -> Result<PendingDeviceLogin> {
+    if provider != ManagedAuthProvider::Arcee {
+        return Err(anyhow!(
+            "an Arcee auth issuer cannot be selected for provider '{provider}'"
+        ));
+    }
+    begin_login_with_optional_arcee_auth_issuer(provider, style, Some(auth_issuer)).await
+}
+
+async fn begin_login_with_optional_arcee_auth_issuer(
+    provider: ManagedAuthProvider,
+    style: LoginStyle,
+    arcee_auth_issuer: Option<&str>,
+) -> Result<PendingDeviceLogin> {
     let inner = match (provider, style) {
         (ManagedAuthProvider::Arcee, _) => {
-            PendingDeviceLoginKind::Arcee(arcee::begin_arcee_device_login().await?)
+            let login = match arcee_auth_issuer {
+                Some(auth_issuer) => arcee::begin_arcee_device_login_at(auth_issuer).await?,
+                None => arcee::begin_arcee_device_login().await?,
+            };
+            PendingDeviceLoginKind::Arcee(login)
         }
         (ManagedAuthProvider::Codex, LoginStyle::Loopback) => {
             PendingDeviceLoginKind::CodexLoopback(

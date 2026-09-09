@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use super::*;
 use crate::model::arcee::{
     request_token_refresh, stored_auth_from_refresh, ArceeAuthService, RefreshOutcome,
-    LEGACY_CLIENT_ID,
+    ARCEE_AUTH_DEV2_ISSUER, LEGACY_CLIENT_ID,
 };
 use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
@@ -87,6 +87,13 @@ fn bootstrap_value(bootstrap_id: &str) -> Value {
     })
 }
 
+fn bootstrap_v2_value(bootstrap_id: &str, auth_issuer: &str) -> Value {
+    let mut value = bootstrap_value(bootstrap_id);
+    value["version"] = json!(2);
+    value["auth_issuer"] = json!(auth_issuer);
+    value
+}
+
 fn write_private(path: &Path, contents: impl AsRef<[u8]>) {
     fs::write(path, contents).unwrap();
     #[cfg(unix)]
@@ -104,11 +111,21 @@ fn write_bootstrap(paths: &OwnedPaths, bootstrap_id: &str) {
 }
 
 fn import(paths: &OwnedPaths) -> Result<ManagedArceeBootstrapOutcome> {
-    import_with_paths(HOST_ID, paths.borrowed(), || Ok(()))
+    import_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        paths.borrowed(),
+        || Ok(()),
+    )
 }
 
 fn validate(paths: &OwnedPaths) -> Result<()> {
-    validate_authorization_with_paths(HOST_ID, "https://api.arcee.ai", paths.authorization())
+    validate_authorization_with_paths(
+        HOST_ID,
+        "https://api.arcee.ai",
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        paths.authorization(),
+    )
 }
 
 fn read_auth(paths: &OwnedPaths) -> StoredArceeAuth {
@@ -130,6 +147,7 @@ fn first_import_is_durable_and_restart_does_not_need_the_mount() {
     assert_eq!(auth.access_token, ACCESS_TOKEN);
     assert_eq!(auth.refresh_token, REFRESH_TOKEN);
     assert_eq!(auth.client_id, MANAGED_CLIENT_ID);
+    assert_eq!(auth.auth_issuer, ARCEE_AUTH_PRODUCTION_ISSUER);
     assert_eq!(auth.expires_at_ms, 1_893_553_445_678);
     assert_eq!(
         auth.managed_bootstrap,
@@ -179,9 +197,12 @@ fn retry_tombstones_the_durable_generation_not_a_reconciled_mount() {
     let paths = dir.paths();
     write_bootstrap(&paths, BOOTSTRAP_ID);
 
-    let error = import_with_paths(HOST_ID, paths.borrowed(), || {
-        Err(anyhow!("deterministic post-credential failpoint"))
-    })
+    let error = import_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        paths.borrowed(),
+        || Err(anyhow!("deterministic post-credential failpoint")),
+    )
     .unwrap_err();
     assert!(error.to_string().contains("deterministic"));
     assert!(paths.auth.exists());
@@ -206,6 +227,57 @@ fn retry_tombstones_the_durable_generation_not_a_reconciled_mount() {
         ManagedArceeBootstrapOutcome::AlreadyConsumed
     );
     validate(&paths).unwrap();
+}
+
+#[test]
+fn receipt_recovery_preserves_and_rechecks_the_stored_dev2_issuer() {
+    let matching_dir = TestDir::new("dev2-recovery-match");
+    let matching_paths = matching_dir.paths();
+    let value = bootstrap_v2_value(BOOTSTRAP_ID, ARCEE_AUTH_DEV2_ISSUER);
+    write_private(&matching_paths.input, serde_json::to_vec(&value).unwrap());
+    import_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_DEV2_ISSUER,
+        matching_paths.borrowed(),
+        || Err(anyhow!("post-write dev2 failpoint")),
+    )
+    .unwrap_err();
+    assert!(!matching_paths.receipt.exists());
+    assert_eq!(
+        import_with_paths(
+            HOST_ID,
+            ARCEE_AUTH_DEV2_ISSUER,
+            matching_paths.borrowed(),
+            || Ok(())
+        )
+        .unwrap(),
+        ManagedArceeBootstrapOutcome::RecoveredReceipt
+    );
+    assert_eq!(
+        read_auth(&matching_paths).auth_issuer,
+        ARCEE_AUTH_DEV2_ISSUER
+    );
+
+    let mismatch_dir = TestDir::new("dev2-recovery-mismatch");
+    let mismatch_paths = mismatch_dir.paths();
+    write_private(&mismatch_paths.input, serde_json::to_vec(&value).unwrap());
+    import_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_DEV2_ISSUER,
+        mismatch_paths.borrowed(),
+        || Err(anyhow!("post-write dev2 failpoint")),
+    )
+    .unwrap_err();
+    let error = import_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        mismatch_paths.borrowed(),
+        || Ok(()),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("does not match managed configuration"));
+    assert!(!mismatch_paths.receipt.exists());
 }
 
 #[test]
@@ -334,10 +406,21 @@ fn bound_validation_rejects_every_receipt_and_provenance_mismatch() {
     let error = assert_redacted(validate(&paths).unwrap_err());
     assert!(error.contains("not structurally valid"));
 
+    auth = read_auth_from_bytes(&original_auth, &paths.auth);
+    auth.auth_issuer = ARCEE_AUTH_DEV2_ISSUER.to_string();
+    write_stored_auth_to_path(&paths.auth, &auth).unwrap();
+    let error = assert_redacted(validate(&paths).unwrap_err());
+    assert!(error.contains("auth issuer does not match managed configuration"));
+
     write_private(&paths.auth, &original_auth);
     let error = assert_redacted(
-        validate_authorization_with_paths(HOST_ID, "https://app.arcee.ai", paths.authorization())
-            .unwrap_err(),
+        validate_authorization_with_paths(
+            HOST_ID,
+            "https://app.arcee.ai",
+            ARCEE_AUTH_PRODUCTION_ISSUER,
+            paths.authorization(),
+        )
+        .unwrap_err(),
     );
     assert!(error.contains("endpoint origin"));
 
@@ -370,6 +453,139 @@ fn strict_validation_rejects_unknown_fields_mismatch_and_secret_echo() {
     let error = import(&paths).unwrap_err().to_string();
     assert!(error.contains("configured logical host"));
     assert!(!error.contains(ACCESS_TOKEN));
+}
+
+#[test]
+fn strict_v2_persists_exact_prod_and_dev2_issuers_independently_of_inference() {
+    for (label, auth_issuer, inference_base_url) in [
+        (
+            "prod-v2",
+            ARCEE_AUTH_PRODUCTION_ISSUER,
+            "https://api2.apps.dev.arcee.ai",
+        ),
+        (
+            "dev2-v2",
+            ARCEE_AUTH_DEV2_ISSUER,
+            "https://tenant.arcee.ai/api/v1",
+        ),
+    ] {
+        let dir = TestDir::new(label);
+        let paths = dir.paths();
+        let mut value = bootstrap_v2_value(BOOTSTRAP_ID, auth_issuer);
+        value["inference_base_url"] = json!(inference_base_url);
+        write_private(&paths.input, serde_json::to_vec(&value).unwrap());
+
+        assert_eq!(
+            import_with_paths(HOST_ID, auth_issuer, paths.borrowed(), || Ok(())).unwrap(),
+            ManagedArceeBootstrapOutcome::Imported
+        );
+        let auth = read_auth(&paths);
+        assert_eq!(auth.auth_issuer, auth_issuer);
+        assert_eq!(auth.base_url, inference_base_url);
+        validate_authorization_with_paths(
+            HOST_ID,
+            inference_base_url,
+            auth_issuer,
+            paths.authorization(),
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn v1_always_means_production_and_cannot_be_reclassified_as_dev2() {
+    let prod_dir = TestDir::new("v1-production-default");
+    let prod_paths = prod_dir.paths();
+    let mut value = bootstrap_value(BOOTSTRAP_ID);
+    value["inference_base_url"] = json!(ARCEE_AUTH_DEV2_ISSUER);
+    write_private(&prod_paths.input, serde_json::to_vec(&value).unwrap());
+    import(&prod_paths).unwrap();
+    let auth = read_auth(&prod_paths);
+    assert_eq!(auth.auth_issuer, ARCEE_AUTH_PRODUCTION_ISSUER);
+    assert_eq!(auth.base_url, ARCEE_AUTH_DEV2_ISSUER);
+
+    let dev2_dir = TestDir::new("v1-dev2-reissue");
+    let dev2_paths = dev2_dir.paths();
+    write_bootstrap(&dev2_paths, BOOTSTRAP_ID);
+    let error = import_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_DEV2_ISSUER,
+        dev2_paths.borrowed(),
+        || Ok(()),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("does not match managed configuration"));
+    assert!(!dev2_paths.auth.exists());
+    assert!(!dev2_paths.receipt.exists());
+}
+
+#[test]
+fn v2_auth_issuer_is_exact_double_bound_and_rejected_without_writes() {
+    for (label, auth_issuer) in [
+        ("http", "http://api.arcee.ai"),
+        ("slash", "https://api.arcee.ai/"),
+        ("port", "https://api.arcee.ai:443"),
+        ("userinfo", "https://user@api.arcee.ai"),
+        ("path", "https://api.arcee.ai/app/v1"),
+        ("query", "https://api.arcee.ai?env=dev2"),
+        ("fragment", "https://api.arcee.ai#dev2"),
+        ("subdomain", "https://tenant.arcee.ai"),
+        ("lookalike", "https://api.arcee.ai.attacker.example"),
+    ] {
+        let dir = TestDir::new(label);
+        let paths = dir.paths();
+        let value = bootstrap_v2_value(BOOTSTRAP_ID, auth_issuer);
+        write_private(&paths.input, serde_json::to_vec(&value).unwrap());
+        let error = import(&paths).unwrap_err().to_string();
+        assert!(
+            error.contains("auth_issuer is not approved"),
+            "{auth_issuer}: {error}"
+        );
+        assert!(!error.contains(ACCESS_TOKEN));
+        assert!(!error.contains(REFRESH_TOKEN));
+        assert!(!paths.auth.exists());
+        assert!(!paths.receipt.exists());
+    }
+
+    let mismatch_dir = TestDir::new("issuer-mismatch");
+    let paths = mismatch_dir.paths();
+    let value = bootstrap_v2_value(BOOTSTRAP_ID, ARCEE_AUTH_PRODUCTION_ISSUER);
+    write_private(&paths.input, serde_json::to_vec(&value).unwrap());
+    let error = import_with_paths(HOST_ID, ARCEE_AUTH_DEV2_ISSUER, paths.borrowed(), || Ok(()))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("does not match managed configuration"));
+    assert!(!paths.auth.exists());
+    assert!(!paths.receipt.exists());
+
+    let missing_dir = TestDir::new("issuer-missing");
+    let missing_paths = missing_dir.paths();
+    let mut value = bootstrap_v2_value(BOOTSTRAP_ID, ARCEE_AUTH_PRODUCTION_ISSUER);
+    value.as_object_mut().unwrap().remove("auth_issuer");
+    write_private(&missing_paths.input, serde_json::to_vec(&value).unwrap());
+    let error = import(&missing_paths).unwrap_err().to_string();
+    assert!(error.contains("strict v2"));
+    assert!(!missing_paths.auth.exists());
+    assert!(!missing_paths.receipt.exists());
+
+    let duplicate_dir = TestDir::new("issuer-duplicate");
+    let duplicate_paths = duplicate_dir.paths();
+    let raw = serde_json::to_string(&bootstrap_v2_value(
+        BOOTSTRAP_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+    ))
+    .unwrap();
+    let raw = raw.replacen(
+        r#""auth_issuer":"https://api.arcee.ai""#,
+        r#""auth_issuer":"https://api.arcee.ai","auth_issuer":"https://api2.apps.dev.arcee.ai""#,
+        1,
+    );
+    write_private(&duplicate_paths.input, raw);
+    let error = import(&duplicate_paths).unwrap_err().to_string();
+    assert!(error.contains("strict v2"));
+    assert!(!duplicate_paths.auth.exists());
+    assert!(!duplicate_paths.receipt.exists());
 }
 
 #[cfg(unix)]
@@ -466,6 +682,7 @@ async fn managed_client_refresh_rotation_is_written_and_reopens_with_provenance(
     assert_eq!(reopened.access_token, "rotated-access");
     assert_eq!(reopened.refresh_token, "rotated-refresh");
     assert_eq!(reopened.client_id, MANAGED_CLIENT_ID);
+    assert_eq!(reopened.auth_issuer, ARCEE_AUTH_PRODUCTION_ISSUER);
     assert!(reopened.managed_bootstrap.is_some());
 }
 
