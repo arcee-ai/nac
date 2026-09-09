@@ -84,6 +84,7 @@ done
             "model_backend = \"arcee-auth\"" \
             "model_id = \"trinity-large-thinking\"" \
             "model_endpoint = \"https://api.arcee.ai\"" \
+            "model_auth_issuer = \"https://api.arcee.ai\"" \
             "model_credential_file = \"/run/secrets/nac/bootstrap.json\"" \
             "model_credential_source = \"managed-bootstrap\"" \
             > /etc/nac/managed.toml
@@ -193,7 +194,7 @@ port=$(wait_until_ready)
     test ! -L /run/secrets/nac/bootstrap.json
     test -f /var/lib/nac/arcee_auth.json
     test -f /var/lib/nac/arcee_managed_bootstrap_receipt.json
-    jq -e '.client_id == "managed-nac" and .managed_bootstrap.bootstrap_id == "4712bc5e-30d5-421a-b416-8291d9f7d8f9"' /var/lib/nac/arcee_auth.json >/dev/null
+    jq -e '.client_id == "managed-nac" and .auth_issuer == "https://api.arcee.ai" and .managed_bootstrap.bootstrap_id == "4712bc5e-30d5-421a-b416-8291d9f7d8f9"' /var/lib/nac/arcee_auth.json >/dev/null
     if printf "%s\n" overwritten > /run/secrets/nac/bootstrap.json 2>/dev/null; then
         echo "bootstrap mount unexpectedly accepted a write" >&2
         exit 1

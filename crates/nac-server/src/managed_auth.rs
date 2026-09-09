@@ -21,8 +21,9 @@ use axum::{
     Json,
 };
 use nac_core::model::{
-    begin_login, managed_auth_logout, managed_auth_snapshot, DeviceLoginPrompt, LoginStyle,
-    ManagedAuthProvider, ManagedAuthSnapshot, MANAGED_AUTH_PROVIDERS,
+    begin_login, begin_login_with_arcee_auth_issuer, managed_auth_logout, managed_auth_snapshot,
+    DeviceLoginPrompt, LoginStyle, ManagedAuthProvider, ManagedAuthSnapshot,
+    MANAGED_AUTH_PROVIDERS,
 };
 use serde::Serialize;
 
@@ -253,6 +254,17 @@ fn parse_provider(value: &str) -> Result<ManagedAuthProvider, ApiError> {
     })
 }
 
+fn managed_auth_issuer_for_login(
+    provider: ManagedAuthProvider,
+    profile: Option<&crate::application::managed::ManagedModelProfile>,
+) -> Option<&str> {
+    if provider == ManagedAuthProvider::Arcee {
+        profile.and_then(|profile| profile.auth_issuer.as_deref())
+    } else {
+        None
+    }
+}
+
 impl SessionManager {
     pub fn managed_auth_statuses(&self) -> Result<ManagedAuthListResponse, ApiError> {
         let providers = MANAGED_AUTH_PROVIDERS
@@ -267,7 +279,13 @@ impl SessionManager {
         provider: ManagedAuthProvider,
         style: LoginStyle,
     ) -> Result<DeviceLoginStartedResponse, ApiError> {
-        let pending = begin_login(provider, style).await?;
+        let managed_arcee_issuer = managed_auth_issuer_for_login(provider, self.managed_model());
+        let pending = match managed_arcee_issuer {
+            Some(auth_issuer) => {
+                begin_login_with_arcee_auth_issuer(provider, style, auth_issuer).await?
+            }
+            None => begin_login(provider, style).await?,
+        };
         let DeviceLoginPrompt {
             verification_uri,
             user_code,
@@ -457,4 +475,44 @@ pub(crate) async fn logout_handler(
     let provider = parse_provider(&provider)?;
     managed_auth_logout(provider)?;
     Ok(Json(managed_auth_snapshot(provider)?.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn dev2_profile() -> crate::application::managed::ManagedModelProfile {
+        crate::application::managed::ManagedModelProfile {
+            backend: nac_core::model::BackendKind::ArceeAuth,
+            model_id: "trinity-large-thinking".to_string(),
+            endpoint: "https://api2.apps.dev.arcee.ai".to_string(),
+            auth_issuer: Some(nac_core::model::ARCEE_AUTH_DEV2_ISSUER.to_string()),
+            credential_file: PathBuf::from(nac_core::model::MANAGED_ARCEE_BOOTSTRAP_PATH),
+            credential_source: nac_managed::ManagedModelCredentialSource::ManagedBootstrap,
+        }
+    }
+
+    #[test]
+    fn managed_arcee_login_uses_configured_issuer_without_stored_credentials() {
+        let profile = dev2_profile();
+        assert_eq!(
+            managed_auth_issuer_for_login(ManagedAuthProvider::Arcee, Some(&profile)),
+            Some(nac_core::model::ARCEE_AUTH_DEV2_ISSUER)
+        );
+    }
+
+    #[test]
+    fn nonmanaged_arcee_and_unrelated_providers_use_their_defaults() {
+        let profile = dev2_profile();
+        assert_eq!(
+            managed_auth_issuer_for_login(ManagedAuthProvider::Arcee, None),
+            None
+        );
+        assert_eq!(
+            managed_auth_issuer_for_login(ManagedAuthProvider::Codex, Some(&profile)),
+            None
+        );
+    }
 }

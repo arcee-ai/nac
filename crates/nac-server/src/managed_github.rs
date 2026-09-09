@@ -871,6 +871,7 @@ mod tests {
             model_backend: "arcee-api".to_string(),
             model_id: "trinity-large-thinking".to_string(),
             model_endpoint: "https://models.example.test/v1".to_string(),
+            model_auth_issuer: None,
             model_credential_file: root.join("model-token"),
             model_credential_source: nac_managed::ManagedModelCredentialSource::MountedApiKey,
             model_credential_environment_names: Vec::new(),

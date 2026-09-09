@@ -81,6 +81,7 @@ github_client_id = "Iv1.example"
 model_backend = "arcee-auth"
 model_id = "trinity-large-thinking"
 model_endpoint = "https://api.arcee.ai"
+model_auth_issuer = "https://api.arcee.ai"
 model_credential_file = "/run/secrets/nac/bootstrap.json"
 model_credential_source = "managed-bootstrap"
 ```
@@ -253,7 +254,15 @@ not copied into command environments.
 
 `managed-bootstrap` requires `model_backend = "arcee-auth"`, the exact bootstrap
 path above, and `NAC_HOME` equal to `state_root` (the image fixes both to
-`/var/lib/nac`). The controller must project the single Secret key with a
+`/var/lib/nac`). `model_auth_issuer` is the expected authorization-service
+origin. It defaults to production (`https://api.arcee.ai`) for compatibility;
+dev2 must set it explicitly to `https://api2.apps.dev.arcee.ai`. NAC accepts
+only those two exact strings. This field is separate from `model_endpoint` and
+is used both to double-bind a new bootstrap and to select the device-auth
+service when the owner starts interactive repair without a usable stored
+credential. Ordinary non-managed login continues to use production.
+
+The controller must project the single Secret key with a
 Kubernetes `subPath` mount so the final path is a regular file, not a projected
 volume symlink. NAC reads it with `O_NOFOLLOW`, imports under the normal Arcee
 credential lock, writes the credential and a separate nonsecret receipt
@@ -261,11 +270,11 @@ atomically, then uses only writable durable state. Reconciliation may leave or
 replace the input, and the mount may disappear on later starts; none can
 overwrite a locally rotated credential.
 
-The strict v1 JSON object has exactly these fields (no extras):
+The strict v2 JSON object has exactly these fields (no extras):
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "bootstrap_id": "4712bc5e-30d5-421a-b416-8291d9f7d8f9",
   "managed_host_id": "21856443-8ed8-40ab-9036-72e837c99f27",
   "client_id": "managed-nac",
@@ -274,10 +283,19 @@ The strict v1 JSON object has exactly these fields (no extras):
   "access_token_expires_at": "2030-01-02T03:04:05Z",
   "token_type": "bearer",
   "inference_base_url": "https://api.arcee.ai",
+  "auth_issuer": "https://api.arcee.ai",
   "organization_id": "<nonsecret Arcee organization id>",
   "workspace": "<nonsecret workspace name>"
 }
 ```
+
+`auth_issuer` is persisted with the rotating credential and is the only input
+used to choose `/app/v1/device/refresh`. NAC never derives it from
+`inference_base_url`, the configured model endpoint, a request host, client ID,
+or token claims. Strict v1 bootstrap remains accepted only with production
+issuer semantics, and stored credentials written before this field existed
+also default to production. A dev2 grant delivered in v1 cannot be identified
+safely and must be revoked and reissued as v2.
 
 Both IDs are UUIDs with distinct meanings: `managed_host_id` is the stable
 ArceeFM business identity and must equal `logical_host_id`; `bootstrap_id`
@@ -293,10 +311,17 @@ repaired from nonsecret provenance on retry without rewriting the credential.
 Local logout or provider revocation removes the usable credential while the
 receipt remains a tombstone, so the managed profile fails closed. The existing
 interactive **Sign in with Arcee** flow remains available for ordinary
-`arcee-auth` use or after an operator deliberately changes credential source;
-its `nac-cli` credential cannot impersonate a managed bootstrap generation.
+`arcee-auth` use and managed repair. Managed configuration selects the expected
+production or dev2 authorization service even when the durable credential is
+missing or invalid; its `nac-cli` credential cannot impersonate a managed
+bootstrap generation.
 
-ArceeFM alone mints and revokes the grant. NAC receives no Kubernetes,
+ArceeFM alone mints and revokes the grant. For v2, ArceeFM must populate
+`auth_issuer` from a dedicated trusted deployment setting rather than from the
+inference URL. The controller/nac-api must carry `model_auth_issuer` in managed
+configuration and transport strict v1/v2 bootstrap JSON opaquely; any private
+schema or fixture validation must accept the v2 field without copying secrets
+into CR spec/status, API responses, or logs. NAC receives no Kubernetes,
 service-account, or provisioning credential and exposes no bootstrap HTTP
 endpoint. The grant authorizes all Arcee models entitled to its organization;
 `model_id` remains only the independent deployment default. GitHub access and
