@@ -247,17 +247,9 @@ async fn enforce_managed_admission(
     let _process_gate = Arc::clone(&manager.inner.maintenance_gate)
         .read_owned()
         .await;
-    let _host_lease = match sessions::HostAdmissionLease::try_acquire(&manager.inner.store_path) {
-        Ok(lease) => lease,
-        Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ApiErrorBody {
-                    error: "Managed NAC admission is closing for maintenance".to_string(),
-                }),
-            )
-                .into_response();
-        }
+    let _host_lease = match manager.managed_work_admission() {
+        Ok(Some(lease)) => lease,
+        Ok(None) => return next.run(request).await,
         Err(_) => {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -652,23 +644,6 @@ pub async fn serve_with_policy(
     on_listening: impl FnOnce(SocketAddr),
 ) -> Result<()> {
     policy.validate(addr)?;
-    let managed_v2 = manager
-        .managed_host()
-        .is_some_and(|managed| managed.version == nac_managed::MANAGED_CONFIG_VERSION);
-    let running = managed_v2.then(|| {
-        let identity = crate::build_identity::current();
-        nac_core::store::ManagedUpgradeTarget {
-            release_id: identity.build_id.to_string(),
-            source_sha: identity.source_revision.to_string(),
-            product_version: identity.product_version.to_string(),
-            schema_version: nac_core::store::schema_version(),
-            minimum_schema_version: nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
-        }
-    });
-    if let Some(running) = running.as_ref() {
-        nac_core::store::preflight_managed_forward_start(&manager.inner.store_path, running)?;
-    }
-
     // Establish the durable store before serving requests. Readiness probes
     // then verify this store in place and never create a blank replacement if
     // it disappears while the process is running. A managed host keeps only
@@ -676,12 +651,6 @@ pub async fn serve_with_policy(
     // failure; every route that could admit or mutate work remains absent.
     let app = match nac_core::store::initialize(&manager.inner.store_path) {
         Ok(()) => {
-            if let Some(running) = running.as_ref() {
-                let _ = nac_core::store::accept_managed_forward_start(
-                    &manager.inner.store_path,
-                    running,
-                )?;
-            }
             nac_core::reconcile_podman_creation_records(&manager.inner.store_path).await?;
             router(manager.clone())
         }
@@ -724,6 +693,17 @@ pub async fn serve_with_policy(
     let bound = listener
         .local_addr()
         .with_context(|| format!("failed to read bound address for {addr}"))?;
+    nac_core::store::check_readiness(&manager.inner.store_path)?;
+    if manager.inner.pending_forward_start {
+        let accepted = manager
+            .inner
+            .managed_identity
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("managed forward-start identity is unavailable"))?;
+        if !nac_core::store::accept_managed_forward_start(&manager.inner.store_path, accepted)? {
+            anyhow::bail!("accepted managed upgrade target changed before startup completed");
+        }
+    }
     on_listening(bound);
     let control_server = control_listener.map(|listener| {
         let app = managed_control::router(manager.clone());

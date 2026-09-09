@@ -273,11 +273,16 @@ impl SessionManager {
             user_code,
             expires_in_secs,
         } = pending.prompt();
+        // The HTTP admission lease ends with the start response, while the
+        // device flow can later persist credentials. Transfer independent
+        // cross-process admission authority into the background task first.
+        let background_admission = self.managed_work_admission()?;
 
         let outcome = Arc::new(StdMutex::new(LoginOutcome::Pending));
         let task = tokio::spawn({
             let outcome = Arc::clone(&outcome);
             async move {
+                let _background_admission = background_admission;
                 let result = pending.complete().await;
                 let mut slot = outcome
                     .lock()

@@ -324,6 +324,8 @@ struct SessionManagerInner {
     recovery_only: AtomicBool,
     maintenance_gate: Arc<RwLock<()>>,
     active_admissions: Arc<StdMutex<HashMap<String, nac_core::store::ManagedUpgradeBlocker>>>,
+    managed_identity: Option<nac_core::store::ManagedAcceptedIdentity>,
+    pending_forward_start: bool,
     #[cfg(test)]
     managed_monitor_peer_observed: tokio::sync::Notify,
 }
@@ -476,6 +478,39 @@ impl SessionManager {
             .transpose()?
             .unwrap_or(std::env::current_exe().context("failed to resolve current executable")?);
 
+        // This is deliberately before any managed model, credential, clone,
+        // reconciliation, or listener setup. An unaccepted replacement must
+        // be rejected by a read-only check before it can mutate host state.
+        let running_target = managed_running_target()?;
+        let configured_identity = options.managed_host.as_ref().and_then(|managed| {
+            (managed.version == nac_managed::MANAGED_CONFIG_VERSION).then(|| {
+                (
+                    managed.logical_host_id.as_str(),
+                    managed
+                        .host_incarnation_id
+                        .as_deref()
+                        .expect("validated v2 managed config has an incarnation"),
+                )
+            })
+        });
+        let preflight = nac_core::store::preflight_managed_forward_start(
+            &store_path,
+            &running_target,
+            configured_identity,
+        )?;
+        let managed_identity = match (preflight.accepted_identity, configured_identity) {
+            (Some(accepted), _) => Some(accepted),
+            (None, Some((managed_host_id, host_incarnation_id))) => {
+                Some(nac_core::store::ManagedAcceptedIdentity {
+                    managed_host_id: managed_host_id.to_string(),
+                    host_incarnation_id: host_incarnation_id.to_string(),
+                    operation_id: String::new(),
+                    target: running_target,
+                })
+            }
+            (None, None) => None,
+        };
+
         let managed_model = options
             .managed_host
             .as_ref()
@@ -520,6 +555,8 @@ impl SessionManager {
                 recovery_only: AtomicBool::new(false),
                 maintenance_gate: Arc::new(RwLock::new(())),
                 active_admissions: Arc::new(StdMutex::new(HashMap::new())),
+                managed_identity,
+                pending_forward_start: preflight.requires_accept,
                 #[cfg(test)]
                 managed_monitor_peer_observed: tokio::sync::Notify::new(),
             }),
@@ -551,10 +588,22 @@ impl SessionManager {
         self.inner.managed_host.as_ref()
     }
 
+    fn managed_identity(&self) -> Option<&nac_core::store::ManagedAcceptedIdentity> {
+        self.inner.managed_identity.as_ref()
+    }
+
     fn managed_work_admission(&self) -> Result<Option<nac_core::store::ManagedWorkAdmission>> {
-        self.managed_host()
-            .map(|_| nac_core::store::try_admit_managed_work(&self.inner.store_path))
-            .transpose()
+        match (self.managed_host(), self.inner.managed_identity.as_ref()) {
+            (None, _) => Ok(None),
+            (Some(_), Some(identity)) => nac_core::store::try_admit_managed_work_for_identity(
+                &self.inner.store_path,
+                identity,
+            )
+            .map(Some),
+            (Some(_), None) => {
+                nac_core::store::try_admit_managed_work(&self.inner.store_path).map(Some)
+            }
+        }
     }
 
     async fn managed_upgrade_blockers(
@@ -1856,6 +1905,17 @@ impl SessionManager {
         )?;
         Ok(child_session_id)
     }
+}
+
+fn managed_running_target() -> Result<nac_core::store::ManagedUpgradeTarget> {
+    let identity = build_identity::current();
+    Ok(nac_core::store::ManagedUpgradeTarget {
+        release_id: identity.build_id.to_string(),
+        source_sha: identity.source_revision.to_string(),
+        product_version: identity.product_version.to_string(),
+        schema_version: nac_core::store::schema_version(),
+        minimum_schema_version: nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+    })
 }
 
 fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPromptResponse {

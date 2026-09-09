@@ -230,13 +230,16 @@ impl ManagedControlVerifier {
             .verify(signed.as_bytes(), &signature)
             .map_err(|_| ManagedControlAssertionError::InvalidSignature)?;
 
+        let lifetime = claims.exp.checked_sub(claims.iat);
+        let latest_expiry = claims.exp.checked_add(CLOCK_SKEW_SECONDS);
+        let latest_not_before = now_unix_seconds.checked_add(CLOCK_SKEW_SECONDS);
         if claims.exp <= claims.iat
-            || claims.exp - claims.iat > MAX_LIFETIME_SECONDS
+            || lifetime.is_none_or(|lifetime| lifetime > MAX_LIFETIME_SECONDS)
             || claims.nbf < claims.iat
             || claims.nbf > claims.exp
-            || now_unix_seconds > claims.exp + CLOCK_SKEW_SECONDS
-            || now_unix_seconds + CLOCK_SKEW_SECONDS < claims.nbf
-            || claims.iat > now_unix_seconds + CLOCK_SKEW_SECONDS
+            || latest_expiry.is_none_or(|latest| now_unix_seconds > latest)
+            || latest_not_before.is_none_or(|latest| latest < claims.nbf)
+            || latest_not_before.is_none_or(|latest| claims.iat > latest)
         {
             return Err(ManagedControlAssertionError::InvalidTime);
         }

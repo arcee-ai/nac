@@ -865,12 +865,32 @@ fn open_connection_with_hooks(
     )?;
     create_session_forks_table(&transaction)?;
     create_managed_maintenance_tables(&transaction)?;
+    create_terminal_remote_cleanups_table(&transaction)?;
+    ensure_column(
+        &transaction,
+        "managed_host_maintenance",
+        "accepted_identity_json",
+        "TEXT",
+    )?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
     transaction.commit()?;
     Ok(conn)
+}
+
+fn create_terminal_remote_cleanups_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS terminal_remote_cleanups (
+             session_id TEXT NOT NULL,
+             pidfile TEXT NOT NULL,
+             created_at TEXT NOT NULL,
+             PRIMARY KEY (session_id, pidfile),
+             FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE RESTRICT
+         );",
+    )?;
+    Ok(())
 }
 
 fn create_managed_maintenance_tables(conn: &Connection) -> Result<()> {
@@ -880,6 +900,7 @@ fn create_managed_maintenance_tables(conn: &Connection) -> Result<()> {
              state TEXT NOT NULL CHECK (state IN ('serving', 'maintenance')),
              operation_id TEXT,
              target_json TEXT,
+             accepted_identity_json TEXT,
              prepared_at TEXT,
              version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
              CHECK (
@@ -889,8 +910,8 @@ fn create_managed_maintenance_tables(conn: &Connection) -> Result<()> {
              )
          );
          INSERT OR IGNORE INTO managed_host_maintenance
-             (singleton, state, operation_id, target_json, prepared_at, version)
-         VALUES (1, 'serving', NULL, NULL, NULL, 0);
+             (singleton, state, operation_id, target_json, accepted_identity_json, prepared_at, version)
+         VALUES (1, 'serving', NULL, NULL, NULL, NULL, 0);
 
          CREATE TABLE IF NOT EXISTS managed_control_operations (
              operation_id TEXT PRIMARY KEY,
@@ -1829,6 +1850,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "traditional_children",
         "managed_orchestrators",
         "session_forks",
+        "terminal_remote_cleanups",
         "projects",
         "session_projects",
     ] {

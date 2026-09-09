@@ -9,6 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const ASSERTION_CLOCK_SKEW_SECONDS: i64 = 5;
 const INCOMPLETE_ATTEMPT_RETENTION_SECONDS: i64 = 300;
 const MAX_CONTROL_OPERATIONS: i64 = 10_000;
+const MAX_CONTROL_ATTEMPTS: i64 = 10_000;
+const CONTROL_ATTEMPT_LOCK_STRIPES: u8 = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -30,9 +32,30 @@ pub struct ManagedUpgradeTarget {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ManagedAcceptedIdentity {
+    pub managed_host_id: String,
+    pub host_incarnation_id: String,
+    pub operation_id: String,
+    pub target: ManagedUpgradeTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedStartupPreflight {
+    pub accepted_identity: Option<ManagedAcceptedIdentity>,
+    pub requires_accept: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ManagedOperationBinding {
     pub managed_host_id: String,
     pub host_incarnation_id: String,
+    pub issuer: String,
+    pub audience: String,
+    /// The controller issuer is also the operation's origin authority. It is
+    /// stored separately so a future distinct-origin contract cannot silently
+    /// reinterpret an existing operation.
+    pub authority_origin: String,
     pub operation_id: String,
     pub target: ManagedUpgradeTarget,
     pub actor: String,
@@ -84,6 +107,8 @@ pub struct ManagedMaintenanceSnapshot {
     pub state: ManagedMaintenanceState,
     pub operation_id: Option<String>,
     pub target: Option<ManagedUpgradeTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_identity: Option<ManagedAcceptedIdentity>,
     pub prepared_at: Option<String>,
     pub version: u64,
     pub blockers: Vec<ManagedUpgradeBlocker>,
@@ -108,6 +133,7 @@ pub enum ManagedMaintenanceError {
     MaintenanceConflict,
     IncompatibleTarget,
     OperationCapacity,
+    AttemptCapacity,
     Store(anyhow::Error),
 }
 
@@ -123,6 +149,28 @@ pub fn try_admit_managed_work(path: &Path) -> Result<ManagedWorkAdmission> {
     let snapshot = managed_maintenance_snapshot(path)?;
     if snapshot.state == ManagedMaintenanceState::Maintenance {
         return Err(anyhow!("managed host is in maintenance"));
+    }
+    Ok(ManagedWorkAdmission { _lease: lease })
+}
+
+/// Managed-server admission additionally fences the serving release and host
+/// incarnation once a forward replacement has been accepted.
+pub fn try_admit_managed_work_for_identity(
+    path: &Path,
+    running: &ManagedAcceptedIdentity,
+) -> Result<ManagedWorkAdmission> {
+    let lease =
+        crate::sessions::HostAdmissionLease::try_acquire(path).map_err(|error| anyhow!(error))?;
+    let snapshot = managed_maintenance_snapshot(path)?;
+    if snapshot.state == ManagedMaintenanceState::Maintenance {
+        return Err(anyhow!("managed host is in maintenance"));
+    }
+    if snapshot
+        .accepted_identity
+        .as_ref()
+        .is_some_and(|accepted| accepted != running)
+    {
+        return Err(anyhow!("managed host release identity is stale"));
     }
     Ok(ManagedWorkAdmission { _lease: lease })
 }
@@ -143,6 +191,9 @@ impl std::fmt::Display for ManagedMaintenanceError {
             }
             Self::OperationCapacity => {
                 formatter.write_str("managed control operation retention capacity has been reached")
+            }
+            Self::AttemptCapacity => {
+                formatter.write_str("managed control attempt retention capacity has been reached")
             }
             Self::Store(_) => formatter.write_str("managed maintenance store operation failed"),
         }
@@ -177,12 +228,23 @@ pub fn managed_maintenance_snapshot(path: &Path) -> Result<ManagedMaintenanceSna
 pub fn preflight_managed_forward_start(
     path: &Path,
     running: &ManagedUpgradeTarget,
-) -> std::result::Result<(), ManagedMaintenanceError> {
+    configured_host: Option<(&str, &str)>,
+) -> std::result::Result<ManagedStartupPreflight, ManagedMaintenanceError> {
+    let empty = || ManagedStartupPreflight {
+        accepted_identity: None,
+        requires_accept: false,
+    };
     if !path.exists() {
-        return Ok(());
+        return Ok(empty());
     }
     let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(anyhow::Error::new)?;
+    let store_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(anyhow::Error::new)?;
+    if store_version > running.schema_version || store_version < running.minimum_schema_version {
+        return Err(ManagedMaintenanceError::IncompatibleTarget);
+    }
     let has_ledger: bool = conn
         .query_row(
             "SELECT EXISTS(
@@ -194,33 +256,102 @@ pub fn preflight_managed_forward_start(
         )
         .map_err(anyhow::Error::new)?;
     if !has_ledger {
-        return Ok(());
+        return Ok(empty());
     }
-    let row = conn
+    let has_accepted_identity: bool = conn
         .query_row(
-            "SELECT state, target_json FROM managed_host_maintenance WHERE singleton = 1",
+            "SELECT EXISTS(
+                 SELECT 1 FROM pragma_table_info('managed_host_maintenance')
+                 WHERE name = 'accepted_identity_json'
+             )",
             [],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| row.get(0),
         )
+        .map_err(anyhow::Error::new)?;
+    let query = if has_accepted_identity {
+        "SELECT state, operation_id, target_json, accepted_identity_json
+         FROM managed_host_maintenance WHERE singleton = 1"
+    } else {
+        "SELECT state, operation_id, target_json, NULL
+         FROM managed_host_maintenance WHERE singleton = 1"
+    };
+    let row = conn
+        .query_row(query, [], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
         .optional()
         .map_err(anyhow::Error::new)?;
-    let Some((state, target_json)) = row else {
+    let Some((state, operation_id, target_json, accepted_identity_json)) = row else {
         return Err(ManagedMaintenanceError::MaintenanceConflict);
     };
     if state == "serving" {
-        return Ok(());
+        let Some(json) = accepted_identity_json else {
+            return Ok(empty());
+        };
+        let accepted: ManagedAcceptedIdentity =
+            serde_json::from_str(&json).map_err(anyhow::Error::new)?;
+        validate_running_identity(&accepted, running, configured_host)?;
+        return Ok(ManagedStartupPreflight {
+            accepted_identity: Some(accepted),
+            requires_accept: false,
+        });
     }
     if state != "maintenance" {
         return Err(ManagedMaintenanceError::MaintenanceConflict);
     }
-    let accepted = target_json
+    let target = target_json
         .ok_or(ManagedMaintenanceError::MaintenanceConflict)
         .and_then(|json| {
             serde_json::from_str::<ManagedUpgradeTarget>(&json)
                 .map_err(anyhow::Error::new)
                 .map_err(ManagedMaintenanceError::Store)
         })?;
-    if accepted != *running || running.schema_version != schema_version() {
+    let operation_id = operation_id.ok_or(ManagedMaintenanceError::MaintenanceConflict)?;
+    let binding_json = conn
+        .query_row(
+            "SELECT binding_json FROM managed_control_operations WHERE operation_id = ?1",
+            params![operation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(anyhow::Error::new)?
+        .ok_or(ManagedMaintenanceError::MaintenanceConflict)?;
+    let binding: ManagedOperationBinding =
+        serde_json::from_str(&binding_json).map_err(anyhow::Error::new)?;
+    if binding.operation_id != operation_id || binding.target != target {
+        return Err(ManagedMaintenanceError::MaintenanceConflict);
+    }
+    let accepted = ManagedAcceptedIdentity {
+        managed_host_id: binding.managed_host_id,
+        host_incarnation_id: binding.host_incarnation_id,
+        operation_id: binding.operation_id,
+        target: binding.target,
+    };
+    validate_running_identity(&accepted, running, configured_host)?;
+    Ok(ManagedStartupPreflight {
+        accepted_identity: Some(accepted),
+        requires_accept: true,
+    })
+}
+
+fn validate_running_identity(
+    accepted: &ManagedAcceptedIdentity,
+    running: &ManagedUpgradeTarget,
+    configured_host: Option<(&str, &str)>,
+) -> std::result::Result<(), ManagedMaintenanceError> {
+    let Some((managed_host_id, host_incarnation_id)) = configured_host else {
+        return Err(ManagedMaintenanceError::MaintenanceConflict);
+    };
+    if accepted.target != *running
+        || running.schema_version != schema_version()
+        || accepted.managed_host_id != managed_host_id
+        || accepted.host_incarnation_id != host_incarnation_id
+    {
         return Err(ManagedMaintenanceError::MaintenanceConflict);
     }
     Ok(())
@@ -265,6 +396,14 @@ fn burn_control_attempt(
     if attempt_exists {
         transaction.commit().map_err(anyhow::Error::new)?;
         return Ok(None);
+    }
+    let attempt_count = transaction
+        .query_row("SELECT COUNT(*) FROM managed_control_attempts", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(anyhow::Error::new)?;
+    if !attempt_capacity_available(attempt_count) {
+        return Err(ManagedMaintenanceError::AttemptCapacity);
     }
     let now = now_utc();
     match transaction
@@ -321,6 +460,10 @@ fn burn_control_attempt(
 
 fn operation_capacity_available(operation_count: i64) -> bool {
     operation_count < MAX_CONTROL_OPERATIONS
+}
+
+fn attempt_capacity_available(attempt_count: i64) -> bool {
+    attempt_count < MAX_CONTROL_ATTEMPTS
 }
 
 fn attempt_outcome(
@@ -552,24 +695,17 @@ fn acquire_control_attempt_lease(
     jti: &str,
 ) -> std::result::Result<crate::sessions::SessionOperationLease, ManagedMaintenanceError> {
     let digest = Sha256::digest(jti.as_bytes());
-    let lease_id = format!("managed-control-{digest:x}");
-    for _ in 0..100 {
-        match crate::sessions::SessionOperationLease::try_acquire(path, &lease_id) {
-            Ok(lease) => return Ok(lease),
-            Err(crate::sessions::SessionOperationLeaseError::Busy(_)) => {
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            Err(error) => return Err(ManagedMaintenanceError::Store(anyhow!(error))),
-        }
-    }
-    Err(ManagedMaintenanceError::ReplayConflict)
+    let stripe = digest[0] % CONTROL_ATTEMPT_LOCK_STRIPES;
+    let lease_id = format!("managed-control-attempt-{stripe:02x}");
+    crate::sessions::SessionOperationLease::acquire(path, &lease_id)
+        .map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))
 }
 
 /// Clear maintenance only when the newly started binary exactly matches the
 /// accepted forward target and has opened the target schema successfully.
 pub fn accept_managed_forward_start(
     path: &Path,
-    running: &ManagedUpgradeTarget,
+    accepted: &ManagedAcceptedIdentity,
 ) -> std::result::Result<bool, ManagedMaintenanceError> {
     let mut conn = open_runtime_connection(path).map_err(ManagedMaintenanceError::Store)?;
     let transaction = conn
@@ -581,20 +717,37 @@ pub fn accept_managed_forward_start(
         transaction.commit().map_err(anyhow::Error::new)?;
         return Ok(false);
     }
-    if snapshot.target.as_ref() != Some(running)
-        || running.schema_version != schema_version()
-        || running.minimum_schema_version > schema_version()
+    let binding_json = transaction
+        .query_row(
+            "SELECT binding_json FROM managed_control_operations WHERE operation_id = ?1",
+            params![accepted.operation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(anyhow::Error::new)?
+        .ok_or(ManagedMaintenanceError::MaintenanceConflict)?;
+    let binding: ManagedOperationBinding =
+        serde_json::from_str(&binding_json).map_err(anyhow::Error::new)?;
+    if snapshot.operation_id.as_deref() != Some(accepted.operation_id.as_str())
+        || snapshot.target.as_ref() != Some(&accepted.target)
+        || binding.managed_host_id != accepted.managed_host_id
+        || binding.host_incarnation_id != accepted.host_incarnation_id
+        || binding.operation_id != accepted.operation_id
+        || binding.target != accepted.target
+        || accepted.target.schema_version != schema_version()
+        || accepted.target.minimum_schema_version > schema_version()
     {
         transaction.commit().map_err(anyhow::Error::new)?;
         return Ok(false);
     }
+    let accepted_json = serde_json::to_string(accepted).map_err(anyhow::Error::new)?;
     transaction
         .execute(
             "UPDATE managed_host_maintenance
              SET state = 'serving', operation_id = NULL, target_json = NULL,
-                 prepared_at = NULL, version = version + 1
+                 accepted_identity_json = ?1, prepared_at = NULL, version = version + 1
              WHERE singleton = 1 AND state = 'maintenance'",
-            [],
+            params![accepted_json],
         )
         .map_err(anyhow::Error::new)?;
     transaction.commit().map_err(anyhow::Error::new)?;
@@ -633,7 +786,7 @@ fn snapshot_with_connection(
     blockers: Vec<ManagedUpgradeBlocker>,
 ) -> Result<ManagedMaintenanceSnapshot> {
     conn.query_row(
-        "SELECT state, operation_id, target_json, prepared_at, version
+        "SELECT state, operation_id, target_json, accepted_identity_json, prepared_at, version
          FROM managed_host_maintenance WHERE singleton = 1",
         [],
         |row| {
@@ -653,7 +806,18 @@ fn snapshot_with_connection(
                         Box::new(error),
                     )
                 })?;
-            let version = u64::try_from(row.get::<_, i64>(4)?).map_err(|error| {
+            let accepted_identity = row
+                .get::<_, Option<String>>(3)?
+                .map(|json| serde_json::from_str(&json))
+                .transpose()
+                .map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+            let version = u64::try_from(row.get::<_, i64>(5)?).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
                     4,
                     rusqlite::types::Type::Integer,
@@ -664,7 +828,8 @@ fn snapshot_with_connection(
                 state,
                 operation_id: row.get(1)?,
                 target,
-                prepared_at: row.get(3)?,
+                accepted_identity,
+                prepared_at: row.get(4)?,
                 version,
                 blockers,
             })
@@ -733,6 +898,20 @@ fn durable_blockers(conn: &Connection) -> Result<Vec<ManagedUpgradeBlocker>> {
         "managed orchestrator is running",
         &mut blockers,
     )?;
+    let mut cleanups = conn.prepare(
+        "SELECT session_id, pidfile FROM terminal_remote_cleanups ORDER BY session_id, pidfile",
+    )?;
+    for row in cleanups.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })? {
+        let (session_id, pidfile) = row?;
+        blockers.push(ManagedUpgradeBlocker {
+            kind: ManagedBlockerKind::TerminalProcess,
+            id: pidfile,
+            session_id: Some(session_id),
+            detail: "remote terminal cleanup remains pending".to_string(),
+        });
+    }
     Ok(blockers)
 }
 

@@ -344,7 +344,13 @@ impl SessionService {
         admission: RunAdmissionKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         let _host_admission = enforce_coordination
-            .then(|| crate::store::try_admit_managed_work(&self.metadata.store_path))
+            .then(|| match self.managed_identity.as_deref() {
+                Some(identity) => crate::store::try_admit_managed_work_for_identity(
+                    &self.metadata.store_path,
+                    identity,
+                ),
+                None => crate::store::try_admit_managed_work(&self.metadata.store_path),
+            })
             .transpose()
             .map_err(|error| SessionSubmitError::Coordination {
                 message: SessionCoordinationError::store(format!(

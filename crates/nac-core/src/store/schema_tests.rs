@@ -277,6 +277,7 @@ fn assert_current_schema(conn: &Connection) {
             "state",
             "operation_id",
             "target_json",
+            "accepted_identity_json",
             "prepared_at",
             "version",
         ]
@@ -302,6 +303,10 @@ fn assert_current_schema(conn: &Connection) {
             "expires_at",
             "created_at",
         ]
+    );
+    assert_eq!(
+        table_columns(conn, "terminal_remote_cleanups"),
+        ["session_id", "pidfile", "created_at"]
     );
     for table in [
         "thread_steering",
@@ -486,7 +491,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 25);
+    assert_eq!(STORE_SCHEMA_VERSION, 26);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

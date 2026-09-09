@@ -5,6 +5,7 @@ use axum::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ring::signature::Ed25519KeyPair;
+use std::collections::BTreeMap;
 use std::future::IntoFuture;
 use tower::ServiceExt;
 
@@ -183,6 +184,61 @@ impl Drop for Fixture {
     }
 }
 
+fn tree_snapshot(root: &std::path::Path) -> BTreeMap<std::path::PathBuf, (u32, Vec<u8>)> {
+    fn visit(
+        root: &std::path::Path,
+        path: &std::path::Path,
+        snapshot: &mut BTreeMap<std::path::PathBuf, (u32, Vec<u8>)>,
+    ) {
+        // SQLite readers may update WAL shared-memory/read-mark bookkeeping.
+        // Those sidecars are process coordination, not managed persistent
+        // state; the database image and every managed file remain covered.
+        if path
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(|name| name.ends_with("-wal") || name.ends_with("-shm"))
+        {
+            return;
+        }
+        let metadata = std::fs::symlink_metadata(path).unwrap();
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            metadata.permissions().mode()
+        };
+        #[cfg(not(unix))]
+        let mode = u32::from(metadata.permissions().readonly());
+        let content = if metadata.is_file() {
+            std::fs::read(path).unwrap()
+        } else if metadata.file_type().is_symlink() {
+            std::fs::read_link(path)
+                .unwrap()
+                .as_os_str()
+                .as_encoded_bytes()
+                .to_vec()
+        } else {
+            Vec::new()
+        };
+        snapshot.insert(
+            path.strip_prefix(root).unwrap().to_path_buf(),
+            (mode, content),
+        );
+        if metadata.is_dir() {
+            let mut children = std::fs::read_dir(path)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
+            children.sort();
+            for child in children {
+                visit(root, &child, snapshot);
+            }
+        }
+    }
+    let mut snapshot = BTreeMap::new();
+    visit(root, root, &mut snapshot);
+    snapshot
+}
+
 async fn call(
     app: Router,
     path: &str,
@@ -278,12 +334,15 @@ async fn lost_response_retry_and_binding_failures_are_sanitized() {
 }
 
 #[tokio::test]
-async fn concurrent_admission_blocks_prepare_then_explicit_retry_succeeds() {
+async fn background_device_login_admission_blocks_prepare_for_its_full_lifetime() {
     let fixture = Fixture::new();
     let request = fixture.request();
-    let admission =
-        nac_core::sessions::HostAdmissionLease::try_acquire(&fixture.manager.inner.store_path)
-            .unwrap();
+    let admission = fixture.manager.managed_work_admission().unwrap().unwrap();
+    let (release, held) = tokio::sync::oneshot::channel::<()>();
+    let background = tokio::spawn(async move {
+        let _admission = admission;
+        let _ = held.await;
+    });
     let prepare = fixture.assertion(
         ManagedControlAction::Prepare,
         &request,
@@ -305,7 +364,8 @@ async fn concurrent_admission_blocks_prepare_then_explicit_retry_succeeds() {
         nac_core::store::ManagedMaintenanceState::Serving
     );
 
-    drop(admission);
+    release.send(()).unwrap();
+    background.await.unwrap();
     let retry = fixture.assertion(ManagedControlAction::Retry, &request, "jti-explicit-retry");
     let (status, body) = call(
         super::router(fixture.manager.clone()),
@@ -400,7 +460,7 @@ async fn durable_operation_and_resource_leases_are_reported_together() {
 }
 
 #[tokio::test]
-async fn real_private_listener_is_distinct_from_the_public_listener() {
+async fn real_listeners_enforce_private_block_settle_retry_and_public_maintenance() {
     let fixture = Fixture::new();
     let public_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let private_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -416,6 +476,7 @@ async fn real_private_listener_is_distinct_from_the_public_listener() {
     let assertion = fixture.assertion(ManagedControlAction::Status, &request, "jti-real-listener");
     async fn raw_call(
         address: std::net::SocketAddr,
+        path: &str,
         request: &ManagedControlRequest,
         assertion: &str,
     ) -> String {
@@ -424,7 +485,7 @@ async fn real_private_listener_is_distinct_from_the_public_listener() {
         let body = serde_json::to_vec(request).unwrap();
         let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
         let head = format!(
-            "POST /v1/upgrade/status HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {assertion}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "POST {path} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {assertion}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         );
         stream.write_all(head.as_bytes()).await.unwrap();
@@ -434,12 +495,127 @@ async fn real_private_listener_is_distinct_from_the_public_listener() {
         String::from_utf8(response).unwrap()
     }
 
-    let public_response = raw_call(public_address, &request, &assertion).await;
+    let public_response =
+        raw_call(public_address, "/v1/upgrade/status", &request, &assertion).await;
     assert!(public_response.starts_with("HTTP/1.1 404"));
-    let private_response = raw_call(private_address, &request, &assertion).await;
+    let private_response =
+        raw_call(private_address, "/v1/upgrade/status", &request, &assertion).await;
     assert!(private_response.starts_with("HTTP/1.1 200"));
     let body = private_response;
     assert!(!body.contains(&assertion));
+
+    let admission =
+        nac_core::sessions::HostAdmissionLease::try_acquire(&fixture.manager.inner.store_path)
+            .unwrap();
+    let prepare = fixture.assertion(
+        ManagedControlAction::Prepare,
+        &request,
+        "jti-real-listener-blocked",
+    );
+    let blocked = raw_call(private_address, "/v1/upgrade/prepare", &request, &prepare).await;
+    assert!(blocked.starts_with("HTTP/1.1 409"), "{blocked}");
+    assert!(blocked.contains("host-admission"));
+    drop(admission);
+
+    let retry = fixture.assertion(
+        ManagedControlAction::Retry,
+        &request,
+        "jti-real-listener-retry",
+    );
+    let safe = raw_call(private_address, "/v1/upgrade/retry", &request, &retry).await;
+    assert!(safe.starts_with("HTTP/1.1 200"), "{safe}");
+    assert!(safe.contains("safe_to_stop"));
+    let mutation = raw_call(public_address, "/projects", &request, &retry).await;
+    assert!(mutation.starts_with("HTTP/1.1 503"), "{mutation}");
     public.abort();
     private.abort();
+}
+
+#[test]
+fn wrong_candidate_is_rejected_before_any_managed_state_mutation() {
+    let fixture = Fixture::new();
+    let request = fixture.request();
+    let binding = operation_binding(&fixture.manager, &request).unwrap();
+    nac_core::store::prepare_managed_upgrade(
+        &fixture.manager.inner.store_path,
+        "zero-mutation-prepare",
+        &binding,
+        nac_core::store::ManagedControlAttemptAction::Prepare,
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 60,
+        Vec::new(),
+    )
+    .unwrap();
+    let before = tree_snapshot(&fixture.root);
+    let managed_host = fixture.manager.managed_host().unwrap().clone();
+    let result = SessionManager::new(crate::ServerOptions {
+        root_cwd: fixture.root.clone(),
+        store_path: Some(fixture.manager.inner.store_path.clone()),
+        worker_executable: None,
+        managed_host: Some(managed_host),
+    });
+    assert!(result.is_err());
+    let after = tree_snapshot(&fixture.root);
+    let changed = before
+        .keys()
+        .chain(after.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .filter(|path| before.get(*path) != after.get(*path))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(changed.is_empty(), "managed state changed at {changed:?}");
+}
+
+#[tokio::test]
+async fn failed_listener_bind_keeps_accepted_candidate_in_maintenance() {
+    let fixture = Fixture::new();
+    let mut request = fixture.request();
+    let running = crate::managed_running_target().unwrap();
+    request.target.release_id = running.release_id;
+    request.target.source_sha = running.source_sha;
+    request.target.product_version = running.product_version;
+    request.target.schema_version = running.schema_version;
+    request.target.minimum_schema_version = running.minimum_schema_version;
+    let binding = operation_binding(&fixture.manager, &request).unwrap();
+    nac_core::store::prepare_managed_upgrade(
+        &fixture.manager.inner.store_path,
+        "bind-failure-prepare",
+        &binding,
+        nac_core::store::ManagedControlAttemptAction::Prepare,
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 60,
+        Vec::new(),
+    )
+    .unwrap();
+    let replacement = SessionManager::new(crate::ServerOptions {
+        root_cwd: fixture.root.clone(),
+        store_path: Some(fixture.manager.inner.store_path.clone()),
+        worker_executable: None,
+        managed_host: Some(fixture.manager.managed_host().unwrap().clone()),
+    })
+    .unwrap();
+    let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = occupied.local_addr().unwrap();
+    let error = crate::serve_with_policy(
+        address,
+        crate::BindPolicy::LoopbackOnly,
+        replacement,
+        |_| {},
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("failed to bind"));
+    assert_eq!(
+        nac_core::store::managed_maintenance_snapshot(&fixture.manager.inner.store_path)
+            .unwrap()
+            .state,
+        nac_core::store::ManagedMaintenanceState::Maintenance
+    );
 }

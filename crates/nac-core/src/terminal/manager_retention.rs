@@ -108,11 +108,45 @@ impl TerminalManager {
         Ok(sessions.remove(name))
     }
 
-    pub(super) fn forget_remote_cleanup(&self, pidfile: &str) {
+    pub(super) fn register_remote_cleanup(
+        &self,
+        pidfile: &str,
+        backend: Arc<ExecutionBackend>,
+        transport_active: bool,
+    ) -> Result<Arc<PendingRemoteCleanup>> {
+        if let Some((store_path, session_id, _)) = self
+            .remote_cleanup_authority
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            crate::store::record_terminal_remote_cleanup(store_path, session_id, pidfile)?;
+        }
+        let cleanup = Arc::new(PendingRemoteCleanup {
+            backend,
+            transport_active: AtomicBool::new(transport_active),
+        });
+        self.pending_remote_cleanups
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(pidfile.to_string(), Arc::clone(&cleanup));
+        Ok(cleanup)
+    }
+
+    pub(super) fn forget_remote_cleanup(&self, pidfile: &str) -> Result<()> {
+        if let Some((store_path, session_id, _)) = self
+            .remote_cleanup_authority
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            crate::store::clear_terminal_remote_cleanup(store_path, session_id, pidfile)?;
+        }
         self.pending_remote_cleanups
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(pidfile);
+        Ok(())
     }
 
     pub(super) async fn retry_remote_cleanup(&self, pidfile: &str) -> Result<()> {
@@ -131,7 +165,7 @@ impl TerminalManager {
             ));
         }
         cleanup.backend.terminal_pipe_kill(pidfile).await?;
-        self.forget_remote_cleanup(pidfile);
+        self.forget_remote_cleanup(pidfile)?;
         Ok(())
     }
 
@@ -214,30 +248,56 @@ impl TerminalManager {
     /// Process-local terminal identities that can still own a live local or
     /// remote process. Completed retained output is deliberately excluded.
     pub async fn live_terminal_names(&self) -> Vec<String> {
-        let mut names = {
-            let mut sessions = self.sessions.lock().await;
-            sessions
-                .iter_mut()
-                .filter_map(|(name, session)| {
-                    session.refresh_status();
-                    session.is_alive().then(|| name.clone())
-                })
-                .collect::<Vec<_>>()
+        // Preparation is a non-waiting query. A concurrent terminal cleanup
+        // is itself a blocker rather than something the controller queues
+        // behind for seconds.
+        let Ok(mut tombstones) = self.completed_sessions.try_lock() else {
+            return vec!["terminal-output-settlement".to_string()];
         };
-        let remote = self
-            .pending_remote_cleanups
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        names.extend(
-            remote
-                .iter()
-                .filter(|(_, cleanup)| {
-                    cleanup
-                        .transport_active
-                        .load(std::sync::atomic::Ordering::SeqCst)
-                })
-                .map(|(name, _)| name.clone()),
-        );
+        let Ok(mut sessions) = self.sessions.try_lock() else {
+            return vec!["terminal-cleanup-in-progress".to_string()];
+        };
+        let mut names = Vec::new();
+        let mut reap = Vec::new();
+        for (name, session) in sessions.iter_mut() {
+            session.refresh_status();
+            if session.is_alive() || session.has_backend_cleanup() || session.exit_code().is_none()
+            {
+                names.push(name.clone());
+            } else {
+                reap.push(name.clone());
+            }
+        }
+        for name in reap {
+            if let Some(session) = sessions.remove(&name) {
+                let completed = CompletedTerminal {
+                    output_id: session.output_id().to_string(),
+                    preview_cursor: session.preview_cursor(),
+                    exit_code: session.exit_code(),
+                };
+                tombstones.retain(|(session_name, _)| session_name != &name);
+                tombstones.push_back((name, completed));
+                while tombstones.len() > self.max_sessions {
+                    tombstones.pop_front();
+                }
+            }
+        }
+        drop(sessions);
+        drop(tombstones);
+        let remote = match self.pending_remote_cleanups.try_lock() {
+            Ok(remote) => remote,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                names.push("remote-cleanup-in-progress".to_string());
+                names.sort();
+                names.dedup();
+                return names;
+            }
+        };
+        // A stopped launcher with a failed backend kill still owns a remote
+        // process obligation. Every pending cleanup is therefore a blocker,
+        // independently of the local transport state.
+        names.extend(remote.keys().cloned());
         names.sort();
         names.dedup();
         names
