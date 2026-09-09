@@ -148,6 +148,10 @@ pub struct Agent {
     admission_controlled_tools: bool,
     direct_primary: bool,
     web_retrieval_eligible: bool,
+    /// `None` keeps direct-agent environment/store refresh behavior. Workers
+    /// use `Some` so only the credential delivered after startup-time MCP
+    /// construction can enable native web retrieval.
+    worker_web_credential: Option<Option<String>>,
     compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
@@ -382,6 +386,7 @@ impl Agent {
             admission_controlled_tools: mode == AgentMode::Direct,
             direct_primary: mode == AgentMode::Direct,
             web_retrieval_eligible,
+            worker_web_credential: (mode == AgentMode::Worker).then_some(None),
             compaction,
             tool_runtime: ToolRuntime {
                 workspace_cwd: config.workspace_cwd,
@@ -431,14 +436,23 @@ impl Agent {
         self.tool_runtime.command_environment = provider;
     }
 
+    pub(crate) fn set_worker_web_credential(&mut self, credential: Option<String>) {
+        if let Some(worker_credential) = self.worker_web_credential.as_mut() {
+            *worker_credential = credential.filter(|value| !value.trim().is_empty());
+        }
+    }
+
     /// Build one immutable model-request capability view. The Exa credential
     /// and the tool names are replaced together before the request and the
     /// resulting runtime is cloned into exactly that response's tool round.
     fn refresh_model_request_capabilities(&mut self) -> Result<Vec<ToolDefinition>> {
-        let credential = if self.web_retrieval_eligible {
-            crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV)?
-        } else {
-            None
+        let credential = match (
+            self.web_retrieval_eligible,
+            self.worker_web_credential.as_ref(),
+        ) {
+            (false, _) => None,
+            (true, Some(credential)) => credential.clone(),
+            (true, None) => crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV)?,
         };
         Ok(self.install_model_request_capabilities(credential))
     }

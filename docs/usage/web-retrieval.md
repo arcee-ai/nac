@@ -1,16 +1,27 @@
 # Native web retrieval
 
-NAC provides `web_search` and `web_fetch` to top-level direct sessions when a
-nonblank `EXA_API_KEY` resolves. A process environment value wins over the
-same name in NAC's managed credential store. When neither source contains a
-usable value, both tools are silently absent.
+NAC provides `web_search` and `web_fetch` to top-level direct sessions and
+orchestrator-managed workers when a nonblank `EXA_API_KEY` is available. A
+direct session resolves the process environment first and then NAC's managed
+credential store. A worker uses only the orchestrator process's environment
+snapshot at dispatch. When the applicable source has no usable value, both
+tools are silently absent.
 
-The capability decision is refreshed for every model request. The resolved
-credential and visible tool names form one immutable request snapshot, so a
-tool response cannot invoke web retrieval unless the request that produced it
-admitted the tools. Existing orchestrator primaries and workers, and
-traditional child sessions, never receive these capabilities. A top-level
-direct session using managed-orchestrator control tools does receive them.
+The capability decision is refreshed for every model request. Direct sessions
+refresh their credential at that boundary; a worker keeps its dispatch
+snapshot. The credential and visible tool names form one immutable request
+snapshot, so a tool response cannot invoke web retrieval unless the request
+that produced it admitted the tools. Orchestrator primaries and traditional
+child sessions never receive these capabilities. A top-level direct session
+using managed-orchestrator control tools does receive them.
+
+The orchestrator removes `EXA_API_KEY` from the worker process environment. The
+worker consumes the snapshot from a private control pipe only after its MCP
+configuration and stdio transports are constructed. Model-controlled commands,
+terminals, MCP configuration expansion, and MCP descendants therefore cannot
+read the key. Exact-value redaction also covers retained worker stdout and
+stderr; the key is never included in model-visible tool definitions or durable
+worker episodes.
 
 `web_search` sends a bounded semantic-search request to Exa Search.
 `web_fetch` validates one public HTTP or HTTPS target and sends that URL to Exa

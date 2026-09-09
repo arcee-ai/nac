@@ -12,6 +12,7 @@ use crate::events::{decode_stderr_event, sanitize_external_agent_event, AgentEve
 use crate::model::{ModelClient, TokenUsage};
 use crate::process::ProcessTreeGuard;
 use crate::tools::{ThreadCancellation, ToolRuntime};
+use crate::worker::ManagedWorkerNativeCredentials;
 const CANCEL_ACK_GRACE: Duration = Duration::from_millis(250);
 // SSH cleanup can spend five seconds in the kill request; Podman can spend two.
 const COOPERATIVE_CLEANUP_GRACE: Duration = Duration::from_secs(7);
@@ -208,21 +209,13 @@ pub(crate) fn worker_model_arguments_for_test(client: &ModelClient) -> Vec<Strin
         .collect()
 }
 
-/// Transport only NAC-owned native integration credentials across the trusted
-/// `__worker` boundary. Model-controlled subprocesses independently remove the
-/// same names in every execution backend.
-fn transport_worker_native_credentials(command: &mut Command) -> Vec<String> {
-    let mut redactions = Vec::new();
+/// Native integration credentials never enter the worker process environment.
+/// The worker receives this snapshot through its private control pipe only
+/// after startup-time MCP construction has completed.
+fn remove_worker_native_credentials(command: &mut Command) {
     for name in crate::model::NATIVE_INTEGRATION_CREDENTIAL_ENV_NAMES {
         command.env_remove(name);
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, &value);
-            if let Some(value) = value.to_str().filter(|value| !value.is_empty()) {
-                redactions.push(value.to_string());
-            }
-        }
     }
-    redactions
 }
 
 fn redact_worker_native_credentials(text: &str, credentials: &[String]) -> String {
@@ -246,9 +239,12 @@ pub(super) async fn run_worker(
             "worker executable path was not configured; cannot spawn managed worker",
         )
     })?;
+    let native_credentials = ManagedWorkerNativeCredentials::from_process_environment()?;
+    let native_credential_redactions = native_credentials.exact_redactions();
+    let native_credential_control = native_credentials.encode_control_line()?;
     let mut command = Command::new(executable);
     command.arg("__worker");
-    let native_credential_redactions = transport_worker_native_credentials(&mut command);
+    remove_worker_native_credentials(&mut command);
     if let Some(provider) = runtime.command_environment.as_ref() {
         let environment = provider.worker_environment();
         if let Some(secret_root) = environment.secret_root {
@@ -301,6 +297,13 @@ pub(super) async fn run_worker(
 
     let (mut child, mut process_tree) = ProcessTreeGuard::spawn_supervised(&mut command)?;
     let mut control_stdin = child.stdin.take();
+    let credential_stdin = control_stdin
+        .as_mut()
+        .ok_or_else(|| std::io::Error::other("supervised worker stdin pipe is unavailable"))?;
+    credential_stdin
+        .write_all(&native_credential_control)
+        .await?;
+    credential_stdin.flush().await?;
 
     let timeout_trace = Arc::new(Mutex::new(WorkerTimeoutTrace::default()));
     let stderr = child
@@ -556,6 +559,35 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn native_credential_isolated_process_helper() {
+        let Some(root) = std::env::var_os("NAC_WORKER_NATIVE_CREDENTIAL_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        assert!(std::env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
+        let expansion_error = crate::mcp::test_support::expand_env("${EXA_API_KEY}")
+            .expect_err("worker MCP expansion must not observe the native credential")
+            .to_string();
+        assert!(!expansion_error.contains("exa-worker-private-control-canary"));
+        std::fs::write(root.join("mcp-expansion"), "absent").unwrap();
+
+        let mut descendant = crate::mcp::test_support::stdio_command(
+            "sh",
+            &[
+                "-c".to_string(),
+                "printf '%s' \"${EXA_API_KEY-unset}\"".to_string(),
+            ],
+            &BTreeMap::new(),
+            &root,
+        )
+        .unwrap();
+        let descendant = descendant.output().await.unwrap();
+        assert!(descendant.status.success());
+        std::fs::write(root.join("descendant-exa"), descendant.stdout).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn native_credential_worker_process_helper() {
         let Some(root) = std::env::var_os("NAC_WORKER_NATIVE_CREDENTIAL_ROOT") else {
             return;
@@ -563,13 +595,21 @@ mod tests {
         let root = PathBuf::from(root);
         std::fs::create_dir_all(&root).unwrap();
         let executable = root.join("worker.sh");
+        let current_exe = std::env::current_exe().unwrap();
+        let shell_quote = |value: &std::path::Path| {
+            format!("'{}'", value.to_string_lossy().replace('\'', "'\\''"))
+        };
         let script = format!(
-            "#!/bin/sh\nprintf '%s' \"${{EXA_API_KEY-unset}}\" > '{}'\n\
+            "#!/bin/sh\nIFS= read -r control\nprintf '%s' \"$control\" > '{}'\n\
+             printf '%s' \"${{EXA_API_KEY-unset}}\" > '{}'\n\
              printf '%s\\n' \"$@\" > '{}'\n\
-             printf 'stdout:%s\\n' \"${{EXA_API_KEY-unset}}\"\n\
-             printf 'stderr:%s\\n' \"${{EXA_API_KEY-unset}}\" >&2\n",
+             printf 'stdout:%s\\n' \"$control\"\n\
+             printf 'stderr:%s\\n' \"$control\" >&2\n\
+             exec {} --exact tools::thread::worker::tests::native_credential_isolated_process_helper --nocapture\n",
+            root.join("credential-control").display(),
             root.join("inherited-exa").display(),
-            root.join("argv").display()
+            root.join("argv").display(),
+            shell_quote(&current_exe)
         );
         std::fs::write(&executable, script).unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -603,12 +643,12 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn managed_worker_receives_exa_only_in_environment_and_redacts_process_output() {
+    fn managed_worker_private_control_isolates_exa_from_mcp_and_process_output() {
         let root = std::env::temp_dir().join(format!(
             "nac_worker_native_credential_{}",
             uuid::Uuid::new_v4()
         ));
-        let credential = "exa-worker-environment-canary";
+        let credential = "exa-worker-private-control-canary";
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -627,8 +667,19 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(root.join("inherited-exa")).unwrap(),
-            credential
+            "unset"
         );
+        assert_eq!(
+            std::fs::read_to_string(root.join("mcp-expansion")).unwrap(),
+            "absent"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("descendant-exa")).unwrap(),
+            "unset"
+        );
+        assert!(std::fs::read_to_string(root.join("credential-control"))
+            .unwrap()
+            .contains(credential));
         let argv = std::fs::read_to_string(root.join("argv")).unwrap();
         assert!(!argv.contains(credential));
         for output_path in ["stdout", "stderr"] {
