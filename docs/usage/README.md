@@ -7,6 +7,7 @@ durable direct-session work.
 - [Skills](skills.md)
 - [Sandbox](sandbox.md)
 - [Session behaviors](session-behaviors.md)
+- [Direct-session permissions](permissions.md)
 - [Durable direct goals](direct-goals.md)
 - [Traditional child sessions](traditional-children.md)
 - [Managed orchestrator sessions](managed-orchestrators.md)

@@ -38,6 +38,7 @@ function ChildPermissionBridge({ child }: { child: TraditionalChildRecord }) {
       sessionId={child.child_session_id}
       behavior="direct"
       label={`Permissions for ${child.description}`}
+      autoApprovalAvailable={false}
     />
   );
 }

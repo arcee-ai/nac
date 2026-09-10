@@ -2,9 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { errorMessage } from "@/app/providers/ToastProvider";
-import { managedQueryKeys } from "@/app/features/managed/queries";
 import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries";
+import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
 import type { DeviceLoginStarted, ManagedAuthProvider } from "@/app/types/api";
 import { toRunError } from "@/app/lib/providerError";
 
@@ -87,22 +86,9 @@ export function useDeviceLogin(onSuccess?: () => void) {
         if (outcome.state === "complete") {
           active.current = null;
           setState({ status: "idle" });
-          void client.invalidateQueries({ queryKey: managedQueryKeys.auth });
-          // The model index is only readable once signed in, so the picker
-          // stays empty until this refetch lands.
-          void client.invalidateQueries({
-            queryKey: managedQueryKeys.providerModelsAll,
-          });
-          // A resolved configuration carries the same index, read on the server
-          // with the login that has just been replaced. Without this it keeps
-          // answering with whatever the broken login managed to return, which is
-          // what makes a form look stuck until it is reopened.
-          void client.invalidateQueries({
-            queryKey: queryKeys.resolvedModelConfigsAll,
-          });
-          void client.invalidateQueries({
-            queryKey: queryKeys.resolvedConfigFilesAll,
-          });
+          // Readiness and the entitled model index both change atomically with
+          // the stored login, so rebuild their catalog-derived caches.
+          void refreshProviderAuthentication(client);
           onSuccessRef.current?.();
           return;
         }

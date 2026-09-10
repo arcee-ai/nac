@@ -39,7 +39,7 @@ import {
   useModelCatalog,
   useModelConfigs,
   useProviderModels,
-  useReadyManagedProviderModels,
+  useReadyProviderModels,
   useResolvedModelConfig,
 } from "@/app/services/queries";
 import type {
@@ -59,6 +59,12 @@ export type LaunchModelSelection =
       api_key_env: string | null;
       reasoning_effort: string | null;
       extra_headers: Record<string, string> | null;
+      /**
+       * An explicitly selected saved preset owns its compaction policy. An
+       * omitted value preserves the project/session inheritance already
+       * resolved by the server.
+       */
+      orchestrator_compaction_threshold?: number | null;
       /**
        * Light model for the launch form to seed from. A saved setup is
        * authoritative: its light model, or `null` for an explicitly
@@ -94,6 +100,12 @@ const PROVIDER_ITEMS: SelectItem[] = [
 
 const PATH_DEBOUNCE_MS = 400;
 
+function stringMapsEqual(left: Record<string, string>, right: Record<string, string>): boolean {
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
 /**
  * Picks the provider setup a new session launches with: a model chosen out of
  * the catalog, a fresh setup, one saved earlier, or one read out of a
@@ -126,7 +138,7 @@ export function ConfigurationsPanel({
   const managedModel = useManagedModelProfile();
   const { data: saved, isPending: savedInitializing } = useModelConfigs();
   const catalog = useModelCatalog();
-  const liveByBackend = useReadyManagedProviderModels(catalog.data);
+  const liveByBackend = useReadyProviderModels(catalog.data);
   const deleteConfig = useDeleteModelConfig();
   const configurations = useMemo(() => saved?.configurations ?? [], [saved]);
 
@@ -188,13 +200,20 @@ export function ConfigurationsPanel({
   // Launching usually means reusing the setup from last time, so the newest
   // saved configuration opens selected. With nothing saved yet the catalog is
   // the only source that asks for nothing up front, so it opens instead.
+  // A saved setup may share its visible provider/model identity with another
+  // setup while carrying different advanced launch settings. Treat a preset
+  // as the inherited source only when its complete primary configuration is
+  // identical; otherwise preserve the exact session/project values until the
+  // user explicitly chooses a preset.
   const initialSaved = initial
     ? configurations.find(
         (entry) =>
           entry.backend === initial.backend &&
           entry.model === initial.model &&
           entry.base_url === initial.base_url &&
-          entry.api_key_env === initial.api_key_env,
+          entry.api_key_env === initial.api_key_env &&
+          (entry.reasoning_effort ?? null) === initial.reasoning_effort &&
+          stringMapsEqual(entry.extra_headers, initial.extra_headers),
       )
     : null;
   const latestSaved = configurations.at(-1);
@@ -378,6 +397,7 @@ export function ConfigurationsPanel({
         api_key_env: initial.api_key_env,
         reasoning_effort: initial.reasoning_effort,
         extra_headers: initial.extra_headers,
+        orchestrator_compaction_threshold: undefined,
         light_model: undefined,
       };
     }
@@ -394,7 +414,7 @@ export function ConfigurationsPanel({
           backend: catalogPick.backend,
           model: catalogPick.model,
           base_url: catalogPick.baseUrl,
-          api_key_env: needsKey ? (catalogProvider?.auth_hint ?? null) : null,
+          api_key_env: needsKey ? (catalogProvider?.connection?.api_key_env ?? null) : null,
           reasoning_effort: null,
           extra_headers: null,
           light_model: undefined,
@@ -472,7 +492,21 @@ export function ConfigurationsPanel({
       api_key_env: resolved.api_key_env,
       reasoning_effort: resolved.reasoning_effort,
       extra_headers: savedRecord?.extra_headers ?? null,
-      light_model: savedRecord ? (savedRecord.light_model ?? null) : undefined,
+      orchestrator_compaction_threshold:
+        initial && picked === null
+          ? undefined
+          : savedRecord
+            ? (savedRecord.orchestrator_compaction_threshold ?? null)
+            : undefined,
+      // Matching an existing session to a saved setup is presentation only:
+      // the session may have changed its light model independently. Emit the
+      // preset's light model only after the user deliberately chooses it.
+      light_model:
+        initial && picked === null
+          ? undefined
+          : savedRecord
+            ? (savedRecord.light_model ?? null)
+            : undefined,
       config_id: savedRecord?.config_id ?? null,
     };
   }, [
@@ -499,6 +533,7 @@ export function ConfigurationsPanel({
     savedBackend,
     savedBaseUrl,
     savedRecord,
+    picked,
   ]);
 
   useEffect(() => {

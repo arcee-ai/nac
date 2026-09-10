@@ -9,6 +9,7 @@ import {
   IconName,
   Modal,
   ModalSize,
+  Switch,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
@@ -17,6 +18,7 @@ import { toRunError } from "@/app/lib/providerError";
 import {
   useDeletePermissionGrant,
   useReplyPermission,
+  useSetPermissionApprovalMode,
   useSessionPermissions,
 } from "@/app/services/queries";
 import type {
@@ -30,6 +32,7 @@ interface PermissionControlsProps {
   sessionId: string;
   behavior: SessionBehavior | null;
   label?: string;
+  autoApprovalAvailable?: boolean;
 }
 
 function requestIdentity(requests: PermissionRequest[]): string {
@@ -73,14 +76,17 @@ export function PermissionControls({
   sessionId,
   behavior,
   label = "Permissions",
+  autoApprovalAvailable = true,
 }: PermissionControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const permissions = useSessionPermissions(sessionId, direct);
   const replyPermission = useReplyPermission();
+  const setApprovalMode = useSetPermissionApprovalMode();
   const deleteGrant = useDeletePermissionGrant();
   const toast = useToast();
   const requests = permissions.data?.requests ?? [];
   const grants = permissions.data?.grants ?? [];
+  const autoApprove = permissions.data?.approval_mode === "auto_approve";
   const [manuallyOpen, setManuallyOpen] = useState(false);
   const [dismissedRequests, setDismissedRequests] = useState("");
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -129,6 +135,18 @@ export function PermissionControls({
     }
   };
 
+  const changeApprovalMode = async (enabled: boolean) => {
+    setManuallyOpen(true);
+    try {
+      await setApprovalMode.mutateAsync({
+        sessionId,
+        mode: enabled ? "auto_approve" : "manual",
+      });
+    } catch (error) {
+      toast.error(`Unable to change approval mode: ${errorMessage(toRunError(error))}`);
+    }
+  };
+
   const badge = requests.length
     ? ` (${requests.length})`
     : grants.length
@@ -140,12 +158,17 @@ export function PermissionControls({
       <Tooltip title={label} position={TooltipPosition.TopCenter}>
         <Button
           size={ButtonSize.Small}
-          variant={requests.length ? ButtonVariant.GhostHighlightedAccent : ButtonVariant.Ghost}
-          content={ButtonContent.Icon}
-          aria-label={`${label}${badge}`}
+          variant={
+            autoApprove || requests.length
+              ? ButtonVariant.GhostHighlightedAccent
+              : ButtonVariant.Ghost
+          }
+          content={autoApprove ? ButtonContent.IconLeft : ButtonContent.Icon}
+          aria-label={autoApprove ? "Auto-approve on — open permissions" : `${label}${badge}`}
           onClick={() => setManuallyOpen(true)}
         >
           <Icon iconName={requests.length ? IconName.Important : IconName.Lock} size={16} />
+          {autoApprove ? "Auto-approve on" : null}
         </Button>
       </Tooltip>
 
@@ -158,7 +181,9 @@ export function PermissionControls({
         subheader={
           active
             ? `${active.tool} is paused before execution.`
-            : "Remembered access for this session."
+            : autoApprove
+              ? "Automatic approval is active for this session."
+              : "Remembered access for this session."
         }
         footer={
           active ? (
@@ -206,6 +231,39 @@ export function PermissionControls({
           </div>
         ) : (
           <div className="flex flex-col gap-5">
+            {autoApprovalAvailable ? (
+              <section
+                aria-label="Automatic approval mode"
+                className={
+                  autoApprove
+                    ? "rounded-[6px] border border-accent-primary bg-elevation-level-2 p-3"
+                    : "rounded-[6px] bg-elevation-level-2 p-3"
+                }
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-small font-medium text-basic-primary">
+                      Approve all automatically
+                    </div>
+                    <div className="mt-1 text-small text-basic-secondary">
+                      Automatically allows ordinary requests only after they reach this session’s
+                      permission broker. Hard and configured denials still apply.
+                    </div>
+                  </div>
+                  <Switch
+                    aria-label="Approve all automatically"
+                    checked={autoApprove}
+                    disabled={setApprovalMode.isPending}
+                    onChange={(enabled) => void changeApprovalMode(enabled)}
+                  />
+                </div>
+                <div className="mt-2 text-small text-basic-tertiary">
+                  This setting belongs only to this session and stays active across restarts until
+                  you turn it off. It does not create remembered permissions.
+                </div>
+              </section>
+            ) : null}
+
             {active ? (
               <section aria-label="Requested access">
                 <div className="mb-2 tag-label uppercase text-basic-tertiary">Requested access</div>

@@ -1,6 +1,21 @@
 use super::*;
 
 #[tokio::test]
+async fn lost_permission_mode_cas_is_an_http_conflict() {
+    let response = ApiError::from(anyhow::Error::new(
+        nac_core::permissions::PermissionApprovalModeUpdateError::ConcurrentChange,
+    ))
+    .into_response();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = response_body(response).await;
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("changed concurrently"));
+}
+
+#[tokio::test]
 async fn attaching_direct_session_wakes_oldest_persisted_inbox_item() {
     let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("direct_inbox_reattach");
@@ -230,7 +245,16 @@ async fn direct_permission_http_api_lists_replies_and_removes_revision_bound_gra
     std::fs::create_dir_all(&nac_home).unwrap();
     let _env = ScopedModelEnv::isolated(&nac_home, Some("direct-permission-test-key"));
     seed_direct_session(&root, "direct");
+    seed_direct_session(&root, "child");
     seed_editable_session(&root, "orchestrator");
+    nac_core::store::create_traditional_child_relationship(
+        &root.join("store.db"),
+        "direct",
+        "child",
+        nac_core::store::GENERAL_CHILD_PROFILE,
+        "separate permission scope",
+    )
+    .unwrap();
     let grant_id = nac_core::store::insert_permission_grants(
         &root.join("store.db"),
         "direct",
@@ -248,9 +272,45 @@ async fn direct_permission_http_api_lists_replies_and_removes_revision_bound_gra
     assert_eq!(list.status(), StatusCode::OK);
     let state: PermissionStateResponse =
         serde_json::from_slice(&response_body(list).await).unwrap();
+    assert_eq!(
+        state.approval_mode,
+        nac_core::permissions::PermissionApprovalMode::Manual
+    );
     assert!(state.requests.is_empty());
     assert_eq!(state.grants.len(), 1);
     assert_eq!(state.grants[0].id, grant_id);
+    let config_before =
+        nac_core::sessions::load_session_config(&root.join("store.db"), "direct").unwrap();
+
+    let enable_auto = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/sessions/direct/permissions/mode")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"mode":"auto_approve"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(enable_auto.status(), StatusCode::NO_CONTENT);
+    let list = get_response(app.clone(), "/sessions/direct/permissions", None).await;
+    let state: PermissionStateResponse =
+        serde_json::from_slice(&response_body(list).await).unwrap();
+    assert_eq!(
+        state.approval_mode,
+        nac_core::permissions::PermissionApprovalMode::AutoApprove
+    );
+    assert_eq!(
+        nac_core::sessions::load_permission_approval_mode(&root.join("store.db"), "direct")
+            .unwrap(),
+        nac_core::permissions::PermissionApprovalMode::AutoApprove
+    );
+    let config_after =
+        nac_core::sessions::load_session_config(&root.join("store.db"), "direct").unwrap();
+    assert_eq!(config_after.config_version, config_before.config_version);
+    assert_eq!(config_after.backend, config_before.backend);
 
     let missing_reply = app
         .clone()
@@ -283,8 +343,33 @@ async fn direct_permission_http_api_lists_replies_and_removes_revision_bound_gra
         serde_json::from_slice(&response_body(list).await).unwrap();
     assert!(state.grants.is_empty());
 
-    let rejected = get_response(app, "/sessions/orchestrator/permissions", None).await;
+    let rejected = get_response(app.clone(), "/sessions/orchestrator/permissions", None).await;
     assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    let rejected_update = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/sessions/orchestrator/permissions/mode")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"mode":"auto_approve"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected_update.status(), StatusCode::BAD_REQUEST);
+    let rejected_child_update = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/sessions/child/permissions/mode")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"mode":"auto_approve"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected_child_update.status(), StatusCode::CONFLICT);
     let _ = std::fs::remove_dir_all(root);
 }
 

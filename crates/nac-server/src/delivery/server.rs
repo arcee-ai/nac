@@ -578,6 +578,9 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::delegation::get_managed_orchestrator))
         .routes(routes!(delivery::delegation::cancel_managed_orchestrator))
         .routes(routes!(delivery::session_state::permission_state))
+        .routes(routes!(
+            delivery::session_state::update_permission_approval_mode
+        ))
         .routes(routes!(delivery::session_state::reply_permission_request))
         .routes(routes!(delivery::session_state::delete_permission_grant))
         .routes(routes!(delivery::session_state::thread_events))

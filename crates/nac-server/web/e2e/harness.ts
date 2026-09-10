@@ -196,6 +196,15 @@ export async function createSession(
 export async function createProject(
   request: APIRequestContext,
   harness: EmbeddedHarness,
+  options: {
+    lightModel?: {
+      model: string;
+      backend: "openai-responses";
+      base_url: string;
+      api_key_env: string;
+      reasoning_effort: "low";
+    };
+  } = {},
 ): Promise<string> {
   const configuration = await request.post(`${harness.baseUrl}/model-configs`, {
     data: {
@@ -207,6 +216,7 @@ export async function createProject(
       reasoning_effort: "high",
       extra_headers: {},
       orchestrator_compaction_threshold: 0,
+      light_model: options.lightModel,
     },
   });
   if (!configuration.ok()) {
@@ -322,6 +332,12 @@ async function startHarness(
         BROWSER: "none",
         RUST_BACKTRACE: "1",
         NAC_E2E_API_KEY: "nac-e2e-dummy-only",
+        // Conventional selectors make two independent provider routes
+        // available to the unified model picker without placing either value
+        // in browser state. The scripted tests never send model traffic to
+        // these public endpoints.
+        OPENAI_API_KEY: "nac-e2e-openai-dummy-only",
+        DEEPSEEK_API_KEY: "nac-e2e-deepseek-dummy-only",
         MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
         [cleanupMarkerEnvironment]: cleanupMarker,
         ...(exaCredential == null
