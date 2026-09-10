@@ -53,7 +53,7 @@ function pendingState(): PermissionStateResponse {
   };
 }
 
-function mount(state: PermissionStateResponse) {
+function mount(state: PermissionStateResponse, requesterLabel?: string) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -62,7 +62,11 @@ function mount(state: PermissionStateResponse) {
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ToastProvider>
-          <PermissionControls sessionId={SESSION_ID} behavior="direct" />
+          <PermissionControls
+            sessionId={SESSION_ID}
+            behavior="direct"
+            requesterLabel={requesterLabel}
+          />
         </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -137,7 +141,10 @@ describe("direct permission controls", () => {
     const toggle = screen.getByRole("switch", { name: "Approve all automatically" });
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     expect(screen.getByRole("dialog").textContent).toContain(
-      "This setting belongs only to this session and stays active across restarts",
+      "This setting governs this session and all existing or future owned child agents",
+    );
+    expect(screen.getByRole("dialog").textContent).toContain(
+      "Separately managed orchestrators are not included",
     );
     fireEvent.click(toggle);
 
@@ -150,9 +157,26 @@ describe("direct permission controls", () => {
       ).toBeTruthy(),
     );
     expect(screen.getByRole("dialog").textContent).toContain(
-      "Automatic approval is active for this session.",
+      "Automatic approval is active for this session and its owned child agents.",
     );
     expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+  });
+
+  it("identifies a child requester and explains why manual approval applies", () => {
+    const state = pendingState();
+    state.requests[0].session_id = "child-session";
+    mount(state, "child agent “Review persistence”");
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain(
+      "exec_command requested by child agent “Review persistence” is paused before execution.",
+    );
+    expect(dialog.textContent).toContain(
+      "Requested by child agent “Review persistence” (child-session)",
+    );
+    expect(dialog.textContent).toContain(
+      "automatic approval is off for this session and its owned child agents",
+    );
   });
 
   it("keeps the active mode conspicuous and provides an immediate disable control", async () => {
@@ -170,6 +194,57 @@ describe("direct permission controls", () => {
       expect(fakes.setPermissionApprovalMode).toHaveBeenCalledWith(SESSION_ID, "manual"),
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy());
+  });
+
+  it("identifies each child control and explains inherited automatic approval", () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const automatic = { ...pendingState(), approval_mode: "auto_approve" as const, requests: [] };
+    client.setQueryData(queryKeys.sessionPermissions("child-review"), automatic);
+    client.setQueryData(queryKeys.sessionPermissions("child-tests"), automatic);
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <ToastProvider>
+            <PermissionControls
+              sessionId="child-review"
+              behavior="direct"
+              label="Permissions for Review persistence"
+              autoApprovalAvailable={false}
+              requesterLabel="child agent “Review persistence”"
+            />
+            <PermissionControls
+              sessionId="child-tests"
+              behavior="direct"
+              label="Permissions for Run tests"
+              autoApprovalAvailable={false}
+              requesterLabel="child agent “Run tests”"
+            />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const reviewControl = screen.getByRole("button", {
+      name: "Permissions for Review persistence — auto-approve inherited; open permissions",
+    });
+    expect(
+      screen.getByRole("button", {
+        name: "Permissions for Run tests — auto-approve inherited; open permissions",
+      }),
+    ).toBeTruthy();
+
+    fireEvent.click(reviewControl);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain(
+      "Automatic approval is inherited from the parent session; change it from the parent.",
+    );
+    expect(dialog.textContent).toContain(
+      "Ordinary requests from this child agent inherit automatic approval from the parent session.",
+    );
+    expect(screen.queryByRole("switch", { name: "Approve all automatically" })).toBeNull();
   });
 
   it("reconciles a mode change made through another server process", async () => {

@@ -132,7 +132,7 @@ pub enum PermissionReply {
     Reject,
 }
 
-/// User-selected approval behavior for one durable direct session.
+/// User-selected approval behavior for one durable direct ownership tree.
 ///
 /// This is deliberately an answer policy at the broker boundary, not an
 /// execution backend or a reusable resource grant.
@@ -212,10 +212,11 @@ impl Drop for PendingPermissionGuard {
     }
 }
 
-/// Per-direct-session approval coordinator. Pending prompts are intentionally
-/// process-local; remembered grants are durable and revision-bound. A restart
-/// drops the waiting call, after which ordinary interrupted-run recovery takes
-/// over without pretending an approval survived.
+/// Per-requesting-session approval coordinator. Traditional children resolve
+/// answer policy through their durable root owner, while pending prompts and
+/// remembered grants remain scoped to the requesting session. A restart drops
+/// the waiting call, after which ordinary interrupted-run recovery takes over
+/// without pretending an approval survived.
 pub struct PermissionBroker {
     policy: PermissionPolicy,
     store_path: PathBuf,

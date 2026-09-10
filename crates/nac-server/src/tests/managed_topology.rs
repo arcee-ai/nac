@@ -307,6 +307,18 @@ async fn direct_permission_http_api_lists_replies_and_removes_revision_bound_gra
             .unwrap(),
         nac_core::permissions::PermissionApprovalMode::AutoApprove
     );
+    let child_list = get_response(app.clone(), "/sessions/child/permissions", None).await;
+    assert_eq!(child_list.status(), StatusCode::OK);
+    let child_state: PermissionStateResponse =
+        serde_json::from_slice(&response_body(child_list).await).unwrap();
+    assert_eq!(
+        child_state.approval_mode,
+        nac_core::permissions::PermissionApprovalMode::AutoApprove
+    );
+    assert!(
+        child_state.grants.is_empty(),
+        "parent grants stay child-local"
+    );
     let config_after =
         nac_core::sessions::load_session_config(&root.join("store.db"), "direct").unwrap();
     assert_eq!(config_after.config_version, config_before.config_version);

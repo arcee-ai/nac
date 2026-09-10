@@ -17,12 +17,21 @@ modes:
   broker. It never creates remembered grants and cannot override a hard or
   configured denial.
 
-Automatic approval has durable session scope. It applies only to the current
-session, survives server restarts and session resume, and remains active until
-the user turns it off in that session's permissions control. New sessions,
-traditional child sessions, and managed orchestrator sessions do not inherit
-it. The composer shows **Auto-approve on** for as long as the mode is active so
-the disable control remains easy to find.
+Automatic approval has durable ownership-tree scope. On a direct or
+direct-with-orchestrator primary session, it applies to that session and all of
+its traditional child sessions, including children that already exist or are
+created later. The policy is resolved through the durable root owner, so it
+also covers deeper descendants if the traditional-child nesting limit changes
+in the future. It survives server restarts and session resume and remains
+active until the user turns it off in the primary session's permissions
+control. Disabling restores manual handling immediately across the tree.
+
+Traditional children keep their own requester identity, transcript, remembered
+grants, configured rules, and execution backend. A manual prompt identifies the
+child that requested access. Managed orchestrator sessions are a distinct
+durable topology and do not inherit this setting. The primary composer shows
+**Auto-approve on** for as long as the mode is active so the disable control
+remains easy to find.
 
 Remembered grants remain separately scoped to the exact resource, backend
 class, and session configuration revision that NAC derived. Forgetting a grant

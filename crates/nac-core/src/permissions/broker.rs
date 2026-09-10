@@ -455,7 +455,7 @@ impl PermissionBroker {
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
         tokio::task::spawn_blocking(move || {
-            crate::sessions::load_permission_approval_state(&store_path, &session_id)
+            crate::sessions::load_effective_permission_approval_state(&store_path, &session_id)
         })
         .await
         .map_err(|error| format!("permission approval mode read task failed: {error}"))?

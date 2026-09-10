@@ -292,7 +292,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const cancelInboxItem = useCancelInboxItem();
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const readOnly = entry?.lineage != null || snapshot?.lineage != null;
+  const lineage = entry?.lineage ?? snapshot?.lineage ?? null;
+  const readOnly = lineage != null;
   const ownershipKnown = entry !== null || snapshot !== null;
   const inboxQuery = useSessionInbox(sessionId, direct && !readOnly);
   const goalQuery = useSessionGoal(sessionId, direct && !readOnly);
@@ -1124,7 +1125,16 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           This delegated transcript is read-only. Continue, steer, or cancel it from its parent
           chat.
         </span>
-        <PermissionControls sessionId={sessionId} behavior={behavior} />
+        <PermissionControls
+          sessionId={sessionId}
+          behavior={behavior}
+          autoApprovalAvailable={false}
+          requesterLabel={
+            lineage?.kind === "traditional-child"
+              ? `child agent “${lineage.description}”`
+              : undefined
+          }
+        />
       </div>
     );
   }

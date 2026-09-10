@@ -12,6 +12,10 @@ permission connection open and presents that request beside the child controls.
 The child transcript remains non-composable but exposes the same approval
 control. A child waits briefly for the parent UI to establish this connection;
 without one, the request fails closed and the operation is not executed.
+The parent's **Approve all automatically** mode governs the parent and all of
+its traditional children. It answers only requests that reach each child's
+broker after configured and hard denials; remembered grants remain child-local.
+Managed orchestrators are a separate topology and do not inherit the mode.
 
 Open the people control beside the direct-session composer to start, inspect,
 continue, steer, cancel, or open a child transcript. The first visible profile
