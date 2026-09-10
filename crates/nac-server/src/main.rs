@@ -704,6 +704,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
                 .map(OptionalModelOption::Value)
                 .unwrap_or_default(),
             trusted_api_key_file: cli.model.trusted_api_key_file,
+            trusted_light_credential: None,
             extra_headers: cli.model.extra_headers,
             light_model: None,
         },

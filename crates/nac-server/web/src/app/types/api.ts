@@ -169,6 +169,8 @@ export type SessionEvent = ApiSchema<"SessionEvent">;
 
 export type PermissionReply = ApiSchema<"PermissionReply">;
 
+export type PermissionApprovalMode = ApiSchema<"PermissionApprovalMode">;
+
 export type PermissionRequestResource = ApiSchema<"PermissionRequestResource">;
 
 export type PermissionRequest = ApiSchema<"PermissionRequest">;

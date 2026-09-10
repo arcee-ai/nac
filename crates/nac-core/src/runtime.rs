@@ -9,7 +9,9 @@ use uuid::Uuid;
 use crate::agent::{Agent, AgentConfig, AgentMode};
 use crate::agents_md::AgentsMdBundle;
 use crate::events::{AgentEvent, EventSink};
-use crate::light_model::{resolve_light_client, LightModelError, LightModelSettings};
+use crate::light_model::{
+    resolve_light_client, LightModelError, LightModelSettings, TrustedLightCredential,
+};
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{
     managed_backend_base_url, resolve_model_metadata, BackendKind, EffectiveModelSettings,

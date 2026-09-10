@@ -5,7 +5,7 @@ import {
   managedModelPick,
   managedSecretNameError,
   matchesManagedModelPick,
-  readyManagedModelRequests,
+  readyProviderModelRequests,
   repositoryIdentity,
 } from "@/app/features/managed/model";
 import type { ManagedCloneOperation, ManagedHostStatus, ModelCatalog } from "@/app/types/api";
@@ -59,24 +59,56 @@ describe("managed feature model", () => {
     expect(managedModelPick(null)).toBeNull();
   });
 
-  it("discovers the mounted-key and stored-login indexes without browser credentials", () => {
+  it("discovers saved, environment, mounted-key, and stored-login accounts without values", () => {
     // Only discovery/auth fields are read by this projection.
     const catalog = {
       catalog_version: 1,
       providers: [
-        { id: "arcee-api", auth: "api_key_env", auth_status: "ready" },
-        { id: "openai-responses", auth: "api_key_env", auth_status: "ready" },
+        {
+          id: "arcee-api",
+          auth: "api_key_env",
+          auth_status: "ready",
+          connection: null,
+        },
+        {
+          id: "openai-responses",
+          auth: "api_key_env",
+          auth_status: "ready",
+          connection: {
+            base_url: "https://api.openai.com/v1",
+            api_key_env: "NAC_CONFIG_saved",
+          },
+        },
         { id: "arcee-auth", auth: "managed_arcee", auth_status: "ready" },
         { id: "chatgpt-codex-responses", auth: "codex_oauth", auth_status: "no_credential" },
       ],
     } as ModelCatalog;
-    expect(readyManagedModelRequests(catalog, managedModelStatus)).toEqual([
+    expect(readyProviderModelRequests(catalog, managedModelStatus)).toEqual([
       { backend: "arcee-api", base_url: "https://api.arcee.ai/api/v1" },
+      {
+        backend: "openai-responses",
+        base_url: "https://api.openai.com/v1",
+        api_key_env: "NAC_CONFIG_saved",
+      },
       { backend: "arcee-auth" },
     ]);
-    expect(readyManagedModelRequests(catalog, null)).toEqual([{ backend: "arcee-auth" }]);
+    expect(readyProviderModelRequests(catalog, null)).toEqual([
+      {
+        backend: "openai-responses",
+        base_url: "https://api.openai.com/v1",
+        api_key_env: "NAC_CONFIG_saved",
+      },
+      { backend: "arcee-auth" },
+    ]);
     expect(
-      readyManagedModelRequests(catalog, { ...managedModelStatus, model_ready: false }),
-    ).toEqual([{ backend: "arcee-auth" }]);
+      readyProviderModelRequests(catalog, { ...managedModelStatus, model_ready: false }),
+    ).toEqual([
+      {
+        backend: "openai-responses",
+        base_url: "https://api.openai.com/v1",
+        api_key_env: "NAC_CONFIG_saved",
+      },
+      { backend: "arcee-auth" },
+    ]);
   });
 });

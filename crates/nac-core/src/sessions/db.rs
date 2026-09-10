@@ -478,6 +478,155 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
     Ok(config)
 }
 
+/// Loads the durable answer policy for exactly one session. Legacy rows are
+/// migrated to manual, preserving headless fail-closed behavior by default.
+pub fn load_permission_approval_mode(
+    path: &Path,
+    session_id: &str,
+) -> Result<crate::permissions::PermissionApprovalMode> {
+    load_permission_approval_state(path, session_id).map(|(mode, _, _)| mode)
+}
+
+/// Loads the current mode, the monotonic auto-approve generation, and the
+/// latest reserved transition revision.
+pub(crate) fn load_permission_approval_state(
+    path: &Path,
+    session_id: &str,
+) -> Result<(crate::permissions::PermissionApprovalMode, i64, i64)> {
+    let conn = crate::store::open_initialized_read_connection(path)?;
+    let (stored, generation, revision) = conn
+        .query_row(
+            "SELECT permission_approval_mode, permission_auto_approve_generation,
+                    permission_approval_revision
+             FROM sessions WHERE session_id = ?1",
+            params![session_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
+    let mode = match stored.as_str() {
+        "manual" => crate::permissions::PermissionApprovalMode::Manual,
+        "auto_approve" => crate::permissions::PermissionApprovalMode::AutoApprove,
+        _ => Err(anyhow!(
+            "unsupported stored permission approval mode '{stored}'"
+        ))?,
+    };
+    if generation < 0 {
+        return Err(anyhow!(
+            "stored permission auto-approve generation cannot be negative"
+        ));
+    }
+    if revision < 0 {
+        return Err(anyhow!(
+            "stored permission approval revision cannot be negative"
+        ));
+    }
+    Ok((mode, generation, revision))
+}
+
+/// Changes only the session-local permission answer policy. This does not
+/// increment model config_version, invalidate remembered grants, or rewrite
+/// backend selection.
+pub fn update_permission_approval_mode(
+    path: &Path,
+    session_id: &str,
+    mode: crate::permissions::PermissionApprovalMode,
+) -> Result<()> {
+    let revision = reserve_permission_approval_transition(path, session_id)?;
+    if compare_and_update_permission_approval_state(path, session_id, revision, mode)? {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "permission approval mode changed concurrently; refresh and try again"
+        ))
+    }
+}
+
+/// Reserves the next durable user-intent ticket. A later reservation prevents
+/// an older delayed writer from applying, regardless of actual write order.
+pub(crate) fn reserve_permission_approval_transition(path: &Path, session_id: &str) -> Result<i64> {
+    let mut conn = crate::store::open_runtime_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let updated = tx.execute(
+        "UPDATE sessions
+         SET permission_approval_revision = permission_approval_revision + 1
+         WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    if updated == 0 {
+        return Err(anyhow!("session '{session_id}' was not found"));
+    }
+    let revision = tx.query_row(
+        "SELECT permission_approval_revision FROM sessions WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    tx.commit()?;
+    Ok(revision)
+}
+
+/// Applies a reserved transition only while it is still the latest user
+/// intent. `false` means a later transition was reserved first.
+pub(crate) fn compare_and_update_permission_approval_state(
+    path: &Path,
+    session_id: &str,
+    revision: i64,
+    mode: crate::permissions::PermissionApprovalMode,
+) -> Result<bool> {
+    let mut conn = crate::store::open_runtime_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let stored = match mode {
+        crate::permissions::PermissionApprovalMode::Manual => "manual",
+        crate::permissions::PermissionApprovalMode::AutoApprove => "auto_approve",
+    };
+    let increment = i64::from(mode == crate::permissions::PermissionApprovalMode::AutoApprove);
+    let updated = tx.execute(
+        "UPDATE sessions
+         SET permission_approval_mode = ?1,
+             permission_auto_approve_generation = permission_auto_approve_generation + ?2
+         WHERE session_id = ?3 AND permission_approval_revision = ?4",
+        params![stored, increment, session_id, revision],
+    )?;
+    if updated == 0 {
+        let exists = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = ?1)",
+            params![session_id],
+            |row| row.get::<_, bool>(0),
+        )?;
+        tx.commit()?;
+        return if exists {
+            Ok(false)
+        } else {
+            Err(anyhow!("session '{session_id}' was not found"))
+        };
+    }
+    tx.commit()?;
+    Ok(true)
+}
+
+/// Reads only the immutable behavior discriminator. Configuration repair paths
+/// use this instead of decoding the whole snapshot, because an unrelated
+/// malformed legacy field must remain explicitly repairable.
+pub fn load_session_behavior(path: &Path, session_id: &str) -> Result<SessionBehavior> {
+    let conn = crate::store::open_connection(path)?;
+    let behavior = conn
+        .query_row(
+            "SELECT behavior FROM sessions WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    behavior
+        .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?
+        .parse()
+}
+
 pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn

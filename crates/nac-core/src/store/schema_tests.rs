@@ -10,6 +10,15 @@ fn temp_store_path(label: &str) -> PathBuf {
         .join("store.db")
 }
 
+#[test]
+fn initialized_read_connection_never_creates_a_missing_store_parent() {
+    let path = temp_store_path("missing_read_only");
+    assert!(!path.parent().unwrap().exists());
+
+    assert!(open_initialized_read_connection(&path).is_err());
+    assert!(!path.parent().unwrap().exists());
+}
+
 fn create_legacy_base(conn: &Connection) {
     conn.execute_batch(
         "CREATE TABLE sessions (
@@ -453,8 +462,103 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 24);
+    assert_eq!(STORE_SCHEMA_VERSION, 26);
     drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v24_store_adds_manual_session_permission_approval_mode() {
+    let path = temp_store_path("v24_permission_approval_mode");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    insert_legacy_session(&legacy, "legacy-session");
+    legacy
+        .execute_batch(
+            "ALTER TABLE sessions DROP COLUMN permission_approval_mode;
+             ALTER TABLE sessions DROP COLUMN permission_auto_approve_generation;
+             ALTER TABLE sessions DROP COLUMN permission_approval_revision;
+             PRAGMA user_version = 24;",
+        )
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    let mode: String = migrated
+        .query_row(
+            "SELECT permission_approval_mode FROM sessions WHERE session_id = 'legacy-session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(mode, "manual");
+    let generation: i64 = migrated
+        .query_row(
+            "SELECT permission_auto_approve_generation FROM sessions WHERE session_id = 'legacy-session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(generation, 0);
+    let revision: i64 = migrated
+        .query_row(
+            "SELECT permission_approval_revision FROM sessions WHERE session_id = 'legacy-session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(revision, 0);
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v25_store_adds_permission_approval_transition_revision() {
+    let path = temp_store_path("v25_permission_approval_revision");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    insert_legacy_session(&legacy, "legacy-session");
+    legacy
+        .execute(
+            "UPDATE sessions
+             SET permission_approval_mode = 'auto_approve',
+                 permission_auto_approve_generation = 7
+             WHERE session_id = 'legacy-session'",
+            [],
+        )
+        .unwrap();
+    legacy
+        .execute_batch(
+            "ALTER TABLE sessions DROP COLUMN permission_approval_revision;
+             PRAGMA user_version = 25;",
+        )
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    let state: (String, i64, i64) = migrated
+        .query_row(
+            "SELECT permission_approval_mode, permission_auto_approve_generation,
+                    permission_approval_revision
+             FROM sessions WHERE session_id = 'legacy-session'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(state, ("auto_approve".to_string(), 7, 0));
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

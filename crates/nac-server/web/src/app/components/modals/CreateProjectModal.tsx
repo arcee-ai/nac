@@ -172,6 +172,11 @@ function CreateProjectForm({
   // directory above all — is meaningless until one connection has answered, so
   // the rest of the form waits for it.
   const [connection, setConnection] = useState<SshTarget | null>(null);
+  const compactionRef = useRef("");
+  const compactionAutoRef = useRef(true);
+  // A saved preset owns an explicit numeric or disabled compaction policy;
+  // this also prevents disabled (`null`) from being auto-filled by the model.
+  const compactionPresetRef = useRef(false);
 
   // The override only makes sense for the model the selection settles on, so
   // the catalog narrows it to the efforts that model accepts.
@@ -228,6 +233,22 @@ function CreateProjectForm({
   // Stable, so the panel does not re-emit its selection on every render.
   const onSelection = useCallback((next: LaunchModelSelection | null) => {
     setSelection(next);
+    if (next?.kind === "resolved" && next.orchestrator_compaction_threshold !== undefined) {
+      const threshold = next.orchestrator_compaction_threshold;
+      const value = threshold == null ? "" : String(threshold);
+      compactionPresetRef.current = true;
+      compactionAutoRef.current = false;
+      compactionRef.current = value;
+      setCompaction(value);
+    } else {
+      const leavingPreset = compactionPresetRef.current;
+      compactionPresetRef.current = false;
+      if (leavingPreset) {
+        compactionAutoRef.current = true;
+        compactionRef.current = "";
+        setCompaction("");
+      }
+    }
     setError((current) => (current?.field === "config" ? null : current));
   }, []);
 
@@ -251,8 +272,6 @@ function CreateProjectForm({
   // threshold. A manually entered value is preserved across model changes —
   // the suggestion only fills the field when it is empty or was itself last
   // auto-suggested.
-  const compactionRef = useRef("");
-  const compactionAutoRef = useRef(true);
   const compactionPlaceholder = useMemo(() => {
     const resolved = resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model);
     const contextWindow = resolved.contextWindow;
@@ -260,6 +279,7 @@ function CreateProjectForm({
   }, [catalog.data, chosen?.backend, chosen?.model]);
   useEffect(() => {
     if (
+      !compactionPresetRef.current &&
       compactionPlaceholder !== "auto" &&
       (compactionRef.current === "" || compactionAutoRef.current)
     ) {
@@ -267,10 +287,11 @@ function CreateProjectForm({
       compactionRef.current = compactionPlaceholder;
       setCompaction(compactionPlaceholder);
     }
-  }, [compactionPlaceholder]);
+  }, [compactionPlaceholder, selection]);
 
   const onCompactionChange = (value: string) => {
     setError(null);
+    compactionPresetRef.current = false;
     compactionAutoRef.current = false;
     compactionRef.current = value;
     setCompaction(value);
@@ -414,10 +435,19 @@ function CreateProjectForm({
       reasoning_effort: reasoning === CLEAR_EFFORT ? null : reasoning || configuredEffort || null,
     };
     if (headers !== undefined) body.extra_headers = headers;
-    if (launchLight) body.light_model = launchLight;
+    // Explicit Single must override a saved project default that is Dual.
+    body.light_model = launchLight;
 
-    const threshold = nullable(compaction);
-    if (threshold !== null) body.orchestrator_compaction_threshold = Number(threshold);
+    if (
+      compactionPresetRef.current &&
+      selection.kind === "resolved" &&
+      selection.orchestrator_compaction_threshold !== undefined
+    ) {
+      body.orchestrator_compaction_threshold = selection.orchestrator_compaction_threshold;
+    } else {
+      const threshold = nullable(compaction);
+      if (threshold !== null) body.orchestrator_compaction_threshold = Number(threshold);
+    }
     if (!connected) {
       const activityKey = mode === "sandbox" ? crypto.randomUUID() : null;
       setLaunchKey(activityKey);
@@ -611,7 +641,12 @@ function CreateProjectForm({
             onChange={onSelection}
           >
             <div className="flex flex-col gap-2">
-              <LightModelSection key={savedLightKey} initial={savedLight} onChange={onLight} />
+              <LightModelSection
+                key={savedLightKey}
+                initial={savedLight}
+                behavior={behavior}
+                onChange={onLight}
+              />
               <Separator />
               <ConfigRow
                 label="Reasoning Effort"

@@ -257,7 +257,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         snapshot.extra_headers.clone(),
         metadata,
     )
-    .and_then(|settings| settings.with_trusted_api_key_file(model.trusted_api_key_file))
+    .and_then(|settings| settings.with_trusted_api_key_file(model.trusted_api_key_file.clone()))
     .map_err(|error| {
         anyhow::anyhow!(
             "stored session model settings are invalid; settings repair required: {error}"
@@ -279,7 +279,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         }
         snapshot.config_version = sessions::update_session_config(&store_path, &snapshot)?;
     }
-    let client = ModelClient::from_effective_settings(snapshot_settings)
+    let client = ModelClient::from_effective_settings(snapshot_settings.clone())
         .map_err(|error| {
             if error.downcast_ref::<ModelConfigurationError>().is_some() {
                 let message = format!(
@@ -291,23 +291,36 @@ pub(super) async fn build_resume_config_from_snapshot(
             }
         })?
         .with_cache_ttl(Some("1h"));
-    let light_client = snapshot
-        .light_model
-        .as_ref()
-        .map(|light| resolve_light_client(light, &snapshot.extra_headers))
-        .transpose()
-        .map_err(|error| match error {
-            // The resolver classifies the failure at the source; add the
-            // repair context without type-sniffing the chain. The boundary
-            // renders the full chain once with `{:#}`.
-            LightModelError::InvalidSettings(inner) => inner.context(
-                "stored session light-model settings are invalid; settings repair required",
-            ),
-            // Keep the typed wrapper so its top-level context still names
-            // the light model as the failing component.
-            error @ LightModelError::Other(_) => anyhow::Error::from(error),
-        })?
-        .map(std::sync::Arc::new);
+    let light_client = if snapshot.behavior == sessions::SessionBehavior::Direct {
+        // Keep this symmetric with fresh construction: ALL-36 owns any future
+        // direct-session use. The durable selection is retained without
+        // credential resolution and is absent from the resumed direct runtime.
+        None
+    } else {
+        snapshot
+            .light_model
+            .as_ref()
+            .map(|light| {
+                resolve_light_client(
+                    light,
+                    &snapshot.extra_headers,
+                    model.trusted_light_credential.as_ref(),
+                )
+            })
+            .transpose()
+            .map_err(|error| match error {
+                // The resolver classifies the failure at the source; add the
+                // repair context without type-sniffing the chain. The boundary
+                // renders the full chain once with `{:#}`.
+                LightModelError::InvalidSettings(inner) => inner.context(
+                    "stored session light-model settings are invalid; settings repair required",
+                ),
+                // Keep the typed wrapper so its top-level context still names
+                // the light model as the failing component.
+                error @ LightModelError::Other(_) => anyhow::Error::from(error),
+            })?
+            .map(std::sync::Arc::new)
+    };
     let sandbox = if ssh.is_some() {
         None
     } else {

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use nac_contracts::{NewProject, ProjectRecord};
 use nac_core::{
+    light_model::TrustedLightCredential,
     model::{provider_uses_api_key, BackendKind},
     runtime::ResumeModelOptions,
     sessions::SessionSnapshot,
@@ -107,6 +108,15 @@ impl ManagedModelProfile {
             .then(|| self.credential_file.clone())
     }
 
+    pub(crate) fn trusted_light_credential(&self) -> Option<TrustedLightCredential> {
+        self.trusted_api_key_file()
+            .map(|path| TrustedLightCredential {
+                backend: self.backend,
+                base_url: self.endpoint.clone(),
+                path,
+            })
+    }
+
     pub(crate) fn matches_session(&self, snapshot: &SessionSnapshot) -> bool {
         snapshot.backend == self.backend
             && snapshot.base_url == self.endpoint
@@ -129,9 +139,12 @@ impl ManagedModelProfile {
             && api_key_env.is_none()
     }
 
-    pub(crate) fn resume_options(&self) -> ResumeModelOptions {
+    pub(crate) fn resume_options(&self, primary_matches: bool) -> ResumeModelOptions {
         ResumeModelOptions {
-            trusted_api_key_file: self.trusted_api_key_file(),
+            trusted_api_key_file: primary_matches
+                .then(|| self.trusted_api_key_file())
+                .flatten(),
+            trusted_light_credential: self.trusted_light_credential(),
         }
     }
 }
@@ -225,7 +238,10 @@ mod tests {
         ))
         .unwrap();
         assert!(profile.trusted_api_key_file().is_some());
-        assert!(profile.resume_options().trusted_api_key_file.is_some());
+        let options = profile.resume_options(true);
+        assert!(options.trusted_api_key_file.is_some());
+        assert!(options.trusted_light_credential.is_some());
+        assert!(profile.resume_options(false).trusted_api_key_file.is_none());
     }
 
     #[test]
@@ -237,7 +253,9 @@ mod tests {
         .unwrap();
         assert_eq!(profile.backend, BackendKind::ArceeAuth);
         assert!(profile.trusted_api_key_file().is_none());
-        assert!(profile.resume_options().trusted_api_key_file.is_none());
+        let options = profile.resume_options(true);
+        assert!(options.trusted_api_key_file.is_none());
+        assert!(options.trusted_light_credential.is_none());
 
         let error = ManagedModelProfile::from_config(&config(
             ManagedModelCredentialSource::ManagedBootstrap,

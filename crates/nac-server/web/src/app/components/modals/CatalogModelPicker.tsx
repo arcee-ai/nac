@@ -113,6 +113,7 @@ export function CatalogModelPicker({
   loading,
   failed,
   disabled = false,
+  compact = false,
   liveByBackend,
   value,
   onSelect,
@@ -122,6 +123,8 @@ export function CatalogModelPicker({
   failed: boolean;
   /** Prevents a seed pick while an authoritative managed index is settling. */
   disabled?: boolean;
+  /** Compact composer trigger; the searchable unified panel stays identical. */
+  compact?: boolean;
   liveByBackend: Map<BackendKind, ProviderModel[] | null>;
   value: CatalogPick | null;
   onSelect: (pick: CatalogPick) => void;
@@ -229,7 +232,7 @@ export function CatalogModelPicker({
       onClose={close}
       // Grows leftwards from the control column, which keeps a panel this wide
       // inside the dialog instead of hanging off its right edge.
-      placement={PopoverPlacement.BottomLeft}
+      placement={compact ? PopoverPlacement.TopRight : PopoverPlacement.BottomLeft}
       size="w-[520px]"
       // Portalled: the dialog scrolls its own body, which would clip the list.
       sticky
@@ -316,14 +319,16 @@ export function CatalogModelPicker({
       }
     >
       <Button
-        variant={ButtonVariant.Secondary}
-        size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-        content={ButtonContent.IconRight}
+        variant={compact ? ButtonVariant.Ghost : ButtonVariant.Secondary}
+        size={compact ? ButtonSize.Small : isMobile ? ButtonSize.Large : ButtonSize.Medium}
+        content={compact ? ButtonContent.IconLeft : ButtonContent.IconRight}
         disabled={!catalog || disabled}
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
-        className="w-full md:w-[280px]"
+        aria-label={compact ? "Model" : undefined}
+        className={compact ? "max-w-[190px]" : "w-full md:w-[280px]"}
       >
+        {compact ? <Icon iconName={IconName.Brain} /> : null}
         <span className="flex-1 min-w-0 text-left truncate">{label}</span>
         {/* Some providers name their flagship after themselves; saying it twice
             on one line reads like a mistake. */}
@@ -332,13 +337,15 @@ export function CatalogModelPicker({
             {providerLabel(value.backend)}
           </span>
         ) : null}
-        <Icon
-          iconName={IconName.Down}
-          className={cn(
-            "transition-transform duration-150 ease-out",
-            open ? "rotate-180" : "rotate-0",
-          )}
-        />
+        {compact ? null : (
+          <Icon
+            iconName={IconName.Down}
+            className={cn(
+              "transition-transform duration-150 ease-out",
+              open ? "rotate-180" : "rotate-0",
+            )}
+          />
+        )}
       </Button>
     </Popover>
   );

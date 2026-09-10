@@ -16,5 +16,5 @@ export {
   useManagedProviderModels,
   useManagedSecrets,
   usePutManagedSecret,
-  useReadyManagedProviderModels,
+  useReadyProviderModels,
 } from "@/app/features/managed/queries";

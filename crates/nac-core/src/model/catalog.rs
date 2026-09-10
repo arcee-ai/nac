@@ -20,7 +20,7 @@
 //! (S4) and adapter effort translation read these maps; adapter dispatch
 //! consolidation (S6) follows.
 
-use crate::model::{managed_backend_base_url, BackendKind};
+use crate::model::{backend, managed_backend_base_url, BackendKind};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -51,7 +51,8 @@ pub use overlay::spawn_overlay_refresh;
 pub use types::{
     ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, CostTier, DefaultLimits,
     ModelCostRates, ModelEntry, ModelListing, ModelMetadata, ModelSource, ProviderAuth,
-    ProviderListing, ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
+    ProviderConnection, ProviderListing, ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW,
+    FALLBACK_MAX_TOKENS,
 };
 
 /// Well-known id of each provider's fallback entry.
@@ -452,11 +453,25 @@ pub fn api_listing() -> ModelListing {
                 *provider,
                 provider_catalog.credential_env_var.as_deref(),
             );
+            let connection = if auth_status == AuthStatus::Ready {
+                managed_backend_base_url(*provider)
+                    .map(str::to_string)
+                    .or_else(|| provider_catalog.default_base_url.clone())
+                    .map(|base_url| ProviderConnection {
+                        base_url,
+                        api_key_env: backend::api_key_backend(*provider)
+                            .then(|| provider_catalog.credential_env_var.clone())
+                            .flatten(),
+                    })
+            } else {
+                None
+            };
             ProviderListing {
                 id: *provider,
                 auth: provider_auth(*provider),
                 auth_status,
                 auth_hint,
+                connection,
                 managed_base_url: managed_backend_base_url(*provider).map(str::to_string),
                 default_base_url: provider_catalog.default_base_url.clone(),
                 default_limits: DefaultLimits {
