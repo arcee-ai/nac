@@ -52,6 +52,7 @@ import type {
   ModelConfigurationList,
   ModelConfigurationRecord,
   OrchestratorSteeringResponse,
+  PermissionApprovalMode,
   PermissionReply,
   PermissionStateResponse,
   SessionGoalRecord,
@@ -549,6 +550,11 @@ export const api = {
   replyPermission: (id: string, requestId: string, reply: PermissionReply) =>
     request<void>("POST", `${sessionPath(id)}/permissions/${encodeURIComponent(requestId)}`, {
       body: { reply },
+    }),
+
+  setPermissionApprovalMode: (id: string, mode: PermissionApprovalMode) =>
+    request<void>("PUT", `${sessionPath(id)}/permissions/mode`, {
+      body: { mode },
     }),
 
   deletePermissionGrant: (id: string, grantId: string) =>

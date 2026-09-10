@@ -43,6 +43,10 @@ pub struct ModelOptions {
     /// Trusted operator-mounted credential path. This is internal runtime
     /// composition state and is never populated from ordinary CLI/HTTP input.
     pub trusted_api_key_file: Option<PathBuf>,
+    /// Independently route-bound credential for the optional light client.
+    /// The resolver attaches it only when backend, endpoint, and absent
+    /// selector all match exactly.
+    pub trusted_light_credential: Option<TrustedLightCredential>,
     pub extra_headers: Option<BTreeMap<String, String>>,
     /// Optional light worker model; `Some` enables weight-classified
     /// dispatch for the session, `None` keeps single-model behavior.
@@ -55,6 +59,7 @@ pub struct ModelOptions {
 #[derive(Debug, Clone, Default)]
 pub struct ResumeModelOptions {
     pub trusted_api_key_file: Option<PathBuf>,
+    pub trusted_light_credential: Option<TrustedLightCredential>,
 }
 
 #[derive(Debug, Clone, Default)]

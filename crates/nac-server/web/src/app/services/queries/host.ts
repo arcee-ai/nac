@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/app/services/api";
+import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
 import { queryKeys } from "@/app/services/queries/keys";
 import type {
   ManagedAuthProvider,
@@ -104,17 +105,10 @@ export function useManagedLogout() {
   return useMutation({
     mutationFn: (provider: ManagedAuthProvider) => api.managedLogout(provider),
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: queryKeys.managedAuth });
       // The model index was only readable through the login that just went
       // away, so what is cached from it is no longer true — including the copy a
       // resolved configuration carries.
-      client.removeQueries({ queryKey: queryKeys.managedProviderModelsAll });
-      await client.invalidateQueries({
-        queryKey: queryKeys.resolvedModelConfigsAll,
-      });
-      await client.invalidateQueries({
-        queryKey: queryKeys.resolvedConfigFilesAll,
-      });
+      await refreshProviderAuthentication(client);
     },
   });
 }

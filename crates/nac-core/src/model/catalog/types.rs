@@ -329,6 +329,17 @@ pub struct ModelEntry {
     pub source: ModelSource,
 }
 
+/// The server-owned account a unified picker can use for this provider.
+/// `api_key_env` is a selector only; the credential value never leaves the
+/// server. Managed logins therefore carry no selector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProviderConnection {
+    pub base_url: String,
+    #[cfg_attr(feature = "openapi", schema(required))]
+    pub api_key_env: Option<String>,
+}
+
 /// One provider group in the `GET /models` listing.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -344,6 +355,10 @@ pub struct ProviderListing {
     /// known.
     #[cfg_attr(feature = "openapi", schema(required))]
     pub auth_hint: Option<String>,
+    /// The currently selected server-owned account route, if usable. This is
+    /// the sole routing source for unified selectors; it contains no secret.
+    #[cfg_attr(feature = "openapi", schema(required))]
+    pub connection: Option<ProviderConnection>,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub managed_base_url: Option<String>,
     /// The provider's catalog endpoint default (models.dev `api` or the

@@ -26,6 +26,17 @@ use crate::{ApiErrorBody, SessionManager};
 
 const MAX_CONTROL_BODY_BYTES: usize = 32 * 1024;
 
+pub(crate) fn running_target() -> anyhow::Result<ManagedUpgradeTarget> {
+    let identity = crate::build_identity::current();
+    Ok(ManagedUpgradeTarget {
+        release_id: identity.build_id.to_string(),
+        source_sha: identity.source_revision.to_string(),
+        product_version: identity.product_version.to_string(),
+        schema_version: nac_core::store::schema_version(),
+        minimum_schema_version: nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+    })
+}
+
 pub(crate) fn router(manager: SessionManager) -> Router {
     Router::new()
         .route("/v1/upgrade/status", post(status))

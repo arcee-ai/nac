@@ -125,6 +125,7 @@ pub(crate) fn model_options(
         api_model: required_create_string(model, "model")?,
         api_key_env,
         trusted_api_key_file: None,
+        trusted_light_credential: None,
         extra_headers,
         light_model: None,
     })

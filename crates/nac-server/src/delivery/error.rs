@@ -7,6 +7,7 @@ use axum::{
 use nac_core::{
     model::ModelConfigurationError,
     model_configurations::ModelConfigurationStoreError,
+    permissions::PermissionApprovalModeUpdateError,
     projects::ProjectStoreError,
     runtime,
     session_service::{SessionCoordinationError, SessionSubmitError},
@@ -225,6 +226,10 @@ impl From<anyhow::Error> for ApiError {
             match error {
                 sessions::SessionOperationLeaseError::Busy(_) => StatusCode::CONFLICT,
                 sessions::SessionOperationLeaseError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        } else if let Some(error) = error.downcast_ref::<PermissionApprovalModeUpdateError>() {
+            match error {
+                PermissionApprovalModeUpdateError::ConcurrentChange => StatusCode::CONFLICT,
             }
         } else if error.downcast_ref::<ModelConfigurationError>().is_some()
             || error.downcast_ref::<RequestConfigurationError>().is_some()

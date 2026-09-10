@@ -531,6 +531,73 @@ async fn create_reports_the_missing_light_model_credential() {
 }
 
 #[tokio::test]
+async fn direct_preserves_an_unavailable_light_model_without_resolving_it() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("direct_unused_light_credential");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+    let manager = test_manager(&root);
+    let store_path = root.join("store.db");
+
+    let unavailable_light = LightModelSettings {
+        model: "claude-sonnet-4-6".to_string(),
+        backend: Some(BackendKind::AnthropicMessages),
+        base_url: Some("https://api.anthropic.com".to_string()),
+        api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+        reasoning_effort: None,
+    };
+    let created = manager
+        .create_session(CreateSessionRequest {
+            behavior: sessions::SessionBehavior::Direct,
+            model: RequestField::Value("gpt-5.2".to_string()),
+            backend: RequestField::Value("openai-responses".to_string()),
+            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+            light_model: RequestField::Value(unavailable_light.clone()),
+            ..CreateSessionRequest::default()
+        })
+        .await
+        .expect("plain direct must not resolve its unused light model");
+    let session_id = created.metadata.session_id.unwrap();
+    assert_eq!(
+        sessions::load_session(&store_path, &session_id)
+            .unwrap()
+            .light_model,
+        Some(unavailable_light.clone())
+    );
+
+    manager
+        .update_session_config(
+            &session_id,
+            UpdateConfigRequest {
+                reasoning_effort: RequestField::Value("high".to_string()),
+                ..UpdateConfigRequest::default()
+            },
+        )
+        .await
+        .expect("plain direct updates must not resolve the unused light model");
+    let stored = sessions::load_session(&store_path, &session_id).unwrap();
+    assert_eq!(stored.light_model, Some(unavailable_light));
+    assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::High));
+
+    manager
+        .inner
+        .active_sessions
+        .write()
+        .await
+        .remove(&session_id);
+    let resumed = manager
+        .attach_session(&session_id)
+        .await
+        .expect("plain direct resume must not resolve the unused light model");
+    assert_eq!(
+        resumed.metadata().behavior,
+        sessions::SessionBehavior::Direct
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn update_reports_the_missing_light_model_credential() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("update_missing_light_credential");

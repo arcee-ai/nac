@@ -313,6 +313,7 @@ impl<'a> SessionCreationApplication<'a> {
             request.extra_headers,
         )?;
         if let Some(profile) = self.manager.managed_model() {
+            model.trusted_light_credential = profile.trusted_light_credential();
             let uses_host_credentials = model.backend == Some(profile.backend)
                 && model.api_base_url.as_deref() == Some(profile.endpoint.as_str())
                 && matches!(model.api_key_env, OptionalModelOption::Clear);

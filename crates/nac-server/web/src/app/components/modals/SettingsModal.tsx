@@ -80,17 +80,24 @@ function headersToText(headers: Record<string, string>): string {
 }
 
 /** The persisted column is a JSON string; unparsable content means "repair me". */
-function parseHeadersJson(json: string | null | undefined): Record<string, string> {
-  if (!json) return {};
+function parseHeadersJson(json: string | null | undefined): {
+  headers: Record<string, string>;
+  invalid: boolean;
+} {
+  if (!json) return { headers: {}, invalid: false };
   try {
     const parsed: unknown = JSON.parse(json);
-    if (Object(parsed) !== parsed || Array.isArray(parsed)) return {};
-    // SAFETY: the identity check above admits only non-null JSON objects; the
-    // column is written by this app as a string map, and anything else reads
-    // as "repair me" rather than being trusted.
-    return parsed as Record<string, string>;
+    if (
+      Object(parsed) !== parsed ||
+      Array.isArray(parsed) ||
+      Object.values(parsed as Record<string, unknown>).some((value) => typeof value !== "string")
+    ) {
+      return { headers: {}, invalid: true };
+    }
+    // SAFETY: the checks above admit only a non-null object with string values.
+    return { headers: parsed as Record<string, string>, invalid: false };
   } catch {
-    return {};
+    return { headers: {}, invalid: true };
   }
 }
 
@@ -109,13 +116,15 @@ function initialFromMetadata(meta: SessionMetadata): SettingsInitialValues {
 }
 
 function initialFromConfig(config: RawSessionConfig): SettingsInitialValues {
+  const headers = parseHeadersJson(config.extra_headers_json);
   return {
     model: config.model,
     backend: config.backend ?? "",
     base_url: config.base_url,
     reasoning_effort: config.reasoning_effort || null,
     api_key_env: config.api_key_env || null,
-    extra_headers: parseHeadersJson(config.extra_headers_json),
+    extra_headers: headers.headers,
+    extra_headers_invalid: headers.invalid,
     orchestrator_compaction_threshold: config.orchestrator_compaction_threshold,
   };
 }
@@ -179,12 +188,14 @@ export function SettingsModal({
   if (!mounted || !id) return null;
 
   const meta = snapshot?.metadata;
+  const storedHeaders = parseHeadersJson(config?.extra_headers_json);
   const initial = meta
     ? {
         ...initialFromMetadata(meta),
         // Metadata lacks the compaction threshold, but the config row (always
         // fetched) carries it, so the field shows the live value.
         orchestrator_compaction_threshold: config?.orchestrator_compaction_threshold ?? null,
+        extra_headers_invalid: storedHeaders.invalid,
       }
     : config
       ? initialFromConfig(config)
@@ -269,12 +280,17 @@ function SettingsForm({
       : "",
   );
   const compactionAutoRef = useRef(initial.orchestrator_compaction_threshold == null);
+  // An explicitly selected saved preset owns even a disabled (`null`)
+  // compaction policy. Keep an empty explicit value from being replaced by
+  // the catalog's automatic 70% suggestion until the user edits it.
+  const compactionPresetRef = useRef(false);
   const [error, setError] = useState("");
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [light, setLight] = useState<LightSelection>({
     mode: initialLight ? "dual" : "single",
     light: initialLight,
   });
+  const [lightSeed, setLightSeed] = useState(initialLight);
   const [advanced, setAdvanced] = useState(false);
 
   // A malformed stored light model loads as null with only a diagnostic; the
@@ -294,6 +310,29 @@ function SettingsForm({
     if (next.kind === "resolved") {
       setReasoning(next.reasoning_effort ?? "");
       setHeaders(headersToText(next.extra_headers ?? {}));
+      if (next.orchestrator_compaction_threshold !== undefined) {
+        const threshold = next.orchestrator_compaction_threshold;
+        const value = threshold == null ? "" : String(threshold);
+        compactionPresetRef.current = true;
+        compactionAutoRef.current = false;
+        compactionRef.current = value;
+        setCompaction(value);
+      } else {
+        const leavingPreset = compactionPresetRef.current;
+        compactionPresetRef.current = false;
+        if (leavingPreset) {
+          compactionAutoRef.current = true;
+          compactionRef.current = "";
+          setCompaction("");
+        }
+      }
+      if (next.light_model !== undefined) {
+        setLightSeed(next.light_model);
+        setLight({
+          mode: next.light_model ? "dual" : "single",
+          light: next.light_model,
+        });
+      }
     }
   }, []);
 
@@ -317,6 +356,7 @@ function SettingsForm({
   // auto-suggested.
   useEffect(() => {
     if (
+      !compactionPresetRef.current &&
       compactionPlaceholder !== "auto" &&
       (compactionRef.current === "" || compactionAutoRef.current)
     ) {
@@ -324,7 +364,7 @@ function SettingsForm({
       compactionRef.current = compactionPlaceholder;
       setCompaction(compactionPlaceholder);
     }
-  }, [compactionPlaceholder]);
+  }, [compactionPlaceholder, selection]);
 
   const blocked = !selection;
   const busy =
@@ -366,6 +406,10 @@ function SettingsForm({
 
   const submit = async () => {
     if (busy || !selection) return;
+    if (light.mode === "dual" && !light.light) {
+      setError("Pick the light model before saving.");
+      return;
+    }
 
     interface SelectedModelConfig {
       backend: BackendKind;
@@ -376,7 +420,10 @@ function SettingsForm({
     let selected: SelectedModelConfig;
     try {
       if (selection.kind === "save") {
-        const record = await createModelConfig.mutateAsync(selection.request);
+        const record = await createModelConfig.mutateAsync({
+          ...selection.request,
+          light_model: light.mode === "dual" ? light.light : null,
+        });
         selected = {
           // SAFETY: the server echoes the BackendKind wire value it stored.
           backend: record.backend as BackendKind,
@@ -422,10 +469,8 @@ function SettingsForm({
     }
 
     if (light.mode === "dual") {
-      if (!light.light) {
-        setError("Pick the light model before saving.");
-        return;
-      }
+      // Guarded before a named configuration can be created above.
+      if (!light.light) return;
       const finalLight = inheritPrimaryCredential(
         light.light,
         selected.backend,
@@ -569,7 +614,12 @@ function SettingsForm({
           onChange={onConfigurationChange}
         >
           <div className="flex flex-col gap-2">
-            <LightModelSection initial={initialLight} onChange={setLight} />
+            <LightModelSection
+              key={JSON.stringify(lightSeed)}
+              initial={lightSeed}
+              behavior={openingSummary.behavior ?? "orchestrator"}
+              onChange={setLight}
+            />
             <Separator />
             <button
               type="button"
@@ -609,6 +659,7 @@ function SettingsForm({
                         inputMode="numeric"
                         value={compaction}
                         onChange={(event) => {
+                          compactionPresetRef.current = false;
                           compactionAutoRef.current = false;
                           compactionRef.current = event.target.value;
                           setCompaction(event.target.value);

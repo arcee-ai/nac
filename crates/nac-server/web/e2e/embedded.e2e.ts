@@ -356,6 +356,111 @@ test("keeps approval state and actions reachable with many remembered permission
   harness.provider.assertConsumed();
 });
 
+test("persists session auto-approval, drains pending asks, and restores manual mode", async ({
+  harness,
+  page,
+  request,
+}) => {
+  test.setTimeout(90_000);
+  const fixtureRoot = path.join(harness.runRoot, "auto-approval-fixtures");
+  await fs.mkdir(fixtureRoot, { recursive: true });
+  const first = path.join(fixtureRoot, "first.txt");
+  const second = path.join(fixtureRoot, "second.txt");
+  const manual = path.join(fixtureRoot, "manual.txt");
+  await Promise.all([
+    fs.writeFile(first, "first\n"),
+    fs.writeFile(second, "second\n"),
+    fs.writeFile(manual, "manual\n"),
+  ]);
+
+  harness.provider.enqueue(
+    "auto-approve-pending",
+    { token: "ALL16_AUTO_APPROVE_TOKEN", requiredTools: ["read"] },
+    {
+      kind: "function_call",
+      name: "read",
+      callId: "auto-approve-first",
+      arguments: { path: first },
+      stream: true,
+    },
+  );
+  harness.provider.enqueue(
+    "auto-approve-new",
+    { functionOutputCallId: "auto-approve-first" },
+    {
+      kind: "function_call",
+      name: "read",
+      callId: "auto-approve-second",
+      arguments: { path: second },
+      stream: true,
+    },
+  );
+  harness.provider.enqueue(
+    "auto-approve-complete",
+    { functionOutputCallId: "auto-approve-second" },
+    { kind: "text", text: "automatic approvals complete", stream: true },
+  );
+
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  await page.getByRole("combobox", { name: "Message" }).fill("ALL16_AUTO_APPROVE_TOKEN");
+  await page.getByRole("button", { name: "Send" }).click();
+  await harness.provider.waitForRequestCount(1);
+  await expect(page.locator('[data-tool-call-id="auto-approve-first"]')).toContainText(
+    "Awaiting approval",
+  );
+
+  await page.getByRole("switch", { name: "Approve all automatically" }).click();
+  await expect(
+    page.getByRole("button", { name: "Auto-approve on — open permissions" }),
+  ).toBeVisible();
+  await harness.provider.waitForRequestCount(3);
+  await waitForRunIdle(request, harness, sessionId);
+  await expect(page.locator('[data-tool-call-id="auto-approve-first"]')).toContainText("Succeeded");
+  await expect(page.locator('[data-tool-call-id="auto-approve-second"]')).toContainText(
+    "Succeeded",
+  );
+  await expect(page.getByText("automatic approvals complete")).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Auto-approve on — open permissions" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
+  const toggle = page.getByRole("switch", { name: "Approve all automatically" });
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await toggle.click();
+  await expect(page.getByRole("button", { name: "Permissions" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  harness.provider.enqueue(
+    "manual-after-disable",
+    { token: "ALL16_MANUAL_TOKEN", requiredTools: ["read"] },
+    {
+      kind: "function_call",
+      name: "read",
+      callId: "manual-after-disable",
+      arguments: { path: manual },
+      stream: true,
+    },
+  );
+  harness.provider.enqueue(
+    "manual-after-disable-complete",
+    { functionOutputCallId: "manual-after-disable" },
+    { kind: "text", text: "manual approval restored", stream: true },
+  );
+  await page.getByRole("combobox", { name: "Message" }).fill("ALL16_MANUAL_TOKEN");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await harness.provider.waitForRequestCount(4);
+  const manualCard = page.locator('[data-tool-call-id="manual-after-disable"]');
+  await expect(manualCard).toContainText("Awaiting approval");
+  await page.getByRole("button", { name: "Allow once" }).click();
+  await harness.provider.waitForRequestCount(5);
+  await waitForRunIdle(request, harness, sessionId);
+  await expect(page.getByText("manual approval restored")).toBeVisible();
+  harness.provider.assertConsumed();
+});
+
 test("renders an unknown primary tool failure safely after reload", async ({
   harness,
   page,
@@ -477,6 +582,260 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
   await tabs.filter({ has: page.getByText("Direct", { exact: true }) }).click();
   await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+});
+
+test("shows and persists the optional light model for every chat behavior", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const lightModel = {
+    model: "gpt-5.6-sol",
+    backend: "openai-responses" as const,
+    base_url: harness.provider.baseUrl,
+    api_key_env: "NAC_E2E_API_KEY",
+    reasoning_effort: "low" as const,
+  };
+  const projectId = await createProject(request, harness, { lightModel });
+  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+
+  for (const expected of [
+    {
+      behavior: "orchestrator",
+      label: "NAC orchestrator",
+      routingCopy: "Worker models",
+      route: "threads",
+    },
+    {
+      behavior: "direct",
+      label: "Direct coding agent",
+      routingCopy: "Optional light model",
+      route: "delegated",
+    },
+    {
+      behavior: "direct-with-orchestrator",
+      label: "Direct + NAC orchestration",
+      routingCopy: "Orchestrator models",
+      route: "delegated",
+    },
+  ] as const) {
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("New Chat");
+    await expect(dialog).toContainText("GPT-5.6 Sol");
+    if (expected.behavior !== "orchestrator") {
+      await dialog.getByRole("radio").filter({ hasText: expected.label }).click();
+    }
+    await expect(dialog).toContainText(expected.routingCopy);
+    await expect(dialog.getByRole("button", { name: "Dual" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await dialog.getByRole("button", { name: "Create chat" }).click();
+    await expect(page).toHaveURL(new RegExp(`/session/[^/]+/${expected.route}$`));
+    const sessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+    expect(sessionId).toBeTruthy();
+    const config = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
+    expect(config.ok()).toBe(true);
+    expect((await config.json()) as { light_model?: unknown }).toMatchObject({
+      light_model: lightModel,
+    });
+
+    if (expected.behavior !== "direct-with-orchestrator") {
+      await page.getByRole("button", { name: "Create new session", exact: true }).click();
+    }
+  }
+});
+
+test("uses the unified catalog for a cross-provider New Chat override", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const projectId = await createProject(request, harness);
+  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Primary model", { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Advanced presets and provider setup" }),
+  ).toBeVisible();
+  await dialog.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+  await page.getByPlaceholder("Search models…").fill("deepseek-v4-flash");
+  await page.getByText("deepseek-v4-flash", { exact: true }).click();
+  await dialog.getByRole("button", { name: "Create chat" }).click();
+  await expect(page).toHaveURL(/\/session\/[^/]+\/threads$/);
+  const sessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+  expect(sessionId).toBeTruthy();
+  const config = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
+  expect(config.ok()).toBe(true);
+  expect(await config.json()).toMatchObject({
+    backend: "deepseek-chat",
+    model: "deepseek-v4-flash",
+    base_url: "https://api.deepseek.com",
+  });
+});
+
+test("switches the active chat across configured providers from the unified composer picker", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  const modelButton = page.getByRole("button", { name: "Model" });
+  await expect(modelButton).toBeVisible();
+  await modelButton.click();
+  await page.getByPlaceholder("Search models…").fill("deepseek-v4-flash");
+
+  const mutation = page.waitForRequest(
+    (candidate) =>
+      candidate.method() === "PATCH" && candidate.url().endsWith(`/sessions/${sessionId}/config`),
+  );
+  await page.getByText("deepseek-v4-flash", { exact: true }).click();
+  const body = (await mutation).postDataJSON() as Record<string, unknown>;
+  expect(body).toMatchObject({
+    backend: "deepseek-chat",
+    model: "deepseek-v4-flash",
+    base_url: "https://api.deepseek.com",
+    api_key_env: "DEEPSEEK_API_KEY",
+    extra_headers: null,
+  });
+  expect(JSON.stringify(body)).not.toContain("nac-e2e-deepseek-dummy-only");
+
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
+      const config = (await response.json()) as { backend?: string; model?: string };
+      return `${config.backend}/${config.model}`;
+    })
+    .toBe("deepseek-chat/deepseek-v4-flash");
+});
+
+test("uses an Advanced saved provider account from the unified composer without exposing its key", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const sessionId = await createDirectSession(request, harness);
+  const canary = "advanced-provider-secret-must-stay-server-side";
+  const created = await request.post(`${harness.baseUrl}/model-configs`, {
+    data: {
+      name: "Advanced Fireworks account",
+      backend: "fireworks-chat",
+      model: "gpt-5.6-sol",
+      base_url: harness.provider.baseUrl,
+      api_key: canary,
+    },
+  });
+  expect(created.ok()).toBe(true);
+  const saved = (await created.json()) as { api_key_env?: string };
+  expect(saved.api_key_env).toMatch(/^NAC_CONFIG_/);
+  expect(JSON.stringify(saved)).not.toContain(canary);
+
+  const catalog = await request.get(`${harness.baseUrl}/models`);
+  const provider = (
+    (await catalog.json()) as {
+      providers: Array<{
+        id: string;
+        auth_status: string;
+        connection: { base_url: string; api_key_env: string | null } | null;
+      }>;
+    }
+  ).providers.find((entry) => entry.id === "fireworks-chat");
+  expect(provider).toMatchObject({
+    auth_status: "ready",
+    connection: {
+      base_url: harness.provider.baseUrl,
+      api_key_env: saved.api_key_env,
+    },
+  });
+
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  await page.getByRole("button", { name: "Model" }).click();
+  await page.getByPlaceholder("Search models…").fill("fireworks-chat");
+  const mutation = page.waitForRequest(
+    (candidate) =>
+      candidate.method() === "PATCH" && candidate.url().endsWith(`/sessions/${sessionId}/config`),
+  );
+  await page.getByRole("button", { name: /gpt-5\.6-sol gpt-5\.6-sol/ }).click();
+  const body = (await mutation).postDataJSON() as Record<string, unknown>;
+  expect(body).toMatchObject({
+    backend: "fireworks-chat",
+    model: "gpt-5.6-sol",
+    base_url: harness.provider.baseUrl,
+    api_key_env: saved.api_key_env,
+    extra_headers: null,
+  });
+  expect(JSON.stringify(body)).not.toContain(canary);
+
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
+      const config = (await response.json()) as {
+        backend?: string;
+        api_key_env?: string | null;
+      };
+      return `${config.backend}/${config.api_key_env}`;
+    })
+    .toBe(`fireworks-chat/${saved.api_key_env}`);
+});
+
+test("uses an Advanced saved provider account for the light model without exposing its key", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const canary = "advanced-light-provider-secret-must-stay-server-side";
+  const created = await request.post(`${harness.baseUrl}/model-configs`, {
+    data: {
+      name: "Advanced Fireworks light account",
+      backend: "fireworks-chat",
+      model: "gpt-5.6-sol",
+      base_url: harness.provider.baseUrl,
+      api_key: canary,
+    },
+  });
+  expect(created.ok()).toBe(true);
+  const saved = (await created.json()) as { api_key_env?: string };
+  expect(saved.api_key_env).toMatch(/^NAC_CONFIG_/);
+  expect(JSON.stringify(saved)).not.toContain(canary);
+
+  const projectId = await createProject(request, harness);
+  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Dual" }).click();
+  const lightRow = dialog.getByText("Light model*", { exact: true }).locator("..").locator("..");
+  await lightRow.getByRole("button").click();
+  await page.getByPlaceholder("Search models…").fill("fireworks-chat");
+  await page.getByRole("button", { name: /gpt-5\.6-sol gpt-5\.6-sol/ }).click();
+
+  const mutation = page.waitForRequest(
+    (candidate) => candidate.method() === "POST" && candidate.url().endsWith("/sessions"),
+  );
+  await dialog.getByRole("button", { name: "Create chat" }).click();
+  const body = (await mutation).postDataJSON() as {
+    light_model?: Record<string, unknown> | null;
+  };
+  expect(body.light_model).toMatchObject({
+    backend: "fireworks-chat",
+    model: "gpt-5.6-sol",
+    base_url: harness.provider.baseUrl,
+    api_key_env: saved.api_key_env,
+  });
+  expect(JSON.stringify(body)).not.toContain(canary);
+
+  await expect(page).toHaveURL(/\/session\/[^/]+\/threads$/);
+  const sessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+  expect(sessionId).toBeTruthy();
+  const config = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
+  expect(config.ok()).toBe(true);
+  expect((await config.json()) as { light_model?: unknown }).toMatchObject({
+    light_model: {
+      backend: "fireworks-chat",
+      model: "gpt-5.6-sol",
+      base_url: harness.provider.baseUrl,
+      api_key_env: saved.api_key_env,
+    },
+  });
 });
 
 test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({

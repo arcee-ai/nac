@@ -73,10 +73,22 @@ async fn create_and_resume_effort_snapshot(
 async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let original_api_key = std::env::var_os("OPENAI_API_KEY");
+    let missing_light_key = "NAC_MISSING_UNUSED_DIRECT_LIGHT_KEY";
+    let original_missing_light_key = std::env::var_os(missing_light_key);
     unsafe { std::env::set_var("OPENAI_API_KEY", "test_dummy_key") };
+    unsafe { std::env::remove_var(missing_light_key) };
     let store_path = temp_store_path("direct_primary");
     let root = store_path.parent().unwrap().to_path_buf();
     std::fs::create_dir_all(&root).unwrap();
+    let light_model = LightModelSettings {
+        model: "gpt-5-mini".to_string(),
+        backend: Some(BackendKind::OpenAiResponses),
+        base_url: Some("https://api.openai.com/v1".to_string()),
+        api_key_env: Some(missing_light_key.to_string()),
+        reasoning_effort: Some(ReasoningEffort::Low),
+    };
+    let mut direct_model = test_openai_model_options();
+    direct_model.light_model = Some(light_model.clone());
 
     let created = build_run_config_for_project_with_behavior(
         RunOptions {
@@ -86,7 +98,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
-            model: test_openai_model_options(),
+            model: direct_model,
             orchestrator_compaction_threshold: Some(32_000),
             sandbox: SandboxOptions::default(),
             ssh: SshOptions::default(),
@@ -105,6 +117,10 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
         .map(|definition| definition.function.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(tool_names, crate::tools::DIRECT_TOOL_NAMES);
+    assert!(
+        !created.agent.has_light_client_for_test(),
+        "plain direct sessions retain the choice without installing a consumer"
+    );
     assert!(matches!(
         created.agent.messages.first(),
         Some(Message::System { content })
@@ -113,6 +129,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     ));
     let stored = sessions::load_session(&store_path, &session_id).unwrap();
     assert_eq!(stored.behavior, sessions::SessionBehavior::Direct);
+    assert_eq!(stored.light_model.as_ref(), Some(&light_model));
     drop(created);
 
     let resumed = build_resume_config_for_session(
@@ -138,7 +155,15 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
             .collect::<Vec<_>>(),
         crate::tools::DIRECT_TOOL_NAMES
     );
+    assert!(
+        !resumed.agent.has_light_client_for_test(),
+        "resuming a direct session must not invent ALL-36 semantics"
+    );
 
+    let mut delegating_model = test_openai_model_options();
+    let mut delegating_light_model = light_model;
+    delegating_light_model.api_key_env = Some("OPENAI_API_KEY".to_string());
+    delegating_model.light_model = Some(delegating_light_model);
     let delegating = build_run_config_for_project_with_behavior(
         RunOptions {
             workspace_cwd: root.clone(),
@@ -147,7 +172,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
-            model: test_openai_model_options(),
+            model: delegating_model,
             orchestrator_compaction_threshold: Some(32_000),
             sandbox: SandboxOptions::default(),
             ssh: SshOptions::default(),
@@ -167,6 +192,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
             .collect::<Vec<_>>(),
         crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES
     );
+    assert!(delegating.agent.has_light_client_for_test());
     assert!(matches!(
         delegating.agent.messages.first(),
         Some(Message::System { content })
@@ -174,6 +200,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     ));
 
     let _ = std::fs::remove_dir_all(root);
+    restore_env(missing_light_key, original_missing_light_key);
     restore_env("OPENAI_API_KEY", original_api_key);
 }
 
@@ -285,6 +312,7 @@ fn explicit_model_settings_beat_config_and_config_supplies_omissions() {
             api_model: Some(" explicit-model ".to_string()),
             api_key_env: OptionalModelOption::Value("EXPLICIT_API_KEY".to_string()),
             trusted_api_key_file: None,
+            trusted_light_credential: None,
             extra_headers: Some(headers.clone()),
             light_model: None,
         },
@@ -1763,6 +1791,7 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
                 api_model: Some("snapshot-model".to_string()),
                 api_key_env: OptionalModelOption::Value(key_name.to_string()),
                 trusted_api_key_file: None,
+                trusted_light_credential: None,
                 extra_headers: Some(headers.clone()),
                 light_model: None,
             },

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { api } from "@/app/services/api";
 import { queryKeys, type BrowseKind } from "@/app/services/queries/keys";
@@ -273,6 +273,22 @@ export function useModelCatalog(enabled = true) {
   });
 }
 
+/** Reconcile every cached projection derived from provider-account state. */
+export async function refreshUnifiedProviderCatalog(client: QueryClient): Promise<void> {
+  client.removeQueries({ queryKey: queryKeys.managedProviderModelsAll });
+  await client.invalidateQueries({ queryKey: queryKeys.modelCatalog });
+}
+
+/** Reconcile every browser projection after a login is added or removed. */
+export async function refreshProviderAuthentication(client: QueryClient): Promise<void> {
+  await Promise.all([
+    client.invalidateQueries({ queryKey: queryKeys.managedAuth }),
+    refreshUnifiedProviderCatalog(client),
+    client.invalidateQueries({ queryKey: queryKeys.resolvedModelConfigsAll }),
+    client.invalidateQueries({ queryKey: queryKeys.resolvedConfigFilesAll }),
+  ]);
+}
+
 /** Static slash-command metadata served from the core command registry. */
 export function useSlashCommands() {
   return useQuery<SlashCommandDefinition[]>({
@@ -314,10 +330,13 @@ export function useCreateModelConfig() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (payload: CreateModelConfigurationRequest) => api.createModelConfig(payload),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
+    onSuccess: async () => {
       // The server files the key under a generated credential name.
-      void client.invalidateQueries({ queryKey: queryKeys.credentials });
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.modelConfigs }),
+        client.invalidateQueries({ queryKey: queryKeys.credentials }),
+        refreshUnifiedProviderCatalog(client),
+      ]);
     },
   });
 }
@@ -332,10 +351,13 @@ export function useUpdateModelConfig() {
       configId: string;
       payload: UpdateModelConfigurationRequest;
     }) => api.updateModelConfig(configId, payload),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
+    onSuccess: async () => {
       // A replaced key is filed under a new generated name and the old one goes.
-      void client.invalidateQueries({ queryKey: queryKeys.credentials });
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.modelConfigs }),
+        client.invalidateQueries({ queryKey: queryKeys.credentials }),
+        refreshUnifiedProviderCatalog(client),
+      ]);
     },
   });
 }
@@ -344,9 +366,12 @@ export function useDeleteModelConfig() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (configId: string) => api.deleteModelConfig(configId),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: queryKeys.modelConfigs });
-      void client.invalidateQueries({ queryKey: queryKeys.credentials });
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.modelConfigs }),
+        client.invalidateQueries({ queryKey: queryKeys.credentials }),
+        refreshUnifiedProviderCatalog(client),
+      ]);
     },
   });
 }

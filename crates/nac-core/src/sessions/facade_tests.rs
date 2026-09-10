@@ -131,6 +131,10 @@ fn behavior_round_trips_lists_and_cannot_change_during_state_save() {
             load_session(&store_path, session_id).unwrap().behavior,
             behavior
         );
+        assert_eq!(
+            load_session_behavior(&store_path, session_id).unwrap(),
+            behavior
+        );
     }
 
     let summaries = list_sessions(&store_path).unwrap();
@@ -159,6 +163,17 @@ fn behavior_round_trips_lists_and_cannot_change_during_state_save() {
         load_session(&store_path, "direct").unwrap().behavior,
         SessionBehavior::Direct
     );
+    let conn = rusqlite::Connection::open(&store_path).unwrap();
+    conn.execute(
+        "UPDATE sessions SET light_model_json = '{broken' WHERE session_id = 'direct'",
+        [],
+    )
+    .unwrap();
+    assert_eq!(
+        load_session_behavior(&store_path, "direct").unwrap(),
+        SessionBehavior::Direct,
+        "behavior-only reads must not decode unrelated repairable configuration",
+    );
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -179,6 +194,10 @@ fn unknown_stored_behavior_fails_closed_for_load_and_list() {
 
     let load_error = load_session(&store_path, "session").unwrap_err();
     assert!(load_error
+        .to_string()
+        .contains("unsupported stored session behavior 'future-behavior'"));
+    let behavior_error = load_session_behavior(&store_path, "session").unwrap_err();
+    assert!(behavior_error
         .to_string()
         .contains("unsupported stored session behavior 'future-behavior'"));
     let list_error = list_sessions(&store_path).unwrap_err();

@@ -4,7 +4,7 @@ use nac_core::{
     events::{SessionEventBoundary, SessionEventEnvelope, SessionReplayGap},
     light_model::LightModelSettings,
     model::{BackendKind, ProviderModel, ReasoningEffort},
-    permissions::{PermissionReply, PermissionRequest},
+    permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
     session_service::{ActiveRunSnapshot, MessagesPageSnapshot, SessionFrontendSnapshot},
     sessions,
     store::{GoalStatus, InboxDelivery, PermissionGrantRecord, SessionInboxRecord},
@@ -268,7 +268,9 @@ pub struct CreateSessionRequest {
     /// Omitted defaults to 70% of the model's context window; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
-    /// Light worker model; omitted or null launches single-model.
+    /// Optional light model. Omitted inherits project/session defaults, null
+    /// explicitly selects single-model operation, and a value replaces the
+    /// inherited selection.
     #[serde(default)]
     pub light_model: RequestField<LightModelSettings>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
@@ -476,8 +478,15 @@ pub struct ReplyPermissionRequest {
     pub reply: PermissionReply,
 }
 
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct UpdatePermissionApprovalModeRequest {
+    pub mode: PermissionApprovalMode,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PermissionStateResponse {
+    /// Durable for this session only. `manual` is the compatibility default.
+    pub approval_mode: PermissionApprovalMode,
     pub requests: Vec<PermissionRequest>,
     pub grants: Vec<PermissionGrantRecord>,
 }
