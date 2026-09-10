@@ -5218,6 +5218,79 @@
         }
       }
     },
+    "/sessions/{session_id}/permissions/mode": {
+      "put": {
+        "tags": [
+          "permissions"
+        ],
+        "operationId": "put_sessions_session_id_permissions_mode",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePermissionApprovalModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Permission approval mode updated"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Concurrent permission approval mode update",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/permissions/{request_id}": {
       "post": {
         "tags": [
@@ -8618,7 +8691,7 @@
           },
           "light_model": {
             "$ref": "#/components/schemas/RequestField_LightModelSettings_LightModelSettings",
-            "description": "Light worker model; omitted or null launches single-model."
+            "description": "Optional light model. Omitted inherits project/session defaults, null\nexplicitly selects single-model operation, and a value replaces the\ninherited selection."
           },
           "model": {
             "$ref": "#/components/schemas/RequestField_String_String"
@@ -9346,7 +9419,7 @@
       },
       "LightModelSettings": {
         "type": "object",
-        "description": "The optional light worker model of a session. `Some` on a session enables\nweight-classified dispatch: light dispatches run this model, heavy\ndispatches run the orchestrator's own model. The model remains a catalog\nid; backend and reasoning effort are typed before entering the domain\nmodel, and the credential is always a selector name, never a key value.",
+        "description": "The optional light model selection stored with a session. Orchestrator\nruntimes use it for weight-classified dispatch, and direct-with-orchestrator\nsessions pass it to the orchestrators they launch. Plain direct sessions\nretain it without a runtime consumer pending ALL-36. The model remains a\ncatalog id; backend and reasoning effort are typed before entering the\ndomain model, and the credential is always a selector name, never a key\nvalue.",
         "required": [
           "model"
         ],
@@ -10737,6 +10810,14 @@
           }
         }
       },
+      "PermissionApprovalMode": {
+        "type": "string",
+        "description": "User-selected approval behavior for one durable direct session.\n\nThis is deliberately an answer policy at the broker boundary, not an\nexecution backend or a reusable resource grant.",
+        "enum": [
+          "manual",
+          "auto_approve"
+        ]
+      },
       "PermissionGrantRecord": {
         "type": "object",
         "required": [
@@ -10847,10 +10928,15 @@
       "PermissionStateResponse": {
         "type": "object",
         "required": [
+          "approval_mode",
           "requests",
           "grants"
         ],
         "properties": {
+          "approval_mode": {
+            "$ref": "#/components/schemas/PermissionApprovalMode",
+            "description": "Durable for this session only. `manual` is the compatibility default."
+          },
           "grants": {
             "type": "array",
             "items": {
@@ -10962,6 +11048,25 @@
           "codex_oauth"
         ]
       },
+      "ProviderConnection": {
+        "type": "object",
+        "description": "The server-owned account a unified picker can use for this provider.\n`api_key_env` is a selector only; the credential value never leaves the\nserver. Managed logins therefore carry no selector.",
+        "required": [
+          "base_url",
+          "api_key_env"
+        ],
+        "properties": {
+          "api_key_env": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "base_url": {
+            "type": "string"
+          }
+        }
+      },
       "ProviderListing": {
         "type": "object",
         "description": "One provider group in the `GET /models` listing.",
@@ -10970,6 +11075,7 @@
           "auth",
           "auth_status",
           "auth_hint",
+          "connection",
           "managed_base_url",
           "default_base_url",
           "default_limits",
@@ -10989,6 +11095,17 @@
           "auth_status": {
             "$ref": "#/components/schemas/AuthStatus",
             "description": "Computed per request from the process environment and the managed\ncredential files — never baked into the catalog."
+          },
+          "connection": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderConnection",
+                "description": "The currently selected server-owned account route, if usable. This is\nthe sole routing source for unified selectors; it contains no secret."
+              }
+            ]
           },
           "default_base_url": {
             "type": [
@@ -11541,7 +11658,7 @@
           },
           {
             "type": "object",
-            "description": "The optional light worker model of a session. `Some` on a session enables\nweight-classified dispatch: light dispatches run this model, heavy\ndispatches run the orchestrator's own model. The model remains a catalog\nid; backend and reasoning effort are typed before entering the domain\nmodel, and the credential is always a selector name, never a key value.",
+            "description": "The optional light model selection stored with a session. Orchestrator\nruntimes use it for weight-classified dispatch, and direct-with-orchestrator\nsessions pass it to the orchestrators they launch. Plain direct sessions\nretain it without a runtime consumer pending ALL-36. The model remains a\ncatalog id; backend and reasoning effort are typed before entering the\ndomain model, and the credential is always a selector name, never a key\nvalue.",
             "required": [
               "model"
             ],
@@ -12162,6 +12279,25 @@
                 "type": "string",
                 "enum": [
                   "permission_dismissed"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The durable answer policy for this direct session changed. No request\nresources or credential-bearing payloads are included.",
+            "required": [
+              "mode",
+              "type"
+            ],
+            "properties": {
+              "mode": {
+                "$ref": "#/components/schemas/PermissionApprovalMode"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "permission_approval_mode_changed"
                 ]
               }
             }
@@ -14020,6 +14156,17 @@
           },
           "reasoning_effort": {
             "$ref": "#/components/schemas/RequestField_ReasoningEffort_ReasoningEffort"
+          }
+        }
+      },
+      "UpdatePermissionApprovalModeRequest": {
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/PermissionApprovalMode"
           }
         }
       },

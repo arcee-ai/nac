@@ -581,6 +581,7 @@ export interface components {
       status: string;
       steering_id: number;
     };
+    PermissionApprovalMode: "manual" | "auto_approve";
     PermissionGrantRecord: {
       action: string;
       backend: string;
@@ -606,6 +607,7 @@ export interface components {
       save_resource?: string | null;
     };
     PermissionStateResponse: {
+      approval_mode: components["schemas"]["PermissionApprovalMode"];
       grants: components["schemas"]["PermissionGrantRecord"][];
       requests: components["schemas"]["PermissionRequest"][];
     };
@@ -626,10 +628,12 @@ export interface components {
       updated_at: string;
     };
     ProviderAuth: "api_key_env" | "managed_arcee" | "codex_oauth";
+    ProviderConnection: { api_key_env: string | null; base_url: string };
     ProviderListing: {
       auth: components["schemas"]["ProviderAuth"];
       auth_hint: string | null;
       auth_status: components["schemas"]["AuthStatus"];
+      connection: null | components["schemas"]["ProviderConnection"];
       default_base_url: string | null;
       default_limits: components["schemas"]["DefaultLimits"];
       id: components["schemas"]["BackendKind"];
@@ -801,6 +805,10 @@ export interface components {
           type: "permission_replied";
         }
       | { reason: string; request_id: string; type: "permission_dismissed" }
+      | {
+          mode: components["schemas"]["PermissionApprovalMode"];
+          type: "permission_approval_mode_changed";
+        }
       | { session_id: string; type: "snapshot_saved" }
       | { transcript_len: number; type: "transcript_appended" }
       | { transcript_len: number; type: "transcript_reverted" };
@@ -1122,6 +1130,7 @@ export interface components {
       orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
       reasoning_effort?: components["schemas"]["RequestField_ReasoningEffort_ReasoningEffort"];
     };
+    UpdatePermissionApprovalModeRequest: { mode: components["schemas"]["PermissionApprovalMode"] };
     UpdateProjectRequest: {
       default_model_config_id?: components["schemas"]["RequestField_String_String"];
       description?: components["schemas"]["RequestField_String_String"];

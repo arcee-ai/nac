@@ -401,6 +401,11 @@ pub enum SessionEvent {
         request_id: String,
         reason: String,
     },
+    /// The durable answer policy for this direct session changed. No request
+    /// resources or credential-bearing payloads are included.
+    PermissionApprovalModeChanged {
+        mode: crate::permissions::PermissionApprovalMode,
+    },
     SnapshotSaved {
         session_id: String,
     },

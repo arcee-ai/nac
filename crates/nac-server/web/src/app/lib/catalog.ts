@@ -18,13 +18,15 @@ import type {
 export interface CatalogPick {
   backend: BackendKind;
   model: string;
-  /** The endpoint the catalog names for this provider, managed one first. */
+  /** The endpoint selected for its server-owned account, then catalog fallbacks. */
   baseUrl: string;
 }
 
 /** Where a session on this provider sends its requests. */
 export function catalogBaseUrl(provider: CatalogProvider): string {
-  return provider.managed_base_url ?? provider.default_base_url ?? "";
+  return (
+    provider.connection?.base_url ?? provider.managed_base_url ?? provider.default_base_url ?? ""
+  );
 }
 
 /**

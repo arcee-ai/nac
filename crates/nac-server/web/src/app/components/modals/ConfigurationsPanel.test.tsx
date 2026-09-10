@@ -43,6 +43,10 @@ const catalog = {
       auth: "api_key_env",
       auth_status: "ready",
       auth_hint: null,
+      connection: {
+        base_url: "https://api.arcee.ai/api/v1",
+        api_key_env: "ARCEE_API_KEY",
+      },
       default_base_url: "https://api.arcee.ai/api/v1",
       managed_base_url: null,
       default_limits: { context_window: 128000, max_tokens: 4096, supported_efforts: [] },
@@ -265,6 +269,86 @@ it("waits for persisted configurations and managed status before emitting an imp
         ([selection]) => selection?.kind === "resolved" && selection.model === hostStatus.model.id,
       ),
     ).toBe(false);
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("preserves exact inherited advanced settings when duplicate presets share basic identity", async () => {
+  vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
+  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
+  vi.spyOn(api, "listModelConfigs").mockResolvedValue({
+    configurations: ["first", "second"].map((suffix, index) => ({
+      config_id: `saved-config-${suffix}`,
+      name: `Saved provider ${suffix}`,
+      backend: "openai-responses" as const,
+      model: "gpt-5.6-sol",
+      base_url: "https://api.openai.com/v1",
+      api_key_env: "SAVED_API_KEY",
+      reasoning_effort: (index === 0 ? "low" : "medium") as "low" | "medium",
+      extra_headers: { "X-Preset": suffix },
+      light_model: {
+        model: "saved-light",
+        backend: "openai-responses" as const,
+        api_key_env: "SAVED_API_KEY",
+      },
+      orchestrator_compaction_threshold: index === 0 ? 111 : 222,
+      created_at: "2026-09-08T00:00:00Z",
+      updated_at: "2026-09-08T00:00:00Z",
+    })),
+  });
+  vi.spyOn(api, "resolveModelConfig").mockResolvedValue({
+    backend: "openai-responses",
+    model: "gpt-5.6-sol",
+    base_url: "https://api.openai.com/v1",
+    api_key_env: "SAVED_API_KEY",
+    reasoning_effort: "high",
+    models: [{ id: "gpt-5.6-sol", display_name: "GPT-5.6 Sol" }],
+    models_error: null,
+  });
+  const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <ConfigurationsPanel
+          invalid={false}
+          initial={{
+            backend: "openai-responses",
+            model: "gpt-5.6-sol",
+            base_url: "https://api.openai.com/v1",
+            api_key_env: "SAVED_API_KEY",
+            reasoning_effort: "high",
+            extra_headers: { "X-Inherited": "exact" },
+          }}
+          onChange={onChange}
+        />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  try {
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          kind: "resolved",
+          reasoning_effort: "high",
+          extra_headers: { "X-Inherited": "exact" },
+          light_model: undefined,
+          orchestrator_compaction_threshold: undefined,
+        }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create New" }));
+    fireEvent.click(await screen.findByText("Saved provider second"));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          config_id: "saved-config-second",
+          orchestrator_compaction_threshold: 222,
+        }),
+      ),
+    );
   } finally {
     view.unmount();
     client.clear();

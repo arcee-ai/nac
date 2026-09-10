@@ -400,7 +400,8 @@ async fn models_endpoint_computes_auth_status_from_the_environment() {
     std::fs::create_dir_all(&nac_home).unwrap();
     // Isolated: no credential files, no config, OPENAI_API_KEY cleared.
     let _env = ScopedModelEnv::isolated(&nac_home, None);
-    let app = router(test_manager(&root));
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
 
     let body = response_json(get_response(app.clone(), "/models", None).await).await;
     let providers = body["providers"].as_array().unwrap();
@@ -410,6 +411,7 @@ async fn models_endpoint_computes_auth_status_from_the_environment() {
     // with the conventional name as the hint.
     assert_eq!(by_id("openai-responses")["auth_status"], "no_credential");
     assert_eq!(by_id("openai-responses")["auth_hint"], "OPENAI_API_KEY");
+    assert!(by_id("openai-responses")["connection"].is_null());
     // Managed providers without stored credentials hint the login
     // commands.
     assert_eq!(by_id("arcee-auth")["auth_status"], "no_credential");
@@ -423,6 +425,56 @@ async fn models_endpoint_computes_auth_status_from_the_environment() {
         "nac-web codex-auth login"
     );
 
+    // Advanced setup stores a provider account under a generated selector.
+    // The catalog publishes that non-secret route until its saved setup is
+    // deleted, so unified pickers do not depend on a conventional env var.
+    let saved = manager
+        .model_configurations()
+        .create(
+            application::model_configurations::CreateModelConfiguration {
+                name: "DeepSeek account".to_string(),
+                backend: BackendKind::DeepSeekChat,
+                model: "deepseek-v4-flash".to_string(),
+                base_url: Some("https://api.deepseek.com".to_string()),
+                api_key: Some("saved-deepseek-key".to_string()),
+                reasoning_effort: None,
+                extra_headers: None,
+                orchestrator_compaction_threshold: None,
+                initial_prompt: None,
+                light_model: None,
+            },
+        )
+        .unwrap();
+    let body = response_json(get_response(app.clone(), "/models", None).await).await;
+    let deepseek = body["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|provider| provider["id"] == "deepseek-chat")
+        .unwrap();
+    assert_eq!(deepseek["auth_status"], "ready");
+    assert_eq!(
+        deepseek["connection"]["base_url"],
+        "https://api.deepseek.com"
+    );
+    let selector = deepseek["connection"]["api_key_env"].as_str().unwrap();
+    assert!(selector.starts_with(GENERATED_CREDENTIAL_PREFIX));
+    assert_ne!(selector, "saved-deepseek-key");
+
+    manager
+        .model_configurations()
+        .delete(&saved.config_id)
+        .unwrap();
+    let body = response_json(get_response(app.clone(), "/models", None).await).await;
+    let deepseek = body["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|provider| provider["id"] == "deepseek-chat")
+        .unwrap();
+    assert_eq!(deepseek["auth_status"], "no_credential");
+    assert!(deepseek["connection"].is_null());
+
     // The conventional variable naming a set value reads ready — the
     // same variable session resolution auto-selects. Unrelated
     // providers still report only their conventional credential hint.
@@ -432,6 +484,10 @@ async fn models_endpoint_computes_auth_status_from_the_environment() {
     let by_id = |id: &str| providers.iter().find(|p| p["id"] == id).unwrap();
     assert_eq!(by_id("openai-responses")["auth_status"], "ready");
     assert!(by_id("openai-responses")["auth_hint"].is_null());
+    assert_eq!(
+        by_id("openai-responses")["connection"]["api_key_env"],
+        "OPENAI_API_KEY"
+    );
     assert_eq!(by_id("anthropic-messages")["auth_status"], "no_credential");
     assert_eq!(
         by_id("anthropic-messages")["auth_hint"],
@@ -461,6 +517,7 @@ async fn models_endpoint_computes_auth_status_from_the_environment() {
         .unwrap();
     assert_eq!(codex["auth_status"], "ready");
     assert!(codex["auth_hint"].is_null());
+    assert!(codex["connection"]["api_key_env"].is_null());
 
     let _ = std::fs::remove_dir_all(root);
 }

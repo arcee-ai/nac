@@ -49,6 +49,25 @@ export function newestPrimarySessionForProject(
 }
 
 /**
+ * The sibling whose model settings the server inherits for a new chat when a
+ * project has no saved default. This is creation order, deliberately distinct
+ * from the activity order used to choose which existing chat to open.
+ */
+export function newestCreatedPrimarySessionForProject(
+  sessions: ManagedSessionSummary[],
+  projectId: string,
+): ManagedSessionSummary | null {
+  return (
+    primarySessions(sessions)
+      .filter((entry) => entry.summary.project_id === projectId)
+      .sort(
+        (left, right) =>
+          parseStoreTime(right.summary.created_at) - parseStoreTime(left.summary.created_at),
+      )[0] ?? null
+  );
+}
+
+/**
  * Join projects with their sessions, newest session first inside each project.
  * Backend order is preserved so pinned projects stay on top.
  */

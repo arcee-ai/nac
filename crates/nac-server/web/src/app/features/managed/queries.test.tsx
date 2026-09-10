@@ -5,7 +5,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { expect, it, vi } from "vitest";
 
-import { managedQueryKeys, useReadyManagedProviderModels } from "@/app/features/managed/queries";
+import { managedQueryKeys, useReadyProviderModels } from "@/app/features/managed/queries";
 import { api } from "@/app/services/api";
 import type { ManagedHostStatus, ModelCatalog } from "@/app/types/api";
 
@@ -26,6 +26,10 @@ it("loads all mounted-key models without sending a browser credential", async ()
         id: "arcee-api",
         auth: "api_key_env",
         auth_status: "ready",
+        connection: {
+          base_url: "https://api.arcee.ai/api/v1",
+          api_key_env: null,
+        },
         models: [],
         auth_hint: null,
         default_base_url: "https://api.arcee.ai/api/v1",
@@ -47,7 +51,7 @@ it("loads all mounted-key models without sending a browser credential", async ()
   const wrapper = ({ children }: PropsWithChildren) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  const hook = renderHook(() => useReadyManagedProviderModels(catalog), { wrapper });
+  const hook = renderHook(() => useReadyProviderModels(catalog), { wrapper });
   try {
     await waitFor(() => expect(hook.result.current.get("arcee-api")).toEqual(models));
     expect(discovery).toHaveBeenCalledExactlyOnceWith({
@@ -78,6 +82,10 @@ it("leaves the overlay absent when live entitlement discovery fails", async () =
         id: "arcee-api",
         auth: "api_key_env",
         auth_status: "ready",
+        connection: {
+          base_url: status.model.endpoint,
+          api_key_env: null,
+        },
         models: [],
         auth_hint: null,
         default_base_url: status.model.endpoint,
@@ -92,7 +100,7 @@ it("leaves the overlay absent when live entitlement discovery fails", async () =
   const wrapper = ({ children }: PropsWithChildren) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  const hook = renderHook(() => useReadyManagedProviderModels(catalog), { wrapper });
+  const hook = renderHook(() => useReadyProviderModels(catalog), { wrapper });
   try {
     await waitFor(() =>
       expect(
@@ -126,6 +134,10 @@ it("keeps a successful empty entitlement index distinct from unavailable discove
         id: "arcee-api",
         auth: "api_key_env",
         auth_status: "ready",
+        connection: {
+          base_url: status.model.endpoint,
+          api_key_env: null,
+        },
         models: [],
         auth_hint: null,
         default_base_url: status.model.endpoint,
@@ -143,7 +155,7 @@ it("keeps a successful empty entitlement index distinct from unavailable discove
   const wrapper = ({ children }: PropsWithChildren) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  const hook = renderHook(() => useReadyManagedProviderModels(catalog), { wrapper });
+  const hook = renderHook(() => useReadyProviderModels(catalog), { wrapper });
   try {
     await waitFor(() => expect(hook.result.current.get("arcee-api")).toEqual([]));
   } finally {

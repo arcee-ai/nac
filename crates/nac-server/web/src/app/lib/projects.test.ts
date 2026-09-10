@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  newestCreatedPrimarySessionForProject,
   newestPrimarySessionForProject,
   orphanSessions,
   primarySessions,
@@ -78,5 +79,21 @@ describe("project chat ownership", () => {
     expect(
       newestPrimarySessionForProject([parent, child, newerParent], "project")?.summary.session_id,
     ).toBe("newer-parent");
+  });
+
+  it("matches server model inheritance by newest primary creation time", () => {
+    const activeOlder = session("active-older", "project");
+    activeOlder.summary.created_at = "2026-08-25T00:00:01Z";
+    activeOlder.summary.updated_at = "2026-08-25T00:00:04Z";
+    const newest = session("newest", "project");
+    newest.summary.created_at = "2026-08-25T00:00:03Z";
+    newest.summary.updated_at = "2026-08-25T00:00:03Z";
+    const child = session("child", "project", true);
+    child.summary.created_at = "2026-08-25T00:00:05Z";
+
+    expect(
+      newestCreatedPrimarySessionForProject([activeOlder, newest, child], "project")?.summary
+        .session_id,
+    ).toBe("newest");
   });
 });

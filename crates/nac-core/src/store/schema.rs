@@ -3,7 +3,11 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+mod managed_tables;
 mod wal_preflight;
+
+pub(super) use managed_tables::create_managed_maintenance_tables;
+use managed_tables::create_terminal_remote_cleanups_table;
 
 #[cfg(test)]
 #[path = "schema/startup_tests.rs"]
@@ -13,10 +17,18 @@ mod startup_tests;
 #[path = "schema/connection_capacity_tests.rs"]
 mod connection_capacity_tests;
 
+#[cfg(test)]
+#[path = "schema/future_schema_tests.rs"]
+mod future_schema_tests;
+
 use wal_preflight::read_schema_version_header;
 
+// 27 composes the independently shipped v25 Managed NAC maintenance schema
+// and v25/v26 permission-mode schema so either predecessor shape is repaired.
+// 26 adds a durable revision for linearizable permission-mode transitions.
 // 25 adds durable Managed NAC maintenance and authenticated-control replay
-// records. 24 adds session_forks (conversation clones plus deleted tombstones). 22 adds
+// records plus the durable per-session permission approval mode. 24 adds
+// session_forks (conversation clones plus deleted tombstones). 22 adds
 // durable direct-parent managed orchestrator relationships. 21 adds
 // durable traditional child sessions. 20 added durable direct-session
 // goals. 19 added revision/backend-bound direct permission grants. 18 added the durable
@@ -31,7 +43,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 25;
+const STORE_SCHEMA_VERSION: i64 = 27;
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
 /// Current durable-store schema version for credential-free readiness and
@@ -640,6 +652,42 @@ fn connect_existing(path: &Path) -> Result<StoreConnection> {
     )
 }
 
+fn connect_read_only(path: &Path) -> Result<StoreConnection> {
+    let path = std::fs::canonicalize(path).with_context(|| {
+        format!(
+            "failed to resolve initialized SQLite store {}",
+            path.display()
+        )
+    })?;
+    connect_with_capacity_using(
+        &path,
+        &CONNECTION_CAPACITY,
+        CONNECTION_WAIT_TIMEOUT,
+        |path| {
+            Connection::open_with_flags(
+                path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+        },
+    )
+}
+
+/// Opens an already initialized store for read-only runtime observation.
+/// Unlike `open_connection`, this never takes migration/write admission or
+/// repairs database-wide pragmas. Callers fail closed if initialization is not
+/// complete.
+pub(crate) fn open_initialized_read_connection(path: &Path) -> Result<StoreConnection> {
+    let conn = connect_read_only(path)?;
+    let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if schema_version != STORE_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "store schema version {schema_version} is not initialized for runtime reads; expected {STORE_SCHEMA_VERSION}"
+        ));
+    }
+    Ok(conn)
+}
+
 pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
     reject_future_schema_before_open(path)?;
     let conn = connect(path)?;
@@ -764,7 +812,7 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | 25 | 26 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -821,6 +869,27 @@ fn open_connection_with_hooks(
         "sessions",
         "behavior",
         "TEXT NOT NULL DEFAULT 'orchestrator' CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'))",
+    )?;
+    // Manual is the fail-closed compatibility default. The option belongs to
+    // exactly one session and survives restart without changing config_version
+    // or the scope of remembered grants.
+    ensure_column(
+        &transaction,
+        "sessions",
+        "permission_approval_mode",
+        "TEXT NOT NULL DEFAULT 'manual' CHECK (permission_approval_mode IN ('manual', 'auto_approve'))",
+    )?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "permission_auto_approve_generation",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (permission_auto_approve_generation >= 0)",
+    )?;
+    ensure_column(
+        &transaction,
+        "sessions",
+        "permission_approval_revision",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (permission_approval_revision >= 0)",
     )?;
     if schema_version < RUN_COUNT_BACKFILL_VERSION {
         backfill_run_counts(&transaction)?;
@@ -891,64 +960,6 @@ fn open_connection_with_hooks(
     Ok(conn)
 }
 
-fn create_terminal_remote_cleanups_table(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS terminal_remote_cleanups (
-             session_id TEXT NOT NULL,
-             pidfile TEXT NOT NULL,
-             created_at TEXT NOT NULL,
-             PRIMARY KEY (session_id, pidfile),
-             FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE RESTRICT
-         );",
-    )?;
-    Ok(())
-}
-
-pub(super) fn create_managed_maintenance_tables(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS managed_host_maintenance (
-             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-             state TEXT NOT NULL CHECK (state IN ('serving', 'maintenance')),
-             operation_id TEXT,
-             target_json TEXT,
-             accepted_identity_json TEXT,
-             prepared_at TEXT,
-             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
-             CHECK (
-                 (state = 'serving' AND operation_id IS NULL AND target_json IS NULL AND prepared_at IS NULL)
-                 OR
-                 (state = 'maintenance' AND operation_id IS NOT NULL AND target_json IS NOT NULL AND prepared_at IS NOT NULL)
-             )
-         );
-         INSERT OR IGNORE INTO managed_host_maintenance
-             (singleton, state, operation_id, target_json, accepted_identity_json, prepared_at, version)
-         VALUES (1, 'serving', NULL, NULL, NULL, NULL, 0);
-
-         CREATE TABLE IF NOT EXISTS managed_control_operations (
-             operation_id TEXT PRIMARY KEY,
-             binding_json TEXT NOT NULL,
-             latest_outcome_json TEXT NOT NULL,
-             created_at TEXT NOT NULL,
-             updated_at TEXT NOT NULL,
-             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0)
-         );
-
-         CREATE TABLE IF NOT EXISTS managed_control_attempts (
-             jti TEXT PRIMARY KEY,
-             operation_id TEXT NOT NULL,
-             binding_json TEXT NOT NULL,
-             outcome_json TEXT,
-             expires_at INTEGER NOT NULL,
-             created_at TEXT NOT NULL,
-             FOREIGN KEY (operation_id) REFERENCES managed_control_operations(operation_id)
-                 ON DELETE RESTRICT
-         );
-         CREATE INDEX IF NOT EXISTS idx_managed_control_attempts_operation
-             ON managed_control_attempts(operation_id);",
-    )?;
-    Ok(())
-}
-
 fn create_base_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS threads (
@@ -1002,6 +1013,12 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
              session_id TEXT PRIMARY KEY,
              behavior TEXT NOT NULL DEFAULT 'orchestrator'
                  CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator')),
+             permission_approval_mode TEXT NOT NULL DEFAULT 'manual'
+                 CHECK (permission_approval_mode IN ('manual', 'auto_approve')),
+             permission_auto_approve_generation INTEGER NOT NULL DEFAULT 0
+                 CHECK (permission_auto_approve_generation >= 0),
+             permission_approval_revision INTEGER NOT NULL DEFAULT 0
+                 CHECK (permission_approval_revision >= 0),
              cwd TEXT NOT NULL,
              store_path TEXT NOT NULL,
              model TEXT NOT NULL,
