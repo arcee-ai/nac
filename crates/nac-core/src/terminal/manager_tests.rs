@@ -614,7 +614,8 @@ async fn pending_remote_cleanup_is_recovered_and_settled_after_manager_restart()
         recovered.live_terminal_names(),
         vec!["remote-pidfile".to_string()]
     );
-    recovered.settle_run().await.unwrap();
+    recovered.terminate("remote-pidfile").await.unwrap();
+    recovered.terminate("remote-pidfile").await.unwrap();
     assert!(
         crate::store::list_terminal_remote_cleanups(&store_path, "cleanup-session")
             .unwrap()
@@ -1221,6 +1222,86 @@ async fn direct_run_settlement_keeps_only_explicitly_retained_terminals() {
 }
 
 #[tokio::test]
+async fn explicit_terminal_termination_is_idempotent_and_preserves_output() {
+    let manager = TerminalManager::for_direct();
+    let name = manager.next_session_name();
+    manager
+        .create(
+            name.clone(),
+            "printf terminal-before-stop; sleep 30",
+            None,
+            120,
+            40,
+            &backend(),
+        )
+        .await
+        .unwrap();
+    manager.retain(&name).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let (first, second) = tokio::join!(manager.terminate(&name), manager.terminate(&name));
+    first.unwrap();
+    second.unwrap();
+    manager.terminate(&name).await.unwrap();
+    assert!(manager.live_terminal_names().is_empty());
+    manager
+        .terminate(&manager.next_session_name())
+        .await
+        .expect("an absent current-instance handle is an idempotent no-op");
+
+    let completed = manager
+        .write_stdin(&name, "", 0, 8_000, None)
+        .await
+        .expect("explicit termination must retain captured output");
+    assert!(completed.content_preview.contains("terminal-before-stop"));
+    assert!(completed.session_name.is_none());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn explicit_terminal_termination_kills_descendant_process_tree() {
+    let manager = TerminalManager::for_direct();
+    let root = std::env::temp_dir().join(format!(
+        "nac-explicit-terminal-descendant-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let pidfile = root.join("descendant-pid");
+    let name = manager.next_session_name();
+    let command = format!(
+        "sh -c 'trap \"\" TERM; sleep 30 & printf %s $! > {}; wait'",
+        pidfile.display()
+    );
+    manager
+        .create(name.clone(), &command, None, 120, 40, &backend())
+        .await
+        .unwrap();
+    let descendant = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(pid) = std::fs::read_to_string(&pidfile) {
+                break pid.parse::<libc::pid_t>().unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("terminal descendant did not publish its pid");
+
+    manager.terminate(&name).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if unsafe { libc::kill(descendant, 0) } != 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("terminal descendant survived explicit termination");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn maintenance_terminal_snapshot_never_waits_for_cleanup_mutex() {
     let manager = TerminalManager::new();
     let _held = manager.sessions.lock().await;
@@ -1597,6 +1678,31 @@ fn stale_terminal_handle_reports_process_local_restart_loss() {
         .missing_session_error(&current.next_session_name())
         .to_string()
         .contains("closed or expired"));
+}
+
+#[tokio::test]
+async fn explicit_terminal_handle_cannot_cross_session_manager_authority() {
+    let owner = TerminalManager::for_direct();
+    let handle = owner.next_session_name();
+    owner
+        .create(
+            handle.clone(),
+            "while :; do sleep 1; done",
+            None,
+            120,
+            40,
+            &backend(),
+        )
+        .await
+        .unwrap();
+    let foreign = TerminalManager::for_direct();
+
+    let error = foreign.terminate(&handle).await.unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("belonged to a previous nac service instance"));
+    assert_eq!(owner.live_terminal_names(), vec![handle]);
+    owner.remove_all().await.unwrap();
 }
 
 #[tokio::test]

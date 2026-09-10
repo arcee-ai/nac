@@ -137,6 +137,63 @@ test("round-trips a native tool result through the scripted Responses provider",
   await expect(page.getByText("tool result received")).toBeVisible();
 });
 
+test("terminates one exact live terminal through the ordinary session API", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const completion = new ScriptGate();
+  harness.provider.enqueue(
+    "terminal-to-stop",
+    { token: "E2E_TERMINAL_STOP_TOKEN", requiredTools: ["exec_command"] },
+    {
+      kind: "function_call",
+      name: "exec_command",
+      callId: "terminal-stop-e2e-1",
+      arguments: {
+        cmd: "sleep 30",
+        tty: true,
+        yield_time_ms: 20,
+      },
+      stream: true,
+    },
+  );
+  harness.provider.enqueue(
+    "finish-after-terminal-stop",
+    { functionOutputCallId: "terminal-stop-e2e-1" },
+    { kind: "text", text: "terminal stop observed", stream: true },
+    completion,
+  );
+
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  const composer = page.getByRole("combobox", { name: "Message" });
+  await composer.fill("E2E_TERMINAL_STOP_TOKEN");
+  await page.getByRole("button", { name: "Send" }).click();
+  await harness.provider.waitForRequestCount(1);
+  const card = page.locator('[data-tool-call-id="terminal-stop-e2e-1"]');
+  await expect(card).toContainText("Awaiting approval");
+  await page.getByRole("button", { name: "Allow once" }).click();
+  await harness.provider.waitForRequestCount(2);
+  await completion.accepted;
+
+  const continuation = harness.provider.requests.find(
+    (entry) => entry.matchedStep === "finish-after-terminal-stop",
+  );
+  const terminalId = JSON.stringify(continuation?.body).match(
+    /shell-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-\d+/,
+  )?.[0];
+  expect(terminalId).toBeTruthy();
+  const endpoint = `${harness.baseUrl}/sessions/${sessionId}/terminals/${encodeURIComponent(terminalId!)}`;
+  expect((await request.delete(endpoint)).status()).toBe(204);
+  expect((await request.delete(endpoint)).status()).toBe(204);
+
+  completion.release();
+  await waitForRunIdle(request, harness, sessionId);
+  await expect(page.getByText("terminal stop observed")).toBeVisible();
+  harness.provider.assertConsumed();
+});
+
 for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
   test(`keeps rich ${behavior} primary tool details through live settlement and reload`, async ({
     harness,

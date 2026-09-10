@@ -873,6 +873,12 @@ impl SessionManager {
         application::session_runs::SessionRunApplication::new(self)
     }
 
+    pub(crate) fn session_terminals(
+        &self,
+    ) -> application::session_terminals::SessionTerminalApplication<'_> {
+        application::session_terminals::SessionTerminalApplication::new(self)
+    }
+
     pub(crate) fn session_lifecycle(
         &self,
     ) -> application::session_lifecycle::SessionLifecycleApplication<'_> {

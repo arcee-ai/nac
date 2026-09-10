@@ -14,6 +14,8 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("DELETE", "/sessions/{session_id}"),
     ("DELETE", "/sessions/{session_id}/goal/{goal_id}"),
     ("DELETE", "/sessions/{session_id}/inbox/{item_id}"),
+    ("DELETE", "/sessions/{session_id}/terminals/{terminal_id}"),
+    ("POST", "/sessions/{session_id}/runs/{run_id}/cancel"),
     (
         "DELETE",
         "/sessions/{session_id}/permissions/grants/{grant_id}",
@@ -473,7 +475,13 @@ async fn openapi_special_wire_schemas_and_docs_are_live() {
         ("delete", "/credentials/{name}", "400"),
         ("get", "/sessions/{session_id}/workspace/revisions", "400"),
         ("post", "/sessions/{session_id}/cancel-active-run", "400"),
+        ("post", "/sessions/{session_id}/runs/{run_id}/cancel", "400"),
         ("delete", "/sessions/{session_id}", "400"),
+        (
+            "delete",
+            "/sessions/{session_id}/terminals/{terminal_id}",
+            "400",
+        ),
         ("get", "/sessions/{session_id}/config", "400"),
         ("post", "/sessions/{session_id}/compact", "400"),
         ("delete", "/mcp_library/servers/{server_name}", "400"),
@@ -484,6 +492,20 @@ async fn openapi_special_wire_schemas_and_docs_are_live() {
         assert!(
             document["paths"][path][method]["responses"][status].is_object(),
             "missing {method} {path} response {status}"
+        );
+    }
+    for (method, path) in [
+        ("post", "/sessions/{session_id}/runs/{run_id}/cancel"),
+        ("delete", "/sessions/{session_id}/terminals/{terminal_id}"),
+    ] {
+        let content = &document["paths"][path][method]["responses"]["400"]["content"];
+        assert!(
+            content["application/json"].is_object(),
+            "missing JSON validation error for {method} {path}"
+        );
+        assert!(
+            content["text/plain"].is_object(),
+            "missing extraction error for {method} {path}"
         );
     }
     for (method, path) in [

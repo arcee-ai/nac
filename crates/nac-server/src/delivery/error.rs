@@ -261,6 +261,7 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("already has running generation")
             || message.contains("already has a running generation")
             || message.contains("running in another process")
+            || message.contains("previous nac service instance")
         {
             StatusCode::CONFLICT
         } else if message.contains("not supported")

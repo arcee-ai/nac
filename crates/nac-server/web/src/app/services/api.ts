@@ -123,6 +123,7 @@ type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 interface RequestOptions {
   body?: unknown;
+  headers?: Record<string, string>;
   signal?: AbortSignal;
 }
 
@@ -138,6 +139,10 @@ async function errorDetail(res: Response): Promise<string> {
         const record = parsed as JsonObject;
         const error = record.error;
         if (isString(error)) return error;
+        const detail = record.detail;
+        if (isString(detail)) return detail;
+        const title = record.title;
+        if (isString(title)) return title;
       }
     } catch {
       // Not JSON; the raw body is the best detail available.
@@ -151,11 +156,14 @@ async function errorDetail(res: Response): Promise<string> {
 async function request<T>(
   method: Method,
   path: string,
-  { body, signal }: RequestOptions = {},
+  { body, headers, signal }: RequestOptions = {},
 ): Promise<T> {
   const res = await fetch(path, {
     method,
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...headers,
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
@@ -225,6 +233,15 @@ export const api = {
   getManagedStatus: (signal?: AbortSignal) =>
     request<ManagedHostStatus>("GET", "/managed/status", { signal }),
 
+  getManagedUpgrade: (signal?: AbortSignal) =>
+    request<unknown>("GET", "/__managed/control/v0/upgrade", { signal }),
+
+  startManagedUpgrade: (idempotencyKey: string) =>
+    request<unknown>("POST", "/__managed/control/v0/upgrade", {
+      body: {},
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+
   getManagedGitHub: (signal?: AbortSignal) =>
     request<ManagedGitHubStatus>("GET", "/managed/github", { signal }),
 
@@ -269,6 +286,12 @@ export const api = {
     request<ManagedCloneOperation>(
       "DELETE",
       `/managed/github/clone-operations/${encodeURIComponent(operationId)}`,
+    ),
+
+  terminateTerminal: (sessionId: string, terminalId: string) =>
+    request<void>(
+      "DELETE",
+      `${sessionPath(sessionId)}/terminals/${encodeURIComponent(terminalId)}`,
     ),
 
   listManagedSecrets: (signal?: AbortSignal) =>
@@ -718,6 +741,9 @@ export const api = {
     }),
 
   cancelActiveRun: (id: string) => request<void>("POST", `${sessionPath(id)}/cancel-active-run`),
+
+  cancelExactRun: (id: string, runId: string) =>
+    request<void>("POST", `${sessionPath(id)}/runs/${encodeURIComponent(runId)}/cancel`),
 
   compactSession: (id: string) =>
     request<CompactSessionResponse>("POST", `${sessionPath(id)}/compact`),

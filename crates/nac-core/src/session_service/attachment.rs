@@ -294,6 +294,13 @@ impl SessionService {
         self.terminal_manager.live_terminal_names()
     }
 
+    /// Explicitly terminates one exact terminal owned by this session while
+    /// preserving its bounded retained output tombstone. This is deliberately
+    /// an ordinary session operation rather than a maintenance force-clear.
+    pub async fn terminate_terminal(&self, terminal_id: &str) -> Result<()> {
+        self.terminal_manager.terminate(terminal_id).await
+    }
+
     pub fn active_run(&self) -> Option<ActiveRunSnapshot> {
         match self.lock_active_operation().as_ref() {
             Some(ActiveSessionOperation::Run(active_run)) => Some(active_run.snapshot.clone()),
