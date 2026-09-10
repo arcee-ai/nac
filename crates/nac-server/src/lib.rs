@@ -15,6 +15,8 @@ mod mcp_api;
 mod orchestration;
 mod revert;
 
+pub(crate) use managed_control::running_target as managed_running_target;
+
 pub use compaction::{CompactSessionError, CompactSessionResponse};
 pub use delivery::contracts::{
     ApiErrorBody, CancelInboxItemRequest, ClearGoalRequest, CreateGoalRequest,
@@ -1955,17 +1957,6 @@ impl SessionManager {
         )?;
         Ok(child_session_id)
     }
-}
-
-fn managed_running_target() -> Result<nac_core::store::ManagedUpgradeTarget> {
-    let identity = build_identity::current();
-    Ok(nac_core::store::ManagedUpgradeTarget {
-        release_id: identity.build_id.to_string(),
-        source_sha: identity.source_revision.to_string(),
-        product_version: identity.product_version.to_string(),
-        schema_version: nac_core::store::schema_version(),
-        minimum_schema_version: nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
-    })
 }
 
 fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPromptResponse {
