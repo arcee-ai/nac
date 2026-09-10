@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -39,6 +39,7 @@ use shell_parser::{canonical_command, command_grant_candidate, parse_shell, Pars
 
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const APPROVAL_SUBSCRIBER_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const APPROVAL_MODE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const DELEGATED_APPROVAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -131,6 +132,35 @@ pub enum PermissionReply {
     Reject,
 }
 
+/// User-selected approval behavior for one durable direct session.
+///
+/// This is deliberately an answer policy at the broker boundary, not an
+/// execution backend or a reusable resource grant.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum PermissionApprovalMode {
+    #[default]
+    Manual,
+    AutoApprove,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionApprovalModeUpdateError {
+    ConcurrentChange,
+}
+
+impl std::fmt::Display for PermissionApprovalModeUpdateError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConcurrentChange => formatter
+                .write_str("permission approval mode changed concurrently; refresh and try again"),
+        }
+    }
+}
+
+impl std::error::Error for PermissionApprovalModeUpdateError {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AuthorizationOutcome {
     Allowed,
@@ -145,6 +175,12 @@ struct PendingPermission {
 #[derive(Default)]
 struct PermissionBrokerState {
     pending: HashMap<String, PendingPermission>,
+}
+
+#[derive(Default)]
+struct PermissionApprovalObserver {
+    last_checked: Option<Instant>,
+    observed_generation: Option<Result<i64, String>>,
 }
 
 struct PendingPermissionGuard {
@@ -188,6 +224,7 @@ pub struct PermissionBroker {
     session_config_version: i64,
     event_bus: StdMutex<Option<crate::events::SessionEventBus>>,
     state: StdMutex<PermissionBrokerState>,
+    approval_observer: tokio::sync::Mutex<PermissionApprovalObserver>,
 }
 
 /// Project one validated backend path into the action being performed plus an
@@ -196,3 +233,11 @@ pub struct PermissionBroker {
 #[cfg(test)]
 #[path = "permissions_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "permission_grant_tests.rs"]
+mod grant_tests;
+
+#[cfg(test)]
+#[path = "permission_mode_tests.rs"]
+mod mode_tests;

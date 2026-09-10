@@ -16,17 +16,22 @@ const SESSION_ID = "direct-session";
 const fakes = {
   getPermissions: vi.fn(),
   replyPermission: vi.fn(),
+  setPermissionApprovalMode: vi.fn(),
   deletePermissionGrant: vi.fn(),
 };
 
 vi.spyOn(api, "getPermissions").mockImplementation((...args) => fakes.getPermissions(...args));
 vi.spyOn(api, "replyPermission").mockImplementation((...args) => fakes.replyPermission(...args));
+vi.spyOn(api, "setPermissionApprovalMode").mockImplementation((...args) =>
+  fakes.setPermissionApprovalMode(...args),
+);
 vi.spyOn(api, "deletePermissionGrant").mockImplementation((...args) =>
   fakes.deletePermissionGrant(...args),
 );
 
 function pendingState(): PermissionStateResponse {
   return {
+    approval_mode: "manual",
     requests: [
       {
         id: "request-1",
@@ -67,6 +72,7 @@ function mount(state: PermissionStateResponse) {
 beforeEach(() => {
   fakes.getPermissions.mockReset().mockResolvedValue({ requests: [], grants: [] });
   fakes.replyPermission.mockReset().mockResolvedValue(undefined);
+  fakes.setPermissionApprovalMode.mockReset().mockResolvedValue(undefined);
   fakes.deletePermissionGrant.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
@@ -123,6 +129,65 @@ describe("direct permission controls", () => {
     await waitFor(() =>
       expect(fakes.replyPermission).toHaveBeenCalledWith(SESSION_ID, "request-1", "always"),
     );
+  });
+
+  it("makes session-wide automatic approval discoverable and drains the pending request", async () => {
+    mount(pendingState());
+
+    const toggle = screen.getByRole("switch", { name: "Approve all automatically" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByRole("dialog").textContent).toContain(
+      "This setting belongs only to this session and stays active across restarts",
+    );
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(fakes.setPermissionApprovalMode).toHaveBeenCalledWith(SESSION_ID, "auto_approve"),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Auto-approve on — open permissions" }),
+      ).toBeTruthy(),
+    );
+    expect(screen.getByRole("dialog").textContent).toContain(
+      "Automatic approval is active for this session.",
+    );
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+  });
+
+  it("keeps the active mode conspicuous and provides an immediate disable control", async () => {
+    const state = pendingState();
+    state.approval_mode = "auto_approve";
+    state.requests = [];
+    mount(state);
+
+    fireEvent.click(screen.getByRole("button", { name: "Auto-approve on — open permissions" }));
+    const toggle = screen.getByRole("switch", { name: "Approve all automatically" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(fakes.setPermissionApprovalMode).toHaveBeenCalledWith(SESSION_ID, "manual"),
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy());
+  });
+
+  it("reconciles a mode change made through another server process", async () => {
+    const manual = pendingState();
+    manual.requests = [];
+    const automatic = { ...manual, approval_mode: "auto_approve" as const };
+    fakes.getPermissions.mockResolvedValueOnce(manual).mockResolvedValue(automatic);
+    mount(manual);
+
+    expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy();
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole("button", { name: "Auto-approve on — open permissions" }),
+        ).toBeTruthy(),
+      { timeout: 2_500 },
+    );
+    expect(fakes.getPermissions.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it("keeps always unavailable when the harness cannot derive a safe grant", () => {

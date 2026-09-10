@@ -63,14 +63,24 @@ export function matchesManagedModelPick(
   );
 }
 
-/** Stored logins and the host's mounted key can discover models without BYOK. */
-export function readyManagedModelRequests(
+/** Every server-owned provider account can discover its models without BYOK. */
+export function readyProviderModelRequests(
   catalog: ModelCatalog | undefined,
   status: ManagedModelHostStatus | null,
 ): ProviderModelsRequest[] {
   return (catalog?.providers ?? []).flatMap((provider) => {
     if (provider.auth_status !== "ready") return [];
     if (provider.auth !== "api_key_env") return [{ backend: provider.id }];
+    const connection = provider.connection;
+    if (connection) {
+      return [
+        {
+          backend: provider.id,
+          base_url: connection.base_url,
+          ...(connection.api_key_env ? { api_key_env: connection.api_key_env } : {}),
+        },
+      ];
+    }
     if (!status?.model_ready || provider.id !== status.model.backend) return [];
     return [{ backend: provider.id, base_url: status.model.endpoint }];
   });

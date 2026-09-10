@@ -5,7 +5,7 @@
 import { useMemo } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { readyManagedModelRequests } from "@/app/features/managed/model";
+import { readyProviderModelRequests } from "@/app/features/managed/model";
 import { api } from "@/app/services/api";
 import type {
   BackendKind,
@@ -110,9 +110,9 @@ export function useManagedProviderModels(
   });
 }
 
-export function useReadyManagedProviderModels(catalog: ModelCatalog | undefined) {
+export function useReadyProviderModels(catalog: ModelCatalog | undefined) {
   const status = useManagedHostStatus().data ?? null;
-  const ready = useMemo(() => readyManagedModelRequests(catalog, status), [catalog, status]);
+  const ready = useMemo(() => readyProviderModelRequests(catalog, status), [catalog, status]);
   const results = useQueries({
     queries: ready.map((request) => ({
       queryKey: managedQueryKeys.providerModels(request.backend, request.base_url),

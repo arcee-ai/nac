@@ -20,6 +20,7 @@ impl PermissionBroker {
             session_config_version,
             event_bus: StdMutex::new(None),
             state: StdMutex::new(PermissionBrokerState::default()),
+            approval_observer: tokio::sync::Mutex::new(PermissionApprovalObserver::default()),
         }
     }
 
@@ -45,6 +46,120 @@ impl PermissionBroker {
                 .then_with(|| left.id.cmp(&right.id))
         });
         requests
+    }
+
+    pub async fn approval_mode(&self) -> anyhow::Result<PermissionApprovalMode> {
+        self.load_approval_state()
+            .await
+            .map(|(mode, _, _)| mode)
+            .map_err(anyhow::Error::msg)
+    }
+
+    /// Durably changes this session's answer policy. Enabling auto-approval
+    /// claims the process-local waiters that existed when the transition
+    /// started. The durable generation lets later or independently attached
+    /// waiters observe the transition without a stale enable claiming work
+    /// admitted after a completed disable.
+    pub async fn set_approval_mode(&self, mode: PermissionApprovalMode) -> anyhow::Result<()> {
+        self.set_approval_mode_with_hooks(mode, || async {}, || async {})
+            .await
+    }
+
+    pub(super) async fn set_approval_mode_with_hooks<
+        BeforeUpdate,
+        BeforeUpdateFuture,
+        AfterCommit,
+        AfterCommitFuture,
+    >(
+        &self,
+        mode: PermissionApprovalMode,
+        before_update: BeforeUpdate,
+        after_commit: AfterCommit,
+    ) -> anyhow::Result<()>
+    where
+        BeforeUpdate: FnOnce() -> BeforeUpdateFuture,
+        BeforeUpdateFuture: std::future::Future<Output = ()>,
+        AfterCommit: FnOnce() -> AfterCommitFuture,
+        AfterCommitFuture: std::future::Future<Output = ()>,
+    {
+        let store_path = self.store_path.clone();
+        let session_id = self.session_id.clone();
+        let revision = tokio::task::spawn_blocking(move || {
+            crate::sessions::reserve_permission_approval_transition(&store_path, &session_id)
+        })
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!("permission approval mode reservation task failed: {error}")
+        })??;
+        let auto_approval_candidates = if mode == PermissionApprovalMode::AutoApprove {
+            self.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .pending
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        before_update().await;
+        let store_path = self.store_path.clone();
+        let session_id = self.session_id.clone();
+        let updated = tokio::task::spawn_blocking(move || {
+            crate::sessions::compare_and_update_permission_approval_state(
+                &store_path,
+                &session_id,
+                revision,
+                mode,
+            )
+        })
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!("permission approval mode update task failed: {error}")
+        })??;
+        if !updated {
+            return Err(PermissionApprovalModeUpdateError::ConcurrentChange.into());
+        }
+
+        // Publish immediately after the durable transition. Test hooks and
+        // process-local waiter delivery must not let an older mode event trail
+        // a later completed transition.
+        self.emit(crate::events::SessionEvent::PermissionApprovalModeChanged { mode });
+        after_commit().await;
+        let replies = if mode == PermissionApprovalMode::AutoApprove {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            auto_approval_candidates
+                .into_iter()
+                .filter_map(|request_id| {
+                    state
+                        .pending
+                        .remove(&request_id)
+                        .map(|pending| (request_id, pending))
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        for (request_id, pending) in replies {
+            if pending.reply.send(PermissionReply::Once).is_ok() {
+                self.emit(crate::events::SessionEvent::PermissionReplied {
+                    request_id,
+                    reply: PermissionReply::Once,
+                });
+            } else {
+                self.emit(crate::events::SessionEvent::PermissionDismissed {
+                    request_id,
+                    reason:
+                        "the operation awaiting automatic approval ended before the mode changed"
+                            .to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn grants(&self) -> anyhow::Result<Vec<crate::store::PermissionGrantRecord>> {
@@ -127,6 +242,17 @@ impl PermissionBroker {
         if cancellation.is_cancelled() {
             return AuthorizationOutcome::Denied("run was cancelled before approval".to_string());
         }
+
+        // The durable mode is consulted only after ordered configured and hard
+        // policy has produced Ask. It is never cached: independent managers and
+        // processes may attach the same durable session.
+        let (_, initial_auto_generation, _) = match self.load_approval_state().await {
+            Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
+                return AuthorizationOutcome::Allowed;
+            }
+            Ok(state) => state,
+            Err(reason) => return AuthorizationOutcome::Denied(reason),
+        };
         let interactive = self
             .event_bus
             .lock()
@@ -142,13 +268,6 @@ impl PermissionBroker {
                     ));
                 }
             };
-        if !interactive && !delegated_child {
-            return AuthorizationOutcome::Denied(
-                "approval is required, but no interactive session client is connected; the operation was not executed"
-                    .to_string(),
-            );
-        }
-
         let request = PermissionRequest {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: self.session_id.clone(),
@@ -166,17 +285,40 @@ impl PermissionBroker {
             created_at_epoch_ms: epoch_millis_now(),
         };
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pending
-            .insert(
+        let approval_generation = match self.load_approval_state().await {
+            Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
+                return AuthorizationOutcome::Allowed;
+            }
+            Ok((PermissionApprovalMode::Manual, generation, _))
+                if generation > initial_auto_generation =>
+            {
+                // Auto-approve was enabled and then disabled while this Ask
+                // was already resolving broker ownership. The enable still
+                // owns this invocation even though it never became pending.
+                return AuthorizationOutcome::Allowed;
+            }
+            Ok((PermissionApprovalMode::Manual, generation, _)) => generation,
+            Err(reason) => return AuthorizationOutcome::Denied(reason),
+        };
+        {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !interactive && !delegated_child {
+                return AuthorizationOutcome::Denied(
+                    "approval is required, but no interactive session client is connected; the operation was not executed"
+                        .to_string(),
+                );
+            }
+            state.pending.insert(
                 request.id.clone(),
                 PendingPermission {
                     request: request.clone(),
                     reply: sender,
                 },
             );
+        }
         let _pending_guard = PendingPermissionGuard {
             broker: Arc::downgrade(self),
             request_id: request.id.clone(),
@@ -200,6 +342,13 @@ impl PermissionBroker {
                 } else {
                     self.reply_outcome(receiver.await, &request, &waiter_live).await
                 }
+            },
+            () = self.auto_approval_after(approval_generation) => {
+                // A local manual reply or cancellation may have claimed the
+                // request after the durable generation was read. Whichever
+                // removes it first owns the sole reply.
+                let _ = self.reply(&request.id, PermissionReply::Once);
+                self.reply_outcome(receiver.await, &request, &waiter_live).await
             },
             reason = self.interactive_subscriber_unavailable(interactive) => {
                 if self.dismiss_pending(&request.id, reason.clone()) {
@@ -300,6 +449,51 @@ impl PermissionBroker {
             });
         }
         dismissed
+    }
+
+    async fn load_approval_state(&self) -> Result<(PermissionApprovalMode, i64, i64), String> {
+        let store_path = self.store_path.clone();
+        let session_id = self.session_id.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::sessions::load_permission_approval_state(&store_path, &session_id)
+        })
+        .await
+        .map_err(|error| format!("permission approval mode read task failed: {error}"))?
+        .map_err(|error| format!("permission approval mode could not be read: {error}"))
+    }
+
+    async fn observed_auto_generation(&self) -> Result<i64, String> {
+        let mut observer = self.approval_observer.lock().await;
+        if let (Some(checked), Some(observation)) =
+            (observer.last_checked, observer.observed_generation.as_ref())
+        {
+            if checked.elapsed() < APPROVAL_MODE_POLL_INTERVAL {
+                return observation.clone();
+            }
+        }
+        let observation = self
+            .load_approval_state()
+            .await
+            .map(|(_, generation, _)| generation);
+        observer.last_checked = Some(Instant::now());
+        observer.observed_generation = Some(observation.clone());
+        observation
+    }
+
+    async fn auto_approval_after(&self, generation: i64) {
+        loop {
+            tokio::time::sleep(APPROVAL_MODE_POLL_INTERVAL).await;
+            // Read failures are fail-closed observations, not permission
+            // answers. Keep the waiter live and retry on the bounded broker
+            // cadence so one transient timeout cannot dismiss every Ask.
+            if self
+                .observed_auto_generation()
+                .await
+                .is_ok_and(|observed_generation| observed_generation > generation)
+            {
+                return;
+            }
+        }
     }
 
     async fn interactive_subscriber_lost(&self) {

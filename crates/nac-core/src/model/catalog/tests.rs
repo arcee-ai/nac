@@ -1027,6 +1027,7 @@ fn api_listing_serializes_the_designed_field_names() {
             "auth",
             "auth_hint",
             "auth_status",
+            "connection",
             "default_base_url",
             "default_limits",
             "id",
