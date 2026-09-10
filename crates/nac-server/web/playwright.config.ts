@@ -2,7 +2,11 @@ import { defineConfig, devices } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
 
+import { assertPortalDebuggingDisabled, remoteArtifactPolicy } from "./e2e/remote-config";
+
 const remoteTarget = process.env.NAC_E2E_REMOTE === "1";
+if (remoteTarget) assertPortalDebuggingDisabled();
+const artifactPolicy = remoteArtifactPolicy();
 
 export default defineConfig({
   testDir: "./e2e",
@@ -18,8 +22,6 @@ export default defineConfig({
   use: {
     ...devices["Desktop Chrome"],
     serviceWorkers: "block",
-    trace: "retain-on-failure",
-    screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    ...artifactPolicy,
   },
 });

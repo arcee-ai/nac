@@ -107,7 +107,8 @@ Run `make test-e2e` as the matching production-browser release gate and
 are also covered by the broader Rust suites. Release packaging and installer
 checks remain workflow-only.
 
-For an explicitly provisioned remote Managed NAC, set
+For an explicitly provisioned remote Managed NAC using the legacy BasicAuth
+gateway, set
 
 ```text
 NAC_E2E_REMOTE_URL
@@ -118,8 +119,20 @@ NAC_E2E_REMOTE_PASSWORD
 through a private runtime secret source and run `make test-e2e-remote`. This
 lane verifies gateway denial, authenticated health/readiness, release identity,
 and production-client loading without modifying remote state. Optionally set
-`NAC_E2E_REMOTE_EXPECTED_VERSION` to pin the expected release. Never put these
-values in Git, shell history, test artifacts, or CI logs. The remote smoke lane
-complements rather than replaces the isolated local `make test-e2e` suite.
+`NAC_E2E_REMOTE_EXPECTED_VERSION` to pin the expected release.
+
+For a portal-owned host, set `NAC_E2E_REMOTE_AUTH_MODE=portal-launch`, keep
+`NAC_E2E_REMOTE_URL` at the HTTPS host root, and inject the single-use URL as
+`NAC_E2E_REMOTE_LAUNCH_URL`; do not set the BasicAuth variables. The launch URL
+must use the exact target origin and managed launch route. Portal mode redeems
+it once into an isolated browser context, disables trace, screenshot, and video
+artifacts before redemption, and refuses `DEBUG` or `PWDEBUG`. An optional
+`NAC_E2E_REMOTE_ENVIRONMENT` non-secret label is included with the recorded
+build and schema identity.
+
+Never put remote credentials, launch URLs, or cookie values in Git, command
+arguments, shell history, test artifacts, or CI logs. The remote smoke lane
+complements rather than replaces the isolated local `make test-e2e` suite, and
+it remains non-mutating in both authentication modes.
 
 nac is licensed under [Apache 2.0](LICENSE).
