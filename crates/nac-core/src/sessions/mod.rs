@@ -31,9 +31,9 @@ pub use db::{
     update_session_presentation,
 };
 pub use operation_lease::{
-    SessionOperationLease, SessionOperationLeaseError, SessionOperationLeaseValidationError,
-    SessionRelationshipLease, SessionResourceLease, SessionResourceMutationLease,
-    WorkspaceActivityLease, WorkspaceMutationLease,
+    HostAdmissionLease, HostMaintenanceLease, SessionOperationLease, SessionOperationLeaseError,
+    SessionOperationLeaseValidationError, SessionRelationshipLease, SessionResourceLease,
+    SessionResourceMutationLease, WorkspaceActivityLease, WorkspaceMutationLease,
 };
 // Compatibility aliases for callers that have not yet adopted operation-wide naming.
 pub type SessionRunLease = SessionOperationLease;

@@ -115,6 +115,190 @@ fn is_safe_method(method: &axum::http::Method) -> bool {
         || method == axum::http::Method::OPTIONS
 }
 
+fn remains_available_during_maintenance(method: &axum::http::Method, path: &str) -> bool {
+    let parts = path.trim_matches('/').split('/').collect::<Vec<_>>();
+    fn is_delete_cancellation(path: &str) -> bool {
+        let parts = path.trim_matches('/').split('/').collect::<Vec<_>>();
+        matches!(parts.as_slice(), ["auth", _, "login", _])
+            || matches!(parts.as_slice(), ["managed", "github", "login", _])
+            || matches!(
+                parts.as_slice(),
+                ["managed", "github", "clone-operations", _]
+            )
+            || matches!(parts.as_slice(), ["sessions", _, "inbox", _])
+    }
+
+    method == axum::http::Method::OPTIONS
+        || ((method == axum::http::Method::GET || method == axum::http::Method::HEAD)
+            && (matches!(
+                path,
+                "/" | "/app"
+                    | "/health"
+                    | "/healthz"
+                    | "/readyz"
+                    | "/managed/status"
+                    | "/openapi.json"
+            ) || path.starts_with("/assets/")
+                || path.starts_with("/docs")))
+        || ((method == axum::http::Method::POST)
+            && (matches!(parts.as_slice(), ["sessions", _, "cancel-active-run"])
+                || matches!(parts.as_slice(), ["sessions", _, "children", _, "cancel"])
+                || matches!(
+                    parts.as_slice(),
+                    ["sessions", _, "orchestrators", _, "cancel"]
+                )
+                || matches!(parts.as_slice(), ["sessions", _, "permissions", _])))
+        || ((method == axum::http::Method::DELETE) && is_delete_cancellation(path))
+}
+
+#[cfg(test)]
+#[test]
+fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available() {
+    use axum::http::Method;
+
+    for (method, path) in [
+        (Method::POST, "/sessions/s/cancel-active-run"),
+        (Method::POST, "/sessions/s/children/c/cancel"),
+        (Method::POST, "/sessions/s/orchestrators/o/cancel"),
+        (Method::DELETE, "/auth/arcee/login/l"),
+        (Method::DELETE, "/managed/github/login/l"),
+        (Method::DELETE, "/managed/github/clone-operations/operation"),
+        (Method::DELETE, "/sessions/s/inbox/1"),
+        (Method::POST, "/sessions/s/permissions/request"),
+    ] {
+        assert!(
+            remains_available_during_maintenance(&method, path),
+            "{method} {path}"
+        );
+    }
+    for (method, path) in [
+        (Method::GET, "/auth/arcee/login/l"),
+        (Method::DELETE, "/projects/project"),
+        (Method::DELETE, "/credentials/key"),
+        (Method::POST, "/unrelated/cancel"),
+    ] {
+        assert!(
+            !remains_available_during_maintenance(&method, path),
+            "{method} {path}"
+        );
+    }
+}
+
+struct ActiveAdmissionGuard {
+    admissions: Arc<StdMutex<HashMap<String, nac_core::store::ManagedUpgradeBlocker>>>,
+    id: String,
+}
+
+impl Drop for ActiveAdmissionGuard {
+    fn drop(&mut self) {
+        self.admissions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.id);
+    }
+}
+
+fn register_active_admission(
+    manager: &SessionManager,
+    method: &axum::http::Method,
+    path: &str,
+) -> ActiveAdmissionGuard {
+    use nac_core::store::{ManagedBlockerKind, ManagedUpgradeBlocker};
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let kind = if path.contains("/workspace/") {
+        ManagedBlockerKind::WorkspaceMutation
+    } else if path == "/managed/github/clone-operations" {
+        ManagedBlockerKind::CloneOperation
+    } else {
+        ManagedBlockerKind::OperationLease
+    };
+    manager
+        .inner
+        .active_admissions
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(
+            id.clone(),
+            ManagedUpgradeBlocker {
+                kind,
+                id: id.clone(),
+                session_id: None,
+                detail: format!("{} {} is being admitted", method.as_str(), path),
+            },
+        );
+    ActiveAdmissionGuard {
+        admissions: Arc::clone(&manager.inner.active_admissions),
+        id,
+    }
+}
+
+async fn enforce_managed_admission(
+    State(manager): State<SessionManager>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    if manager.managed_host().is_none() {
+        return next.run(request).await;
+    }
+    if remains_available_during_maintenance(request.method(), request.uri().path()) {
+        let _host_lease = match manager.managed_completion_admission() {
+            Ok(Some(lease)) => lease,
+            Ok(None) => return next.run(request).await,
+            Err(_) => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ApiErrorBody {
+                        error: "Managed NAC admission state is unavailable".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+        return next.run(request).await;
+    }
+    let _process_gate = Arc::clone(&manager.inner.maintenance_gate)
+        .read_owned()
+        .await;
+    let _host_lease = match manager.managed_work_admission() {
+        Ok(Some(lease)) => lease,
+        Ok(None) => return next.run(request).await,
+        Err(_) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ApiErrorBody {
+                    error: "Managed NAC admission state is unavailable".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
+    match nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path) {
+        Ok(snapshot) if snapshot.state == nac_core::store::ManagedMaintenanceState::Maintenance => {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ApiErrorBody {
+                    error: "Managed NAC is in maintenance; new work is unavailable".to_string(),
+                }),
+            )
+                .into_response()
+        }
+        Ok(_) => {
+            let method = request.method().clone();
+            let path = request.uri().path().to_string();
+            let _active = register_active_admission(&manager, &method, &path);
+            next.run(request).await
+        }
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiErrorBody {
+                error: "Managed NAC admission state is unavailable".to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
 fn origin_matches_host(origin: &str, host: &str) -> bool {
     origin
         .parse::<axum::http::Uri>()
@@ -212,7 +396,7 @@ pub fn router(manager: SessionManager) -> Router {
     // The registry answer takes a few seconds, so it is warmed in the
     // background rather than on the first picker open.
     tokio::spawn(mcp_api::warm_library_cache());
-    let (api, openapi) = api_router(manager);
+    let (api, openapi) = api_router(manager.clone());
     let docs = Router::new()
         .merge(
             SwaggerUi::new("/docs")
@@ -220,12 +404,16 @@ pub fn router(manager: SessionManager) -> Router {
                 .config(SwaggerConfig::default().validator_url("none")),
         )
         .layer(middleware::from_fn(secure_docs));
-    secure_public_router(api.merge(docs).merge(embedded_frontend_router()))
+    secure_public_router(api.merge(docs).merge(embedded_frontend_router()), manager)
 }
 
-fn secure_public_router(router: Router) -> Router {
+fn secure_public_router(router: Router, manager: SessionManager) -> Router {
     router
         .layer(response_compression_layer())
+        .layer(middleware::from_fn_with_state(
+            manager,
+            enforce_managed_admission,
+        ))
         .layer(middleware::from_fn(reject_cross_origin_mutation))
         .layer(middleware::from_fn_with_state(
             Arc::new(configured_allowed_hosts()),
@@ -234,16 +422,20 @@ fn secure_public_router(router: Router) -> Router {
 }
 
 fn managed_migration_recovery_router(manager: SessionManager) -> Router {
-    secure_public_router(
-        Router::new()
-            .route("/healthz", get(managed_status::healthz_handler))
-            .route("/readyz", get(managed_status::readyz_handler))
-            .route(
-                "/managed/status",
-                get(managed_status::managed_status_handler),
-            )
-            .with_state(manager),
-    )
+    Router::new()
+        .route("/healthz", get(managed_status::healthz_handler))
+        .route("/readyz", get(managed_status::readyz_handler))
+        .route(
+            "/managed/status",
+            get(managed_status::managed_status_handler),
+        )
+        .with_state(manager)
+        .layer(response_compression_layer())
+        .layer(middleware::from_fn(reject_cross_origin_mutation))
+        .layer(middleware::from_fn_with_state(
+            Arc::new(configured_allowed_hosts()),
+            reject_foreign_host,
+        ))
 }
 
 fn embedded_frontend_router() -> Router {
@@ -470,30 +662,73 @@ pub async fn serve_with_policy(
     manager: SessionManager,
     on_listening: impl FnOnce(SocketAddr),
 ) -> Result<()> {
+    serve_with_policy_and_readiness(
+        addr,
+        policy,
+        manager,
+        on_listening,
+        application::managed::ManagedReadinessPolicy::production(),
+    )
+    .await
+}
+
+pub(crate) async fn serve_with_policy_and_readiness(
+    addr: SocketAddr,
+    policy: BindPolicy,
+    manager: SessionManager,
+    on_listening: impl FnOnce(SocketAddr),
+    readiness_policy: application::managed::ManagedReadinessPolicy,
+) -> Result<()> {
     policy.validate(addr)?;
     // Establish the durable store before serving requests. Readiness probes
     // then verify this store in place and never create a blank replacement if
     // it disappears while the process is running. A managed host keeps only
     // its credential-free diagnostic surface available after a migration
     // failure; every route that could admit or mutate work remains absent.
-    let app = match nac_core::store::initialize(&manager.inner.store_path) {
-        Ok(()) => {
-            nac_core::reconcile_podman_creation_records(&manager.inner.store_path).await?;
-            router(manager.clone())
+    let recovery_router = |manager: &SessionManager| {
+        manager.enter_recovery_only();
+        let status = nac_core::store::migration_status(&manager.inner.store_path);
+        let reason = status
+            .failure
+            .map_or(status.state.as_str(), |failure| failure.as_str());
+        eprintln!("nac: managed store unavailable ({reason}); serving recovery status only");
+        managed_migration_recovery_router(manager.clone())
+    };
+    let app = if manager.is_recovery_only() {
+        recovery_router(&manager)
+    } else {
+        match nac_core::store::initialize(&manager.inner.store_path) {
+            Ok(()) => {
+                nac_core::reconcile_podman_creation_records(&manager.inner.store_path).await?;
+                router(manager.clone())
+            }
+            Err(_) if manager.managed_host().is_some() => {
+                // This process never constructed the full router. Keep its mode
+                // unavailable even if another process later repairs or migrates
+                // the shared store; a restart is required to admit work routes.
+                recovery_router(&manager)
+            }
+            Err(error) => return Err(error),
         }
-        Err(_) if manager.managed_host().is_some() => {
-            // This process never constructed the full router. Keep its mode
-            // unavailable even if another process later repairs or migrates
-            // the shared store; a restart is required to admit work routes.
-            manager.enter_recovery_only();
-            let status = nac_core::store::migration_status(&manager.inner.store_path);
-            let reason = status
-                .failure
-                .map_or(status.state.as_str(), |failure| failure.as_str());
-            eprintln!("nac: managed store unavailable ({reason}); serving recovery status only");
-            managed_migration_recovery_router(manager.clone())
-        }
-        Err(error) => return Err(error),
+    };
+    let control_listener = match manager
+        .managed_host()
+        .filter(|_| !manager.is_recovery_only())
+    {
+        Some(managed) => match managed.managed_control()? {
+            Some(control) => {
+                if control.bind == addr {
+                    anyhow::bail!(
+                        "managed control listener must use a different address from the public listener"
+                    );
+                }
+                Some(TcpListener::bind(control.bind).await.with_context(|| {
+                    format!("failed to bind managed control listener {}", control.bind)
+                })?)
+            }
+            None => None,
+        },
+        None => None,
     };
     let listener = TcpListener::bind(addr)
         .await
@@ -501,8 +736,27 @@ pub async fn serve_with_policy(
     let bound = listener
         .local_addr()
         .with_context(|| format!("failed to read bound address for {addr}"))?;
+    if !manager.is_recovery_only() {
+        if manager.inner.pending_forward_start {
+            application::managed::require_replacement_readiness(&manager, readiness_policy)?;
+            let accepted =
+                manager.inner.managed_identity.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("managed forward-start identity is unavailable")
+                })?;
+            if !nac_core::store::accept_managed_forward_start(&manager.inner.store_path, accepted)?
+            {
+                anyhow::bail!("accepted managed upgrade target changed before startup completed");
+            }
+        } else {
+            nac_core::store::check_readiness(&manager.inner.store_path)?;
+        }
+    }
     on_listening(bound);
-    serve_router_listener_with_shutdown(
+    let control_server = control_listener.map(|listener| {
+        let app = managed_control::router(manager.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await })
+    });
+    let result = serve_router_listener_with_shutdown(
         listener,
         app,
         manager,
@@ -510,7 +764,12 @@ pub async fn serve_with_policy(
         COMPLETE_SHUTDOWN_TIMEOUT,
         || std::process::exit(0),
     )
-    .await
+    .await;
+    if let Some(control_server) = control_server {
+        control_server.abort();
+        let _ = control_server.await;
+    }
+    result
 }
 
 #[cfg(test)]

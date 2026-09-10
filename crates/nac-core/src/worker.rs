@@ -9,6 +9,7 @@ use crate::agent::Agent;
 use crate::skills::SkillRegistry;
 use crate::store::{self, WorkerContext};
 use crate::types::Message;
+use crate::worker_credentials::{ManagedWorkerCredentialReceiver, ManagedWorkerNativeCredentials};
 
 pub(crate) const MANAGED_WORKER_CANCEL_ACK: &str = "__NAC_CANCEL_ACK__";
 
@@ -100,12 +101,11 @@ async fn commit_managed_worker_episode(
 
 fn spawn_cancellation_listener(
     command_cancellation: ThreadCancellation,
-    #[cfg(test)] ready: Option<std::sync::mpsc::Sender<()>>,
+    ready: Option<std::sync::mpsc::Sender<()>>,
 ) {
     std::thread::spawn(move || {
         let stdin = std::io::stdin();
         let lines = stdin.lock().lines();
-        #[cfg(test)]
         if let Some(ready) = ready {
             let _ = ready.send(());
         }
@@ -122,7 +122,22 @@ fn spawn_cancellation_listener(
     });
 }
 
-pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()> {
+pub async fn run_managed_worker(
+    run_config: ManagedWorkerRunConfig,
+    credential_receiver: ManagedWorkerCredentialReceiver,
+) -> Result<()> {
+    // The CLI builds `run_config`, including every configured MCP transport,
+    // before entering this function. Only now does the worker announce
+    // readiness and receive the credential over its non-inherited socket.
+    let credentials = credential_receiver.receive_after_mcp().await?;
+    spawn_cancellation_listener(run_config.agent.command_cancellation(), None);
+    run_managed_worker_with_credentials(run_config, credentials).await
+}
+
+async fn run_managed_worker_with_credentials(
+    run_config: ManagedWorkerRunConfig,
+    credentials: ManagedWorkerNativeCredentials,
+) -> Result<()> {
     let ManagedWorkerRunConfig {
         mut agent,
         store_path,
@@ -131,11 +146,7 @@ pub async fn run_managed_worker(run_config: ManagedWorkerRunConfig) -> Result<()
         action,
     } = run_config;
 
-    spawn_cancellation_listener(
-        agent.command_cancellation(),
-        #[cfg(test)]
-        None,
-    );
+    agent.set_worker_web_credential(credentials.into_exa_api_key());
     let send_result = agent.send(&action).await;
     let response = send_result?;
     commit_managed_worker_episode(store_path, session_id, thread_name, action, &response).await?;
@@ -148,6 +159,7 @@ mod tests {
     use super::*;
     use crate::agent::{AgentConfig, AgentMode};
     use crate::events::EventSink;
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
     use crate::model::ModelClient;
     use crate::skills::SkillRecord;
     use crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS;
@@ -164,6 +176,110 @@ mod tests {
             body: "Review body instructions.".to_string(),
             resources: Vec::new(),
         }])
+    }
+
+    fn test_worker_agent(client: ModelClient, store_path: PathBuf) -> Agent {
+        Agent::with_config(
+            client,
+            AgentConfig {
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
+                mode: AgentMode::Worker,
+                session_behavior: None,
+                store_path,
+                session_id: Some("session".to_string()),
+                orchestrator_compaction_threshold: None,
+                initial_messages: Vec::new(),
+                thread_name: Some("impl".to_string()),
+                dispatch_id: Some("dispatch".to_string()),
+                event_sink: EventSink::none(),
+                workspace_cwd: PathBuf::from("."),
+                config_cwd: PathBuf::from("."),
+                working_directory: ".".to_string(),
+                worker_executable: None,
+                sandbox: None,
+                ssh: None,
+                mcp: None,
+                skills: None,
+                extra_tool_defs: Vec::new(),
+                agents_md_message: None,
+                thread_timeout_secs: DEFAULT_THREAD_TIMEOUT_SECS,
+                light_client: None,
+                permission_rules: Vec::new(),
+            },
+        )
+        .expect("worker agent config must be valid")
+    }
+
+    #[tokio::test]
+    async fn managed_worker_credential_is_model_safe_and_absent_from_durable_state() {
+        let root = std::env::temp_dir().join(format!(
+            "nac_worker_credential_store_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let store_path = root.join("store.db");
+        store::initialize(&store_path).unwrap();
+        store::insert_test_session(&store_path, "session");
+        let response = serde_json::json!({
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "content": [{"type": "output_text", "text": "worker answer"}]
+            }],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+        })
+        .to_string();
+        let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", response)]);
+        let credential = "exa-durable-state-canary";
+        let run_config = ManagedWorkerRunConfig {
+            agent: test_worker_agent(
+                ModelClient::new_for_test_server(server.base_url.clone()),
+                store_path.clone(),
+            ),
+            store_path: store_path.clone(),
+            session_id: "session".to_string(),
+            thread_name: "impl".to_string(),
+            action: "answer the delegated question".to_string(),
+        };
+
+        run_managed_worker_with_credentials(
+            run_config,
+            ManagedWorkerNativeCredentials::for_test(Some(credential)),
+        )
+        .await
+        .unwrap();
+
+        let requests = server.finish();
+        assert_eq!(requests.len(), 1);
+        let request = String::from_utf8_lossy(&requests[0].body);
+        assert!(request.contains("web_search"));
+        assert!(request.contains("web_fetch"));
+        assert!(!request.contains(credential));
+
+        let episodes = store::thread_read(&store_path, "session", "impl").unwrap();
+        assert_eq!(episodes.len(), 1);
+        assert_eq!(episodes[0].content, "worker answer");
+        assert!(
+            store::TranscriptLogWriter::new(&store_path)
+                .unwrap()
+                .read_from("session", 0)
+                .unwrap()
+                .is_empty(),
+            "worker execution must not write orchestrator transcript rows"
+        );
+        for entry in std::fs::read_dir(&root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_file() {
+                let bytes = std::fs::read(&path).unwrap();
+                assert!(
+                    !bytes
+                        .windows(credential.len())
+                        .any(|window| window == credential.as_bytes()),
+                    "credential persisted in {}",
+                    path.display()
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

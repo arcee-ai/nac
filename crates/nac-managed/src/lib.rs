@@ -10,6 +10,7 @@ mod clone_workflow;
 mod configuration;
 mod github;
 mod github_credential_store;
+mod managed_control_assertion;
 mod readiness;
 
 pub use clone_workflow::{
@@ -18,12 +19,17 @@ pub use clone_workflow::{
 };
 pub use configuration::{
     is_reserved_environment_name, is_valid_environment_name, CommandEnvironmentSnapshot,
-    HostSecretStore, HostSecretSummary, ManagedCommandEnvironmentProvider, ManagedHostConfig,
-    ManagedModelCredentialSource, MANAGED_CONFIG_VERSION, MAX_HOST_SECRETS,
+    HostSecretStore, HostSecretSummary, ManagedCommandEnvironmentProvider, ManagedControlConfig,
+    ManagedHostConfig, ManagedModelCredentialSource, ManagedUpgradeExpectation,
+    LEGACY_MANAGED_CONFIG_VERSION, MANAGED_CONFIG_VERSION, MAX_HOST_SECRETS,
     MAX_HOST_SECRET_TOTAL_BYTES, MAX_HOST_SECRET_VALUE_BYTES,
 };
 pub use github::{
     GitHubAccessToken, GitHubAuthError, GitHubAuthFailureKind, GitHubConnectionStatus,
     GitHubDeviceLogin, GitHubDevicePrompt, GitHubEndpoints, GitHubRepository, ManagedGitHubAuth,
+};
+pub use managed_control_assertion::{
+    ManagedControlAction, ManagedControlAssertion, ManagedControlAssertionError,
+    ManagedControlRequest, ManagedControlTarget, ManagedControlVerifier,
 };
 pub use readiness::{host_checks, ReadinessCheck};

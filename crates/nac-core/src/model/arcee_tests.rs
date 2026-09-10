@@ -46,6 +46,7 @@ fn stored_auth(access_token: &str) -> StoredArceeAuth {
         base_url: "https://api.arcee.ai".to_string(),
         organization_id: "org-1".to_string(),
         workspace_name: "acme".to_string(),
+        auth_issuer: ARCEE_AUTH_PRODUCTION_ISSUER.to_string(),
         client_id: LEGACY_CLIENT_ID.to_string(),
         managed_bootstrap: None,
     }
@@ -99,6 +100,8 @@ async fn device_code_request_uses_expected_contract_and_parses_complete_uri() {
     let device = request_device_code(
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
+        LEGACY_CLIENT_ID,
+        None,
     )
     .await
     .expect("device-code response should parse");
@@ -135,6 +138,8 @@ async fn device_code_request_supports_fallback_uri_and_default_timing() {
     let device = request_device_code(
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
+        LEGACY_CLIENT_ID,
+        None,
     )
     .await
     .expect("fallback verification URI should parse");
@@ -168,6 +173,8 @@ async fn device_code_request_reports_malformed_and_non_success_responses() {
         let error = request_device_code(
             &no_redirect_client().unwrap(),
             &ArceeAuthService::for_test(&server.base_url),
+            LEGACY_CLIENT_ID,
+            None,
         )
         .await
         .expect_err("invalid device-code response should fail");
@@ -182,6 +189,34 @@ async fn device_code_request_reports_malformed_and_non_success_responses() {
 }
 
 #[tokio::test]
+async fn managed_device_code_request_is_nested_and_redacts_the_repair_intent() {
+    let repair_intent = "managed-repair-intent-secret-canary-0123456789";
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "400 Bad Request",
+        json!({"error": repair_intent}).to_string(),
+    )]);
+
+    let error = request_device_code(
+        &no_redirect_client().unwrap(),
+        &ArceeAuthService::for_test(&server.base_url),
+        MANAGED_CLIENT_ID,
+        Some(repair_intent),
+    )
+    .await
+    .expect_err("managed device-code failure should be reported")
+    .to_string();
+    let requests = server.finish();
+
+    assert!(!error.contains(repair_intent));
+    assert!(error.contains("[REDACTED]"));
+    let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(body["client_id"], MANAGED_CLIENT_ID);
+    assert_eq!(body["managed_repair"]["repair_intent"], repair_intent);
+    assert!(body.get("managed_host_id").is_none());
+    assert!(body.get("bootstrap_id").is_none());
+}
+
+#[tokio::test]
 async fn device_code_same_origin_redirect_is_reported_without_replay() {
     let server = ScriptedServer::start_same_origin_redirect(
         "308 Permanent Redirect",
@@ -192,6 +227,8 @@ async fn device_code_same_origin_redirect_is_reported_without_replay() {
     let error = request_device_code(
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
+        LEGACY_CLIENT_ID,
+        None,
     )
     .await
     .expect_err("Arcee device-code redirects must not be followed")
@@ -245,6 +282,8 @@ async fn device_token_redirect_to_http_destination_does_not_replay_code() {
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&source.base_url),
         &device,
+        LEGACY_CLIENT_ID,
+        None,
         || 0,
         |_| ready(()),
     )
@@ -308,6 +347,8 @@ async fn token_poll_handles_pending_and_slow_down_then_parses_success_without_wa
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
         &device,
+        LEGACY_CLIENT_ID,
+        None,
         move || now_clock.get(),
         move |duration| {
             recorded_sleeps.borrow_mut().push(duration);
@@ -382,6 +423,8 @@ async fn token_poll_reports_denied_expired_malformed_and_unstructured_errors() {
             &no_redirect_client().unwrap(),
             &ArceeAuthService::for_test(&server.base_url),
             &device,
+            LEGACY_CLIENT_ID,
+            None,
             || 0,
             |_| ready(()),
         )
@@ -399,14 +442,14 @@ async fn token_poll_reports_denied_expired_malformed_and_unstructured_errors() {
 }
 
 #[tokio::test]
-async fn token_poll_redacts_device_code_from_structured_error() {
-    let secret = "sensitive-device-code";
+async fn token_poll_redacts_managed_repair_intent_from_structured_error() {
+    let secret = "sensitive-managed-repair-intent";
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
         "400 Bad Request",
         format!(r#"{{"error":"{secret}"}}"#),
     )]);
     let device = DeviceCode {
-        device_code: secret.to_string(),
+        device_code: "device-error".to_string(),
         user_code: "ERROR".to_string(),
         verification_uri_complete: "https://accounts.arcee.ai/device".to_string(),
         interval_secs: 1,
@@ -417,6 +460,8 @@ async fn token_poll_redacts_device_code_from_structured_error() {
         &no_redirect_client().unwrap(),
         &ArceeAuthService::for_test(&server.base_url),
         &device,
+        LEGACY_CLIENT_ID,
+        Some(secret),
         || 0,
         |_| ready(()),
     )
@@ -427,7 +472,7 @@ async fn token_poll_redacts_device_code_from_structured_error() {
 
     assert!(
         !error.contains(secret),
-        "error leaked the echoed device credential: {error}"
+        "error leaked the echoed managed repair credential: {error}"
     );
     assert!(error.contains(crate::model::redact::REDACTED), "{error}");
 }
@@ -435,7 +480,7 @@ async fn token_poll_redacts_device_code_from_structured_error() {
 #[test]
 fn canonical_auth_service_uses_the_fixed_approved_origin() {
     let service = ArceeAuthService::canonical().unwrap();
-    assert_eq!(service.base_url, CANONICAL_AUTH_SERVICE_BASE_URL);
+    assert_eq!(service.base_url, ARCEE_AUTH_PRODUCTION_ISSUER);
     assert_eq!(
         service.device_code_url(),
         "https://api.arcee.ai/app/v1/device/code"
@@ -451,7 +496,22 @@ fn canonical_auth_service_uses_the_fixed_approved_origin() {
 }
 
 #[test]
-fn noncanonical_auth_service_origins_are_rejected_before_connection() {
+fn auth_service_accepts_only_exact_production_and_dev2_origins() {
+    for (issuer, refresh_url) in [
+        (
+            ARCEE_AUTH_PRODUCTION_ISSUER,
+            "https://api.arcee.ai/app/v1/device/refresh",
+        ),
+        (
+            ARCEE_AUTH_DEV2_ISSUER,
+            "https://api2.apps.dev.arcee.ai/app/v1/device/refresh",
+        ),
+    ] {
+        let service = ArceeAuthService::approved(issuer).unwrap();
+        assert_eq!(service.base_url, issuer);
+        assert_eq!(service.device_refresh_url(), refresh_url);
+    }
+
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     listener.set_nonblocking(true).unwrap();
     let local_origin = format!("http://{}", listener.local_addr().unwrap());
@@ -461,16 +521,21 @@ fn noncanonical_auth_service_origins_are_rejected_before_connection() {
         "https://accounts.arcee.ai",
         "http://api.arcee.ai",
         "https://api.arcee.ai:8443",
+        "https://api.arcee.ai:443",
         "https://user@api.arcee.ai",
         "https://api.arcee.ai/custom-path",
+        "https://api.arcee.ai/",
+        "https://api.arcee.ai?env=dev2",
+        "https://api.arcee.ai#dev2",
+        "https://tenant.arcee.ai",
+        "https://api.arcee.ai.attacker.example",
         "not a URL",
     ];
 
     for base_url in cases {
         let error = ArceeAuthService::approved(base_url).unwrap_err();
         assert!(
-            error.to_string().contains("Arcee auth service")
-                || error.to_string().contains("canonical origin"),
+            error.to_string().contains("Arcee auth issuer"),
             "unexpected error for {base_url}: {error:#}"
         );
     }
@@ -727,9 +792,12 @@ fn login_token_base_url_must_be_an_approved_arcee_origin() {
         base_url: "https://capture.attacker.example/v1".to_string(),
         organization_id: "org-1".to_string(),
         workspace_name: "acme".to_string(),
+        managed_binding: None,
     };
 
-    let error = stored_auth_from_token_success(success).unwrap_err();
+    let error =
+        stored_auth_from_token_success(success, ARCEE_AUTH_PRODUCTION_ISSUER, LEGACY_CLIENT_ID)
+            .unwrap_err();
     assert!(
         error.to_string().contains("invalid credential base URL"),
         "unexpected error: {error:#}"
@@ -793,6 +861,7 @@ fn stored_auth_round_trips() {
     assert_eq!(value["refresh_token"], "refresh-1");
     assert_eq!(value["base_url"], "https://api.arcee.ai");
     assert_eq!(value["client_id"], LEGACY_CLIENT_ID);
+    assert_eq!(value["auth_issuer"], ARCEE_AUTH_PRODUCTION_ISSUER);
 }
 
 #[test]
@@ -811,7 +880,23 @@ fn legacy_stored_auth_without_client_identity_defaults_to_nac_cli() {
     }"#;
     let auth = parse_stored_auth(raw, &canonical).unwrap().unwrap();
     assert_eq!(auth.client_id, LEGACY_CLIENT_ID);
+    assert_eq!(auth.auth_issuer, ARCEE_AUTH_PRODUCTION_ISSUER);
     assert!(auth.managed_bootstrap.is_none());
+}
+
+#[test]
+fn stored_auth_rejects_unsupported_issuer_without_echoing_secrets() {
+    let dir = TestDir::new("stored-auth-issuer");
+    let (_, canonical) = dir.paths();
+    let mut auth = stored_auth("access-secret-canary");
+    auth.refresh_token = "refresh-secret-canary".to_string();
+    auth.auth_issuer = "https://tenant.arcee.ai".to_string();
+    let raw = serde_json::to_string(&auth).unwrap();
+    let error = parse_stored_auth(&raw, &canonical).unwrap_err().to_string();
+    assert!(error.contains("invalid auth_issuer"));
+    assert!(!error.contains("access-secret-canary"));
+    assert!(!error.contains("refresh-secret-canary"));
+    assert!(!error.contains("tenant.arcee.ai"));
 }
 
 #[test]
@@ -824,13 +909,16 @@ fn stored_auth_from_token_success_computes_absolute_expiry() {
         base_url: "https://api.arcee.ai".to_string(),
         organization_id: "org-1".to_string(),
         workspace_name: "acme".to_string(),
+        managed_binding: None,
     };
 
-    let auth = stored_auth_from_token_success(success).unwrap();
+    let auth =
+        stored_auth_from_token_success(success, ARCEE_AUTH_DEV2_ISSUER, LEGACY_CLIENT_ID).unwrap();
 
     assert_eq!(auth.access_token, "jwt-access");
     assert_eq!(auth.refresh_token, "opaque-refresh");
     assert_eq!(auth.token_type, "bearer");
+    assert_eq!(auth.auth_issuer, ARCEE_AUTH_DEV2_ISSUER);
     assert!(
         auth.expires_at_ms > now_ms(),
         "expiry should be in the future"
@@ -902,7 +990,7 @@ async fn concurrent_refreshes_single_flight_and_reopen_the_rotated_record() {
         })
         .to_string(),
     )]);
-    let service = ArceeAuthService::for_test(&server.base_url);
+    let service_base_url = server.base_url.clone();
     let client = no_redirect_client().unwrap();
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(3));
     let first_barrier = std::sync::Arc::clone(&barrier);
@@ -914,9 +1002,9 @@ async fn concurrent_refreshes_single_flight_and_reopen_the_rotated_record() {
             &client,
             "https://api.arcee.ai",
             |auth| auth.access_token == "stale-access",
-            &service,
             &auth_path,
             &lock_path,
+            |_| Ok(ArceeAuthService::for_test(&service_base_url)),
         )
         .await
     };
@@ -926,9 +1014,9 @@ async fn concurrent_refreshes_single_flight_and_reopen_the_rotated_record() {
             &client,
             "https://api.arcee.ai",
             |auth| auth.access_token == "stale-access",
-            &service,
             &auth_path,
             &lock_path,
+            |_| Ok(ArceeAuthService::for_test(&service_base_url)),
         )
         .await
     };
@@ -948,6 +1036,76 @@ async fn concurrent_refreshes_single_flight_and_reopen_the_rotated_record() {
     let reopened = read_stored_auth_optional_at(&auth_path).unwrap().unwrap();
     assert_eq!(reopened.access_token, "fresh-access");
     assert_eq!(reopened.refresh_token, "fresh-refresh");
+    assert_eq!(reopened.auth_issuer, ARCEE_AUTH_PRODUCTION_ISSUER);
+}
+
+#[tokio::test]
+async fn refresh_destination_comes_only_from_the_stored_auth_issuer() {
+    for (label, auth_issuer, inference_base_url) in [
+        (
+            "dev2-issuer-prod-inference",
+            ARCEE_AUTH_DEV2_ISSUER,
+            ARCEE_AUTH_PRODUCTION_ISSUER,
+        ),
+        (
+            "prod-issuer-dev2-inference",
+            ARCEE_AUTH_PRODUCTION_ISSUER,
+            ARCEE_AUTH_DEV2_ISSUER,
+        ),
+    ] {
+        let dir = TestDir::new(label);
+        let (_, auth_path) = dir.paths();
+        let lock_path = dir.0.join("arcee_auth.json.lock");
+        let mut auth = stored_auth("stale-access");
+        auth.expires_at_ms = 0;
+        auth.base_url = inference_base_url.to_string();
+        auth.auth_issuer = auth_issuer.to_string();
+        write_json(&auth_path, &auth);
+
+        let selected = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            json!({
+                "access_token": "fresh-access",
+                "refresh_token": "fresh-refresh",
+                "token_type": "bearer",
+                "expires_in": 3600
+            })
+            .to_string(),
+        )]);
+        let unselected =
+            ScriptedServer::start_unexpected_request_server(Duration::from_millis(200));
+        let selected_url = selected.base_url.clone();
+        let unselected_url = unselected.base_url.clone();
+        let selected_issuer = auth_issuer.to_string();
+
+        let token = refresh_locked_with(
+            &no_redirect_client().unwrap(),
+            inference_base_url,
+            |_| true,
+            &auth_path,
+            &lock_path,
+            move |issuer| {
+                let base_url = if issuer == selected_issuer {
+                    &selected_url
+                } else {
+                    &unselected_url
+                };
+                Ok(ArceeAuthService::for_test(base_url))
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(token, "fresh-access");
+        assert_eq!(selected.finish().len(), 1);
+        assert!(
+            unselected.finish().is_empty(),
+            "inference origin selected the wrong auth service for {label}"
+        );
+
+        let reopened = read_stored_auth_optional_at(&auth_path).unwrap().unwrap();
+        assert_eq!(reopened.auth_issuer, auth_issuer);
+        assert_eq!(reopened.base_url, inference_base_url);
+    }
 }
 
 #[test]

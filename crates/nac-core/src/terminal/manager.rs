@@ -34,6 +34,7 @@ const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const READER_DRAIN_GRACE: Duration = Duration::from_millis(100);
 type WorkspaceAuthority = Option<(PathBuf, Vec<u8>)>;
 type SessionResourceAuthority = Option<(PathBuf, String)>;
+type RemoteCleanupAuthority = Option<(PathBuf, String, Arc<ExecutionBackend>)>;
 
 const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
     ("GIT_TERMINAL_PROMPT", "0"),
@@ -56,6 +57,7 @@ pub struct TerminalManager {
     instance_id: Arc<str>,
     workspace_authority: Arc<StdMutex<WorkspaceAuthority>>,
     session_resource_authority: Arc<StdMutex<SessionResourceAuthority>>,
+    remote_cleanup_authority: Arc<StdMutex<RemoteCleanupAuthority>>,
 }
 
 #[derive(Clone)]
@@ -136,6 +138,7 @@ impl TerminalManager {
             instance_id: Arc::from(uuid::Uuid::new_v4().to_string()),
             workspace_authority: Arc::new(StdMutex::new(None)),
             session_resource_authority: Arc::new(StdMutex::new(None)),
+            remote_cleanup_authority: Arc::new(StdMutex::new(None)),
         })
     }
 
@@ -160,6 +163,42 @@ impl TerminalManager {
             .session_resource_authority
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((store_path, session_id));
+    }
+
+    pub(crate) fn configure_remote_cleanup_authority(
+        &self,
+        store_path: PathBuf,
+        session_id: String,
+        backend: Arc<ExecutionBackend>,
+    ) -> Result<()> {
+        let records = crate::store::list_terminal_remote_cleanups(&store_path, &session_id)?;
+        let mut pending = self
+            .pending_remote_cleanups
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for record in records {
+            pending.insert(
+                record.pidfile,
+                Arc::new(PendingRemoteCleanup {
+                    backend: Arc::clone(&backend),
+                    transport_active: AtomicBool::new(false),
+                }),
+            );
+        }
+        *self
+            .remote_cleanup_authority
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((store_path, session_id, backend));
+        Ok(())
+    }
+
+    fn remote_cleanup_persistence(&self) -> Option<(PathBuf, String)> {
+        self.remote_cleanup_authority
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|(path, session_id, _)| (path.clone(), session_id.clone()))
     }
 
     pub(crate) fn acquire_workspace_activity_lease(

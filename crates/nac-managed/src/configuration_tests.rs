@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
+use crate::ManagedControlTarget;
 
 struct TestDir(PathBuf);
 
@@ -23,8 +24,9 @@ impl Drop for TestDir {
 
 fn valid_config(root: &Path) -> ManagedHostConfig {
     ManagedHostConfig {
-        version: MANAGED_CONFIG_VERSION,
+        version: LEGACY_MANAGED_CONFIG_VERSION,
         logical_host_id: "host-123".to_string(),
+        host_incarnation_id: None,
         owner: Some("owner@example.test".to_string()),
         public_hostname: "nac.example.test".to_string(),
         repository_root: root.join("repositories"),
@@ -34,15 +36,106 @@ fn valid_config(root: &Path) -> ManagedHostConfig {
         model_backend: "arcee-api".to_string(),
         model_id: "trinity-large-thinking".to_string(),
         model_endpoint: "https://models.example.test/v1".to_string(),
+        model_auth_issuer: None,
         model_credential_file: root.join("model-token"),
         model_credential_source: ManagedModelCredentialSource::MountedApiKey,
         model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
+        managed_control_bind: None,
+        managed_control_issuer: None,
+        managed_control_jwks_file: None,
+        managed_upgrade_expectation: None,
     }
 }
 
 #[test]
 fn optional_managed_configuration_is_absent_without_an_explicit_path() {
     assert_eq!(ManagedHostConfig::load_optional(None).unwrap(), None);
+}
+
+#[test]
+fn version_two_requires_exact_managed_control_identity_and_listener_fields() {
+    let root = TestDir::new("control-v2");
+    let mut config = valid_config(&root.0);
+    config.version = MANAGED_CONFIG_VERSION;
+    assert!(config.validate().is_err());
+
+    config.host_incarnation_id = Some("incarnation-456".to_string());
+    config.managed_control_bind = Some("0.0.0.0:3211".to_string());
+    config.managed_control_issuer = Some("https://nac-api.example.test".to_string());
+    config.managed_control_jwks_file = Some(root.0.join("jwks.json"));
+    config.validate().unwrap();
+    let control = config.managed_control().unwrap().unwrap();
+    assert_eq!(control.bind, "0.0.0.0:3211".parse().unwrap());
+    assert_eq!(control.host_incarnation_id, "incarnation-456");
+
+    let mut legacy = config;
+    legacy.version = LEGACY_MANAGED_CONFIG_VERSION;
+    assert!(legacy.validate().is_err());
+    legacy.host_incarnation_id = None;
+    legacy.managed_control_bind = None;
+    legacy.managed_control_issuer = None;
+    legacy.managed_control_jwks_file = None;
+    legacy.validate().unwrap();
+    assert_eq!(legacy.managed_control().unwrap(), None);
+}
+
+#[test]
+fn version_two_upgrade_expectation_is_exact_nonsecret_forward_metadata() {
+    let root = TestDir::new("upgrade-expectation");
+    let mut config = valid_config(&root.0);
+    config.version = MANAGED_CONFIG_VERSION;
+    config.host_incarnation_id = Some("incarnation-456".to_string());
+    config.managed_control_bind = Some("0.0.0.0:3211".to_string());
+    config.managed_control_issuer = Some("https://nac-api.example.test".to_string());
+    config.managed_control_jwks_file = Some(root.0.join("jwks.json"));
+    config.managed_upgrade_expectation = Some(ManagedUpgradeExpectation {
+        adopt_unbound_previous: false,
+        previous_operation_id: "operation-failed".to_string(),
+        previous_target: ManagedControlTarget {
+            release_id: "release-a".to_string(),
+            source_sha: "a".repeat(40),
+            product_version: "1.2.3+failed.1".to_string(),
+            schema_version: 25,
+            minimum_schema_version: 0,
+        },
+        operation_id: "operation-corrected".to_string(),
+        target: ManagedControlTarget {
+            release_id: "release-b".to_string(),
+            source_sha: "b".repeat(40),
+            product_version: "1.2.4+recovery.1".to_string(),
+            schema_version: 25,
+            minimum_schema_version: 0,
+        },
+        actor: "user:owner".to_string(),
+        beneficiary: "tenant:owner".to_string(),
+    });
+    config.validate().unwrap();
+    config
+        .managed_upgrade_expectation
+        .as_mut()
+        .unwrap()
+        .adopt_unbound_previous = true;
+    config.validate().unwrap();
+
+    let mut same_operation = config.clone();
+    same_operation
+        .managed_upgrade_expectation
+        .as_mut()
+        .unwrap()
+        .operation_id = "operation-failed".to_string();
+    assert!(same_operation.validate().is_err());
+
+    let mut malformed = config.clone();
+    malformed
+        .managed_upgrade_expectation
+        .as_mut()
+        .unwrap()
+        .target
+        .product_version = "1.2+invalid".to_string();
+    assert!(malformed.validate().is_err());
+
+    config.version = LEGACY_MANAGED_CONFIG_VERSION;
+    assert!(config.validate().is_err());
 }
 
 #[test]
@@ -99,6 +192,68 @@ fn managed_bootstrap_is_a_strict_explicit_credential_source() {
         .replace("managed-bootstrap", "unknown-source");
     std::fs::write(&path, invalid).unwrap();
     assert!(ManagedHostConfig::load(&path).is_err());
+}
+
+#[test]
+fn version_two_composes_managed_bootstrap_auth_and_upgrade_control() {
+    let root = TestDir::new("config-bootstrap-control-v2");
+    let path = root.0.join("managed.toml");
+    std::fs::write(
+        &path,
+        format!(
+            "version = 2\nlogical_host_id = \"21856443-8ed8-40ab-9036-72e837c99f27\"\nhost_incarnation_id = \"incarnation-456\"\nowner = \"owner@example.test\"\npublic_hostname = \"nac.example.test\"\nrepository_root = \"{0}/repositories\"\nstate_root = \"{0}/state\"\nhome_root = \"{0}/home\"\ngithub_client_id = \"Iv1.example\"\nmodel_backend = \"arcee-auth\"\nmodel_id = \"trinity-large-thinking\"\nmodel_endpoint = \"https://api2.apps.dev.arcee.ai\"\nmodel_auth_issuer = \"https://api2.apps.dev.arcee.ai\"\nmodel_credential_file = \"/run/secrets/nac/bootstrap.json\"\nmodel_credential_source = \"managed-bootstrap\"\nmanaged_control_bind = \"0.0.0.0:3211\"\nmanaged_control_issuer = \"https://nac-api.example.test\"\nmanaged_control_jwks_file = \"{0}/control-jwks.json\"\n",
+            root.0.display()
+        ),
+    )
+    .unwrap();
+
+    let config = ManagedHostConfig::load(&path).unwrap();
+    assert_eq!(config.version, MANAGED_CONFIG_VERSION);
+    assert_eq!(
+        config.model_credential_source,
+        ManagedModelCredentialSource::ManagedBootstrap
+    );
+    assert_eq!(
+        config.model_auth_issuer.as_deref(),
+        Some("https://api2.apps.dev.arcee.ai")
+    );
+    assert_eq!(
+        config
+            .managed_control()
+            .unwrap()
+            .unwrap()
+            .host_incarnation_id,
+        "incarnation-456"
+    );
+
+    let legacy_with_control =
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .replacen("version = 2", "version = 1", 1);
+    std::fs::write(&path, legacy_with_control).unwrap();
+    assert!(ManagedHostConfig::load(&path)
+        .unwrap_err()
+        .to_string()
+        .contains("managed control fields require managed configuration version 2"));
+}
+
+#[test]
+fn managed_auth_issuer_is_optional_but_must_be_an_exact_https_origin() {
+    let root = TestDir::new("config-auth-issuer");
+    let mut config = valid_config(&root.0);
+    config.model_auth_issuer = Some("https://api2.apps.dev.arcee.ai".to_string());
+    config.validate().unwrap();
+
+    for invalid in [
+        "http://api2.apps.dev.arcee.ai",
+        "https://api2.apps.dev.arcee.ai/",
+        "https://api2.apps.dev.arcee.ai/path",
+        "https://user@api2.apps.dev.arcee.ai",
+        "https://api2.apps.dev.arcee.ai:443",
+    ] {
+        config.model_auth_issuer = Some(invalid.to_string());
+        assert!(config.validate().is_err(), "{invalid}");
+    }
 }
 
 #[test]

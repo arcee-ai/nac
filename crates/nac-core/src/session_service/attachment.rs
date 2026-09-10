@@ -115,6 +115,8 @@ impl SessionService {
             permission_broker,
             sandbox_resource_lease: Arc::new(StdMutex::new(None)),
             has_sandbox,
+            managed_admission_enabled: false,
+            managed_identity: None,
             inbox_wake: Arc::new(Mutex::new(())),
             #[cfg(test)]
             frontend_snapshot_after_workspace_gate: None,
@@ -130,6 +132,14 @@ impl SessionService {
             init,
             events,
         }
+    }
+
+    pub fn enable_managed_admission(
+        &mut self,
+        identity: Option<crate::store::ManagedAcceptedIdentity>,
+    ) {
+        self.managed_admission_enabled = true;
+        self.managed_identity = identity.map(Arc::new);
     }
 
     pub fn connect_client(&self) -> SessionClientHandle {
@@ -278,6 +288,10 @@ impl SessionService {
 
     pub fn has_retained_terminals(&self) -> bool {
         self.terminal_manager.has_retained()
+    }
+
+    pub fn live_terminal_names(&self) -> Vec<String> {
+        self.terminal_manager.live_terminal_names()
     }
 
     pub fn active_run(&self) -> Option<ActiveRunSnapshot> {

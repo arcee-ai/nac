@@ -399,7 +399,10 @@ impl<'a> SessionCreationApplication<'a> {
         self.manager
             .attach_managed_command_environment(&mut run_config)?;
         let parts = SessionService::from_orchestrator_run_config(run_config);
-        let service = parts.service;
+        let mut service = parts.service;
+        if self.manager.managed_host().is_some() {
+            service.enable_managed_admission(self.manager.managed_identity().cloned());
+        }
         service.acquire_sandbox_resource_lease()?;
         let snapshot = service.frontend_snapshot().await?;
         let session_id = snapshot

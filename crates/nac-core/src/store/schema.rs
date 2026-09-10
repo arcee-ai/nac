@@ -3,11 +3,19 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+mod managed_tables;
 mod wal_preflight;
+
+pub(super) use managed_tables::create_managed_maintenance_tables;
+use managed_tables::create_terminal_remote_cleanups_table;
 
 #[cfg(test)]
 #[path = "schema/startup_tests.rs"]
 mod startup_tests;
+
+#[cfg(test)]
+#[path = "schema/connection_capacity_tests.rs"]
+mod connection_capacity_tests;
 
 #[cfg(test)]
 #[path = "schema/future_schema_tests.rs"]
@@ -15,8 +23,11 @@ mod future_schema_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 27 composes the independently shipped v25 Managed NAC maintenance schema
+// and v25/v26 permission-mode schema so either predecessor shape is repaired.
 // 26 adds a durable revision for linearizable permission-mode transitions.
-// 25 adds the durable per-session permission approval mode. 24 adds
+// 25 adds durable Managed NAC maintenance and authenticated-control replay
+// records plus the durable per-session permission approval mode. 24 adds
 // session_forks (conversation clones plus deleted tombstones). 22 adds
 // durable direct-parent managed orchestrator relationships. 21 adds
 // durable traditional child sessions. 20 added durable direct-session
@@ -32,7 +43,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 26;
+const STORE_SCHEMA_VERSION: i64 = 27;
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
 /// Current durable-store schema version for credential-free readiness and
@@ -446,6 +457,13 @@ fn read_opened_schema_version(path: &Path) -> Option<i64> {
         .ok()
 }
 
+/// Read the effective SQLite schema version without opening SQLite or creating
+/// sidecars. Managed replacement admission uses this before any read-only
+/// ledger query so a future database is rejected without filesystem mutation.
+pub(super) fn preflight_schema_version(path: &Path) -> Result<Option<i64>> {
+    read_schema_version_header(path)
+}
+
 #[cfg(test)]
 fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     let mut sidecar = path.as_os_str().to_os_string();
@@ -454,7 +472,7 @@ fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
 }
 
 fn reject_future_schema_before_open(path: &Path) -> Result<()> {
-    if let Some(version) = read_schema_version_header(path)? {
+    if let Some(version) = preflight_schema_version(path)? {
         if version > STORE_SCHEMA_VERSION {
             return Err(anyhow!(
                 "unsupported store schema version {version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -794,7 +812,7 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | 25 | 26 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -926,6 +944,14 @@ fn open_connection_with_hooks(
         "INTEGER NOT NULL DEFAULT 0 CHECK (completion_suppressed IN (0, 1))",
     )?;
     create_session_forks_table(&transaction)?;
+    create_managed_maintenance_tables(&transaction)?;
+    create_terminal_remote_cleanups_table(&transaction)?;
+    ensure_column(
+        &transaction,
+        "managed_host_maintenance",
+        "accepted_identity_json",
+        "TEXT",
+    )?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
@@ -1852,6 +1878,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "traditional_children",
         "managed_orchestrators",
         "session_forks",
+        "terminal_remote_cleanups",
         "projects",
         "session_projects",
     ] {

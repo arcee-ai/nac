@@ -20,7 +20,8 @@ use nac_credential_store::{
 pub use nac_contracts::CommandEnvironmentSnapshot;
 use nac_contracts::{CommandEnvironmentFuture, CommandEnvironmentProvider, WorkerEnvironment};
 
-pub const MANAGED_CONFIG_VERSION: u32 = 1;
+pub const MANAGED_CONFIG_VERSION: u32 = 2;
+pub const LEGACY_MANAGED_CONFIG_VERSION: u32 = 1;
 const SECRET_STORE_VERSION: u32 = 1;
 pub const MAX_HOST_SECRETS: usize = 128;
 pub const MAX_HOST_SECRET_VALUE_BYTES: usize = 32 * 1024;
@@ -43,6 +44,8 @@ pub enum ManagedModelCredentialSource {
 pub struct ManagedHostConfig {
     pub version: u32,
     pub logical_host_id: String,
+    #[serde(default)]
+    pub host_incarnation_id: Option<String>,
     pub owner: Option<String>,
     pub public_hostname: String,
     pub repository_root: PathBuf,
@@ -52,11 +55,46 @@ pub struct ManagedHostConfig {
     pub model_backend: String,
     pub model_id: String,
     pub model_endpoint: String,
+    /// Expected authorization-service origin for login-backed managed model
+    /// credentials. Provider-specific policy is enforced by composition.
+    #[serde(default)]
+    pub model_auth_issuer: Option<String>,
     pub model_credential_file: PathBuf,
     #[serde(default)]
     pub model_credential_source: ManagedModelCredentialSource,
     #[serde(default)]
     pub model_credential_environment_names: Vec<String>,
+    #[serde(default)]
+    pub managed_control_bind: Option<String>,
+    #[serde(default)]
+    pub managed_control_issuer: Option<String>,
+    #[serde(default)]
+    pub managed_control_jwks_file: Option<PathBuf>,
+    #[serde(default)]
+    pub managed_upgrade_expectation: Option<ManagedUpgradeExpectation>,
+}
+
+/// Controller-authored, nonsecret desired-release CAS used when a suspended or
+/// failed host has no old process available to serve the private control API.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedUpgradeExpectation {
+    #[serde(default)]
+    pub adopt_unbound_previous: bool,
+    pub previous_operation_id: String,
+    pub previous_target: crate::managed_control_assertion::ManagedControlTarget,
+    pub operation_id: String,
+    pub target: crate::managed_control_assertion::ManagedControlTarget,
+    pub actor: String,
+    pub beneficiary: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManagedControlConfig {
+    pub bind: std::net::SocketAddr,
+    pub issuer: String,
+    pub jwks_file: PathBuf,
+    pub host_incarnation_id: String,
 }
 
 impl ManagedHostConfig {
@@ -75,10 +113,14 @@ impl ManagedHostConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.version != MANAGED_CONFIG_VERSION {
+        if !matches!(
+            self.version,
+            LEGACY_MANAGED_CONFIG_VERSION | MANAGED_CONFIG_VERSION
+        ) {
             bail!(
-                "unsupported managed configuration version {}; expected {}",
+                "unsupported managed configuration version {}; expected {} or {}",
                 self.version,
+                LEGACY_MANAGED_CONFIG_VERSION,
                 MANAGED_CONFIG_VERSION
             );
         }
@@ -103,6 +145,22 @@ impl ManagedHostConfig {
         if endpoint.scheme() != "https" || endpoint.host_str().is_none() {
             bail!("managed model_endpoint must be a valid HTTPS URL");
         }
+        if let Some(auth_issuer) = self.model_auth_issuer.as_deref() {
+            let issuer = Url::parse(auth_issuer)
+                .map_err(|_| anyhow!("managed model_auth_issuer must be a valid HTTPS origin"))?;
+            if issuer.scheme() != "https"
+                || issuer.host_str().is_none()
+                || !issuer.username().is_empty()
+                || issuer.password().is_some()
+                || issuer.port().is_some()
+                || issuer.path() != "/"
+                || issuer.query().is_some()
+                || issuer.fragment().is_some()
+                || auth_issuer != issuer.origin().ascii_serialization()
+            {
+                bail!("managed model_auth_issuer must be a valid exact HTTPS origin");
+            }
+        }
         for name in &self.model_credential_environment_names {
             if !is_valid_environment_name(name) {
                 bail!(
@@ -110,7 +168,65 @@ impl ManagedHostConfig {
                 );
             }
         }
+        if self.version == LEGACY_MANAGED_CONFIG_VERSION {
+            if self.host_incarnation_id.is_some()
+                || self.managed_control_bind.is_some()
+                || self.managed_control_issuer.is_some()
+                || self.managed_control_jwks_file.is_some()
+                || self.managed_upgrade_expectation.is_some()
+            {
+                bail!("managed control fields require managed configuration version 2");
+            }
+        } else {
+            let control = self.managed_control()?;
+            debug_assert!(
+                control.is_some(),
+                "version 2 validation constructs control config"
+            );
+            if let Some(expectation) = &self.managed_upgrade_expectation {
+                validate_upgrade_expectation(expectation)?;
+            }
+        }
         Ok(())
+    }
+
+    pub fn managed_control(&self) -> Result<Option<ManagedControlConfig>> {
+        if self.version == LEGACY_MANAGED_CONFIG_VERSION {
+            return Ok(None);
+        }
+        let host_incarnation_id = self
+            .host_incarnation_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("managed version 2 requires host_incarnation_id"))?;
+        validate_identifier("host_incarnation_id", host_incarnation_id, 128)?;
+        let bind = self
+            .managed_control_bind
+            .as_deref()
+            .ok_or_else(|| anyhow!("managed version 2 requires managed_control_bind"))?
+            .parse::<std::net::SocketAddr>()
+            .map_err(|_| anyhow!("managed_control_bind must be an IP socket address"))?;
+        if bind.port() == 0 {
+            bail!("managed_control_bind port must not be zero");
+        }
+        let issuer = self
+            .managed_control_issuer
+            .as_deref()
+            .ok_or_else(|| anyhow!("managed version 2 requires managed_control_issuer"))?;
+        validate_nonblank("managed_control_issuer", issuer)?;
+        if issuer.len() > 256 || issuer.chars().any(char::is_control) {
+            bail!("managed_control_issuer is invalid");
+        }
+        let jwks_file = self
+            .managed_control_jwks_file
+            .as_ref()
+            .ok_or_else(|| anyhow!("managed version 2 requires managed_control_jwks_file"))?;
+        validate_absolute_path("managed_control_jwks_file", jwks_file)?;
+        Ok(Some(ManagedControlConfig {
+            bind,
+            issuer: issuer.to_string(),
+            jwks_file: jwks_file.clone(),
+            host_incarnation_id: host_incarnation_id.to_string(),
+        }))
     }
 
     pub fn secret_store(&self) -> HostSecretStore {
@@ -138,6 +254,61 @@ impl ManagedHostConfig {
     }
 }
 
+fn validate_upgrade_expectation(expectation: &ManagedUpgradeExpectation) -> Result<()> {
+    validate_identifier(
+        "managed_upgrade_expectation.previous_operation_id",
+        &expectation.previous_operation_id,
+        128,
+    )?;
+    validate_identifier(
+        "managed_upgrade_expectation.operation_id",
+        &expectation.operation_id,
+        128,
+    )?;
+    if expectation.previous_operation_id == expectation.operation_id {
+        bail!("managed upgrade expectation must change operation_id");
+    }
+    validate_control_target("previous_target", &expectation.previous_target)?;
+    validate_control_target("target", &expectation.target)?;
+    validate_nonblank("managed_upgrade_expectation.actor", &expectation.actor)?;
+    validate_nonblank(
+        "managed_upgrade_expectation.beneficiary",
+        &expectation.beneficiary,
+    )?;
+    if expectation.actor.len() > 256
+        || expectation.beneficiary.len() > 256
+        || expectation.actor.chars().any(char::is_control)
+        || expectation.beneficiary.chars().any(char::is_control)
+    {
+        bail!("managed upgrade expectation principals are invalid");
+    }
+    Ok(())
+}
+
+fn validate_control_target(
+    field: &str,
+    target: &crate::managed_control_assertion::ManagedControlTarget,
+) -> Result<()> {
+    validate_identifier(
+        &format!("managed_upgrade_expectation.{field}.release_id"),
+        &target.release_id,
+        256,
+    )?;
+    if !nac_contracts::valid_product_version(&target.product_version)
+        || !matches!(target.source_sha.len(), 40 | 64)
+        || !target
+            .source_sha
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        || target.schema_version < 0
+        || target.minimum_schema_version < 0
+        || target.minimum_schema_version > target.schema_version
+    {
+        bail!("managed upgrade expectation {field} is invalid");
+    }
+    Ok(())
+}
+
 fn managed_home_dir() -> Option<PathBuf> {
     if let Some(nac_home) = std::env::var_os("NAC_HOME") {
         return Some(PathBuf::from(nac_home));
@@ -153,6 +324,18 @@ fn managed_home_dir() -> Option<PathBuf> {
 fn validate_nonblank(field: &str, value: &str) -> Result<()> {
     if value.trim().is_empty() {
         bail!("managed {field} must not be blank");
+    }
+    Ok(())
+}
+
+fn validate_identifier(field: &str, value: &str, max: usize) -> Result<()> {
+    if value.is_empty()
+        || value.len() > max
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+    {
+        bail!("managed {field} is invalid");
     }
     Ok(())
 }

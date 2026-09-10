@@ -41,6 +41,7 @@ pub struct TerminalSession {
     /// Remote process-tree cleanup: backends that return a pidfile from
     /// `terminal_pty_command` get a backend-side kill on session teardown.
     backend_cleanup: Option<(Arc<ExecutionBackend>, String)>,
+    durable_cleanup: Option<(PathBuf, String, String)>,
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
@@ -60,6 +61,7 @@ impl TerminalSession {
         backend: &Arc<ExecutionBackend>,
         output_registry: OutputRegistry,
         extra_envs: &[(String, String)],
+        cleanup_authority: Option<(PathBuf, String)>,
     ) -> Result<Self> {
         let pty_system = NativePtySystem::default();
         let pty_pair = pty_system
@@ -84,11 +86,29 @@ impl TerminalSession {
         // the backend's default terminal directory. Keep these in sync.
         let resolved_cwd = cwd.unwrap_or_else(|| backend.default_terminal_cwd());
         let backend_cleanup = pidfile.map(|pidfile| (Arc::clone(backend), pidfile));
+        let durable_cleanup = match (backend_cleanup.as_ref(), cleanup_authority) {
+            (Some((_, pidfile)), Some((store_path, session_id))) => {
+                crate::store::record_terminal_remote_cleanup(&store_path, &session_id, pidfile)?;
+                Some((store_path, session_id, pidfile.clone()))
+            }
+            _ => None,
+        };
 
         let child = pty_pair
             .slave
             .spawn_command(cmd)
-            .context("Failed to spawn command in PTY")?;
+            .context("Failed to spawn command in PTY");
+        let child = match child {
+            Ok(child) => child,
+            Err(error) => {
+                if let Some((store_path, session_id, pidfile)) = durable_cleanup.as_ref() {
+                    let _ = crate::store::clear_terminal_remote_cleanup(
+                        store_path, session_id, pidfile,
+                    );
+                }
+                return Err(error);
+            }
+        };
         #[cfg(target_os = "linux")]
         let mut child = child;
         #[cfg(target_os = "linux")]
@@ -98,6 +118,11 @@ impl TerminalSession {
                 .and_then(|pid| process_start_time(pid as libc::pid_t));
             let Some(start_time) = start_time else {
                 let _ = child.kill();
+                if let Some((store_path, session_id, pidfile)) = durable_cleanup.as_ref() {
+                    let _ = crate::store::clear_terminal_remote_cleanup(
+                        store_path, session_id, pidfile,
+                    );
+                }
                 return Err(anyhow!("Failed to capture PTY root process identity"));
             };
             start_time
@@ -171,6 +196,7 @@ impl TerminalSession {
             _workspace_activity: None,
             _session_resource: None,
             backend_cleanup,
+            durable_cleanup,
             cwd: resolved_cwd,
             cols,
             rows,
@@ -279,6 +305,10 @@ impl TerminalSession {
         self.retained
     }
 
+    pub(super) fn has_backend_cleanup(&self) -> bool {
+        self.backend_cleanup.is_some()
+    }
+
     pub fn idle_duration(&self) -> Duration {
         self.last_output_at.elapsed()
     }
@@ -319,6 +349,9 @@ impl TerminalSession {
         #[cfg(unix)]
         descendant_result?;
         backend_cleanup.context("remote terminal cleanup incomplete")?;
+        if let Some((store_path, session_id, pidfile)) = self.durable_cleanup.as_ref() {
+            crate::store::clear_terminal_remote_cleanup(store_path, session_id, pidfile)?;
+        }
         Ok(())
     }
 
@@ -519,6 +552,7 @@ mod tests {
             &backend,
             registry.clone(),
             &[],
+            None,
         )
         .unwrap();
         // The PTY uses the account's configured login shell, which may not
@@ -598,6 +632,7 @@ mod tests {
             &backend,
             registry.clone(),
             &[],
+            None,
         )
         .unwrap();
 

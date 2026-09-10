@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test as base, type APIRequestContext, type TestInfo } from "@playwright/test";
 
+import { ExaDouble } from "./exa-double";
 import { ScriptedProvider } from "./scripted-provider";
 
 type SessionBehavior = "orchestrator" | "direct" | "direct-with-orchestrator";
@@ -17,8 +18,11 @@ const cleanupMarkerEnvironment = "NAC_E2E_CLEANUP_ID";
 export type EmbeddedHarness = {
   baseUrl: string;
   binaryPath: string;
+  exa: ExaDouble | undefined;
+  output: string[];
   provider: ScriptedProvider;
   runRoot: string;
+  waitForNoWorkerProcesses: () => Promise<void>;
 };
 
 type RunningHarness = EmbeddedHarness & {
@@ -283,6 +287,15 @@ async function startHarness(
   await fs.access(binaryPath);
   const provider = new ScriptedProvider();
   await provider.start();
+  let exa: ExaDouble | undefined;
+  try {
+    if (exaCredential != null) exa = await ExaDouble.start(runRoot);
+  } catch (error) {
+    await provider.stop();
+    throw error;
+  }
+  const managedConfig =
+    exaCredential == null ? undefined : await writeManagedConfiguration(runRoot, workspace, home);
   const output: string[] = [];
   let resolveAddress!: (url: string) => void;
   let rejectAddress!: (error: Error) => void;
@@ -302,6 +315,7 @@ async function startHarness(
       path.join(runRoot, "store.db"),
       "--worker-executable",
       binaryPath,
+      ...(managedConfig == null ? [] : ["--managed-config", managedConfig]),
       "--no-open",
     ],
     {
@@ -326,7 +340,13 @@ async function startHarness(
         DEEPSEEK_API_KEY: "nac-e2e-deepseek-dummy-only",
         MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
         [cleanupMarkerEnvironment]: cleanupMarker,
-        ...(exaCredential == null ? {} : { EXA_API_KEY: exaCredential }),
+        ...(exaCredential == null
+          ? {}
+          : {
+              EXA_API_KEY: exaCredential,
+              NAC_E2E_EXA_CA_CERT: exa!.caCertificatePath,
+              NAC_E2E_EXA_HTTPS_PROXY: exa!.proxyUrl,
+            }),
       },
     },
   );
@@ -360,7 +380,11 @@ async function startHarness(
     baseUrl = await withTimeout(address, 15_000, "nac-web readiness line");
     await waitForHealth(baseUrl);
   } catch (error) {
-    const cleanup = await Promise.allSettled([terminateProcessGroup(server), provider.stop()]);
+    const cleanup = await Promise.allSettled([
+      terminateProcessGroup(server),
+      provider.stop(),
+      ...(exa == null ? [] : [exa.stop()]),
+    ]);
     const startupLog = path.join(runRoot, "nac-web.log");
     const diagnosticFailures: unknown[] = [];
     try {
@@ -403,13 +427,31 @@ async function startHarness(
   return {
     baseUrl,
     binaryPath,
+    exa,
     provider,
     runRoot,
+    waitForNoWorkerProcesses: async () => {
+      const pid = server.pid;
+      if (pid == null) throw new Error("nac-web has no process ID");
+      const deadline = Date.now() + 10_000;
+      let descendants = await processDescendants(pid, cleanupMarker);
+      while (descendants.length > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        descendants = await processDescendants(pid, cleanupMarker);
+      }
+      if (descendants.length > 0) {
+        throw new Error(`managed worker descendants remained after cancellation: ${descendants}`);
+      }
+    },
     server,
     output,
     stop: async () => {
       const pid = server.pid;
-      const cleanup = await Promise.allSettled([terminateProcessGroup(server), provider.stop()]);
+      const cleanup = await Promise.allSettled([
+        terminateProcessGroup(server),
+        provider.stop(),
+        ...(exa == null ? [] : [exa.stop()]),
+      ]);
       const processRecord = fs.writeFile(
         path.join(runRoot, "process.json"),
         JSON.stringify(
@@ -436,6 +478,38 @@ async function startHarness(
       if (failures.length > 0) throw new AggregateError(failures, "E2E cleanup failed");
     },
   };
+}
+
+async function writeManagedConfiguration(
+  runRoot: string,
+  repositoryRoot: string,
+  homeRoot: string,
+): Promise<string> {
+  const stateRoot = path.join(runRoot, "managed-state");
+  const modelCredential = path.join(runRoot, "managed-model-key");
+  const configPath = path.join(runRoot, "managed.toml");
+  await fs.mkdir(stateRoot, { recursive: true });
+  await fs.writeFile(modelCredential, "managed-e2e-model-key\n", { mode: 0o600 });
+  const quoted = (value: string): string => JSON.stringify(value);
+  await fs.writeFile(
+    configPath,
+    [
+      "version = 1",
+      'logical_host_id = "00000000-0000-4000-8000-000000000035"',
+      'owner = "managed-e2e@example.test"',
+      'public_hostname = "managed-e2e.example.test"',
+      `repository_root = ${quoted(repositoryRoot)}`,
+      `state_root = ${quoted(stateRoot)}`,
+      `home_root = ${quoted(homeRoot)}`,
+      'github_client_id = "Iv1.managed-e2e"',
+      'model_backend = "openai-responses"',
+      'model_id = "gpt-5.6-sol"',
+      'model_endpoint = "https://models.example.test/v1"',
+      `model_credential_file = ${quoted(modelCredential)}`,
+      "",
+    ].join("\n"),
+  );
+  return configPath;
 }
 
 async function waitForHealth(baseUrl: string): Promise<void> {

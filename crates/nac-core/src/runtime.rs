@@ -36,6 +36,10 @@ use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
 use crate::worker::{build_preloaded_skill_messages, build_worker_context_messages};
 pub use crate::worker::{run_managed_worker, ManagedWorkerRunConfig};
+pub use crate::worker_credentials::{
+    capture_managed_native_credentials_from_environment, restrict_same_uid_inspection,
+    ManagedWorkerCredentialReceiver,
+};
 use crate::workspace::GitTarget;
 
 mod builders;

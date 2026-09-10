@@ -123,6 +123,19 @@ pub(crate) mod test_support {
     use std::thread;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+    pub(crate) fn expand_env(input: &str) -> anyhow::Result<String> {
+        super::expand_env(input)
+    }
+
+    pub(crate) fn stdio_command(
+        program: &str,
+        args: &[String],
+        envs: &std::collections::BTreeMap<String, String>,
+        cwd: &Path,
+    ) -> anyhow::Result<tokio::process::Command> {
+        super::transport::build_stdio_command(program, args, envs, cwd)
+    }
+
     pub(crate) fn unique_temp_dir(prefix: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -322,6 +335,113 @@ mod tests {
     use super::*;
     use crate::TEST_ENV_LOCK;
     use std::fs;
+
+    const MANAGED_EXA_CANARY: &str = "managed-server-mcp-isolation-canary";
+
+    #[tokio::test]
+    async fn managed_native_credential_mcp_isolation_helper() {
+        let Some(root) = env::var_os("NAC_MANAGED_MCP_ISOLATION_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        fs::create_dir_all(&root).unwrap();
+        crate::worker_credentials::capture_managed_native_credentials_from_environment().unwrap();
+        assert!(env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
+        assert_eq!(
+            crate::worker_credentials::managed_exa_api_key().as_deref(),
+            Some(MANAGED_EXA_CANARY)
+        );
+
+        let http_url = "http://127.0.0.1:9/arbitrary-mcp-endpoint";
+        let argv_marker = root.join("stdio-argv-spawned");
+        let env_marker = root.join("stdio-env-spawned");
+        let argv_shell = format!("printf spawned > {}", shell_single_quote(&argv_marker));
+        let env_shell = format!("printf spawned > {}", shell_single_quote(&env_marker));
+        fs::write(
+            root.join("config.toml"),
+            format!(
+                r#"
+[mcp_servers.stdio_argv]
+transport = "stdio"
+command = "/bin/sh"
+args = ["-c", {}, "${{EXA_API_KEY}}"]
+
+[mcp_servers.stdio_env]
+transport = "stdio"
+command = "/bin/sh"
+args = ["-c", {}]
+env = {{ MCP_SECRET = "${{EXA_API_KEY}}" }}
+
+[mcp_servers.http_header]
+transport = "streamable_http"
+url = {}
+headers = {{ Authorization = "Bearer ${{EXA_API_KEY}}" }}
+"#,
+                toml_string(&argv_shell),
+                toml_string(&env_shell),
+                toml_string(&http_url),
+            ),
+        )
+        .unwrap();
+        unsafe { env::set_var("NAC_HOME", &root) };
+
+        let outcome = McpRegistry::load_reporting_skips(
+            &root,
+            None,
+            &PathContext::new(&root),
+            McpTransportPolicy::All,
+            McpRootPolicy::None,
+        )
+        .await
+        .unwrap();
+        assert!(outcome.registry.is_none());
+        assert_eq!(outcome.skipped.len(), 3);
+        assert!(!argv_marker.exists());
+        assert!(!env_marker.exists());
+        assert!(outcome.skipped.iter().all(|skipped| skipped
+            .reason
+            .contains("environment variable 'EXA_API_KEY' is not set")));
+        let rendered = outcome
+            .skipped
+            .iter()
+            .map(|skipped| format!("{}: {}", skipped.name, skipped.reason))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!rendered.contains(MANAGED_EXA_CANARY));
+        fs::write(root.join("load-observation"), rendered).unwrap();
+    }
+
+    #[test]
+    fn managed_server_snapshot_is_hidden_from_stdio_and_http_mcp() {
+        let root = unique_temp_dir("nac-managed-mcp-isolation");
+        let output = std::process::Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "mcp::tests::managed_native_credential_mcp_isolation_helper",
+                "--nocapture",
+            ])
+            .env("NAC_MANAGED_MCP_ISOLATION_ROOT", &root)
+            .env(crate::model::EXA_API_KEY_ENV, MANAGED_EXA_CANARY)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "managed MCP isolation helper failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(MANAGED_EXA_CANARY));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(MANAGED_EXA_CANARY));
+        for entry in fs::read_dir(&root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_file() {
+                assert!(!fs::read_to_string(path)
+                    .unwrap()
+                    .contains(MANAGED_EXA_CANARY));
+            }
+        }
+        let _ = fs::remove_dir_all(root);
+    }
 
     async fn load_registry(
         cwd: &Path,

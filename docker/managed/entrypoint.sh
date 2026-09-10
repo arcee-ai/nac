@@ -8,6 +8,10 @@ if [ "$(id -u)" -ne 10001 ] || [ "$(id -g)" -ne 10001 ]; then
     exit 78
 fi
 
+# CAP_SYS_PTRACE in any inheritable, permitted, effective, bounding, or ambient
+# set can undermine the server/worker non-dumpable boundary now or after exec.
+/usr/local/libexec/nac/check-process-capabilities /proc/self/status
+
 for managed_path in /var/lib/nac /repositories /home/nac /tmp /run/nac; do
     if [ ! -d "$managed_path" ] || [ "$(readlink -f "$managed_path")" != "$managed_path" ]; then
         printf 'error: required managed path is missing or non-canonical: %s\n' "$managed_path" >&2

@@ -125,8 +125,9 @@ COPY --from=build /usr/local/rustup /usr/local/rustup
 COPY --from=build /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=build /src/nac/target/release/nac-web /usr/local/bin/nac-web
 COPY docker/managed/entrypoint.sh /usr/local/bin/nac-managed-entrypoint
+COPY docker/managed/check-process-capabilities.sh /usr/local/libexec/nac/check-process-capabilities
 
-RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint \
+RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint /usr/local/libexec/nac/check-process-capabilities \
     && chmod -R a+rX /usr/local/rustup /usr/local/cargo/bin \
     && rustc --version \
     && cargo --version \
@@ -143,7 +144,7 @@ RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint \
 # The system installation above remains available after dropping privileges.
 USER 10001:10001
 WORKDIR /repositories
-EXPOSE 3210
+EXPOSE 3210 3211
 VOLUME ["/var/lib/nac", "/repositories", "/home/nac", "/etc/nac", "/tmp", "/run/nac"]
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/nac-managed-entrypoint"]

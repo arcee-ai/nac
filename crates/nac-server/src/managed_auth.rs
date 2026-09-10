@@ -22,7 +22,7 @@ use axum::{
 };
 use nac_core::model::{
     begin_login, managed_auth_logout, managed_auth_snapshot, DeviceLoginPrompt, LoginStyle,
-    ManagedAuthProvider, ManagedAuthSnapshot, MANAGED_AUTH_PROVIDERS,
+    ManagedAuthProvider, ManagedAuthSnapshot, PendingDeviceLogin, MANAGED_AUTH_PROVIDERS,
 };
 use serde::Serialize;
 
@@ -138,6 +138,28 @@ pub(crate) struct ManagedLoginRegistry {
 }
 
 impl ManagedLoginRegistry {
+    pub(crate) fn pending_ids(&self) -> Vec<String> {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut ids = entries
+            .iter()
+            .filter(|(_, entry)| {
+                matches!(
+                    *entry
+                        .outcome
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                    LoginOutcome::Pending
+                )
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+
     fn insert(&self, id: String, login: PendingLogin) {
         let mut entries = self
             .entries
@@ -245,17 +267,54 @@ impl SessionManager {
         provider: ManagedAuthProvider,
         style: LoginStyle,
     ) -> Result<DeviceLoginStartedResponse, ApiError> {
-        let pending = begin_login(provider, style).await?;
+        let pending = match (provider, self.managed_model(), self.managed_host()) {
+            (ManagedAuthProvider::Arcee, Some(profile), Some(managed))
+                if profile.backend == nac_core::model::BackendKind::ArceeAuth =>
+            {
+                profile.begin_interactive_repair(managed).await?
+            }
+            _ => begin_login(provider, style).await?,
+        };
+        self.register_managed_login(provider, pending)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn start_managed_arcee_repair_with_auth_service_for_test(
+        &self,
+        auth_service_base_url: &str,
+    ) -> Result<DeviceLoginStartedResponse, ApiError> {
+        let profile = self
+            .managed_model()
+            .ok_or_else(|| anyhow::anyhow!("managed model profile is unavailable"))?;
+        let managed = self
+            .managed_host()
+            .ok_or_else(|| anyhow::anyhow!("managed host configuration is unavailable"))?;
+        let pending = profile
+            .begin_interactive_repair_with_auth_service_for_test(managed, auth_service_base_url)
+            .await?;
+        self.register_managed_login(ManagedAuthProvider::Arcee, pending)
+    }
+
+    fn register_managed_login(
+        &self,
+        provider: ManagedAuthProvider,
+        pending: PendingDeviceLogin,
+    ) -> Result<DeviceLoginStartedResponse, ApiError> {
         let DeviceLoginPrompt {
             verification_uri,
             user_code,
             expires_in_secs,
         } = pending.prompt();
+        // The HTTP admission lease ends with the start response, while the
+        // device flow can later persist credentials. Transfer independent
+        // cross-process admission authority into the background task first.
+        let background_admission = self.managed_work_admission()?;
 
         let outcome = Arc::new(StdMutex::new(LoginOutcome::Pending));
         let task = tokio::spawn({
             let outcome = Arc::clone(&outcome);
             async move {
+                let _background_admission = background_admission;
                 let result = pending.complete().await;
                 let mut slot = outcome
                     .lock()

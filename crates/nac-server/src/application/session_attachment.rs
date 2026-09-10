@@ -359,7 +359,10 @@ impl<'a> SessionAttachmentApplication<'a> {
         };
         self.manager
             .attach_managed_command_environment(&mut run_config)?;
-        let service = SessionService::from_orchestrator_run_config(run_config).service;
+        let mut service = SessionService::from_orchestrator_run_config(run_config).service;
+        if self.manager.managed_host().is_some() {
+            service.enable_managed_admission(self.manager.managed_identity().cloned());
+        }
         if let Some(resource_lease) = resource_lease {
             service.adopt_sandbox_resource_lease(resource_lease);
         }
@@ -417,7 +420,10 @@ impl<'a> SessionAttachmentApplication<'a> {
             .await?;
         self.manager
             .attach_managed_command_environment(&mut run_config)?;
-        let service = SessionService::from_orchestrator_run_config(run_config).service;
+        let mut service = SessionService::from_orchestrator_run_config(run_config).service;
+        if self.manager.managed_host().is_some() {
+            service.enable_managed_admission(self.manager.managed_identity().cloned());
+        }
         if let Some(resource_lease) = resource_lease {
             service.adopt_sandbox_resource_lease(resource_lease);
         }

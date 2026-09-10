@@ -39,6 +39,7 @@ mod anthropic_stream;
 mod api_key_store;
 mod arcee;
 mod arcee_bootstrap;
+mod arcee_repair;
 pub(crate) mod auth_store;
 mod backend;
 mod catalog;
@@ -61,9 +62,11 @@ mod types;
 
 pub use api_key_store::{list_stored_api_keys, remove_api_key, store_api_key, StoredApiKeySummary};
 use arcee::{arcee_auth_login, arcee_auth_logout, arcee_auth_status};
+pub use arcee::{validate_arcee_auth_issuer, ARCEE_AUTH_DEV2_ISSUER, ARCEE_AUTH_PRODUCTION_ISSUER};
 pub use arcee_bootstrap::{
-    import_managed_arcee_bootstrap, managed_arcee_auth_storage_root,
-    validate_managed_arcee_authorization, ManagedArceeBootstrapOutcome,
+    import_managed_arcee_bootstrap, import_managed_arcee_bootstrap_for_issuer,
+    managed_arcee_auth_storage_root, validate_managed_arcee_authorization,
+    validate_managed_arcee_authorization_for_issuer, ManagedArceeBootstrapOutcome,
     MANAGED_ARCEE_BOOTSTRAP_PATH,
 };
 pub use backend::{
@@ -388,6 +391,51 @@ pub async fn begin_login(
         }
     };
     Ok(PendingDeviceLogin { inner })
+}
+
+/// Starts the managed-host Arcee repair flow after proving that the durable
+/// bootstrap receipt and opaque capability agree and no credential can be
+/// overwritten. Completion rechecks them and ArceeFM's authoritative binding
+/// before it stores provider tokens.
+pub async fn begin_managed_arcee_repair(
+    expected_managed_host_id: &str,
+    expected_base_url: &str,
+    expected_auth_issuer: &str,
+) -> Result<PendingDeviceLogin> {
+    let login = arcee::begin_managed_arcee_device_login(
+        expected_managed_host_id,
+        expected_base_url,
+        expected_auth_issuer,
+    )
+    .await?;
+    Ok(PendingDeviceLogin {
+        inner: PendingDeviceLoginKind::Arcee(login),
+    })
+}
+
+/// Test-support entry point for exercising the real managed repair lifecycle
+/// against a loopback authorization service while retaining the configured
+/// issuer as the credential's security identity.
+#[cfg(feature = "test-support")]
+pub async fn begin_managed_arcee_repair_with_auth_service_for_test(
+    expected_managed_host_id: &str,
+    expected_base_url: &str,
+    expected_auth_issuer: &str,
+    auth_service_base_url: &str,
+) -> Result<PendingDeviceLogin> {
+    let context = arcee_repair::prepare_managed_arcee_repair(
+        expected_managed_host_id,
+        expected_base_url,
+        expected_auth_issuer,
+    )?;
+    let login = arcee::begin_managed_arcee_device_login_with_service(
+        context,
+        arcee::ArceeAuthService::for_test(auth_service_base_url),
+    )
+    .await?;
+    Ok(PendingDeviceLogin {
+        inner: PendingDeviceLoginKind::Arcee(login),
+    })
 }
 
 pub fn managed_auth_snapshot(provider: ManagedAuthProvider) -> Result<ManagedAuthSnapshot> {

@@ -148,6 +148,130 @@ async fn direct_inbox_promotes_queued_prompts_one_at_a_time() {
 }
 
 #[tokio::test]
+async fn maintenance_prevents_post_settlement_direct_continuation_admission() {
+    let session_id = "maintenance-direct-inbox";
+    let (mut parts, store_path) = test_direct_active_service(
+        "maintenance_direct_inbox",
+        session_id,
+        ModelClient::new_for_test(),
+    );
+    parts.service.enable_managed_admission(None);
+    crate::store::create_session_inbox_item(
+        &store_path,
+        session_id,
+        crate::store::InboxDelivery::Queue,
+        "must remain queued",
+        None,
+        None,
+    )
+    .unwrap();
+    let binding = crate::store::ManagedOperationBinding {
+        managed_host_id: "host".to_string(),
+        host_incarnation_id: "incarnation".to_string(),
+        issuer: "https://controller.example.test".to_string(),
+        audience: "urn:nac:managed-control:host:incarnation".to_string(),
+        authority_origin: "https://controller.example.test".to_string(),
+        operation_id: "operation".to_string(),
+        target: crate::store::ManagedUpgradeTarget {
+            release_id: "release".to_string(),
+            source_sha: "a".repeat(40),
+            product_version: "version".to_string(),
+            schema_version: crate::store::schema_version(),
+            minimum_schema_version: 0,
+        },
+        actor: "actor".to_string(),
+        beneficiary: "beneficiary".to_string(),
+    };
+    let expires_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + 60;
+    assert!(matches!(
+        crate::store::prepare_managed_upgrade(
+            &store_path,
+            "jti",
+            &binding,
+            crate::store::ManagedControlAttemptAction::Prepare,
+            expires_at,
+            Vec::new(),
+        )
+        .unwrap(),
+        crate::store::ManagedPrepareOutcome::SafeToStop { .. }
+    ));
+
+    let error = match parts.service.start_next_direct_inbox_item().await {
+        Ok(_) => panic!("maintenance must reject direct continuation admission"),
+        Err(error) => error,
+    };
+    assert!(!error.to_string().is_empty());
+    assert_eq!(
+        parts.service.list_direct_inbox().unwrap()[0].status,
+        crate::store::InboxStatus::Pending
+    );
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn ordinary_unmanaged_service_does_not_consult_managed_maintenance() {
+    let session_id = "ordinary-unmanaged-maintenance";
+    let (parts, store_path) = test_direct_active_service(
+        "ordinary_unmanaged_maintenance",
+        session_id,
+        ModelClient::new_for_test(),
+    );
+    let binding = crate::store::ManagedOperationBinding {
+        managed_host_id: "host".to_string(),
+        host_incarnation_id: "incarnation".to_string(),
+        issuer: "https://controller.example.test".to_string(),
+        audience: "urn:nac:managed-control:host:incarnation".to_string(),
+        authority_origin: "https://controller.example.test".to_string(),
+        operation_id: "unmanaged-operation".to_string(),
+        target: crate::store::ManagedUpgradeTarget {
+            release_id: "release".to_string(),
+            source_sha: "b".repeat(40),
+            product_version: "version".to_string(),
+            schema_version: crate::store::schema_version(),
+            minimum_schema_version: 0,
+        },
+        actor: "actor".to_string(),
+        beneficiary: "beneficiary".to_string(),
+    };
+    crate::store::prepare_managed_upgrade(
+        &store_path,
+        "unmanaged-jti",
+        &binding,
+        crate::store::ManagedControlAttemptAction::Prepare,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 60,
+        Vec::new(),
+    )
+    .unwrap();
+
+    let active = parts
+        .service
+        .try_begin_run_inner(
+            None,
+            "ordinary work",
+            None,
+            true,
+            RunAdmissionKind::default(),
+        )
+        .unwrap();
+    parts
+        .service
+        .run_prompt_commit(&active.run_id)
+        .unwrap()
+        .send_replace(RunPromptCommitStatus::Committed);
+    parts.service.request_cancel(&active.run_id).await.unwrap();
+    assert!(!parts.service.has_active_operation());
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn direct_goal_continues_until_budget_limited_and_accounts_each_run() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 

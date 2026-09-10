@@ -394,9 +394,11 @@ async fn failed_remote_one_shot_cleanup_remains_owned_for_settlement_retry() {
         .stderr_preview
         .contains("remote command cleanup incomplete"));
     assert_eq!(manager.pending_remote_cleanup_count(), 1);
+    assert_eq!(manager.live_terminal_names().len(), 1);
 
     manager.settle_run().await.unwrap();
     assert_eq!(manager.pending_remote_cleanup_count(), 0);
+    assert!(manager.live_terminal_names().is_empty());
     assert_eq!(std::fs::read_to_string(&cleanup_calls).unwrap(), "2");
     let _ = std::fs::remove_dir_all(root);
 }
@@ -566,6 +568,59 @@ async fn remote_cleanup_observes_local_transport_already_stopped() {
     assert_eq!(output.exit_code, Some(7));
     assert!(natural_cleanup.exists());
     assert_eq!(manager.pending_remote_cleanup_count(), 0);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn pending_remote_cleanup_is_recovered_and_settled_after_manager_restart() {
+    let root = std::env::temp_dir().join(format!(
+        "nac-remote-cleanup-restart-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let store_path = root.join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "cleanup-session");
+    let backend = crate::sandbox::execution_backend_from_sandbox(None, &root);
+
+    let first = TerminalManager::new();
+    first
+        .configure_remote_cleanup_authority(
+            store_path.clone(),
+            "cleanup-session".to_string(),
+            Arc::clone(&backend),
+        )
+        .unwrap();
+    first
+        .register_remote_cleanup("remote-pidfile", Arc::clone(&backend), false)
+        .unwrap();
+    assert_eq!(
+        crate::store::list_terminal_remote_cleanups(&store_path, "cleanup-session")
+            .unwrap()
+            .len(),
+        1
+    );
+    drop(first);
+
+    let recovered = TerminalManager::new();
+    recovered
+        .configure_remote_cleanup_authority(
+            store_path.clone(),
+            "cleanup-session".to_string(),
+            backend,
+        )
+        .unwrap();
+    assert_eq!(
+        recovered.live_terminal_names(),
+        vec!["remote-pidfile".to_string()]
+    );
+    recovered.settle_run().await.unwrap();
+    assert!(
+        crate::store::list_terminal_remote_cleanups(&store_path, "cleanup-session")
+            .unwrap()
+            .is_empty()
+    );
+    assert!(recovered.live_terminal_names().is_empty());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1152,11 +1207,30 @@ async fn direct_run_settlement_keeps_only_explicitly_retained_terminals() {
         .unwrap();
     let info = manager.retain(&retained).await.unwrap();
     assert!(info.retained);
+    assert_eq!(
+        manager.live_terminal_names(),
+        vec![foreground.clone(), retained.clone()]
+    );
 
     manager.settle_run().await.unwrap();
     assert!(manager.get(&foreground).await.is_none());
     assert!(manager.get(&retained).await.unwrap().retained);
+    assert_eq!(manager.live_terminal_names(), vec![retained.clone()]);
     manager.remove_all().await.unwrap();
+    assert!(manager.live_terminal_names().is_empty());
+}
+
+#[tokio::test]
+async fn maintenance_terminal_snapshot_never_waits_for_cleanup_mutex() {
+    let manager = TerminalManager::new();
+    let _held = manager.sessions.lock().await;
+    let started = std::time::Instant::now();
+    let names = manager.live_terminal_names();
+    assert!(
+        started.elapsed() < Duration::from_millis(50),
+        "maintenance blocker scan must not queue behind terminal cleanup"
+    );
+    assert_eq!(names, vec!["terminal-cleanup-in-progress".to_string()]);
 }
 
 #[tokio::test]
@@ -1201,6 +1275,60 @@ async fn retained_terminal_holds_cross_process_workspace_authority() {
         crate::sessions::SessionResourceMutationLease::try_acquire(&store_path, "retained-session")
             .unwrap(),
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn exited_retained_terminal_is_archived_and_releases_cross_process_authority() {
+    let root = std::env::temp_dir().join(format!(
+        "nac-exited-retained-workspace-authority-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let store_path = root.join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    let identity = crate::workspace::GitTarget::local(root.clone()).lease_identity();
+    let manager = TerminalManager::for_direct();
+    manager.configure_workspace_authority(store_path.clone(), identity.clone());
+    manager
+        .configure_session_resource_authority(store_path.clone(), "retained-session".to_string());
+    let name = manager.next_session_name();
+    manager
+        .create(
+            name.clone(),
+            "printf complete",
+            Some(root.clone()),
+            120,
+            40,
+            &backend(),
+        )
+        .await
+        .unwrap();
+    manager.retain(&name).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if manager.get(&name).await.is_some_and(|info| !info.alive) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("retained terminal did not exit");
+
+    assert!(manager.live_terminal_names().is_empty());
+    drop(crate::sessions::WorkspaceMutationLease::try_acquire(&store_path, &identity).unwrap());
+    drop(
+        crate::sessions::SessionResourceMutationLease::try_acquire(&store_path, "retained-session")
+            .unwrap(),
+    );
+    let completed = manager
+        .write_stdin(&name, "", 0, 8_000, None)
+        .await
+        .expect("completed retained output remains available");
+    assert_eq!(completed.exit_code, Some(0));
+    assert!(completed.session_name.is_none());
+    manager.remove_all().await.unwrap();
     let _ = std::fs::remove_dir_all(root);
 }
 

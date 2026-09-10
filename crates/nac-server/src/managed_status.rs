@@ -8,42 +8,7 @@ use axum::Json;
 use nac_managed::ReadinessCheck;
 use serde::Serialize;
 
-use crate::SessionManager;
-
-const MANAGED_RUNTIME_UID: u32 = 10_001;
-const MANAGED_RUNTIME_GID: u32 = 10_001;
-const REQUIRED_RUNTIME_TOOLS: &[&str] = &[
-    "bash",
-    "git",
-    "git-lfs",
-    "gh",
-    "ssh",
-    "curl",
-    "jq",
-    "rg",
-    "fd",
-    "rsync",
-    "make",
-    "pkg-config",
-    "cmake",
-    "cc",
-    "python3",
-    "uv",
-    "node",
-    "npm",
-    "corepack",
-    "rustc",
-    "cargo",
-    "rustfmt",
-    "cargo-clippy",
-    "go",
-    "tar",
-    "gzip",
-    "xz",
-    "zip",
-    "unzip",
-    "tini",
-];
+use crate::{application::managed::ManagedReadinessPolicy, SessionManager};
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub(crate) struct ReadinessResponse {
@@ -91,6 +56,7 @@ pub(crate) struct ManagedHostStatusResponse {
     secret_count: usize,
     project_count: usize,
     session_count: usize,
+    maintenance: Option<nac_core::store::ManagedMaintenanceSnapshot>,
     checks: Vec<ReadinessCheck>,
 }
 
@@ -198,12 +164,10 @@ pub(crate) async fn managed_status_handler(
 fn readiness_snapshot(manager: &SessionManager) -> ReadinessResponse {
     let identity = crate::build_identity::current();
     let migration = nac_core::store::migration_status(&manager.inner.store_path);
-    let checks = readiness_checks(
-        manager,
-        MANAGED_RUNTIME_UID,
-        MANAGED_RUNTIME_GID,
-        REQUIRED_RUNTIME_TOOLS,
-    );
+    let maintenance = (migration.state == nac_core::store::StoreMigrationState::Current)
+        .then(|| nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path))
+        .and_then(Result::ok);
+    let checks = readiness_checks(manager);
     let recovery_only = manager.is_recovery_only();
     ReadinessResponse {
         status: if !recovery_only && checks.iter().all(|check| check.ready) {
@@ -225,13 +189,7 @@ fn readiness_snapshot(manager: &SessionManager) -> ReadinessResponse {
         migration_failure: migration
             .failure
             .map(nac_core::store::StoreMigrationFailure::as_str),
-        maintenance_state: if recovery_only {
-            "recovery-only"
-        } else if migration.state == nac_core::store::StoreMigrationState::Current {
-            "serving"
-        } else {
-            "unavailable"
-        },
+        maintenance_state: maintenance_state(recovery_only, migration.state, maintenance.as_ref()),
         checks,
     }
 }
@@ -245,12 +203,7 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         .ok_or_else(|| anyhow::anyhow!("managed model profile is unavailable"))?;
     let identity = crate::build_identity::current();
     let migration = nac_core::store::migration_status(&manager.inner.store_path);
-    let checks = readiness_checks(
-        manager,
-        MANAGED_RUNTIME_UID,
-        MANAGED_RUNTIME_GID,
-        REQUIRED_RUNTIME_TOOLS,
-    );
+    let checks = readiness_checks(manager);
     let model_ready = checks
         .iter()
         .find(|check| check.name == "model-credential")
@@ -273,6 +226,9 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
     } else {
         0
     };
+    let maintenance = store_current
+        .then(|| nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path))
+        .transpose()?;
     Ok(ManagedHostStatusResponse {
         managed: true,
         ready: !recovery_only && checks.iter().all(|check| check.ready),
@@ -289,13 +245,7 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         migration_failure: migration
             .failure
             .map(nac_core::store::StoreMigrationFailure::as_str),
-        maintenance_state: if recovery_only {
-            "recovery-only"
-        } else if store_current {
-            "serving"
-        } else {
-            "unavailable"
-        },
+        maintenance_state: maintenance_state(recovery_only, migration.state, maintenance.as_ref()),
         logical_host_id: managed.logical_host_id.clone(),
         owner: managed.owner.clone(),
         public_hostname: managed.public_hostname.clone(),
@@ -311,59 +261,61 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         secret_count,
         project_count,
         session_count,
+        maintenance,
         checks,
     })
 }
 
-fn readiness_checks(
-    manager: &SessionManager,
-    expected_uid: u32,
-    expected_gid: u32,
-    required_tools: &[&str],
-) -> Vec<ReadinessCheck> {
-    let mut checks = vec![
-        match nac_core::store::check_readiness(&manager.inner.store_path) {
-            Ok(()) => ReadinessCheck::pass("store", "SQLite store is open and migrated"),
+fn maintenance_state(
+    recovery_only: bool,
+    migration_state: nac_core::store::StoreMigrationState,
+    maintenance: Option<&nac_core::store::ManagedMaintenanceSnapshot>,
+) -> &'static str {
+    if recovery_only {
+        return "recovery-only";
+    }
+    if migration_state != nac_core::store::StoreMigrationState::Current {
+        return "unavailable";
+    }
+    match maintenance {
+        Some(snapshot) if snapshot.state == nac_core::store::ManagedMaintenanceState::Serving => {
+            "serving"
+        }
+        Some(snapshot)
+            if snapshot.state == nac_core::store::ManagedMaintenanceState::Maintenance =>
+        {
+            "maintenance"
+        }
+        _ => "unavailable",
+    }
+}
+
+fn readiness_checks(manager: &SessionManager) -> Vec<ReadinessCheck> {
+    let mut checks = crate::application::managed::runtime_readiness_checks(
+        manager,
+        ManagedReadinessPolicy::production(),
+    );
+    checks.insert(
+        1,
+        match nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path) {
+            Ok(snapshot) if snapshot.state == nac_core::store::ManagedMaintenanceState::Serving => {
+                ReadinessCheck::pass("maintenance", "host admission is open")
+            }
+            Ok(_) => ReadinessCheck::fail(
+                "maintenance",
+                "host is safely stopped for a managed upgrade",
+            ),
             Err(_) => {
-                let migration = nac_core::store::migration_status(&manager.inner.store_path);
-                let reason = migration
-                    .failure
-                    .map_or(migration.state.as_str(), |failure| failure.as_str());
-                ReadinessCheck::fail("store", format!("SQLite store is unavailable ({reason})"))
+                ReadinessCheck::fail("maintenance", "managed maintenance state is unavailable")
             }
         },
-    ];
-
-    let Some(managed) = manager.managed_host() else {
-        return checks;
-    };
-
-    checks.extend(nac_managed::host_checks(
-        managed,
-        expected_uid,
-        expected_gid,
-        required_tools,
-    ));
-    if let Some(model) = manager.managed_model() {
-        if model.credential_source == nac_managed::ManagedModelCredentialSource::ManagedBootstrap {
-            checks.push(match model.credential_ready(managed) {
-                Ok(()) => ReadinessCheck::pass(
-                    "model-credential",
-                    "durable managed model authorization is present",
-                ),
-                Err(error) => ReadinessCheck::fail(
-                    "model-credential",
-                    format!("durable managed model authorization is unavailable: {error}"),
-                ),
-            });
-        }
-    }
+    );
     checks
 }
 
 #[cfg(test)]
 mod tests {
-    use super::REQUIRED_RUNTIME_TOOLS;
+    use crate::application::managed::REQUIRED_RUNTIME_TOOLS;
 
     #[test]
     fn managed_readiness_requires_git_lfs_executable() {

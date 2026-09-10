@@ -79,22 +79,24 @@ impl Fixture {
     }
 
     fn service(&self) -> ManagedCloneService {
+        let registrar = Arc::<TestProjectRegistrar>::clone(&self.registrar);
         ManagedCloneService::new(
             &self.repository_root,
             &self.state_root,
             &self.home_root,
-            self.registrar.clone(),
+            registrar,
             None,
         )
         .unwrap()
     }
 
     fn service_with_git(&self, git_executable: PathBuf) -> ManagedCloneService {
+        let registrar = Arc::<TestProjectRegistrar>::clone(&self.registrar);
         ManagedCloneService::new_with_git_executable(
             &self.repository_root,
             &self.state_root,
             &self.home_root,
-            self.registrar.clone(),
+            registrar,
             None,
             git_executable,
         )
@@ -268,6 +270,15 @@ async fn cancellation_and_destination_race_are_bounded_and_project_last() {
     let started = first
         .start_validated(request(&source, "reserved", "main"), identity.clone())
         .unwrap();
+    assert_eq!(
+        first
+            .active_operations()
+            .unwrap()
+            .into_iter()
+            .map(|operation| operation.operation_id)
+            .collect::<Vec<_>>(),
+        vec![started.operation_id.clone()]
+    );
 
     let second = fixture.service_with_git(fake_git);
     let error = second
@@ -278,6 +289,7 @@ async fn cancellation_and_destination_race_are_bounded_and_project_last() {
     assert!(first.cancel(&started.operation_id).unwrap());
     let cancelled = wait_for_terminal(&first, &started.operation_id).await;
     assert_eq!(cancelled.status, ManagedCloneStatus::Cancelled);
+    assert!(first.active_operations().unwrap().is_empty());
     assert!(!fixture.repository_root.join("reserved").exists());
     assert!(!fixture
         .repository_root

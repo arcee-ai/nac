@@ -7,12 +7,15 @@ mod filesystem;
 mod fork;
 mod light_model;
 mod managed_auth;
+mod managed_control;
 mod managed_github;
 mod managed_status;
 mod mcp;
 mod mcp_api;
 mod orchestration;
 mod revert;
+
+pub(crate) use managed_control::running_target as managed_running_target;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
 pub use delivery::contracts::{
@@ -81,7 +84,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex as StdMutex, Weak,
+        Arc, Mutex as StdMutex, OnceLock, Weak,
     },
     time::{Duration, Instant},
 };
@@ -118,9 +121,9 @@ use nac_core::{
     permissions::PermissionReply,
     runtime::{self, NacConfig, StoreOptions},
     session_service::{
-        FrontendSnapshotLoadOptions, MessagePageRequest, MessagesPageSnapshot,
-        SessionEventReceiver, SessionFrontendSnapshot, SessionFrontendSnapshotLoad,
-        SessionRunHandle, SessionService, ThreadEventPage,
+        ActiveSessionOperationSnapshot, FrontendSnapshotLoadOptions, MessagePageRequest,
+        MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
+        SessionFrontendSnapshotLoad, SessionRunHandle, SessionService, ThreadEventPage,
     },
     sessions,
     store::{
@@ -321,6 +324,10 @@ struct SessionManagerInner {
     managed_logins: managed_auth::ManagedLoginRegistry,
     managed_github_logins: managed_github::ManagedGitHubLoginRegistry,
     recovery_only: AtomicBool,
+    maintenance_gate: Arc<RwLock<()>>,
+    active_admissions: Arc<StdMutex<HashMap<String, nac_core::store::ManagedUpgradeBlocker>>>,
+    managed_identity: Option<nac_core::store::ManagedAcceptedIdentity>,
+    pending_forward_start: bool,
     #[cfg(test)]
     managed_monitor_peer_observed: tokio::sync::Notify,
 }
@@ -451,12 +458,38 @@ impl GitProbeCacheEntry {
 /// deleting one never removes a key the operator manages themselves.
 const GENERATED_CREDENTIAL_PREFIX: &str = "NAC_CONFIG_";
 
+static MANAGED_SERVER_PROCESS_PREPARATION: OnceLock<std::result::Result<(), String>> =
+    OnceLock::new();
+
+fn prepare_managed_server_process() -> Result<()> {
+    MANAGED_SERVER_PROCESS_PREPARATION
+        .get_or_init(|| {
+            runtime::restrict_same_uid_inspection().map_err(|error| {
+                format!("failed to restrict Managed NAC process inspection: {error}")
+            })?;
+            runtime::capture_managed_native_credentials_from_environment().map_err(|error| {
+                format!("failed to capture Managed NAC native credentials: {error}")
+            })?;
+            Ok(())
+        })
+        .as_ref()
+        .map_err(|message| anyhow!(message.clone()))
+        .copied()
+}
+
 impl SessionManager {
     pub(crate) fn root_cwd(&self) -> &std::path::Path {
         &self.inner.root_cwd
     }
 
     pub fn new(options: ServerOptions) -> Result<Self> {
+        if options.managed_host.is_some() {
+            // Managed construction is the security boundary, including for
+            // embedders that never enter the nac-web CLI. Harden and capture
+            // before reading project configuration, opening the store, or
+            // constructing any model-visible runtime components.
+            prepare_managed_server_process()?;
+        }
         let root_cwd = canonicalize_dir(options.root_cwd)?;
         let config = NacConfig::load_without_model_from_cwd(&root_cwd)?;
         let store_path = runtime::resolve_store_path_for_track(
@@ -473,32 +506,55 @@ impl SessionManager {
             .transpose()?
             .unwrap_or(std::env::current_exe().context("failed to resolve current executable")?);
 
+        // This is deliberately before any managed model, credential, clone,
+        // reconciliation, or listener setup. Only an exact controller-authored
+        // startup CAS may advance the durable target before ordinary startup.
+        let running_target = managed_running_target()?;
+        let startup = application::managed::managed_startup_plan(
+            &store_path,
+            options.managed_host.as_ref(),
+            &running_target,
+        )?;
+        let startup_recovery_only = startup.recovery_only;
+        let pending_forward_start = startup.preflight.requires_accept;
+        let managed_identity = match (
+            startup.preflight.accepted_identity,
+            startup.configured_identity,
+        ) {
+            (Some(accepted), _) => Some(accepted),
+            (None, Some((managed_host_id, host_incarnation_id))) => {
+                Some(nac_core::store::ManagedAcceptedIdentity {
+                    managed_host_id,
+                    host_incarnation_id,
+                    operation_id: String::new(),
+                    target: running_target,
+                })
+            }
+            (None, None) => None,
+        };
+
         let managed_model = options
             .managed_host
             .as_ref()
             .map(application::managed::ManagedModelProfile::from_config)
             .transpose()?;
-        if let (Some(managed), Some(model)) =
-            (options.managed_host.as_ref(), managed_model.as_ref())
-        {
-            model.initialize(managed)?;
+        if !startup_recovery_only {
+            if let (Some(managed), Some(model)) =
+                (options.managed_host.as_ref(), managed_model.as_ref())
+            {
+                model.initialize(managed)?;
+            }
         }
 
-        let managed_clones = options
-            .managed_host
-            .as_ref()
-            .map(|managed| {
-                nac_managed::ManagedCloneService::new(
-                    &managed.repository_root,
-                    &managed.state_root,
-                    &managed.home_root,
-                    Arc::new(application::managed::StoreProjectRegistrar::new(
-                        &store_path,
-                    )),
-                    Some(managed.github_auth()?),
-                )
-            })
-            .transpose()?;
+        let managed_clones = if startup_recovery_only {
+            None
+        } else {
+            options
+                .managed_host
+                .as_ref()
+                .map(|managed| application::managed::clone_service(managed, &store_path))
+                .transpose()?
+        };
         let manager = Self {
             inner: Arc::new(SessionManagerInner {
                 root_cwd,
@@ -514,7 +570,11 @@ impl SessionManager {
                 git_probe_cache: RwLock::new(HashMap::new()),
                 managed_logins: managed_auth::ManagedLoginRegistry::default(),
                 managed_github_logins: managed_github::ManagedGitHubLoginRegistry::default(),
-                recovery_only: AtomicBool::new(false),
+                recovery_only: AtomicBool::new(startup_recovery_only),
+                maintenance_gate: Arc::new(RwLock::new(())),
+                active_admissions: Arc::new(StdMutex::new(HashMap::new())),
+                managed_identity,
+                pending_forward_start,
                 #[cfg(test)]
                 managed_monitor_peer_observed: tokio::sync::Notify::new(),
             }),
@@ -544,6 +604,165 @@ impl SessionManager {
 
     pub fn managed_host(&self) -> Option<&nac_managed::ManagedHostConfig> {
         self.inner.managed_host.as_ref()
+    }
+
+    fn managed_identity(&self) -> Option<&nac_core::store::ManagedAcceptedIdentity> {
+        self.inner.managed_identity.as_ref()
+    }
+
+    fn managed_work_admission(&self) -> Result<Option<nac_core::store::ManagedWorkAdmission>> {
+        match (self.managed_host(), self.inner.managed_identity.as_ref()) {
+            (None, _) => Ok(None),
+            (Some(_), Some(identity)) => nac_core::store::try_admit_managed_work_for_identity(
+                &self.inner.store_path,
+                identity,
+            )
+            .map(Some),
+            (Some(_), None) => {
+                nac_core::store::try_admit_managed_work(&self.inner.store_path).map(Some)
+            }
+        }
+    }
+
+    fn managed_completion_admission(
+        &self,
+    ) -> Result<Option<nac_core::store::ManagedWorkAdmission>> {
+        match (self.managed_host(), self.inner.managed_identity.as_ref()) {
+            (None, _) => Ok(None),
+            (Some(_), Some(identity)) => {
+                nac_core::store::try_admit_managed_completion_for_identity(
+                    &self.inner.store_path,
+                    identity,
+                )
+                .map(Some)
+            }
+            (Some(_), None) => {
+                nac_core::store::try_admit_managed_completion(&self.inner.store_path).map(Some)
+            }
+        }
+    }
+
+    fn managed_upgrade_blockers(&self) -> Result<Vec<nac_core::store::ManagedUpgradeBlocker>> {
+        use nac_core::store::{ManagedBlockerKind, ManagedUpgradeBlocker};
+
+        let mut blockers = Vec::new();
+        let services = match self.inner.active_sessions.try_read() {
+            Ok(sessions) => sessions
+                .iter()
+                .map(|(id, service)| (id.clone(), Arc::clone(service)))
+                .collect::<Vec<_>>(),
+            Err(_) => {
+                blockers.push(ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::OperationLease,
+                    id: "process-active-sessions-snapshot".to_string(),
+                    session_id: None,
+                    detail: "this process is updating its active session registry".to_string(),
+                });
+                Vec::new()
+            }
+        };
+        for (session_id, service) in services {
+            if let Some(ActiveSessionOperationSnapshot::ManualCompaction { compaction }) =
+                service.active_operation()
+            {
+                blockers.push(ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::Compaction,
+                    id: compaction.compaction_id.to_string(),
+                    session_id: Some(session_id.clone()),
+                    detail: "session compaction is active".to_string(),
+                });
+            }
+            for terminal in service.live_terminal_names() {
+                blockers.push(ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::TerminalProcess,
+                    id: terminal,
+                    session_id: Some(session_id.clone()),
+                    detail: "terminal process is live".to_string(),
+                });
+            }
+        }
+        if let Some(clones) = self.inner.managed_clones.as_ref() {
+            blockers.extend(clones.active_operations()?.into_iter().map(|operation| {
+                ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::CloneOperation,
+                    id: operation.operation_id,
+                    session_id: None,
+                    detail: "managed repository clone is running".to_string(),
+                }
+            }));
+        }
+        blockers.extend(
+            self.inner
+                .managed_logins
+                .pending_ids()
+                .into_iter()
+                .map(|id| ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::OperationLease,
+                    id: format!("model-login:{id}"),
+                    session_id: None,
+                    detail: "managed model login is pending".to_string(),
+                }),
+        );
+        blockers.extend(
+            self.inner
+                .managed_github_logins
+                .pending_ids()
+                .into_iter()
+                .map(|id| ManagedUpgradeBlocker {
+                    kind: ManagedBlockerKind::OperationLease,
+                    id: format!("github-login:{id}"),
+                    session_id: None,
+                    detail: "managed GitHub login is pending".to_string(),
+                }),
+        );
+        for snapshot in sessions::list_sessions(&self.inner.store_path)? {
+            let session_id = snapshot.session_id;
+            match sessions::SessionOperationLease::try_acquire(&self.inner.store_path, &session_id)
+            {
+                Ok(lease) => drop(lease),
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                    blockers.push(ManagedUpgradeBlocker {
+                        kind: ManagedBlockerKind::OperationLease,
+                        id: session_id.clone(),
+                        session_id: Some(session_id.clone()),
+                        detail: "cross-process session operation lease is active".to_string(),
+                    });
+                }
+                Err(error) => return Err(anyhow::Error::new(error)),
+            }
+            match sessions::SessionResourceMutationLease::try_acquire(
+                &self.inner.store_path,
+                &session_id,
+            ) {
+                Ok(lease) => drop(lease),
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => {
+                    blockers.push(ManagedUpgradeBlocker {
+                        kind: ManagedBlockerKind::ResourceLease,
+                        id: session_id.clone(),
+                        session_id: Some(session_id),
+                        detail: "cross-process session resource lease is active".to_string(),
+                    });
+                }
+                Err(error) => return Err(anyhow::Error::new(error)),
+            }
+        }
+        blockers.sort();
+        blockers.dedup();
+        Ok(blockers)
+    }
+
+    fn active_admission_blockers(&self) -> Vec<nac_core::store::ManagedUpgradeBlocker> {
+        let mut blockers = self
+            .inner
+            .active_admissions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        blockers.sort();
+        blockers.dedup();
+        blockers
     }
 
     pub(crate) fn managed_model(&self) -> Option<&application::managed::ManagedModelProfile> {
@@ -848,6 +1067,7 @@ impl SessionManager {
         &self,
         request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
+        let _host_admission = self.managed_work_admission()?;
         self.session_creation()
             .create_session(request.into_application())
             .await

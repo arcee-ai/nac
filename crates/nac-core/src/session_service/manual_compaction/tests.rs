@@ -26,6 +26,52 @@ fn persisted_response_state(
             .unwrap()
 }
 
+#[test]
+fn manual_compaction_cannot_start_after_host_maintenance_closes() {
+    let (mut parts, store_path) =
+        test_active_service("compaction_maintenance", "maintenance-session");
+    parts.service.enable_managed_admission(None);
+    let binding = crate::store::ManagedOperationBinding {
+        managed_host_id: "host".to_string(),
+        host_incarnation_id: "incarnation".to_string(),
+        issuer: "https://controller.example.test".to_string(),
+        audience: "urn:nac:managed-control:host:incarnation".to_string(),
+        authority_origin: "https://controller.example.test".to_string(),
+        operation_id: "operation".to_string(),
+        target: crate::store::ManagedUpgradeTarget {
+            release_id: "release".to_string(),
+            source_sha: "c".repeat(40),
+            product_version: "version".to_string(),
+            schema_version: crate::store::schema_version(),
+            minimum_schema_version: 0,
+        },
+        actor: "actor".to_string(),
+        beneficiary: "beneficiary".to_string(),
+    };
+    assert!(matches!(
+        crate::store::prepare_managed_upgrade(
+            &store_path,
+            "compaction-maintenance-jti",
+            &binding,
+            crate::store::ManagedControlAttemptAction::Prepare,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+                + 60,
+            Vec::new(),
+        )
+        .unwrap(),
+        crate::store::ManagedPrepareOutcome::SafeToStop { .. }
+    ));
+    assert!(matches!(
+        parts.service.try_compact(),
+        Err(SessionCompactionAdmissionError::Coordination { .. })
+    ));
+    assert!(!parts.service.has_active_operation());
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
 #[tokio::test]
 async fn manual_compaction_and_run_admission_are_mutually_exclusive() {
     let (parts, store_path) = test_active_service("compaction_conflicts", "conflict-session");

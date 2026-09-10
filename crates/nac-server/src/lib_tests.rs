@@ -21,7 +21,7 @@ use nac_core::store::{GoalStatus, InboxDelivery};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
 
-static SERVER_MODEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static SERVER_MODEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 async fn point_session_at_hanging_endpoint(
     root: &std::path::Path,
@@ -66,12 +66,12 @@ async fn put_json(app: Router, uri: &str, body: serde_json::Value) -> Response {
     .await
     .unwrap()
 }
-struct ScopedModelEnv {
+pub(crate) struct ScopedModelEnv {
     original: Vec<(&'static str, Option<std::ffi::OsString>)>,
 }
 
 impl ScopedModelEnv {
-    fn isolated(nac_home: &std::path::Path, openai_api_key: Option<&str>) -> Self {
+    pub(crate) fn isolated(nac_home: &std::path::Path, openai_api_key: Option<&str>) -> Self {
         Self::with_config_home(Some(nac_home), None, None, openai_api_key)
     }
 
@@ -212,6 +212,93 @@ fn managed_monitor_peer_lease_process_helper() {
     std::thread::sleep(Duration::from_secs(30));
 }
 
+const MANAGED_LIBRARY_EXA_CANARY: &str = "managed-library-startup-exa-canary";
+
+#[test]
+fn managed_library_startup_child_helper() {
+    let Some(report_path) = std::env::var_os("NAC_TEST_MANAGED_LIBRARY_REPORT") else {
+        return;
+    };
+    assert_eq!(
+        std::env::var("EXA_API_KEY").unwrap(),
+        MANAGED_LIBRARY_EXA_CANARY
+    );
+    let root = temp_root("managed_library_startup_child");
+    write_managed_credential(root.join("model-token").as_path(), b"mounted-model-token");
+
+    let _manager = test_managed_manager(&root);
+    assert!(
+        std::env::var_os("EXA_API_KEY").is_none(),
+        "managed library construction must remove the ambient native credential"
+    );
+
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: these prctl getters take no pointer arguments.
+        assert_eq!(unsafe { libc::prctl(libc::PR_GET_DUMPABLE) }, 0);
+        // SAFETY: PR_GET_NO_NEW_PRIVS takes integer zero placeholders only.
+        assert_eq!(
+            unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) },
+            1
+        );
+        let probe = std::process::Command::new("/bin/sh")
+            .args(["-c", "cat /proc/$PPID/environ"])
+            .output()
+            .unwrap();
+        assert!(
+            !probe
+                .stdout
+                .windows(MANAGED_LIBRARY_EXA_CANARY.len())
+                .any(|bytes| bytes == MANAGED_LIBRARY_EXA_CANARY.as_bytes()),
+            "a same-UID child read the managed server credential from procfs"
+        );
+    }
+
+    let second_root = temp_root("managed_library_startup_second");
+    write_managed_credential(
+        second_root.join("model-token").as_path(),
+        b"second-mounted-model-token",
+    );
+    let _second_manager = test_managed_manager(&second_root);
+
+    std::fs::write(report_path, b"managed-library-startup-hardened").unwrap();
+}
+
+#[test]
+fn managed_library_startup_captures_and_hardens_native_credentials() {
+    let root = temp_root("managed_library_startup_parent");
+    let report_path = root.join("report");
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::managed_library_startup_child_helper",
+            "--nocapture",
+        ])
+        .env("NAC_TEST_MANAGED_LIBRARY_REPORT", &report_path)
+        .env("NAC_HOME", &root)
+        .env("EXA_API_KEY", MANAGED_LIBRARY_EXA_CANARY)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "managed library startup helper failed without exposing its credential: {}",
+        String::from_utf8_lossy(&output.stderr).replace(MANAGED_LIBRARY_EXA_CANARY, "[REDACTED]")
+    );
+    assert!(!output
+        .stdout
+        .windows(MANAGED_LIBRARY_EXA_CANARY.len())
+        .any(|bytes| bytes == MANAGED_LIBRARY_EXA_CANARY.as_bytes()));
+    assert!(!output
+        .stderr
+        .windows(MANAGED_LIBRARY_EXA_CANARY.len())
+        .any(|bytes| bytes == MANAGED_LIBRARY_EXA_CANARY.as_bytes()));
+    assert_eq!(
+        std::fs::read_to_string(&report_path).unwrap(),
+        "managed-library-startup-hardened"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn test_manager(root: &std::path::Path) -> SessionManager {
     SessionManager::new(ServerOptions {
         root_cwd: root.to_path_buf(),
@@ -230,8 +317,9 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
         std::fs::create_dir_all(path).unwrap();
     }
     let managed_host = nac_managed::ManagedHostConfig {
-        version: nac_managed::MANAGED_CONFIG_VERSION,
+        version: nac_managed::LEGACY_MANAGED_CONFIG_VERSION,
         logical_host_id: "test-host".to_string(),
+        host_incarnation_id: None,
         owner: Some("owner@example.test".to_string()),
         public_hostname: "nac.example.test".to_string(),
         repository_root,
@@ -241,9 +329,14 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
         model_backend: "arcee-api".to_string(),
         model_id: "trinity-large-thinking".to_string(),
         model_endpoint: "https://api.arcee.ai/api/v1".to_string(),
+        model_auth_issuer: None,
         model_credential_file: root.join("model-token"),
         model_credential_source: nac_managed::ManagedModelCredentialSource::MountedApiKey,
         model_credential_environment_names: vec!["ARCEE_API_KEY".to_string()],
+        managed_control_bind: None,
+        managed_control_issuer: None,
+        managed_control_jwks_file: None,
+        managed_upgrade_expectation: None,
     };
     managed_host.validate().unwrap();
     SessionManager::new(ServerOptions {
@@ -256,6 +349,35 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
 }
 
 fn test_managed_bootstrap_manager(root: &std::path::Path) -> SessionManager {
+    test_managed_bootstrap_manager_with_auth(
+        root,
+        nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER,
+        None,
+    )
+}
+
+fn test_managed_bootstrap_manager_with_auth(
+    root: &std::path::Path,
+    model_endpoint: &str,
+    model_auth_issuer: Option<&str>,
+) -> SessionManager {
+    test_managed_bootstrap_manager_with_contract(root, model_endpoint, model_auth_issuer, false)
+}
+
+fn test_managed_bootstrap_control_manager_with_auth(
+    root: &std::path::Path,
+    model_endpoint: &str,
+    model_auth_issuer: Option<&str>,
+) -> SessionManager {
+    test_managed_bootstrap_manager_with_contract(root, model_endpoint, model_auth_issuer, true)
+}
+
+fn test_managed_bootstrap_manager_with_contract(
+    root: &std::path::Path,
+    model_endpoint: &str,
+    model_auth_issuer: Option<&str>,
+    managed_control: bool,
+) -> SessionManager {
     let state_root = root.join("nac-home");
     let repository_root = root.join("repositories");
     let home_root = root.join("managed-home");
@@ -263,8 +385,14 @@ fn test_managed_bootstrap_manager(root: &std::path::Path) -> SessionManager {
         std::fs::create_dir_all(path).unwrap();
     }
     let managed_host = nac_managed::ManagedHostConfig {
-        version: nac_managed::MANAGED_CONFIG_VERSION,
+        version: if managed_control {
+            nac_managed::MANAGED_CONFIG_VERSION
+        } else {
+            nac_managed::LEGACY_MANAGED_CONFIG_VERSION
+        },
         logical_host_id: "21856443-8ed8-40ab-9036-72e837c99f27".to_string(),
+        host_incarnation_id: managed_control
+            .then(|| "managed-server-incarnation-canary".to_string()),
         owner: Some("owner@example.test".to_string()),
         public_hostname: "nac.example.test".to_string(),
         repository_root,
@@ -273,10 +401,15 @@ fn test_managed_bootstrap_manager(root: &std::path::Path) -> SessionManager {
         github_client_id: "Iv1.test".to_string(),
         model_backend: "arcee-auth".to_string(),
         model_id: "trinity-large-thinking".to_string(),
-        model_endpoint: "https://api.arcee.ai".to_string(),
+        model_endpoint: model_endpoint.to_string(),
+        model_auth_issuer: model_auth_issuer.map(str::to_string),
         model_credential_file: PathBuf::from(nac_core::model::MANAGED_ARCEE_BOOTSTRAP_PATH),
         model_credential_source: nac_managed::ManagedModelCredentialSource::ManagedBootstrap,
         model_credential_environment_names: Vec::new(),
+        managed_control_bind: managed_control.then(|| "127.0.0.1:3211".to_string()),
+        managed_control_issuer: managed_control.then(|| "https://nac-api.example.test".to_string()),
+        managed_control_jwks_file: managed_control.then(|| root.join("control-jwks.json")),
+        managed_upgrade_expectation: None,
     };
     managed_host.validate().unwrap();
     SessionManager::new(ServerOptions {

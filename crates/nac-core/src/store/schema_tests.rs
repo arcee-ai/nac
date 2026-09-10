@@ -165,6 +165,9 @@ fn assert_current_schema(conn: &Connection) {
     let session_columns = table_columns(conn, "sessions");
     for expected in [
         "behavior",
+        "permission_approval_mode",
+        "permission_auto_approve_generation",
+        "permission_approval_revision",
         "orchestrator_compaction_threshold",
         "visible_message_count",
         "last_user_prompt",
@@ -278,6 +281,44 @@ fn assert_current_schema(conn: &Connection) {
             "updated_at",
             "version",
         ]
+    );
+    assert_eq!(
+        table_columns(conn, "managed_host_maintenance"),
+        [
+            "singleton",
+            "state",
+            "operation_id",
+            "target_json",
+            "accepted_identity_json",
+            "prepared_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        table_columns(conn, "managed_control_operations"),
+        [
+            "operation_id",
+            "binding_json",
+            "latest_outcome_json",
+            "created_at",
+            "updated_at",
+            "version",
+        ]
+    );
+    assert_eq!(
+        table_columns(conn, "managed_control_attempts"),
+        [
+            "jti",
+            "operation_id",
+            "binding_json",
+            "outcome_json",
+            "expires_at",
+            "created_at",
+        ]
+    );
+    assert_eq!(
+        table_columns(conn, "terminal_remote_cleanups"),
+        ["session_id", "pidfile", "created_at"]
     );
     for table in [
         "thread_steering",
@@ -462,7 +503,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 26);
+    assert_eq!(STORE_SCHEMA_VERSION, 27);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -559,6 +600,84 @@ fn v25_store_adds_permission_approval_transition_revision() {
             .unwrap(),
         STORE_SCHEMA_VERSION
     );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v25_managed_store_adds_the_complete_permission_mode_schema() {
+    let path = temp_store_path("v25_managed_permission_composition");
+    initialize(&path).unwrap();
+    let predecessor = Connection::open(&path).unwrap();
+    insert_legacy_session(&predecessor, "managed-v25-session");
+    predecessor
+        .execute_batch(
+            "ALTER TABLE sessions DROP COLUMN permission_approval_mode;
+             ALTER TABLE sessions DROP COLUMN permission_auto_approve_generation;
+             ALTER TABLE sessions DROP COLUMN permission_approval_revision;
+             PRAGMA user_version = 25;",
+        )
+        .unwrap();
+    drop(predecessor);
+
+    initialize(&path).unwrap();
+
+    let migrated = Connection::open(&path).unwrap();
+    assert_current_schema(&migrated);
+    let permission_state: (String, i64, i64) = migrated
+        .query_row(
+            "SELECT permission_approval_mode, permission_auto_approve_generation,
+                    permission_approval_revision
+             FROM sessions WHERE session_id = 'managed-v25-session'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(permission_state, ("manual".to_string(), 0, 0));
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v26_permission_store_adds_the_complete_managed_maintenance_schema() {
+    let path = temp_store_path("v26_permission_managed_composition");
+    initialize(&path).unwrap();
+    let predecessor = Connection::open(&path).unwrap();
+    predecessor
+        .execute_batch(
+            "DROP TABLE managed_control_attempts;
+             DROP TABLE managed_control_operations;
+             DROP TABLE managed_host_maintenance;
+             DROP TABLE terminal_remote_cleanups;
+             PRAGMA user_version = 26;",
+        )
+        .unwrap();
+    drop(predecessor);
+
+    initialize(&path).unwrap();
+
+    let migrated = Connection::open(&path).unwrap();
+    assert_current_schema(&migrated);
+    let maintenance_state: (String, i64) = migrated
+        .query_row(
+            "SELECT state, version FROM managed_host_maintenance WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(maintenance_state, ("serving".to_string(), 0));
+    assert_eq!(
+        migrated
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -1807,86 +1926,6 @@ fn opening_v4_store_is_idempotent() {
         .unwrap();
     assert_eq!(stored_id, event_id);
     drop(reopened);
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn connection_capacity_enforces_process_store_alias_and_cleanup() {
-    let root = temp_store_path("capacity").parent().unwrap().to_path_buf();
-    let store_a = root.join("a").join("store.db");
-    let store_b = root.join("b").join("store.db");
-    let store_c = root.join("c").join("store.db");
-    let store_d = root.join("d").join("store.db");
-    let capacity = ConnectionCapacity::new(3, 1);
-    let wait = std::time::Duration::from_millis(20);
-
-    let connection_a = connect_with_capacity(&store_a, &capacity, wait).unwrap();
-    let resolved_a = resolved_store_path(&store_a).unwrap();
-    assert_eq!(capacity.counts(&resolved_a), (1, 1));
-
-    // Saturating one store does not reserve unused process capacity.
-    let connection_b = connect_with_capacity(&store_b, &capacity, wait).unwrap();
-    let connection_c = connect_with_capacity(&store_c, &capacity, wait).unwrap();
-    let process_error = connect_with_capacity(&store_d, &capacity, wait)
-        .err()
-        .unwrap();
-    assert!(process_error
-        .to_string()
-        .contains("timed out waiting for SQLite connection capacity"));
-
-    drop(connection_c);
-    let alias_a = store_a.parent().unwrap().join(".").join("store.db");
-    let store_error = connect_with_capacity(&alias_a, &capacity, wait)
-        .err()
-        .unwrap();
-    assert!(store_error
-        .to_string()
-        .contains("timed out waiting for SQLite connection capacity"));
-
-    let waiting_capacity = Arc::clone(&capacity);
-    let waiting_alias = alias_a.clone();
-    let waiter = std::thread::spawn(move || {
-        connect_with_capacity(
-            &waiting_alias,
-            &waiting_capacity,
-            std::time::Duration::from_secs(1),
-        )
-    });
-    std::thread::sleep(std::time::Duration::from_millis(20));
-    drop(connection_a);
-    let alias_connection = waiter.join().unwrap().unwrap();
-    assert_eq!(capacity.counts(&resolved_a), (2, 1));
-
-    drop(alias_connection);
-    drop(connection_b);
-    assert_eq!(capacity.counts(&resolved_a), (0, 0));
-
-    let directory_path = root.join("not-a-database");
-    std::fs::create_dir_all(&directory_path).unwrap();
-    assert!(connect_with_capacity(&directory_path, &capacity, wait).is_err());
-    assert_eq!(
-        capacity.counts(&resolved_store_path(&directory_path).unwrap()),
-        (0, 0)
-    );
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn cached_writers_and_event_subscribers_hold_no_connection_capacity() {
-    let path = temp_store_path("idle_writers");
-    initialize(&path).unwrap();
-    assert_eq!(active_connection_counts(&path).unwrap().1, 0);
-
-    let transcript = TranscriptLogWriter::new(&path).unwrap();
-    let events = crate::events::SessionEventBus::with_thread_event_store(
-        Some("idle-session".to_string()),
-        path.clone(),
-    );
-    let subscription = events.subscribe();
-
-    assert_eq!(active_connection_counts(&path).unwrap().1, 0);
-    drop((transcript, subscription, events));
-    assert_eq!(active_connection_counts(&path).unwrap().1, 0);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

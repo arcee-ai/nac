@@ -1,0 +1,32 @@
+{
+  "description": "Language-neutral Ed25519 compact-JWS verification vector for Managed NAC control v1",
+  "now_unix_seconds": 1800000030,
+  "action": "prepare",
+  "request": {
+    "managed_host_id": "host-123",
+    "host_incarnation_id": "incarnation-456",
+    "operation_id": "operation-789",
+    "target": {
+      "release_id": "beta-42",
+      "source_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "product_version": "0.2.0-beta.42",
+      "schema_version": 25,
+      "minimum_schema_version": 0
+    },
+    "actor": "user:owner",
+    "beneficiary": "tenant:owner"
+  },
+  "jwks": {
+    "keys": [
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "use": "sig",
+        "alg": "EdDSA",
+        "kid": "test-key",
+        "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+      }
+    ]
+  },
+  "compact_jws": "eyJhbGciOiJFZERTQSIsImtpZCI6InRlc3Qta2V5IiwidHlwIjoibmFjLW1hbmFnZWQtb3BlcmF0aW9uK2p3dCIsInYiOjF9.eyJhY3Rpb24iOiJwcmVwYXJlIiwiYWN0b3IiOiJ1c2VyOm93bmVyIiwiYXVkIjoidXJuOm5hYzptYW5hZ2VkLWNvbnRyb2w6aG9zdC0xMjM6aW5jYXJuYXRpb24tNDU2IiwiYmVuZWZpY2lhcnkiOiJ0ZW5hbnQ6b3duZXIiLCJleHAiOjE4MDAwMDAwNjAsImhvc3RfaW5jYXJuYXRpb25faWQiOiJpbmNhcm5hdGlvbi00NTYiLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6Imh0dHBzOi8vbmFjLWFwaS5leGFtcGxlLnRlc3QiLCJqdGkiOiJqdGktMTIzIiwibWFuYWdlZF9ob3N0X2lkIjoiaG9zdC0xMjMiLCJuYmYiOjE4MDAwMDAwMDAsIm9wZXJhdGlvbl9pZCI6Im9wZXJhdGlvbi03ODkiLCJ0YXJnZXQiOnsibWluaW11bV9zY2hlbWFfdmVyc2lvbiI6MCwicHJvZHVjdF92ZXJzaW9uIjoiMC4yLjAtYmV0YS40MiIsInJlbGVhc2VfaWQiOiJiZXRhLTQyIiwic2NoZW1hX3ZlcnNpb24iOjI1LCJzb3VyY2Vfc2hhIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJ9fQ.np7CnJL5wNZu2EtSRnKq3DK9Iubt61vuHQIsKujJZgJ_W447YYfiXTy9U_5a0QKXnWf1sOPkJCcq-zcCzgIsCw"
+}

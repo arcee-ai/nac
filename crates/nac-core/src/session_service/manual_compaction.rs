@@ -284,6 +284,21 @@ impl SessionService {
         let Some(_session_id) = self.metadata.session_id.as_deref() else {
             return Err(SessionCompactionAdmissionError::Unavailable);
         };
+        let _host_admission = self
+            .managed_admission_enabled
+            .then(|| match self.managed_identity.as_deref() {
+                Some(identity) => crate::store::try_admit_managed_work_for_identity(
+                    &self.metadata.store_path,
+                    identity,
+                ),
+                None => crate::store::try_admit_managed_work(&self.metadata.store_path),
+            })
+            .transpose()
+            .map_err(|error| SessionCompactionAdmissionError::Coordination {
+                message: SessionCoordinationError::store(format!(
+                    "failed to acquire managed host compaction admission: {error:#}"
+                )),
+            })?;
         let mut operation = self.lock_active_operation();
         if let Some(active_operation) = operation.as_ref() {
             return Err(SessionCompactionAdmissionError::Busy {
