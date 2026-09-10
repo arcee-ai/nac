@@ -89,6 +89,7 @@ export function PermissionControls({
   const requests = permissions.data?.requests ?? [];
   const grants = permissions.data?.grants ?? [];
   const autoApprove = permissions.data?.approval_mode === "auto_approve";
+  const inheritedAutoApproval = autoApprove && !autoApprovalAvailable;
   const [manuallyOpen, setManuallyOpen] = useState(false);
   const [dismissedRequests, setDismissedRequests] = useState("");
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -166,7 +167,13 @@ export function PermissionControls({
               : ButtonVariant.Ghost
           }
           content={autoApprove ? ButtonContent.IconLeft : ButtonContent.Icon}
-          aria-label={autoApprove ? "Auto-approve on — open permissions" : `${label}${badge}`}
+          aria-label={
+            autoApprove
+              ? inheritedAutoApproval
+                ? `${label} — auto-approve inherited; open permissions`
+                : "Auto-approve on — open permissions"
+              : `${label}${badge}`
+          }
           onClick={() => setManuallyOpen(true)}
         >
           <Icon iconName={requests.length ? IconName.Important : IconName.Lock} size={16} />
@@ -183,9 +190,11 @@ export function PermissionControls({
         subheader={
           active
             ? `${active.tool} requested by ${requesterLabel ?? "this session"} is paused before execution.`
-            : autoApprove
-              ? "Automatic approval is active for this session and its owned child agents."
-              : "Remembered access for this session."
+            : inheritedAutoApproval
+              ? "Automatic approval is inherited from the parent session; change it from the parent."
+              : autoApprove
+                ? "Automatic approval is active for this session and its owned child agents."
+                : "Remembered access for this session."
         }
         footer={
           active ? (
@@ -264,6 +273,22 @@ export function PermissionControls({
                   This setting governs this session and all existing or future owned child agents.
                   It stays active across restarts until you turn it off and does not create
                   remembered permissions. Separately managed orchestrators are not included.
+                </div>
+              </section>
+            ) : null}
+
+            {inheritedAutoApproval ? (
+              <section
+                aria-label="Inherited automatic approval mode"
+                className="rounded-[6px] border border-accent-primary bg-elevation-level-2 p-3"
+              >
+                <div className="text-small font-medium text-basic-primary">
+                  Auto-approve inherited
+                </div>
+                <div className="mt-1 text-small text-basic-secondary">
+                  Ordinary requests from this child agent inherit automatic approval from the parent
+                  session. Change this mode from the parent session; hard and configured denials
+                  still apply.
                 </div>
               </section>
             ) : null}

@@ -196,6 +196,57 @@ describe("direct permission controls", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy());
   });
 
+  it("identifies each child control and explains inherited automatic approval", () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const automatic = { ...pendingState(), approval_mode: "auto_approve" as const, requests: [] };
+    client.setQueryData(queryKeys.sessionPermissions("child-review"), automatic);
+    client.setQueryData(queryKeys.sessionPermissions("child-tests"), automatic);
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <ToastProvider>
+            <PermissionControls
+              sessionId="child-review"
+              behavior="direct"
+              label="Permissions for Review persistence"
+              autoApprovalAvailable={false}
+              requesterLabel="child agent “Review persistence”"
+            />
+            <PermissionControls
+              sessionId="child-tests"
+              behavior="direct"
+              label="Permissions for Run tests"
+              autoApprovalAvailable={false}
+              requesterLabel="child agent “Run tests”"
+            />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const reviewControl = screen.getByRole("button", {
+      name: "Permissions for Review persistence — auto-approve inherited; open permissions",
+    });
+    expect(
+      screen.getByRole("button", {
+        name: "Permissions for Run tests — auto-approve inherited; open permissions",
+      }),
+    ).toBeTruthy();
+
+    fireEvent.click(reviewControl);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain(
+      "Automatic approval is inherited from the parent session; change it from the parent.",
+    );
+    expect(dialog.textContent).toContain(
+      "Ordinary requests from this child agent inherit automatic approval from the parent session.",
+    );
+    expect(screen.queryByRole("switch", { name: "Approve all automatically" })).toBeNull();
+  });
+
   it("reconciles a mode change made through another server process", async () => {
     const manual = pendingState();
     manual.requests = [];
