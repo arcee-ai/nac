@@ -485,7 +485,8 @@ pub struct UpdatePermissionApprovalModeRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PermissionStateResponse {
-    /// Durable for this session only. `manual` is the compatibility default.
+    /// Effective for this session's durable traditional-child ownership tree.
+    /// `manual` is the compatibility default.
     pub approval_mode: PermissionApprovalMode,
     pub requests: Vec<PermissionRequest>,
     pub grants: Vec<PermissionGrantRecord>,

@@ -73,6 +73,7 @@ impl SessionService {
         &self,
         mode: crate::permissions::PermissionApprovalMode,
     ) -> Result<()> {
+        self.require_direct_primary_behavior()?;
         self.direct_permission_broker()?
             .set_approval_mode(mode)
             .await

@@ -487,6 +487,43 @@ pub fn load_permission_approval_mode(
     load_permission_approval_state(path, session_id).map(|(mode, _, _)| mode)
 }
 
+/// Loads the answer policy that governs a requesting session.
+///
+/// Traditional children resolve through their durable root ownership record,
+/// including any future deeper descendant whose record preserves that root.
+/// Managed orchestrators deliberately remain outside this lookup: their
+/// relationship is a separate topology and cannot inherit a direct parent's
+/// approval authority accidentally.
+pub(crate) fn load_effective_permission_approval_state(
+    path: &Path,
+    requesting_session_id: &str,
+) -> Result<(crate::permissions::PermissionApprovalMode, i64, i64)> {
+    let conn = crate::store::open_initialized_read_connection(path)?;
+    let (stored, generation, revision) = conn
+        .query_row(
+            "SELECT policy.permission_approval_mode,
+                    policy.permission_auto_approve_generation,
+                    policy.permission_approval_revision
+             FROM sessions AS requester
+             LEFT JOIN traditional_children AS child
+                ON child.child_session_id = requester.session_id
+             JOIN sessions AS policy
+                ON policy.session_id = COALESCE(child.root_session_id, requester.session_id)
+             WHERE requester.session_id = ?1",
+            params![requesting_session_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| anyhow!("session '{requesting_session_id}' was not found"))?;
+    decode_permission_approval_state(stored, generation, revision)
+}
+
 /// Loads the current mode, the monotonic auto-approve generation, and the
 /// latest reserved transition revision.
 pub(crate) fn load_permission_approval_state(
@@ -510,6 +547,14 @@ pub(crate) fn load_permission_approval_state(
         )
         .optional()?
         .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
+    decode_permission_approval_state(stored, generation, revision)
+}
+
+fn decode_permission_approval_state(
+    stored: String,
+    generation: i64,
+    revision: i64,
+) -> Result<(crate::permissions::PermissionApprovalMode, i64, i64)> {
     let mode = match stored.as_str() {
         "manual" => crate::permissions::PermissionApprovalMode::Manual,
         "auto_approve" => crate::permissions::PermissionApprovalMode::AutoApprove,

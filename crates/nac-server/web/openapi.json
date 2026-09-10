@@ -10812,7 +10812,7 @@
       },
       "PermissionApprovalMode": {
         "type": "string",
-        "description": "User-selected approval behavior for one durable direct session.\n\nThis is deliberately an answer policy at the broker boundary, not an\nexecution backend or a reusable resource grant.",
+        "description": "User-selected approval behavior for one durable direct ownership tree.\n\nThis is deliberately an answer policy at the broker boundary, not an\nexecution backend or a reusable resource grant.",
         "enum": [
           "manual",
           "auto_approve"
@@ -10935,7 +10935,7 @@
         "properties": {
           "approval_mode": {
             "$ref": "#/components/schemas/PermissionApprovalMode",
-            "description": "Durable for this session only. `manual` is the compatibility default."
+            "description": "Effective for this session's durable traditional-child ownership tree.\n`manual` is the compatibility default."
           },
           "grants": {
             "type": "array",

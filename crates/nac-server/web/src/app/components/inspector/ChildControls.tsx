@@ -39,6 +39,7 @@ function ChildPermissionBridge({ child }: { child: TraditionalChildRecord }) {
       behavior="direct"
       label={`Permissions for ${child.description}`}
       autoApprovalAvailable={false}
+      requesterLabel={`child agent “${child.description}”`}
     />
   );
 }

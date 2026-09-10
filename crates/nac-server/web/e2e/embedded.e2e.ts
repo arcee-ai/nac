@@ -461,6 +461,127 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   harness.provider.assertConsumed();
 });
 
+test("applies parent auto-approval to child agents and identifies manual child requests", async ({
+  harness,
+  page,
+  request,
+}) => {
+  test.setTimeout(90_000);
+  const fixtureRoot = path.join(harness.runRoot, "child-auto-approval-fixtures");
+  await fs.mkdir(fixtureRoot, { recursive: true });
+  const automatic = path.join(fixtureRoot, "automatic.txt");
+  const manual = path.join(fixtureRoot, "manual.txt");
+  await Promise.all([
+    fs.writeFile(automatic, "automatic child permission\n"),
+    fs.writeFile(manual, "manual child permission\n"),
+  ]);
+
+  harness.provider.enqueue(
+    "child-auto-read",
+    { token: "ALL58_AUTO_CHILD", requiredTools: ["read"], forbiddenTools: ["spawn_agent"] },
+    {
+      kind: "function_call",
+      name: "read",
+      callId: "child-auto-read",
+      arguments: { path: automatic },
+    },
+  );
+  harness.provider.enqueue(
+    "child-auto-complete",
+    { functionOutputCallId: "child-auto-read" },
+    { kind: "text", text: "automatic child complete" },
+  );
+  harness.provider.enqueue(
+    "child-manual-read",
+    { token: "ALL58_MANUAL_CHILD", requiredTools: ["read"], forbiddenTools: ["spawn_agent"] },
+    {
+      kind: "function_call",
+      name: "read",
+      callId: "child-manual-read",
+      arguments: { path: manual },
+    },
+  );
+  harness.provider.enqueue(
+    "child-manual-complete",
+    { functionOutputCallId: "child-manual-read" },
+    { kind: "text", text: "manual child complete" },
+  );
+
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  await page.getByRole("button", { name: "Permissions" }).click();
+  const permissions = page.getByRole("dialog");
+  await expect(permissions).toContainText(
+    "This setting governs this session and all existing or future owned child agents",
+  );
+  await expect(permissions).toContainText("Separately managed orchestrators are not included");
+  await permissions.getByRole("switch", { name: "Approve all automatically" }).click();
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Launch coding agent" }).click();
+  let launchDialog = page.getByRole("dialog").filter({ hasText: "Launch coding agent" });
+  await launchDialog.getByRole("textbox").nth(0).fill("Automatic child");
+  await launchDialog.getByRole("textbox").nth(1).fill("ALL58_AUTO_CHILD");
+  await launchDialog.getByRole("switch").click();
+  const automaticStart = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`/sessions/${sessionId}/children`),
+  );
+  await page.getByRole("button", { name: "Start coding agent" }).click();
+  await harness.provider.waitForRequestCount(2);
+  expect((await automaticStart).status()).toBe(201);
+  await expect(page.getByText("Permission required")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
+  await page.getByRole("switch", { name: "Approve all automatically" }).click();
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Launch coding agent" }).click();
+  launchDialog = page.getByRole("dialog").filter({ hasText: "Launch coding agent" });
+  await launchDialog.getByRole("textbox").nth(0).fill("Manual child");
+  await launchDialog.getByRole("textbox").nth(1).fill("ALL58_MANUAL_CHILD");
+  await launchDialog.getByRole("switch").click();
+  const manualStart = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`/sessions/${sessionId}/children`),
+  );
+  await page.getByRole("button", { name: "Start coding agent" }).click();
+  await harness.provider.waitForRequestCount(3);
+
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/children`);
+      const children = (await response.json()) as Array<{
+        child_session_id: string;
+        description: string;
+        status: string;
+      }>;
+      return children.find((child) => child.description === "Manual child")?.child_session_id;
+    })
+    .toBeTruthy();
+  const childrenResponse = await request.get(`${harness.baseUrl}/sessions/${sessionId}/children`);
+  const children = (await childrenResponse.json()) as Array<{
+    child_session_id: string;
+    description: string;
+  }>;
+  const manualChildId = children.find(
+    (child) => child.description === "Manual child",
+  )!.child_session_id;
+  const permissionDialog = page.getByRole("dialog").filter({ hasText: "Permission required" });
+  await expect(permissionDialog).toContainText(
+    "read requested by child agent “Manual child” is paused before execution",
+  );
+  await expect(permissionDialog).toContainText(`Requested by child agent “Manual child”`);
+  await expect(permissionDialog).toContainText("automatic approval is off");
+  await expect(permissionDialog).toContainText(String(manualChildId));
+  await permissionDialog.getByRole("button", { name: "Allow once" }).click();
+  await harness.provider.waitForRequestCount(4);
+  expect((await manualStart).status()).toBe(201);
+  harness.provider.assertConsumed();
+});
+
 test("renders an unknown primary tool failure safely after reload", async ({
   harness,
   page,

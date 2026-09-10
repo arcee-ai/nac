@@ -33,6 +33,7 @@ interface PermissionControlsProps {
   behavior: SessionBehavior | null;
   label?: string;
   autoApprovalAvailable?: boolean;
+  requesterLabel?: string;
 }
 
 function requestIdentity(requests: PermissionRequest[]): string {
@@ -77,6 +78,7 @@ export function PermissionControls({
   behavior,
   label = "Permissions",
   autoApprovalAvailable = true,
+  requesterLabel,
 }: PermissionControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const permissions = useSessionPermissions(sessionId, direct);
@@ -180,9 +182,9 @@ export function PermissionControls({
         title={active ? "Permission required" : "Permissions"}
         subheader={
           active
-            ? `${active.tool} is paused before execution.`
+            ? `${active.tool} requested by ${requesterLabel ?? "this session"} is paused before execution.`
             : autoApprove
-              ? "Automatic approval is active for this session."
+              ? "Automatic approval is active for this session and its owned child agents."
               : "Remembered access for this session."
         }
         footer={
@@ -246,8 +248,9 @@ export function PermissionControls({
                       Approve all automatically
                     </div>
                     <div className="mt-1 text-small text-basic-secondary">
-                      Automatically allows ordinary requests only after they reach this session’s
-                      permission broker. Hard and configured denials still apply.
+                      Automatically allows ordinary requests only after they reach this session’s or
+                      an owned child agent’s permission broker. Hard and configured denials still
+                      apply.
                     </div>
                   </div>
                   <Switch
@@ -258,14 +261,20 @@ export function PermissionControls({
                   />
                 </div>
                 <div className="mt-2 text-small text-basic-tertiary">
-                  This setting belongs only to this session and stays active across restarts until
-                  you turn it off. It does not create remembered permissions.
+                  This setting governs this session and all existing or future owned child agents.
+                  It stays active across restarts until you turn it off and does not create
+                  remembered permissions. Separately managed orchestrators are not included.
                 </div>
               </section>
             ) : null}
 
             {active ? (
               <section aria-label="Requested access">
+                <div className="mb-2 text-small text-basic-secondary">
+                  Requested by {requesterLabel ?? "this session"} ({active.session_id}). Manual
+                  approval is effective because automatic approval is off for this session and its
+                  owned child agents.
+                </div>
                 <div className="mb-2 tag-label uppercase text-basic-tertiary">Requested access</div>
                 <div className="flex flex-col gap-2">
                   {active.resources.map((resource, index) => (
