@@ -9,6 +9,10 @@ mod wal_preflight;
 #[path = "schema/startup_tests.rs"]
 mod startup_tests;
 
+#[cfg(test)]
+#[path = "schema/future_schema_tests.rs"]
+mod future_schema_tests;
+
 use wal_preflight::read_schema_version_header;
 
 // 26 adds a durable revision for linearizable permission-mode transitions.
