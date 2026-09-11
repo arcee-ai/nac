@@ -21,6 +21,7 @@ pub use crate::events::{
     SessionClientId, SessionEventEnvelope, SessionEventReceiver, SessionEventReplaySubscription,
     SessionEventSubscription, SessionRunId, SessionSubscriptionId, SubmittedUserMessageSnapshot,
 };
+use crate::run_failure::FAILED_RUN_RECOVERY_DIAGNOSTIC as FAILED_RUN_WARNING;
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::SkillRegistry;
@@ -335,8 +336,6 @@ pub struct ThreadEventDecodeDiagnostic {
 const MAX_THREAD_EVENT_DIAGNOSTICS: usize = 64;
 const INTERRUPTED_RUN_WARNING: &str =
     "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue.";
-const FAILED_RUN_WARNING: &str =
-    "The previous run failed before producing a complete response. Resubmit the prompt to continue.";
 const INTERRUPTED_RUN_EVENT_MESSAGE: &str = "run interrupted by process restart";
 
 struct DecodedThreadEvents {

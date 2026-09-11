@@ -640,12 +640,12 @@ pub(crate) fn reconcile_session_goal_failure_with_connection(
     session_id: &str,
     run_id: &str,
     failure: &crate::run_failure::RunFailure,
-) -> Result<()> {
+) -> Result<Option<crate::run_failure::RunFailure>> {
     let Some(current) = load_with_connection(connection, session_id)? else {
-        return Ok(());
+        return Ok(None);
     };
     if current.accounting_run_id.as_deref() != Some(run_id) {
-        return Ok(());
+        return Ok(None);
     }
     let terminal_at_epoch_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -660,7 +660,7 @@ pub(crate) fn reconcile_session_goal_failure_with_connection(
     };
     let tokens_used = current.tokens_used;
     let time_used_ms = current.time_used_ms;
-    settle_goal_terminal_state(
+    Ok(settle_goal_terminal_state(
         connection,
         session_id,
         run_id,
@@ -670,8 +670,8 @@ pub(crate) fn reconcile_session_goal_failure_with_connection(
         terminal_at_epoch_ms,
         disposition,
         Some(failure),
-    )?;
-    Ok(())
+    )?
+    .and_then(|goal| goal.last_failure))
 }
 
 /// Recover only the terminal disposition when a crash happened after the

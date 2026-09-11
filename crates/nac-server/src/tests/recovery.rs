@@ -140,6 +140,61 @@ async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch()
 }
 
 #[tokio::test]
+async fn rebuilt_manager_hides_legacy_failed_partial_marker_in_run_event() {
+    let root = temp_root("legacy_failed_partial_restart");
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("restart-test-key"));
+    seed_editable_session(&root, "session");
+    let store_path = root.join("store.db");
+    let writer = nac_core::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer
+        .append_run_prompt(
+            "session",
+            0,
+            &nac_core::types::Message::User {
+                content: "persisted before process death".to_string(),
+            },
+            "failed-before-restart",
+        )
+        .unwrap();
+    writer
+        .append(
+            "session",
+            1,
+            &nac_core::types::Message::Assistant {
+                content: Some("[run failed after this partial assistant response]".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+        )
+        .unwrap();
+
+    let manager = test_manager(&root);
+    manager.snapshot("session").await.unwrap();
+    let recovery_events = manager.recent_events("session", None, 64).await.unwrap().1;
+    assert!(recovery_events.iter().any(|envelope| {
+        envelope.run_id.as_ref().map(|run_id| run_id.as_str()) == Some("failed-before-restart")
+            && matches!(
+                &envelope.event,
+                nac_core::events::SessionEvent::RunFailed {
+                    message,
+                    failure: Some(failure),
+                } if message == "run failed"
+                    && failure.diagnostic == "The previous run failed before producing a complete response. Resubmit the prompt to continue."
+                    && !failure.diagnostic.contains("[run failed after this partial assistant response]")
+            )
+    }), "{recovery_events:#?}");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn rebuilt_manager_rearms_staged_transient_goal_retry() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("staged_transient_goal_restart");
@@ -243,6 +298,9 @@ async fn rebuilt_manager_rearms_staged_transient_goal_retry() {
     .await
     .expect("retried goal should settle after the scripted response");
     let recovery_events = manager.recent_events("session", None, 64).await.unwrap().1;
+    let recovered_failure = failure
+        .clone()
+        .with_recovery_action(nac_core::run_failure::RecoveryAction::AutomaticRetry);
     assert!(recovery_events.iter().any(|envelope| {
         envelope.run_id.as_ref().map(|run_id| run_id.as_str()) == Some("failed-before-restart")
             && matches!(
@@ -250,7 +308,7 @@ async fn rebuilt_manager_rearms_staged_transient_goal_retry() {
                 nac_core::events::SessionEvent::RunFailed {
                     failure: Some(event_failure),
                     ..
-                } if event_failure == &failure
+                } if event_failure == &recovered_failure
             )
     }));
 

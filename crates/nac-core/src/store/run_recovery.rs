@@ -398,7 +398,7 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
                 return Ok(ActiveRunReconciliation::CanonicalTerminal);
             }
             RecoveredRunTerminal::Failed => {
-                reconcile_failed_goal(&transaction, session_id, &record)?;
+                let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
                 mark_active_run_failed(
                     &transaction,
                     session_id,
@@ -408,7 +408,7 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
                 transaction.commit()?;
                 return Ok(ActiveRunReconciliation::Failed {
                     run_id: record.run_id,
-                    failure: record.failure,
+                    failure,
                 });
             }
         }
@@ -419,7 +419,7 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
     // the typed staged outcome is still authoritative and must settle the
     // bound goal with the same retry policy as the ordinary run-end path.
     if record.failure.is_some() {
-        reconcile_failed_goal(&transaction, session_id, &record)?;
+        let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
         mark_active_run_failed(
             &transaction,
             session_id,
@@ -429,7 +429,7 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::Failed {
             run_id: record.run_id,
-            failure: record.failure,
+            failure,
         });
     }
 
@@ -458,20 +458,24 @@ fn reconcile_failed_goal(
     connection: &Connection,
     session_id: &str,
     record: &RunRecoveryRecord,
-) -> Result<()> {
+) -> Result<Option<crate::run_failure::RunFailure>> {
     let Some(failure) = record.failure.as_ref() else {
-        return crate::store::reconcile_session_goal_terminal_with_connection(
+        crate::store::reconcile_session_goal_terminal_with_connection(
             connection,
             session_id,
             &record.run_id,
             GoalRunDisposition::Failed,
-        );
+        )?;
+        return Ok(None);
     };
-    crate::store::reconcile_session_goal_failure_with_connection(
-        connection,
-        session_id,
-        &record.run_id,
-        failure,
+    Ok(
+        crate::store::reconcile_session_goal_failure_with_connection(
+            connection,
+            session_id,
+            &record.run_id,
+            failure,
+        )?
+        .or_else(|| Some(failure.clone())),
     )
 }
 
@@ -1139,7 +1143,11 @@ mod tests {
             reconcile_active_run(&path, "session-a").unwrap(),
             ActiveRunReconciliation::Failed {
                 run_id: "run-1".to_string(),
-                failure: Some(failure.clone()),
+                failure: Some(
+                    failure
+                        .clone()
+                        .with_recovery_action(crate::run_failure::RecoveryAction::AutomaticRetry),
+                ),
             }
         );
         let goal = load_session_goal(&path, "session-a").unwrap().unwrap();

@@ -27,7 +27,9 @@ fn record_run_failure_recovery(
         store::ActiveRunReconciliation::Failed { run_id, failure } => (
             run_id,
             failure.unwrap_or_else(|| {
-                crate::run_failure::RunFailure::unknown(crate::agent::RUN_FAILED_PARTIAL_MARKER)
+                crate::run_failure::RunFailure::unknown(
+                    crate::run_failure::FAILED_RUN_RECOVERY_DIAGNOSTIC,
+                )
             }),
         ),
         store::ActiveRunReconciliation::Interrupted { run_id } => (

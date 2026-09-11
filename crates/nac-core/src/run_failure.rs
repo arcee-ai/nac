@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+pub(crate) const FAILED_RUN_RECOVERY_DIAGNOSTIC: &str =
+    "The previous run failed before producing a complete response. Resubmit the prompt to continue.";
+
 /// Stable failure categories carried from execution into durable presentation.
 /// Provider-specific wire codes are deliberately collapsed at the adapter edge.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
