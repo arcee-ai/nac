@@ -399,12 +399,7 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
             }
             RecoveredRunTerminal::Failed => {
                 let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
-                mark_active_run_failed(
-                    &transaction,
-                    session_id,
-                    &record.run_id,
-                    record.failure.as_ref(),
-                )?;
+                mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
                 transaction.commit()?;
                 return Ok(ActiveRunReconciliation::Failed {
                     run_id: record.run_id,
@@ -420,12 +415,7 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
     // bound goal with the same retry policy as the ordinary run-end path.
     if record.failure.is_some() {
         let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
-        mark_active_run_failed(
-            &transaction,
-            session_id,
-            &record.run_id,
-            record.failure.as_ref(),
-        )?;
+        mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::Failed {
             run_id: record.run_id,
@@ -1160,12 +1150,11 @@ mod tests {
             goal.last_failure.as_ref().unwrap().recovery_action,
             crate::run_failure::RecoveryAction::AutomaticRetry
         );
+        let recovered_run = load_run_recovery(&path, "session-a").unwrap().unwrap();
+        assert_eq!(recovered_run.status, RunRecoveryStatus::Failed);
         assert_eq!(
-            load_run_recovery(&path, "session-a")
-                .unwrap()
-                .unwrap()
-                .status,
-            RunRecoveryStatus::Failed
+            recovered_run.failure.unwrap().recovery_action,
+            crate::run_failure::RecoveryAction::AutomaticRetry
         );
         assert_eq!(
             reconcile_active_run(&path, "session-a").unwrap(),
