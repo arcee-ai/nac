@@ -468,10 +468,13 @@ impl SessionService {
         let goal_id = goal.goal_id.clone();
         let goal_version = goal.version;
         let task = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(
-                deadline.saturating_sub(now_epoch_ms()),
-            ))
-            .await;
+            loop {
+                let remaining = deadline.saturating_sub(now_epoch_ms());
+                if remaining == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(remaining)).await;
+            }
             let Some(session_id) = service.metadata.session_id.as_deref() else {
                 return;
             };
@@ -488,7 +491,6 @@ impl SessionService {
                 || current.version != goal_version
                 || current.status != crate::store::GoalStatus::Active
                 || current.next_attempt_at_epoch_ms != Some(deadline)
-                || deadline > now_epoch_ms()
             {
                 return;
             }

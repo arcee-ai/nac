@@ -59,6 +59,7 @@ const TOOL_ARGS_DETAIL_LIMIT: usize = 8_192;
 pub(crate) const RUN_CANCELLED_MARKER: &str = "[run cancelled by user]";
 pub(crate) const RUN_FAILED_PARTIAL_MARKER: &str =
     "[run failed after this partial assistant response]";
+type RecoveredRunFailure = (String, crate::run_failure::RunFailure);
 
 /// What a turn that answered with neither prose nor a tool call is asked next.
 ///
@@ -180,9 +181,9 @@ pub struct Agent {
     /// User-facing notice set only when restore repaired a validly encoded
     /// non-contiguous transcript tail.
     transcript_recovery_warning: Option<String>,
-    /// Set only when this process atomically transitioned a prior active run to
-    /// interrupted during resume. Consumed once when the session bus is built.
-    interrupted_run_recovery: Option<String>,
+    /// Set only when this process atomically settled a prior active run as a
+    /// failure during resume. Consumed once when the session bus is built.
+    recovered_run_failure: Option<RecoveredRunFailure>,
     /// Token usage from the most recent `send()` call, updated after each
     /// model call; `None` if the provider omitted usage.
     pub last_usage: Option<crate::model::TokenUsage>,
@@ -423,7 +424,7 @@ impl Agent {
             direct_inbox_append_start: None,
             steering_append_pending: false,
             transcript_recovery_warning: None,
-            interrupted_run_recovery: None,
+            recovered_run_failure: None,
             last_usage: None,
             partial_stream: StdMutex::new(ModelStreamDelta::default()),
             permission_rules: config.permission_rules,
@@ -1031,12 +1032,12 @@ impl Agent {
         self.transcript_recovery_warning.as_deref()
     }
 
-    pub(crate) fn set_interrupted_run_recovery(&mut self, run_id: String) {
-        self.interrupted_run_recovery = Some(run_id);
+    pub(crate) fn set_recovered_run_failure(&mut self, recovered: RecoveredRunFailure) {
+        self.recovered_run_failure = Some(recovered);
     }
 
-    pub(crate) fn take_interrupted_run_recovery(&mut self) -> Option<String> {
-        self.interrupted_run_recovery.take()
+    pub(crate) fn take_recovered_run_failure(&mut self) -> Option<RecoveredRunFailure> {
+        self.recovered_run_failure.take()
     }
 
     #[cfg(test)]

@@ -38,13 +38,11 @@ impl SessionService {
         if let Some(broker) = &permission_broker {
             broker.attach_event_bus(event_bus.clone());
         }
-        if let Some(run_id) = run_config.agent.take_interrupted_run_recovery() {
+        if let Some((run_id, failure)) = run_config.agent.take_recovered_run_failure() {
             event_bus.emit_with_context(
                 SessionEvent::RunFailed {
-                    message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
-                    failure: Some(crate::run_failure::RunFailure::interrupted(
-                        INTERRUPTED_RUN_EVENT_MESSAGE,
-                    )),
+                    message: failure.diagnostic.clone(),
+                    failure: Some(failure),
                 },
                 Some(SessionRunId::from_stored(run_id)),
                 None,

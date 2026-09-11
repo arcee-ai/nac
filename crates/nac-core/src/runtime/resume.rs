@@ -19,13 +19,25 @@ pub async fn build_resume_picker_config(
     })
 }
 
-fn record_interrupted_run_recovery(
+fn record_run_failure_recovery(
     run_config: &mut OrchestratorRunConfig,
     recovery: store::ActiveRunReconciliation,
 ) {
-    if let store::ActiveRunReconciliation::Interrupted { run_id } = recovery {
-        run_config.agent.set_interrupted_run_recovery(run_id);
-    }
+    let recovered = match recovery {
+        store::ActiveRunReconciliation::Failed { run_id, failure } => (
+            run_id,
+            failure.unwrap_or_else(|| {
+                crate::run_failure::RunFailure::unknown(crate::agent::RUN_FAILED_PARTIAL_MARKER)
+            }),
+        ),
+        store::ActiveRunReconciliation::Interrupted { run_id } => (
+            run_id,
+            crate::run_failure::RunFailure::interrupted("run interrupted by process restart"),
+        ),
+        store::ActiveRunReconciliation::None
+        | store::ActiveRunReconciliation::CanonicalTerminal => return,
+    };
+    run_config.agent.set_recovered_run_failure(recovered);
 }
 
 pub async fn build_resume_config(
@@ -65,7 +77,7 @@ pub async fn build_resume_config(
         ResumeModelOptions::default(),
     )
     .await?;
-    record_interrupted_run_recovery(&mut run_config, recovery);
+    record_run_failure_recovery(&mut run_config, recovery);
     Ok(run_config)
 }
 
@@ -93,7 +105,7 @@ pub async fn build_resume_config_for_session(
         model,
     )
     .await?;
-    record_interrupted_run_recovery(&mut run_config, recovery);
+    record_run_failure_recovery(&mut run_config, recovery);
     Ok(run_config)
 }
 
@@ -148,7 +160,7 @@ pub async fn build_resume_config_for_session_attachment(
                 model.clone(),
             )
             .await?;
-            record_interrupted_run_recovery(&mut run_config, recovery);
+            record_run_failure_recovery(&mut run_config, recovery);
             Ok((run_config, true, Some(lease)))
         }
         Err(sessions::SessionOperationLeaseError::Busy(_)) => {
@@ -194,7 +206,7 @@ pub async fn build_resume_config_for_session_with_lease(
         model,
     )
     .await?;
-    record_interrupted_run_recovery(&mut run_config, recovery);
+    record_run_failure_recovery(&mut run_config, recovery);
     Ok(run_config)
 }
 

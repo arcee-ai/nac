@@ -140,6 +140,124 @@ async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch()
 }
 
 #[tokio::test]
+async fn rebuilt_manager_rearms_staged_transient_goal_retry() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("staged_transient_goal_restart");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("restart-goal-key"));
+    let (base_url, request) = scripted_direct_response();
+    seed_direct_session_with_base_url(&root, "session", base_url);
+    let store_path = root.join("store.db");
+    nac_core::store::create_session_goal(
+        &store_path,
+        "session",
+        "finish after restart",
+        Some(15),
+        None,
+    )
+    .unwrap();
+    nac_core::store::bind_session_goal_run(
+        &store_path,
+        "session",
+        &nac_core::store::GoalRunBaseline {
+            run_id: "failed-before-restart".to_string(),
+            billable_tokens: 0,
+            started_at_epoch_ms: 10,
+            continuation: false,
+        },
+    )
+    .unwrap();
+    nac_core::store::TranscriptLogWriter::new(&store_path)
+        .unwrap()
+        .append_run_prompt(
+            "session",
+            0,
+            &nac_core::types::Message::User {
+                content: "start before process death".to_string(),
+            },
+            "failed-before-restart",
+        )
+        .unwrap();
+    let failure = nac_core::run_failure::RunFailure {
+        kind: nac_core::run_failure::RunFailureKind::Transport,
+        phase: nac_core::run_failure::RunFailurePhase::Stream,
+        transient: true,
+        partial_output: nac_core::run_failure::PartialModelOutput::default(),
+        attempt_count: 10,
+        http_status: None,
+        retry_after_ms: None,
+        summary: "The model stream was interrupted.".to_string(),
+        diagnostic: "unexpected EOF during chunk size line".to_string(),
+        recovery_action: nac_core::run_failure::RecoveryAction::RegenerateWithRewind,
+    };
+    rusqlite::Connection::open(&store_path)
+        .unwrap()
+        .execute(
+            "UPDATE session_run_recovery
+             SET failure_json = ?1
+             WHERE session_id = 'session' AND run_id = 'failed-before-restart'",
+            [serde_json::to_string(&failure).unwrap()],
+        )
+        .unwrap();
+
+    let manager = test_manager(&root);
+    let service = manager.attach_session("session").await.unwrap();
+    assert_eq!(
+        service.metadata().behavior,
+        sessions::SessionBehavior::Direct
+    );
+    assert!(manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("session"));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match request.try_recv() {
+                Ok(()) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    panic!("scripted model server disconnected before the retry request")
+                }
+            }
+        }
+    })
+    .await
+    .expect("fresh attachment must re-arm and submit the durable goal retry");
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let goal = nac_core::store::load_session_goal(&store_path, "session")
+                .unwrap()
+                .unwrap();
+            if goal.status == GoalStatus::BudgetLimited {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("retried goal should settle after the scripted response");
+    let recovery_events = manager.recent_events("session", None, 64).await.unwrap().1;
+    assert!(recovery_events.iter().any(|envelope| {
+        envelope.run_id.as_ref().map(|run_id| run_id.as_str()) == Some("failed-before-restart")
+            && matches!(
+                &envelope.event,
+                nac_core::events::SessionEvent::RunFailed {
+                    failure: Some(event_failure),
+                    ..
+                } if event_failure == &failure
+            )
+    }));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn cached_manager_snapshot_reconciles_peer_interruption_once() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("cached_peer_snapshot");
