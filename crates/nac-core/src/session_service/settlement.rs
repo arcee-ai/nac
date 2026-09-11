@@ -37,9 +37,6 @@ impl SessionService {
             return false;
         };
         self.expire_orchestrator_steering(run_id);
-        if matches!(outcome, RunOutcome::Failed(..)) {
-            self.normalize_failed_run_transcript().await;
-        }
         let (completed_duration_ms, completed_usage) = match &outcome {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
             RunOutcome::Failed(_, usage) => (None, usage.clone()),
@@ -67,6 +64,10 @@ impl SessionService {
             Some(_) => crate::store::GoalRunDisposition::Failed,
             None => crate::store::GoalRunDisposition::Completed,
         };
+        if let Some(failure) = run_failure.as_ref() {
+            self.stage_run_failure(run_id, failure).await;
+            self.normalize_failed_run_transcript().await;
+        }
         let persistence_error = match self
             .persist_run_snapshot(
                 &finishing_run.snapshot,
@@ -152,6 +153,32 @@ impl SessionService {
             }
         }
         true
+    }
+
+    async fn stage_run_failure(
+        &self,
+        run_id: &SessionRunId,
+        failure: &crate::run_failure::RunFailure,
+    ) {
+        let Some(session_id) = self.metadata.session_id.clone() else {
+            return;
+        };
+        let store_path = self.metadata.store_path.clone();
+        let run_id = run_id.to_string();
+        let failure = failure.clone();
+        match tokio::task::spawn_blocking(move || {
+            crate::store::stage_active_run_failure(&store_path, &session_id, &run_id, &failure)
+        })
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                eprintln!("nac: failed to stage typed run failure: {error:#}");
+            }
+            Err(error) => {
+                eprintln!("nac: run-failure staging task failed: {error}");
+            }
+        }
     }
 
     pub(super) async fn settle_direct_goal_run(

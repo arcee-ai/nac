@@ -532,6 +532,34 @@ pub(crate) fn settle_session_goal_run_with_connection(
     );
     let tokens_used = current.tokens_used.saturating_add(delta_tokens);
     let time_used_ms = current.time_used_ms.saturating_add(delta_ms);
+    settle_goal_terminal_state(
+        connection,
+        session_id,
+        run_id,
+        current,
+        tokens_used,
+        time_used_ms,
+        terminal_at_epoch_ms,
+        disposition,
+        failure,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the goal terminal transition keeps its accounting and failure inputs explicit"
+)]
+fn settle_goal_terminal_state(
+    connection: &Connection,
+    session_id: &str,
+    run_id: &str,
+    current: SessionGoalRecord,
+    tokens_used: u64,
+    time_used_ms: u64,
+    terminal_at_epoch_ms: u64,
+    disposition: GoalRunDisposition,
+    failure: Option<&crate::run_failure::RunFailure>,
+) -> Result<Option<SessionGoalRecord>> {
     let next_transient_failures = if disposition == GoalRunDisposition::RetryableFailed {
         current.consecutive_transient_failures.saturating_add(1)
     } else {
@@ -602,6 +630,48 @@ pub(crate) fn settle_session_goal_run_with_connection(
         ],
     )?;
     load_with_connection(connection, session_id)
+}
+
+/// Reconcile a typed failure staged before a process died. Usage samples are
+/// process-local and unavailable after restart, so preserve the last committed
+/// accounting totals while applying the ordinary bounded retry transition.
+pub(crate) fn reconcile_session_goal_failure_with_connection(
+    connection: &Connection,
+    session_id: &str,
+    run_id: &str,
+    failure: &crate::run_failure::RunFailure,
+) -> Result<()> {
+    let Some(current) = load_with_connection(connection, session_id)? else {
+        return Ok(());
+    };
+    if current.accounting_run_id.as_deref() != Some(run_id) {
+        return Ok(());
+    }
+    let terminal_at_epoch_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX);
+    let disposition = if failure.transient {
+        GoalRunDisposition::RetryableFailed
+    } else {
+        GoalRunDisposition::Failed
+    };
+    let tokens_used = current.tokens_used;
+    let time_used_ms = current.time_used_ms;
+    settle_goal_terminal_state(
+        connection,
+        session_id,
+        run_id,
+        current,
+        tokens_used,
+        time_used_ms,
+        terminal_at_epoch_ms,
+        disposition,
+        Some(failure),
+    )?;
+    Ok(())
 }
 
 /// Recover only the terminal disposition when a crash happened after the

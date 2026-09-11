@@ -97,11 +97,14 @@ impl SessionService {
                     }
                 }
             }
-            crate::store::ActiveRunReconciliation::Failed { run_id } => {
+            crate::store::ActiveRunReconciliation::Failed { run_id, failure } => {
+                let failure = failure
+                    .clone()
+                    .unwrap_or_else(|| crate::run_failure::RunFailure::unknown(FAILED_RUN_WARNING));
                 self.event_bus.emit_with_context(
                     SessionEvent::RunFailed {
-                        message: FAILED_RUN_WARNING.to_string(),
-                        failure: Some(crate::run_failure::RunFailure::unknown(FAILED_RUN_WARNING)),
+                        message: failure.diagnostic.clone(),
+                        failure: Some(failure.clone()),
                     },
                     Some(SessionRunId::from_stored(run_id.clone())),
                     None,
@@ -110,7 +113,7 @@ impl SessionService {
                     &SessionRunId::from_stored(run_id.clone()),
                     crate::store::TraditionalChildStatus::Failed,
                     None,
-                    Some(FAILED_RUN_WARNING.to_string()),
+                    Some(failure.diagnostic),
                 );
             }
             crate::store::ActiveRunReconciliation::Interrupted { run_id } => {

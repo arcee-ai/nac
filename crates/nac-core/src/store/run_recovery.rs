@@ -91,8 +91,13 @@ pub struct RunRecoveryRecord {
 pub enum ActiveRunReconciliation {
     None,
     CanonicalTerminal,
-    Failed { run_id: String },
-    Interrupted { run_id: String },
+    Failed {
+        run_id: String,
+        failure: Option<crate::run_failure::RunFailure>,
+    },
+    Interrupted {
+        run_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,6 +229,34 @@ pub(crate) fn mark_active_run_failed(
          WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
         params![session_id, run_id, failure_json],
     )?;
+    Ok(())
+}
+
+/// Persist the typed terminal failure before transcript normalization. The run
+/// remains active until ordinary atomic settlement commits, but restart
+/// recovery can no longer mistake a known transient failure for a permanent
+/// failed-tail marker merely because the process died between those writes.
+pub(crate) fn stage_active_run_failure(
+    path: &Path,
+    session_id: &str,
+    run_id: &str,
+    failure: &crate::run_failure::RunFailure,
+) -> Result<()> {
+    let sanitized_failure = failure.clone().sanitized();
+    let failure_json = serde_json::to_string(&sanitized_failure)
+        .context("failed to serialize staged run failure")?;
+    let connection = open_runtime_connection(path)?;
+    let changed = connection.execute(
+        "UPDATE session_run_recovery
+         SET failure_json = ?3
+         WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
+        params![session_id, run_id, failure_json],
+    )?;
+    if changed != 1 {
+        return Err(anyhow!(
+            "run '{run_id}' is no longer the active durable run for session '{session_id}'"
+        ));
+    }
     Ok(())
 }
 
@@ -365,19 +398,39 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
                 return Ok(ActiveRunReconciliation::CanonicalTerminal);
             }
             RecoveredRunTerminal::Failed => {
-                crate::store::reconcile_session_goal_terminal_with_connection(
+                reconcile_failed_goal(&transaction, session_id, &record)?;
+                mark_active_run_failed(
                     &transaction,
                     session_id,
                     &record.run_id,
-                    GoalRunDisposition::Failed,
+                    record.failure.as_ref(),
                 )?;
-                mark_active_run_failed(&transaction, session_id, &record.run_id, None)?;
                 transaction.commit()?;
                 return Ok(ActiveRunReconciliation::Failed {
                     run_id: record.run_id,
+                    failure: record.failure,
                 });
             }
         }
+    }
+
+    // Failure staging intentionally precedes transcript normalization. A
+    // process can therefore die before appending the failed-partial marker;
+    // the typed staged outcome is still authoritative and must settle the
+    // bound goal with the same retry policy as the ordinary run-end path.
+    if record.failure.is_some() {
+        reconcile_failed_goal(&transaction, session_id, &record)?;
+        mark_active_run_failed(
+            &transaction,
+            session_id,
+            &record.run_id,
+            record.failure.as_ref(),
+        )?;
+        transaction.commit()?;
+        return Ok(ActiveRunReconciliation::Failed {
+            run_id: record.run_id,
+            failure: record.failure,
+        });
     }
 
     let changed = transaction.execute(
@@ -399,6 +452,27 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
     Ok(ActiveRunReconciliation::Interrupted {
         run_id: record.run_id,
     })
+}
+
+fn reconcile_failed_goal(
+    connection: &Connection,
+    session_id: &str,
+    record: &RunRecoveryRecord,
+) -> Result<()> {
+    let Some(failure) = record.failure.as_ref() else {
+        return crate::store::reconcile_session_goal_terminal_with_connection(
+            connection,
+            session_id,
+            &record.run_id,
+            GoalRunDisposition::Failed,
+        );
+    };
+    crate::store::reconcile_session_goal_failure_with_connection(
+        connection,
+        session_id,
+        &record.run_id,
+        failure,
+    )
 }
 
 fn canonical_terminal_disposition(
@@ -991,7 +1065,8 @@ mod tests {
         assert_eq!(
             reconcile_active_run(&path, "session-a").unwrap(),
             ActiveRunReconciliation::Failed {
-                run_id: "run-1".to_string()
+                run_id: "run-1".to_string(),
+                failure: None,
             }
         );
         let goal = load_session_goal(&path, "session-a").unwrap().unwrap();
@@ -1004,6 +1079,139 @@ mod tests {
                 .status,
             RunRecoveryStatus::Failed
         );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_partial_marker_recovery_preserves_staged_transient_goal_retry() {
+        let path = temp_store_path("staged_transient_failed_partial");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "session-a");
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'session-a'",
+                [],
+            )
+            .unwrap();
+        create_session_goal(&path, "session-a", "finish safely", None, None).unwrap();
+        bind_session_goal_run(
+            &path,
+            "session-a",
+            &GoalRunBaseline {
+                run_id: "run-1".to_string(),
+                billable_tokens: 7,
+                started_at_epoch_ms: 10,
+                continuation: false,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_run_prompt("session-a", 0, &user("prompt"), "run-1")
+            .unwrap();
+        let failure = crate::run_failure::RunFailure {
+            kind: crate::run_failure::RunFailureKind::Transport,
+            phase: crate::run_failure::RunFailurePhase::Stream,
+            transient: true,
+            partial_output: crate::run_failure::PartialModelOutput {
+                reasoning: true,
+                ..Default::default()
+            },
+            attempt_count: 10,
+            http_status: None,
+            retry_after_ms: None,
+            summary: "The model stream was interrupted.".to_string(),
+            diagnostic: "unexpected EOF during chunk size line".to_string(),
+            recovery_action: crate::run_failure::RecoveryAction::RegenerateWithRewind,
+        };
+        stage_active_run_failure(&path, "session-a", "run-1", &failure).unwrap();
+        writer
+            .append(
+                "session-a",
+                1,
+                &assistant(crate::agent::RUN_FAILED_PARTIAL_MARKER),
+            )
+            .unwrap();
+
+        assert_eq!(
+            reconcile_active_run(&path, "session-a").unwrap(),
+            ActiveRunReconciliation::Failed {
+                run_id: "run-1".to_string(),
+                failure: Some(failure.clone()),
+            }
+        );
+        let goal = load_session_goal(&path, "session-a").unwrap().unwrap();
+        assert_eq!(goal.status, GoalStatus::Active);
+        assert_eq!(goal.tokens_used, 0);
+        assert_eq!(goal.time_used_ms, 0);
+        assert_eq!(goal.consecutive_transient_failures, 1);
+        assert!(goal.next_attempt_at_epoch_ms.is_some());
+        assert_eq!(
+            goal.last_failure.as_ref().unwrap().recovery_action,
+            crate::run_failure::RecoveryAction::AutomaticRetry
+        );
+        assert_eq!(
+            load_run_recovery(&path, "session-a")
+                .unwrap()
+                .unwrap()
+                .status,
+            RunRecoveryStatus::Failed
+        );
+        assert_eq!(
+            reconcile_active_run(&path, "session-a").unwrap(),
+            ActiveRunReconciliation::None
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn staged_failure_is_authoritative_before_transcript_normalization() {
+        let path = temp_store_path("staged_failure_before_marker");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "session-a");
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'session-a'",
+                [],
+            )
+            .unwrap();
+        create_session_goal(&path, "session-a", "finish safely", None, None).unwrap();
+        bind_session_goal_run(
+            &path,
+            "session-a",
+            &GoalRunBaseline {
+                run_id: "run-1".to_string(),
+                billable_tokens: 0,
+                started_at_epoch_ms: 10,
+                continuation: false,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let writer = TranscriptLogWriter::new(&path).unwrap();
+        writer
+            .append_run_prompt("session-a", 0, &user("prompt"), "run-1")
+            .unwrap();
+        let failure = crate::run_failure::RunFailure::interrupted("connection closed");
+        stage_active_run_failure(&path, "session-a", "run-1", &failure).unwrap();
+
+        assert!(matches!(
+            reconcile_active_run(&path, "session-a").unwrap(),
+            ActiveRunReconciliation::Failed {
+                failure: Some(crate::run_failure::RunFailure {
+                    kind: crate::run_failure::RunFailureKind::Interrupted,
+                    ..
+                }),
+                ..
+            }
+        ));
+        let goal = load_session_goal(&path, "session-a").unwrap().unwrap();
+        assert_eq!(goal.status, GoalStatus::Active);
+        assert_eq!(goal.consecutive_transient_failures, 1);
+        assert!(goal.next_attempt_at_epoch_ms.is_some());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
