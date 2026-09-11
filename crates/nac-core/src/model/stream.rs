@@ -7,6 +7,10 @@ use std::time::{Duration, Instant};
 pub struct ModelStreamDelta {
     pub text: String,
     pub reasoning: String,
+    /// Replace the abandoned attempt's live buffers before applying this delta.
+    pub reset: bool,
+    /// One-based provider attempt that will follow a reset.
+    pub retry_attempt: Option<u32>,
 }
 
 impl ModelStreamDelta {
@@ -14,6 +18,8 @@ impl ModelStreamDelta {
         Self {
             text: text.into(),
             reasoning: String::new(),
+            reset: false,
+            retry_attempt: None,
         }
     }
 
@@ -21,14 +27,35 @@ impl ModelStreamDelta {
         Self {
             text: String::new(),
             reasoning: reasoning.into(),
+            reset: false,
+            retry_attempt: None,
+        }
+    }
+
+    pub fn retry_reset(attempt: u32) -> Self {
+        Self {
+            text: String::new(),
+            reasoning: String::new(),
+            reset: true,
+            retry_attempt: Some(attempt),
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.reasoning.is_empty()
+        !self.reset && self.text.is_empty() && self.reasoning.is_empty()
+    }
+
+    pub(crate) fn clear_if_reset(&mut self, next: &Self) {
+        if next.reset {
+            *self = Self::default();
+        }
     }
 
     fn absorb(&mut self, other: &Self) {
+        if other.reset {
+            *self = other.clone();
+            return;
+        }
         self.text.push_str(&other.text);
         self.reasoning.push_str(&other.reasoning);
     }
@@ -70,6 +97,19 @@ impl<F: Fn(ModelStreamDelta)> CoalescedDeltas<F> {
     }
 
     pub fn push(&self, delta: ModelStreamDelta) {
+        if delta.reset {
+            let pending = {
+                let mut state = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                state.last_flush = Some(Instant::now());
+                std::mem::take(&mut state.pending)
+            };
+            self.emit(pending);
+            self.emit(delta);
+            return;
+        }
         let due = {
             let mut state = self
                 .state

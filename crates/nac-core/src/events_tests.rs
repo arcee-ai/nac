@@ -366,9 +366,11 @@ fn replay_cursor_sequence_is_fenced_by_epoch() {
     let bus = SessionEventBus::with_capacity(Some("session-a".to_string()), 8);
     let first = bus.emit(SessionEvent::RunFailed {
         message: "one".to_string(),
+        failure: None,
     });
     let second = bus.emit(SessionEvent::RunFailed {
         message: "two".to_string(),
+        failure: None,
     });
 
     let same_epoch_cursor = SessionEventBoundary {
@@ -396,6 +398,39 @@ fn replay_cursor_sequence_is_fenced_by_epoch() {
 }
 
 #[test]
+fn typed_run_failure_is_preserved_but_redacted_on_the_session_bus() {
+    let bus = SessionEventBus::with_capacity(Some("session-a".to_string()), 8);
+    let envelope = bus.emit(SessionEvent::RunFailed {
+        message: "provider detail".to_string(),
+        failure: Some(crate::run_failure::RunFailure {
+            kind: crate::run_failure::RunFailureKind::Transport,
+            phase: crate::run_failure::RunFailurePhase::Stream,
+            transient: true,
+            partial_output: crate::run_failure::PartialModelOutput {
+                text: true,
+                ..Default::default()
+            },
+            attempt_count: 10,
+            http_status: None,
+            retry_after_ms: None,
+            summary: "connection stopped".to_string(),
+            diagnostic: "Authorization: Bearer secret-token unexpected EOF".to_string(),
+            recovery_action: crate::run_failure::RecoveryAction::RegenerateWithRewind,
+        }),
+    });
+
+    let SessionEvent::RunFailed { message, failure } = envelope.event else {
+        panic!("expected run failure event")
+    };
+    assert_eq!(message, "run failed");
+    let failure = failure.expect("typed failure must remain available to clients");
+    assert!(failure.partial_output.text);
+    assert_eq!(failure.attempt_count, 10);
+    assert!(!failure.diagnostic.contains("secret-token"));
+    assert!(failure.diagnostic.contains("unexpected EOF"));
+}
+
+#[test]
 fn session_event_bus_replay_filters_after_sequence_and_trims_capacity() {
     let bus = SessionEventBus::with_capacity(Some("session-trim".to_string()), 2);
 
@@ -415,6 +450,7 @@ fn session_event_bus_replay_filters_after_sequence_and_trims_capacity() {
         .unwrap();
     let third = bus.emit(SessionEvent::RunFailed {
         message: "boom".to_string(),
+        failure: None,
     });
 
     assert_eq!(first.sequence_id, 1);
@@ -638,6 +674,7 @@ async fn replay_subscription_replays_boundary_events_then_live_without_gap() {
         bus.subscribe_for_client_with_replay(SessionClientId::new(), Some(&cursor), 10);
     let third = bus.emit(SessionEvent::RunFailed {
         message: "three".to_string(),
+        failure: None,
     });
 
     assert_eq!(subscription.replay_boundary_sequence_id, second.sequence_id);

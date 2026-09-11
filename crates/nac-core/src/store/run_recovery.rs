@@ -84,6 +84,7 @@ pub struct RunRecoveryRecord {
     pub submitted_message_id: i64,
     pub status: RunRecoveryStatus,
     pub terminal_disposition: Option<RunTerminalDisposition>,
+    pub failure: Option<crate::run_failure::RunFailure>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,7 +116,8 @@ pub(crate) fn replace_with_active_run(
              run_id = excluded.run_id,
              submitted_message_id = excluded.submitted_message_id,
              status = 'active',
-             terminal_disposition = NULL
+             terminal_disposition = NULL,
+             failure_json = NULL
          WHERE session_run_recovery.status IN ('interrupted', 'failed')",
         params![session_id, run_id, submitted_message_id],
     )?;
@@ -206,12 +208,21 @@ pub(crate) fn mark_active_run_failed(
     transaction: &Transaction<'_>,
     session_id: &str,
     run_id: &str,
+    failure: Option<&crate::run_failure::RunFailure>,
 ) -> Result<()> {
+    let sanitized_failure = failure
+        .cloned()
+        .map(crate::run_failure::RunFailure::sanitized);
+    let failure_json = sanitized_failure
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .context("failed to serialize run failure")?;
     transaction.execute(
         "UPDATE session_run_recovery
-         SET status = 'failed'
+         SET status = 'failed', failure_json = ?3
          WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
-        params![session_id, run_id],
+        params![session_id, run_id, failure_json],
     )?;
     Ok(())
 }
@@ -227,7 +238,7 @@ pub(crate) fn load_run_recovery_with_connection(
 ) -> Result<Option<RunRecoveryRecord>> {
     connection
         .query_row(
-            "SELECT run_id, submitted_message_id, status, terminal_disposition
+            "SELECT run_id, submitted_message_id, status, terminal_disposition, failure_json
              FROM session_run_recovery
              WHERE session_id = ?1",
             params![session_id],
@@ -237,18 +248,25 @@ pub(crate) fn load_run_recovery_with_connection(
                     row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
                 ))
             },
         )
         .optional()?
         .map(
-            |(run_id, submitted_message_id, status, terminal_disposition)| {
+            |(run_id, submitted_message_id, status, terminal_disposition, failure_json)| {
                 Ok(RunRecoveryRecord {
                     run_id,
                     submitted_message_id,
                     status: RunRecoveryStatus::parse(&status)?,
                     terminal_disposition: terminal_disposition
                         .map(|value| RunTerminalDisposition::parse(&value))
+                        .transpose()?,
+                    failure: failure_json
+                        .map(|value| {
+                            serde_json::from_str(&value)
+                                .context("failed to decode stored run failure")
+                        })
                         .transpose()?,
                 })
             },
@@ -353,7 +371,7 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
                     &record.run_id,
                     GoalRunDisposition::Failed,
                 )?;
-                mark_active_run_failed(&transaction, session_id, &record.run_id)?;
+                mark_active_run_failed(&transaction, session_id, &record.run_id, None)?;
                 transaction.commit()?;
                 return Ok(ActiveRunReconciliation::Failed {
                     run_id: record.run_id,
@@ -490,6 +508,7 @@ mod tests {
             finished_run_id: None,
             finished_run_disposition: None,
             failed_run_id: None,
+            failed_run_failure: None,
             goal_settlement: None,
             updated_at: now_utc(),
         }
@@ -866,6 +885,7 @@ mod tests {
             final_billable_tokens: 12,
             terminal_at_epoch_ms: 110,
             disposition: GoalRunDisposition::Cancelled,
+            failure: None,
         });
         crate::sessions::save_session_run_state(&path, &update).unwrap();
 

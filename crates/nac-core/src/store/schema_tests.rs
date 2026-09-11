@@ -233,6 +233,9 @@ fn assert_current_schema(conn: &Connection) {
             "accounting_token_baseline",
             "accounting_started_at_epoch_ms",
             "continuation_run_id",
+            "consecutive_transient_failures",
+            "next_attempt_at_epoch_ms",
+            "last_failure_json",
             "created_at",
             "updated_at",
             "version",
@@ -503,7 +506,49 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 27);
+    assert_eq!(STORE_SCHEMA_VERSION, 28);
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn v27_store_adds_typed_run_failure_and_goal_retry_metadata() {
+    let path = temp_store_path("v27_goal_retry");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch(
+            "ALTER TABLE session_run_recovery DROP COLUMN failure_json;
+             ALTER TABLE session_goals DROP COLUMN last_failure_json;
+             ALTER TABLE session_goals DROP COLUMN next_attempt_at_epoch_ms;
+             ALTER TABLE session_goals DROP COLUMN consecutive_transient_failures;
+             PRAGMA user_version = 27;",
+        )
+        .unwrap();
+    drop(legacy);
+
+    initialize(&path).unwrap();
+
+    let migrated = Connection::open(&path).unwrap();
+    assert_eq!(
+        table_columns(&migrated, "session_run_recovery"),
+        vec![
+            "session_id",
+            "run_id",
+            "submitted_message_id",
+            "status",
+            "terminal_disposition",
+            "failure_json",
+        ]
+    );
+    let goal_columns = table_columns(&migrated, "session_goals");
+    assert!(goal_columns.contains(&"consecutive_transient_failures".to_string()));
+    assert!(goal_columns.contains(&"next_attempt_at_epoch_ms".to_string()));
+    assert!(goal_columns.contains(&"last_failure_json".to_string()));
+    let version: i64 = migrated
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, STORE_SCHEMA_VERSION);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -779,6 +824,9 @@ fn v19_store_adds_durable_session_goals() {
             "accounting_token_baseline",
             "accounting_started_at_epoch_ms",
             "continuation_run_id",
+            "consecutive_transient_failures",
+            "next_attempt_at_epoch_ms",
+            "last_failure_json",
             "created_at",
             "updated_at",
             "version",

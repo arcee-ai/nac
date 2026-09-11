@@ -213,6 +213,7 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
             update.session_id
         ));
     }
+    let mut durable_failure = update.failed_run_failure.clone();
     if let Some(run_id) = update.finished_run_id.as_deref() {
         if let Some(goal) = update.goal_settlement.as_ref() {
             crate::store::settle_session_goal_run_with_connection(
@@ -222,6 +223,7 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
                 goal.final_billable_tokens,
                 goal.terminal_at_epoch_ms,
                 goal.disposition,
+                goal.failure.as_ref(),
             )?;
         }
         crate::store::clear_active_run(
@@ -234,16 +236,25 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
         )?;
     } else if let Some(run_id) = update.failed_run_id.as_deref() {
         if let Some(goal) = update.goal_settlement.as_ref() {
-            crate::store::settle_session_goal_run_with_connection(
+            let settled = crate::store::settle_session_goal_run_with_connection(
                 &tx,
                 &update.session_id,
                 &goal.run_id,
                 goal.final_billable_tokens,
                 goal.terminal_at_epoch_ms,
                 goal.disposition,
+                goal.failure.as_ref(),
             )?;
+            if let Some(failure) = settled.and_then(|goal| goal.last_failure) {
+                durable_failure = Some(failure);
+            }
         }
-        crate::store::mark_active_run_failed(&tx, &update.session_id, run_id)?;
+        crate::store::mark_active_run_failed(
+            &tx,
+            &update.session_id,
+            run_id,
+            durable_failure.as_ref(),
+        )?;
     }
     tx.commit()?;
     Ok(())

@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 // The real perfDebug module is inert unless explicitly enabled, so the store
 // under test runs against the real thing.
 import { mergeWorkspaceStats } from "@/app/services/queries";
-import { applyEnvelope, getRuntimeState, resetRuntime } from "@/app/store/runtimeStore";
+import {
+  applyAssistantDelta,
+  applyEnvelope,
+  getRuntimeState,
+  resetRuntime,
+} from "@/app/store/runtimeStore";
 import type { ManagedSessionSummary, SessionEvent, SessionEventEnvelope } from "@/app/types/api";
 
 function envelope(event: SessionEvent): SessionEventEnvelope {
@@ -30,6 +35,24 @@ function summary(id: string, title: string, changed?: number): ManagedSessionSum
 }
 
 describe("canonical refresh classification", () => {
+  it("replaces an abandoned partial stream when a model retry begins", () => {
+    resetRuntime("session-a");
+    applyAssistantDelta({ text: "abandoned", reasoning: "old thoughts" });
+    applyAssistantDelta({ reset: true, retry_attempt: 2 });
+    expect(getRuntimeState()).toMatchObject({
+      streamText: "",
+      streamReasoning: "",
+      modelRetryAttempt: 2,
+    });
+
+    applyAssistantDelta({ text: "replacement" });
+    expect(getRuntimeState()).toMatchObject({
+      streamText: "replacement",
+      streamReasoning: "",
+      modelRetryAttempt: 2,
+    });
+  });
+
   it("routes transcript commits to messages without a redundant assistant snapshot", () => {
     resetRuntime("session-a");
     expect(applyEnvelope(envelope({ type: "transcript_appended", transcript_len: 42 }))).toBe(

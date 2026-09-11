@@ -651,11 +651,11 @@ impl Agent {
             let call_started = Instant::now();
             self.clear_partial_stream();
             let deltas = CoalescedDeltas::new(|delta: ModelStreamDelta| {
-                self.event_sink.emit_assistant_delta(AssistantStreamDelta {
-                    thread_name: self.thread_name.clone(),
-                    text: (!delta.text.is_empty()).then_some(delta.text),
-                    reasoning: (!delta.reasoning.is_empty()).then_some(delta.reasoning),
-                });
+                self.event_sink
+                    .emit_assistant_delta(AssistantStreamDelta::from_model(
+                        self.thread_name.clone(),
+                        delta,
+                    ));
             });
             let push_delta = |delta: ModelStreamDelta| {
                 {
@@ -663,6 +663,7 @@ impl Agent {
                         .partial_stream
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    partial.clear_if_reset(&delta);
                     partial.text.push_str(&delta.text);
                     partial.reasoning.push_str(&delta.reasoning);
                 }

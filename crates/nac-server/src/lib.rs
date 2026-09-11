@@ -1766,13 +1766,11 @@ impl SessionManager {
                                     failure: None,
                                 })
                             }
-                            SessionEvent::RunFailed { message } => {
+                            SessionEvent::RunFailed { message, failure } => {
                                 Some(nac_core::store::ManagedOrchestratorTerminal {
-                                    status: if message.contains("interrupted") {
-                                        ManagedOrchestratorStatus::Interrupted
-                                    } else {
-                                        ManagedOrchestratorStatus::Failed
-                                    },
+                                    status: delegation_runtime::managed_run_failure_status(
+                                        failure.as_ref(),
+                                    ),
                                     report: None,
                                     failure: Some(message.clone()),
                                 })

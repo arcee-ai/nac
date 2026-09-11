@@ -4,6 +4,7 @@ import {
   buildTranscript,
   dispatchThreadName,
   partitionThreadCalls,
+  RUN_FAILED_PARTIAL_MARKER,
   type TranscriptThread,
 } from "@/app/lib/transcript";
 import type { RuntimeThread } from "@/app/store/runtimeStore";
@@ -145,6 +146,24 @@ function snapshot(messages: Message[]): SessionSnapshotResponse {
     },
   };
 }
+
+it("treats the failed-run sentinel as metadata instead of copyable model prose", () => {
+  const turns = buildTranscript(
+    snapshot([
+      { role: "user", content: "continue" },
+      {
+        role: "assistant",
+        content: `useful partial answer\n\n${RUN_FAILED_PARTIAL_MARKER}`,
+      },
+    ]),
+    {},
+  );
+  expect(turns[1]).toMatchObject({
+    kind: "model",
+    blocks: [{ kind: "text", text: "useful partial answer" }],
+  });
+  expect(JSON.stringify(turns)).not.toContain(RUN_FAILED_PARTIAL_MARKER);
+});
 
 function directSnapshot(messages: Message[], behavior: SessionBehavior): SessionSnapshotResponse {
   const value = snapshot(messages);

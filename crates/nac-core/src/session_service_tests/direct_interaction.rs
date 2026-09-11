@@ -38,6 +38,185 @@ async fn goal_creation_fails_closed_during_peer_owned_run() {
 }
 
 #[tokio::test]
+async fn pausing_a_goal_invalidates_its_persisted_retry_wake() {
+    let session_id = "paused-goal-retry";
+    let (parts, store_path) =
+        test_direct_active_service("paused_goal_retry", session_id, ModelClient::new_for_test());
+    crate::store::create_session_goal(&store_path, session_id, "finish", None, None).unwrap();
+    crate::store::bind_session_goal_run(
+        &store_path,
+        session_id,
+        &crate::store::GoalRunBaseline {
+            run_id: "failed-run".into(),
+            billable_tokens: 0,
+            started_at_epoch_ms: now_epoch_ms(),
+            continuation: true,
+        },
+    )
+    .unwrap();
+    let failure = crate::run_failure::RunFailure {
+        kind: crate::run_failure::RunFailureKind::Transport,
+        phase: crate::run_failure::RunFailurePhase::Stream,
+        transient: true,
+        partial_output: crate::run_failure::PartialModelOutput::default(),
+        attempt_count: 10,
+        http_status: None,
+        retry_after_ms: None,
+        summary: "connection interrupted".into(),
+        diagnostic: "unexpected EOF".into(),
+        recovery_action: crate::run_failure::RecoveryAction::AutomaticRetry,
+    };
+    let retrying = crate::store::settle_session_goal_run_with_failure(
+        &store_path,
+        session_id,
+        "failed-run",
+        0,
+        now_epoch_ms(),
+        crate::store::GoalRunDisposition::RetryableFailed,
+        Some(&failure),
+    )
+    .unwrap()
+    .unwrap();
+
+    // Rebuild the process-local service while the durable deadline is still
+    // in the future. Attachment must re-arm that exact goal generation.
+    drop(parts);
+    let client = ModelClient::new_for_test();
+    let snapshot = sessions::load_session(&store_path, session_id).unwrap();
+    let agent = build_test_agent(
+        client.clone(),
+        store_path.clone(),
+        Some(session_id.to_string()),
+        AgentMode::Direct,
+        None,
+        None,
+    );
+    let restarted = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+        agent,
+        client,
+        session: OrchestratorSession::Active {
+            session_id: session_id.to_string(),
+            store_path: store_path.clone(),
+            snapshot,
+        },
+        sandbox_status: "off".to_string(),
+        agents_md_status: "off".to_string(),
+        workspace_display: "/repo".to_string(),
+        workspace_git: None,
+        resume_base_cwd: PathBuf::from("/repo"),
+    });
+
+    assert!(restarted
+        .service
+        .start_next_direct_inbox_item()
+        .await
+        .unwrap()
+        .is_none());
+    let paused = restarted
+        .service
+        .update_direct_goal(
+            &retrying.goal_id,
+            retrying.version,
+            crate::store::UserGoalUpdate {
+                status: Some(crate::store::GoalStatus::Paused),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(paused.status, crate::store::GoalStatus::Paused);
+
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    assert!(restarted.service.active_run().is_none());
+    assert_eq!(
+        restarted.service.direct_goal().unwrap().unwrap().status,
+        crate::store::GoalStatus::Paused
+    );
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn persisted_retry_deadline_automatically_resumes_the_same_goal_generation() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        serde_json::json!({
+            "status": "completed",
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": "recovered"}]}],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+        })
+        .to_string(),
+    )]);
+    let client = ModelClient::new_for_test_server(server.base_url.clone());
+    let session_id = "automatic-goal-retry";
+    let (parts, store_path) =
+        test_direct_active_service("automatic_goal_retry", session_id, client);
+    let service = parts.service;
+    crate::store::create_session_goal(&store_path, session_id, "finish", Some(15), None).unwrap();
+    crate::store::bind_session_goal_run(
+        &store_path,
+        session_id,
+        &crate::store::GoalRunBaseline {
+            run_id: "failed-run".into(),
+            billable_tokens: 0,
+            started_at_epoch_ms: now_epoch_ms(),
+            continuation: true,
+        },
+    )
+    .unwrap();
+    let failure = crate::run_failure::RunFailure {
+        kind: crate::run_failure::RunFailureKind::Transport,
+        phase: crate::run_failure::RunFailurePhase::Stream,
+        transient: true,
+        partial_output: crate::run_failure::PartialModelOutput::default(),
+        attempt_count: 10,
+        http_status: None,
+        retry_after_ms: None,
+        summary: "connection interrupted".into(),
+        diagnostic: "unexpected EOF".into(),
+        recovery_action: crate::run_failure::RecoveryAction::AutomaticRetry,
+    };
+    crate::store::settle_session_goal_run_with_failure(
+        &store_path,
+        session_id,
+        "failed-run",
+        0,
+        now_epoch_ms(),
+        crate::store::GoalRunDisposition::RetryableFailed,
+        Some(&failure),
+    )
+    .unwrap();
+
+    assert!(service
+        .start_next_direct_inbox_item()
+        .await
+        .unwrap()
+        .is_none());
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let goal = service.direct_goal().unwrap().unwrap();
+            if !service.has_active_operation()
+                && goal.status == crate::store::GoalStatus::BudgetLimited
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the persisted retry deadline should submit the goal continuation");
+
+    let goal = service.direct_goal().unwrap().unwrap();
+    assert_eq!(goal.tokens_used, 15);
+    assert_eq!(goal.consecutive_transient_failures, 0);
+    assert!(goal.next_attempt_at_epoch_ms.is_none());
+    assert!(goal.last_failure.is_none());
+    assert_eq!(server.finish().len(), 1);
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn direct_inbox_promotes_queued_prompts_one_at_a_time() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
@@ -568,7 +747,10 @@ async fn cleanup_failure_blocks_run_terminalization_and_remains_retryable() {
         finish_service
             .finish_run(
                 &finish_run_id,
-                RunOutcome::Failed("model failed".to_string(), None),
+                RunOutcome::Failed(
+                    crate::run_failure::RunFailure::unknown("model failed"),
+                    None,
+                ),
             )
             .await;
     });

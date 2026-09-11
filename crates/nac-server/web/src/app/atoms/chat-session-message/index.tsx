@@ -74,7 +74,7 @@ const ChatSessionMessage: React.FC<ChatSessionMessageProps> & {
         />
         <p className="flex-1 min-w-0 header-sm break-words !my-0">{title}</p>
       </div>
-      {children ? <p className="w-full text-small break-words">{children}</p> : null}
+      {children ? <div className="w-full text-small break-words">{children}</div> : null}
       {action ? (
         <Button
           size={ButtonSize.Small}

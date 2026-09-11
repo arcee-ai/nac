@@ -9,6 +9,7 @@ fn test_event(sequence_id: u64, message: &str) -> SessionEventEnvelope {
         run_id: None,
         event: nac_core::events::SessionEvent::RunFailed {
             message: message.to_string(),
+            failure: None,
         },
     }
 }

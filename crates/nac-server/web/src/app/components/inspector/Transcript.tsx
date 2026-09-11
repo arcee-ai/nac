@@ -33,6 +33,7 @@ import { cn } from "@/app/lib/cn";
 import { RevertModal } from "@/app/components/modals/RevertModal";
 import { displayPromptFromMessageText, formatStoreTime, invokedSkillNames } from "@/app/lib/format";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
+import { failureRecoveryAffordance } from "@/app/lib/runFailure";
 import { revisionsByTurn } from "@/app/lib/revisions";
 import { routes, type SessionPanel } from "@/app/lib/routes";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
@@ -44,13 +45,16 @@ import {
   type TranscriptTurn,
 } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
   useDismissSessionFork,
   useForkSession,
   useLoadOlderMessages,
   useRegenerateRun,
+  useSessionGoal,
   useSessionPermissions,
   useSubmitRun,
+  useUpdateGoal,
   useWorkspaceRevisions,
 } from "@/app/services/queries";
 import {
@@ -73,11 +77,13 @@ import {
   useLiveThreads,
   useOptimisticUserPrompt,
   useRunError,
+  useRunFailure,
   useRunning,
+  useModelRetryAttempt,
   useStreamReasoning,
   useStreamText,
 } from "@/app/store/runtimeStore";
-import type { SessionSnapshotResponse } from "@/app/types/api";
+import type { RunFailure, SessionGoalRecord, SessionSnapshotResponse } from "@/app/types/api";
 
 interface TranscriptProps {
   sessionId: string;
@@ -103,6 +109,60 @@ export function TranscriptRecoveryNotice({ warning }: { warning?: string | null 
       title="Session recovered"
     >
       {warning}
+    </ChatSessionMessage>
+  );
+}
+
+export function RunFailureNotice({
+  failure,
+  goal,
+  action,
+}: {
+  failure: RunFailure;
+  goal?: SessionGoalRecord | null;
+  action?: { label: string; onClick: () => void };
+}) {
+  const retryScheduled = failure.recovery_action === "automatic_retry" && goal?.status === "active";
+  const retryExhausted = failure.recovery_action === "resume_goal" && goal?.status === "blocked";
+  const partial = Boolean(
+    failure.partial_output?.text ||
+    failure.partial_output?.reasoning ||
+    failure.partial_output?.tool_call,
+  );
+  const title = retryScheduled
+    ? "Goal retry scheduled"
+    : retryExhausted
+      ? "Goal stopped after repeated run failures"
+      : partial
+        ? "Run stopped after a partial response"
+        : failure.summary;
+  const retryTime = goal?.next_attempt_at_epoch_ms
+    ? new Date(goal.next_attempt_at_epoch_ms).toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : null;
+  return (
+    <ChatSessionMessage
+      role={retryScheduled ? "status" : "alert"}
+      variant={retryScheduled ? ChatSessionMessageVariant.Info : ChatSessionMessageVariant.Danger}
+      title={title}
+      action={action}
+    >
+      <span>
+        {retryScheduled
+          ? `The durable goal and its usage were preserved. NAC will continue automatically${retryTime ? ` at ${retryTime}` : ""}.`
+          : retryExhausted
+            ? "The durable goal and its usage were preserved. Resume it when you want another bounded retry sequence."
+            : failure.summary}
+      </span>
+      <details className="mt-2">
+        <summary className="cursor-pointer">Diagnostics</summary>
+        <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-xs">
+          {failure.diagnostic}
+        </pre>
+      </details>
     </ChatSessionMessage>
   );
 }
@@ -146,6 +206,8 @@ export function Transcript({
   const stopping = useCancelArmed(sessionId);
   const activity = useActivity();
   const error = useRunError();
+  const liveFailure = useRunFailure();
+  const modelRetryAttempt = useModelRetryAttempt();
   const liveThreads = useLiveThreads();
   const finishedToolCalls = useFinishedToolCalls();
   const primaryToolEvents = usePrimaryToolEvents();
@@ -157,6 +219,7 @@ export function Transcript({
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const toast = useToast();
+  const sessionActions = useSessionActions();
   const navigate = useNavigate();
   const backend = snapshot?.metadata.backend ?? null;
   const toNotice = useErrorNotice(sessionId, backend);
@@ -172,6 +235,8 @@ export function Transcript({
   const direct =
     snapshot?.metadata.behavior === "direct" ||
     snapshot?.metadata.behavior === "direct-with-orchestrator";
+  const goalQuery = useSessionGoal(sessionId, direct);
+  const updateGoal = useUpdateGoal();
   const { data: permissions } = useSessionPermissions(sessionId, direct);
   const pendingPermissionCallIds = useMemo(
     () =>
@@ -311,10 +376,10 @@ export function Transcript({
             id: sessionId,
             messageIdx,
           });
-          pushLocalEvent("run", `▶ resent: ${response.display_prompt.slice(0, 80)}`);
+          pushLocalEvent("run", `▶ regenerated: ${response.display_prompt.slice(0, 80)}`);
         } catch (err) {
-          pushLocalEvent("error", `resend failed: ${errorMessage(toRunError(err))}`, true);
-          toast.error(`Failed to resend: ${humanErrorText(toRunError(err), backend)}`);
+          pushLocalEvent("error", `regeneration failed: ${errorMessage(toRunError(err))}`, true);
+          toast.error(`Failed to regenerate: ${humanErrorText(toRunError(err), backend)}`);
         }
       })();
     },
@@ -444,9 +509,48 @@ export function Transcript({
   const showInitialPrompts = Boolean(snapshot && turns.length === 0 && !running && !showPending);
 
   const runError = error && !running ? error : null;
+  const durableFailure = !running
+    ? (liveFailure ?? snapshot?.run_failure ?? goalQuery.data?.last_failure ?? null)
+    : null;
+  const latestUser = [...turns].reverse().find((turn) => turn.kind === "user");
+  const recoveryAffordance = durableFailure
+    ? failureRecoveryAffordance(durableFailure, goalQuery.data, latestUser?.kind === "user")
+    : null;
+  const failureAction = durableFailure
+    ? recoveryAffordance === "resume_goal"
+      ? {
+          label: "Resume goal",
+          onClick: () => {
+            const goal = goalQuery.data;
+            if (!goal) return;
+            void updateGoal
+              .mutateAsync({
+                sessionId,
+                goalId: goal.goal_id,
+                payload: { expected_version: goal.version, status: "active" },
+              })
+              .catch((err) =>
+                toast.error(`Failed to resume goal: ${humanErrorText(toRunError(err), backend)}`),
+              );
+          },
+        }
+      : recoveryAffordance === "settings"
+        ? {
+            label: "Open settings",
+            onClick: () => sessionActions.settings(sessionId),
+          }
+        : recoveryAffordance === "regenerate" && latestUser?.kind === "user"
+          ? {
+              label: "Regenerate from original prompt",
+              onClick: () => resend(latestUser.messageIndex),
+            }
+          : undefined
+    : undefined;
   // Prefer the session notice when both fire; a broken config already explains
   // why the run could not continue.
-  const notice = errorNotice ?? (runError && !authErrorSuppressed ? toNotice(runError) : null);
+  const notice = durableFailure
+    ? null
+    : (errorNotice ?? (runError && !authErrorSuppressed ? toNotice(runError) : null));
 
   // Nothing is worth revealing before the snapshot lands, unless the reason it
   // never will is the notice standing in its place.
@@ -556,7 +660,7 @@ export function Transcript({
                 );
               }
 
-              // Resend / revert on a model turn address the user prompt it
+              // Regenerate / revert on a model turn address the user prompt it
               // answered — same messageIdx as the bubble above.
               let precedingUserIndex: number | null = null;
               let precedingUser: Extract<TranscriptTurn, { kind: "user" }> | null = null;
@@ -665,6 +769,24 @@ export function Transcript({
             >
               {notice.description}
             </ChatSessionMessage>
+          ) : null}
+
+          {running && modelRetryAttempt ? (
+            <ChatSessionMessage
+              role="status"
+              variant={ChatSessionMessageVariant.Info}
+              title={`Connection interrupted; retrying model response (attempt ${modelRetryAttempt})`}
+            >
+              The abandoned partial stream was cleared before this attempt began.
+            </ChatSessionMessage>
+          ) : null}
+
+          {durableFailure ? (
+            <RunFailureNotice
+              failure={durableFailure}
+              goal={goalQuery.data}
+              action={failureAction}
+            />
           ) : null}
 
           <TranscriptRecoveryNotice warning={snapshot?.transcript_recovery_warning} />

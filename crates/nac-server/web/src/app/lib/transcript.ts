@@ -33,6 +33,15 @@ import type {
 
 /** Exact assistant marker written after any partial response on cancellation. */
 export const RUN_CANCELLED_MARKER = "[run cancelled by user]";
+/** Stored sentinel identifying an assistant response abandoned by run failure. */
+export const RUN_FAILED_PARTIAL_MARKER = "[run failed after this partial assistant response]";
+
+function stripRunFailureMarker(content: string): string {
+  const trimmed = content.trim();
+  if (trimmed === RUN_FAILED_PARTIAL_MARKER) return "";
+  const suffix = `\n\n${RUN_FAILED_PARTIAL_MARKER}`;
+  return trimmed.endsWith(suffix) ? trimmed.slice(0, -suffix.length).trimEnd() : trimmed;
+}
 /**
  * Prefix the backend puts on every tool result that exists only because the
  * user stopped the run — both the synthetic result that closes a call the run
@@ -676,7 +685,9 @@ export function buildTranscript(
       });
     }
 
-    const content = stripNativeToolMarkup(message.content ?? "").trim();
+    // The sentinel is status metadata, not model prose. Keeping it out of the
+    // text block prevents Markdown rendering and clipboard leakage.
+    const content = stripRunFailureMarker(stripNativeToolMarkup(message.content ?? ""));
     if (content) {
       blocks.push({
         kind: "text",

@@ -76,12 +76,11 @@ async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch()
 
     let first_manager = test_manager(&root);
     let first = first_manager.snapshot("session").await.unwrap();
+    assert!(first.transcript_recovery_warning.is_none());
     assert_eq!(
-            first.transcript_recovery_warning.as_deref(),
-            Some(
-                "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue."
-            )
-        );
+        first.run_failure.as_ref().map(|failure| failure.kind),
+        Some(nac_core::run_failure::RunFailureKind::Interrupted)
+    );
     assert_eq!(
         first
             .messages
@@ -121,6 +120,7 @@ async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch()
         second.transcript_recovery_warning,
         first.transcript_recovery_warning
     );
+    assert_eq!(second.run_failure, first.run_failure);
     assert_ne!(second.thread_event_boundary.epoch_id, first_epoch);
     assert!(
         second_manager
@@ -166,12 +166,11 @@ async fn cached_manager_snapshot_reconciles_peer_interruption_once() {
     drop(peer_lease);
 
     let recovered = manager.snapshot("session").await.unwrap();
+    assert!(recovered.transcript_recovery_warning.is_none());
     assert_eq!(
-            recovered.transcript_recovery_warning.as_deref(),
-            Some(
-                "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue."
-            )
-        );
+        recovered.run_failure.as_ref().map(|failure| failure.kind),
+        Some(nac_core::run_failure::RunFailureKind::Interrupted)
+    );
     assert!(matches!(
         recovered.messages.last(),
         Some(nac_core::types::Message::User { content }) if content == "committed by peer"

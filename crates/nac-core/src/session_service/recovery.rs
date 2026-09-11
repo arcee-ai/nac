@@ -101,6 +101,7 @@ impl SessionService {
                 self.event_bus.emit_with_context(
                     SessionEvent::RunFailed {
                         message: FAILED_RUN_WARNING.to_string(),
+                        failure: Some(crate::run_failure::RunFailure::unknown(FAILED_RUN_WARNING)),
                     },
                     Some(SessionRunId::from_stored(run_id.clone())),
                     None,
@@ -116,6 +117,9 @@ impl SessionService {
                 self.event_bus.emit_with_context(
                     SessionEvent::RunFailed {
                         message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
+                        failure: Some(crate::run_failure::RunFailure::interrupted(
+                            INTERRUPTED_RUN_EVENT_MESSAGE,
+                        )),
                     },
                     Some(SessionRunId::from_stored(run_id.clone())),
                     None,

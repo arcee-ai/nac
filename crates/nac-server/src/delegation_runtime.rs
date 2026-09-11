@@ -2,10 +2,21 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use nac_core::{
+    run_failure::RunFailure,
     session_service::MessagePageRequest,
     sessions,
     store::{ManagedOrchestratorRecord, ManagedOrchestratorStatus},
 };
+
+pub(crate) fn managed_run_failure_status(
+    failure: Option<&RunFailure>,
+) -> ManagedOrchestratorStatus {
+    if failure.is_some_and(RunFailure::is_interrupted) {
+        ManagedOrchestratorStatus::Interrupted
+    } else {
+        ManagedOrchestratorStatus::Failed
+    }
+}
 
 use crate::{
     orchestration, ServerOrchestrationController, ServerTraditionalChildController,

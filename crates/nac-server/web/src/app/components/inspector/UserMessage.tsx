@@ -110,12 +110,15 @@ export const UserMessage = memo(function UserMessage({
           ) : null}
 
           {canRefresh ? (
-            <Tooltip title="Resend" position={TooltipPosition.BottomLeft}>
+            <Tooltip
+              title="Regenerate from the original prompt (rewinds later transcript and workspace changes)"
+              position={TooltipPosition.BottomLeft}
+            >
               <Button
                 size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
                 variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
                 content={ButtonContent.Icon}
-                aria-label="Resend"
+                aria-label="Regenerate from original prompt"
                 disabled={actionsDisabled}
                 onClick={() => onRefresh(messageIndex)}
                 className="md:!h-4 md:!min-h-4 md:!p-0"

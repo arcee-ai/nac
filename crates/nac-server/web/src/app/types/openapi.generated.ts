@@ -118,6 +118,8 @@ export interface components {
     AssignSessionRequest: { session_id: string };
     AssistantStreamDelta: {
       reasoning?: string | null;
+      reset?: boolean;
+      retry_attempt?: number | null;
       text?: string | null;
       thread_name?: string | null;
     };
@@ -581,6 +583,7 @@ export interface components {
       status: string;
       steering_id: number;
     };
+    PartialModelOutput: { reasoning?: boolean; text?: boolean; tool_call?: boolean };
     PermissionApprovalMode: "manual" | "auto_approve";
     PermissionGrantRecord: {
       action: string;
@@ -685,6 +688,12 @@ export interface components {
       boundary: components["schemas"]["SessionEventBoundary"];
       events: components["schemas"]["SessionEventEnvelope"][];
     };
+    RecoveryAction:
+      | "automatic_retry"
+      | "resume_goal"
+      | "regenerate_with_rewind"
+      | "settings"
+      | "none";
     RegenerateSessionRequest: { message_idx: number };
     ReorderProjectsRequest: {
       expected_versions: Record<string, number>;
@@ -763,6 +772,28 @@ export interface components {
       transcript_len: number;
       workspace_restored: boolean;
     };
+    RunFailure: {
+      attempt_count: number;
+      diagnostic: string;
+      http_status?: number | null;
+      kind: components["schemas"]["RunFailureKind"];
+      partial_output?: components["schemas"]["PartialModelOutput"];
+      phase: components["schemas"]["RunFailurePhase"];
+      recovery_action: components["schemas"]["RecoveryAction"];
+      retry_after_ms?: number | null;
+      summary: string;
+      transient: boolean;
+    };
+    RunFailureKind:
+      | "transport"
+      | "capacity"
+      | "authentication"
+      | "validation"
+      | "configuration"
+      | "protocol"
+      | "interrupted"
+      | "unknown";
+    RunFailurePhase: "request" | "response" | "stream" | "decode" | "agent";
     SandboxActivity: { phase: string; since_epoch_ms: number };
     SandboxAvailability: {
       detail?: string | null;
@@ -796,7 +827,11 @@ export interface components {
           type: "run_started";
         }
       | { duration_ms?: number | null; response: string; type: "run_completed" }
-      | { message: string; type: "run_failed" }
+      | {
+          failure?: null | components["schemas"]["RunFailure"];
+          message: string;
+          type: "run_failed";
+        }
       | { type: "run_cancelled" }
       | { request: components["schemas"]["PermissionRequest"]; type: "permission_asked" }
       | {
@@ -839,6 +874,7 @@ export interface components {
       metadata: components["schemas"]["SessionMetadata"];
       primary_tool_events?: components["schemas"]["AgentEvent"][];
       response_timing: components["schemas"]["ResponseTimingSnapshot"];
+      run_failure?: null | components["schemas"]["RunFailure"];
       sessions: components["schemas"]["SessionSummarySnapshot"][];
       thread_episodes: Record<string, components["schemas"]["EpisodeSnapshot"][]>;
       thread_event_boundary: components["schemas"]["SessionEventBoundary"];
@@ -854,9 +890,12 @@ export interface components {
       accounting_run_id: string | null;
       accounting_started_at_epoch_ms: number | null;
       accounting_token_baseline: number | null;
+      consecutive_transient_failures: number;
       continuation_run_id: string | null;
       created_at: string;
       goal_id: string;
+      last_failure: null | components["schemas"]["RunFailure"];
+      next_attempt_at_epoch_ms: number | null;
       objective: string;
       session_id: string;
       status: components["schemas"]["GoalStatus"];

@@ -42,6 +42,9 @@ impl SessionService {
             event_bus.emit_with_context(
                 SessionEvent::RunFailed {
                     message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
+                    failure: Some(crate::run_failure::RunFailure::interrupted(
+                        INTERRUPTED_RUN_EVENT_MESSAGE,
+                    )),
                 },
                 Some(SessionRunId::from_stored(run_id)),
                 None,
@@ -118,6 +121,7 @@ impl SessionService {
             managed_admission_enabled: false,
             managed_identity: None,
             inbox_wake: Arc::new(Mutex::new(())),
+            goal_retry_wake: Arc::new(StdMutex::new(None)),
             #[cfg(test)]
             frontend_snapshot_after_workspace_gate: None,
         };

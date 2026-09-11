@@ -316,6 +316,7 @@ impl SessionService {
             expected_version,
             update,
         )?;
+        self.cancel_goal_retry_wake();
         if goal.status == crate::store::GoalStatus::Active {
             self.start_next_direct_inbox_item().await?;
         }
@@ -334,7 +335,9 @@ impl SessionService {
             session_id,
             goal_id,
             expected_version,
-        )
+        )?;
+        self.cancel_goal_retry_wake();
+        Ok(())
     }
 
     /// Idempotently promote the oldest pending item when this direct session
@@ -394,8 +397,18 @@ impl SessionService {
         let Some(goal) = crate::store::load_session_goal(&self.metadata.store_path, session_id)?
             .filter(|goal| goal.status == crate::store::GoalStatus::Active)
         else {
+            self.cancel_goal_retry_wake();
             return Ok(None);
         };
+        if goal
+            .next_attempt_at_epoch_ms
+            .is_some_and(|deadline| deadline > now_epoch_ms())
+        {
+            drop(lease);
+            self.schedule_goal_retry_wake(&goal);
+            return Ok(None);
+        }
+        self.cancel_goal_retry_wake();
         self.try_submit_prompt_inner(
             None,
             goal_continuation_prompt(&goal),
@@ -407,5 +420,87 @@ impl SessionService {
         )
         .map(Some)
         .map_err(anyhow::Error::new)
+    }
+
+    fn cancel_goal_retry_wake(&self) {
+        let wake = self
+            .goal_retry_wake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(wake) = wake {
+            wake.task.abort();
+        }
+    }
+
+    fn disarm_goal_retry_wake(&self, goal_id: &str, goal_version: i64) {
+        let mut guard = self
+            .goal_retry_wake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if guard
+            .as_ref()
+            .is_some_and(|wake| wake.goal_id == goal_id && wake.goal_version == goal_version)
+        {
+            guard.take();
+        }
+    }
+
+    fn schedule_goal_retry_wake(&self, goal: &crate::store::SessionGoalRecord) {
+        let Some(deadline) = goal.next_attempt_at_epoch_ms else {
+            return;
+        };
+        let mut guard = self
+            .goal_retry_wake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if guard.as_ref().is_some_and(|wake| {
+            wake.goal_id == goal.goal_id
+                && wake.goal_version == goal.version
+                && !wake.task.is_finished()
+        }) {
+            return;
+        }
+        if let Some(previous) = guard.take() {
+            previous.task.abort();
+        }
+        let service = self.clone();
+        let goal_id = goal.goal_id.clone();
+        let goal_version = goal.version;
+        let task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(
+                deadline.saturating_sub(now_epoch_ms()),
+            ))
+            .await;
+            let Some(session_id) = service.metadata.session_id.as_deref() else {
+                return;
+            };
+            let current =
+                match crate::store::load_session_goal(&service.metadata.store_path, session_id) {
+                    Ok(Some(goal)) => goal,
+                    Ok(None) => return,
+                    Err(error) => {
+                        eprintln!("nac: failed to load goal at retry deadline: {error:#}");
+                        return;
+                    }
+                };
+            if current.goal_id != goal_id
+                || current.version != goal_version
+                || current.status != crate::store::GoalStatus::Active
+                || current.next_attempt_at_epoch_ms != Some(deadline)
+                || deadline > now_epoch_ms()
+            {
+                return;
+            }
+            service.disarm_goal_retry_wake(&goal_id, goal_version);
+            if let Err(error) = service.start_next_direct_inbox_item().await {
+                eprintln!("nac: failed to resume goal at retry deadline: {error:#}");
+            }
+        });
+        *guard = Some(GoalRetryWake {
+            goal_id: goal.goal_id.clone(),
+            goal_version,
+            task,
+        });
     }
 }

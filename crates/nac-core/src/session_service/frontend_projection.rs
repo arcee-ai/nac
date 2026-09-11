@@ -64,7 +64,7 @@ impl SessionService {
             thread_events,
             thread_event_boundary,
             thread_steering,
-            run_recovery_warning,
+            run_failure,
             worksets,
             forks,
         ) = {
@@ -98,7 +98,7 @@ impl SessionService {
                 })
                 .transpose()?
                 .unwrap_or_default();
-            let run_recovery_warning = session_id
+            let run_failure = session_id
                 .map(|session_id| {
                     crate::store::load_run_recovery_with_connection(&conn, session_id)
                 })
@@ -106,10 +106,14 @@ impl SessionService {
                 .flatten()
                 .and_then(|record| match record.status {
                     crate::store::RunRecoveryStatus::Active => None,
-                    crate::store::RunRecoveryStatus::Interrupted => {
-                        Some(INTERRUPTED_RUN_WARNING.to_string())
+                    crate::store::RunRecoveryStatus::Interrupted => Some(
+                        crate::run_failure::RunFailure::interrupted(INTERRUPTED_RUN_WARNING),
+                    ),
+                    crate::store::RunRecoveryStatus::Failed => {
+                        Some(record.failure.unwrap_or_else(|| {
+                            crate::run_failure::RunFailure::unknown(FAILED_RUN_WARNING)
+                        }))
                     }
-                    crate::store::RunRecoveryStatus::Failed => Some(FAILED_RUN_WARNING.to_string()),
                 });
             (
                 sessions,
@@ -118,7 +122,7 @@ impl SessionService {
                 thread_events,
                 thread_event_boundary,
                 thread_steering,
-                run_recovery_warning,
+                run_failure,
                 worksets,
                 forks,
             )
@@ -131,7 +135,7 @@ impl SessionService {
             thread_event_boundary,
             thread_steering,
             forks,
-            run_recovery_warning,
+            run_failure,
             worksets,
             workspace,
         })
@@ -352,21 +356,13 @@ impl SessionService {
             .transcript_recovery_warning
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let transcript_recovery_warning = match (
-            blocking.run_recovery_warning.as_deref(),
-            transcript_warning.as_deref(),
-        ) {
-            (Some(run_warning), Some(transcript_warning)) => {
-                Some(format!("{run_warning}\n\n{transcript_warning}"))
-            }
-            (Some(run_warning), None) => Some(run_warning.to_string()),
-            (None, warning) => warning.map(str::to_owned),
-        };
+        let transcript_recovery_warning = transcript_warning.as_deref().map(str::to_owned);
         let snapshot = SessionFrontendSnapshot {
             metadata,
             messages: loaded_messages.messages,
             message_created_at: loaded_messages.created_at,
             transcript_recovery_warning,
+            run_failure: blocking.run_failure,
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),

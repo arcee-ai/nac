@@ -8076,6 +8076,18 @@
               "null"
             ]
           },
+          "reset": {
+            "type": "boolean",
+            "description": "Clear abandoned live output before displaying a replacement attempt."
+          },
+          "retry_attempt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
           "text": {
             "type": [
               "string",
@@ -10810,6 +10822,20 @@
           }
         }
       },
+      "PartialModelOutput": {
+        "type": "object",
+        "properties": {
+          "reasoning": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "boolean"
+          },
+          "tool_call": {
+            "type": "boolean"
+          }
+        }
+      },
       "PermissionApprovalMode": {
         "type": "string",
         "description": "User-selected approval behavior for one durable direct ownership tree.\n\nThis is deliberately an answer policy at the broker boundary, not an\nexecution backend or a reusable resource grant.",
@@ -11423,6 +11449,16 @@
           }
         }
       },
+      "RecoveryAction": {
+        "type": "string",
+        "enum": [
+          "automatic_retry",
+          "resume_goal",
+          "regenerate_with_rewind",
+          "settings",
+          "none"
+        ]
+      },
       "RegenerateSessionRequest": {
         "type": "object",
         "required": [
@@ -11958,6 +11994,87 @@
           }
         }
       },
+      "RunFailure": {
+        "type": "object",
+        "description": "Credential-redacted failure metadata suitable for persistence and API use.",
+        "required": [
+          "kind",
+          "phase",
+          "transient",
+          "attempt_count",
+          "summary",
+          "diagnostic",
+          "recovery_action"
+        ],
+        "properties": {
+          "attempt_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "diagnostic": {
+            "type": "string"
+          },
+          "http_status": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RunFailureKind"
+          },
+          "partial_output": {
+            "$ref": "#/components/schemas/PartialModelOutput"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/RunFailurePhase"
+          },
+          "recovery_action": {
+            "$ref": "#/components/schemas/RecoveryAction"
+          },
+          "retry_after_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "summary": {
+            "type": "string"
+          },
+          "transient": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RunFailureKind": {
+        "type": "string",
+        "description": "Stable failure categories carried from execution into durable presentation.\nProvider-specific wire codes are deliberately collapsed at the adapter edge.",
+        "enum": [
+          "transport",
+          "capacity",
+          "authentication",
+          "validation",
+          "configuration",
+          "protocol",
+          "interrupted",
+          "unknown"
+        ]
+      },
+      "RunFailurePhase": {
+        "type": "string",
+        "enum": [
+          "request",
+          "response",
+          "stream",
+          "decode",
+          "agent"
+        ]
+      },
       "SandboxActivity": {
         "type": "object",
         "description": "What sandbox setup is currently doing for one launching session, for UIs\nwaiting on a launch. Sandbox creation can take minutes (a first image\npull), and without this the only signal is a hung request.",
@@ -12193,6 +12310,16 @@
               "type"
             ],
             "properties": {
+              "failure": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunFailure"
+                  }
+                ]
+              },
               "message": {
                 "type": "string"
               },
@@ -12560,6 +12687,16 @@
           "response_timing": {
             "$ref": "#/components/schemas/ResponseTimingSnapshot"
           },
+          "run_failure": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunFailure"
+              }
+            ]
+          },
           "sessions": {
             "type": "array",
             "items": {
@@ -12639,6 +12776,9 @@
           "accounting_token_baseline",
           "accounting_started_at_epoch_ms",
           "continuation_run_id",
+          "consecutive_transient_failures",
+          "next_attempt_at_epoch_ms",
+          "last_failure",
           "created_at",
           "updated_at",
           "version"
@@ -12666,6 +12806,11 @@
             "format": "int64",
             "minimum": 0
           },
+          "consecutive_transient_failures": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
           "continuation_run_id": {
             "type": [
               "string",
@@ -12677,6 +12822,24 @@
           },
           "goal_id": {
             "type": "string"
+          },
+          "last_failure": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunFailure"
+              }
+            ]
+          },
+          "next_attempt_at_epoch_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           },
           "objective": {
             "type": "string"
