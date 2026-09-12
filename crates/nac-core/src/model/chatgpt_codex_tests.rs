@@ -615,6 +615,79 @@ async fn scripted_codex_sse_server(
     (address, server)
 }
 
+async fn truncated_chunk_then_completed_codex_sse_server(
+    partial_event: &'static str,
+) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        for (index, body) in [partial_event, completed_codex_sse()]
+            .into_iter()
+            .enumerate()
+        {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 16 * 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            if index == 0 {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                          Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+                stream
+                    .write_all(format!("{:X}\r\n{body}\r\n", body.len()).as_bytes())
+                    .await
+                    .unwrap();
+            } else {
+                let headers = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(headers.as_bytes()).await.unwrap();
+                stream.write_all(body.as_bytes()).await.unwrap();
+            }
+            stream.flush().await.unwrap();
+        }
+    });
+    (address, server)
+}
+
+async fn truncated_chunked_codex_sse_server(
+    bodies: Vec<&'static str>,
+) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        for body in bodies {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 16 * 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                      Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            stream
+                .write_all(format!("{:X}\r\n{body}\r\n", body.len()).as_bytes())
+                .await
+                .unwrap();
+            stream.flush().await.unwrap();
+        }
+    });
+    (address, server)
+}
+
 fn completed_codex_sse() -> &'static str {
     concat!(
         "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\n",
@@ -625,6 +698,19 @@ fn completed_codex_sse() -> &'static str {
         "data: {\"type\":\"response.completed\",\"response\":",
         "{\"status\":\"completed\",\"output\":[]}}\n\n"
     )
+}
+
+#[test]
+fn codex_auth_setup_and_refresh_failures_map_to_actionable_kinds() {
+    let configuration = codex_auth_run_failure(stored_auth_configuration_error(
+        "Codex auth file is missing",
+    ));
+    assert_eq!(configuration.kind, RunFailureKind::Configuration);
+    assert!(!configuration.transient);
+
+    let authentication = codex_auth_run_failure(anyhow!("refresh token was rejected"));
+    assert_eq!(authentication.kind, RunFailureKind::Authentication);
+    assert!(!authentication.transient);
 }
 
 #[tokio::test]
@@ -664,6 +750,7 @@ async fn retries_transient_codex_sse_error_before_observable_output() {
     assert_eq!(
         receive.try_iter().collect::<Vec<_>>(),
         vec![
+            ModelStreamDelta::retry_reset(2),
             ModelStreamDelta::reasoning("thinking"),
             ModelStreamDelta::text("complete"),
         ]
@@ -745,49 +832,135 @@ async fn exhausts_transient_codex_sse_retries_with_final_provider_error() {
 }
 
 #[tokio::test]
-async fn does_not_retry_codex_sse_error_after_observable_delta() {
+async fn retries_truncated_chunked_codex_stream_after_partial_output_with_or_without_observer() {
     use std::sync::mpsc;
     use tokio::time::timeout;
 
-    let partial_text = concat!(
-        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
-        "data: {\"type\":\"error\",\"error\":{\"code\":\"server_error\",",
-        "\"message\":\"Our servers are currently overloaded.\"}}\n\n"
-    );
-    let partial_reasoning = concat!(
-        "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\n",
-        "data: {\"type\":\"error\",\"error\":{\"code\":\"server_error\",",
-        "\"message\":\"Our servers are currently overloaded.\"}}\n\n"
-    );
     for (body, expected_delta) in [
-        (partial_text, ModelStreamDelta::text("partial")),
-        (partial_reasoning, ModelStreamDelta::reasoning("thinking")),
+        (
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+            ModelStreamDelta::text("partial"),
+        ),
+        (
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"partial reasoning\"}\n\n",
+            ModelStreamDelta::reasoning("partial reasoning"),
+        ),
     ] {
-        let (address, server) = scripted_codex_sse_server(vec![body]).await;
-        let (send, receive) = mpsc::channel();
-        let sink = move |delta| send.send(delta).expect("delta receiver should remain live");
-        let error = timeout(
-            Duration::from_secs(1),
-            post_codex_json_with_retry(
-                &Client::new(),
-                &format!("http://{address}"),
-                &json!({"stream": true}),
-                &stored_codex_auth("access-token"),
-                None,
-                Some(&sink),
-            ),
-        )
-        .await
-        .expect("post-delta stream error unexpectedly retried")
-        .unwrap_err();
-
-        timeout(Duration::from_secs(1), server)
+        for observed in [false, true] {
+            let (address, server) = truncated_chunk_then_completed_codex_sse_server(body).await;
+            let (send, receive) = mpsc::channel();
+            let sink = move |delta| send.send(delta).expect("delta receiver should remain live");
+            let response = timeout(
+                Duration::from_secs(2),
+                post_codex_json_with_retry_delay(
+                    &Client::new(),
+                    &format!("http://{address}"),
+                    &json!({"stream": true}),
+                    &stored_codex_auth("access-token"),
+                    None,
+                    observed.then_some(&sink),
+                    |_| Duration::ZERO,
+                ),
+            )
             .await
-            .expect("expected exactly one request")
+            .expect("post-delta stream retry timed out")
             .unwrap();
-        assert!(error.to_string().contains("currently overloaded"));
-        assert_eq!(receive.try_iter().collect::<Vec<_>>(), vec![expected_delta]);
+
+            timeout(Duration::from_secs(1), server)
+                .await
+                .expect("expected exactly two requests")
+                .unwrap();
+            assert_eq!(response["output"][0]["content"][0]["text"], "complete");
+            let deltas = receive.try_iter().collect::<Vec<_>>();
+            if observed {
+                assert_eq!(
+                    deltas,
+                    vec![
+                        expected_delta.clone(),
+                        ModelStreamDelta::retry_reset(2),
+                        ModelStreamDelta::reasoning("thinking"),
+                        ModelStreamDelta::text("complete"),
+                    ]
+                );
+            } else {
+                assert!(deltas.is_empty());
+            }
+        }
     }
+}
+
+#[tokio::test]
+async fn exhausted_truncated_stream_reports_typed_partial_output_and_attempt_count() {
+    use tokio::time::timeout;
+
+    let partial = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n";
+    let (address, server) = truncated_chunked_codex_sse_server(vec![partial; 10]).await;
+    let error = timeout(
+        Duration::from_secs(2),
+        post_codex_json_with_retry_delay(
+            &Client::new(),
+            &format!("http://{address}"),
+            &json!({"stream": true}),
+            &stored_codex_auth("access-token"),
+            None,
+            None,
+            |_| Duration::ZERO,
+        ),
+    )
+    .await
+    .expect("bounded post-delta retries timed out")
+    .unwrap_err()
+    .into_run_failure();
+
+    timeout(Duration::from_secs(1), server)
+        .await
+        .expect("expected exactly ten requests")
+        .unwrap();
+    assert_eq!(error.kind, RunFailureKind::Transport);
+    assert_eq!(error.phase, RunFailurePhase::Stream);
+    assert!(error.transient);
+    assert!(error.partial_output.text);
+    assert_eq!(error.attempt_count, 10);
+    assert!(error.diagnostic.contains("unexpected EOF"));
+}
+
+#[tokio::test]
+async fn exhausted_truncated_function_call_reports_partial_output_without_an_observer() {
+    use tokio::time::timeout;
+
+    let partial = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,",
+        "\"item\":{\"type\":\"function_call\",\"call_id\":\"call-1\",",
+        "\"name\":\"read_file\",\"arguments\":\"\"}}\n\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",",
+        "\"delta\":\"{\\\"path\\\":\"}\n\n"
+    );
+    let (address, server) = truncated_chunked_codex_sse_server(vec![partial; 10]).await;
+    let error = timeout(
+        Duration::from_secs(2),
+        post_codex_json_with_retry_delay(
+            &Client::new(),
+            &format!("http://{address}"),
+            &json!({"stream": true}),
+            &stored_codex_auth("access-token"),
+            None,
+            None,
+            |_| Duration::ZERO,
+        ),
+    )
+    .await
+    .expect("bounded function-call retries timed out")
+    .unwrap_err()
+    .into_run_failure();
+
+    timeout(Duration::from_secs(1), server)
+        .await
+        .expect("expected exactly ten requests")
+        .unwrap();
+    assert!(error.partial_output.tool_call);
+    assert!(!error.partial_output.text);
+    assert_eq!(error.attempt_count, 10);
+    assert!(error.diagnostic.contains("unexpected EOF"));
 }
 
 #[tokio::test]

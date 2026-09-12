@@ -385,7 +385,7 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
                 {
                     break;
                 }
-                SessionEvent::RunFailed { message }
+                SessionEvent::RunFailed { message, .. }
                     if envelope.run_id.as_ref() == Some(&run.run_id) =>
                 {
                     panic!("ordinary run failed: {message}");
@@ -511,7 +511,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
                     {
                         break;
                     }
-                    SessionEvent::RunFailed { message }
+                    SessionEvent::RunFailed { message, .. }
                         if envelope.run_id.as_ref() == Some(&run.run_id) =>
                     {
                         panic!("sequential run failed: {message}");

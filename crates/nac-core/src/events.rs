@@ -380,6 +380,8 @@ pub enum SessionEvent {
     },
     RunFailed {
         message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<crate::run_failure::RunFailure>,
     },
     /// The run ended because the user asked it to, which is an outcome rather
     /// than a fault. Carries no message: the user already knows what happened,
@@ -440,11 +442,29 @@ pub struct AssistantStreamDelta {
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
+    /// Clear abandoned live output before displaying a replacement attempt.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reset: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_attempt: Option<u32>,
 }
 
 impl AssistantStreamDelta {
+    pub(crate) fn from_model(
+        thread_name: Option<String>,
+        delta: crate::model::ModelStreamDelta,
+    ) -> Self {
+        Self {
+            thread_name,
+            text: (!delta.text.is_empty()).then_some(delta.text),
+            reasoning: (!delta.reasoning.is_empty()).then_some(delta.reasoning),
+            reset: delta.reset,
+            retry_attempt: delta.retry_attempt,
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.text.is_none() && self.reasoning.is_none()
+        !self.reset && self.text.is_none() && self.reasoning.is_none()
     }
 }
 
@@ -1068,8 +1088,9 @@ fn sanitize_external_session_event(event: SessionEvent) -> Option<SessionEvent> 
         SessionEvent::Agent { event } => SessionEvent::Agent {
             event: sanitize_external_agent_event(event)?,
         },
-        SessionEvent::RunFailed { .. } => SessionEvent::RunFailed {
+        SessionEvent::RunFailed { failure, .. } => SessionEvent::RunFailed {
             message: "run failed".to_string(),
+            failure: failure.map(crate::run_failure::RunFailure::sanitized),
         },
         event => event,
     })

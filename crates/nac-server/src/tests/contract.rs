@@ -1290,6 +1290,7 @@ fn session_event_envelope_serializes_for_sse_payloads() {
         run_id: None,
         event: nac_core::events::SessionEvent::RunFailed {
             message: "boom".to_string(),
+            failure: None,
         },
     };
 

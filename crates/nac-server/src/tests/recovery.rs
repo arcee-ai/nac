@@ -76,12 +76,11 @@ async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch()
 
     let first_manager = test_manager(&root);
     let first = first_manager.snapshot("session").await.unwrap();
+    assert!(first.transcript_recovery_warning.is_none());
     assert_eq!(
-            first.transcript_recovery_warning.as_deref(),
-            Some(
-                "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue."
-            )
-        );
+        first.run_failure.as_ref().map(|failure| failure.kind),
+        Some(nac_core::run_failure::RunFailureKind::Interrupted)
+    );
     assert_eq!(
         first
             .messages
@@ -121,6 +120,7 @@ async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch()
         second.transcript_recovery_warning,
         first.transcript_recovery_warning
     );
+    assert_eq!(second.run_failure, first.run_failure);
     assert_ne!(second.thread_event_boundary.epoch_id, first_epoch);
     assert!(
         second_manager
@@ -135,6 +135,182 @@ async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch()
             )),
         "idempotent rebuild must not synthesize another terminal event"
     );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn rebuilt_manager_hides_legacy_failed_partial_marker_in_run_event() {
+    let root = temp_root("legacy_failed_partial_restart");
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("restart-test-key"));
+    seed_editable_session(&root, "session");
+    let store_path = root.join("store.db");
+    let writer = nac_core::store::TranscriptLogWriter::new(&store_path).unwrap();
+    writer
+        .append_run_prompt(
+            "session",
+            0,
+            &nac_core::types::Message::User {
+                content: "persisted before process death".to_string(),
+            },
+            "failed-before-restart",
+        )
+        .unwrap();
+    writer
+        .append(
+            "session",
+            1,
+            &nac_core::types::Message::Assistant {
+                content: Some("[run failed after this partial assistant response]".to_string()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+        )
+        .unwrap();
+
+    let manager = test_manager(&root);
+    manager.snapshot("session").await.unwrap();
+    let recovery_events = manager.recent_events("session", None, 64).await.unwrap().1;
+    assert!(recovery_events.iter().any(|envelope| {
+        envelope.run_id.as_ref().map(|run_id| run_id.as_str()) == Some("failed-before-restart")
+            && matches!(
+                &envelope.event,
+                nac_core::events::SessionEvent::RunFailed {
+                    message,
+                    failure: Some(failure),
+                } if message == "run failed"
+                    && failure.diagnostic == "The previous run failed before producing a complete response. Resubmit the prompt to continue."
+                    && !failure.diagnostic.contains("[run failed after this partial assistant response]")
+            )
+    }), "{recovery_events:#?}");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn rebuilt_manager_rearms_staged_transient_goal_retry() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("staged_transient_goal_restart");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("restart-goal-key"));
+    let (base_url, request) = scripted_direct_response();
+    seed_direct_session_with_base_url(&root, "session", base_url);
+    let store_path = root.join("store.db");
+    nac_core::store::create_session_goal(
+        &store_path,
+        "session",
+        "finish after restart",
+        Some(15),
+        None,
+    )
+    .unwrap();
+    nac_core::store::bind_session_goal_run(
+        &store_path,
+        "session",
+        &nac_core::store::GoalRunBaseline {
+            run_id: "failed-before-restart".to_string(),
+            billable_tokens: 0,
+            started_at_epoch_ms: 10,
+            continuation: false,
+        },
+    )
+    .unwrap();
+    nac_core::store::TranscriptLogWriter::new(&store_path)
+        .unwrap()
+        .append_run_prompt(
+            "session",
+            0,
+            &nac_core::types::Message::User {
+                content: "start before process death".to_string(),
+            },
+            "failed-before-restart",
+        )
+        .unwrap();
+    let failure = nac_core::run_failure::RunFailure {
+        kind: nac_core::run_failure::RunFailureKind::Transport,
+        phase: nac_core::run_failure::RunFailurePhase::Stream,
+        transient: true,
+        partial_output: nac_core::run_failure::PartialModelOutput::default(),
+        attempt_count: 10,
+        http_status: None,
+        retry_after_ms: None,
+        summary: "The model stream was interrupted.".to_string(),
+        diagnostic: "unexpected EOF during chunk size line".to_string(),
+        recovery_action: nac_core::run_failure::RecoveryAction::RegenerateWithRewind,
+    };
+    rusqlite::Connection::open(&store_path)
+        .unwrap()
+        .execute(
+            "UPDATE session_run_recovery
+             SET failure_json = ?1
+             WHERE session_id = 'session' AND run_id = 'failed-before-restart'",
+            [serde_json::to_string(&failure).unwrap()],
+        )
+        .unwrap();
+
+    let manager = test_manager(&root);
+    let service = manager.attach_session("session").await.unwrap();
+    assert_eq!(
+        service.metadata().behavior,
+        sessions::SessionBehavior::Direct
+    );
+    assert!(manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("session"));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match request.try_recv() {
+                Ok(()) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    panic!("scripted model server disconnected before the retry request")
+                }
+            }
+        }
+    })
+    .await
+    .expect("fresh attachment must re-arm and submit the durable goal retry");
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let goal = nac_core::store::load_session_goal(&store_path, "session")
+                .unwrap()
+                .unwrap();
+            if goal.status == GoalStatus::BudgetLimited {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("retried goal should settle after the scripted response");
+    let recovery_events = manager.recent_events("session", None, 64).await.unwrap().1;
+    let recovered_failure = failure
+        .clone()
+        .with_recovery_action(nac_core::run_failure::RecoveryAction::AutomaticRetry);
+    assert!(recovery_events.iter().any(|envelope| {
+        envelope.run_id.as_ref().map(|run_id| run_id.as_str()) == Some("failed-before-restart")
+            && matches!(
+                &envelope.event,
+                nac_core::events::SessionEvent::RunFailed {
+                    failure: Some(event_failure),
+                    ..
+                } if event_failure == &recovered_failure
+            )
+    }));
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -166,12 +342,11 @@ async fn cached_manager_snapshot_reconciles_peer_interruption_once() {
     drop(peer_lease);
 
     let recovered = manager.snapshot("session").await.unwrap();
+    assert!(recovered.transcript_recovery_warning.is_none());
     assert_eq!(
-            recovered.transcript_recovery_warning.as_deref(),
-            Some(
-                "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue."
-            )
-        );
+        recovered.run_failure.as_ref().map(|failure| failure.kind),
+        Some(nac_core::run_failure::RunFailureKind::Interrupted)
+    );
     assert!(matches!(
         recovered.messages.last(),
         Some(nac_core::types::Message::User { content }) if content == "committed by peer"

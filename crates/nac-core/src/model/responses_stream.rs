@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use super::sse::{StreamFold, StreamFoldError};
 use super::stream::{DeltaSink, ModelStreamDelta};
+use crate::run_failure::PartialModelOutput;
 
 /// Folds a Responses-API event stream into the final `response` object, handing
 /// text and reasoning to the sink as they arrive. Shared by the OpenAI and Codex
@@ -13,6 +14,7 @@ pub(super) struct ResponsesStreamFold<'sink> {
     /// arrives with an empty `output` array.
     output_items: Vec<(usize, Value)>,
     observable_delta: bool,
+    partial_output: PartialModelOutput,
 }
 
 impl<'sink> ResponsesStreamFold<'sink> {
@@ -22,18 +24,20 @@ impl<'sink> ResponsesStreamFold<'sink> {
             final_response: None,
             output_items: Vec::new(),
             observable_delta: false,
+            partial_output: PartialModelOutput::default(),
         }
     }
 
     fn emit(&mut self, event: &Value, build: impl Fn(&str) -> ModelStreamDelta) {
-        let Some(on_delta) = self.on_delta else {
-            return;
-        };
         if let Some(text) = event.get("delta").and_then(Value::as_str) {
             let delta = build(text);
             if !delta.is_empty() {
-                self.observable_delta = true;
-                on_delta(delta);
+                self.partial_output.text |= !delta.text.is_empty();
+                self.partial_output.reasoning |= !delta.reasoning.is_empty();
+                if let Some(on_delta) = self.on_delta {
+                    self.observable_delta = true;
+                    on_delta(delta);
+                }
             }
         }
     }
@@ -48,6 +52,19 @@ impl StreamFold for ResponsesStreamFold<'_> {
             Some("response.reasoning_summary_text.delta" | "response.reasoning_text.delta") => {
                 self.emit(event, |text| ModelStreamDelta::reasoning(text));
             }
+            Some("response.output_item.added") => {
+                self.partial_output.tool_call |= event
+                    .get("item")
+                    .and_then(|item| item.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("function_call");
+            }
+            Some("response.function_call_arguments.delta") => {
+                self.partial_output.tool_call |= event
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .is_some_and(|delta| !delta.is_empty());
+            }
             Some("error" | "response.failed") => {
                 return Err(responses_event_error(
                     event,
@@ -56,6 +73,8 @@ impl StreamFold for ResponsesStreamFold<'_> {
             }
             Some("response.output_item.done") => {
                 if let Some(item) = event.get("item").cloned() {
+                    self.partial_output.tool_call |=
+                        item.get("type").and_then(Value::as_str) == Some("function_call");
                     let output_index = event
                         .get("output_index")
                         .and_then(Value::as_u64)
@@ -91,6 +110,10 @@ impl StreamFold for ResponsesStreamFold<'_> {
 
     fn has_observable_delta(&self) -> bool {
         self.observable_delta
+    }
+
+    fn partial_output(&self) -> PartialModelOutput {
+        self.partial_output
     }
 
     fn is_complete(&self) -> bool {
@@ -198,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn tracks_only_nonempty_deltas_delivered_to_a_live_sink() {
+    fn tracks_nonempty_partial_output_even_without_a_live_sink() {
         let (send, receive) = mpsc::channel();
         let sink = move |delta| send.send(delta).expect("delta receiver should remain live");
         let mut observed = ResponsesStreamFold::new(Some(&sink));
@@ -220,5 +243,6 @@ mod tests {
             .push(&json!({"type": "response.output_text.delta", "delta": "hidden"}))
             .unwrap();
         assert!(!unobserved.has_observable_delta());
+        assert!(unobserved.partial_output().text);
     }
 }

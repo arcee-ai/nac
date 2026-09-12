@@ -427,15 +427,11 @@ async fn recovered_session_continues_without_model_bookkeeping_and_clears_warnin
         crate::store::reconcile_active_run(&store_path, &session_id).unwrap(),
         crate::store::ActiveRunReconciliation::Interrupted { .. }
     ));
+    let recovered = parts.service.frontend_snapshot().await.unwrap();
+    assert!(recovered.transcript_recovery_warning.is_none());
     assert_eq!(
-        parts
-            .service
-            .frontend_snapshot()
-            .await
-            .unwrap()
-            .transcript_recovery_warning
-            .as_deref(),
-        Some(INTERRUPTED_RUN_WARNING)
+        recovered.run_failure.as_ref().map(|failure| failure.kind),
+        Some(crate::run_failure::RunFailureKind::Interrupted)
     );
 
     let mut events = parts.service.subscribe_events();
@@ -664,7 +660,10 @@ async fn failed_run_without_visible_response_round_trips_token_usage() {
             .service
             .finish_run_once(
                 &active.run_id,
-                RunOutcome::Failed("model API error".to_string(), Some(test_usage.clone())),
+                RunOutcome::Failed(
+                    crate::run_failure::RunFailure::unknown("model API error"),
+                    Some(test_usage.clone()),
+                ),
             )
             .await
     );

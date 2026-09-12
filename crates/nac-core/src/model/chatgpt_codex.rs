@@ -2,6 +2,9 @@ use super::auth_store::ensure_open_credential_file_is_safe;
 use super::responses_stream::ResponsesStreamFold;
 use super::sse::{read_sse_response, with_source_chain, StreamFold, StreamFoldError};
 use super::*;
+use crate::run_failure::{
+    PartialModelOutput, RecoveryAction, RunFailure, RunFailureKind, RunFailurePhase,
+};
 use anyhow::Context;
 use fs2::FileExt;
 use reqwest::header;
@@ -71,6 +74,44 @@ fn stored_auth_configuration_error(message: impl Into<String>) -> anyhow::Error 
     })
 }
 
+fn codex_auth_run_failure(error: anyhow::Error) -> RunFailure {
+    let configuration = error
+        .downcast_ref::<StoredCodexAuthConfigurationError>()
+        .is_some();
+    let transient_transport = error.chain().any(|source| {
+        source
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|error| error.is_connect() || error.is_timeout())
+    });
+    let kind = if configuration {
+        RunFailureKind::Configuration
+    } else if transient_transport {
+        RunFailureKind::Transport
+    } else {
+        RunFailureKind::Authentication
+    };
+    RunFailure {
+        kind,
+        phase: RunFailurePhase::Request,
+        transient: transient_transport,
+        partial_output: PartialModelOutput::default(),
+        attempt_count: 1,
+        http_status: None,
+        retry_after_ms: None,
+        summary: match kind {
+            RunFailureKind::Configuration => {
+                "Codex authentication is not configured correctly.".to_string()
+            }
+            RunFailureKind::Transport => {
+                "The connection failed while refreshing Codex authentication.".to_string()
+            }
+            _ => "Codex authentication could not be refreshed.".to_string(),
+        },
+        diagnostic: truncate(&redact_credentials(&format!("{error:#}"), &[])),
+        recovery_action: RecoveryAction::None,
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
     id_token: Option<String>,
@@ -97,7 +138,11 @@ struct CodexRequestError {
     status: Option<StatusCode>,
     message: String,
     retryable_stream: bool,
-    observable_delta: bool,
+    partial_output: PartialModelOutput,
+    attempt_count: u32,
+    retry_after_ms: Option<u64>,
+    kind: RunFailureKind,
+    phase: RunFailurePhase,
 }
 
 impl fmt::Display for CodexRequestError {
@@ -110,7 +155,37 @@ impl std::error::Error for CodexRequestError {}
 
 impl CodexRequestError {
     fn can_retry_stream(&self) -> bool {
-        self.retryable_stream && !self.observable_delta
+        self.retryable_stream
+    }
+
+    fn into_run_failure(self) -> RunFailure {
+        let summary = match (self.kind, self.partial_output.any()) {
+            (RunFailureKind::Capacity, _) => {
+                "The model provider is temporarily unavailable.".to_string()
+            }
+            (RunFailureKind::Transport, true) => {
+                "The connection ended after a partial model response.".to_string()
+            }
+            (RunFailureKind::Transport, false) => {
+                "The connection ended before the model responded.".to_string()
+            }
+            (RunFailureKind::Authentication, _) => {
+                "The model provider rejected authentication.".to_string()
+            }
+            _ => "The model request could not be completed.".to_string(),
+        };
+        RunFailure {
+            kind: self.kind,
+            phase: self.phase,
+            transient: self.retryable_stream,
+            partial_output: self.partial_output,
+            attempt_count: self.attempt_count.max(1),
+            http_status: self.status.map(|status| status.as_u16()),
+            retry_after_ms: self.retry_after_ms,
+            summary,
+            diagnostic: self.message,
+            recovery_action: RecoveryAction::None,
+        }
     }
 }
 
@@ -443,14 +518,18 @@ pub async fn send_responses(
         thinking_levels,
         prompt_cache_key,
     );
-    let auth = fresh_auth(client).await?;
+    let auth = fresh_auth(client)
+        .await
+        .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
 
     match post_codex_json_with_retry(client, &url, &request, &auth, prompt_cache_key, on_delta)
         .await
     {
         Ok(value) => parse_openai_responses_response(&value, &url),
         Err(error) if error.status == Some(StatusCode::UNAUTHORIZED) => {
-            let refreshed = force_refresh_auth(client).await?;
+            let refreshed = force_refresh_auth(client)
+                .await
+                .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
             let value = post_codex_json_with_retry(
                 client,
                 &url,
@@ -460,10 +539,10 @@ pub async fn send_responses(
                 on_delta,
             )
             .await
-            .map_err(anyhow::Error::new)?;
+            .map_err(|error| anyhow::Error::new(error.into_run_failure()))?;
             parse_openai_responses_response(&value, &url)
         }
-        Err(error) => Err(anyhow::Error::new(error)),
+        Err(error) => Err(anyhow::Error::new(error.into_run_failure())),
     }
 }
 
@@ -952,7 +1031,11 @@ async fn post_codex_json_with_retry_delay(
         status: None,
         message: "No attempts made".to_string(),
         retryable_stream: false,
-        observable_delta: false,
+        partial_output: PartialModelOutput::default(),
+        attempt_count: 0,
+        retry_after_ms: None,
+        kind: RunFailureKind::Unknown,
+        phase: RunFailurePhase::Request,
     };
 
     for attempt in 0..10 {
@@ -975,10 +1058,17 @@ async fn post_codex_json_with_retry_delay(
                 last_error = CodexRequestError {
                     status: None,
                     message: format!("HTTP request failed for {url}: {}", with_source_chain(&e)),
-                    retryable_stream: false,
-                    observable_delta: false,
+                    retryable_stream: true,
+                    partial_output: PartialModelOutput::default(),
+                    attempt_count: (attempt + 1) as u32,
+                    retry_after_ms: None,
+                    kind: RunFailureKind::Transport,
+                    phase: RunFailurePhase::Request,
                 };
                 if attempt < 9 {
+                    if let Some(on_delta) = on_delta {
+                        on_delta(ModelStreamDelta::retry_reset((attempt + 2) as u32));
+                    }
                     sleep(retry_delay(attempt)).await;
                 }
                 continue;
@@ -1016,14 +1106,21 @@ async fn post_codex_json_with_retry_delay(
             };
             match result {
                 Ok(value) => return Ok(value),
-                Err(error) if error.can_retry_stream() => {
+                Err(mut error) if error.can_retry_stream() => {
+                    error.attempt_count = (attempt + 1) as u32;
                     last_error = error;
                     if attempt < 9 {
+                        if let Some(on_delta) = on_delta {
+                            on_delta(ModelStreamDelta::retry_reset((attempt + 2) as u32));
+                        }
                         sleep(retry_delay(attempt)).await;
                     }
                     continue;
                 }
-                Err(error) => return Err(error),
+                Err(mut error) => {
+                    error.attempt_count = (attempt + 1) as u32;
+                    return Err(error);
+                }
             }
         }
 
@@ -1038,14 +1135,30 @@ async fn post_codex_json_with_retry_delay(
                 truncate(&redact_credentials(&response_body, &[auth.access.as_str()],))
             ),
             retryable_stream: false,
-            observable_delta: false,
+            partial_output: PartialModelOutput::default(),
+            attempt_count: (attempt + 1) as u32,
+            retry_after_ms: retry_after.map(|delay| delay.as_millis() as u64),
+            kind: if status == StatusCode::UNAUTHORIZED {
+                RunFailureKind::Authentication
+            } else if super::retryable_http_status(status) {
+                RunFailureKind::Capacity
+            } else {
+                RunFailureKind::Validation
+            },
+            phase: RunFailurePhase::Response,
         };
         if status == StatusCode::UNAUTHORIZED {
             return Err(error);
         }
         if super::retryable_http_status(status) {
-            last_error = error;
+            last_error = CodexRequestError {
+                retryable_stream: true,
+                ..error
+            };
             if attempt < 9 {
+                if let Some(on_delta) = on_delta {
+                    on_delta(ModelStreamDelta::retry_reset((attempt + 2) as u32));
+                }
                 let delay = retry_after.unwrap_or_else(|| retry_delay(attempt));
                 sleep(delay).await;
             }
@@ -1069,7 +1182,11 @@ async fn read_codex_body(
             redact_credentials(url, &[])
         ),
         retryable_stream: false,
-        observable_delta: false,
+        partial_output: PartialModelOutput::default(),
+        attempt_count: 1,
+        retry_after_ms: None,
+        kind: RunFailureKind::Transport,
+        phase: RunFailurePhase::Response,
     })
 }
 
@@ -1094,7 +1211,11 @@ async fn stream_codex_responses(
             status: Some(status),
             message: error.to_string(),
             retryable_stream: error.is_retryable(),
-            observable_delta: error.has_observable_delta(),
+            partial_output: error.partial_output(),
+            attempt_count: 1,
+            retry_after_ms: None,
+            kind: RunFailureKind::Transport,
+            phase: RunFailurePhase::Stream,
         })
 }
 
@@ -1120,7 +1241,15 @@ fn parse_codex_success_body(
                     truncate(&redact_credentials(response_body, secrets))
                 ),
                 retryable_stream: error.is_retryable(),
-                observable_delta: false,
+                partial_output: PartialModelOutput::default(),
+                attempt_count: 1,
+                retry_after_ms: None,
+                kind: if error.is_retryable() {
+                    RunFailureKind::Capacity
+                } else {
+                    RunFailureKind::Protocol
+                },
+                phase: RunFailurePhase::Decode,
             }
         });
     }
@@ -1133,7 +1262,11 @@ fn parse_codex_success_body(
             truncate(&redact_credentials(response_body, secrets))
         ),
         retryable_stream: false,
-        observable_delta: false,
+        partial_output: PartialModelOutput::default(),
+        attempt_count: 1,
+        retry_after_ms: None,
+        kind: RunFailureKind::Protocol,
+        phase: RunFailurePhase::Decode,
     })
 }
 

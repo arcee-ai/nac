@@ -64,6 +64,11 @@ pub struct SessionGoalRecord {
     pub accounting_started_at_epoch_ms: Option<u64>,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub continuation_run_id: Option<String>,
+    pub consecutive_transient_failures: u32,
+    #[cfg_attr(feature = "openapi", schema(required))]
+    pub next_attempt_at_epoch_ms: Option<u64>,
+    #[cfg_attr(feature = "openapi", schema(required))]
+    pub last_failure: Option<crate::run_failure::RunFailure>,
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
@@ -92,6 +97,7 @@ pub struct GoalRunBaseline {
 pub enum GoalRunDisposition {
     Completed,
     Failed,
+    RetryableFailed,
     Cancelled,
 }
 
@@ -101,6 +107,7 @@ pub struct GoalRunSettlement {
     pub final_billable_tokens: u64,
     pub terminal_at_epoch_ms: u64,
     pub disposition: GoalRunDisposition,
+    pub failure: Option<crate::run_failure::RunFailure>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -114,7 +121,16 @@ pub struct UserGoalUpdate {
 const COLUMNS: &str =
     "session_id, goal_id, objective, status, token_budget, tokens_used, time_used_ms, \
      accounting_run_id, accounting_token_baseline, accounting_started_at_epoch_ms, \
-     continuation_run_id, created_at, updated_at, version";
+     continuation_run_id, consecutive_transient_failures, next_attempt_at_epoch_ms, \
+     last_failure_json, created_at, updated_at, version";
+
+pub const MAX_CONSECUTIVE_TRANSIENT_GOAL_FAILURES: u32 = 3;
+
+fn retry_delay_ms(consecutive_failures: u32) -> u64 {
+    1_000u64
+        .saturating_mul(1u64 << consecutive_failures.saturating_sub(1).min(5))
+        .min(30_000)
+}
 
 fn u64_from_i64(index: usize, value: i64) -> rusqlite::Result<u64> {
     u64::try_from(value).map_err(|error| {
@@ -146,9 +162,29 @@ fn row_to_goal(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionGoalRecord> {
         accounting_token_baseline: optional_u64_from_i64(8, row.get(8)?)?,
         accounting_started_at_epoch_ms: optional_u64_from_i64(9, row.get(9)?)?,
         continuation_run_id: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
-        version: row.get(13)?,
+        consecutive_transient_failures: u32::try_from(row.get::<_, i64>(11)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                11,
+                rusqlite::types::Type::Integer,
+                error.into(),
+            )
+        })?,
+        next_attempt_at_epoch_ms: optional_u64_from_i64(12, row.get(12)?)?,
+        last_failure: row
+            .get::<_, Option<String>>(13)?
+            .map(|json| {
+                serde_json::from_str(&json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        13,
+                        rusqlite::types::Type::Text,
+                        error.into(),
+                    )
+                })
+            })
+            .transpose()?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+        version: row.get(16)?,
     })
 }
 
@@ -331,6 +367,8 @@ pub fn update_session_goal_by_user(
     transaction.execute(
         "UPDATE session_goals
          SET objective = ?1, token_budget = ?2, status = ?3,
+             consecutive_transient_failures = 0, next_attempt_at_epoch_ms = NULL,
+             last_failure_json = NULL,
              updated_at = ?4, version = version + 1
          WHERE session_id = ?5 AND goal_id = ?6 AND version = ?7",
         params![
@@ -433,6 +471,26 @@ pub fn settle_session_goal_run(
     terminal_at_epoch_ms: u64,
     disposition: GoalRunDisposition,
 ) -> Result<Option<SessionGoalRecord>> {
+    settle_session_goal_run_with_failure(
+        path,
+        session_id,
+        run_id,
+        final_billable_tokens,
+        terminal_at_epoch_ms,
+        disposition,
+        None,
+    )
+}
+
+pub fn settle_session_goal_run_with_failure(
+    path: &Path,
+    session_id: &str,
+    run_id: &str,
+    final_billable_tokens: u64,
+    terminal_at_epoch_ms: u64,
+    disposition: GoalRunDisposition,
+    failure: Option<&crate::run_failure::RunFailure>,
+) -> Result<Option<SessionGoalRecord>> {
     let mut connection = open_runtime_connection(path)?;
     let transaction =
         connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -443,6 +501,7 @@ pub fn settle_session_goal_run(
         final_billable_tokens,
         terminal_at_epoch_ms,
         disposition,
+        failure,
     )?;
     transaction.commit()?;
     Ok(goal)
@@ -455,6 +514,7 @@ pub(crate) fn settle_session_goal_run_with_connection(
     final_billable_tokens: u64,
     terminal_at_epoch_ms: u64,
     disposition: GoalRunDisposition,
+    failure: Option<&crate::run_failure::RunFailure>,
 ) -> Result<Option<SessionGoalRecord>> {
     require_direct_session(connection, session_id)?;
     let Some(current) = load_with_connection(connection, session_id)? else {
@@ -472,10 +532,50 @@ pub(crate) fn settle_session_goal_run_with_connection(
     );
     let tokens_used = current.tokens_used.saturating_add(delta_tokens);
     let time_used_ms = current.time_used_ms.saturating_add(delta_ms);
+    settle_goal_terminal_state(
+        connection,
+        session_id,
+        run_id,
+        current,
+        tokens_used,
+        time_used_ms,
+        terminal_at_epoch_ms,
+        disposition,
+        failure,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the goal terminal transition keeps its accounting and failure inputs explicit"
+)]
+fn settle_goal_terminal_state(
+    connection: &Connection,
+    session_id: &str,
+    run_id: &str,
+    current: SessionGoalRecord,
+    tokens_used: u64,
+    time_used_ms: u64,
+    terminal_at_epoch_ms: u64,
+    disposition: GoalRunDisposition,
+    failure: Option<&crate::run_failure::RunFailure>,
+) -> Result<Option<SessionGoalRecord>> {
+    let next_transient_failures = if disposition == GoalRunDisposition::RetryableFailed {
+        current.consecutive_transient_failures.saturating_add(1)
+    } else {
+        0
+    };
     let mut status = match disposition {
         GoalRunDisposition::Failed if current.status.is_unfinished() => GoalStatus::Blocked,
+        GoalRunDisposition::RetryableFailed
+            if current.status == GoalStatus::Active
+                && next_transient_failures >= MAX_CONSECUTIVE_TRANSIENT_GOAL_FAILURES =>
+        {
+            GoalStatus::Blocked
+        }
         GoalRunDisposition::Cancelled if current.status.is_unfinished() => GoalStatus::Paused,
-        GoalRunDisposition::Completed
+        GoalRunDisposition::RetryableFailed
+        | GoalRunDisposition::Completed
         | GoalRunDisposition::Failed
         | GoalRunDisposition::Cancelled => current.status,
     };
@@ -486,17 +586,43 @@ pub(crate) fn settle_session_goal_run_with_connection(
     {
         status = GoalStatus::BudgetLimited;
     }
+    let next_attempt_at_epoch_ms = (disposition == GoalRunDisposition::RetryableFailed
+        && status == GoalStatus::Active)
+        .then(|| terminal_at_epoch_ms.saturating_add(retry_delay_ms(next_transient_failures)));
+    let stored_failure = failure.cloned().map(|failure| {
+        let action = if failure.recovery_action == crate::run_failure::RecoveryAction::Settings {
+            crate::run_failure::RecoveryAction::Settings
+        } else if status == GoalStatus::Active {
+            crate::run_failure::RecoveryAction::AutomaticRetry
+        } else if status == GoalStatus::Blocked {
+            crate::run_failure::RecoveryAction::ResumeGoal
+        } else {
+            crate::run_failure::RecoveryAction::None
+        };
+        failure.with_recovery_action(action).sanitized()
+    });
+    let failure_json = stored_failure
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .context("failed to serialize goal failure")?;
     connection.execute(
         "UPDATE session_goals
          SET status = ?1, tokens_used = ?2, time_used_ms = ?3,
              accounting_run_id = NULL, accounting_token_baseline = NULL,
              accounting_started_at_epoch_ms = NULL, continuation_run_id = NULL,
-             updated_at = ?4, version = version + 1
-         WHERE session_id = ?5 AND goal_id = ?6 AND accounting_run_id = ?7",
+             consecutive_transient_failures = ?4, next_attempt_at_epoch_ms = ?5,
+             last_failure_json = ?6, updated_at = ?7, version = version + 1
+         WHERE session_id = ?8 AND goal_id = ?9 AND accounting_run_id = ?10",
         params![
             status.as_str(),
             checked_integer(tokens_used, "token usage")?,
             checked_integer(time_used_ms, "time usage")?,
+            next_transient_failures,
+            next_attempt_at_epoch_ms
+                .map(|value| checked_integer(value, "retry time"))
+                .transpose()?,
+            failure_json,
             now_utc(),
             session_id,
             current.goal_id,
@@ -504,6 +630,48 @@ pub(crate) fn settle_session_goal_run_with_connection(
         ],
     )?;
     load_with_connection(connection, session_id)
+}
+
+/// Reconcile a typed failure staged before a process died. Usage samples are
+/// process-local and unavailable after restart, so preserve the last committed
+/// accounting totals while applying the ordinary bounded retry transition.
+pub(crate) fn reconcile_session_goal_failure_with_connection(
+    connection: &Connection,
+    session_id: &str,
+    run_id: &str,
+    failure: &crate::run_failure::RunFailure,
+) -> Result<Option<crate::run_failure::RunFailure>> {
+    let Some(current) = load_with_connection(connection, session_id)? else {
+        return Ok(None);
+    };
+    if current.accounting_run_id.as_deref() != Some(run_id) {
+        return Ok(None);
+    }
+    let terminal_at_epoch_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX);
+    let disposition = if failure.transient {
+        GoalRunDisposition::RetryableFailed
+    } else {
+        GoalRunDisposition::Failed
+    };
+    let tokens_used = current.tokens_used;
+    let time_used_ms = current.time_used_ms;
+    Ok(settle_goal_terminal_state(
+        connection,
+        session_id,
+        run_id,
+        current,
+        tokens_used,
+        time_used_ms,
+        terminal_at_epoch_ms,
+        disposition,
+        Some(failure),
+    )?
+    .and_then(|goal| goal.last_failure))
 }
 
 /// Recover only the terminal disposition when a crash happened after the
@@ -527,6 +695,7 @@ pub(crate) fn reconcile_session_goal_terminal_with_connection(
         GoalRunDisposition::Cancelled if current.status.is_unfinished() => GoalStatus::Paused,
         GoalRunDisposition::Completed
         | GoalRunDisposition::Failed
+        | GoalRunDisposition::RetryableFailed
         | GoalRunDisposition::Cancelled => current.status,
     };
     connection.execute(
@@ -774,5 +943,170 @@ mod tests {
         .unwrap();
         assert_eq!(paused.goal_id, resumed.goal_id);
         assert_eq!(paused.status, GoalStatus::Paused);
+    }
+
+    fn transient_stream_failure() -> crate::run_failure::RunFailure {
+        crate::run_failure::RunFailure {
+            kind: crate::run_failure::RunFailureKind::Transport,
+            phase: crate::run_failure::RunFailurePhase::Stream,
+            transient: true,
+            partial_output: crate::run_failure::PartialModelOutput {
+                text: true,
+                ..Default::default()
+            },
+            attempt_count: 10,
+            http_status: None,
+            retry_after_ms: None,
+            summary: "The model stream was interrupted.".into(),
+            diagnostic: "unexpected EOF during chunk size line".into(),
+            recovery_action: crate::run_failure::RecoveryAction::AutomaticRetry,
+        }
+    }
+
+    #[test]
+    fn transient_failures_retry_twice_then_block_with_durable_reason() {
+        let path = test_path("transient-retries");
+        initialize(&path).unwrap();
+        direct_session(&path, "direct");
+        create_session_goal(&path, "direct", "finish", None, None).unwrap();
+        let failure = transient_stream_failure();
+
+        for attempt in 1..=3u32 {
+            let run_id = format!("run-{attempt}");
+            bind_session_goal_run(
+                &path,
+                "direct",
+                &GoalRunBaseline {
+                    run_id: run_id.clone(),
+                    billable_tokens: 0,
+                    started_at_epoch_ms: u64::from(attempt) * 1_000,
+                    continuation: true,
+                },
+            )
+            .unwrap()
+            .unwrap();
+            let terminal_at = u64::from(attempt) * 10_000;
+            let goal = settle_session_goal_run_with_failure(
+                &path,
+                "direct",
+                &run_id,
+                u64::from(attempt),
+                terminal_at,
+                GoalRunDisposition::RetryableFailed,
+                Some(&failure),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(goal.consecutive_transient_failures, attempt);
+            assert_eq!(
+                goal.status,
+                if attempt < 3 {
+                    GoalStatus::Active
+                } else {
+                    GoalStatus::Blocked
+                }
+            );
+            assert_eq!(
+                goal.next_attempt_at_epoch_ms,
+                (attempt < 3).then_some(terminal_at + (1u64 << (attempt - 1)) * 1_000)
+            );
+            assert_eq!(
+                goal.last_failure.as_ref().unwrap().recovery_action,
+                if attempt < 3 {
+                    crate::run_failure::RecoveryAction::AutomaticRetry
+                } else {
+                    crate::run_failure::RecoveryAction::ResumeGoal
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn successful_or_user_resumed_goal_clears_retry_state() {
+        let path = test_path("retry-reset");
+        initialize(&path).unwrap();
+        direct_session(&path, "direct");
+        create_session_goal(&path, "direct", "finish", None, None).unwrap();
+        bind_session_goal_run(
+            &path,
+            "direct",
+            &GoalRunBaseline {
+                run_id: "run-1".into(),
+                billable_tokens: 0,
+                started_at_epoch_ms: 1,
+                continuation: true,
+            },
+        )
+        .unwrap();
+        let failed = settle_session_goal_run_with_failure(
+            &path,
+            "direct",
+            "run-1",
+            0,
+            10,
+            GoalRunDisposition::RetryableFailed,
+            Some(&transient_stream_failure()),
+        )
+        .unwrap()
+        .unwrap();
+        let paused = update_session_goal_by_user(
+            &path,
+            "direct",
+            &failed.goal_id,
+            failed.version,
+            UserGoalUpdate {
+                status: Some(GoalStatus::Paused),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(paused.consecutive_transient_failures, 0);
+        assert!(paused.next_attempt_at_epoch_ms.is_none());
+        assert!(paused.last_failure.is_none());
+    }
+
+    #[test]
+    fn blocked_goal_preserves_settings_recovery_for_authentication_failure() {
+        let path = test_path("settings-recovery");
+        initialize(&path).unwrap();
+        direct_session(&path, "direct");
+        create_session_goal(&path, "direct", "finish", None, None).unwrap();
+        bind_session_goal_run(
+            &path,
+            "direct",
+            &GoalRunBaseline {
+                run_id: "run-1".into(),
+                billable_tokens: 0,
+                started_at_epoch_ms: 1,
+                continuation: true,
+            },
+        )
+        .unwrap();
+        let mut failure = transient_stream_failure();
+        failure.kind = crate::run_failure::RunFailureKind::Authentication;
+        failure.transient = false;
+        failure.diagnostic = format!("Authorization: Bearer goal-secret {}", "x".repeat(1_000));
+        failure.recovery_action = crate::run_failure::RecoveryAction::Settings;
+
+        let blocked = settle_session_goal_run_with_failure(
+            &path,
+            "direct",
+            "run-1",
+            0,
+            10,
+            GoalRunDisposition::Failed,
+            Some(&failure),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(blocked.status, GoalStatus::Blocked);
+        let stored_failure = blocked.last_failure.unwrap();
+        assert_eq!(
+            stored_failure.recovery_action,
+            crate::run_failure::RecoveryAction::Settings
+        );
+        assert!(!stored_failure.diagnostic.contains("goal-secret"));
+        assert!(stored_failure.diagnostic.len() <= 600);
     }
 }

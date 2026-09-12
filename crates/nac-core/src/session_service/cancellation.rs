@@ -125,6 +125,7 @@ impl SessionService {
                 None,
                 cancel_usage.clone(),
                 DurableRunTerminal::Cancelled,
+                None,
             )
             .await
         {
@@ -152,6 +153,7 @@ impl SessionService {
                 &cancelling_run.snapshot.run_id,
                 cancel_usage,
                 crate::store::GoalRunDisposition::Cancelled,
+                None,
             )
             .await;
             self.capture_workspace_revision(&cancelling_run.snapshot)

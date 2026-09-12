@@ -51,7 +51,7 @@ describe("delegated completion event", () => {
       "Coding agent completed: Audit persistence",
     );
     expect(screen.getByText("Generation 2")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Regenerate from original prompt" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create fork" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open exact transcript" }));

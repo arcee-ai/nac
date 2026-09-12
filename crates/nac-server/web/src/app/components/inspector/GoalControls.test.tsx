@@ -38,6 +38,9 @@ function goal(status: SessionGoalRecord["status"] = "active"): SessionGoalRecord
     accounting_token_baseline: null,
     accounting_started_at_epoch_ms: null,
     continuation_run_id: null,
+    consecutive_transient_failures: 0,
+    next_attempt_at_epoch_ms: null,
+    last_failure: null,
     created_at: "2026-08-24T00:00:00Z",
     updated_at: "2026-08-24T00:00:00Z",
     version: 4,
@@ -129,6 +132,19 @@ describe("durable goal controls", () => {
       }),
     );
     expect(fakes.updateGoal).not.toHaveBeenCalled();
+  });
+
+  it("offers a direct resume action for a blocked goal", async () => {
+    mount(goal("blocked"));
+    fireEvent.click(screen.getByRole("button", { name: "Goal: blocked" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    await waitFor(() =>
+      expect(fakes.updateGoal).toHaveBeenCalledWith(SESSION_ID, "goal-1", {
+        expected_version: 4,
+        status: "active",
+      }),
+    );
   });
 
   it("does not fetch or render for orchestrator sessions", () => {

@@ -12,6 +12,7 @@ import type {
   AgentEvent,
   AssistantStreamDelta,
   SessionEventEnvelope,
+  RunFailure,
   TokenUsage,
 } from "@/app/types/api";
 
@@ -64,6 +65,10 @@ export interface RuntimeState {
    * box into something the user can act on.
    */
   modelError: string | null;
+  /** Structured terminal failure for recovery-aware transcript actions. */
+  runFailure: RunFailure | null;
+  /** Model request attempt currently replacing an abandoned partial stream. */
+  modelRetryAttempt: number | null;
   streamStatus: StreamStatus;
   events: RuntimeEvent[];
   threads: Record<string, RuntimeThread>;
@@ -121,7 +126,7 @@ export interface RuntimeState {
   workspaceEpoch: number;
   /**
    * Stop was painted; the HTTP cancel is still waiting on worker trees.
-   * Composer Send and transcript Resend stay blocked, and a still-live
+   * Composer Send and transcript Regenerate stay blocked, and a still-live
    * `active_run` on the snapshot must not snap the chrome back to running.
    */
   cancelArmed: boolean;
@@ -134,6 +139,8 @@ export const runtimeStore = createStore<RuntimeState>(
     activity: "",
     error: null,
     modelError: null,
+    runFailure: null,
+    modelRetryAttempt: null,
     streamStatus: "idle",
     events: [],
     threads: {},
@@ -164,6 +171,8 @@ export function resetRuntime(sessionId: string | null): void {
     activity: "",
     error: null,
     modelError: null,
+    runFailure: null,
+    modelRetryAttempt: null,
     streamStatus: sessionId ? "connecting" : "idle",
     events: [],
     threads: {},
@@ -215,6 +224,15 @@ export function setOptimisticUserPrompt(prompt: string | null): void {
  */
 export function applyAssistantDelta(delta: AssistantStreamDelta): void {
   if (delta.thread_name) return;
+  if (delta.reset) {
+    setState({
+      streamSettled: false,
+      streamText: "",
+      streamReasoning: "",
+      modelRetryAttempt: delta.retry_attempt ?? null,
+    });
+    return;
+  }
   setState((state) => {
     const base = state.streamSettled
       ? { streamText: "", streamReasoning: "" }
@@ -332,6 +350,8 @@ export function requestRunCancel(): RuntimeState {
     activity: "",
     error: null,
     modelError: null,
+    runFailure: null,
+    modelRetryAttempt: null,
     streamSettled: true,
     cancelArmed: true,
     lastElapsedMs: freezeElapsed(state),
@@ -348,6 +368,8 @@ export function restoreRunCancel(previous: RuntimeState): void {
     activity: previous.activity,
     error: previous.error,
     modelError: previous.modelError,
+    runFailure: previous.runFailure,
+    modelRetryAttempt: previous.modelRetryAttempt,
     streamSettled: previous.streamSettled,
     threads: previous.threads,
     cancelArmed: previous.cancelArmed,
@@ -356,7 +378,7 @@ export function restoreRunCancel(previous: RuntimeState): void {
 }
 
 /**
- * Cancel HTTP returned: worker trees are down, so Send/Resend are honest again.
+ * Cancel HTTP returned: worker trees are down, so Send/Regenerate are honest again.
  * SSE `run_cancelled` does the same; either may win.
  */
 export function finishRunCancel(): void {
@@ -418,6 +440,8 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         activity: "",
         error: null,
         modelError: null,
+        runFailure: null,
+        modelRetryAttempt: null,
         streamText: "",
         streamReasoning: "",
         streamSettled: false,
@@ -451,6 +475,8 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         streamText: event.response,
         streamReasoning: "",
         streamSettled: true,
+        runFailure: null,
+        modelRetryAttempt: null,
         cancelArmed: false,
         lastElapsedMs: freezeElapsed(state, event.duration_ms ?? null),
         runStartedAt: null,
@@ -466,6 +492,8 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         running: false,
         activity: "",
         error: message,
+        runFailure: event.failure ?? null,
+        modelRetryAttempt: null,
         streamSettled: true,
         cancelArmed: false,
         lastElapsedMs: freezeElapsed(state),
@@ -484,6 +512,8 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
         activity: "",
         error: null,
         modelError: null,
+        runFailure: null,
+        modelRetryAttempt: null,
         streamSettled: true,
         cancelArmed: false,
         lastElapsedMs: freezeElapsed(state),
@@ -730,6 +760,8 @@ export const useCancelArmed = (sessionId: string | null) =>
   useStore((state) => state.sessionId === sessionId && state.cancelArmed);
 export const useActivity = () => useStore((s) => s.activity);
 export const useRunError = () => useStore((s) => s.error);
+export const useRunFailure = () => useStore((s) => s.runFailure);
+export const useModelRetryAttempt = () => useStore((s) => s.modelRetryAttempt);
 export const useLiveEvents = () => useStore((s) => s.events);
 export const useStreamStatus = () => useStore((s) => s.streamStatus);
 export const useLiveThreads = () => useStore((s) => s.threads);

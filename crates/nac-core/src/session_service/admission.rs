@@ -265,7 +265,14 @@ impl SessionService {
                 let result = agent
                     .send_session_run(&expanded_prompt, &task_run_id, prompt_commit, inbox_item_id)
                     .await
-                    .map_err(|error| error.to_string());
+                    .map_err(|error| {
+                        error
+                            .downcast_ref::<crate::run_failure::RunFailure>()
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                crate::run_failure::RunFailure::unknown(error.to_string())
+                            })
+                    });
                 agent.set_event_sink(EventSink::bus(event_bus));
                 // Capture usage regardless of success or failure. On error
                 // paths, `last_usage` is now set in `send()` before returning
@@ -279,13 +286,13 @@ impl SessionService {
                         .finish_run(&task_run_id, RunOutcome::Completed(response, usage))
                         .await;
                 }
-                Err(message) => {
+                Err(failure) => {
                     // The published event is deliberately reduced to "run
                     // failed", so the operator's log is the only place the real
                     // reason can be read.
-                    eprintln!("nac: run failed: {message}");
+                    eprintln!("nac: run failed: {}", failure.diagnostic);
                     service
-                        .finish_run(&task_run_id, RunOutcome::Failed(message, usage))
+                        .finish_run(&task_run_id, RunOutcome::Failed(failure, usage))
                         .await;
                 }
             }
@@ -427,6 +434,9 @@ impl SessionService {
                     self.event_bus.emit_with_context(
                         SessionEvent::RunFailed {
                             message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
+                            failure: Some(crate::run_failure::RunFailure::interrupted(
+                                INTERRUPTED_RUN_EVENT_MESSAGE,
+                            )),
                         },
                         Some(SessionRunId::from_stored(run_id)),
                         None,

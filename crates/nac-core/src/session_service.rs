@@ -21,6 +21,7 @@ pub use crate::events::{
     SessionClientId, SessionEventEnvelope, SessionEventReceiver, SessionEventReplaySubscription,
     SessionEventSubscription, SessionRunId, SessionSubscriptionId, SubmittedUserMessageSnapshot,
 };
+use crate::run_failure::FAILED_RUN_RECOVERY_DIAGNOSTIC as FAILED_RUN_WARNING;
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::SkillRegistry;
@@ -193,6 +194,8 @@ pub struct SessionFrontendSnapshot {
     pub messages: Vec<Message>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript_recovery_warning: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_failure: Option<crate::run_failure::RunFailure>,
     /// When each message was written to the transcript log, aligned with
     /// `messages`. `None` for messages carried by the snapshot blob, which
     /// predates the log and stores no per-message time.
@@ -333,8 +336,6 @@ pub struct ThreadEventDecodeDiagnostic {
 const MAX_THREAD_EVENT_DIAGNOSTICS: usize = 64;
 const INTERRUPTED_RUN_WARNING: &str =
     "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue.";
-const FAILED_RUN_WARNING: &str =
-    "The previous run failed before producing a complete response. Resubmit the prompt to continue.";
 const INTERRUPTED_RUN_EVENT_MESSAGE: &str = "run interrupted by process restart";
 
 struct DecodedThreadEvents {
@@ -352,7 +353,7 @@ struct FrontendSnapshotBlockingLoad {
     thread_steering: Vec<crate::store::ThreadSteeringRecord>,
     forks: Vec<crate::store::SessionForkLink>,
     worksets: WorksetsSnapshot,
-    run_recovery_warning: Option<String>,
+    run_failure: Option<crate::run_failure::RunFailure>,
     workspace: WorkspaceSnapshot,
 }
 
@@ -615,6 +616,10 @@ pub struct SessionService {
     /// Serializes process-local idle wake attempts. The cross-process
     /// operation lease remains the authoritative run admission boundary.
     inbox_wake: Arc<Mutex<()>>,
+    /// At most one process-local wake for a persisted goal retry deadline.
+    /// Goal id/version checks fence stale tasks; the operation lease fences
+    /// competing processes after restart.
+    goal_retry_wake: Arc<StdMutex<Option<GoalRetryWake>>>,
     #[cfg(test)]
     frontend_snapshot_after_workspace_gate: Option<Arc<FrontendSnapshotAfterWorkspaceGate>>,
 }
@@ -622,6 +627,12 @@ pub struct SessionService {
 enum ActiveSessionOperation {
     Run(ActiveRunState),
     ManualCompaction(ActiveCompactionState),
+}
+
+struct GoalRetryWake {
+    goal_id: String,
+    goal_version: i64,
+    task: tokio::task::JoinHandle<()>,
 }
 
 impl ActiveSessionOperation {
@@ -698,7 +709,10 @@ impl Drop for CancellingRun {
 #[derive(Clone)]
 enum RunOutcome {
     Completed(String, Option<crate::model::TokenUsage>),
-    Failed(String, Option<crate::model::TokenUsage>),
+    Failed(
+        crate::run_failure::RunFailure,
+        Option<crate::model::TokenUsage>,
+    ),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

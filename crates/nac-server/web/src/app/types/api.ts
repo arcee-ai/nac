@@ -223,6 +223,7 @@ export type LaggedEvent = ApiSchema<"LaggedEvent">;
  * is the authoritative copy of the same text.
  */
 export type AssistantStreamDelta = ApiSchema<"AssistantStreamDelta">;
+export type RunFailure = ApiSchema<"RunFailure">;
 
 export type ThreadEventRecord = ApiSchema<"ThreadEventPageItem">;
 

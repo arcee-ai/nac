@@ -11,6 +11,32 @@ vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => false }));
 afterEach(cleanup);
 
 describe("transcript topology badge navigation", () => {
+  it("names destructive replay as regeneration from the original prompt", () => {
+    const refresh = vi.fn();
+    render(
+      <ModelMessage
+        turn={{
+          kind: "model",
+          key: "model-1",
+          durationMs: 25,
+          messageIndex: 1,
+          blocks: [{ kind: "text", key: "text-1", text: "Result" }],
+        }}
+        model="gpt-5.6-sol"
+        active={false}
+        selectedThreadEpisode={null}
+        selectedWorkset={null}
+        onSelectThread={vi.fn()}
+        onSelectWorkset={vi.fn()}
+        userMessageIndex={0}
+        onRefresh={refresh}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate from original prompt" }));
+    expect(refresh).toHaveBeenCalledWith(0);
+  });
+
   it("selects the referenced workset and thread episode", () => {
     const onSelectWorkset = vi.fn();
     const onSelectThread = vi.fn();
@@ -94,7 +120,7 @@ describe("transcript topology badge navigation", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Regenerate from original prompt" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create fork" })).toBeNull();
     expect(screen.queryByText("Forked chat")).toBeNull();

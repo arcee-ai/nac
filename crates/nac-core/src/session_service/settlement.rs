@@ -37,9 +37,6 @@ impl SessionService {
             return false;
         };
         self.expire_orchestrator_steering(run_id);
-        if matches!(outcome, RunOutcome::Failed(..)) {
-            self.normalize_failed_run_transcript().await;
-        }
         let (completed_duration_ms, completed_usage) = match &outcome {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
             RunOutcome::Failed(_, usage) => (None, usage.clone()),
@@ -50,11 +47,27 @@ impl SessionService {
             DurableRunTerminal::Completed
         };
         let goal_usage = completed_usage.clone();
-        let goal_disposition = if matches!(outcome, RunOutcome::Failed(..)) {
-            crate::store::GoalRunDisposition::Failed
-        } else {
-            crate::store::GoalRunDisposition::Completed
+        let run_failure = match &outcome {
+            RunOutcome::Failed(failure, _) => {
+                Some(failure.clone().with_recovery_action(match failure.kind {
+                    crate::run_failure::RunFailureKind::Authentication
+                    | crate::run_failure::RunFailureKind::Configuration => {
+                        crate::run_failure::RecoveryAction::Settings
+                    }
+                    _ => crate::run_failure::RecoveryAction::RegenerateWithRewind,
+                }))
+            }
+            RunOutcome::Completed(..) => None,
         };
+        let goal_disposition = match run_failure.as_ref() {
+            Some(failure) if failure.transient => crate::store::GoalRunDisposition::RetryableFailed,
+            Some(_) => crate::store::GoalRunDisposition::Failed,
+            None => crate::store::GoalRunDisposition::Completed,
+        };
+        if let Some(failure) = run_failure.as_ref() {
+            self.stage_run_failure(run_id, failure).await;
+            self.normalize_failed_run_transcript().await;
+        }
         let persistence_error = match self
             .persist_run_snapshot(
                 &finishing_run.snapshot,
@@ -62,6 +75,7 @@ impl SessionService {
                 completed_duration_ms,
                 completed_usage,
                 durable_terminal,
+                run_failure.clone(),
             )
             .await
         {
@@ -84,33 +98,51 @@ impl SessionService {
                 Some(response.clone()),
                 None,
             ),
-            RunOutcome::Failed(message, _) => (
+            RunOutcome::Failed(failure, _) => (
                 crate::store::TraditionalChildStatus::Failed,
                 None,
-                Some(message.clone()),
+                Some(failure.diagnostic.clone()),
             ),
         };
         self.settle_traditional_child_run(run_id, child_status, child_report, child_failure);
 
-        self.settle_direct_goal_run(run_id, goal_usage, goal_disposition)
+        self.settle_direct_goal_run(run_id, goal_usage, goal_disposition, run_failure.as_ref())
             .await;
+        let presented_run_failure =
+            if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
+                self.metadata.session_id.as_deref().and_then(|session_id| {
+                    crate::store::load_session_goal(&self.metadata.store_path, session_id)
+                        .ok()
+                        .flatten()
+                        .and_then(|goal| goal.last_failure)
+                })
+            } else {
+                None
+            }
+            .or_else(|| run_failure.clone());
 
         let run_id = finishing_run.snapshot.run_id.clone();
         let client_id = finishing_run.snapshot.client_id.clone();
         let terminal_event = match (outcome, persistence_error) {
             (RunOutcome::Completed(_, _), Some(error)) => SessionEvent::RunFailed {
                 message: format!("run completed, but failed to persist session snapshot: {error}"),
+                failure: None,
             },
             (RunOutcome::Completed(response, _), None) => SessionEvent::RunCompleted {
                 response,
                 duration_ms: completed_duration_ms,
             },
-            (RunOutcome::Failed(message, _), Some(error)) => SessionEvent::RunFailed {
+            (RunOutcome::Failed(failure, _), Some(error)) => SessionEvent::RunFailed {
                 message: format!(
-                    "{message}\nAdditionally, failed to persist session snapshot: {error}"
+                    "{}\nAdditionally, failed to persist session snapshot: {error}",
+                    failure.diagnostic
                 ),
+                failure: Some(presented_run_failure.clone().unwrap_or(failure)),
             },
-            (RunOutcome::Failed(message, _), None) => SessionEvent::RunFailed { message },
+            (RunOutcome::Failed(failure, _), None) => SessionEvent::RunFailed {
+                message: failure.diagnostic.clone(),
+                failure: Some(presented_run_failure.unwrap_or(failure)),
+            },
         };
         self.event_bus
             .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
@@ -123,17 +155,44 @@ impl SessionService {
         true
     }
 
+    async fn stage_run_failure(
+        &self,
+        run_id: &SessionRunId,
+        failure: &crate::run_failure::RunFailure,
+    ) {
+        let Some(session_id) = self.metadata.session_id.clone() else {
+            return;
+        };
+        let store_path = self.metadata.store_path.clone();
+        let run_id = run_id.to_string();
+        let failure = failure.clone();
+        match tokio::task::spawn_blocking(move || {
+            crate::store::stage_active_run_failure(&store_path, &session_id, &run_id, &failure)
+        })
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                eprintln!("nac: failed to stage typed run failure: {error:#}");
+            }
+            Err(error) => {
+                eprintln!("nac: run-failure staging task failed: {error}");
+            }
+        }
+    }
+
     pub(super) async fn settle_direct_goal_run(
         &self,
         run_id: &SessionRunId,
         usage: Option<crate::model::TokenUsage>,
         disposition: crate::store::GoalRunDisposition,
+        failure: Option<&crate::run_failure::RunFailure>,
     ) {
         if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
             return;
         }
         if let Some(session_id) = self.metadata.session_id.as_deref() {
-            if let Err(error) = crate::store::settle_session_goal_run(
+            if let Err(error) = crate::store::settle_session_goal_run_with_failure(
                 &self.metadata.store_path,
                 session_id,
                 run_id.as_str(),
@@ -142,6 +201,7 @@ impl SessionService {
                     .map_or(0, crate::model::TokenUsage::billable_tokens),
                 now_epoch_ms(),
                 disposition,
+                failure,
             ) {
                 eprintln!("nac: failed to settle durable goal for run {run_id}: {error:#}");
             }
@@ -481,6 +541,7 @@ impl SessionService {
         completed_duration_ms: Option<u64>,
         completed_usage: Option<crate::model::TokenUsage>,
         durable_terminal: DurableRunTerminal,
+        failure: Option<crate::run_failure::RunFailure>,
     ) -> Result<()> {
         let goal_final_billable_tokens = completed_usage
             .as_ref()
@@ -543,6 +604,7 @@ impl SessionService {
             }
             DurableRunTerminal::Failed => {
                 update.failed_run_id = Some(active_run.run_id.to_string());
+                update.failed_run_failure = failure.clone();
             }
         }
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
@@ -553,8 +615,14 @@ impl SessionService {
                 disposition: match durable_terminal {
                     DurableRunTerminal::Completed => crate::store::GoalRunDisposition::Completed,
                     DurableRunTerminal::Cancelled => crate::store::GoalRunDisposition::Cancelled,
+                    DurableRunTerminal::Failed
+                        if failure.as_ref().is_some_and(|failure| failure.transient) =>
+                    {
+                        crate::store::GoalRunDisposition::RetryableFailed
+                    }
                     DurableRunTerminal::Failed => crate::store::GoalRunDisposition::Failed,
                 },
+                failure,
             });
         }
         let saved_session_id = update.session_id.clone();

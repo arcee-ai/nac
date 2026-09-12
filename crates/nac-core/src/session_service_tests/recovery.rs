@@ -479,7 +479,8 @@ async fn completed_run_reports_failure_when_snapshot_persistence_fails() {
     assert_eq!(
         terminal.event,
         SessionEvent::RunFailed {
-            message: "run failed".to_string()
+            message: "run failed".to_string(),
+            failure: None,
         }
     );
     assert!(matches!(
@@ -655,7 +656,7 @@ async fn frontend_snapshot_does_not_wait_for_agent_lock_while_active_run() {
             .service
             .finish_run_once(
                 &active.run_id,
-                RunOutcome::Failed("cleanup".to_string(), None)
+                RunOutcome::Failed(crate::run_failure::RunFailure::unknown("cleanup"), None)
             )
             .await
     );
@@ -743,6 +744,7 @@ async fn mark_run_finishing_clears_submitted_user_message_before_persistence() {
             Some(42),
             None,
             DurableRunTerminal::Completed,
+            None,
         )
         .await
         .unwrap();
@@ -968,7 +970,10 @@ async fn busy_run_rejects_concurrent_submission_and_clears_once() {
     assert!(
         parts
             .service
-            .finish_run_once(&second.run_id, RunOutcome::Failed("boom".to_string(), None))
+            .finish_run_once(
+                &second.run_id,
+                RunOutcome::Failed(crate::run_failure::RunFailure::unknown("boom"), None),
+            )
             .await
     );
     let failed = events.recv().await.unwrap();
@@ -977,7 +982,13 @@ async fn busy_run_rejects_concurrent_submission_and_clears_once() {
     assert_eq!(
         failed.event,
         SessionEvent::RunFailed {
-            message: "run failed".to_string()
+            message: "run failed".to_string(),
+            failure:
+                Some(
+                    crate::run_failure::RunFailure::unknown("boom").with_recovery_action(
+                        crate::run_failure::RecoveryAction::RegenerateWithRewind,
+                    ),
+                ),
         }
     );
     assert!(parts.service.active_run().is_none());
@@ -1046,10 +1057,18 @@ async fn failed_run_persists_messages_without_recording_new_duration() {
             .unwrap();
     }
 
+    let raw_failure = crate::run_failure::RunFailure::unknown(format!(
+        "Authorization: Bearer persistence-secret {}",
+        "x".repeat(1_000)
+    ));
+    let expected_failure = raw_failure
+        .clone()
+        .with_recovery_action(crate::run_failure::RecoveryAction::RegenerateWithRewind)
+        .sanitized();
     assert!(
         parts
             .service
-            .finish_run_once(&active.run_id, RunOutcome::Failed("boom".to_string(), None))
+            .finish_run_once(&active.run_id, RunOutcome::Failed(raw_failure, None),)
             .await
     );
     let started = events.recv().await.unwrap();
@@ -1068,7 +1087,8 @@ async fn failed_run_persists_messages_without_recording_new_duration() {
     assert_eq!(
         failed.event,
         SessionEvent::RunFailed {
-            message: "run failed".to_string()
+            message: "run failed".to_string(),
+            failure: Some(expected_failure.clone()),
         }
     );
 
@@ -1093,16 +1113,12 @@ async fn failed_run_persists_messages_without_recording_new_duration() {
         .expect("failed run must retain a durable terminal outcome");
     assert_eq!(recovery.run_id, active.run_id.as_str());
     assert_eq!(recovery.status, crate::store::RunRecoveryStatus::Failed);
-    assert_eq!(
-        parts
-            .service
-            .frontend_snapshot()
-            .await
-            .unwrap()
-            .transcript_recovery_warning
-            .as_deref(),
-        Some(FAILED_RUN_WARNING)
-    );
+    assert_eq!(recovery.failure.as_ref(), Some(&expected_failure));
+    let frontend = parts.service.frontend_snapshot().await.unwrap();
+    assert!(frontend.transcript_recovery_warning.is_none());
+    assert_eq!(frontend.run_failure.as_ref(), Some(&expected_failure));
+    assert!(!expected_failure.diagnostic.contains("persistence-secret"));
+    assert!(expected_failure.diagnostic.len() <= 600);
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

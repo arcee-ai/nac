@@ -14,6 +14,7 @@ use std::fmt;
 use std::pin::Pin;
 
 use super::{redact_credentials, redact_credentials_with_extra_headers};
+use crate::run_failure::PartialModelOutput;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -122,14 +123,20 @@ pub(super) struct SseError {
     message: String,
     retryable: bool,
     observable_delta: bool,
+    partial_output: PartialModelOutput,
 }
 
 impl SseError {
-    fn permanent(message: impl Into<String>, observable_delta: bool) -> Self {
+    fn permanent(
+        message: impl Into<String>,
+        observable_delta: bool,
+        partial_output: PartialModelOutput,
+    ) -> Self {
         Self {
             message: message.into(),
             retryable: false,
             observable_delta,
+            partial_output,
         }
     }
 
@@ -137,6 +144,7 @@ impl SseError {
         url: &str,
         error: StreamFoldError,
         observable_delta: bool,
+        partial_output: PartialModelOutput,
         secrets: &[&str],
         extra_headers: Option<&BTreeMap<String, String>>,
     ) -> Self {
@@ -151,14 +159,20 @@ impl SseError {
             ),
             retryable: error.retryable,
             observable_delta,
+            partial_output,
         }
     }
 
-    fn retryable(message: impl Into<String>, observable_delta: bool) -> Self {
+    fn retryable(
+        message: impl Into<String>,
+        observable_delta: bool,
+        partial_output: PartialModelOutput,
+    ) -> Self {
         Self {
             message: message.into(),
             retryable: true,
             observable_delta,
+            partial_output,
         }
     }
 
@@ -168,6 +182,10 @@ impl SseError {
 
     pub(super) fn has_observable_delta(&self) -> bool {
         self.observable_delta
+    }
+
+    pub(super) fn partial_output(&self) -> PartialModelOutput {
+        self.partial_output
     }
 }
 
@@ -189,6 +207,13 @@ pub(super) trait StreamFold {
     /// Whether a non-empty model delta has reached a live observer.
     fn has_observable_delta(&self) -> bool {
         false
+    }
+
+    fn partial_output(&self) -> PartialModelOutput {
+        PartialModelOutput {
+            text: self.has_observable_delta(),
+            ..PartialModelOutput::default()
+        }
     }
 
     /// Whether a protocol-level terminal event has been folded. Streaming
@@ -239,6 +264,7 @@ async fn read_sse_response_with_request_secrets<F: StreamFold>(
                     redact_credentials(url, &[])
                 ),
                 fold.has_observable_delta(),
+                fold.partial_output(),
             )
         })?;
         if frame.is_done() {
@@ -256,6 +282,7 @@ async fn read_sse_response_with_request_secrets<F: StreamFold>(
                     error
                 ),
                 fold.has_observable_delta(),
+                fold.partial_output(),
             )
         })?;
         if let Err(error) = fold.push(&event) {
@@ -263,6 +290,7 @@ async fn read_sse_response_with_request_secrets<F: StreamFold>(
                 url,
                 error,
                 fold.has_observable_delta(),
+                fold.partial_output(),
                 secrets,
                 extra_headers,
             ));
@@ -273,8 +301,17 @@ async fn read_sse_response_with_request_secrets<F: StreamFold>(
     }
 
     let observable_delta = fold.has_observable_delta();
-    fold.finish()
-        .map_err(|error| SseError::fold(url, error, observable_delta, secrets, extra_headers))
+    let partial_output = fold.partial_output();
+    fold.finish().map_err(|error| {
+        SseError::fold(
+            url,
+            error,
+            observable_delta,
+            partial_output,
+            secrets,
+            extra_headers,
+        )
+    })
 }
 
 /// One dispatched SSE event. Only the payload is kept: providers that also name

@@ -832,6 +832,8 @@ async fn direct_failure_marks_streamed_partial_output_as_failed_in_the_log() {
     *agent.partial_stream.lock().unwrap() = ModelStreamDelta {
         text: "work in progress".to_string(),
         reasoning: "private reasoning fragment".to_string(),
+        reset: false,
+        retry_attempt: None,
     };
 
     agent

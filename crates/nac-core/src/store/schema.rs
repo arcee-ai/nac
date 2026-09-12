@@ -23,8 +23,9 @@ mod future_schema_tests;
 
 use wal_preflight::read_schema_version_header;
 
-// 27 composes the independently shipped v25 Managed NAC maintenance schema
-// and v25/v26 permission-mode schema so either predecessor shape is repaired.
+// 28 adds typed durable run-failure and bounded goal-retry metadata.
+// 27 composes the independently shipped v25 Managed NAC maintenance schema and
+// v25/v26 permission-mode schema so either predecessor shape is repaired.
 // 26 adds a durable revision for linearizable permission-mode transitions.
 // 25 adds durable Managed NAC maintenance and authenticated-control replay
 // records plus the durable per-session permission approval mode. 24 adds
@@ -43,7 +44,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 27;
+const STORE_SCHEMA_VERSION: i64 = 28;
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
 /// Current durable-store schema version for credential-free readiness and
@@ -812,7 +813,7 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | 26 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -924,9 +925,23 @@ fn open_connection_with_hooks(
         "terminal_disposition",
         "TEXT CHECK (terminal_disposition IN ('completed', 'cancelled'))",
     )?;
+    ensure_column(&transaction, "session_run_recovery", "failure_json", "TEXT")?;
     create_session_inbox_table(&transaction)?;
     create_permission_grants_table(&transaction)?;
     create_session_goals_table(&transaction)?;
+    ensure_column(
+        &transaction,
+        "session_goals",
+        "consecutive_transient_failures",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_transient_failures >= 0)",
+    )?;
+    ensure_column(
+        &transaction,
+        "session_goals",
+        "next_attempt_at_epoch_ms",
+        "INTEGER CHECK (next_attempt_at_epoch_ms IS NULL OR next_attempt_at_epoch_ms >= 0)",
+    )?;
+    ensure_column(&transaction, "session_goals", "last_failure_json", "TEXT")?;
     create_traditional_children_table(&transaction)?;
     create_managed_orchestrators_table(&transaction)?;
     // Execution mode records how a generation was admitted and must remain
@@ -1544,7 +1559,8 @@ fn create_session_run_recovery_table(conn: &Connection) -> Result<()> {
                  REFERENCES thread_events(id) ON DELETE CASCADE,
              status TEXT NOT NULL CHECK (status IN ('active', 'interrupted', 'failed')),
              terminal_disposition TEXT
-                 CHECK (terminal_disposition IN ('completed', 'cancelled'))
+                 CHECK (terminal_disposition IN ('completed', 'cancelled')),
+             failure_json TEXT
          );",
     )?;
     Ok(())
@@ -1632,6 +1648,11 @@ fn create_session_goals_table(conn: &Connection) -> Result<()> {
              accounting_started_at_epoch_ms INTEGER
                  CHECK (accounting_started_at_epoch_ms IS NULL OR accounting_started_at_epoch_ms >= 0),
              continuation_run_id TEXT,
+             consecutive_transient_failures INTEGER NOT NULL DEFAULT 0
+                 CHECK (consecutive_transient_failures >= 0),
+             next_attempt_at_epoch_ms INTEGER
+                 CHECK (next_attempt_at_epoch_ms IS NULL OR next_attempt_at_epoch_ms >= 0),
+             last_failure_json TEXT,
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL,
              version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),

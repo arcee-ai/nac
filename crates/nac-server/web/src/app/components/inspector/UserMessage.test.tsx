@@ -21,7 +21,7 @@ describe("UserMessage", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Regenerate from original prompt" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
     expect(screen.getByRole("button", { name: "Copy message" })).not.toBeNull();
   });
