@@ -13,7 +13,7 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
   running?: boolean;
   /** Display title of the chat this session was forked from. */
   forkedFromTitle?: string | null;
-  /** Compact identity shown after the title, such as the session behavior. */
+  /** Compact identity shown below the title, such as the session behavior. */
   badge?: string;
   /** Full accessible meaning of the compact badge. */
   badgeLabel?: string;
@@ -25,7 +25,7 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
 export function ChatSessionTabSkeleton() {
   return (
     <div
-      className="chat-session-tab flex h-10 w-32 max-w-32 min-w-10 shrink-0 items-center px-2 py-1"
+      className="chat-session-tab flex h-12 w-32 max-w-32 min-w-10 shrink-0 items-center px-2 py-1"
       aria-hidden
     >
       <ShimmerLoader rows={1} className="w-full gap-0" rowClassName="h-3" />
@@ -35,15 +35,16 @@ export function ChatSessionTabSkeleton() {
 
 /**
  * One session in the tab strip above a project's transcript. The tab is a fixed
- * width so the strip's rhythm survives titles of any length, and the underline
- * on the active one is the only thing marking it as selected. A fork shows the
- * scheme glyph in front until the chat is running, when the loader takes that
- * slot.
+ * width so the strip's rhythm survives titles of any length. Its first line is
+ * reserved for the title and running/fork identity; its second line carries the
+ * compact behavior identity without taking width from the title. The underline
+ * on the active tab is the only thing marking it as selected.
  *
- * Pointing at a tab reveals its close control, which takes its room from the
- * title rather than being held in reserve — a strip of tabs is read at a glance,
- * so the untouched ones show as much of their name as they can. Renaming lives
- * in the chat list, where there is room to say what the button does.
+ * Pointing at a tab reveals its close control on the title line. That line adds
+ * the control's clearance only while the control is visible, so it cannot cover
+ * the title and untouched tabs still show as much of their name as they can.
+ * Renaming lives in the chat list, where there is room to say what the button
+ * does.
  */
 const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   title,
@@ -59,17 +60,20 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   ...props
 }) => {
   const labelClass = running
-    ? "text-shimmer-basic group-hover:w-[calc(100%-36px)] group-hover:max-w-[calc(100%-36px)]"
+    ? "text-shimmer-basic"
     : forkedFromTitle
-      ? "text-btn-secondary group-hover:text-btn-secondary-hovered group-hover:w-[calc(100%-32px)] group-hover:max-w-[calc(100%-32px)]"
+      ? "text-btn-secondary group-hover:text-btn-secondary-hovered"
       : active
-        ? "text-btn-secondary-pressed group-hover:w-[calc(100%-16px)] group-hover:max-w-[calc(100%-16px)]"
-        : "text-btn-secondary group-hover:text-btn-secondary-hovered group-hover:w-[calc(100%-16px)] group-hover:max-w-[calc(100%-16px)]";
+        ? "text-btn-secondary-pressed"
+        : "text-btn-secondary group-hover:text-btn-secondary-hovered";
+
+  const accessibleTitle = badgeLabel ? `${title}, ${badgeLabel}` : title;
+  const discoverableTitle = badgeLabel ? `${title} · ${badgeLabel}` : title;
 
   return (
     <div
       className={cn(
-        "chat-session-tab group flex shrink-0 items-center justify-start gap-1 relative",
+        "chat-session-tab group relative flex h-12 w-32 max-w-32 min-w-10 shrink-0 items-stretch justify-start",
         active
           ? "chat-session-tab-active bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered"
           : "hover:bg-btn-ghost-hovered",
@@ -78,29 +82,29 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
     >
       <button
         type={type}
-        aria-label={ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)}
+        title={discoverableTitle}
+        aria-label={ariaLabel ?? accessibleTitle}
         aria-current={active ? "page" : undefined}
-        className="flex flex-1 min-w-0 items-center justify-start gap-1 px-2 py-1 h-10 w-full max-w-32 min-w-10"
+        className="flex h-12 w-full min-w-0 flex-1 flex-col items-stretch justify-center px-2 py-1 text-left"
         {...props}
       >
-        <ChatSessionLeadingMark
-          forkedFromTitle={forkedFromTitle}
-          running={running}
-          className={
-            running
-              ? undefined
-              : active
-                ? "text-btn-secondary-pressed"
-                : "text-btn-secondary group-hover:text-btn-secondary-hovered"
-          }
-        />
-        <span className={cn("label-micro w-full min-w-0 flex-1 truncate text-left", labelClass)}>
-          {title}
+        <span className="flex min-w-0 items-center gap-1 transition-[padding] group-hover:pr-4 group-has-[:focus-visible]:pr-4">
+          <ChatSessionLeadingMark
+            forkedFromTitle={forkedFromTitle}
+            running={running}
+            className={running ? undefined : labelClass}
+          />
+          <span
+            title={title}
+            className={cn("label-micro min-w-0 flex-1 truncate text-left", labelClass)}
+          >
+            {title}
+          </span>
         </span>
         {badge ? (
           <span
             title={badgeLabel}
-            className="tag-label max-w-[56px] shrink-0 truncate rounded bg-elevation-level-3 px-1 text-basic-tertiary"
+            className="tag-label max-w-full self-start truncate rounded bg-elevation-level-3 px-1 text-basic-tertiary"
           >
             {badge}
           </span>
@@ -119,7 +123,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
           }}
           // Stay in layout (`display` is `.btn`'s) and fade in on hover. Toggling
           // `hidden` never wins against unlayered `.btn { display: inline-flex }`.
-          className="absolute right-0 top-1/2 -translate-y-1/2 shrink-0 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto"
+          className="absolute right-0 top-0.5 shrink-0 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto"
         >
           <Icon iconName={IconName.Close} />
         </Button>

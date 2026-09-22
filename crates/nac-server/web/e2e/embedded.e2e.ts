@@ -629,7 +629,35 @@ test("asks for immutable behavior on every first and new chat", async ({
   page,
   request,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   const projectId = await createProject(request, harness);
+  const renameSession = async (sessionId: string, title: string) => {
+    const sessionsResponse = await request.get(
+      `${harness.baseUrl}/sessions?project_id=${encodeURIComponent(projectId)}`,
+    );
+    expect(sessionsResponse.ok()).toBe(true);
+    const sessions = (await sessionsResponse.json()) as Array<{
+      summary: {
+        pinned?: boolean;
+        presentation_version?: number;
+        session_id: string;
+      };
+    }>;
+    const summary = sessions.find((entry) => entry.summary.session_id === sessionId)?.summary;
+    if (!summary || typeof summary.presentation_version !== "number") {
+      throw new Error(`session ${sessionId} has no presentation version`);
+    }
+    const response = await request.put(`${harness.baseUrl}/sessions/${sessionId}/presentation`, {
+      data: {
+        title,
+        pinned: summary.pinned ?? false,
+        expected_version: summary.presentation_version,
+      },
+    });
+    if (!response.ok()) {
+      throw new Error(`session rename failed (${response.status()}): ${await response.text()}`);
+    }
+  };
   await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
 
   const behaviorChoices = page.getByRole("radio");
@@ -651,6 +679,10 @@ test("asks for immutable behavior on every first and new chat", async ({
     "true",
   );
   await page.getByRole("button", { name: "Create chat" }).click();
+  await expect(page).toHaveURL(/\/session\/[^/]+\/threads$/);
+  const orchestratorSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+  if (!orchestratorSessionId) throw new Error("orchestrator session route returned no id");
+  await renameSession(orchestratorSessionId, "Plan the managed deployment rollout");
   await expect(page.getByText("Immutable behavior")).toBeVisible();
   await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
   await page.reload();
@@ -667,7 +699,8 @@ test("asks for immutable behavior on every first and new chat", async ({
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect(page).toHaveURL(/\/session\/[^/]+\/delegated$/);
   const directSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
-  expect(directSessionId).toBeTruthy();
+  if (!directSessionId) throw new Error("direct session route returned no id");
+  await renameSession(directSessionId, "Implement connection status feedback");
   await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
@@ -684,6 +717,9 @@ test("asks for immutable behavior on every first and new chat", async ({
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect.poll(() => page.url()).not.toContain(`/session/${directSessionId}/`);
   await expect(page).toHaveURL(/\/session\/[^/]+\/delegated$/);
+  const hybridSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+  if (!hybridSessionId) throw new Error("direct + NAC session route returned no id");
+  await renameSession(hybridSessionId, "Coordinate release readiness review");
   await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
   await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
   await page.reload();
@@ -703,6 +739,29 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
   await tabs.filter({ has: page.getByText("Direct", { exact: true }) }).click();
   await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+  await tabs.filter({ has: page.getByText("Direct + NAC", { exact: true }) }).click();
+  await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
+
+  await expect(
+    page.getByRole("button", {
+      name: "Plan the managed deployment rollout, NAC orchestrator",
+    }),
+  ).toHaveAttribute("title", /Plan the managed deployment rollout/);
+  await expect(
+    page.getByRole("button", {
+      name: "Implement connection status feedback, Direct coding agent",
+    }),
+  ).toHaveAttribute("title", /Implement connection status feedback/);
+  await expect(
+    page.getByRole("button", {
+      name: "Coordinate release readiness review, Direct + NAC orchestration",
+    }),
+  ).toHaveAttribute("aria-current", "page");
+
+  const screenshotPath = process.env.NAC_ALL97_SCREENSHOT;
+  if (screenshotPath) {
+    await page.screenshot({ path: screenshotPath, animations: "disabled" });
+  }
 });
 
 test("shows and persists the optional light model for every chat behavior", async ({

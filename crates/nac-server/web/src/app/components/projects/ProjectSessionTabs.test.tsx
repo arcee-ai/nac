@@ -54,29 +54,36 @@ afterEach(cleanup);
 describe("project session tab behavior identity", () => {
   it("keeps every behavior identifiable in the compact tab strip", () => {
     const sessions = [
-      session("orchestrator", "Plan", "orchestrator"),
-      session("direct", "Code", "direct"),
-      session("hybrid", "Coordinate", "direct-with-orchestrator"),
+      session("orchestrator", "Plan the managed deployment rollout", "orchestrator"),
+      session("direct", "Implement connection status feedback", "direct"),
+      session("hybrid", "Coordinate release readiness review", "direct-with-orchestrator"),
     ];
     render(
       <MemoryRouter>
         <ProjectSessionTabs
           projectId="project"
           sessions={sessions}
-          activeSessionId="direct"
-          summary={sessions[1].summary}
+          activeSessionId="hybrid"
+          summary={sessions[2].summary}
         />
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("button", { name: "Plan, NAC orchestrator" })).toBeTruthy();
     expect(
-      screen
-        .getByRole("button", { name: "Code, Direct coding agent" })
-        .getAttribute("aria-current"),
-    ).toBe("page");
-    expect(
-      screen.getByRole("button", { name: "Coordinate, Direct + NAC orchestration" }),
+      screen.getByRole("button", {
+        name: "Plan the managed deployment rollout, NAC orchestrator",
+      }),
     ).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: "Implement connection status feedback, Direct coding agent",
+      }),
+    ).toBeTruthy();
+    const hybrid = screen.getByRole("button", {
+      name: "Coordinate release readiness review, Direct + NAC orchestration",
+    });
+    expect(hybrid.getAttribute("aria-current")).toBe("page");
+    expect(hybrid.getAttribute("title")).toContain("Coordinate release readiness review");
+    expect(screen.getByText("Direct + NAC", { exact: true })).toBeTruthy();
   });
 });
