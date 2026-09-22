@@ -19,6 +19,7 @@ import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { SessionIdentity } from "@/app/components/inspector/SessionIdentity";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { ProjectSessionTabs } from "@/app/components/projects/ProjectSessionTabs";
+import { ProjectSessionRail } from "@/app/components/projects/ProjectSessionRail";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
@@ -115,6 +116,7 @@ export default function SessionPage() {
   const navigate = useNavigate();
   const id = sessionId ?? null;
   const [heldProjectId, setHeldProjectId] = useState<string | null>(null);
+  const [sessionRailCollapsed, setSessionRailCollapsed] = useState(false);
 
   perfRender("SessionPage");
 
@@ -225,6 +227,50 @@ export default function SessionPage() {
         .sort((a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at))
     : [];
 
+  const showPanelButton = collapsed ? (
+    <Tooltip title="Show panel" position={TooltipPosition.BottomRight}>
+      <Button
+        size={ButtonSize.Medium}
+        variant={ButtonVariant.Ghost}
+        content={ButtonContent.Icon}
+        aria-label="Show panel"
+        onClick={toggleSidePanelCollapsed}
+      >
+        <Icon iconName={IconName.OpenSidebar} />
+      </Button>
+    </Tooltip>
+  ) : null;
+
+  const conversation = (
+    <div className="flex flex-1 min-h-0 min-w-0 flex-col">
+      <SessionIdentity
+        behavior={entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null}
+        lineage={snapshot?.lineage ?? null}
+      />
+
+      <div className="flex flex-col flex-1 min-h-0 w-full relative">
+        <Transcript
+          sessionId={id}
+          snapshot={snapshot}
+          panel={effectivePanel}
+          onFocusPanel={focusPanel}
+          errorNotice={errorNotice}
+        />
+
+        <div
+          className={cn(
+            "absolute bottom-0 left-0 right-0",
+            // The phone composer paints its own ground fade and owns its
+            // padding, so it has to reach past the column's inset.
+            isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[840px]",
+          )}
+        >
+          <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <section className="relative flex h-full min-h-0 overflow-hidden bg-elevation-ground">
       {/* A phone has no room for the split: the chat takes the screen and the
@@ -275,60 +321,35 @@ export default function SessionPage() {
           isMobile ? "px-0" : collapsed ? "pl-2 pr-2" : isDesktop ? "pl-6 pr-2" : "pl-2 pr-2",
         )}
       >
-        {/* The phone reaches the same chats through the header's sheet; there
-            is no width here for a strip of tabs. The padding clears the fixed
-            52px header the shell puts above everything. */}
-        {isMobile ? null : (
+        {/* Phones keep the header sheet. Tablets keep the compact horizontal
+            strip; only the wide layout promotes project chats to a rail. */}
+        {!isMobile && (!isDesktop || !projectId) ? (
           <div className="w-full shrink-0 pt-[60px]">
             <ProjectSessionTabs
               projectId={projectId}
               sessions={projectSessions}
               activeSessionId={id}
               summary={entry?.summary ?? null}
-              leading={
-                collapsed ? (
-                  <Tooltip title="Show panel" position={TooltipPosition.BottomRight}>
-                    <Button
-                      size={ButtonSize.Medium}
-                      variant={ButtonVariant.Ghost}
-                      content={ButtonContent.Icon}
-                      aria-label="Show panel"
-                      onClick={toggleSidePanelCollapsed}
-                    >
-                      <Icon iconName={IconName.OpenSidebar} />
-                    </Button>
-                  </Tooltip>
-                ) : null
-              }
+              leading={showPanelButton}
             />
           </div>
-        )}
+        ) : null}
 
-        <SessionIdentity
-          behavior={entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null}
-          lineage={snapshot?.lineage ?? null}
-        />
-
-        <div className="flex flex-col flex-1 min-h-0 w-full relative">
-          <Transcript
-            sessionId={id}
-            snapshot={snapshot}
-            panel={effectivePanel}
-            onFocusPanel={focusPanel}
-            errorNotice={errorNotice}
-          />
-
-          <div
-            className={cn(
-              "absolute bottom-0 left-0 right-0",
-              // The phone composer paints its own ground fade and owns its
-              // padding, so it has to reach past the column's inset.
-              isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[840px]",
-            )}
-          >
-            <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
+        {isDesktop && projectId ? (
+          <div className="flex flex-1 min-h-0 w-full pt-[60px]">
+            <ProjectSessionRail
+              projectId={projectId}
+              sessions={projectSessions}
+              activeSessionId={id}
+              collapsed={sessionRailCollapsed}
+              onToggleCollapsed={() => setSessionRailCollapsed((value) => !value)}
+              leading={showPanelButton}
+            />
+            {conversation}
           </div>
-        </div>
+        ) : (
+          conversation
+        )}
       </div>
 
       {isMobile ? (

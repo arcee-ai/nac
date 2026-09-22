@@ -652,6 +652,8 @@ test("asks for immutable behavior on every first and new chat", async ({
   );
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect(page.getByText("Immutable behavior")).toBeVisible();
+  const orchestratorSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+  expect(orchestratorSessionId).toBeTruthy();
   await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
@@ -684,6 +686,8 @@ test("asks for immutable behavior on every first and new chat", async ({
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect.poll(() => page.url()).not.toContain(`/session/${directSessionId}/`);
   await expect(page).toHaveURL(/\/session\/[^/]+\/delegated$/);
+  const hybridSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
+  expect(hybridSessionId).toBeTruthy();
   await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
   await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
   await page.reload();
@@ -691,18 +695,81 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByText("Coding agents", { exact: true })).toBeVisible();
   await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
 
-  const tabs = page.locator(".chat-session-tab button");
-  await expect(tabs.filter({ has: page.getByText("Orchestrator", { exact: true }) })).toHaveCount(
-    1,
-  );
-  await expect(tabs.filter({ has: page.getByText("Direct", { exact: true }) })).toHaveCount(1);
-  await expect(tabs.filter({ has: page.getByText("Direct + NAC", { exact: true }) })).toHaveCount(
-    1,
-  );
-  await tabs.filter({ has: page.getByText("Orchestrator", { exact: true }) }).click();
+  const projectChats = page.getByRole("navigation", { name: "Project chats" });
+  await expect(
+    projectChats.getByRole("button", { name: /^New Session(?: \d+)?, NAC orchestrator$/ }),
+  ).toBeVisible();
+  await expect(
+    projectChats.getByRole("button", { name: /^New Session(?: \d+)?, Direct coding agent$/ }),
+  ).toBeVisible();
+  await expect(
+    projectChats.getByRole("button", {
+      name: /^New Session(?: \d+)?, Direct \+ NAC orchestration$/,
+    }),
+  ).toBeVisible();
+  await projectChats.getByRole("button", { name: "Collapse project chats" }).click();
+  await page.getByRole("button", { name: "Expand project chats" }).click();
+  await expect(projectChats).toBeVisible();
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect(projectChats).toHaveCount(0);
+  await expect(page.locator(".chat-session-tab")).toHaveCount(3);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(projectChats).toBeVisible();
+
+  await projectChats
+    .getByRole("button", { name: /^New Session(?: \d+)?, NAC orchestrator$/ })
+    .click();
   await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
-  await tabs.filter({ has: page.getByText("Direct", { exact: true }) }).click();
+  await projectChats
+    .getByRole("button", { name: /^New Session(?: \d+)?, Direct coding agent$/ })
+    .click();
   await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+
+  const comparisonScreenshot = process.env.NAC_ALL97_SCREENSHOT;
+  if (comparisonScreenshot) {
+    const titles = new Map([
+      [orchestratorSessionId!, "Plan the managed deployment rollout"],
+      [directSessionId!, "Implement connection status feedback"],
+      [hybridSessionId!, "Coordinate release readiness review"],
+    ]);
+    const listResponse = await request.get(`${harness.baseUrl}/sessions`);
+    expect(listResponse.ok()).toBe(true);
+    const entries = (await listResponse.json()) as Array<{
+      summary: {
+        session_id: string;
+        pinned?: boolean;
+        presentation_version?: number;
+      };
+    }>;
+    for (const entry of entries) {
+      const title = titles.get(entry.summary.session_id);
+      if (!title) continue;
+      const rename = await request.put(
+        `${harness.baseUrl}/sessions/${entry.summary.session_id}/presentation`,
+        {
+          data: {
+            title,
+            pinned: Boolean(entry.summary.pinned),
+            expected_version: entry.summary.presentation_version ?? 0,
+          },
+        },
+      );
+      expect(rename.ok()).toBe(true);
+    }
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${harness.baseUrl}/#/session/${hybridSessionId}/delegated`);
+    await expect(page.getByRole("button", { name: "Collapse project chats" })).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "Coordinate release readiness review, Direct + NAC orchestration",
+      }),
+    ).toHaveAttribute("aria-current", "page");
+    await page.evaluate("document.fonts.ready");
+    await page.mouse.move(730, 895);
+    await page.screenshot({ path: comparisonScreenshot, animations: "disabled" });
+  }
 });
 
 test("shows and persists the optional light model for every chat behavior", async ({

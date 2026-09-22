@@ -19,6 +19,8 @@ interface ChatSessionButtonProps extends Omit<
   badgeLabel?: string;
   /** Taller touch target and always-visible actions for the mobile modal. */
   isMobile?: boolean;
+  /** Gives a rail row a full title line and places behavior identity below it. */
+  stackedBadge?: boolean;
   /** Rename and delete controls, revealed on hover and on keyboard focus. */
   actions?: React.ReactNode;
 }
@@ -42,6 +44,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   badge,
   badgeLabel,
   isMobile = false,
+  stackedBadge = false,
   actions,
   className = "",
   type = "button",
@@ -58,7 +61,11 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
     <div
       className={cn(
         "group flex items-center min-w-0 rounded-[4px]",
-        isMobile ? "h-12 gap-3 px-3 py-2" : "h-9 gap-1.5 px-2 py-1",
+        isMobile
+          ? "h-12 gap-3 px-3 py-2"
+          : stackedBadge
+            ? "min-h-12 gap-1.5 px-2 py-1.5"
+            : "h-9 gap-1.5 px-2 py-1",
         active
           ? "bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered"
           : "hover:bg-btn-ghost-hovered",
@@ -70,7 +77,11 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         title={badgeLabel ? `${title} · ${badgeLabel}` : title}
         aria-label={ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)}
         aria-current={active ? "page" : undefined}
-        className={cn("flex flex-1 items-center min-w-0 text-left", isMobile ? "gap-3" : "gap-1.5")}
+        className={cn(
+          "flex flex-1 min-w-0 text-left rounded-[4px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary",
+          stackedBadge ? "items-start" : "items-center",
+          isMobile ? "gap-3" : "gap-1.5",
+        )}
         {...props}
       >
         <ChatSessionLeadingMark
@@ -78,23 +89,28 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
           running={running}
           className={running ? undefined : labelClass}
         />
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate",
-            isMobile ? "text-medium" : "label-small",
-            labelClass,
-          )}
-        >
-          {title}
-        </span>
-        {badge ? (
+        <span className={cn("flex min-w-0 flex-1", stackedBadge && "flex-col gap-0.5")}>
           <span
-            title={badgeLabel}
-            className="tag-label max-w-[76px] shrink-0 truncate rounded bg-elevation-level-3 px-1 text-basic-tertiary"
+            className={cn(
+              "min-w-0 flex-1 truncate",
+              isMobile ? "text-medium" : "label-small",
+              labelClass,
+            )}
           >
-            {badge}
+            {title}
           </span>
-        ) : null}
+          {badge ? (
+            <span
+              title={badgeLabel}
+              className={cn(
+                "tag-label w-fit max-w-full truncate rounded bg-elevation-level-3 px-1 text-basic-tertiary",
+                !stackedBadge && "max-w-[76px] shrink-0",
+              )}
+            >
+              {badge}
+            </span>
+          ) : null}
+        </span>
       </button>
       {actions ? (
         <div
