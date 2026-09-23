@@ -10,7 +10,8 @@ export enum CircularLoaderVariant {
 }
 
 interface CircularLoaderProps extends React.HTMLAttributes<HTMLDivElement> {
-  size?: LoaderSize;
+  /** Pixel diameter. LoaderSize values remain supported for compatibility. */
+  size?: number;
   variant?: CircularLoaderVariant;
   strokeWidth?: number;
 }
