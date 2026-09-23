@@ -8,7 +8,6 @@ import {
   MAX_PILLS_MOBILE,
   PILL_SLOT_PX,
   PILL_TRANSITION_MS,
-  visibleToolsItems,
   type ToolsSegmentItem,
 } from "@/app/lib/agentSegments";
 import { cn } from "@/app/lib/cn";
@@ -31,12 +30,14 @@ function Coupler() {
 
 const ToolPillRow = memo(function ToolPillRow({
   item,
+  active,
   showCoupler,
 }: {
   item: ToolsSegmentItem;
+  active: boolean;
   showCoupler: boolean;
 }) {
-  const state = item.live
+  const state = active
     ? ToolPillState.Active
     : item.failed
       ? ToolPillState.Error
@@ -66,6 +67,35 @@ export interface ToolsSegmentsProps {
   onClick?: () => void;
 }
 
+function toolsSegmentsPropsAreEqual(
+  previous: Readonly<ToolsSegmentsProps>,
+  next: Readonly<ToolsSegmentsProps>,
+): boolean {
+  if (
+    previous.inProgress !== next.inProgress ||
+    previous.active !== next.active ||
+    previous.durationMs !== next.durationMs ||
+    previous.label !== next.label ||
+    previous.className !== next.className ||
+    previous.ariaLabel !== next.ariaLabel ||
+    previous.onClick !== next.onClick ||
+    previous.items.length !== next.items.length
+  ) {
+    return false;
+  }
+  return previous.items.every((item, index) => {
+    const candidate = next.items[index];
+    return (
+      item.id === candidate.id &&
+      item.icon === candidate.icon &&
+      item.label === candidate.label &&
+      item.statusLabel === candidate.statusLabel &&
+      item.live === candidate.live &&
+      item.failed === candidate.failed
+    );
+  });
+}
+
 function ToolsSegments({
   items,
   label,
@@ -78,9 +108,12 @@ function ToolsSegments({
 }: ToolsSegmentsProps) {
   const isMobile = useIsMobile();
   const maxPills = isMobile ? MAX_PILLS_MOBILE : MAX_PILLS_DESKTOP;
-  const visible = useMemo(() => visibleToolsItems(items, maxPills), [items, maxPills]);
   const viewportMaxPx = maxPills * PILL_SLOT_PX - COUPLER_WIDTH_PX;
-  const innerWidthPx = Math.max(0, visible.items.length * PILL_SLOT_PX - COUPLER_WIDTH_PX);
+  const renderedItems = items;
+  const overflowCount = Math.max(0, renderedItems.length - maxPills);
+  const innerWidthPx = Math.max(0, renderedItems.length * PILL_SLOT_PX - COUPLER_WIDTH_PX);
+  const translateXPx = -(overflowCount * PILL_SLOT_PX);
+  const lastItemId = items.at(-1)?.id;
   const reducedMotion = useMemo(() => prefersReducedMotion(), []);
 
   return (
@@ -96,9 +129,9 @@ function ToolsSegments({
       onClick={onClick}
     >
       <div className="flex shrink-0 items-center">
-        {visible.overflowCount > 0 ? (
+        {overflowCount > 0 ? (
           <>
-            <ToolPill.Overflow count={visible.overflowCount} size={ToolPillSize.Small} />
+            <ToolPill.Overflow count={overflowCount} size={ToolPillSize.Small} />
             <Coupler />
           </>
         ) : null}
@@ -110,33 +143,38 @@ function ToolsSegments({
             className="flex items-center"
             style={{
               width: `${innerWidthPx}px`,
+              minWidth: `${innerWidthPx}px`,
+              maxWidth: `${innerWidthPx}px`,
+              transform: `translateX(${translateXPx}px)`,
               transition:
-                inProgress && !reducedMotion ? `width ${PILL_TRANSITION_MS}ms ease-out` : "none",
+                inProgress && !reducedMotion
+                  ? `transform ${PILL_TRANSITION_MS}ms ease-out`
+                  : "none",
             }}
           >
-            {visible.items.map((item, index) => (
-              <ToolPillRow key={item.id} item={item} showCoupler={index > 0} />
+            {renderedItems.map((item, index) => (
+              <ToolPillRow
+                key={item.id}
+                item={item}
+                active={inProgress && item.id === lastItemId}
+                showCoupler={index > 0}
+              />
             ))}
           </div>
         </div>
       </div>
-      <div className="flex min-w-0 items-center gap-2 pr-2">
-        <span
-          className={cn(
-            "label-micro min-w-0 truncate",
-            inProgress ? "text-shimmer-basic" : "text-basic-tertiary",
-          )}
-        >
-          {label}
-        </span>
-        {!inProgress && durationMs != null ? (
-          <span className="text-micro shrink-0 whitespace-nowrap text-basic-muted">
-            {formatSeconds(durationMs)}
-          </span>
-        ) : null}
-      </div>
+      {!inProgress ? (
+        <div className="flex min-w-0 items-center gap-2 pr-2">
+          <span className="label-micro min-w-0 truncate text-basic-tertiary">{label}</span>
+          {durationMs != null ? (
+            <span className="text-micro shrink-0 whitespace-nowrap text-basic-muted">
+              {formatSeconds(durationMs)}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </button>
   );
 }
 
-export default memo(ToolsSegments);
+export default memo(ToolsSegments, toolsSegmentsPropsAreEqual);

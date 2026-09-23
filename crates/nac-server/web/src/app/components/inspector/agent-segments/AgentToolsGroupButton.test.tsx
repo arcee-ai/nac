@@ -71,6 +71,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetActionExpansion();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -169,6 +170,36 @@ describe("agent segment presentation", () => {
     expect(root.scrollTop).toBe(500);
   });
 
+  it("animates only the newest live pill and fades the live stepper after settlement", () => {
+    vi.useFakeTimers();
+    const live = group();
+    live.inProgress = true;
+    const liveTail = live.segments[2];
+    if (liveTail.kind !== "tool") throw new Error("expected a tool tail");
+    liveTail.presentation.status = "running";
+    liveTail.presentation.statusLabel = "Running";
+
+    const { container, rerender } = render(
+      <AgentToolsGroupButton group={live} active={false} onSelect={() => {}} />,
+    );
+    const activePills = container.querySelectorAll('[data-state="active"]');
+    expect(activePills).toHaveLength(1);
+    expect(activePills[0].getAttribute("data-segment-id")).toBe("tool-2");
+    expect(screen.getByText("Reading file…")).toBeTruthy();
+
+    const settled = structuredClone(live);
+    settled.inProgress = false;
+    const settledTail = settled.segments[2];
+    if (settledTail.kind !== "tool") throw new Error("expected a tool tail");
+    settledTail.presentation.status = "success";
+    settledTail.presentation.statusLabel = "Succeeded";
+    rerender(<AgentToolsGroupButton group={settled} active={false} onSelect={() => {}} />);
+    expect(container.querySelector('[data-stepper] [aria-hidden="true"]')).not.toBeNull();
+
+    act(() => vi.advanceTimersByTime(300));
+    expect(container.querySelector("[data-stepper]")).toBeNull();
+  });
+
   it("derives live step text without changing the underlying segment order", () => {
     const live = group();
     live.segments[0] = {
@@ -214,10 +245,12 @@ describe("agent segment presentation", () => {
       <AgentToolsGroupButton group={mobile} active={false} onSelect={() => {}} />,
     );
     expect(screen.getByText("+2")).toBeTruthy();
+    const track = container.querySelector<HTMLElement>("[data-segment-id]")?.parentElement;
+    expect(track?.style.transform).toBe("translateX(-72px)");
     expect(
       Array.from(container.querySelectorAll("[data-segment-id]")).map((node) =>
         node.getAttribute("data-segment-id"),
       ),
-    ).toEqual(["tool-2", "tool-3", "tool-4", "tool-5"]);
+    ).toEqual(["tool-0", "tool-1", "tool-2", "tool-3", "tool-4", "tool-5"]);
   });
 });

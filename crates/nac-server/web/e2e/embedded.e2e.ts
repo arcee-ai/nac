@@ -297,10 +297,14 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
     await expect(group).toHaveAccessibleName(/Awaiting approval/);
     await page.getByRole("button", { name: "Allow once" }).click();
     await expect(group).toHaveAccessibleName(/Running/);
+    const liveGroup = group.locator("..");
+    await expect(liveGroup.locator('[data-state="active"]')).toHaveCount(1);
+    await expect(liveGroup.getByText("Running command…", { exact: true })).toBeVisible();
 
     await harness.provider.waitForRequestCount(2);
     await waitForRunIdle(request, harness, sessionId);
     await expect(group).toHaveAccessibleName(/Succeeded/);
+    await expect(liveGroup.locator("[data-stepper]")).toHaveCount(0);
     await group.click();
     await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/actions$`));
     const detail = page.locator("[data-segment-key]").filter({ hasText: command });
