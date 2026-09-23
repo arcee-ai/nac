@@ -1,16 +1,14 @@
 import { memo } from "react";
 
 import {
-  Button,
-  ButtonContent,
   ButtonSize,
   ButtonVariant,
   CopyButton,
   Icon,
   IconName,
-  Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { MessageActionIcon } from "@/app/components/inspector/MessageActionIcon";
 import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -110,56 +108,38 @@ export const UserMessage = memo(function UserMessage({
           ) : null}
 
           {canRefresh ? (
-            <Tooltip
+            <MessageActionIcon
               title="Regenerate from the original prompt (rewinds later transcript and workspace changes)"
+              ariaLabel="Regenerate from original prompt"
               position={TooltipPosition.BottomLeft}
+              isMobile={isMobile}
+              disabled={actionsDisabled}
+              onClick={() => onRefresh(messageIndex)}
             >
-              <Button
-                size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                content={ButtonContent.Icon}
-                aria-label="Regenerate from original prompt"
-                disabled={actionsDisabled}
-                onClick={() => onRefresh(messageIndex)}
-                className="md:!h-4 md:!min-h-4 md:!p-0"
-              >
-                <Icon iconName={IconName.Refresh} size={16} />
-              </Button>
-            </Tooltip>
+              <Icon iconName={IconName.Refresh} size={16} />
+            </MessageActionIcon>
           ) : null}
 
           {canRevert ? (
-            <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomLeft}>
-              <Button
-                size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                content={ButtonContent.Icon}
-                aria-label="Revert to this snapshot"
-                disabled={actionsDisabled}
-                onClick={() => onRevert(messageIndex, text)}
-                className="md:!h-4 md:!min-h-4 md:!p-0"
-              >
-                <Icon iconName={IconName.TurnLeft} size={16} />
-              </Button>
-            </Tooltip>
-          ) : readOnly ? null : (
-            <Tooltip
-              title="This message is not in the transcript yet"
+            <MessageActionIcon
+              title="Revert to this snapshot"
               position={TooltipPosition.BottomLeft}
+              isMobile={isMobile}
+              disabled={actionsDisabled}
+              onClick={() => onRevert(messageIndex, text)}
             >
-              <span className="inline-flex">
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                  content={ButtonContent.Icon}
-                  aria-label="Revert to this snapshot"
-                  disabled
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.TurnLeft} size={16} />
-                </Button>
-              </span>
-            </Tooltip>
+              <Icon iconName={IconName.TurnLeft} size={16} />
+            </MessageActionIcon>
+          ) : readOnly ? null : (
+            <MessageActionIcon
+              title="Revert to this snapshot"
+              disabledReason="This message is not in the transcript yet"
+              position={TooltipPosition.BottomLeft}
+              isMobile={isMobile}
+              disabled
+            >
+              <Icon iconName={IconName.TurnLeft} size={16} />
+            </MessageActionIcon>
           )}
 
           <CopyButton
