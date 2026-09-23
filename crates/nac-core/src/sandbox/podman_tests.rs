@@ -1464,6 +1464,7 @@ fn portable_identity_inspection_failure_retains_retry_authority() {
 fn total_portable_identity_inspection_failure_retains_retry_authority() {
     use std::os::unix::fs::PermissionsExt;
 
+    let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
         "nac-wrapper-portable-total-uncertainty-{}",
         uuid::Uuid::new_v4()
