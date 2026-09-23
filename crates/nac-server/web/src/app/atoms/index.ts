@@ -38,6 +38,12 @@ export { default as MessageBox, MessageBoxSize, MessageBoxVariant } from "./mess
 export { default as Modal, ModalSize } from "./modal";
 export { default as ModelPill, ModelPillSize } from "./model-pill";
 export { default as NumberInput } from "./number-input";
+export {
+  default as OriginSessionBadge,
+  OriginSessionKind,
+  originKindFromLineage,
+  originSessionIconName,
+} from "./origin-session-badge";
 export { default as Pagination } from "./pagination";
 export { default as Popover, PopoverPlacement, PopoverSize } from "./popover";
 export { default as ProjectButton, ProjectButtonVariant } from "./project-button";
@@ -46,6 +52,7 @@ export { default as Radio } from "./radio";
 export { default as RangeInput } from "./range-input";
 export { default as Select, type SelectItem } from "./select";
 export { default as SessionAvatar, sessionAvatarColor } from "./session-avatar";
+export { default as SessionTypeAvatar, sessionTypeIconName } from "./session-type-avatar";
 export { default as SessionIllustration } from "./session-illustration";
 export { default as Separator } from "./separator";
 export { default as Switch, SwitchSize } from "./switch";

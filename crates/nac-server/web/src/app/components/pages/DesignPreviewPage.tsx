@@ -37,6 +37,8 @@ import {
   MessageBoxVariant,
   Modal,
   NumberInput,
+  OriginSessionBadge,
+  OriginSessionKind,
   Pagination,
   Popover,
   PopoverPlacement,
@@ -47,6 +49,7 @@ import {
   RangeInput,
   Select,
   SessionAvatar,
+  SessionTypeAvatar,
   ShimmerLoader,
   Switch,
   TagsSelector,
@@ -118,29 +121,37 @@ export default function DesignPreviewPage() {
       <main className="p-6 flex flex-col gap-6 max-w-[1100px]">
         <BoxSurface title="UX migration foundations">
           <div className="p-4 flex flex-col gap-5">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
-                <div className="session-type-avatar-shimmer flex h-7 w-7 items-center justify-center rounded-full bg-session-agent text-session-type">
-                  <Icon iconName={IconName.Robot} size={16} />
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="label-small w-24 text-basic-muted">Session type</span>
+                <div className="flex items-center gap-2">
+                  <SessionTypeAvatar behavior="direct" />
+                  <span className="label-small text-basic-secondary">Direct</span>
                 </div>
-                <span className="label-small text-basic-secondary">Agent</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="session-type-avatar-shimmer flex h-7 w-7 items-center justify-center rounded-full bg-session-orchestrator text-session-type">
-                  <Icon iconName={IconName.Orchestrator} size={16} />
+                <div className="flex items-center gap-2">
+                  <SessionTypeAvatar behavior="direct-with-orchestrator" running />
+                  <span className="label-small text-basic-secondary">Direct + orchestrator</span>
                 </div>
-                <span className="label-small text-basic-secondary">Orchestrator</span>
+                <div className="flex items-center gap-2">
+                  <SessionTypeAvatar behavior="orchestrator" />
+                  <span className="label-small text-basic-secondary">NAC orchestrator</span>
+                </div>
               </div>
-              <div className="flex items-center gap-2 rounded-full bg-session-origin-agent-locked px-3 py-1 text-session-origin-locked">
-                <Icon iconName={IconName.Lock} size={14} />
-                <span className="label-small">Locked agent origin</span>
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="label-small w-24 text-basic-muted">Origin</span>
+                <div className="flex items-center gap-2">
+                  <OriginSessionBadge kind={OriginSessionKind.Fork} />
+                  <span className="label-small text-basic-secondary">Fork</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <OriginSessionBadge kind={OriginSessionKind.TraditionalChild} />
+                  <span className="label-small text-basic-secondary">Traditional child</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <OriginSessionBadge kind={OriginSessionKind.ManagedOrchestrator} />
+                  <span className="label-small text-basic-secondary">Managed orchestrator</span>
+                </div>
               </div>
-              <Icon
-                iconName={IconName.Orchestrator}
-                size={24}
-                shimmer
-                aria-label="Loading orchestrator"
-              />
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
               {UX_FOUNDATION_ICONS.map(({ label, icon }) => (
