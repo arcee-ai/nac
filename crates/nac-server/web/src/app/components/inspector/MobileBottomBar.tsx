@@ -3,6 +3,7 @@ import { cn } from "@/app/lib/cn";
 import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
 
 const TAB = {
+  sessions: { label: "Sessions", iconName: IconName.Chat },
   threads: { label: "Threads", iconName: IconName.Flow },
   delegated: { label: "Delegated", iconName: IconName.People },
   files: { label: "Files", iconName: IconName.Folders },

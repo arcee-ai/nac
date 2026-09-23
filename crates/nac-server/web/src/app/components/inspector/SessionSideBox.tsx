@@ -18,6 +18,7 @@ import { HistoryView } from "@/app/components/inspector/HistoryView";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
+import { SessionCollection } from "@/app/components/sessions/SessionCollection";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useSessionFetching } from "@/app/hooks/useSessionFetching";
 import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
@@ -36,13 +37,20 @@ import {
   useSelectedWorkset,
   useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
-import type { SessionSnapshotResponse, WorkspaceSnapshot } from "@/app/types/api";
+import type {
+  ManagedSessionSummary,
+  ProjectRecord,
+  SessionSnapshotResponse,
+  WorkspaceSnapshot,
+} from "@/app/types/api";
 
 interface SessionSideBoxProps {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
   panel: SessionPanel;
   onPanelChange: (panel: SessionPanel) => void;
+  sessions: ManagedSessionSummary[];
+  projects: ProjectRecord[];
 }
 
 function FooterChip({
@@ -145,7 +153,14 @@ function SideBoxFooter({
  * the body of the modal box that SessionPage puts them in, and its chrome —
  * header, bottom bar — belongs to the dialog rather than to this box.
  */
-export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: SessionSideBoxProps) {
+export function SessionSideBox({
+  sessionId,
+  snapshot,
+  panel,
+  onPanelChange,
+  sessions,
+  projects,
+}: SessionSideBoxProps) {
   const expanded = useSidePanelExpanded();
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
@@ -167,6 +182,9 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
 
   const body = (
     <>
+      {active === "sessions" ? (
+        <SessionCollection sessions={sessions} projects={projects} activeSessionId={sessionId} />
+      ) : null}
       {active === "files" ? (
         <FilesView
           sessionId={sessionId}
@@ -255,13 +273,15 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
 
       <div className="flex-1 min-h-0 flex flex-col">{body}</div>
 
-      <SideBoxFooter
-        sessionId={sessionId}
-        workspace={snapshot?.workspace ?? null}
-        revision={selectedRevision}
-        compact={isTablet}
-        readOnly={delegatedTranscript}
-      />
+      {active === "sessions" ? null : (
+        <SideBoxFooter
+          sessionId={sessionId}
+          workspace={snapshot?.workspace ?? null}
+          revision={selectedRevision}
+          compact={isTablet}
+          readOnly={delegatedTranscript}
+        />
+      )}
     </div>
   );
 }

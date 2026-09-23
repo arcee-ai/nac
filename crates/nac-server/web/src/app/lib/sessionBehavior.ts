@@ -63,23 +63,23 @@ export interface SessionPanelPolicy {
 }
 
 const ORCHESTRATOR_PANELS: SessionPanelPolicy = {
-  widePanels: ["threads", "files", "worksets"],
-  mobilePanels: ["threads", "files", "worksets", "history"],
-  defaultPanel: "threads",
+  widePanels: ["sessions", "threads", "files", "worksets"],
+  mobilePanels: ["sessions", "threads", "files", "worksets", "history"],
+  defaultPanel: "sessions",
   readOnly: false,
 };
 
 const DIRECT_PANELS: SessionPanelPolicy = {
-  widePanels: ["delegated", "files"],
-  mobilePanels: ["delegated", "files", "history"],
-  defaultPanel: "delegated",
+  widePanels: ["sessions", "delegated", "files"],
+  mobilePanels: ["sessions", "delegated", "files", "history"],
+  defaultPanel: "sessions",
   readOnly: false,
 };
 
 const TRADITIONAL_CHILD_PANELS: SessionPanelPolicy = {
-  widePanels: ["files"],
-  mobilePanels: ["files", "history"],
-  defaultPanel: "files",
+  widePanels: ["sessions", "files"],
+  mobilePanels: ["sessions", "files", "history"],
+  defaultPanel: "sessions",
   readOnly: true,
 };
 

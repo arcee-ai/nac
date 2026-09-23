@@ -1,6 +1,95 @@
 use super::*;
 
 #[tokio::test]
+async fn provider_models_route_maps_caller_url_hygiene_to_bad_request() {
+    let root = temp_root("provider_models_url_hygiene");
+    let app = router(test_manager(&root));
+
+    for (base_url, expected) in [
+        ("relative/path", "not a valid absolute URL"),
+        (
+            "ftp://gateway.example/v1",
+            "absolute http(s) URL with a host",
+        ),
+        (
+            "https://user:secret@gateway.example/v1",
+            "must not embed userinfo",
+        ),
+        ("http://gateway.example/v1", "requires HTTPS"),
+    ] {
+        let response = post_json(
+            app.clone(),
+            "/providers/models",
+            serde_json::json!({
+                "backend": "openai-responses",
+                "api_key": "provider-route-test-key",
+                "base_url": base_url,
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{base_url}");
+        let body = response_json(response).await;
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|message| message.contains(expected)),
+            "unexpected response for {base_url}: {body}"
+        );
+        assert!(!body.to_string().contains("provider-route-test-key"));
+    }
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn provider_models_route_keeps_provider_failures_at_bad_gateway() {
+    use std::io::{Read, Write};
+
+    let root = temp_root("provider_models_upstream_failure");
+    let app = router(test_manager(&root));
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0u8; 2048];
+        let read = stream.read(&mut request).unwrap();
+        let request = String::from_utf8_lossy(&request[..read]);
+        assert!(request.starts_with("GET /models "), "{request}");
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer provider-route-test-key"),
+            "{request}"
+        );
+        stream
+            .write_all(
+                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 21\r\nConnection: close\r\n\r\ndiscovery unavailable",
+            )
+            .unwrap();
+    });
+
+    let response = post_json(
+        app,
+        "/providers/models",
+        serde_json::json!({
+            "backend": "openai-responses",
+            "api_key": "provider-route-test-key",
+            "base_url": base_url,
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = response_json(response).await;
+    assert!(body["error"]
+        .as_str()
+        .is_some_and(|message| message.contains("503")));
+    assert!(!body.to_string().contains("provider-route-test-key"));
+    server.join().unwrap();
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn saved_chat_configuration_survives_unavailable_model_discovery() {
     use std::io::{Read, Write};
 

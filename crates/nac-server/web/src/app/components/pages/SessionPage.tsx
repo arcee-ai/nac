@@ -36,6 +36,7 @@ import {
 } from "@/app/lib/routes";
 import {
   useSessions,
+  useProjects,
   useSessionSnapshot,
   useSessionSummary,
   useSshConnect,
@@ -122,6 +123,8 @@ export default function SessionPage() {
   const { data: entry = null } = useSessionSummary(id);
   const { data: sessionList } = useSessions();
   const allSessions = sessionList ?? [];
+  const { data: projectList } = useProjects();
+  const allProjects = projectList?.projects ?? [];
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
   const expanded = useSidePanelExpanded();
@@ -212,6 +215,8 @@ export default function SessionPage() {
       snapshot={snapshot}
       panel={effectivePanel}
       onPanelChange={goToPanel}
+      sessions={allSessions}
+      projects={allProjects}
     />
   );
 
@@ -235,7 +240,11 @@ export default function SessionPage() {
           <div
             className={cn(
               "h-full shrink-0 transition-[width] duration-150 ease-out",
-              collapsed ? "w-0" : "w-1/2",
+              collapsed
+                ? "w-0"
+                : effectivePanel === "sessions" && isDesktop
+                  ? "w-[320px]"
+                  : "w-1/2",
             )}
           />
 
@@ -246,7 +255,8 @@ export default function SessionPage() {
           */}
           <div
             className={cn(
-              "absolute inset-y-0 left-0 flex flex-col w-1/2 min-w-0",
+              "absolute inset-y-0 left-0 flex flex-col min-w-0",
+              effectivePanel === "sessions" && isDesktop ? "w-[320px]" : "w-1/2",
               "pt-[56px] pb-2 pl-2 pr-2 xl:pr-6",
               "transition-transform duration-150 ease-out",
               collapsed && "-translate-x-full",

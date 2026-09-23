@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -52,11 +52,11 @@ function session(
 afterEach(cleanup);
 
 describe("project session tab behavior identity", () => {
-  it("keeps every behavior identifiable in the compact tab strip", () => {
+  it("sizes tabs to their titles and keeps every behavior identifiable", () => {
     const sessions = [
-      session("orchestrator", "Plan", "orchestrator"),
-      session("direct", "Code", "direct"),
-      session("hybrid", "Coordinate", "direct-with-orchestrator"),
+      session("orchestrator", "Plan the managed deployment rollout", "orchestrator"),
+      session("direct", "Implement connection status feedback", "direct"),
+      session("hybrid", "Coordinate release readiness review", "direct-with-orchestrator"),
     ];
     render(
       <MemoryRouter>
@@ -69,14 +69,54 @@ describe("project session tab behavior identity", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("button", { name: "Plan, NAC orchestrator" })).toBeTruthy();
-    expect(
-      screen
-        .getByRole("button", { name: "Code, Direct coding agent" })
-        .getAttribute("aria-current"),
-    ).toBe("page");
-    expect(
-      screen.getByRole("button", { name: "Coordinate, Direct + NAC orchestration" }),
-    ).toBeTruthy();
+    const expected = [
+      ["Plan the managed deployment rollout", "NAC orchestrator", "orchestrator"],
+      ["Implement connection status feedback", "Direct coding agent", "plane"],
+      ["Coordinate release readiness review", "Direct + NAC orchestration", "planeAdd"],
+    ] as const;
+
+    for (const [title, behavior, icon] of expected) {
+      const tab = screen.getByRole("button", { name: `${title}, ${behavior}` });
+      expect(tab.getAttribute("title")).toBe(title);
+      expect(tab.querySelector(`[data-session-behavior-icon="${icon}"]`)).toBeTruthy();
+      expect(tab.querySelector("[data-session-tab-badge]")).toBeNull();
+      expect(tab.closest(".chat-session-tab")?.className).toContain("w-full");
+      const slot = tab.closest(".chat-session-tab")?.parentElement;
+      expect(slot?.className).toContain("w-fit");
+      expect(slot?.className).toContain("flex-none");
+      expect(slot?.className).toContain("max-w-[272px]");
+      expect(screen.getByRole("button", { name: `Close ${title}` })).toBeTruthy();
+    }
+
+    const active = screen.getByRole("button", {
+      name: "Implement connection status feedback, Direct coding agent",
+    });
+    expect(active.getAttribute("aria-current")).toBe("page");
+    expect(active.className).toContain("pl-2");
+    expect(active.className).toContain("pr-2");
+    expect(active.className).toContain("group-hover:pr-8");
+    expect(active.className).toContain("group-has-[:focus-visible]:pr-8");
+    const close = screen.getByRole("button", {
+      name: "Close Implement connection status feedback",
+    });
+    expect(close.className).toContain("absolute");
+    expect(close.className).toContain("right-1");
+
+    expect(screen.queryByText("Orchestrator")).toBeNull();
+    expect(screen.queryByText("Direct")).toBeNull();
+    expect(screen.queryByText("Direct + NAC")).toBeNull();
+
+    const orchestrator = screen.getByRole("button", {
+      name: "Plan the managed deployment rollout, NAC orchestrator",
+    });
+    const orchestratorIcon = orchestrator.querySelector(
+      '[data-session-behavior-icon="orchestrator"]',
+    );
+    fireEvent.mouseEnter(orchestratorIcon!);
+    expect(screen.getByText("NAC orchestrator").closest(".tooltip-box")).toBeTruthy();
+    fireEvent.mouseLeave(orchestratorIcon!);
+
+    fireEvent.focus(active);
+    expect(screen.getByText("Direct coding agent").closest(".tooltip-box")).toBeTruthy();
   });
 });
