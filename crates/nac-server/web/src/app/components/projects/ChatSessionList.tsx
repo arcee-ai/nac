@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import { ChatSessionButton } from "@/app/atoms";
+import { ChatSessionButton, sessionTypeIconName } from "@/app/atoms";
 import { ChatSessionActions } from "@/app/components/projects/ChatSessionActions";
 import { GroupLabel } from "@/app/components/projects/GroupLabel";
 import { useNow } from "@/app/hooks/useNow";
@@ -74,6 +74,9 @@ export function ChatSessionList({
                   title={title}
                   badge={behavior.navigationLabel}
                   badgeLabel={behavior.label}
+                  behaviorIcon={sessionTypeIconName(behavior.id)}
+                  behaviorLabel={behavior.label}
+                  originKind={entry.lineage?.kind}
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}

@@ -2,6 +2,9 @@ import type React from "react";
 
 import { cn } from "../../lib/cn";
 import ChatSessionLeadingMark from "../chat-session-fork-mark";
+import Icon, { type IconName } from "../icon";
+import OriginSessionBadge, { type OriginSessionKind } from "../origin-session-badge";
+import Tooltip from "../tooltip";
 
 interface ChatSessionButtonProps extends Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
@@ -17,6 +20,12 @@ interface ChatSessionButtonProps extends Omit<
   badge?: string;
   /** Full accessible meaning of the compact badge. */
   badgeLabel?: string;
+  /** #258's immutable behavior glyph, kept separate from status badges. */
+  behaviorIcon?: IconName;
+  /** Full hover/focus meaning of the behavior glyph. */
+  behaviorLabel?: string;
+  /** Read-only lineage shown after the row content. Forks keep their leading mark. */
+  originKind?: OriginSessionKind;
   /** Authoritative server activity is newer than the browser's viewed marker. */
   unread?: boolean;
   /** Taller touch target and always-visible actions for the mobile modal. */
@@ -43,6 +52,9 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   forkedFromTitle,
   badge,
   badgeLabel,
+  behaviorIcon,
+  behaviorLabel,
+  originKind,
   unread = false,
   isMobile = false,
   actions,
@@ -74,12 +86,31 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         aria-label={ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)}
         aria-current={active ? "page" : undefined}
         className={cn(
-          "flex flex-1 items-center min-w-0 rounded-[3px] text-left",
+          "flex min-w-0 flex-1 items-center rounded-[3px] text-left",
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary",
           isMobile ? "gap-3" : "gap-1.5",
         )}
         {...props}
       >
+        {behaviorIcon ? (
+          <Tooltip
+            title={behaviorLabel ?? "Session behavior"}
+            position={Tooltip.Position.BottomCenter}
+            sticky
+            className="shrink-0"
+          >
+            <span className="inline-flex shrink-0">
+              <Icon
+                iconName={behaviorIcon}
+                size={16}
+                shimmer={running}
+                aria-hidden
+                data-session-behavior-icon={behaviorIcon}
+                className={cn("shrink-0", running ? undefined : labelClass)}
+              />
+            </span>
+          </Tooltip>
+        ) : null}
         <ChatSessionLeadingMark
           forkedFromTitle={forkedFromTitle}
           running={running}
@@ -102,6 +133,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
             {badge}
           </span>
         ) : null}
+        {originKind ? <OriginSessionBadge kind={originKind} /> : null}
         {unread ? (
           <span
             className="h-2 w-2 shrink-0 rounded-full bg-accent-primary"

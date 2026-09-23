@@ -1,12 +1,13 @@
 import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ChatSessionButton } from "@/app/atoms";
+import { ChatSessionButton, sessionTypeIconName } from "@/app/atoms";
 import { ChatSessionActions } from "@/app/components/projects/ChatSessionActions";
 import { GroupLabel } from "@/app/components/projects/GroupLabel";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun } from "@/app/lib/format";
+import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import { buildSessionNavigation, isSessionUnread } from "@/app/lib/sessionNavigation";
 import { routes } from "@/app/lib/routes";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
@@ -38,6 +39,7 @@ function SessionCollectionRow({
   const viewedAt = useSessionViewedAt(entry.summary.session_id);
   const title = sessionTitle(entry.summary);
   const running = isActiveRun(entry.active_run);
+  const behavior = sessionBehaviorPresentation(entry.summary.behavior);
   const unread = isSessionUnread(entry.summary.updated_at, viewedAt);
   const status = entry.summary.model_config_error
     ? "Needs attention"
@@ -59,6 +61,8 @@ function SessionCollectionRow({
       running={running}
       unread={unread}
       forkedFromTitle={entry.summary.forked_from?.title}
+      behaviorIcon={sessionTypeIconName(behavior.id)}
+      behaviorLabel={behavior.label}
       badge={status ?? undefined}
       badgeLabel={status ?? undefined}
       isMobile={isMobile}

@@ -277,6 +277,7 @@ export function ProjectSessionTabs({
                   title={sessionTitle(entry.summary)}
                   behaviorIcon={SESSION_BEHAVIOR_ICONS[behavior.id]}
                   behaviorLabel={behavior.label}
+                  originKind={entry.lineage?.kind}
                   active={sessionId === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}

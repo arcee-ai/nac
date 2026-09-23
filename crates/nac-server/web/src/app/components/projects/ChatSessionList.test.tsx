@@ -9,6 +9,9 @@ import type { ManagedSessionSummary, SessionBehavior } from "@/app/types/api";
 vi.mock("@/app/hooks/useSessionTitle", () => ({
   useSessionTitle: () => (summary: { title: string | null }) => summary.title ?? "Untitled",
 }));
+vi.mock("@/app/hooks/useMediaQuery", () => ({
+  useIsMobile: () => false,
+}));
 
 function session(
   sessionId: string,
@@ -63,6 +66,7 @@ describe("chat session behavior identity", () => {
       name: "Coordinate the migration, Direct + NAC orchestration",
     });
     expect(hybrid).toBeTruthy();
+    expect(hybrid.querySelector('[data-session-behavior-icon="planeAdd"]')).toBeTruthy();
     expect(screen.getByText("Orchestrator")).toBeTruthy();
     expect(screen.getByText("Direct")).toBeTruthy();
     expect(screen.getByText("Direct + NAC")).toBeTruthy();

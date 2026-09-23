@@ -5,6 +5,7 @@ import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import ChatSessionLeadingMark from "../chat-session-fork-mark";
 import Icon, { IconName } from "../icon";
 import ShimmerLoader from "../loader/ShimmerLoader";
+import OriginSessionBadge, { type OriginSessionKind } from "../origin-session-badge";
 import Tooltip from "../tooltip";
 
 interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> {
@@ -18,6 +19,8 @@ interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButton
   behaviorIcon?: IconName;
   /** Full accessible and hover/focus meaning of the behavior icon. */
   behaviorLabel?: string;
+  /** Read-only lineage shown after the title. Forks keep their leading mark. */
+  originKind?: OriginSessionKind;
   /** Takes the tab off the strip. The chat itself is untouched. */
   onDismiss?: () => void;
 }
@@ -57,6 +60,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   forkedFromTitle,
   behaviorIcon,
   behaviorLabel,
+  originKind,
   onDismiss,
   className = "",
   type = "button",
@@ -95,6 +99,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
         <Icon
           iconName={behaviorIcon}
           size={16}
+          shimmer={running}
           aria-hidden
           data-session-behavior-icon={behaviorIcon}
           className={cn("shrink-0", labelClass)}
@@ -106,6 +111,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
       >
         {title}
       </span>
+      {originKind ? <OriginSessionBadge kind={originKind} /> : null}
     </button>
   );
 

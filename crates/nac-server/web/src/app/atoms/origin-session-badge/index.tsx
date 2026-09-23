@@ -55,6 +55,7 @@ const OriginSessionBadge: React.FC<OriginSessionBadgeProps> = ({ kind, className
           : "bg-elevation-sublevel-variant-B text-basic-tertiary",
         className,
       )}
+      data-session-origin-kind={kind}
       aria-hidden
     >
       <Icon iconName={originSessionIconName(kind)} size={12} />

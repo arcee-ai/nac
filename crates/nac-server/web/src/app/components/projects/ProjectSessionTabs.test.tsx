@@ -24,11 +24,12 @@ function session(
   sessionId: string,
   title: string,
   behavior: SessionBehavior,
+  lineage: ManagedSessionSummary["lineage"] = null,
 ): ManagedSessionSummary {
   return {
     active: false,
     active_run: null,
-    lineage: null,
+    lineage,
     summary: {
       backend: "openai-responses",
       behavior,
@@ -56,7 +57,12 @@ describe("project session tab behavior identity", () => {
     const sessions = [
       session("orchestrator", "Plan the managed deployment rollout", "orchestrator"),
       session("direct", "Implement connection status feedback", "direct"),
-      session("hybrid", "Coordinate release readiness review", "direct-with-orchestrator"),
+      session("hybrid", "Coordinate release readiness review", "direct-with-orchestrator", {
+        kind: "managed-orchestrator",
+        parent_session_id: "direct",
+        root_session_id: "direct",
+        description: "Release child",
+      }),
     ];
     render(
       <MemoryRouter>
@@ -87,6 +93,13 @@ describe("project session tab behavior identity", () => {
       expect(slot?.className).toContain("max-w-[272px]");
       expect(screen.getByRole("button", { name: `Close ${title}` })).toBeTruthy();
     }
+
+    const managedOrigin = screen
+      .getByRole("button", {
+        name: "Coordinate release readiness review, Direct + NAC orchestration",
+      })
+      .querySelector('[data-session-origin-kind="managed-orchestrator"]');
+    expect(managedOrigin).toBeTruthy();
 
     const active = screen.getByRole("button", {
       name: "Implement connection status feedback, Direct coding agent",

@@ -118,6 +118,9 @@ describe("global session collection", () => {
     expect(screen.getAllByText("Updated").length).toBeGreaterThan(0);
     const activeRow = screen.getByRole("button", { name: /^one-active/ });
     expect(activeRow.getAttribute("aria-current")).toBe("page");
+    expect(activeRow.querySelector('[data-session-behavior-icon="plane"]')).toBeTruthy();
+    expect(screen.getByText("Project One")).toBeTruthy();
+    expect(screen.getAllByText("Updated").length).toBeGreaterThan(0);
     activeRow.focus();
     expect(document.activeElement).toBe(activeRow);
     expect(activeRow.className).toContain("focus-visible:outline");
