@@ -58,10 +58,12 @@ import {
   useWorkspaceRevisions,
 } from "@/app/services/queries";
 import {
+  selectActionGroup,
   selectFile,
   selectRevision,
   selectThread,
   selectWorkset,
+  useSelectedActionGroup,
   useSelectedFile,
   useSelectedRevision,
   useSelectedThreadEpisode,
@@ -214,6 +216,7 @@ export function Transcript({
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
   const optimisticPrompt = useOptimisticUserPrompt();
+  const selectedActionGroup = useSelectedActionGroup();
   const selectedThreadEpisode = useSelectedThreadEpisode();
   const selectedWorkset = useSelectedWorkset();
   const selectedFile = useSelectedFile();
@@ -469,6 +472,13 @@ export function Transcript({
     },
     [onFocusPanel],
   );
+  const focusActionGroup = useCallback(
+    (id: string) => {
+      selectActionGroup(id);
+      onFocusPanel("actions");
+    },
+    [onFocusPanel],
+  );
   // Opening a snapshot points the panel at that run's revision rather than at
   // the working tree: the run is what the badge describes, and the tree has
   // usually moved on — or been committed — since.
@@ -690,8 +700,10 @@ export function Transcript({
                   activity={running && lastIsThisRun ? activity : undefined}
                   selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
                   selectedWorkset={panel === "worksets" ? selectedWorkset : null}
+                  selectedActionGroup={panel === "actions" ? selectedActionGroup : null}
                   onSelectThread={focusThread}
                   onSelectWorkset={focusWorkset}
+                  onSelectActionGroup={focusActionGroup}
                   userMessageIndex={precedingUser?.messageIndex}
                   userText={precedingUser?.text}
                   actionsDisabled={actionsBusy}
@@ -757,8 +769,10 @@ export function Transcript({
               isLast
               selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
               selectedWorkset={panel === "worksets" ? selectedWorkset : null}
+              selectedActionGroup={panel === "actions" ? selectedActionGroup : null}
               onSelectThread={focusThread}
               onSelectWorkset={focusWorkset}
+              onSelectActionGroup={focusActionGroup}
             />
           ) : null}
 

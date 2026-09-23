@@ -218,6 +218,58 @@ describe("transcript topology badge navigation", () => {
     expect(onSelectThread).toHaveBeenCalledWith("api", "api:0");
   });
 
+  it("groups transcript thoughts and tools and selects the matching Actions group", () => {
+    const onSelectActionGroup = vi.fn();
+    const { container } = render(
+      <ModelMessage
+        turn={{
+          kind: "model",
+          key: "model-tools",
+          durationMs: 1200,
+          messageIndex: 1,
+          blocks: [
+            {
+              kind: "thoughts",
+              key: "thoughts-1",
+              text: "Inspect the fixture",
+              durationMs: 400,
+              streaming: false,
+            },
+            {
+              kind: "tool-detail",
+              key: "tool-1",
+              presentation: {
+                callId: "read-1",
+                name: "read",
+                label: "Read file",
+                summary: "fixture.txt",
+                resultPreview: "contents",
+                status: "success",
+                statusLabel: "Succeeded",
+              },
+            },
+            { kind: "text", key: "text-1", text: "Done" },
+          ],
+        }}
+        model="gpt-5.6-sol"
+        active={false}
+        selectedThreadEpisode={null}
+        selectedWorkset={null}
+        selectedActionGroup={null}
+        onSelectThread={vi.fn()}
+        onSelectWorkset={vi.fn()}
+        onSelectActionGroup={onSelectActionGroup}
+      />,
+    );
+
+    const group = screen.getByRole("button", { name: /Thoughts & tools/ });
+    expect(container.querySelector('[data-tool-call-id="read-1"]')).toBeNull();
+    expect(screen.getByText("Done")).not.toBeNull();
+
+    fireEvent.click(group);
+    expect(onSelectActionGroup).toHaveBeenCalledWith("model-tools:tools-0");
+  });
+
   it("keeps parent-owned transcripts free of mutation affordances", () => {
     const turn: ModelTurn = {
       kind: "model",

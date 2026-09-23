@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { Page } from "@playwright/test";
 
 import {
   createDirectSession,
@@ -10,6 +11,10 @@ import {
   waitForRunIdle,
 } from "./harness";
 import { ScriptGate } from "./scripted-provider";
+
+function transcriptToolGroups(page: Page, name: RegExp) {
+  return page.locator(".chat-response").getByRole("button", { name });
+}
 
 test("serves the production-embedded application and hashed assets", async ({
   harness,
@@ -133,18 +138,22 @@ test("round-trips a native tool result through the scripted Responses provider",
     (entry) => entry.matchedStep === "finish-after-read",
   );
   expect(JSON.stringify(resultRequest?.body)).toContain("E2E_FILE_BODY");
-  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/actions`);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/sessions`);
   await expect(page.getByRole("button", { name: "About Direct coding agent" })).toBeVisible();
   await expect(page.getByText("tool result received")).toBeVisible();
 
-  const transcriptTool = page.locator('[data-tool-call-id="read-e2e-1"]');
-  await expect(transcriptTool).toContainText("Read file");
-  await expect(transcriptTool).toContainText("fixture.txt");
-  await expect(transcriptTool).toContainText("Succeeded");
+  const transcriptToolGroup = page
+    .locator(".chat-response")
+    .getByRole("button", { name: /Read file: Succeeded/ });
+  await expect(transcriptToolGroup).toBeVisible();
+  await expect(page.locator('[data-tool-call-id="read-e2e-1"]')).toHaveCount(0);
+  await transcriptToolGroup.click();
+  await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/actions$`));
+  await expect(transcriptToolGroup).toHaveAttribute("aria-pressed", "true");
 
-  // The migration keeps #258's session navigation contract while adding the
-  // Actions side-box projection. Exercise the real route and the settled tool
-  // detail instead of relying on the design preview.
+  // The transcript group and Actions side-box are two projections of the same
+  // settled tool activity. Exercise their shared selection through the real
+  // route instead of relying on the design preview.
   const desktopPanels = page.getByRole("tablist").last();
   await expect(desktopPanels.getByRole("tab", { name: "Sessions" })).toBeVisible();
   await expect(desktopPanels.getByRole("tab", { name: "Actions" })).toHaveAttribute(
@@ -222,8 +231,8 @@ test("terminates one exact live terminal through the ordinary session API", asyn
   await composer.fill("E2E_TERMINAL_STOP_TOKEN");
   await page.getByRole("button", { name: "Send" }).click();
   await harness.provider.waitForRequestCount(1);
-  const card = page.locator('[data-tool-call-id="terminal-stop-e2e-1"]');
-  await expect(card).toContainText("Awaiting approval");
+  const group = transcriptToolGroups(page, /Run command/).last();
+  await expect(group).toHaveAccessibleName(/Awaiting approval/);
   await page.getByRole("button", { name: "Allow once" }).click();
   await harness.provider.waitForRequestCount(2);
   await completion.accepted;
@@ -277,26 +286,28 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
     await page.getByRole("button", { name: "Send" }).click();
     await harness.provider.waitForRequestCount(1);
 
-    const card = page.locator(`[data-tool-call-id="${callId}"]`);
-    await expect(card).toContainText("Run command");
-    await expect(card).toContainText(command);
-    await expect(card).toContainText("Awaiting approval");
+    const group = transcriptToolGroups(page, /Run command/).last();
+    await expect(group).toHaveAccessibleName(/Awaiting approval/);
     await page.getByRole("button", { name: "Allow once" }).click();
-    await expect(card).toContainText("Running");
+    await expect(group).toHaveAccessibleName(/Running/);
 
     await harness.provider.waitForRequestCount(2);
     await waitForRunIdle(request, harness, sessionId);
-    await expect(card).toContainText("Succeeded");
-    await expect(card).toContainText("ALL1_TOOL_COMPLETE");
+    await expect(group).toHaveAccessibleName(/Succeeded/);
+    await group.click();
+    await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/actions$`));
+    const detail = page.locator("[data-segment-key]").filter({ hasText: command });
+    await expect(detail).toContainText("Succeeded");
+    await expect(detail).toContainText("ALL1_TOOL_COMPLETE");
     await expect(page.getByText(`${behavior} rich tool complete`)).toBeVisible();
 
     await page.reload();
-    const reloaded = page.locator(`[data-tool-call-id="${callId}"]`);
-    await expect(reloaded).toContainText("Run command");
-    await expect(reloaded).toContainText(command);
-    await expect(reloaded).toContainText("Succeeded");
-    await expect(reloaded).toContainText("ALL1_TOOL_COMPLETE");
-    await expect(reloaded).toHaveCount(1);
+    const reloadedGroup = transcriptToolGroups(page, /Run command/).last();
+    await expect(reloadedGroup).toHaveAccessibleName(/Succeeded/);
+    const reloadedDetail = page.locator("[data-segment-key]").filter({ hasText: command });
+    await expect(reloadedDetail).toContainText("Succeeded");
+    await expect(reloadedDetail).toContainText("ALL1_TOOL_COMPLETE");
+    await expect(reloadedDetail).toHaveCount(1);
     harness.provider.assertConsumed();
   });
 }
@@ -349,16 +360,16 @@ test("keeps approval state and actions reachable with many remembered permission
 
   for (let index = 0; index < rememberedRequests; index += 1) {
     await harness.provider.waitForRequestCount(index + 1);
-    const card = page.locator(`[data-tool-call-id="permission-read-${index}"]`);
-    await expect(card).toContainText("Awaiting approval");
+    const group = transcriptToolGroups(page, /Read file/).last();
+    await expect(group).toHaveAccessibleName(/Awaiting approval/);
     await expect(page.getByRole("button", { name: "Always allow" })).toBeEnabled();
     await page.getByRole("button", { name: "Always allow" }).click();
   }
 
   await harness.provider.waitForRequestCount(rememberedRequests + 1);
-  const pendingCard = page.locator(`[data-tool-call-id="permission-read-${rememberedRequests}"]`);
-  await expect(pendingCard).toContainText("Awaiting approval");
-  await expect(pendingCard).not.toContainText("Running");
+  const pendingGroup = transcriptToolGroups(page, /Read file/).last();
+  await expect(pendingGroup).toHaveAccessibleName(/Awaiting approval/);
+  await expect(pendingGroup).not.toHaveAccessibleName(/Running/);
 
   const dialog = page.getByRole("dialog");
   const scrollBody = dialog.locator(":scope > .overflow-auto");
@@ -382,14 +393,14 @@ test("keeps approval state and actions reachable with many remembered permission
 
   await page.mouse.click(4, 4);
   await expect(dialog).toBeHidden();
-  await expect(pendingCard).toContainText("Awaiting approval");
+  await expect(pendingGroup).toHaveAccessibleName(/Awaiting approval/);
   await page.getByRole("button", { name: "Permissions (1)" }).click();
   await expect(dialog).toBeVisible();
   await page.getByRole("button", { name: "Allow once" }).click();
 
   await harness.provider.waitForRequestCount(rememberedRequests + 2);
   await waitForRunIdle(request, harness, sessionId);
-  await expect(pendingCard).toContainText("Succeeded");
+  await expect(pendingGroup).toHaveAccessibleName(/Succeeded/);
   await expect(page.getByText("permission journey complete")).toBeVisible();
 
   await page.getByRole("button", { name: /^Permissions \(\d+\)$/ }).click();
@@ -457,9 +468,8 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   await page.getByRole("combobox", { name: "Message" }).fill("ALL16_AUTO_APPROVE_TOKEN");
   await page.getByRole("button", { name: "Send" }).click();
   await harness.provider.waitForRequestCount(1);
-  await expect(page.locator('[data-tool-call-id="auto-approve-first"]')).toContainText(
-    "Awaiting approval",
-  );
+  const firstAutomaticGroup = transcriptToolGroups(page, /Read file/).first();
+  await expect(firstAutomaticGroup).toHaveAccessibleName(/Awaiting approval/);
 
   await page.getByRole("switch", { name: "Approve all automatically" }).click();
   await expect(
@@ -467,10 +477,8 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   ).toBeVisible();
   await harness.provider.waitForRequestCount(3);
   await waitForRunIdle(request, harness, sessionId);
-  await expect(page.locator('[data-tool-call-id="auto-approve-first"]')).toContainText("Succeeded");
-  await expect(page.locator('[data-tool-call-id="auto-approve-second"]')).toContainText(
-    "Succeeded",
-  );
+  const automaticGroup = transcriptToolGroups(page, /Read file/).first();
+  await expect(automaticGroup).toHaveAccessibleName(/Succeeded.*Succeeded/);
   await expect(page.getByText("automatic approvals complete")).toBeVisible();
 
   await page.reload();
@@ -503,8 +511,8 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   await page.getByRole("combobox", { name: "Message" }).fill("ALL16_MANUAL_TOKEN");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await harness.provider.waitForRequestCount(4);
-  const manualCard = page.locator('[data-tool-call-id="manual-after-disable"]');
-  await expect(manualCard).toContainText("Awaiting approval");
+  const manualGroup = transcriptToolGroups(page, /Read file/).last();
+  await expect(manualGroup).toHaveAccessibleName(/Awaiting approval/);
   await page.getByRole("button", { name: "Allow once" }).click();
   await harness.provider.waitForRequestCount(5);
   await waitForRunIdle(request, harness, sessionId);
@@ -664,14 +672,21 @@ test("renders an unknown primary tool failure safely after reload", async ({
   await harness.provider.waitForRequestCount(2);
   await waitForRunIdle(request, harness, sessionId);
 
-  const card = page.locator('[data-tool-call-id="all1-unknown"]');
-  await expect(card).toContainText("MCP · Dangerous tool");
-  await expect(card).toContainText("Failed");
+  const group = transcriptToolGroups(page, /MCP · Dangerous tool/).last();
+  await expect(group).toHaveAccessibleName(/Failed/);
+  await group.click();
+  await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/actions$`));
+  const detail = page.locator("[data-segment-key]").filter({ hasText: "MCP · Dangerous tool" });
+  await expect(detail).toContainText("Failed");
   await expect(page.locator("body")).not.toContainText("RAW_SECRET_MUST_NOT_RENDER");
   await expect(page.locator("body")).not.toContainText("UNBOUNDED_RAW_BODY_MUST_NOT_RENDER");
   await page.reload();
-  await expect(page.locator('[data-tool-call-id="all1-unknown"]')).toContainText("Failed");
-  await expect(page.locator('[data-tool-call-id="all1-unknown"]')).toHaveCount(1);
+  await expect(transcriptToolGroups(page, /MCP · Dangerous tool/).last()).toHaveAccessibleName(
+    /Failed/,
+  );
+  await expect(
+    page.locator("[data-segment-key]").filter({ hasText: "MCP · Dangerous tool" }),
+  ).toHaveCount(1);
   harness.provider.assertConsumed();
 });
 

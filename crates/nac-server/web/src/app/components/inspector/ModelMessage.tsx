@@ -17,13 +17,17 @@ import { MessageActionIcon } from "@/app/components/inspector/MessageActionIcon"
 import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
+import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
+import { partitionAgentTranscript } from "@/app/lib/agentSegments";
 import { cn } from "@/app/lib/cn";
 import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
-import { RUN_CANCELLED_MARKER, type ModelTurn } from "@/app/lib/transcript";
+import { RUN_CANCELLED_MARKER, type ModelTurn, type TranscriptBlock } from "@/app/lib/transcript";
 import type { SessionBehavior, SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+
+const ignoreActionGroupSelection = () => undefined;
 
 /**
  * "Thinking" for reasoning that is still arriving, so the badge names what the
@@ -62,8 +66,11 @@ interface ModelMessageProps {
   /** Episode key of the thread card the panels are pointing at, if any. */
   selectedThreadEpisode: string | null;
   selectedWorkset: string | null;
+  /** Thoughts/tools group the Actions panel currently shows in detail. */
+  selectedActionGroup?: string | null;
   onSelectThread: (name: string, episodeKey: string) => void;
   onSelectWorkset: (id: string) => void;
+  onSelectActionGroup?: (id: string) => void;
   /**
    * Snapshot index of the user prompt this model turn answers. Regenerate and
    * revert address that prompt — same endpoints as the user bubble above.
@@ -112,8 +119,10 @@ export const ModelMessage = memo(function ModelMessage({
   isLast = false,
   selectedThreadEpisode,
   selectedWorkset,
+  selectedActionGroup = null,
   onSelectThread,
   onSelectWorkset,
+  onSelectActionGroup,
   userMessageIndex,
   userText = "",
   onRefresh = null,
@@ -139,6 +148,64 @@ export const ModelMessage = memo(function ModelMessage({
     (block) => block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
   );
   const isMobile = useIsMobile();
+  const renderTranscriptBlock = (block: TranscriptBlock) => {
+    switch (block.kind) {
+      case "thoughts":
+        if (!block.text.trim()) return null;
+        return (
+          <ChatBadge
+            key={block.key}
+            label={thoughtsLabel(block)}
+            pending={block.streaming}
+            body={block.text}
+          />
+        );
+      case "text":
+        if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
+        return (
+          <Markdown key={block.key} streaming={active}>
+            {block.text}
+          </Markdown>
+        );
+      case "workset":
+        return (
+          <ChatBadge
+            key={block.key}
+            label={
+              block.worksetId
+                ? `Worksets_${block.worksetId}`
+                : block.pending
+                  ? "Defining worksets…"
+                  : "Worksets"
+            }
+            pending={block.pending}
+            active={selectedWorkset === block.worksetId}
+            onClick={() => onSelectWorkset(block.worksetId)}
+          />
+        );
+      case "tool":
+        return (
+          <ChatBadge
+            key={block.key}
+            label={block.pending ? `${block.name}…` : block.name}
+            pending={block.pending}
+          />
+        );
+      case "tool-detail":
+        return <ToolCallDetail key={block.key} tool={block.presentation} />;
+      case "wave":
+        return (
+          <ThreadWave
+            key={block.key}
+            rows={block.rows}
+            selected={selectedThreadEpisode}
+            onSelect={onSelectThread}
+          />
+        );
+      default:
+        return null;
+    }
+  };
   return (
     <div
       className={cn(
@@ -172,66 +239,18 @@ export const ModelMessage = memo(function ModelMessage({
             active && "streaming",
           )}
         >
-          {turn.blocks.map((block) => {
-            switch (block.kind) {
-              case "thoughts":
-                // Empty reasoning (e.g. stripped tool-call markup, or a bare
-                // thinking signal with no text) should not leave a hollow badge.
-                if (!block.text.trim()) return null;
-                return (
-                  <ChatBadge
-                    key={block.key}
-                    label={thoughtsLabel(block)}
-                    pending={block.streaming}
-                    body={block.text}
-                  />
-                );
-              case "text":
-                if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
-                return (
-                  <Markdown key={block.key} streaming={active}>
-                    {block.text}
-                  </Markdown>
-                );
-              case "workset":
-                return (
-                  <ChatBadge
-                    key={block.key}
-                    label={
-                      block.worksetId
-                        ? `Worksets_${block.worksetId}`
-                        : block.pending
-                          ? "Defining worksets…"
-                          : "Worksets"
-                    }
-                    pending={block.pending}
-                    active={selectedWorkset === block.worksetId}
-                    onClick={() => onSelectWorkset(block.worksetId)}
-                  />
-                );
-              case "tool":
-                return (
-                  <ChatBadge
-                    key={block.key}
-                    label={block.pending ? `${block.name}…` : block.name}
-                    pending={block.pending}
-                  />
-                );
-              case "tool-detail":
-                return <ToolCallDetail key={block.key} tool={block.presentation} />;
-              case "wave":
-                return (
-                  <ThreadWave
-                    key={block.key}
-                    rows={block.rows}
-                    selected={selectedThreadEpisode}
-                    onSelect={onSelectThread}
-                  />
-                );
-              default:
-                return null;
-            }
-          })}
+          {partitionAgentTranscript(turn).map((item) =>
+            item.kind === "group" ? (
+              <AgentToolsGroupButton
+                key={item.group.id}
+                group={item.group}
+                active={selectedActionGroup === item.group.id}
+                onSelect={onSelectActionGroup ?? ignoreActionGroupSelection}
+              />
+            ) : (
+              renderTranscriptBlock(item.block)
+            ),
+          )}
           {snapshotRevision && filesPanel ? (
             <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
           ) : null}
