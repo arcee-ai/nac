@@ -133,8 +133,59 @@ test("round-trips a native tool result through the scripted Responses provider",
     (entry) => entry.matchedStep === "finish-after-read",
   );
   expect(JSON.stringify(resultRequest?.body)).toContain("E2E_FILE_BODY");
-  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/threads`);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/actions`);
+  await expect(page.getByRole("button", { name: "About Direct coding agent" })).toBeVisible();
   await expect(page.getByText("tool result received")).toBeVisible();
+
+  const transcriptTool = page.locator('[data-tool-call-id="read-e2e-1"]');
+  await expect(transcriptTool).toContainText("Read file");
+  await expect(transcriptTool).toContainText("fixture.txt");
+  await expect(transcriptTool).toContainText("Succeeded");
+
+  // The migration keeps #258's session navigation contract while adding the
+  // Actions side-box projection. Exercise the real route and the settled tool
+  // detail instead of relying on the design preview.
+  const desktopPanels = page.getByRole("tablist").last();
+  await expect(desktopPanels.getByRole("tab", { name: "Sessions" })).toBeVisible();
+  await expect(desktopPanels.getByRole("tab", { name: "Actions" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(desktopPanels.getByRole("tab", { name: "Delegated work" })).toBeVisible();
+  await expect(desktopPanels.getByRole("tab", { name: "Files" })).toBeVisible();
+  await expect(desktopPanels.getByRole("tab", { name: "Threads" })).toHaveCount(0);
+  await expect(desktopPanels.getByRole("tab", { name: "Worksets" })).toHaveCount(0);
+
+  const actionTurn = page.locator('section[aria-label="Turn 1"]');
+  await expect(actionTurn).toContainText("E2E_TOOL_TOKEN");
+  await expect(actionTurn.getByRole("button", { name: /Read file/ })).toBeVisible();
+  const actionDetail = page.locator("[data-segment-key]").filter({ hasText: "Read file" });
+  await expect(actionDetail).toContainText("Succeeded");
+  await expect(actionDetail).toContainText("fixture.txt");
+
+  await desktopPanels.getByRole("tab", { name: "Sessions" }).click();
+  await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/sessions$`));
+  await desktopPanels.getByRole("tab", { name: "Actions" }).click();
+  await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/actions$`));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open panel" }).click();
+  const mobilePanel = page.getByRole("dialog");
+  await expect(mobilePanel).toBeVisible();
+  await expect(mobilePanel.getByRole("tab", { name: "Sessions" })).toBeVisible();
+  await expect(mobilePanel.getByRole("tab", { name: "Actions" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(mobilePanel.getByRole("tab", { name: "Delegated" })).toBeVisible();
+  await expect(mobilePanel.getByRole("tab", { name: "Files" })).toBeVisible();
+  await expect(mobilePanel.getByRole("tab", { name: "History" })).toBeVisible();
+  await expect(mobilePanel.getByRole("tab", { name: "Threads" })).toHaveCount(0);
+  await expect(mobilePanel.getByRole("tab", { name: "Worksets" })).toHaveCount(0);
+  await expect(mobilePanel.locator("[data-segment-key]")).toContainText("Read file");
+  await expect(mobilePanel.locator("[data-segment-key]")).toContainText("Succeeded");
+  await mobilePanel.getByRole("button", { name: "Close" }).click();
+  await expect(mobilePanel).toBeHidden();
 });
 
 test("terminates one exact live terminal through the ordinary session API", async ({
