@@ -197,6 +197,8 @@ export async function createProject(
   request: APIRequestContext,
   harness: EmbeddedHarness,
   options: {
+    name?: string;
+    cwd?: string;
     lightModel?: {
       model: string;
       backend: "openai-responses";
@@ -206,9 +208,11 @@ export async function createProject(
     };
   } = {},
 ): Promise<string> {
+  const cwd = options.cwd ?? path.join(harness.runRoot, "workspace");
+  await fs.mkdir(cwd, { recursive: true });
   const configuration = await request.post(`${harness.baseUrl}/model-configs`, {
     data: {
-      name: "E2E scripted provider",
+      name: options.name ? `${options.name} scripted provider` : "E2E scripted provider",
       backend: "openai-responses",
       model: "gpt-5.6-sol",
       base_url: harness.provider.baseUrl,
@@ -229,8 +233,8 @@ export async function createProject(
 
   const project = await request.post(`${harness.baseUrl}/projects`, {
     data: {
-      name: "Embedded E2E project",
-      cwd: path.join(harness.runRoot, "workspace"),
+      name: options.name ?? "Embedded E2E project",
+      cwd,
       default_model_config_id: configId,
     },
   });

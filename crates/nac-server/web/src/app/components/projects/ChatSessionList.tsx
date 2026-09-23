@@ -1,14 +1,7 @@
 import { useMemo } from "react";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  ChatSessionButton,
-  Icon,
-  IconName,
-} from "@/app/atoms";
+import { ChatSessionButton } from "@/app/atoms";
+import { ChatSessionActions } from "@/app/components/projects/ChatSessionActions";
 import { GroupLabel } from "@/app/components/projects/GroupLabel";
 import { useNow } from "@/app/hooks/useNow";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
@@ -88,44 +81,13 @@ export function ChatSessionList({
                   onClick={() => onOpen(entry)}
                   actions={
                     onPin || onRename || onDelete ? (
-                      <>
-                        {onPin ? (
-                          <Button
-                            variant={ButtonVariant.Ghost}
-                            size={ButtonSize.Small}
-                            content={ButtonContent.Icon}
-                            title={entry.summary.pinned ? "Unpin chat" : "Pin chat"}
-                            aria-label={`${entry.summary.pinned ? "Unpin" : "Pin"} ${title}`}
-                            onClick={() => onPin(entry)}
-                          >
-                            <Icon iconName={entry.summary.pinned ? IconName.Unpin : IconName.Pin} />
-                          </Button>
-                        ) : null}
-                        {onRename ? (
-                          <Button
-                            variant={ButtonVariant.Ghost}
-                            size={ButtonSize.Small}
-                            content={ButtonContent.Icon}
-                            title="Rename chat"
-                            aria-label={`Rename ${title}`}
-                            onClick={() => onRename(entry)}
-                          >
-                            <Icon iconName={IconName.Edit} />
-                          </Button>
-                        ) : null}
-                        {onDelete ? (
-                          <Button
-                            variant={ButtonVariant.GhostDestructive}
-                            size={ButtonSize.Small}
-                            content={ButtonContent.Icon}
-                            title="Delete chat"
-                            aria-label={`Delete ${title}`}
-                            onClick={() => onDelete(entry)}
-                          >
-                            <Icon iconName={IconName.Trash} />
-                          </Button>
-                        ) : null}
-                      </>
+                      <ChatSessionActions
+                        title={title}
+                        pinned={entry.summary.pinned}
+                        onPin={onPin ? () => onPin(entry) : undefined}
+                        onRename={onRename ? () => onRename(entry) : undefined}
+                        onDelete={onDelete ? () => onDelete(entry) : undefined}
+                      />
                     ) : null
                   }
                 />
