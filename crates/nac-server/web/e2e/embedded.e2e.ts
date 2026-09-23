@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import {
   createDirectSession,
@@ -354,14 +354,27 @@ test("keeps approval state and actions reachable with many remembered permission
   );
 
   const sessionId = await createDirectSession(request, harness);
-  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/actions`);
   await page.getByRole("combobox", { name: "Message" }).fill("ALL14_ALL15_PERMISSION_TOKEN");
   await page.getByRole("button", { name: "Send" }).click();
 
+  let detailScroller: Locator | null = null;
   for (let index = 0; index < rememberedRequests; index += 1) {
     await harness.provider.waitForRequestCount(index + 1);
     const group = transcriptToolGroups(page, /Read file/).last();
     await expect(group).toHaveAccessibleName(/Awaiting approval/);
+    if (index >= 4 && index <= 6) {
+      const rows = page.locator("[data-segment-key]");
+      await expect(rows).toHaveCount(index + 1);
+      detailScroller = rows.first().locator("..");
+      await expect
+        .poll(() =>
+          detailScroller!.evaluate(
+            (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+          ),
+        )
+        .toBeLessThanOrEqual(60);
+    }
     await expect(page.getByRole("button", { name: "Always allow" })).toBeEnabled();
     await page.getByRole("button", { name: "Always allow" }).click();
   }
@@ -412,7 +425,11 @@ test("keeps approval state and actions reachable with many remembered permission
   const detailRows = page.locator("[data-segment-key]");
   await expect(detailRows).toHaveCount(rememberedRequests + 1);
   const newestToolDetail = detailRows.last();
-  const detailScroller = detailRows.first().locator("..");
+  detailScroller = detailRows.first().locator("..");
+  await detailScroller.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect.poll(() => detailScroller.evaluate((element) => element.scrollTop)).toBe(0);
   const scrollBeforeSelection = await detailScroller.evaluate((element) => element.scrollTop);
   await newestToolChild.click();
   await expect(newestToolChild).toHaveAttribute("aria-pressed", "true");

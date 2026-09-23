@@ -131,6 +131,44 @@ describe("agent segment presentation", () => {
     expect(target!.className).toContain("bg-btn-ghost-highlighted");
   });
 
+  it("follows live detail growth until the reader scrolls away and resumes at the bottom", () => {
+    let scrollHeight = 600;
+    const initial = group();
+    const { container, rerender } = render(<SegmentDetailList group={initial} />);
+    const root = container.firstElementChild as HTMLDivElement;
+    Object.defineProperty(root, "scrollHeight", { configurable: true, get: () => scrollHeight });
+    Object.defineProperty(root, "clientHeight", { configurable: true, get: () => 200 });
+
+    const firstLive = structuredClone(initial);
+    firstLive.inProgress = true;
+    const firstTail = firstLive.segments[2];
+    if (firstTail.kind !== "tool") throw new Error("expected a tool tail");
+    firstTail.presentation.status = "running";
+    firstTail.presentation.statusLabel = "Running";
+    firstTail.presentation.resultPreview = "partial output";
+    rerender(<SegmentDetailList group={firstLive} />);
+    expect(root.scrollTop).toBe(400);
+
+    root.scrollTop = 100;
+    fireEvent.scroll(root);
+    const paused = structuredClone(firstLive);
+    const pausedTail = paused.segments[2];
+    if (pausedTail.kind !== "tool") throw new Error("expected a tool tail");
+    pausedTail.presentation.resultPreview = "partial output growing while reading";
+    rerender(<SegmentDetailList group={paused} />);
+    expect(root.scrollTop).toBe(100);
+
+    root.scrollTop = 390;
+    fireEvent.scroll(root);
+    scrollHeight = 700;
+    const resumed = structuredClone(paused);
+    const resumedTail = resumed.segments[2];
+    if (resumedTail.kind !== "tool") throw new Error("expected a tool tail");
+    resumedTail.presentation.resultPreview = "partial output growing after returning to bottom";
+    rerender(<SegmentDetailList group={resumed} />);
+    expect(root.scrollTop).toBe(500);
+  });
+
   it("derives live step text without changing the underlying segment order", () => {
     const live = group();
     live.segments[0] = {

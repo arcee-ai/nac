@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import type { SegmentDetailBoxContent } from "@/app/components/inspector/agent-segments/SegmentDetailBox";
 import SegmentDetailRow, {
@@ -14,6 +14,7 @@ import {
 import { useActionSegmentScroll, useSelectedActionSegmentKey } from "@/app/lib/actionExpand";
 import { cn } from "@/app/lib/cn";
 import { formatSeconds } from "@/app/lib/format";
+import { STICK_TOLERANCE_PX, distanceFromBottom, scrollToBottomInstantly } from "@/app/lib/scroll";
 import "./agent-segments.css";
 
 function detailForSegment(segment: AgentSegment): {
@@ -94,8 +95,17 @@ export function SegmentDetailList({
 }) {
   const items = useMemo(() => itemsFromGroup(group), [group]);
   const rootRef = useRef<HTMLDivElement>(null);
+  const stuckRef = useRef(true);
   const scrollTo = useActionSegmentScroll();
   const selectedKey = useSelectedActionSegmentKey();
+  const last = items[items.length - 1];
+  const followSeed = `${items.length}:${last?.key ?? ""}:${last?.copyText.length ?? 0}:${group.inProgress}`;
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root || !stuckRef.current) return;
+    scrollToBottomInstantly(root);
+  }, [followSeed]);
 
   useEffect(() => {
     if (!scrollTo) return;
@@ -105,6 +115,7 @@ export function SegmentDetailList({
       (candidate) => candidate.dataset.segmentKey === scrollTo.key,
     );
     if (!element) return;
+    stuckRef.current = false;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const marginTop = Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 0;
     const top =
@@ -123,7 +134,14 @@ export function SegmentDetailList({
     );
   }
   return (
-    <div ref={rootRef} className={className}>
+    <div
+      ref={rootRef}
+      className={className}
+      onScroll={() => {
+        const root = rootRef.current;
+        if (root) stuckRef.current = distanceFromBottom(root) <= STICK_TOLERANCE_PX;
+      }}
+    >
       {items.map((item, index) => (
         <SegmentDetailRow
           key={item.key}
