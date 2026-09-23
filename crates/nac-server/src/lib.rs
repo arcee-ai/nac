@@ -117,7 +117,7 @@ use nac_core::{
     },
     model::{
         list_managed_provider_models, list_provider_models, provider_default_base_url,
-        resolve_backend_api_key, ManagedAuthProvider, ModelListing,
+        resolve_backend_api_key, validate_model_base_url, ManagedAuthProvider, ModelListing,
     },
     permissions::PermissionReply,
     runtime::{self, NacConfig, StoreOptions},

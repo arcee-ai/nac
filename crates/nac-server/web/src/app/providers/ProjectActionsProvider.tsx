@@ -13,6 +13,7 @@ import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_CHAT_KEYS, NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { pruneChatTabs } from "@/app/store/chatTabsStore";
+import { pruneSessionNavigation } from "@/app/store/sessionNavigationStore";
 import {
   useAssignSessionToProject,
   useProjects,
@@ -125,6 +126,7 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
       sessions.map((entry) => entry.summary.session_id),
       projectList.projects.map((project) => project.project_id),
     );
+    pruneSessionNavigation(primarySessions(sessions).map((entry) => entry.summary.session_id));
   }, [sessionsLoaded, sessions, projectList]);
 
   // Which project the screen is about, whether it was reached by its own route

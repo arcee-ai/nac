@@ -55,6 +55,6 @@ describe("delegated completion event", () => {
     expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create fork" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open exact transcript" }));
-    expect(screen.getByTestId("location").textContent).toBe("/session/child%2Fexact/threads");
+    expect(screen.getByTestId("location").textContent).toBe("/session/child%2Fexact/sessions");
   });
 });

@@ -1192,6 +1192,7 @@ async fn provider_models_handler(
             status: StatusCode::BAD_REQUEST,
             message: format!("backend '{backend}' has no default base URL; supply one"),
         })?;
+    validate_model_base_url(&base_url).map_err(ApiError::from)?;
     let models = list_provider_models(backend, &base_url, &api_key)
         .await
         .map_err(|error| ApiError {

@@ -42,29 +42,29 @@ describe("session behavior presentation", () => {
 describe("session panel policy", () => {
   const behaviors: SessionBehavior[] = ["orchestrator", "direct", "direct-with-orchestrator"];
 
-  it("keeps every primary behavior's established desktop and mobile panels", () => {
+  it("puts global sessions first while preserving every behavior-specific panel", () => {
     expect(sessionPanelPolicy("orchestrator", null)).toEqual({
-      widePanels: ["threads", "files", "worksets"],
-      mobilePanels: ["threads", "files", "worksets", "history"],
-      defaultPanel: "threads",
+      widePanels: ["sessions", "threads", "files", "worksets"],
+      mobilePanels: ["sessions", "threads", "files", "worksets", "history"],
+      defaultPanel: "sessions",
       readOnly: false,
     });
     for (const behavior of ["direct", "direct-with-orchestrator"] satisfies SessionBehavior[]) {
       expect(sessionPanelPolicy(behavior, null)).toEqual({
-        widePanels: ["delegated", "files"],
-        mobilePanels: ["delegated", "files", "history"],
-        defaultPanel: "delegated",
+        widePanels: ["sessions", "delegated", "files"],
+        mobilePanels: ["sessions", "delegated", "files", "history"],
+        defaultPanel: "sessions",
         readOnly: false,
       });
     }
   });
 
-  it("keeps traditional children Files/History-only for every stored behavior", () => {
+  it("keeps traditional children read-only while retaining global navigation", () => {
     for (const behavior of behaviors) {
       expect(sessionPanelPolicy(behavior, "traditional-child")).toEqual({
-        widePanels: ["files"],
-        mobilePanels: ["files", "history"],
-        defaultPanel: "files",
+        widePanels: ["sessions", "files"],
+        mobilePanels: ["sessions", "files", "history"],
+        defaultPanel: "sessions",
         readOnly: true,
       });
     }
@@ -73,9 +73,9 @@ describe("session panel policy", () => {
   it("gives managed orchestrators their own Threads and Worksets while remaining read-only", () => {
     for (const behavior of behaviors) {
       expect(sessionPanelPolicy(behavior, "managed-orchestrator")).toEqual({
-        widePanels: ["threads", "files", "worksets"],
-        mobilePanels: ["threads", "files", "worksets", "history"],
-        defaultPanel: "threads",
+        widePanels: ["sessions", "threads", "files", "worksets"],
+        mobilePanels: ["sessions", "threads", "files", "worksets", "history"],
+        defaultPanel: "sessions",
         readOnly: true,
       });
     }

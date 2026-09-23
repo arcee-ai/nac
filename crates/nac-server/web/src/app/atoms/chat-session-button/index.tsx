@@ -17,6 +17,8 @@ interface ChatSessionButtonProps extends Omit<
   badge?: string;
   /** Full accessible meaning of the compact badge. */
   badgeLabel?: string;
+  /** Authoritative server activity is newer than the browser's viewed marker. */
+  unread?: boolean;
   /** Taller touch target and always-visible actions for the mobile modal. */
   isMobile?: boolean;
   /** Rename and delete controls, revealed on hover and on keyboard focus. */
@@ -41,6 +43,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   forkedFromTitle,
   badge,
   badgeLabel,
+  unread = false,
   isMobile = false,
   actions,
   className = "",
@@ -70,7 +73,11 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         title={badgeLabel ? `${title} · ${badgeLabel}` : title}
         aria-label={ariaLabel ?? (badgeLabel ? `${title}, ${badgeLabel}` : title)}
         aria-current={active ? "page" : undefined}
-        className={cn("flex flex-1 items-center min-w-0 text-left", isMobile ? "gap-3" : "gap-1.5")}
+        className={cn(
+          "flex flex-1 items-center min-w-0 rounded-[3px] text-left",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary",
+          isMobile ? "gap-3" : "gap-1.5",
+        )}
         {...props}
       >
         <ChatSessionLeadingMark
@@ -93,6 +100,14 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
             className="tag-label max-w-[76px] shrink-0 truncate rounded bg-elevation-level-3 px-1 text-basic-tertiary"
           >
             {badge}
+          </span>
+        ) : null}
+        {unread ? (
+          <span
+            className="h-2 w-2 shrink-0 rounded-full bg-accent-primary"
+            title="Updated since last viewed"
+          >
+            <span className="sr-only">Unread</span>
           </span>
         ) : null}
       </button>

@@ -128,7 +128,7 @@ describe("delegated work", () => {
     mount("direct");
 
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    expect(screen.getByTestId("location").textContent).toBe("/session/child-1/threads");
+    expect(screen.getByTestId("location").textContent).toBe("/session/child-1/sessions");
     expect(screen.queryByText("NAC orchestrators")).toBeNull();
   });
 
