@@ -6,13 +6,129 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import type { ModelTurn } from "@/app/lib/transcript";
 
-vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => false }));
+const media = vi.hoisted(() => ({ isMobile: false }));
+vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => media.isMobile }));
 
-afterEach(cleanup);
+afterEach(() => {
+  media.isMobile = false;
+  cleanup();
+});
 
 describe("transcript topology badge navigation", () => {
-  it("names destructive replay as regeneration from the original prompt", () => {
+  it("uses the session behavior avatar and keeps running state local to the header", () => {
+    const { container } = render(
+      <ModelMessage
+        turn={{
+          kind: "model",
+          key: "model-1",
+          durationMs: null,
+          messageIndex: 1,
+          blocks: [{ kind: "text", key: "text-1", text: "Working" }],
+        }}
+        model="gpt-5.6-sol"
+        behavior="direct-with-orchestrator"
+        active
+        selectedThreadEpisode={null}
+        selectedWorkset={null}
+        onSelectThread={vi.fn()}
+        onSelectWorkset={vi.fn()}
+      />,
+    );
+
+    const avatar = container.querySelector(".session-type-avatar-shimmer");
+    expect(avatar).not.toBeNull();
+    expect(avatar?.classList.contains("size-[28px]")).toBe(true);
+    expect(avatar?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByText("gpt-5.6-sol")).not.toBeNull();
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("preserves the action set, tooltip text, order, and callback arguments", () => {
     const refresh = vi.fn();
+    const revert = vi.fn();
+    const fork = vi.fn();
+    render(
+      <ModelMessage
+        turn={{
+          kind: "model",
+          key: "model-1",
+          durationMs: 25,
+          messageIndex: 1,
+          blocks: [{ kind: "text", key: "text-1", text: "Result" }],
+        }}
+        model="gpt-5.6-sol"
+        active={false}
+        selectedThreadEpisode={null}
+        selectedWorkset={null}
+        onSelectThread={vi.fn()}
+        onSelectWorkset={vi.fn()}
+        userMessageIndex={0}
+        userText="Ship the transcript chrome"
+        onRefresh={refresh}
+        onRevert={revert}
+        onFork={fork}
+      />,
+    );
+
+    const regenerate = screen.getByRole("button", {
+      name: "Regenerate from original prompt",
+    });
+    const restore = screen.getByRole("button", { name: "Revert to this snapshot" });
+    const createFork = screen.getByRole("button", { name: "Create fork" });
+    const copy = screen.getByRole("button", { name: "Copy message" });
+    expect(screen.getAllByRole("button")).toEqual([regenerate, restore, createFork, copy]);
+    expect(
+      screen.getByText(
+        "Regenerate from the original prompt (rewinds later transcript and workspace changes)",
+      ),
+    ).not.toBeNull();
+
+    fireEvent.click(regenerate);
+    fireEvent.click(restore);
+    fireEvent.click(createFork);
+    expect(refresh).toHaveBeenCalledWith(0);
+    expect(revert).toHaveBeenCalledWith(0, "Ship the transcript chrome");
+    expect(fork).toHaveBeenCalledWith(1);
+  });
+
+  it("keeps the model action row hover/focus treatment and mobile sizing", () => {
+    media.isMobile = true;
+    const { container } = render(
+      <ModelMessage
+        turn={{
+          kind: "model",
+          key: "model-1",
+          durationMs: 25,
+          messageIndex: 1,
+          blocks: [{ kind: "text", key: "text-1", text: "Result" }],
+        }}
+        model="gpt-5.6-sol"
+        active={false}
+        selectedThreadEpisode={null}
+        selectedWorkset={null}
+        onSelectThread={vi.fn()}
+        onSelectWorkset={vi.fn()}
+        userMessageIndex={0}
+        onRefresh={vi.fn()}
+        onRevert={vi.fn()}
+        onFork={vi.fn()}
+      />,
+    );
+
+    const actionRow = Array.from(container.querySelectorAll("div")).find((element) =>
+      element.className.includes("group-hover/model-msg:opacity-100"),
+    );
+    expect(actionRow?.className).toContain("group-focus-within/model-msg:opacity-100");
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.classList.contains("btn-medium")).toBe(true);
+      expect(button.classList.contains("btn-ghost")).toBe(true);
+    }
+  });
+
+  it("keeps mutations disabled during a run without disabling copy", () => {
+    const refresh = vi.fn();
+    const revert = vi.fn();
+    const fork = vi.fn();
     render(
       <ModelMessage
         turn={{
@@ -30,11 +146,27 @@ describe("transcript topology badge navigation", () => {
         onSelectWorkset={vi.fn()}
         userMessageIndex={0}
         onRefresh={refresh}
+        onRevert={revert}
+        onFork={fork}
+        actionsDisabled
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Regenerate from original prompt" }));
-    expect(refresh).toHaveBeenCalledWith(0);
+    const mutationButtons = [
+      screen.getByRole("button", { name: "Regenerate from original prompt" }),
+      screen.getByRole("button", { name: "Revert to this snapshot" }),
+      screen.getByRole("button", { name: "Create fork" }),
+    ];
+    for (const button of mutationButtons) {
+      expect(button.hasAttribute("disabled")).toBe(true);
+      fireEvent.click(button);
+    }
+    expect(screen.getByRole("button", { name: "Copy message" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+    expect(refresh).not.toHaveBeenCalled();
+    expect(revert).not.toHaveBeenCalled();
+    expect(fork).not.toHaveBeenCalled();
   });
 
   it("selects the referenced workset and thread episode", () => {

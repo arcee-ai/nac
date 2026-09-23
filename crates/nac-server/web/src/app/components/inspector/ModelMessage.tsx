@@ -1,8 +1,6 @@
 import { memo } from "react";
 
 import {
-  Button,
-  ButtonContent,
   ButtonSize,
   ButtonVariant,
   ChatSessionMessage,
@@ -11,11 +9,11 @@ import {
   ForkSessionItem,
   Icon,
   IconName,
-  ModelPill,
-  Tooltip,
+  SessionTypeAvatar,
   TooltipPosition,
 } from "@/app/atoms";
 import { ChatBadge } from "@/app/components/inspector/ChatBadge";
+import { MessageActionIcon } from "@/app/components/inspector/MessageActionIcon";
 import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave } from "@/app/components/inspector/ThreadWave";
 import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
@@ -24,7 +22,7 @@ import { formatDurationShort, formatSeconds } from "@/app/lib/format";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
 import { RUN_CANCELLED_MARKER, type ModelTurn } from "@/app/lib/transcript";
-import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
+import type { SessionBehavior, SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /**
@@ -50,7 +48,9 @@ function modelCopyText(turn: ModelTurn): string {
 interface ModelMessageProps {
   turn: ModelTurn;
   model: string;
-  /** Draws the spinner ring while this turn is the one still producing output. */
+  /** Immutable session behavior represented by the header identity mark. */
+  behavior?: SessionBehavior;
+  /** Shimmers the session identity while this turn is still producing output. */
   active: boolean;
   /**
    * What the run is doing right now. Only the active turn is given it, so the
@@ -106,6 +106,7 @@ interface ModelMessageProps {
 export const ModelMessage = memo(function ModelMessage({
   turn,
   model,
+  behavior = "orchestrator",
   active,
   activity,
   isLast = false,
@@ -147,7 +148,7 @@ export const ModelMessage = memo(function ModelMessage({
     >
       <div className="flex flex-col flex-grow gap-1 pt-2 md:max-w-[calc(100%-36px)] min-w-0">
         <div className="flex gap-3 items-center mb-4 min-w-0">
-          <ModelPill active={active} />
+          <SessionTypeAvatar behavior={behavior} running={active} className="shrink-0" />
           <span className="label-small text-basic-primary truncate">{model}</span>
           {/* The header carries whichever of the two is available: what the run
               is doing now, or how long it took once it is over. */}
@@ -273,72 +274,50 @@ export const ModelMessage = memo(function ModelMessage({
             )}
           >
             {canRefresh ? (
-              <Tooltip
+              <MessageActionIcon
                 title="Regenerate from the original prompt (rewinds later transcript and workspace changes)"
+                ariaLabel="Regenerate from original prompt"
                 position={TooltipPosition.BottomRight}
+                isMobile={isMobile}
+                disabled={actionsDisabled}
+                onClick={() => onRefresh(userMessageIndex)}
               >
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                  content={ButtonContent.Icon}
-                  aria-label="Regenerate from original prompt"
-                  disabled={actionsDisabled}
-                  onClick={() => onRefresh(userMessageIndex)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.Refresh} size={16} />
-                </Button>
-              </Tooltip>
+                <Icon iconName={IconName.Refresh} size={16} />
+              </MessageActionIcon>
             ) : null}
 
             {canRevert ? (
-              <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomRight}>
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                  content={ButtonContent.Icon}
-                  aria-label="Revert to this snapshot"
-                  disabled={actionsDisabled}
-                  onClick={() => onRevert(userMessageIndex, userText)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.TurnLeft} size={16} />
-                </Button>
-              </Tooltip>
-            ) : readOnly ? null : (
-              <Tooltip
-                title="This message is not in the transcript yet"
+              <MessageActionIcon
+                title="Revert to this snapshot"
                 position={TooltipPosition.BottomRight}
+                isMobile={isMobile}
+                disabled={actionsDisabled}
+                onClick={() => onRevert(userMessageIndex, userText)}
               >
-                <span className="inline-flex">
-                  <Button
-                    size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                    variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                    content={ButtonContent.Icon}
-                    aria-label="Revert to this snapshot"
-                    disabled
-                    className="md:!h-4 md:!min-h-4 md:!p-0"
-                  >
-                    <Icon iconName={IconName.TurnLeft} size={16} />
-                  </Button>
-                </span>
-              </Tooltip>
+                <Icon iconName={IconName.TurnLeft} size={16} />
+              </MessageActionIcon>
+            ) : readOnly ? null : (
+              <MessageActionIcon
+                title="Revert to this snapshot"
+                position={TooltipPosition.BottomRight}
+                isMobile={isMobile}
+                disabled
+                disabledReason="This message is not in the transcript yet"
+              >
+                <Icon iconName={IconName.TurnLeft} size={16} />
+              </MessageActionIcon>
             )}
 
             {!readOnly && onFork != null && forkIndex != null ? (
-              <Tooltip title="Create fork" position={TooltipPosition.BottomRight}>
-                <Button
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-                  content={ButtonContent.Icon}
-                  aria-label="Create fork"
-                  disabled={actionsDisabled}
-                  onClick={() => onFork(forkIndex)}
-                  className="md:!h-4 md:!min-h-4 md:!p-0"
-                >
-                  <Icon iconName={IconName.Scheme} size={16} />
-                </Button>
-              </Tooltip>
+              <MessageActionIcon
+                title="Create fork"
+                position={TooltipPosition.BottomRight}
+                isMobile={isMobile}
+                disabled={actionsDisabled}
+                onClick={() => onFork(forkIndex)}
+              >
+                <Icon iconName={IconName.Scheme} size={16} />
+              </MessageActionIcon>
             ) : null}
 
             <CopyButton

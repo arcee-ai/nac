@@ -443,9 +443,9 @@ export function Transcript({
   }, [showPending, optimisticPrompt]);
 
   // Once *this* run has a model message of its own, that message carries the
-  // liveness — its pill spins and its header names the activity. A standalone
-  // row below would be a second pill for the same run. The last snapshot model
-  // turn is the previous reply; treating it as live hid the pending pill and
+  // liveness — its avatar shimmers and its header names the activity. A standalone
+  // row below would be a second avatar for the same run. The last snapshot model
+  // turn is the previous reply; treating it as live hid the pending avatar and
   // left `isLast` min-height on the old bubble until the stream opened, so
   // Send glided twice (user bubble, then the min-height hop).
   const lastTurn = turns[turns.length - 1];
@@ -681,6 +681,7 @@ export function Transcript({
                   key={turn.key}
                   turn={turn}
                   model={model}
+                  behavior={snapshot?.metadata.behavior}
                   active={running && lastIsThisRun}
                   // Pending model chrome below the optimistic bubble is the
                   // visual last row; leaving min-height on the previous reply
@@ -739,7 +740,7 @@ export function Transcript({
           ) : null}
 
           {/* Before the first assistant message or stream delta lands, keep the
-              same chrome as a live ModelMessage — pill + model name — rather
+              same chrome as a live ModelMessage — avatar + model name — rather
               than a separate "Run started…" / loader row. */}
           {showModelPending ? (
             <ModelMessage
@@ -751,6 +752,7 @@ export function Transcript({
                 messageIndex: null,
               }}
               model={model}
+              behavior={snapshot?.metadata.behavior}
               active
               isLast
               selectedThreadEpisode={panel === "threads" ? selectedThreadEpisode : null}
