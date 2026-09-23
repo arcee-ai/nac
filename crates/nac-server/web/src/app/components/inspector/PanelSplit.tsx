@@ -44,6 +44,7 @@ import {
 export function PanelSplit({
   list,
   listToolbar,
+  listClassName,
   listTitle,
   title,
   titleAction,
@@ -56,6 +57,8 @@ export function PanelSplit({
    * pointer, and a pill floating over its last rows on a phone.
    */
   listToolbar?: ReactNode;
+  /** Presentation-only spacing override for lists with their own section headers. */
+  listClassName?: string;
   /** What the list is of, for the header of the phone's list dialog. */
   listTitle?: string;
   /** Row that is open, named for the narrow header. */
@@ -141,6 +144,7 @@ export function PanelSplit({
           <div
             className={cn(
               "flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-2 gap-1 [&>*]:shrink-0",
+              listClassName,
               // Clearance for the bar floating over the last rows.
               listToolbar && "pb-[80px]",
             )}
@@ -183,7 +187,12 @@ export function PanelSplit({
         {showList ? (
           <div className="flex flex-col flex-1 min-h-0 bg-elevation-level-1">
             {listToolbar}
-            <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-1 [&>*]:shrink-0">
+            <div
+              className={cn(
+                "flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-1 [&>*]:shrink-0",
+                listClassName,
+              )}
+            >
               {list}
             </div>
           </div>
@@ -203,7 +212,12 @@ export function PanelSplit({
         style={{ width: listWidth }}
       >
         {listToolbar}
-        <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-4 px-1 [&>*]:shrink-0">
+        <div
+          className={cn(
+            "flex flex-col flex-1 min-h-0 overflow-auto pt-4 px-1 [&>*]:shrink-0",
+            listClassName,
+          )}
+        >
           {list}
         </div>
         <div

@@ -12,6 +12,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
+import { ActionsView } from "@/app/components/inspector/ActionsView";
 import { FilesView } from "@/app/components/inspector/FilesView";
 import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { HistoryView } from "@/app/components/inspector/HistoryView";
@@ -185,6 +186,9 @@ export function SessionSideBox({
       {active === "sessions" ? (
         <SessionCollection sessions={sessions} projects={projects} activeSessionId={sessionId} />
       ) : null}
+      {active === "actions" ? (
+        <ActionsView snapshot={snapshot} onPanelChange={onPanelChange} />
+      ) : null}
       {active === "files" ? (
         <FilesView
           sessionId={sessionId}
@@ -222,7 +226,10 @@ export function SessionSideBox({
         )}
       >
         <SideBoxProgress sessionId={sessionId} />
-        <div className="flex flex-1 min-w-0 items-center gap-1 " role="tablist">
+        <div
+          className="flex flex-1 min-w-0 items-center gap-1 overflow-x-auto overflow-y-clip scrollbar-none [&>*]:shrink-0"
+          role="tablist"
+        >
           {widePanels.map((name) => (
             <HorizontalTabsItem
               key={name}

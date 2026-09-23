@@ -107,7 +107,7 @@ function useAutoSshConnect(
   }, [target, status, connect]);
 }
 
-/** Session screen: the Files/Worksets/Threads box beside a permanent chat. */
+/** Session screen: the Actions and established inspector panels beside a permanent chat. */
 export default function SessionPage() {
   const { sessionId, panel } = useParams<{
     sessionId: string;

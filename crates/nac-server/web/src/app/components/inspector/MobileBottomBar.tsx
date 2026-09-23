@@ -4,6 +4,7 @@ import { SESSION_PANELS, type SessionPanel } from "@/app/lib/routes";
 
 const TAB = {
   sessions: { label: "Sessions", iconName: IconName.Chat },
+  actions: { label: "Actions", iconName: IconName.Brain },
   threads: { label: "Threads", iconName: IconName.Flow },
   delegated: { label: "Delegated", iconName: IconName.People },
   files: { label: "Files", iconName: IconName.Folders },

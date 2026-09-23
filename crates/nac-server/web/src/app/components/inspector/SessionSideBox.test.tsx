@@ -16,11 +16,15 @@ vi.mock("@/app/hooks/useMediaQuery", () => ({
 vi.mock("@/app/hooks/useSessionFetching", () => ({ useSessionFetching: () => false }));
 vi.mock("@/app/services/queries", () => ({
   useWorkspaceRevisionChanges: () => ({ data: null }),
+  useWorkspaceRevisions: () => ({ data: [], isLoading: false, error: null }),
 }));
 vi.mock("@/app/components/sessions/SessionCollection", () => ({
   SessionCollection: () => <nav aria-label="All sessions">collection</nav>,
 }));
 vi.mock("@/app/components/inspector/FilesView", () => ({ FilesView: () => <div>files</div> }));
+vi.mock("@/app/components/inspector/ActionsView", () => ({
+  ActionsView: () => <div>actions</div>,
+}));
 vi.mock("@/app/components/inspector/DelegatedWorkView", () => ({
   DelegatedWorkView: () => <div>delegated</div>,
 }));
@@ -67,9 +71,44 @@ describe("session side box collection integration", () => {
       "true",
     );
     expect(screen.getByRole("tab", { name: "Delegated work" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Actions" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Files" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     expect(sessionLayoutStore.getState().collapsed).toBe(true);
+  });
+
+  it("keeps Actions inside the existing responsive panel policy", () => {
+    const onPanelChange = vi.fn();
+    render(
+      <SessionSideBox
+        sessionId="session-a"
+        snapshot={snapshot}
+        panel="actions"
+        onPanelChange={onPanelChange}
+        sessions={[]}
+        projects={[]}
+      />,
+    );
+
+    expect(screen.getByText("actions")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Actions" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    expect(onPanelChange).toHaveBeenCalledWith("files");
+
+    cleanup();
+    viewport.mobile = true;
+    render(
+      <SessionSideBox
+        sessionId="session-a"
+        snapshot={snapshot}
+        panel="actions"
+        onPanelChange={vi.fn()}
+        sessions={[]}
+        projects={[]}
+      />,
+    );
+    expect(screen.getByText("actions")).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Actions" })).toBeNull();
   });
 
   it("leaves the collection body to the existing phone sheet chrome", () => {

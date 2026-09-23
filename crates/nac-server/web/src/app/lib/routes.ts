@@ -6,6 +6,7 @@
 // Order is also the tab order in the side box.
 export const SESSION_PANELS = [
   "sessions",
+  "actions",
   "threads",
   "delegated",
   "files",
@@ -19,6 +20,7 @@ export type SessionPanel = (typeof SESSION_PANELS)[number];
 // name so links that are already out there still land on it.
 export const SESSION_PANEL_LABEL = {
   sessions: "Sessions",
+  actions: "Actions",
   threads: "Threads",
   delegated: "Delegated work",
   files: "Files",

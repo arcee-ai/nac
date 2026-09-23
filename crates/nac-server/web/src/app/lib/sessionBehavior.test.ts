@@ -44,15 +44,15 @@ describe("session panel policy", () => {
 
   it("puts global sessions first while preserving every behavior-specific panel", () => {
     expect(sessionPanelPolicy("orchestrator", null)).toEqual({
-      widePanels: ["sessions", "threads", "files", "worksets"],
-      mobilePanels: ["sessions", "threads", "files", "worksets", "history"],
+      widePanels: ["sessions", "actions", "threads", "files", "worksets"],
+      mobilePanels: ["sessions", "actions", "threads", "files", "worksets", "history"],
       defaultPanel: "sessions",
       readOnly: false,
     });
     for (const behavior of ["direct", "direct-with-orchestrator"] satisfies SessionBehavior[]) {
       expect(sessionPanelPolicy(behavior, null)).toEqual({
-        widePanels: ["sessions", "delegated", "files"],
-        mobilePanels: ["sessions", "delegated", "files", "history"],
+        widePanels: ["sessions", "actions", "delegated", "files"],
+        mobilePanels: ["sessions", "actions", "delegated", "files", "history"],
         defaultPanel: "sessions",
         readOnly: false,
       });
@@ -62,8 +62,8 @@ describe("session panel policy", () => {
   it("keeps traditional children read-only while retaining global navigation", () => {
     for (const behavior of behaviors) {
       expect(sessionPanelPolicy(behavior, "traditional-child")).toEqual({
-        widePanels: ["sessions", "files"],
-        mobilePanels: ["sessions", "files", "history"],
+        widePanels: ["sessions", "actions", "files"],
+        mobilePanels: ["sessions", "actions", "files", "history"],
         defaultPanel: "sessions",
         readOnly: true,
       });
@@ -73,8 +73,8 @@ describe("session panel policy", () => {
   it("gives managed orchestrators their own Threads and Worksets while remaining read-only", () => {
     for (const behavior of behaviors) {
       expect(sessionPanelPolicy(behavior, "managed-orchestrator")).toEqual({
-        widePanels: ["sessions", "threads", "files", "worksets"],
-        mobilePanels: ["sessions", "threads", "files", "worksets", "history"],
+        widePanels: ["sessions", "actions", "threads", "files", "worksets"],
+        mobilePanels: ["sessions", "actions", "threads", "files", "worksets", "history"],
         defaultPanel: "sessions",
         readOnly: true,
       });

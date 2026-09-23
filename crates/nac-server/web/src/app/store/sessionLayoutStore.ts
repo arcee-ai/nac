@@ -29,6 +29,8 @@ interface SessionLayoutState {
    * phone dialog header reads this so its title shimmer matches the panel.
    */
   selectedThreadRunning: boolean;
+  /** Thoughts/tools group the Actions panel currently shows in detail. */
+  selectedActionGroup: string | null;
   /** Workset the chat last pointed the Worksets panel at. */
   selectedWorkset: string | null;
   /** Revision the panels are looking at, or null for the live working tree. */
@@ -53,6 +55,7 @@ export const sessionLayoutStore = createStore<SessionLayoutState>({
   selectedThread: null,
   selectedThreadEpisode: null,
   selectedThreadRunning: false,
+  selectedActionGroup: null,
   selectedWorkset: null,
   selectedRevision: null,
   selectedFile: null,
@@ -117,6 +120,11 @@ export function setSelectedThreadRunning(selectedThreadRunning: boolean): void {
   }
 }
 
+export function selectActionGroup(selectedActionGroup: string | null): void {
+  setState({ selectedActionGroup });
+  if (selectedActionGroup) showSidePanelList(false);
+}
+
 export function selectWorkset(selectedWorkset: string | null): void {
   setState({ selectedWorkset });
   if (selectedWorkset) showSidePanelList(false);
@@ -164,6 +172,7 @@ export function resetSessionSelection(): void {
   setState({
     selectedThread: null,
     selectedThreadEpisode: null,
+    selectedActionGroup: null,
     selectedWorkset: null,
     selectedRevision: null,
     selectedFile: null,
@@ -183,6 +192,7 @@ export const useSidePanelList = () => useStore((s) => s.panelList);
 export const useSelectedThread = () => useStore((s) => s.selectedThread);
 export const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
 export const useSelectedThreadRunning = () => useStore((s) => s.selectedThreadRunning);
+export const useSelectedActionGroup = () => useStore((s) => s.selectedActionGroup);
 export const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
 export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);

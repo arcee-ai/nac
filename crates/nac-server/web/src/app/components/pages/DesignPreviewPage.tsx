@@ -19,6 +19,8 @@ import {
   EditableHeader,
   EditableHeaderSize,
   ForkSessionItem,
+  HorizontalTabsItem,
+  HorizontalTabsItemVariant,
   Icon,
   IconName,
   Input,
@@ -63,8 +65,10 @@ import {
 import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
 import { SegmentDetailList } from "@/app/components/inspector/agent-segments/SegmentDetailList";
 import { ActionList } from "@/app/components/inspector/ActionList";
+import { PanelSplit } from "@/app/components/inspector/PanelSplit";
 import type { AgentToolsGroup } from "@/app/lib/agentSegments";
 import type { ActionTurnSection } from "@/app/lib/actionsTimeline";
+import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 
 const SAMPLE_IDS = ["9f2c1ab4", "3de77c01", "b81004ff", "22aa93de", "7c0518ba", "e4419d27"];
 
@@ -168,6 +172,14 @@ const SAMPLE_ACTION_SECTIONS: ActionTurnSection[] = [
   },
 ];
 
+const SAMPLE_SIDE_BOX_PANELS = [
+  "sessions",
+  "actions",
+  "threads",
+  "files",
+  "worksets",
+] satisfies SessionPanel[];
+
 /**
  * Design-system preview, reachable at `#/design`. It stays after the app shell
  * lands as a fast way to eyeball the token port.
@@ -187,6 +199,7 @@ export default function DesignPreviewPage() {
     SAMPLE_TOOL_GROUP.id,
   );
   const [selectedActionThread, setSelectedActionThread] = useState<string | null>(null);
+  const [previewSidePanel, setPreviewSidePanel] = useState<SessionPanel>("actions");
   const [environments, setEnvironments] = useState<string[]>(["local"]);
   const [page, setPage] = useState(1);
   const [day, setDay] = useState<string | null>(null);
@@ -251,26 +264,66 @@ export default function DesignPreviewPage() {
           </div>
         </BoxSurface>
 
-        <BoxSurface title="Actions timeline">
-          <div className="grid gap-6 p-4 md:grid-cols-[minmax(240px,0.8fr)_minmax(0,1.2fr)]">
-            <div className="min-w-0 rounded border border-muted bg-elevation-low p-2">
-              <ActionList
-                sections={SAMPLE_ACTION_SECTIONS}
-                kind="orchestrator"
-                selectedGroupId={selectedActionGroup}
-                selectedThreadEpisode={selectedActionThread}
-                onSelectGroup={(id) => {
-                  setSelectedActionGroup(id);
-                  setSelectedActionThread(null);
-                }}
-                onSelectThread={(_name, episodeKey) => {
-                  setSelectedActionThread(episodeKey);
-                  setSelectedActionGroup(null);
-                }}
-              />
-            </div>
-            <div className="min-w-0 rounded border border-muted bg-elevation-low p-4">
-              <SegmentDetailList group={SAMPLE_TOOL_GROUP} />
+        <BoxSurface title="Session side-box integration">
+          <div className="p-4">
+            <div className="flex h-[520px] min-h-0 flex-col overflow-hidden rounded-[8px] border border-muted bg-elevation-level-1 shadow-md">
+              <div
+                className="flex shrink-0 items-center gap-1 overflow-x-auto overflow-y-clip border-b border-muted bg-elevation-level-1 pl-1 pt-1 scrollbar-none [&>*]:shrink-0"
+                role="tablist"
+              >
+                {SAMPLE_SIDE_BOX_PANELS.map((panel) => (
+                  <HorizontalTabsItem
+                    key={panel}
+                    role="tab"
+                    aria-selected={previewSidePanel === panel}
+                    active={previewSidePanel === panel}
+                    variant={HorizontalTabsItemVariant.Neutral}
+                    onClick={() => setPreviewSidePanel(panel)}
+                  >
+                    {SESSION_PANEL_LABEL[panel]}
+                  </HorizontalTabsItem>
+                ))}
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col">
+                {previewSidePanel === "actions" ? (
+                  <PanelSplit
+                    listTitle="Actions"
+                    title={SAMPLE_TOOL_GROUP.label}
+                    listClassName="!pt-0"
+                    list={
+                      <ActionList
+                        sections={SAMPLE_ACTION_SECTIONS}
+                        kind="orchestrator"
+                        selectedGroupId={selectedActionGroup}
+                        selectedThreadEpisode={selectedActionThread}
+                        onSelectGroup={(id) => {
+                          setSelectedActionGroup(id);
+                          setSelectedActionThread(null);
+                        }}
+                        onSelectThread={(_name, episodeKey) => {
+                          setSelectedActionThread(episodeKey);
+                          setSelectedActionGroup(null);
+                        }}
+                      />
+                    }
+                  >
+                    <SegmentDetailList
+                      group={SAMPLE_TOOL_GROUP}
+                      className="flex-1 min-h-0 overflow-auto px-4 py-4 [&>*]:shrink-0"
+                    />
+                  </PanelSplit>
+                ) : (
+                  <div className="flex flex-1 items-center justify-center text-small text-basic-muted">
+                    {SESSION_PANEL_LABEL[previewSidePanel]} keeps its existing NAC view.
+                  </div>
+                )}
+              </div>
+              <div className="flex h-10 shrink-0 items-center gap-2 border-t border-muted px-4 text-micro text-basic-tertiary">
+                <Icon iconName={IconName.Folder} size={16} />
+                <span>arcee-ai/nac</span>
+                <span className="ml-auto text-success-primary">+128</span>
+                <span className="text-error-primary">-14</span>
+              </div>
             </div>
           </div>
         </BoxSurface>
