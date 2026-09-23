@@ -1,4 +1,4 @@
-import type React from "react";
+import React, { useId } from "react";
 import { iconPaths } from "./icon-paths";
 
 // Enums
@@ -8,8 +8,10 @@ export enum IconName {
   Publish = "publish",
   Toolbox = "toolbox",
   Play = "play",
+  Pause = "pause",
   Add = "add",
   Chat = "chat",
+  AddChat = "addChat",
   Home = "home",
   Coursor = "coursor",
   Hand = "hand",
@@ -33,6 +35,7 @@ export enum IconName {
   Trash = "trash",
   ArrowDown = "arrowDown",
   Close = "close",
+  Clock = "clock",
   Hamburger = "hamburger",
   BookOpen = "bookOpen",
   Ai = "ai",
@@ -40,7 +43,10 @@ export enum IconName {
   FileCopy = "fileCopy",
   FileCopyFilled = "fileCopyFilled",
   FileUpload = "fileUpload",
+  ReadFile = "readFile",
   Search = "search",
+  SearchFile = "searchFile",
+  SearchFiles = "searchFiles",
   PlayHistory = "playHistory",
   MenuHorizontal = "menuHorizontal",
   HideSidebar = "hideSidebar",
@@ -62,6 +68,7 @@ export enum IconName {
   Image = "image",
   Attachment = "attachment",
   Plane = "plane",
+  PlaneAdd = "planeAdd",
   Headphones = "headphones",
   Bolt = "bolt",
   Private = "private",
@@ -134,6 +141,7 @@ export enum IconName {
   Price = "price",
   Calendar = "calendar",
   Terminal = "terminal",
+  WriteCommand = "writeCommand",
   Chunk = "chunk",
   Markdown = "markdown",
   String = "string",
@@ -143,6 +151,8 @@ export enum IconName {
   Unpin = "unpin",
   OpenMobileModal = "openMobileModal",
   ChatGpt = "chatGpt",
+  Robot = "robot",
+  Orchestrator = "orchestrator",
 }
 
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
@@ -150,16 +160,29 @@ interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {
   /** CSS color for the glyph. Stylesheets can still override it via `fill`. */
   color?: string;
   size?: number;
+  /** Animate the glyph with the shared loading-gradient treatment. */
+  shimmer?: boolean;
 }
 
 const DEFAULT_VIEW_BOX = "0 0 24 24";
 
+const pathSegments = (d: string | readonly string[] | undefined): readonly string[] =>
+  d == null ? [""] : typeof d === "string" ? [d] : d;
+
 const getGlyph = (iconName: IconName) => {
   const entry = iconPaths[iconName];
   if (entry?.kind === "glyph") {
-    return entry;
+    return {
+      viewBox: entry.viewBox,
+      segments: pathSegments(entry.d),
+      fillRule: entry.fillRule,
+    };
   }
-  return { d: entry?.d ?? "", viewBox: DEFAULT_VIEW_BOX };
+  return {
+    viewBox: DEFAULT_VIEW_BOX,
+    segments: pathSegments(entry?.d),
+    fillRule: entry?.fillRule,
+  };
 };
 
 /**
@@ -215,9 +238,12 @@ const Icon: React.FC<IconProps> & { Name: typeof IconName } = ({
   size = 20,
   className = "",
   style,
+  shimmer = false,
   ...props
 }) => {
-  const { d, viewBox } = getGlyph(iconName);
+  const { segments, viewBox, fillRule } = getGlyph(iconName);
+  const gradientId = `icon-shimmer-${useId().replace(/:/g, "")}`;
+  const fill = shimmer ? `url(#${gradientId})` : "currentColor";
   return (
     <svg
       className={`icon ${className}`}
@@ -226,10 +252,36 @@ const Icon: React.FC<IconProps> & { Name: typeof IconName } = ({
       viewBox={viewBox}
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      style={color ? { color, ...style } : style}
+      style={color && !shimmer ? { color, ...style } : style}
       {...props}
     >
-      <path d={d} fill="currentColor" />
+      {shimmer ? (
+        <defs>
+          <linearGradient
+            id={gradientId}
+            gradientUnits="objectBoundingBox"
+            x1="-1"
+            y1="0"
+            x2="1"
+            y2="0"
+          >
+            <stop offset="0%" stopColor="var(--color-text-basic-secondary)" />
+            <stop offset="50%" stopColor="var(--color-text-basic-muted)" />
+            <stop offset="100%" stopColor="var(--color-text-basic-secondary)" />
+            <animateTransform
+              attributeName="gradientTransform"
+              type="translate"
+              from="-1 0"
+              to="1 0"
+              dur="2s"
+              repeatCount="indefinite"
+            />
+          </linearGradient>
+        </defs>
+      ) : null}
+      {segments.map((d, index) => (
+        <path key={index} d={d} fill={fill} fillRule={fillRule} />
+      ))}
     </svg>
   );
 };

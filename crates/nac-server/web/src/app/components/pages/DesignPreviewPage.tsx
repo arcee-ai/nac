@@ -63,6 +63,19 @@ const MODELS = [
   { id: "gpt", label: "GPT", icon: IconName.Ai },
 ];
 
+const UX_FOUNDATION_ICONS = [
+  { label: "Pause", icon: IconName.Pause },
+  { label: "New chat", icon: IconName.AddChat },
+  { label: "Clock", icon: IconName.Clock },
+  { label: "Read file", icon: IconName.ReadFile },
+  { label: "Search file", icon: IconName.SearchFile },
+  { label: "Search files", icon: IconName.SearchFiles },
+  { label: "Send + add", icon: IconName.PlaneAdd },
+  { label: "Command", icon: IconName.WriteCommand },
+  { label: "Agent", icon: IconName.Robot },
+  { label: "Orchestrator", icon: IconName.Orchestrator },
+];
+
 const SAMPLE_CODE = `pub enum AgentEvent {
     RunStarted { thread_name: Option<String> },
     AssistantMessage {
@@ -103,6 +116,46 @@ export default function DesignPreviewPage() {
       </header>
 
       <main className="p-6 flex flex-col gap-6 max-w-[1100px]">
+        <BoxSurface title="UX migration foundations">
+          <div className="p-4 flex flex-col gap-5">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <div className="session-type-avatar-shimmer relative flex h-7 w-7 items-center justify-center rounded-full bg-session-agent text-session-type">
+                  <Icon iconName={IconName.Robot} size={16} />
+                </div>
+                <span className="label-small text-basic-secondary">Agent</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="session-type-avatar-shimmer relative flex h-7 w-7 items-center justify-center rounded-full bg-session-orchestrator text-session-type">
+                  <Icon iconName={IconName.Orchestrator} size={16} />
+                </div>
+                <span className="label-small text-basic-secondary">Orchestrator</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-full bg-session-origin-agent-locked px-3 py-1 text-session-origin-locked">
+                <Icon iconName={IconName.Lock} size={14} />
+                <span className="label-small">Locked agent origin</span>
+              </div>
+              <Icon
+                iconName={IconName.Orchestrator}
+                size={24}
+                shimmer
+                aria-label="Loading orchestrator"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {UX_FOUNDATION_ICONS.map(({ label, icon }) => (
+                <div
+                  key={label}
+                  className="flex items-center gap-2 rounded border border-muted bg-elevation-low px-3 py-2"
+                >
+                  <Icon iconName={icon} size={18} />
+                  <span className="text-micro text-basic-muted">{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </BoxSurface>
+
         <BoxSurface title="Buttons">
           <div className="p-4 flex flex-wrap items-center gap-3">
             <Button variant={ButtonVariant.Primary}>Primary</Button>

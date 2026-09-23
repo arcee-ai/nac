@@ -25,6 +25,17 @@
   --brand-trans-800: #008c8cc0;
   --brand-trans-900: #008c8ce6;
 
+  /* Complementary / Violet (session-type Agent) */
+  --violet-100: #f6eaff;
+  --violet-400: #ab4ff1;
+  --violet-700: #5d3080;
+
+  /* Complementary / Teal (session-type Orchestrator) */
+  --teal-100: #e2fff5;
+  --teal-600: #15a897;
+  --teal-700: #237771;
+  --teal-800: #155b55;
+
   /* Complementary / Blue */
   --blue-50: #f3fcff;
   --blue-100: #e2f5ff;
