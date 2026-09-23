@@ -62,7 +62,9 @@ import {
 } from "@/app/atoms";
 import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
 import { SegmentDetailList } from "@/app/components/inspector/agent-segments/SegmentDetailList";
+import { ActionList } from "@/app/components/inspector/ActionList";
 import type { AgentToolsGroup } from "@/app/lib/agentSegments";
+import type { ActionTurnSection } from "@/app/lib/actionsTimeline";
 
 const SAMPLE_IDS = ["9f2c1ab4", "3de77c01", "b81004ff", "22aa93de", "7c0518ba", "e4419d27"];
 
@@ -138,6 +140,34 @@ const SAMPLE_TOOL_GROUP: AgentToolsGroup = {
   ],
 };
 
+const SAMPLE_ACTION_SECTIONS: ActionTurnSection[] = [
+  {
+    key: "design-turn",
+    number: 3,
+    prompt: "Validate the actions timeline migration",
+    createdAt: "2026-09-23 12:05:00",
+    items: [
+      { kind: "group", id: SAMPLE_TOOL_GROUP.id, group: SAMPLE_TOOL_GROUP },
+      {
+        kind: "workset",
+        id: "design:workset-validation",
+        worksetId: "validation",
+        pending: false,
+        title: "Worksets_validation",
+      },
+      {
+        kind: "thread",
+        id: "design:thread-review",
+        name: "review-ui",
+        episodeKey: "design:thread-review",
+        nested: true,
+        state: "done",
+        action: "Review the frontend-only timeline diff",
+      },
+    ],
+  },
+];
+
 /**
  * Design-system preview, reachable at `#/design`. It stays after the app shell
  * lands as a fast way to eyeball the token port.
@@ -153,6 +183,10 @@ export default function DesignPreviewPage() {
   const [parallel, setParallel] = useState(4);
   const [temperature, setTemperature] = useState(0.7);
   const [toolGroupSelected, setToolGroupSelected] = useState(false);
+  const [selectedActionGroup, setSelectedActionGroup] = useState<string | null>(
+    SAMPLE_TOOL_GROUP.id,
+  );
+  const [selectedActionThread, setSelectedActionThread] = useState<string | null>(null);
   const [environments, setEnvironments] = useState<string[]>(["local"]);
   const [page, setPage] = useState(1);
   const [day, setDay] = useState<string | null>(null);
@@ -213,6 +247,30 @@ export default function DesignPreviewPage() {
                   <span className="text-micro text-basic-muted">{label}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        </BoxSurface>
+
+        <BoxSurface title="Actions timeline">
+          <div className="grid gap-6 p-4 md:grid-cols-[minmax(240px,0.8fr)_minmax(0,1.2fr)]">
+            <div className="min-w-0 rounded border border-muted bg-elevation-low p-2">
+              <ActionList
+                sections={SAMPLE_ACTION_SECTIONS}
+                kind="orchestrator"
+                selectedGroupId={selectedActionGroup}
+                selectedThreadEpisode={selectedActionThread}
+                onSelectGroup={(id) => {
+                  setSelectedActionGroup(id);
+                  setSelectedActionThread(null);
+                }}
+                onSelectThread={(_name, episodeKey) => {
+                  setSelectedActionThread(episodeKey);
+                  setSelectedActionGroup(null);
+                }}
+              />
+            </div>
+            <div className="min-w-0 rounded border border-muted bg-elevation-low p-4">
+              <SegmentDetailList group={SAMPLE_TOOL_GROUP} />
             </div>
           </div>
         </BoxSurface>
