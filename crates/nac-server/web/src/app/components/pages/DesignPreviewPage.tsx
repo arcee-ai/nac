@@ -54,9 +54,15 @@ import {
   Switch,
   TagsSelector,
   TextArea,
+  ToolPill,
+  ToolPillSize,
+  ToolPillState,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
+import { SegmentDetailList } from "@/app/components/inspector/agent-segments/SegmentDetailList";
+import type { AgentToolsGroup } from "@/app/lib/agentSegments";
 
 const SAMPLE_IDS = ["9f2c1ab4", "3de77c01", "b81004ff", "22aa93de", "7c0518ba", "e4419d27"];
 
@@ -89,6 +95,49 @@ const SAMPLE_CODE = `pub enum AgentEvent {
     RunFinished { thread_name: Option<String> },
 }`;
 
+const SAMPLE_TOOL_GROUP: AgentToolsGroup = {
+  id: "design:tools-0",
+  turnKey: "design",
+  label: "Thoughts & tools",
+  inProgress: false,
+  durationMs: 2_400,
+  segments: [
+    {
+      kind: "thinking",
+      key: "design-thought",
+      text: "Inspect the existing component contract before changing its presentation.",
+      durationMs: 1_100,
+      streaming: false,
+    },
+    {
+      kind: "tool",
+      key: "design-read",
+      presentation: {
+        callId: "design-read",
+        name: "read",
+        label: "Read file",
+        summary: "src/app/components/inspector/ModelMessage.tsx",
+        resultPreview: "Current transcript rendering loaded.",
+        status: "success",
+        statusLabel: "Succeeded",
+      },
+    },
+    {
+      kind: "tool",
+      key: "design-command",
+      presentation: {
+        callId: "design-command",
+        name: "exec_command",
+        label: "Run command",
+        summary: "npm test -- agentSegments.test.ts",
+        resultPreview: "Characterization tests passed.",
+        status: "success",
+        statusLabel: "Succeeded",
+      },
+    },
+  ],
+};
+
 /**
  * Design-system preview, reachable at `#/design`. It stays after the app shell
  * lands as a fast way to eyeball the token port.
@@ -103,6 +152,7 @@ export default function DesignPreviewPage() {
   const [title, setTitle] = useState("Port the ArceeFM atoms");
   const [parallel, setParallel] = useState(4);
   const [temperature, setTemperature] = useState(0.7);
+  const [toolGroupSelected, setToolGroupSelected] = useState(false);
   const [environments, setEnvironments] = useState<string[]>(["local"]);
   const [page, setPage] = useState(1);
   const [day, setDay] = useState<string | null>(null);
@@ -164,6 +214,37 @@ export default function DesignPreviewPage() {
                 </div>
               ))}
             </div>
+          </div>
+        </BoxSurface>
+
+        <BoxSurface title="Thought and tool presentation">
+          <div className="grid gap-6 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+            <div className="flex min-w-0 flex-col gap-4">
+              <span className="label-small text-basic-muted">Tool states</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <ToolPill icon={IconName.ReadFile} size={ToolPillSize.Small} />
+                <ToolPill
+                  icon={IconName.Terminal}
+                  size={ToolPillSize.Small}
+                  state={ToolPillState.Active}
+                />
+                <ToolPill
+                  icon={IconName.SearchFiles}
+                  size={ToolPillSize.Small}
+                  state={ToolPillState.Error}
+                />
+                <ToolPill.Overflow count={6} size={ToolPillSize.Small} />
+              </div>
+              <AgentToolsGroupButton
+                group={SAMPLE_TOOL_GROUP}
+                active={toolGroupSelected}
+                onSelect={() => setToolGroupSelected((selected) => !selected)}
+              />
+              <span className="text-micro text-basic-muted">
+                Select the segment tray to exercise its controlled highlighted state.
+              </span>
+            </div>
+            <SegmentDetailList group={SAMPLE_TOOL_GROUP} className="min-w-0" />
           </div>
         </BoxSurface>
 

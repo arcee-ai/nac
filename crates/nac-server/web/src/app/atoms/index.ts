@@ -60,3 +60,4 @@ export { default as TabButton, TabButtonSize, TabButtonVariant } from "./tab-but
 export { default as TagsSelector } from "./tags-selector";
 export { default as Toast, ToastVariant } from "./toast/Toast";
 export { default as Tooltip, TooltipPosition } from "./tooltip";
+export { default as ToolPill, ToolPillSize, ToolPillState } from "./tool-pill";
