@@ -16,6 +16,13 @@ function transcriptToolGroups(page: Page, name: RegExp) {
   return page.locator(".chat-response").getByRole("button", { name });
 }
 
+function immutableBehaviorLabel(page: Page, label: string) {
+  return page
+    .getByText("Immutable behavior", { exact: true })
+    .locator("..")
+    .getByText(label, { exact: true });
+}
+
 test("serves the production-embedded application and hashed assets", async ({
   harness,
   page,
@@ -753,7 +760,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   );
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect(page.getByText("Immutable behavior")).toBeVisible();
-  await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
+  await expect(immutableBehaviorLabel(page, "NAC orchestrator")).toBeVisible();
   const orchestratorSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
   expect(orchestratorSessionId).toBeTruthy();
   const orchestratorTitle = "Plan the managed deployment rollout";
@@ -765,7 +772,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   );
   expect(orchestratorPresentation.ok()).toBe(true);
   await page.reload();
-  await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
+  await expect(immutableBehaviorLabel(page, "NAC orchestrator")).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toBeVisible();
   await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
 
@@ -788,9 +795,9 @@ test("asks for immutable behavior on every first and new chat", async ({
     },
   );
   expect(directPresentation.ok()).toBe(true);
-  await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+  await expect(immutableBehaviorLabel(page, "Direct coding agent")).toBeVisible();
   await page.reload();
-  await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+  await expect(immutableBehaviorLabel(page, "Direct coding agent")).toBeVisible();
   await expect(page.getByText("Delegated work", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
@@ -814,7 +821,7 @@ test("asks for immutable behavior on every first and new chat", async ({
     },
   );
   expect(hybridPresentation.ok()).toBe(true);
-  await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
+  await expect(immutableBehaviorLabel(page, "Direct + NAC orchestration")).toBeVisible();
   await page.getByRole("tab", { name: "Delegated work" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${hybridSessionId}/delegated$`));
   await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
@@ -850,7 +857,7 @@ test("asks for immutable behavior on every first and new chat", async ({
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
-  await expect(page.getByText("Direct + NAC orchestration", { exact: true })).toBeVisible();
+  await expect(immutableBehaviorLabel(page, "Direct + NAC orchestration")).toBeVisible();
   await expect(page.getByText("Coding agents", { exact: true })).toBeVisible();
   await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Sessions" }).click();
@@ -949,9 +956,9 @@ test("asks for immutable behavior on every first and new chat", async ({
   expect(focusTitleBox!.x + focusTitleBox!.width).toBeLessThanOrEqual(focusCloseBox!.x);
 
   await page.getByRole("button", { name: `${orchestratorTitle}, NAC orchestrator` }).click();
-  await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
+  await expect(immutableBehaviorLabel(page, "NAC orchestrator")).toBeVisible();
   await page.getByRole("button", { name: `${directTitle}, Direct coding agent` }).click();
-  await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+  await expect(immutableBehaviorLabel(page, "Direct coding agent")).toBeVisible();
   runningGate.release();
   expect((await runningRequest).status()).toBe(202);
   await waitForRunIdle(request, harness, directSessionId!);
