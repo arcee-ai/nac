@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
 import { SegmentDetailList } from "@/app/components/inspector/agent-segments/SegmentDetailList";
 import { buildStepperSteps } from "@/app/components/inspector/agent-segments/stepper";
+import { focusActionSegment, resetActionExpansion } from "@/app/lib/actionExpand";
 import type { AgentToolsGroup } from "@/app/lib/agentSegments";
 
 function group(): AgentToolsGroup {
@@ -54,6 +55,7 @@ function group(): AgentToolsGroup {
 }
 
 beforeEach(() => {
+  resetActionExpansion();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -68,6 +70,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  resetActionExpansion();
   vi.unstubAllGlobals();
 });
 
@@ -89,6 +92,43 @@ describe("agent segment presentation", () => {
     expect(screen.getByText("Awaiting approval")).toBeTruthy();
     expect(screen.getByText("npm test")).toBeTruthy();
     expect(screen.getByText("all tests passed")).toBeTruthy();
+  });
+
+  it("scrolls to and highlights a child selected from the Actions list", async () => {
+    const scroll = vi.fn();
+    const { container } = render(<SegmentDetailList group={group()} />);
+    const root = container.firstElementChild as HTMLDivElement;
+    const target = root.querySelector<HTMLElement>('[data-segment-key="tool-2"]');
+    expect(target).not.toBeNull();
+    root.scrollTop = 40;
+    Object.defineProperty(root, "scrollTo", { value: scroll });
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      bottom: 500,
+      left: 0,
+      right: 400,
+      width: 400,
+      height: 400,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(target!, "getBoundingClientRect").mockReturnValue({
+      top: 250,
+      bottom: 300,
+      left: 0,
+      right: 400,
+      width: 400,
+      height: 50,
+      x: 0,
+      y: 250,
+      toJSON: () => ({}),
+    });
+
+    act(() => focusActionSegment("tool-2"));
+
+    await waitFor(() => expect(scroll).toHaveBeenCalledWith({ top: 190, behavior: "smooth" }));
+    expect(target!.className).toContain("bg-btn-ghost-highlighted");
   });
 
   it("derives live step text without changing the underlying segment order", () => {

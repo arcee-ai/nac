@@ -17,6 +17,7 @@ import SegmentDetailBox, {
 } from "@/app/components/inspector/agent-segments/SegmentDetailBox";
 import { ToolCallLabel } from "@/app/components/inspector/agent-segments/ToolCallLabel";
 import type { SegmentDisplayConfig } from "@/app/lib/agentSegments";
+import { cn } from "@/app/lib/cn";
 
 export interface SegmentDetailItem {
   key: string;
@@ -29,7 +30,15 @@ export interface SegmentDetailItem {
   boxes: SegmentDetailBoxContent[];
 }
 
-function SegmentDetailRow({ item, isLast }: { item: SegmentDetailItem; isLast: boolean }) {
+function SegmentDetailRow({
+  item,
+  isLast,
+  highlighted = false,
+}: {
+  item: SegmentDetailItem;
+  isLast: boolean;
+  highlighted?: boolean;
+}) {
   const pillState = item.live
     ? ToolPillState.Active
     : item.failed
@@ -37,7 +46,13 @@ function SegmentDetailRow({ item, isLast }: { item: SegmentDetailItem; isLast: b
       : ToolPillState.Default;
 
   return (
-    <div className="flex w-full items-start gap-2" data-segment-key={item.key}>
+    <div
+      className={cn(
+        "flex w-full scroll-mt-2 items-start gap-2 rounded-[4px] transition-colors",
+        highlighted && "bg-btn-ghost-highlighted",
+      )}
+      data-segment-key={item.key}
+    >
       <div className="flex shrink-0 self-stretch flex-col items-center">
         <ToolPill size={ToolPillSize.Small} icon={item.config.icon} state={pillState} />
         {!isLast ? <div className="w-px min-h-0 flex-1 bg-[var(--color-border-tertiary)]" /> : null}

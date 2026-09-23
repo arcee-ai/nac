@@ -403,6 +403,24 @@ test("keeps approval state and actions reachable with many remembered permission
   await expect(pendingGroup).toHaveAccessibleName(/Succeeded/);
   await expect(page.getByText("permission journey complete")).toBeVisible();
 
+  await pendingGroup.click();
+  await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/actions$`));
+  const actionAnchor = page.locator("[data-action-anchor]").first();
+  const actionButtons = actionAnchor.getByRole("button");
+  await expect(actionButtons).toHaveCount(rememberedRequests + 2);
+  const newestToolChild = actionButtons.nth(1);
+  const detailRows = page.locator("[data-segment-key]");
+  await expect(detailRows).toHaveCount(rememberedRequests + 1);
+  const newestToolDetail = detailRows.last();
+  const detailScroller = detailRows.first().locator("..");
+  const scrollBeforeSelection = await detailScroller.evaluate((element) => element.scrollTop);
+  await newestToolChild.click();
+  await expect(newestToolChild).toHaveAttribute("aria-pressed", "true");
+  await expect(newestToolDetail).toHaveClass(/bg-btn-ghost-highlighted/);
+  await expect
+    .poll(() => detailScroller.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(scrollBeforeSelection);
+
   await page.getByRole("button", { name: /^Permissions \(\d+\)$/ }).click();
   const manager = page.getByRole("dialog");
   const managerBody = manager.locator(":scope > .overflow-auto");

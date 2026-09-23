@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import type { SegmentDetailBoxContent } from "@/app/components/inspector/agent-segments/SegmentDetailBox";
 import SegmentDetailRow, {
@@ -11,6 +11,7 @@ import {
   type AgentSegment,
   type AgentToolsGroup,
 } from "@/app/lib/agentSegments";
+import { useActionSegmentScroll, useSelectedActionSegmentKey } from "@/app/lib/actionExpand";
 import { cn } from "@/app/lib/cn";
 import { formatSeconds } from "@/app/lib/format";
 import "./agent-segments.css";
@@ -92,6 +93,28 @@ export function SegmentDetailList({
   className?: string;
 }) {
   const items = useMemo(() => itemsFromGroup(group), [group]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const scrollTo = useActionSegmentScroll();
+  const selectedKey = useSelectedActionSegmentKey();
+
+  useEffect(() => {
+    if (!scrollTo) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const element = Array.from(root.querySelectorAll<HTMLElement>("[data-segment-key]")).find(
+      (candidate) => candidate.dataset.segmentKey === scrollTo.key,
+    );
+    if (!element) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const marginTop = Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 0;
+    const top =
+      root.scrollTop +
+      element.getBoundingClientRect().top -
+      root.getBoundingClientRect().top -
+      marginTop;
+    root.scrollTo({ top, behavior: reduced ? "auto" : "smooth" });
+  }, [scrollTo]);
+
   if (items.length === 0) {
     return (
       <div className={cn("label-small text-basic-muted", className)}>
@@ -100,9 +123,14 @@ export function SegmentDetailList({
     );
   }
   return (
-    <div className={className}>
+    <div ref={rootRef} className={className}>
       {items.map((item, index) => (
-        <SegmentDetailRow key={item.key} item={item} isLast={index === items.length - 1} />
+        <SegmentDetailRow
+          key={item.key}
+          item={item}
+          isLast={index === items.length - 1}
+          highlighted={selectedKey === item.key}
+        />
       ))}
     </div>
   );
