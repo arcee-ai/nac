@@ -165,6 +165,7 @@
 }
 
 .session-type-avatar-shimmer {
+  position: relative;
   overflow: hidden;
 }
 

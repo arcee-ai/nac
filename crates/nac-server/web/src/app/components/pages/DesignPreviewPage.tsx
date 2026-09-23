@@ -120,13 +120,13 @@ export default function DesignPreviewPage() {
           <div className="p-4 flex flex-col gap-5">
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
-                <div className="session-type-avatar-shimmer relative flex h-7 w-7 items-center justify-center rounded-full bg-session-agent text-session-type">
+                <div className="session-type-avatar-shimmer flex h-7 w-7 items-center justify-center rounded-full bg-session-agent text-session-type">
                   <Icon iconName={IconName.Robot} size={16} />
                 </div>
                 <span className="label-small text-basic-secondary">Agent</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="session-type-avatar-shimmer relative flex h-7 w-7 items-center justify-center rounded-full bg-session-orchestrator text-session-type">
+                <div className="session-type-avatar-shimmer flex h-7 w-7 items-center justify-center rounded-full bg-session-orchestrator text-session-type">
                   <Icon iconName={IconName.Orchestrator} size={16} />
                 </div>
                 <span className="label-small text-basic-secondary">Orchestrator</span>
