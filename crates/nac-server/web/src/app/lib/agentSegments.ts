@@ -405,4 +405,5 @@ export const COUPLER_WIDTH_PX = 8;
 export const PILL_SIZE_MEDIUM_PX = 36;
 export const PILL_SIZE_SMALL_PX = 28;
 export const PILL_SLOT_PX = COUPLER_WIDTH_PX + PILL_SIZE_SMALL_PX;
+export const PILL_LINGER_MS = 350;
 export const PILL_TRANSITION_MS = 300;

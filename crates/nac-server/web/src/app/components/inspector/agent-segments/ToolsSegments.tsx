@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ToolPill, ToolPillSize, ToolPillState } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -6,6 +6,7 @@ import {
   COUPLER_WIDTH_PX,
   MAX_PILLS_DESKTOP,
   MAX_PILLS_MOBILE,
+  PILL_LINGER_MS,
   PILL_SLOT_PX,
   PILL_TRANSITION_MS,
   type ToolsSegmentItem,
@@ -55,6 +56,30 @@ const ToolPillRow = memo(function ToolPillRow({
     </>
   );
 });
+
+const LingeringToolPillRow = memo(function LingeringToolPillRow({
+  item,
+  showCoupler,
+  onExpire,
+}: {
+  item: ToolsSegmentItem;
+  showCoupler: boolean;
+  onExpire: (id: string) => void;
+}) {
+  const itemId = item.id;
+  useEffect(() => {
+    const timeout = window.setTimeout(() => onExpire(itemId), PILL_LINGER_MS);
+    return () => window.clearTimeout(timeout);
+  }, [itemId, onExpire]);
+
+  return <ToolPillRow item={item} active={false} showCoupler={showCoupler} />;
+});
+
+interface ItemHistory {
+  items: ToolsSegmentItem[];
+  inProgress: boolean;
+  lingering: ToolsSegmentItem[];
+}
 
 export interface ToolsSegmentsProps {
   items: ToolsSegmentItem[];
@@ -109,7 +134,42 @@ function ToolsSegments({
   const isMobile = useIsMobile();
   const maxPills = isMobile ? MAX_PILLS_MOBILE : MAX_PILLS_DESKTOP;
   const viewportMaxPx = maxPills * PILL_SLOT_PX - COUPLER_WIDTH_PX;
-  const renderedItems = items;
+  const [history, setHistory] = useState<ItemHistory>(() => ({
+    items,
+    inProgress,
+    lingering: [],
+  }));
+  const [allowTransition, setAllowTransition] = useState(true);
+  if (history.items !== items || history.inProgress !== inProgress) {
+    const currentIds = new Set(items.map((item) => item.id));
+    const lingering = inProgress
+      ? [
+          ...history.lingering.filter((item) => !currentIds.has(item.id)),
+          ...history.items.filter(
+            (item) =>
+              !currentIds.has(item.id) &&
+              !history.lingering.some((lingeringItem) => lingeringItem.id === item.id),
+          ),
+        ]
+      : [];
+    setHistory({ items, inProgress, lingering });
+  }
+  const expireLingeringItem = useCallback((id: string) => {
+    setAllowTransition(false);
+    setHistory((current) => {
+      const lingering = current.lingering.filter((item) => item.id !== id);
+      return lingering.length === current.lingering.length ? current : { ...current, lingering };
+    });
+    window.requestAnimationFrame(() => setAllowTransition(true));
+  }, []);
+  const renderedItems = useMemo(() => {
+    const currentIds = new Set(items.map((item) => item.id));
+    return [...history.lingering.filter((item) => !currentIds.has(item.id)), ...items];
+  }, [history.lingering, items]);
+  const lingeringIds = useMemo(
+    () => new Set(history.lingering.map((item) => item.id)),
+    [history.lingering],
+  );
   const overflowCount = Math.max(0, renderedItems.length - maxPills);
   const innerWidthPx = Math.max(0, renderedItems.length * PILL_SLOT_PX - COUPLER_WIDTH_PX);
   const translateXPx = -(overflowCount * PILL_SLOT_PX);
@@ -147,19 +207,28 @@ function ToolsSegments({
               maxWidth: `${innerWidthPx}px`,
               transform: `translateX(${translateXPx}px)`,
               transition:
-                inProgress && !reducedMotion
+                inProgress && allowTransition && !reducedMotion
                   ? `transform ${PILL_TRANSITION_MS}ms ease-out`
                   : "none",
             }}
           >
-            {renderedItems.map((item, index) => (
-              <ToolPillRow
-                key={item.id}
-                item={item}
-                active={inProgress && item.id === lastItemId}
-                showCoupler={index > 0}
-              />
-            ))}
+            {renderedItems.map((item, index) =>
+              lingeringIds.has(item.id) ? (
+                <LingeringToolPillRow
+                  key={item.id}
+                  item={item}
+                  showCoupler={index > 0}
+                  onExpire={expireLingeringItem}
+                />
+              ) : (
+                <ToolPillRow
+                  key={item.id}
+                  item={item}
+                  active={inProgress && item.id === lastItemId}
+                  showCoupler={index > 0}
+                />
+              ),
+            )}
           </div>
         </div>
       </div>

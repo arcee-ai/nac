@@ -340,4 +340,42 @@ describe("agent segment presentation", () => {
       ),
     ).toEqual(["tool-0", "tool-1", "tool-2", "tool-3", "tool-4", "tool-5"]);
   });
+
+  it("keeps a departing live pill visible for the transition window", () => {
+    vi.useFakeTimers();
+    const live = group();
+    live.inProgress = true;
+    const { container, rerender } = render(
+      <AgentToolsGroupButton group={live} active={false} onSelect={() => {}} />,
+    );
+    expect(container.querySelector('[data-segment-id="tool-2"]')).not.toBeNull();
+
+    const advanced = structuredClone(live);
+    advanced.segments = [advanced.segments[0], advanced.segments[1]];
+    rerender(<AgentToolsGroupButton group={advanced} active={false} onSelect={() => {}} />);
+    expect(container.querySelector('[data-segment-id="tool-2"]')).not.toBeNull();
+
+    act(() => vi.advanceTimersByTime(349));
+    expect(container.querySelector('[data-segment-id="tool-2"]')).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(container.querySelector('[data-segment-id="tool-2"]')).toBeNull();
+  });
+
+  it("cancels a pending pill departure when that segment reappears", () => {
+    vi.useFakeTimers();
+    const live = group();
+    live.inProgress = true;
+    const { container, rerender } = render(
+      <AgentToolsGroupButton group={live} active={false} onSelect={() => {}} />,
+    );
+
+    const withoutTail = structuredClone(live);
+    withoutTail.segments = withoutTail.segments.slice(0, -1);
+    rerender(<AgentToolsGroupButton group={withoutTail} active={false} onSelect={() => {}} />);
+    rerender(<AgentToolsGroupButton group={live} active={false} onSelect={() => {}} />);
+
+    expect(container.querySelectorAll('[data-segment-id="tool-2"]')).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(350));
+    expect(container.querySelectorAll('[data-segment-id="tool-2"]')).toHaveLength(1);
+  });
 });
