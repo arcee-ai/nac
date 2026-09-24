@@ -33,8 +33,8 @@ function SegmentDetailBox({ box }: { box: SegmentDetailBoxContent }) {
   return (
     <div
       className={cn(
-        "agent-segment-box w-full overflow-hidden rounded-[6px] border border-tertiary bg-elevation-low px-3 py-2",
-        box.accent === "error" && "agent-segment-box-error border-error-primary",
+        "agent-segment-box w-full overflow-hidden",
+        box.accent === "error" && "agent-segment-box-error",
       )}
     >
       {box.kind === "code" ? (

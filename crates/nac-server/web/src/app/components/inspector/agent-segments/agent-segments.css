@@ -26,6 +26,15 @@
   margin-bottom: 0.25rem;
 }
 
+.agent-segment-box .markdown-content li {
+  margin-left: 20px;
+}
+
+.agent-segment-box .chat-response ol li::marker {
+  color: var(--color-text-basic-secondary);
+  font-weight: 400;
+}
+
 .agent-segment-box .markdown-content > *:last-child {
   margin-bottom: 0;
 }
@@ -33,6 +42,14 @@
 .agent-segment-box-error .markdown-content,
 .agent-segment-box-error .markdown-content p,
 .agent-segment-box-error .markdown-content li,
+.agent-segment-box-error .markdown-content h1,
+.agent-segment-box-error .markdown-content h2,
+.agent-segment-box-error .markdown-content h3,
+.agent-segment-box-error .markdown-content h4,
+.agent-segment-box-error .markdown-content h5,
+.agent-segment-box-error .markdown-content h6,
+.agent-segment-box-error .markdown-content blockquote,
+.agent-segment-box-error .markdown-content table,
 .agent-segment-box-error .markdown-content code {
   color: var(--color-text-error-primary);
 }
