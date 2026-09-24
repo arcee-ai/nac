@@ -148,7 +148,7 @@ function SideBoxFooter({
 }
 
 /**
- * The left half of the session screen: one box with the Threads / Files /
+ * The right half of the session screen: one box with the Threads / Files /
  * Worksets panels, sized by the shared layout store. On a phone the panels are
  * the body of the modal box that SessionPage puts them in, and its chrome —
  * header, bottom bar — belongs to the dialog rather than to this box.
@@ -218,7 +218,12 @@ export function SessionSideBox({
   }
 
   return (
-    <div className="flex flex-col min-h-0 h-full rounded-[8px] overflow-hidden bg-elevation-level-1 shadow-md border border-muted">
+    <div
+      className={cn(
+        "flex flex-col min-h-0 h-full overflow-hidden bg-elevation-level-1",
+        expanded ? null : "border-l border-muted",
+      )}
+    >
       <div
         className={cn(
           "flex items-center gap-4 pl-1 pt-1 shrink-0 border-b border-muted bg-elevation-level-1 relative",

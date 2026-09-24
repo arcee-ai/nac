@@ -74,6 +74,7 @@ export function ProjectSessionTabs({
   activeSessionId,
   summary,
   leading,
+  trailing,
 }: {
   /** Null when the open session belongs to no project. */
   projectId: string | null;
@@ -83,8 +84,9 @@ export function ProjectSessionTabs({
   /** The open session, needed to offer assigning it. */
   summary: SessionSummarySnapshot | null;
   /** Controls that belong to the row rather than the strip, e.g. the side
-   *  panel toggle while the panel is away. */
+   *  panel toggle while the panel is away. Shown on the side the panel occupies. */
   leading?: React.ReactNode;
+  trailing?: React.ReactNode;
 }) {
   const navigate = useNavigate();
   const projectActions = useProjectActions();
@@ -117,6 +119,7 @@ export function ProjectSessionTabs({
           <ChatSessionTabSkeleton className={SESSION_TAB_SLOT_CLASS} />
           <ChatSessionTabSkeleton className={SESSION_TAB_SLOT_CLASS} />
         </div>
+        {trailing}
       </div>
     );
   }
@@ -155,6 +158,7 @@ export function ProjectSessionTabs({
         >
           <Icon iconName={IconName.FolderOpen} /> Assign to Project
         </Button>
+        {trailing}
       </div>
     );
   }
@@ -291,6 +295,7 @@ export function ProjectSessionTabs({
       </div>
 
       <div className="flex items-center shrink-0">
+        {trailing}
         <Popover
           open={open}
           onClose={() => setOpen(false)}

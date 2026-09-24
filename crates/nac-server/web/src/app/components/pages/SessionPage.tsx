@@ -18,8 +18,9 @@ import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { SessionIdentity } from "@/app/components/inspector/SessionIdentity";
 import { Transcript } from "@/app/components/inspector/Transcript";
+import { LeftSidebar } from "@/app/components/LeftSidebar";
 import { ProjectSessionTabs } from "@/app/components/projects/ProjectSessionTabs";
-import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { parseStoreTime } from "@/app/lib/format";
@@ -122,8 +123,8 @@ export default function SessionPage() {
   const { data: snapshot = null, error, refetch: refetchSnapshot } = useSessionSnapshot(id);
   const { data: entry = null } = useSessionSummary(id);
   const { data: sessionList } = useSessions();
-  const allSessions = sessionList ?? [];
   const { data: projectList } = useProjects();
+  const allSessions = sessionList ?? [];
   const allProjects = projectList?.projects ?? [];
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
@@ -134,7 +135,6 @@ export default function SessionPage() {
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const isMobile = useIsMobile();
-  const isDesktop = useIsDesktop();
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
   useAutoSshConnect(id, entry?.summary);
@@ -232,113 +232,110 @@ export default function SessionPage() {
 
   return (
     <section className="relative flex h-full min-h-0 overflow-hidden bg-elevation-ground">
-      {/* A phone has no room for the split: the chat takes the screen and the
+      {/* A phone has no room for the rail: the chat takes the screen and the
           box comes up as the dialog below instead. */}
-      {isMobile ? null : (
-        <>
-          {/* Yields the box's half of the row to the chat as the box slides away. */}
-          <div
-            className={cn(
-              "h-full shrink-0 transition-[width] duration-150 ease-out",
-              collapsed
-                ? "w-0"
-                : effectivePanel === "sessions" && isDesktop
-                  ? "w-[320px]"
-                  : "w-1/2",
-            )}
-          />
+      {isMobile ? null : <LeftSidebar />}
 
-          {/*
-            Pinned to half the section rather than laid out in the row: a box
-            that kept its width while the row shrank would reflow its whole tree
-            over the animation, so it slides out at full size instead.
-          */}
-          <div
-            className={cn(
-              "absolute inset-y-0 left-0 flex flex-col min-w-0",
-              effectivePanel === "sessions" && isDesktop ? "w-[320px]" : "w-1/2",
-              "pt-[56px] pb-2 pl-2 pr-2 xl:pr-6",
-              "transition-transform duration-150 ease-out",
-              collapsed && "-translate-x-full",
-            )}
-            aria-hidden={collapsed}
-            inert={collapsed}
-          >
-            <div
-              className={cn(
-                "flex flex-col flex-1 min-h-0 transition-opacity duration-150 ease-out",
-                collapsed && "opacity-0",
-              )}
-            >
-              {/* While the dialog is up it owns the panels, so this half stays
-                  empty behind the scrim instead of running them twice. */}
-              <div className="flex-1 min-h-0">{expanded ? null : sideBox}</div>
-            </div>
-          </div>
-        </>
-      )}
-
-      <div
-        className={cn(
-          "flex flex-col items-center flex-1 min-w-0 h-full",
-          "transition-[padding] duration-150 ease-out",
-          isMobile ? "px-0" : collapsed ? "pl-2 pr-2" : isDesktop ? "pl-6 pr-2" : "pl-2 pr-2",
-        )}
-      >
-        {/* The phone reaches the same chats through the header's sheet; there
+      <div className="relative flex flex-1 min-w-0 h-full min-h-0">
+        <div
+          className={cn(
+            "flex flex-col items-center flex-1 min-w-0 h-full",
+            isMobile ? "px-0" : "px-2",
+          )}
+        >
+          {/* The phone reaches the same chats through the header's sheet; there
             is no width here for a strip of tabs. The padding clears the fixed
             52px header the shell puts above everything. */}
-        {isMobile ? null : (
-          <div className="w-full shrink-0 pt-[60px]">
-            <ProjectSessionTabs
-              projectId={projectId}
-              sessions={projectSessions}
-              activeSessionId={id}
-              summary={entry?.summary ?? null}
-              leading={
-                collapsed ? (
-                  <Tooltip title="Show panel" position={TooltipPosition.BottomRight}>
-                    <Button
-                      size={ButtonSize.Medium}
-                      variant={ButtonVariant.Ghost}
-                      content={ButtonContent.Icon}
-                      aria-label="Show panel"
-                      onClick={toggleSidePanelCollapsed}
-                    >
-                      <Icon iconName={IconName.OpenSidebar} />
-                    </Button>
-                  </Tooltip>
-                ) : null
-              }
-            />
-          </div>
-        )}
+          {isMobile ? null : (
+            <div className="w-full shrink-0 pt-[60px]">
+              <ProjectSessionTabs
+                projectId={projectId}
+                sessions={projectSessions}
+                activeSessionId={id}
+                summary={entry?.summary ?? null}
+                trailing={
+                  collapsed ? (
+                    <Tooltip title="Show panel" position={TooltipPosition.BottomLeft}>
+                      <Button
+                        size={ButtonSize.Medium}
+                        variant={ButtonVariant.Ghost}
+                        content={ButtonContent.Icon}
+                        aria-label="Show panel"
+                        onClick={toggleSidePanelCollapsed}
+                      >
+                        <Icon iconName={IconName.OpenSidebar} />
+                      </Button>
+                    </Tooltip>
+                  ) : null
+                }
+              />
+            </div>
+          )}
 
-        <SessionIdentity
-          behavior={entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null}
-          lineage={snapshot?.lineage ?? null}
-        />
-
-        <div className="flex flex-col flex-1 min-h-0 w-full relative">
-          <Transcript
-            sessionId={id}
-            snapshot={snapshot}
-            panel={effectivePanel}
-            onFocusPanel={focusPanel}
-            errorNotice={errorNotice}
+          <SessionIdentity
+            behavior={entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null}
+            lineage={snapshot?.lineage ?? null}
           />
 
-          <div
-            className={cn(
-              "absolute bottom-0 left-0 right-0",
-              // The phone composer paints its own ground fade and owns its
-              // padding, so it has to reach past the column's inset.
-              isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[840px]",
-            )}
-          >
-            <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
+          <div className="flex flex-col flex-1 min-h-0 w-full relative">
+            <Transcript
+              sessionId={id}
+              snapshot={snapshot}
+              panel={effectivePanel}
+              onFocusPanel={focusPanel}
+              errorNotice={errorNotice}
+            />
+
+            <div
+              className={cn(
+                "absolute bottom-0 left-0 right-0",
+                // The phone composer paints its own ground fade and owns its
+                // padding, so it has to reach past the column's inset.
+                isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[840px]",
+              )}
+            >
+              <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
+            </div>
           </div>
         </div>
+
+        {isMobile ? null : (
+          <>
+            {/* Yields the box's share of the row to the chat as the box slides away. */}
+            <div
+              className={cn(
+                "h-full shrink-0 transition-[width] duration-150 ease-out",
+                collapsed ? "w-0" : "w-1/2",
+              )}
+            />
+            {/*
+            Pinned to the right edge rather than laid out in the row: a box
+            that kept its width while the row shrank would reflow its whole tree
+            over the animation, so it slides out at full size instead. It fills
+            that column edge to edge.
+          */}
+            <div
+              className={cn(
+                "absolute top-[52px] bottom-0 right-0 flex flex-col min-w-0 w-1/2",
+                "transition-transform duration-150 ease-out",
+                collapsed && "translate-x-full",
+              )}
+              aria-hidden={collapsed}
+              inert={collapsed}
+            >
+              <div
+                className={cn(
+                  "flex flex-col flex-1 min-h-0 transition-opacity duration-150 ease-out",
+                  collapsed && "opacity-0",
+                )}
+              >
+                {/* While the dialog is up it owns the panels, so this half stays
+                  empty behind the scrim instead of running them twice. */}
+                <div className="flex-1 min-h-0">{expanded ? null : sideBox}</div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {isMobile ? (
