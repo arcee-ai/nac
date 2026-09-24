@@ -13,21 +13,15 @@ function Location() {
 afterEach(cleanup);
 
 describe("session identity", () => {
-  it("always labels the immutable primary-session behavior", () => {
-    render(
+  it("leaves a primary session without a behavior strip", () => {
+    const { container } = render(
       <MemoryRouter>
         <SessionIdentity behavior="direct-with-orchestrator" lineage={null} />
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("Immutable behavior")).toBeTruthy();
-    expect(screen.getByText("Direct + NAC orchestration")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "About Direct + NAC orchestration" }));
-    expect(
-      screen.getByText(/top-level agent edits files and runs commands directly/i),
-    ).toBeTruthy();
-    expect(screen.getByText(/separate NAC orchestrator sessions/i)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Back to Parent" })).toBeNull();
+    expect(container.textContent).toBe("");
+    expect(screen.queryByText("Immutable behavior")).toBeNull();
   });
 
   it("identifies a child transcript and navigates back to its parent", () => {

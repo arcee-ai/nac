@@ -16,9 +16,7 @@ vi.mock("@/app/hooks/useMediaQuery", () => ({
 vi.mock("@/app/hooks/useSessionFetching", () => ({ useSessionFetching: () => false }));
 vi.mock("@/app/services/queries", () => ({
   useWorkspaceRevisionChanges: () => ({ data: null }),
-}));
-vi.mock("@/app/components/sessions/SessionCollection", () => ({
-  SessionCollection: () => <nav aria-label="All sessions">collection</nav>,
+  useWorkspaceRevisions: () => ({ data: [], isLoading: false, error: null }),
 }));
 vi.mock("@/app/components/inspector/FilesView", () => ({ FilesView: () => <div>files</div> }));
 vi.mock("@/app/components/inspector/DelegatedWorkView", () => ({
@@ -55,44 +53,38 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe("session side box collection integration", () => {
-  it("shows Sessions by default beside preserved views and uses the existing collapse control", () => {
+describe("session side box tabs", () => {
+  it("shows the behavior panels without a Sessions tab and keeps the collapse control", () => {
     const onPanelChange = vi.fn();
     render(
       <SessionSideBox
         sessionId="session-a"
         snapshot={snapshot}
-        panel="sessions"
+        panel="files"
         onPanelChange={onPanelChange}
-        sessions={[]}
-        projects={[]}
       />,
     );
 
-    expect(screen.getByRole("navigation", { name: "All sessions" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Sessions" }).getAttribute("aria-selected")).toBe(
-      "true",
-    );
+    expect(screen.queryByRole("tab", { name: "Sessions" })).toBeNull();
     expect(screen.getByRole("tab", { name: "Delegated work" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Files" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Files" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("files")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     expect(sessionLayoutStore.getState().collapsed).toBe(true);
   });
 
-  it("leaves the collection body to the existing phone sheet chrome", () => {
+  it("leaves the phone body without the wide tab row", () => {
     viewport.mobile = true;
     render(
       <SessionSideBox
         sessionId="session-a"
         snapshot={snapshot}
-        panel="sessions"
+        panel="files"
         onPanelChange={vi.fn()}
-        sessions={[]}
-        projects={[]}
       />,
     );
 
-    expect(screen.getByRole("navigation", { name: "All sessions" })).toBeTruthy();
+    expect(screen.getByText("files")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Hide panel" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Sessions" })).toBeNull();
   });

@@ -32,7 +32,7 @@ export const SESSION_PANEL_LABEL = {
  */
 export const WIDE_SESSION_PANELS = SESSION_PANELS.filter((panel) => panel !== "history");
 
-export const DEFAULT_SESSION_PANEL: SessionPanel = "sessions";
+export const DEFAULT_SESSION_PANEL: SessionPanel = "files";
 
 export function isSessionPanel(value: string | undefined): value is SessionPanel {
   // SAFETY: the cast only widens the readonly tuple to a mutable array for

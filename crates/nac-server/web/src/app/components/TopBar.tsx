@@ -20,6 +20,7 @@ import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
+import { useSidebarOffset } from "@/app/store/sidebarLayoutStore";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 
@@ -38,15 +39,22 @@ export function TopBar() {
   const { pathname } = useLocation();
   const actions = useProjectActions();
   const managed = useManagedHost();
+  const sidebarOffset = useSidebarOffset();
   const inTrail = sessionIdFromPath(pathname) !== null || projectIdFromPath(pathname) !== null;
+  // A wide session already has the sidebar for navigation, so the bar would
+  // only sit on top of the chat. A phone still needs it: there is no rail,
+  // and this is where the side box is opened.
+  if (!isMobile && sessionIdFromPath(pathname) !== null) return null;
 
   return (
     <>
       <header
         className={cn(
-          "fixed inset-x-0 top-0 z-10 flex items-center justify-between py-2 shrink-0",
+          "fixed top-0 right-0 z-10 flex items-center justify-between py-2 shrink-0",
+          "transition-[left] duration-500 ease-in-out",
           isMobile ? "h-16 px-3 gap-4" : isTablet ? "h-[52px] px-3" : "h-[52px] px-4",
         )}
+        style={{ left: sidebarOffset }}
       >
         <div
           className={cn(
@@ -63,13 +71,15 @@ export function TopBar() {
             isMobile ? "flex-1 min-w-0 gap-4" : isTablet ? "shrink-0 gap-4" : "shrink-0 gap-8",
           )}
         >
-          <Link to={routes.list()} className="shrink-0" aria-label="All projects">
-            <Logo
-              height={isMobile ? 36 : isTablet ? 36 : 36}
-              markOnly={isMobile || isTablet}
-              className="text-basic-primary"
-            />
-          </Link>
+          {sidebarOffset > 0 ? null : (
+            <Link to={routes.list()} className="shrink-0" aria-label="All projects">
+              <Logo
+                height={isMobile ? 36 : isTablet ? 36 : 36}
+                markOnly={isMobile || isTablet}
+                className="text-basic-primary"
+              />
+            </Link>
+          )}
           <Breadcrumbs />
         </div>
         <div className="relative flex items-center shrink-0 gap-2">
