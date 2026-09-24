@@ -850,7 +850,12 @@ test("asks for immutable behavior on every first and new chat", async ({
   await page.getByRole("button", { name: `${orchestratorTitle}, NAC orchestrator` }).click();
   await expect(page.getByText("NAC orchestrator", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: `${directTitle}, Direct coding agent` }).click();
-  await expect(page.getByText("Direct coding agent", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByText("Immutable behavior", { exact: true })
+      .locator("..")
+      .getByText("Direct coding agent", { exact: true }),
+  ).toBeVisible();
   runningGate.release();
   expect((await runningRequest).status()).toBe(202);
   await waitForRunIdle(request, harness, directSessionId!);
