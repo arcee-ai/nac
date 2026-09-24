@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   indexToolEvents,
+  isEmptyGlobResultPreview,
   presentToolCall,
   type ToolPresentationStatus,
 } from "@/app/lib/toolPresentation";
@@ -177,5 +178,31 @@ describe("tool presentation mapper", () => {
         turnCancelled: false,
       }),
     ).toMatchObject({ summary: null, statusLabel: "Interrupted" });
+  });
+
+  it("keeps structured glob results so Actions can render every returned path", () => {
+    const resultText = JSON.stringify({
+      entries: Array.from({ length: 8 }, (_, index) => ({
+        path: `src/file-${index}.ts`,
+        kind: "file",
+      })),
+    });
+    const presentation = presentToolCall({
+      call: call("glob", '{"pattern":"src/**/*.ts"}'),
+      events: indexToolEvents([
+        started("glob", "src/**/*.ts"),
+        finished("glob", { content_preview: "bounded result" }),
+      ]).get("call-glob"),
+      hasResult: true,
+      resultText,
+      resultHasImage: false,
+      active: false,
+      turnCancelled: false,
+    });
+
+    expect(presentation.resultPreview).toBe(resultText);
+    expect(isEmptyGlobResultPreview(presentation.resultPreview)).toBe(false);
+    expect(isEmptyGlobResultPreview('{"entries":[]}')).toBe(true);
+    expect(isEmptyGlobResultPreview("not json")).toBe(false);
   });
 });

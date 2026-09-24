@@ -1,6 +1,8 @@
 /** @vitest-environment jsdom */
 
+import type { PropsWithChildren } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentToolsGroupButton } from "@/app/components/inspector/agent-segments/AgentToolsGroupButton";
@@ -8,6 +10,17 @@ import { SegmentDetailList } from "@/app/components/inspector/agent-segments/Seg
 import { buildStepperSteps } from "@/app/components/inspector/agent-segments/stepper";
 import { focusActionSegment, resetActionExpansion } from "@/app/lib/actionExpand";
 import type { AgentToolsGroup } from "@/app/lib/agentSegments";
+import { resetSessionSelection, sessionLayoutStore } from "@/app/store/sessionLayoutStore";
+
+function DetailRouter({ children }: PropsWithChildren) {
+  return <MemoryRouter initialEntries={["/session/session-1/actions"]}>{children}</MemoryRouter>;
+}
+
+function renderDetails(group: AgentToolsGroup, hostRoots?: string[]) {
+  return render(<SegmentDetailList group={group} hostRoots={hostRoots} />, {
+    wrapper: DetailRouter,
+  });
+}
 
 function group(): AgentToolsGroup {
   return {
@@ -56,6 +69,7 @@ function group(): AgentToolsGroup {
 
 beforeEach(() => {
   resetActionExpansion();
+  resetSessionSelection();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -71,6 +85,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetActionExpansion();
+  resetSessionSelection();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -86,7 +101,7 @@ describe("agent segment presentation", () => {
   });
 
   it("renders bounded input/output previews and every settled status", () => {
-    render(<SegmentDetailList group={group()} />);
+    renderDetails(group());
     expect(screen.getByText("Thoughts")).toBeTruthy();
     expect(screen.getByText("Run command")).toBeTruthy();
     expect(screen.getByText("Succeeded")).toBeTruthy();
@@ -97,7 +112,7 @@ describe("agent segment presentation", () => {
 
   it("scrolls to and highlights a child selected from the Actions list", async () => {
     const scroll = vi.fn();
-    const { container } = render(<SegmentDetailList group={group()} />);
+    const { container } = renderDetails(group());
     const root = container.firstElementChild as HTMLDivElement;
     const target = root.querySelector<HTMLElement>('[data-segment-key="tool-2"]');
     expect(target).not.toBeNull();
@@ -135,7 +150,12 @@ describe("agent segment presentation", () => {
   it("follows live detail growth until the reader scrolls away and resumes at the bottom", () => {
     let scrollHeight = 600;
     const initial = group();
-    const { container, rerender } = render(<SegmentDetailList group={initial} />);
+    const initialTail = initial.segments[2];
+    if (initialTail.kind !== "tool") throw new Error("expected a tool tail");
+    initialTail.presentation.name = "exec_command";
+    initialTail.presentation.label = "Run command";
+    initialTail.presentation.summary = "npm test";
+    const { container, rerender } = renderDetails(initial);
     const root = container.firstElementChild as HTMLDivElement;
     Object.defineProperty(root, "scrollHeight", { configurable: true, get: () => scrollHeight });
     Object.defineProperty(root, "clientHeight", { configurable: true, get: () => 200 });
@@ -168,6 +188,72 @@ describe("agent segment presentation", () => {
     resumedTail.presentation.resultPreview = "partial output growing after returning to bottom";
     rerender(<SegmentDetailList group={resumed} />);
     expect(root.scrollTop).toBe(500);
+  });
+
+  it("turns read paths into Files-panel buttons without hiding the result preview", () => {
+    const fileGroup = group();
+    fileGroup.segments = [
+      {
+        kind: "tool",
+        key: "read-file",
+        presentation: {
+          callId: "call-read",
+          name: "read",
+          label: "Read file",
+          summary: "/workspace/src/app.tsx",
+          resultPreview: "export function App() {}",
+          status: "success",
+          statusLabel: "Succeeded",
+        },
+      },
+    ];
+
+    renderDetails(fileGroup, ["/workspace"]);
+    const file = screen.getByRole("button", { name: "src/app.tsx" });
+    expect(screen.getByText("export function App() {}")).toBeTruthy();
+    fireEvent.click(file);
+    expect(sessionLayoutStore.getState().selectedFile).toBe("src/app.tsx");
+    expect(file.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("shows the first three glob matches, a remainder count, and an empty state", () => {
+    const globGroup = group();
+    globGroup.segments = [
+      {
+        kind: "tool",
+        key: "glob-files",
+        presentation: {
+          callId: "call-glob",
+          name: "glob",
+          label: "Find files",
+          summary: "src/**/*",
+          resultPreview: JSON.stringify({
+            entries: [
+              { path: "src/app.tsx", kind: "file" },
+              { path: "src/lib", kind: "directory" },
+              { path: "src/lib/routes.ts", kind: "file" },
+              { path: "src/lib/store.ts", kind: "file" },
+            ],
+          }),
+          status: "success",
+          statusLabel: "Succeeded",
+        },
+      },
+    ];
+
+    const { rerender } = renderDetails(globGroup);
+    expect(screen.getByRole("button", { name: "src/app.tsx" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "src/lib" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "src/lib/routes.ts" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "src/lib/store.ts" })).toBeNull();
+    expect(screen.getByText("+1 more")).toBeTruthy();
+
+    const empty = structuredClone(globGroup);
+    const emptyTool = empty.segments[0];
+    if (emptyTool.kind !== "tool") throw new Error("expected a glob tool");
+    emptyTool.presentation.resultPreview = JSON.stringify({ entries: [] });
+    rerender(<SegmentDetailList group={empty} />);
+    expect(screen.getByText("No files found")).toBeTruthy();
   });
 
   it("animates only the newest live pill and fades the live stepper after settlement", () => {

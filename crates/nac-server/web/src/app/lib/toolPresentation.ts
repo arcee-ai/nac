@@ -18,7 +18,7 @@ export interface ToolPresentation {
   label: string;
   /** Backend-owned bounded key argument; never reconstructed from raw arguments. */
   summary: string | null;
-  /** Backend-owned bounded result preview; never the durable raw tool body. */
+  /** Backend-owned bounded preview; glob retains its structured result so paths stay linkable. */
   resultPreview: string | null;
   status: ToolPresentationStatus;
   statusLabel: string;
@@ -159,6 +159,21 @@ function statusFromFinished(event: ToolFinished): ToolPresentationStatus {
   return "success";
 }
 
+/** True when glob returned a parsed payload with zero matches. */
+export function isEmptyGlobResultPreview(preview: string | null | undefined): boolean {
+  if (!preview) return false;
+  try {
+    const parsed: unknown = JSON.parse(preview);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const entries = (parsed as { entries?: unknown }).entries;
+    return Array.isArray(entries) && entries.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+export const GLOB_EMPTY_RESULT_LABEL = "No files found";
+
 /**
  * Pair sanitized durable and live lifecycle events by call id. Later events
  * win, so an SSE finish can settle a durable start and the canonical snapshot
@@ -211,7 +226,10 @@ export function presentToolCall({
   else if (active) status = "pending";
   else status = "interrupted";
 
-  let resultPreview = bounded(events?.finished?.content_preview, PREVIEW_LIMIT) || null;
+  let resultPreview =
+    name === "glob" && resultText?.trim()
+      ? resultText
+      : bounded(events?.finished?.content_preview, PREVIEW_LIMIT) || null;
   if (!resultPreview && resultHasImage) resultPreview = "Image result";
   if (!resultPreview && status === "cancelled") resultPreview = "No result was retained.";
   if (!resultPreview && status === "interrupted") resultPreview = "No result was recorded.";

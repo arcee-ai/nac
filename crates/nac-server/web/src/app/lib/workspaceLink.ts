@@ -91,3 +91,12 @@ export function classifyMarkdownHref(
 
   return { kind: "workspace", path };
 }
+
+/** Workspace-relative path the Files panel can open, or null if it cannot. */
+export function toWorkspaceRelativePath(
+  raw: string | null | undefined,
+  hostRoots: Array<string | null | undefined> = [],
+): string | null {
+  const kind = classifyMarkdownHref(raw ?? undefined, hostRoots);
+  return kind.kind === "workspace" ? kind.path : null;
+}

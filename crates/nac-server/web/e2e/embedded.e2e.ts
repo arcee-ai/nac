@@ -178,6 +178,14 @@ test("round-trips a native tool result through the scripted Responses provider",
   const actionDetail = page.locator("[data-segment-key]").filter({ hasText: "Read file" });
   await expect(actionDetail).toContainText("Succeeded");
   await expect(actionDetail).toContainText("fixture.txt");
+  const fileButton = actionDetail.getByRole("button", { name: "fixture.txt" });
+  await expect(fileButton).toBeVisible();
+  await fileButton.click();
+  await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/files$`));
+  await expect(desktopPanels.getByRole("tab", { name: "Files" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
 
   await desktopPanels.getByRole("tab", { name: "Sessions" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/sessions$`));
