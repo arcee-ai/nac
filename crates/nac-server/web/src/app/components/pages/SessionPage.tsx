@@ -37,7 +37,6 @@ import {
 } from "@/app/lib/routes";
 import {
   useSessions,
-  useProjects,
   useSessionSnapshot,
   useSessionSummary,
   useSshConnect,
@@ -123,9 +122,7 @@ export default function SessionPage() {
   const { data: snapshot = null, error, refetch: refetchSnapshot } = useSessionSnapshot(id);
   const { data: entry = null } = useSessionSummary(id);
   const { data: sessionList } = useSessions();
-  const { data: projectList } = useProjects();
   const allSessions = sessionList ?? [];
-  const allProjects = projectList?.projects ?? [];
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
   const expanded = useSidePanelExpanded();
@@ -215,8 +212,6 @@ export default function SessionPage() {
       snapshot={snapshot}
       panel={effectivePanel}
       onPanelChange={goToPanel}
-      sessions={allSessions}
-      projects={allProjects}
     />
   );
 
@@ -244,10 +239,9 @@ export default function SessionPage() {
           )}
         >
           {/* The phone reaches the same chats through the header's sheet; there
-            is no width here for a strip of tabs. The padding clears the fixed
-            52px header the shell puts above everything. */}
+            is no width here for a strip of tabs. */}
           {isMobile ? null : (
-            <div className="w-full shrink-0 pt-[60px]">
+            <div className="w-full shrink-0 pt-3">
               <ProjectSessionTabs
                 projectId={projectId}
                 sessions={projectSessions}
@@ -316,7 +310,7 @@ export default function SessionPage() {
           */}
             <div
               className={cn(
-                "absolute top-[52px] bottom-0 right-0 flex flex-col min-w-0 w-1/2",
+                "absolute inset-y-0 right-0 flex flex-col min-w-0 w-1/2",
                 "transition-transform duration-150 ease-out",
                 collapsed && "translate-x-full",
               )}

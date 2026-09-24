@@ -140,7 +140,7 @@ describe("global session collection", () => {
     expect(actions.remove).toHaveBeenCalledWith(sessions[1].summary);
 
     fireEvent.click(screen.getByRole("button", { name: /^two-chat/ }));
-    expect(screen.getByTestId("location").textContent).toBe("/session/two-chat/sessions");
+    expect(screen.getByTestId("location").textContent).toBe("/session/two-chat/files");
     expect(sessionNavigationStore.getState().lastViewedAt["two-chat"]).toBe("2026-09-22T12:00:00Z");
   });
 

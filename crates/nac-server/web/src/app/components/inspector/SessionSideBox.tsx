@@ -18,7 +18,6 @@ import { HistoryView } from "@/app/components/inspector/HistoryView";
 import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
-import { SessionCollection } from "@/app/components/sessions/SessionCollection";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useSessionFetching } from "@/app/hooks/useSessionFetching";
 import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
@@ -38,8 +37,6 @@ import {
   useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
 import type {
-  ManagedSessionSummary,
-  ProjectRecord,
   SessionSnapshotResponse,
   WorkspaceSnapshot,
 } from "@/app/types/api";
@@ -49,8 +46,6 @@ interface SessionSideBoxProps {
   snapshot: SessionSnapshotResponse | null;
   panel: SessionPanel;
   onPanelChange: (panel: SessionPanel) => void;
-  sessions: ManagedSessionSummary[];
-  projects: ProjectRecord[];
 }
 
 function FooterChip({
@@ -69,7 +64,11 @@ function FooterChip({
         compact ? "pl-1 pr-1" : "pl-1 pr-3",
       )}
     >
-      <Icon iconName={iconName} size={16} color="var(--color-fill-basic-tertiary)" />
+      <Icon
+        iconName={iconName}
+        size={16}
+        color="var(--color-fill-basic-tertiary)"
+      />
       <span
         className={cn(
           "label-micro text-basic-tertiary truncate",
@@ -94,7 +93,10 @@ function FooterChip({
 function SideBoxProgress({ sessionId }: { sessionId: string }) {
   const fetching = useSessionFetching(sessionId);
   return (
-    <ProgressLoader active={fetching} className="absolute bottom-[-1px] left-0 right-0 z-[1]" />
+    <ProgressLoader
+      active={fetching}
+      className="absolute bottom-[-1px] left-0 right-0 z-[1]"
+    />
   );
 }
 
@@ -118,7 +120,9 @@ function SideBoxFooter({
   // A revision reports its own totals, which the panel has already fetched.
   const changes = useWorkspaceRevisionChanges(sessionId, revision);
   const totals =
-    revision == null ? workspace : (changes.data ?? { total_additions: 0, total_deletions: 0 });
+    revision == null
+      ? workspace
+      : (changes.data ?? { total_additions: 0, total_deletions: 0 });
   const additions = totals?.total_additions ?? 0;
   const deletions = totals?.total_deletions ?? 0;
 
@@ -129,13 +133,34 @@ function SideBoxFooter({
         compact ? "px-2 gap-1" : "px-4",
       )}
     >
-      <div className={cn("flex flex-1 min-w-0 items-center", compact ? "gap-1" : "gap-[10px]")}>
-        {repo ? <FooterChip iconName={IconName.Folder} label={repo} compact={compact} /> : null}
-        {branch && !readOnly ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
-        {branch && readOnly ? (
-          <FooterChip iconName={IconName.Scheme} label={branch} compact={compact} />
+      <div
+        className={cn(
+          "flex flex-1 min-w-0 items-center",
+          compact ? "gap-1" : "gap-[10px]",
+        )}
+      >
+        {repo ? (
+          <FooterChip
+            iconName={IconName.Folder}
+            label={repo}
+            compact={compact}
+          />
         ) : null}
-        <RevisionPicker sessionId={sessionId} selected={revision} onSelect={selectRevision} />
+        {branch && !readOnly ? (
+          <BranchPicker sessionId={sessionId} branch={branch} />
+        ) : null}
+        {branch && readOnly ? (
+          <FooterChip
+            iconName={IconName.Scheme}
+            label={branch}
+            compact={compact}
+          />
+        ) : null}
+        <RevisionPicker
+          sessionId={sessionId}
+          selected={revision}
+          onSelect={selectRevision}
+        />
       </div>
       {additions || deletions ? (
         <div className="flex items-center gap-2 shrink-0 code code-small">
@@ -149,17 +174,16 @@ function SideBoxFooter({
 
 /**
  * The right half of the session screen: one box with the Threads / Files /
- * Worksets panels, sized by the shared layout store. On a phone the panels are
- * the body of the modal box that SessionPage puts them in, and its chrome —
- * header, bottom bar — belongs to the dialog rather than to this box.
+ * Worksets / Delegated work panels, sized by the shared layout store. Session
+ * switching lives in the left sidebar. On a phone the panels are the body of
+ * the modal box that SessionPage puts them in, and its chrome — header, bottom
+ * bar — belongs to the dialog rather than to this box.
  */
 export function SessionSideBox({
   sessionId,
   snapshot,
   panel,
   onPanelChange,
-  sessions,
-  projects,
 }: SessionSideBoxProps) {
   const expanded = useSidePanelExpanded();
   const isMobile = useIsMobile();
@@ -168,7 +192,8 @@ export function SessionSideBox({
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
   const behavior = snapshot?.metadata.behavior ?? "orchestrator";
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const direct =
+    behavior === "direct" || behavior === "direct-with-orchestrator";
   const panelPolicy = sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
   const delegatedTranscript = panelPolicy.readOnly;
   const widePanels = panelPolicy.widePanels;
@@ -176,15 +201,13 @@ export function SessionSideBox({
   // History belongs to the phone's bottom bar: a wide box reaches revisions
   // through its footer chip, so a link to that panel lands on the default one.
   const active =
-    widePanels.includes(panel) || (isMobile && panelPolicy.mobilePanels.includes(panel))
+    widePanels.includes(panel) ||
+    (isMobile && panelPolicy.mobilePanels.includes(panel))
       ? panel
       : panelPolicy.defaultPanel;
 
   const body = (
     <>
-      {active === "sessions" ? (
-        <SessionCollection sessions={sessions} projects={projects} activeSessionId={sessionId} />
-      ) : null}
       {active === "files" ? (
         <FilesView
           sessionId={sessionId}
@@ -197,7 +220,11 @@ export function SessionSideBox({
         <DelegatedWorkView sessionId={sessionId} behavior={behavior} />
       ) : null}
       {active === "worksets" ? (
-        <WorksetsView snapshot={snapshot} selected={selectedWorkset} onSelect={selectWorkset} />
+        <WorksetsView
+          snapshot={snapshot}
+          selected={selectedWorkset}
+          onSelect={selectWorkset}
+        />
       ) : null}
       {active === "threads" ? (
         <ThreadsView
@@ -208,7 +235,11 @@ export function SessionSideBox({
         />
       ) : null}
       {active === "history" ? (
-        <HistoryView sessionId={sessionId} selected={selectedRevision} onSelect={selectRevision} />
+        <HistoryView
+          sessionId={sessionId}
+          selected={selectedRevision}
+          onSelect={selectRevision}
+        />
       ) : null}
     </>
   );
@@ -283,15 +314,13 @@ export function SessionSideBox({
 
       <div className="flex-1 min-h-0 flex flex-col">{body}</div>
 
-      {active === "sessions" ? null : (
-        <SideBoxFooter
-          sessionId={sessionId}
-          workspace={snapshot?.workspace ?? null}
-          revision={selectedRevision}
-          compact={isTablet}
-          readOnly={delegatedTranscript}
-        />
-      )}
+      <SideBoxFooter
+        sessionId={sessionId}
+        workspace={snapshot?.workspace ?? null}
+        revision={selectedRevision}
+        compact={isTablet}
+        readOnly={delegatedTranscript}
+      />
     </div>
   );
 }
