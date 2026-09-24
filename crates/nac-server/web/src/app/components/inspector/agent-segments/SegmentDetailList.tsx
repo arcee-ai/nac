@@ -329,6 +329,7 @@ export function SegmentDetailList({
           key={item.key}
           item={item}
           isLast={index === items.length - 1}
+          animateConnector={group.inProgress && index === items.length - 2}
           highlighted={selectedKey === item.key}
         />
       ))}

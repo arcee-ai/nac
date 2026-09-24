@@ -33,10 +33,12 @@ export interface SegmentDetailItem {
 function SegmentDetailRow({
   item,
   isLast,
+  animateConnector,
   highlighted = false,
 }: {
   item: SegmentDetailItem;
   isLast: boolean;
+  animateConnector: boolean;
   highlighted?: boolean;
 }) {
   const pillState = item.live
@@ -48,17 +50,24 @@ function SegmentDetailRow({
   return (
     <div
       className={cn(
-        "flex w-full scroll-mt-2 items-start gap-2 rounded-[4px] transition-colors",
+        "flex w-full scroll-mt-2 items-start gap-2 px-4 py-2 transition-colors",
         highlighted && "bg-btn-ghost-highlighted",
       )}
       data-segment-key={item.key}
     >
       <div className="flex shrink-0 self-stretch flex-col items-center">
         <ToolPill size={ToolPillSize.Small} icon={item.config.icon} state={pillState} />
-        {!isLast ? <div className="w-px min-h-0 flex-1 bg-[var(--color-border-tertiary)]" /> : null}
+        {!isLast ? (
+          <div
+            className={cn(
+              "-mb-6 w-px min-h-0 flex-1 bg-[var(--color-border-tertiary)]",
+              animateConnector && "agent-segment-row-connector",
+            )}
+          />
+        ) : null}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-2 pb-6">
-        <div className="flex w-full items-center gap-2">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="flex h-7 w-full items-center gap-2">
           <ToolCallLabel
             label={item.label}
             statusLabel={item.statusLabel}

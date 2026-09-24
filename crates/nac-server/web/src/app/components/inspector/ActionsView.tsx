@@ -119,7 +119,7 @@ export function ActionsView({
             snapshot.metadata.workspace_host_path,
             snapshot.metadata.cwd,
           ]}
-          className="flex-1 min-h-0 overflow-auto px-4 py-4 [&>*]:shrink-0"
+          className="flex-1 min-h-0 overflow-auto py-4 [&>*]:shrink-0"
         />
       ) : (
         <PanelEmpty title={emptyCopy.title}>{emptyCopy.body}</PanelEmpty>

@@ -169,6 +169,7 @@ describe("agent segment presentation", () => {
     firstTail.presentation.resultPreview = "partial output";
     rerender(<SegmentDetailList group={firstLive} />);
     expect(root.scrollTop).toBe(400);
+    expect(container.querySelectorAll(".agent-segment-row-connector")).toHaveLength(1);
 
     root.scrollTop = 100;
     fireEvent.scroll(root);
