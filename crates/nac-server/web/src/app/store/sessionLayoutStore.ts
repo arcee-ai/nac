@@ -146,7 +146,9 @@ export function bindSidePanelProject(projectId: string): void {
  * still loading, instead of recording that click on the previous project.
  */
 export function unbindSidePanelProject(): void {
-  if (getState().sidePanelProjectId == null && getState().collapsed) return;
+  // Already unbound: keep whatever the user did while the next project loaded.
+  // Collapsing here would hide a Show-panel click from `openedBeforeBind`.
+  if (getState().sidePanelProjectId == null) return;
   setState({
     sidePanelProjectId: null,
     collapsed: true,
