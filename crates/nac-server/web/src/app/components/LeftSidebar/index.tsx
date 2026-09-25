@@ -44,8 +44,11 @@ export function LeftSidebar() {
 
   useLayoutEffect(() => {
     setSidebarOffset(isOpen ? SIDEBAR_PANEL_WIDTH : SIDEBAR_RAIL_WIDTH);
-    return () => setSidebarOffset(0);
   }, [isOpen]);
+
+  useLayoutEffect(() => {
+    return () => setSidebarOffset(0);
+  }, []);
 
   useEffect(() => {
     try {

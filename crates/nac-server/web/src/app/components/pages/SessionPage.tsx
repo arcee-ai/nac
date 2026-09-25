@@ -263,7 +263,7 @@ export default function SessionPage() {
                         aria-label="Show panel"
                         onClick={toggleSidePanelCollapsed}
                       >
-                        <Icon iconName={IconName.OpenSidebar} />
+                        <Icon iconName={IconName.CloseSidebar} />
                       </Button>
                     </Tooltip>
                   ) : null

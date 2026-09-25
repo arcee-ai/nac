@@ -156,6 +156,31 @@ export function SidebarProjectList({
   );
 }
 
+function withActiveSession(
+  shown: { label: string; items: ManagedSessionSummary[] }[],
+  groups: { label: string; items: ManagedSessionSummary[] }[],
+  activeSessionId: string | null,
+): { label: string; items: ManagedSessionSummary[] }[] {
+  if (!activeSessionId) return shown;
+  if (
+    shown.some((group) => group.items.some((entry) => entry.summary.session_id === activeSessionId))
+  ) {
+    return shown;
+  }
+  const owner = groups.find((group) =>
+    group.items.some((entry) => entry.summary.session_id === activeSessionId),
+  );
+  const active = owner?.items.find((entry) => entry.summary.session_id === activeSessionId);
+  if (!owner || !active) return shown;
+  const existing = shown.find((group) => group.label === owner.label);
+  if (existing) {
+    return shown.map((group) =>
+      group.label === owner.label ? { ...group, items: [...group.items, active] } : group,
+    );
+  }
+  return [...shown, { label: owner.label, items: [active] }];
+}
+
 function visibleGroups(
   groups: { label: string; items: ManagedSessionSummary[] }[],
   revealed: boolean,
@@ -210,9 +235,9 @@ function ProjectSessions({
     return <p className="label-small text-basic-muted px-4 pb-3">No chats yet</p>;
   }
 
-  const pinnedCount = groups.find((group) => group.label === "Pinned")?.items.length ?? 0;
-  const hidden = revealed ? 0 : Math.max(0, sessions.length - pinnedCount - PREVIEW_LIMIT);
-  const shown = visibleGroups(groups, revealed);
+  const shown = withActiveSession(visibleGroups(groups, revealed), groups, activeSessionId);
+  const shownCount = shown.reduce((count, group) => count + group.items.length, 0);
+  const hidden = Math.max(0, sessions.length - shownCount);
 
   return (
     <div className="flex flex-col gap-1 px-2 pb-2">

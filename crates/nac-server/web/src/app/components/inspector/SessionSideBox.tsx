@@ -274,7 +274,7 @@ export function SessionSideBox({
                 aria-label="Hide panel"
                 onClick={toggleSidePanelCollapsed}
               >
-                <Icon iconName={IconName.CloseSidebar} />
+                <Icon iconName={IconName.OpenSidebar} />
               </Button>
             </Tooltip>
           </div>

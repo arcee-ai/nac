@@ -5,6 +5,7 @@ import { ConfigurationsModal } from "@/app/components/modals/ConfigurationsModal
 import { McpServersModal } from "@/app/components/modals/MCPServersModal/McpServersModal";
 import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
+import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useMcpServers, useSessions, useSshConfigs } from "@/app/services/queries";
 
@@ -19,11 +20,14 @@ export function useSidebarCommands() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const actions = useProjectActions();
+  const managed = useManagedHost();
   const { data: sessions = [] } = useSessions();
   const { data: mcpServers } = useMcpServers();
   const { data: sshConfigs } = useSshConfigs();
 
   const sessionId = sessionIdFromPath(pathname);
+  const sessionKnown =
+    sessionId != null && sessions.some((entry) => entry.summary.session_id === sessionId);
   const projectId =
     projectIdFromPath(pathname) ??
     sessions.find((entry) => entry.summary.session_id === sessionId)?.summary.project_id ??
@@ -36,6 +40,9 @@ export function useSidebarCommands() {
       void actions.newChat(projectId);
       return;
     }
+    // A session route's project id arrives with the list. Opening New Project
+    // before that lands sends the click to the wrong dialog.
+    if (sessionId && !sessionKnown) return;
     actions.create();
   };
 
@@ -51,6 +58,7 @@ export function useSidebarCommands() {
     openMcp: () => setMcp(true),
     openSsh: () => setSsh(true),
     openConfigurations: () => setConfiguring(true),
+    openManaged: managed.isManaged ? managed.openSettings : null,
     modals: (
       <>
         <ConfigurationsModal open={configuring} onClose={() => setConfiguring(false)} />
