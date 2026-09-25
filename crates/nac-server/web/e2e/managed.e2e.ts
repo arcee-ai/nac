@@ -5,12 +5,14 @@ import { expect, test } from "./harness";
 /** The projects sidebar exposes Managed host directly; phones still use the menu. */
 async function openManagedHost(page: Page) {
   const hosted = page.getByRole("button", { name: "Managed host", exact: true });
-  if ((await hosted.count()) > 0) {
+  const menu = page.getByRole("button", { name: "Open the menu" });
+  await expect(hosted.or(menu).first()).toBeVisible();
+  if (await hosted.first().isVisible()) {
     await hosted.first().click();
     return;
   }
-  await page.getByRole("button", { name: "Open the menu" }).click();
-  await page.getByRole("button", { name: "Managed host" }).click();
+  await menu.click();
+  await hosted.click();
 }
 
 type ManagedDoubleState = {
