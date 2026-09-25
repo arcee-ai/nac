@@ -1482,12 +1482,12 @@ test("shows live background delegated work, terminal events, cancellation, and g
   harness.provider.enqueue(
     "background-generation-2",
     { token: "E2E_GENERATION_TWO" },
-    { kind: "text", text: "second generation completed" },
+    { kind: "text", text: "second generation completed", stream: true },
     continued,
   );
   harness.provider.enqueue(
     "observe-generation-2",
-    { token: "Background success", afterStep: "background-generation-2" },
+    { token: "second generation completed", afterStep: "background-generation-2" },
     { kind: "text", text: "generation 2 acknowledged" },
   );
 
@@ -1661,7 +1661,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await showSidePanel(page);
   await page.getByRole("button", { name: "Inspect the child lifecycle" }).click();
   await expect(page.getByText("Completed", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
   await expect(page.getByText("Inspect the child lifecycle", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
@@ -1703,7 +1703,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
     "Coordinate the compatibility audit",
   );
   harness.provider.assertConsumed();
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByText("Managed NAC orchestrator", { exact: true })).toBeVisible();
   await expect(page.getByText("Coordinate the compatibility audit", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
