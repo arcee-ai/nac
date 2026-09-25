@@ -5,8 +5,19 @@
 import { createStore } from "@/app/lib/store";
 
 interface SessionLayoutState {
-  /** Side box slid out of the row so the chat has the screen to itself. */
+  /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
   collapsed: boolean;
+  /**
+   * Whether the next collapsed change should tween. A launch from the composer
+   * opens a collapsed panel in place, so the chat column does not replay its
+   * layout for half a second.
+   */
+  sidePanelAnimate: boolean;
+  /**
+   * Project the collapsed preference belongs to. Null until the open session's
+   * project is known. Switching projects resets the panel to collapsed.
+   */
+  sidePanelProjectId: string | null;
   /** Side box lifted out of the row into a full-screen dialog. */
   expanded: boolean;
   /**
@@ -35,6 +46,13 @@ interface SessionLayoutState {
   selectedRevision: number | null;
   /** File the Files panel is showing. */
   selectedFile: string | null;
+  /**
+   * Subagents tab opened on a blank launch, from the parent composer's spawn
+   * menu or from New Agent / New Orchestrator in the list.
+   */
+  subagentLaunch: "agent" | "orchestrator" | null;
+  /** Bumps every time a blank subagent launch is requested, so the composer can take focus again. */
+  subagentLaunchRequest: number;
   /** Folders flipped away from their default open state, by path. */
   toggledFolders: ReadonlySet<string>;
   /**
@@ -47,7 +65,9 @@ interface SessionLayoutState {
 export type FileListing = "tree" | "changed";
 
 export const sessionLayoutStore = createStore<SessionLayoutState>({
-  collapsed: false,
+  collapsed: true,
+  sidePanelAnimate: true,
+  sidePanelProjectId: null,
   expanded: false,
   panelList: false,
   selectedThread: null,
@@ -58,9 +78,63 @@ export const sessionLayoutStore = createStore<SessionLayoutState>({
   selectedFile: null,
   toggledFolders: new Set(),
   fileListing: "tree",
+  subagentLaunch: null,
+  subagentLaunchRequest: 0,
 });
 
 const { getState, setState, useStore } = sessionLayoutStore;
+
+const COLLAPSED_STORAGE_PREFIX = "nac.rightSidebar.collapsed.";
+
+function collapsedStorageKey(projectId: string): string {
+  return `${COLLAPSED_STORAGE_PREFIX}${projectId || "none"}`;
+}
+
+function readCollapsed(projectId: string): boolean {
+  try {
+    const stored = localStorage.getItem(collapsedStorageKey(projectId));
+    if (stored === "0") return false;
+    if (stored === "1") return true;
+  } catch {
+    // A private-mode store that throws is the same as no preference.
+  }
+  return true;
+}
+
+function writeCollapsed(projectId: string, collapsed: boolean): void {
+  try {
+    localStorage.setItem(collapsedStorageKey(projectId), collapsed ? "1" : "0");
+  } catch {
+    // Preference is convenience; the panel still works without it.
+  }
+}
+
+function rememberCollapsed(collapsed: boolean): void {
+  const projectId = getState().sidePanelProjectId;
+  if (projectId == null) return;
+  writeCollapsed(projectId, collapsed);
+}
+
+function applyCollapsed(collapsed: boolean): void {
+  if (getState().collapsed !== collapsed) setState({ collapsed });
+  rememberCollapsed(collapsed);
+}
+
+/**
+ * Bind the collapse preference to the session's project. The first project
+ * restores its saved value (collapsed when nothing is stored). A later project
+ * starts collapsed, and that reset is what the next visit of the project reads.
+ */
+export function bindSidePanelProject(projectId: string): void {
+  const current = getState().sidePanelProjectId;
+  if (current === projectId) return;
+  if (current == null) {
+    setState({ sidePanelProjectId: projectId, collapsed: readCollapsed(projectId) });
+    return;
+  }
+  writeCollapsed(projectId, true);
+  setState({ sidePanelProjectId: projectId, collapsed: true });
+}
 
 /**
  * Show the side box as a dialog over the session, or put it back in the row.
@@ -71,9 +145,9 @@ export function toggleSidePanelExpanded(): void {
   setState(expanded ? { expanded, panelList: false } : { expanded });
 }
 
-/** Hide the side box so the chat gets the full width, or bring it back. */
+/** Slide the side box down to its icon rail, or bring the panel back. */
 export function toggleSidePanelCollapsed(): void {
-  setState({ collapsed: !getState().collapsed });
+  applyCollapsed(!getState().collapsed);
 }
 
 /** Swap a narrow panel between its list of rows and the row it has open. */
@@ -96,7 +170,7 @@ export function revealSidePanel(asDialog = false): void {
     if (!getState().expanded) setState({ expanded: true });
     return;
   }
-  if (getState().collapsed) setState({ collapsed: false });
+  applyCollapsed(false);
 }
 
 export function selectThread(
@@ -145,6 +219,30 @@ export function selectFileListing(fileListing: FileListing): void {
   setState({ fileListing });
 }
 
+/** Open the Subagents tab on a blank agent or orchestrator launch. */
+export function openSubagentLaunch(subagentLaunch: "agent" | "orchestrator"): void {
+  setState((state) => ({
+    subagentLaunch,
+    panelList: false,
+    subagentLaunchRequest: state.subagentLaunchRequest + 1,
+    collapsed: false,
+    // The chat is laid out against the column width. Tweening that from the
+    // rail to half the screen reflows the whole transcript, which reads as the
+    // session resetting. The panel is already full size off to the side, so it
+    // can appear without that tween.
+    sidePanelAnimate: state.collapsed ? false : state.sidePanelAnimate,
+  }));
+  rememberCollapsed(false);
+}
+
+export function setSidePanelAnimate(sidePanelAnimate: boolean): void {
+  if (getState().sidePanelAnimate !== sidePanelAnimate) setState({ sidePanelAnimate });
+}
+
+export function clearSubagentLaunch(): void {
+  if (getState().subagentLaunch != null) setState({ subagentLaunch: null });
+}
+
 /**
  * Wipe the session-scoped pointers that belong to the inspector we just left.
  * Threads, worksets, revisions, files and folders belong to one session, so
@@ -170,6 +268,7 @@ export function resetSessionSelection(): void {
     toggledFolders: new Set(),
     panelList: false,
     selectedThreadRunning: false,
+    subagentLaunch: null,
   });
 }
 
@@ -178,6 +277,7 @@ if (import.meta.env.DEV) {
 }
 
 export const useSidePanelCollapsed = () => useStore((s) => s.collapsed);
+export const useSidePanelAnimate = () => useStore((s) => s.sidePanelAnimate);
 export const useSidePanelExpanded = () => useStore((s) => s.expanded);
 export const useSidePanelList = () => useStore((s) => s.panelList);
 export const useSelectedThread = () => useStore((s) => s.selectedThread);
@@ -188,3 +288,5 @@ export const useSelectedRevision = () => useStore((s) => s.selectedRevision);
 export const useSelectedFile = () => useStore((s) => s.selectedFile);
 export const useToggledFolders = () => useStore((s) => s.toggledFolders);
 export const useFileListing = () => useStore((s) => s.fileListing);
+export const useSubagentLaunch = () => useStore((s) => s.subagentLaunch);
+export const useSubagentLaunchRequest = () => useStore((s) => s.subagentLaunchRequest);

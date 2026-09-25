@@ -176,7 +176,7 @@ function ListingButton({
     <Button
       className={round ? "btn-round" : undefined}
       size={round ? ButtonSize.Medium : ButtonSize.Small}
-      variant={active ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
+      variant={active ? ButtonVariant.Primary : ButtonVariant.Ghost}
       content={ButtonContent.Icon}
       aria-pressed={active}
       aria-label={label}
@@ -371,7 +371,7 @@ function PaneHeader({ path, trailing }: { path: string; trailing: React.ReactNod
 
   return (
     <div
-      className="flex items-center gap-2 h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-0-5"
+      className="flex items-center gap-2 h-10 px-4 shrink-0 border-b border-muted bg-elevation-level-1"
       title={path}
     >
       <div className="flex flex-1 items-center gap-[6px] min-w-0">
@@ -573,7 +573,9 @@ export function FilesView({
   // revision is frozen, so it never needs this.
   useEffect(() => {
     if (revision != null) return;
-    void client.invalidateQueries({ queryKey: queryKeys.sessionSnapshot(sessionId) });
+    void client.invalidateQueries({
+      queryKey: queryKeys.sessionSnapshot(sessionId),
+    });
   }, [client, sessionId, revision]);
   useLiveWorkspace(sessionId, revision);
 

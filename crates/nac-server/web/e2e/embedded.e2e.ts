@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { Page } from "@playwright/test";
 
 import {
   createDirectSession,
@@ -14,6 +15,21 @@ import { ScriptGate } from "./scripted-provider";
 /** The new-chat chord. The page binds it to the platform modifier. */
 function newChatChord(): string {
   return process.platform === "darwin" ? "Meta+Shift+O" : "Control+Shift+O";
+}
+
+/**
+ * The right sidebar starts collapsed, so panel tabs and rows sit behind this.
+ * A saved open preference can remove the button after the first paint, which
+ * makes a click that already saw it wait until the test times out.
+ */
+async function showSidePanel(page: Page) {
+  const show = page.getByRole("button", { name: "Show panel" });
+  const open = page.getByRole("tab", { name: "Files" });
+  await expect(show.or(open).first()).toBeVisible();
+  if (await open.isVisible()) return;
+  await show.click({ timeout: 5_000 }).catch(() => undefined);
+  if (!(await open.isVisible()) && (await show.isVisible())) await show.click();
+  await expect(open).toBeVisible();
 }
 
 test("serves the production-embedded application and hashed assets", async ({
@@ -701,6 +717,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   );
   await page.getByRole("button", { name: "Create chat" }).click();
   await expect(page).toHaveURL(/\/session\/[^/]+\/files$/);
+  await showSidePanel(page);
   await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
   const orchestratorSessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
   expect(orchestratorSessionId).toBeTruthy();
@@ -713,6 +730,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   );
   expect(orchestratorPresentation.ok()).toBe(true);
   await page.reload();
+  await showSidePanel(page);
   await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toBeVisible();
   await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
@@ -1449,6 +1467,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
 
   const parentId = await createSession(request, harness, "direct");
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
+  await showSidePanel(page);
   const launch = async (description: string, prompt: string) => {
     const response = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
       data: { profile: "general", description, prompt, background: true },
@@ -1598,6 +1617,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await orchestratorCompletion.accepted;
 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
+  await showSidePanel(page);
   await expect(page.getByText("Coding agents", { exact: true })).toBeVisible();
   await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
   const childRow = page.locator("article").filter({ hasText: "Inspect the child lifecycle" });
