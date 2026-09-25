@@ -232,6 +232,20 @@ export default function SessionPage() {
           )}
         >
           <div className="flex flex-col flex-1 min-h-0 w-full relative">
+            {isMobile && (entry?.lineage ?? snapshot?.lineage) ? (
+              <div className="mt-16 flex shrink-0 items-center px-3">
+                <Button
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Ghost}
+                  onClick={() => {
+                    const parentId = (entry?.lineage ?? snapshot?.lineage)?.parent_session_id;
+                    if (parentId) navigate(routes.session(parentId, "delegated"));
+                  }}
+                >
+                  Parent chat
+                </Button>
+              </div>
+            ) : null}
             {isMobile ? null : (
               <TopSingleSessionHeader sessionId={id} snapshot={snapshot} entry={entry} />
             )}
