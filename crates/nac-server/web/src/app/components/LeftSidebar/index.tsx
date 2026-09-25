@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useState } from "react";
 
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { cn } from "@/app/lib/cn";
 import { MOD } from "@/app/lib/shortcuts";
@@ -29,10 +29,6 @@ function storedOpen(): boolean | null {
   return null;
 }
 
-function initialOpen(): boolean {
-  return storedOpen() ?? window.matchMedia("(min-width: 1280px)").matches;
-}
-
 /**
  * Collapsible session navigation, in the ArceeFM arrangement: a 52px rail stays
  * put, and the 320px panel slides over it. The rail's width is what the rest of
@@ -40,8 +36,23 @@ function initialOpen(): boolean {
  */
 export function LeftSidebar({ variant = "session" }: { variant?: "session" | "projects" }) {
   const isMobile = useIsMobile();
-  const [isOpen, setIsOpen] = useState(initialOpen);
-  const toggle = useCallback(() => setIsOpen((open) => !open), []);
+  const isDesktop = useIsDesktop();
+  // A phone-sized first paint must not freeze a closed value into storage or
+  // into later desktop layout. Until the user toggles, follow the stored
+  // preference or the xl default.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const isOpen = userOpen ?? storedOpen() ?? isDesktop;
+  const toggle = useCallback(() => {
+    setUserOpen((current) => {
+      const next = !(current ?? storedOpen() ?? isDesktop);
+      try {
+        localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        // Preference is convenience; the sidebar still works without it.
+      }
+      return next;
+    });
+  }, [isDesktop]);
   const commands = useSidebarCommands();
 
   useLayoutEffect(() => {
@@ -51,15 +62,6 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
   useLayoutEffect(() => {
     return () => setSidebarOffset(0);
   }, []);
-
-  useEffect(() => {
-    if (isMobile) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, isOpen ? "1" : "0");
-    } catch {
-      // Preference is convenience; the sidebar still works without it.
-    }
-  }, [isMobile, isOpen]);
 
   useKeyboardShortcuts([{ keys: TOGGLE_KEYS, onTrigger: toggle, enabled: !isMobile }]);
 

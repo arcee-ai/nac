@@ -26,10 +26,11 @@ async function showSidePanel(page: Page) {
   const show = page.getByRole("button", { name: "Show panel" });
   const open = page.getByRole("tab", { name: "Files" });
   await expect(show.or(open).first()).toBeVisible();
-  if (await open.isVisible()) return;
-  await show.click({ timeout: 5_000 }).catch(() => undefined);
-  if (!(await open.isVisible()) && (await show.isVisible())) await show.click();
-  await expect(open).toBeVisible();
+  await expect(async () => {
+    if (await open.isVisible()) return;
+    if (await show.isVisible()) await show.click();
+    await expect(open).toBeVisible();
+  }).toPass();
 }
 
 /** Spawn menu → foreground child. The first prompt line is the description. */

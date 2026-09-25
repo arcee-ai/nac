@@ -42,6 +42,14 @@ interface SubagentRow {
   icon: IconName;
 }
 
+function parseRowKey(key: string): { mode: "child" | "orchestrator"; id: string } | null {
+  if (key.startsWith("child:")) return { mode: "child", id: key.slice("child:".length) };
+  if (key.startsWith("orchestrator:")) {
+    return { mode: "orchestrator", id: key.slice("orchestrator:".length) };
+  }
+  return null;
+}
+
 function nonempty(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -117,6 +125,11 @@ export function DelegatedWorkView({
   const launchRequest = useSubagentLaunchRequest();
   const now = useNow(60_000);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [seenSession, setSeenSession] = useState(sessionId);
+  if (seenSession !== sessionId) {
+    setSeenSession(sessionId);
+    setSelectedKey(null);
+  }
 
   const rows = useMemo(() => {
     const childRows = (children.data ?? []).map(rowFromChild);
@@ -128,14 +141,14 @@ export function DelegatedWorkView({
 
   const newestKey =
     [...rows].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.key ?? null;
-  const resolvedKey = launch
-    ? null
-    : selectedKey && rows.some((row) => row.key === selectedKey)
-      ? selectedKey
-      : newestKey;
-  if (resolvedKey !== selectedKey) setSelectedKey(resolvedKey);
+  // Keep a just-launched key even before the children list refetches. Falling
+  // back to `newestKey` the moment the id is missing would snap back to the
+  // previous row and stay there once the list catches up.
+  const resolvedKey = launch ? null : (selectedKey ?? newestKey);
+  if (!launch && selectedKey == null && newestKey != null) setSelectedKey(newestKey);
 
   const selected = rows.find((row) => row.key === resolvedKey) ?? null;
+  const pending = !launch && !selected && resolvedKey ? parseRowKey(resolvedKey) : null;
   const groups = useMemo(
     () => groupByRecency(rows, (row) => ({ updatedAt: row.updatedAt, pinned: false }), now),
     [rows, now],
@@ -161,7 +174,15 @@ export function DelegatedWorkView({
           status: selected.status,
           background: selected.background,
         }
-      : { mode: "new-agent" };
+      : pending
+        ? {
+            mode: pending.mode,
+            id: pending.id,
+            description: "Subagent",
+            status: "running",
+            background: false,
+          }
+        : { mode: "new-agent" };
 
   // A failed poll keeps the last successful payload. Only an empty failure
   // replaces the list; otherwise the rows would vanish on a dropped refetch.
@@ -239,6 +260,13 @@ export function DelegatedWorkView({
             title={selected.description}
             fallbackText={selected.fallbackText}
             icon={selected.icon}
+          />
+        ) : pending ? (
+          <SubagentPreview
+            sessionId={pending.id}
+            title="Subagent"
+            fallbackText={null}
+            icon={pending.mode === "orchestrator" ? IconName.Orchestrator : IconName.Plane}
           />
         ) : (
           <LaunchEmpty kind="agent" />

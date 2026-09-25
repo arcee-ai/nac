@@ -46,7 +46,9 @@ export function SidebarProjectList({
   const sessionTitle = useSessionTitle();
   const now = useNow(RECENCY_TICK_MS);
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
-  const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set());
+  const [closedAtSession, setClosedAtSession] = useState<ReadonlyMap<string, string | null>>(
+    () => new Map(),
+  );
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set());
   const needle = query.trim().toLowerCase();
 
@@ -58,13 +60,15 @@ export function SidebarProjectList({
 
   const isExpanded = (projectId: string) => {
     if (needle) return true;
-    if (closed.has(projectId)) return false;
+    // Stay collapsed only for the session it was shut on. A later chat in
+    // that project (parent breadcrumb, URL, another row) opens the group.
+    if (closedAtSession.get(projectId) === activeSessionId) return false;
     return opened.has(projectId) || projectId === activeProjectId;
   };
 
   const toggle = (projectId: string) => {
     if (isExpanded(projectId)) {
-      setClosed((current) => new Set(current).add(projectId));
+      setClosedAtSession((current) => new Map(current).set(projectId, activeSessionId));
       setOpened((current) => {
         const next = new Set(current);
         next.delete(projectId);
@@ -73,8 +77,8 @@ export function SidebarProjectList({
       return;
     }
     setOpened((current) => new Set(current).add(projectId));
-    setClosed((current) => {
-      const next = new Set(current);
+    setClosedAtSession((current) => {
+      const next = new Map(current);
       next.delete(projectId);
       return next;
     });

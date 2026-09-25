@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -40,6 +40,7 @@ import {
 import { clearAttention } from "@/app/store/attentionStore";
 import {
   bindSidePanelProject,
+  unbindSidePanelProject,
   resetSessionSelection,
   setSidePanelAnimate,
   revealSidePanel,
@@ -166,10 +167,11 @@ export default function SessionPage() {
   }, [id]);
 
   const projectKey = entry ? (entry.summary.project_id ?? "") : null;
-  useEffect(() => {
+  useLayoutEffect(() => {
+    unbindSidePanelProject();
     if (projectKey == null) return;
     bindSidePanelProject(projectKey);
-  }, [projectKey]);
+  }, [id, projectKey]);
 
   // Restored after paint, so the launch open has already landed at full width
   // and putting the tween back does not replay it.
@@ -240,8 +242,9 @@ export default function SessionPage() {
         >
           <div className="flex flex-col flex-1 min-h-0 w-full relative">
             {isMobile && (entry?.lineage ?? snapshot?.lineage) ? (
-              <div className="mt-16 flex shrink-0 items-center px-3">
+              <div className="pointer-events-none absolute inset-x-0 top-16 z-20 flex items-center px-3 pt-2">
                 <Button
+                  className="pointer-events-auto relative"
                   size={ButtonSize.Small}
                   variant={ButtonVariant.Ghost}
                   onClick={() => {
