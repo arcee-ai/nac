@@ -143,12 +143,18 @@ export function TopSingleSessionHeader({
   const branch = workspace?.branch ?? null;
   const lineage = entry?.lineage ?? snapshot?.lineage ?? null;
   const readOnly = lineage != null;
+  const relationship =
+    lineage?.kind === "traditional-child"
+      ? "Traditional coding agent"
+      : lineage?.kind === "managed-orchestrator"
+        ? "Managed NAC orchestrator"
+        : null;
   const parent = lineage
     ? sessions.find((item) => item.summary.session_id === lineage.parent_session_id)
     : undefined;
   const parentTitle = parent ? sessionTitle(parent.summary) : "Parent session";
   const openParent = () => {
-    if (lineage) navigate(routes.session(lineage.parent_session_id));
+    if (lineage) navigate(routes.session(lineage.parent_session_id, "delegated"));
   };
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
   const title = sessionTitle(entry?.summary);
@@ -165,7 +171,7 @@ export function TopSingleSessionHeader({
                   variant={ButtonVariant.Ghost}
                   content={ButtonContent.Icon}
                   className="!h-6 !w-6 !min-h-0 !p-0"
-                  aria-label={`Back to ${parentTitle}`}
+                  aria-label="Parent chat"
                   onClick={openParent}
                 >
                   <Icon iconName={IconName.Left} />
@@ -189,7 +195,11 @@ export function TopSingleSessionHeader({
             >
               {title}
             </p>
-            {behavior ? (
+            {relationship ? (
+              <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-1 py-[2px] text-basic-tertiary">
+                {relationship}
+              </span>
+            ) : behavior ? (
               <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-1 py-[2px] text-basic-tertiary">
                 {BEHAVIOR_BADGE[behavior]}
               </span>
@@ -257,6 +267,11 @@ export function TopSingleSessionHeader({
         </div>
         <div className="flex w-full items-center gap-2">
           <div className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden">
+            {lineage?.description ? (
+              <span className="label-micro min-w-0 truncate text-basic-secondary">
+                {lineage.description}
+              </span>
+            ) : null}
             {repo ? (
               <div className="flex shrink-0 items-center gap-0.5">
                 <span className="label-micro max-w-[120px] truncate text-basic-tertiary">

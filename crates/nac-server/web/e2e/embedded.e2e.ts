@@ -1606,7 +1606,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await childRow.getByRole("button", { name: "Open" }).click();
   await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
   await expect(page.getByText("Inspect the child lifecycle", { exact: true })).toBeVisible();
-  await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /goal/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
@@ -1646,7 +1646,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await orchestratorRow.getByRole("button", { name: "Open" }).click();
   await expect(page.getByText("Managed NAC orchestrator", { exact: true })).toBeVisible();
   await expect(page.getByText("Coordinate the compatibility audit", { exact: true })).toBeVisible();
-  await expect(page.getByText(/delegated transcript is read-only/i)).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Worksets" })).toBeVisible();
