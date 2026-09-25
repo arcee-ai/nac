@@ -145,6 +145,7 @@ if ! [[ "$SOURCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
   echo "SOURCE_SHA must be a full commit SHA" >&2
   exit 2
 fi
+SOURCE_SHA="$(printf '%s' "$SOURCE_SHA" | tr 'A-F' 'a-f')"
 
 case "${1:-}" in
   stage) stage ;;

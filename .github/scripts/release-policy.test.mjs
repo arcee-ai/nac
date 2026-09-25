@@ -275,7 +275,7 @@ esac
     GH_TOKEN: "test-token",
     GITHUB_REPOSITORY: "test/repo",
     GITHUB_REPOSITORY_OWNER: "test",
-    SOURCE_SHA: selected,
+    SOURCE_SHA: selected.toUpperCase(),
     SOURCE_REF: sourceRef,
     PR_BASE: prBase,
   };
