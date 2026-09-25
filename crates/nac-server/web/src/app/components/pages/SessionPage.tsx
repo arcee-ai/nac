@@ -40,6 +40,7 @@ import {
 import { clearAttention } from "@/app/store/attentionStore";
 import {
   bindSidePanelProject,
+  unbindSidePanelProject,
   resetSessionSelection,
   setSidePanelAnimate,
   revealSidePanel,
@@ -167,9 +168,10 @@ export default function SessionPage() {
 
   const projectKey = entry ? (entry.summary.project_id ?? "") : null;
   useLayoutEffect(() => {
+    unbindSidePanelProject();
     if (projectKey == null) return;
     bindSidePanelProject(projectKey);
-  }, [projectKey]);
+  }, [id, projectKey]);
 
   // Restored after paint, so the launch open has already landed at full width
   // and putting the tween back does not replay it.

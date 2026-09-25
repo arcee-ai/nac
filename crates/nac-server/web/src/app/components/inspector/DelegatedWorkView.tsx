@@ -125,6 +125,11 @@ export function DelegatedWorkView({
   const launchRequest = useSubagentLaunchRequest();
   const now = useNow(60_000);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [seenSession, setSeenSession] = useState(sessionId);
+  if (seenSession !== sessionId) {
+    setSeenSession(sessionId);
+    setSelectedKey(null);
+  }
 
   const rows = useMemo(() => {
     const childRows = (children.data ?? []).map(rowFromChild);

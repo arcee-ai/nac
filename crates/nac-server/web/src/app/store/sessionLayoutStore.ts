@@ -141,6 +141,20 @@ export function bindSidePanelProject(projectId: string): void {
 }
 
 /**
+ * Drop the project binding without writing storage. The next session's first
+ * bind can then honor a Show-panel click that happened while the summary was
+ * still loading, instead of recording that click on the previous project.
+ */
+export function unbindSidePanelProject(): void {
+  if (getState().sidePanelProjectId == null && getState().collapsed) return;
+  setState({
+    sidePanelProjectId: null,
+    collapsed: true,
+    sidePanelAnimate: false,
+  });
+}
+
+/**
  * Show the side box as a dialog over the session, or put it back in the row.
  * It always comes up on the row it has open rather than on a list of rows.
  */
