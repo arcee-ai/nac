@@ -1530,6 +1530,8 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await expect(page.getByRole("button", { name: "Resend" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
+  // Continuation is rejected while the parent is still settling a completion.
+  await waitForRunIdle(request, harness, parentId);
 
   await composer.getByRole("textbox", { name: "Send a message" }).fill("E2E_GENERATION_TWO");
   await composer.getByRole("button", { name: "Send" }).click();
