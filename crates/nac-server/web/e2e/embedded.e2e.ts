@@ -1512,7 +1512,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
     has: page.getByRole("textbox", { name: /Steer a message|Send a message/ }),
   });
   await subagent("Background success").click();
-  await expect(composer.getByText("Running in the background")).toBeVisible();
+  await expect(composer.locator("span", { hasText: "Running in the background" })).toBeVisible();
   await expect(composer.getByRole("textbox", { name: "Steer a message" })).toBeVisible();
   await subagent("Background cancellation").click();
   await composer.getByRole("button", { name: "Stop" }).click();
@@ -1534,7 +1534,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await composer.getByRole("textbox", { name: "Send a message" }).fill("E2E_GENERATION_TWO");
   await composer.getByRole("button", { name: "Send" }).click();
   await continued.accepted;
-  await expect(composer.getByText("Running in the background")).toBeVisible();
+  await expect(composer.locator("span", { hasText: "Running in the background" })).toBeVisible();
   await expect
     .poll(async () => {
       const response = await request.get(`${harness.baseUrl}/sessions/${parentId}/children`);
@@ -1693,7 +1693,9 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   const orchestratorComposer = page.locator("form").filter({
     has: page.getByRole("textbox", { name: "Steer a message" }),
   });
-  await expect(orchestratorComposer.getByText("Running in the background")).toBeVisible();
+  await expect(
+    orchestratorComposer.locator("span", { hasText: "Running in the background" }),
+  ).toBeVisible();
   await expect(orchestratorComposer.getByRole("button", { name: "Stop" })).toBeVisible();
   orchestratorCompletion.release();
   await expect(page.getByText("Completed", { exact: true })).toBeVisible();
