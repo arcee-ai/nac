@@ -15,7 +15,7 @@ interface SessionLayoutState {
   sidePanelAnimate: boolean;
   /**
    * Project the collapsed preference belongs to. Null until the open session's
-   * project is known. Switching projects resets the panel to collapsed.
+   * project is known. Switching projects restores that project's stored rail.
    */
   sidePanelProjectId: string | null;
   /** Side box lifted out of the row into a full-screen dialog. */
@@ -121,19 +121,23 @@ function applyCollapsed(collapsed: boolean): void {
 }
 
 /**
- * Bind the collapse preference to the session's project. The first project
- * restores its saved value (collapsed when nothing is stored). A later project
- * starts collapsed, and that reset is what the next visit of the project reads.
+ * Bind the collapse preference to the session's project. Each project keeps
+ * its own stored rail state. A missing value starts collapsed, except when the
+ * user already opened the panel before the project id was known — that click
+ * must not be overwritten by the default.
  */
 export function bindSidePanelProject(projectId: string): void {
   const current = getState().sidePanelProjectId;
   if (current === projectId) return;
-  if (current == null) {
-    setState({ sidePanelProjectId: projectId, collapsed: readCollapsed(projectId) });
-    return;
-  }
-  writeCollapsed(projectId, true);
-  setState({ sidePanelProjectId: projectId, collapsed: true });
+  const openedBeforeBind = current == null && !getState().collapsed;
+  const collapsed = openedBeforeBind ? false : readCollapsed(projectId);
+  const changed = getState().collapsed !== collapsed;
+  setState({
+    sidePanelProjectId: projectId,
+    collapsed,
+    sidePanelAnimate: changed ? false : getState().sidePanelAnimate,
+  });
+  if (openedBeforeBind) writeCollapsed(projectId, false);
 }
 
 /**

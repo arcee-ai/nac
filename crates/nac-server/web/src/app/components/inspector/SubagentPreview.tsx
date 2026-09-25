@@ -101,6 +101,12 @@ export function SubagentPreview({
     loadingOlder.current = true;
     let cancelled = false;
     void loadOlder()
+      .then((accepted) => {
+        // `false` is a settled no-op (generation moved or the page could not
+        // merge), not a throw. Treat it as a failure so the shimmer cannot
+        // wait forever on `has_older`.
+        if (!cancelled && !accepted) setOlderFailed(true);
+      })
       .catch(() => {
         if (!cancelled) setOlderFailed(true);
       })
