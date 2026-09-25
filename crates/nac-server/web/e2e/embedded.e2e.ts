@@ -1488,7 +1488,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
   harness.provider.enqueue(
     "observe-generation-2",
     { token: "second generation completed", afterStep: "background-generation-2" },
-    { kind: "text", text: "generation 2 acknowledged" },
+    { kind: "text", text: "generation 2 acknowledged", stream: true },
   );
 
   const parentId = await createSession(request, harness, "direct");
@@ -1530,11 +1530,25 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await expect(page.getByRole("button", { name: "Resend" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
-  // Continuation is rejected while the parent is still settling a completion.
-  await waitForRunIdle(request, harness, parentId);
-
-  await composer.getByRole("textbox", { name: "Send a message" }).fill("E2E_GENERATION_TWO");
-  await composer.getByRole("button", { name: "Send" }).click();
+  // The open parent is still answering the completion, and that run rejects
+  // another child generation until it finishes. Retry past the conflict.
+  await expect
+    .poll(
+      async () => {
+        const response = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
+          data: {
+            profile: "general",
+            description: "Background success",
+            prompt: "E2E_GENERATION_TWO",
+            background: true,
+            child_session_id: successChild.child_session_id,
+          },
+        });
+        return response.ok();
+      },
+      { timeout: 15_000, intervals: [100, 200, 400] },
+    )
+    .toBe(true);
   await continued.accepted;
   await expect(composer.locator("span", { hasText: "Running in the background" })).toBeVisible();
   await expect
