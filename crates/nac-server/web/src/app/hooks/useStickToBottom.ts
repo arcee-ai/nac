@@ -312,14 +312,25 @@ export function useStickToBottom({ resetKey = null }: StickToBottomOptions = {})
       });
     };
 
+    let portWidth = 0;
     const growth = new ResizeObserver(() => {
       // Observer callbacks still run inside the frame that laid the content out,
       // so pinning here beats the paint. Deferring the first one would show the
       // reader a frame at the top of a transcript they never scrolled to.
+      const width = element.clientWidth;
+      const widthChanged = portWidth !== 0 && width !== portWidth;
+      portWidth = width;
       const contentH = content.offsetHeight;
       const deltaH = contentH - prevContentHeight.current;
       const shrunk = prevContentHeight.current > 0 && deltaH < 0;
       prevContentHeight.current = contentH;
+      // A side panel opening or closing reflows wrapped lines. That height
+      // change is a correction, not new text: gliding through it reads as the
+      // conversation arriving again.
+      if (widthChanged) {
+        if (stuck.current) snap();
+        return;
+      }
       if (!hasPinned.current) {
         follow();
         return;

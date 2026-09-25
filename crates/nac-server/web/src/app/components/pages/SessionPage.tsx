@@ -13,6 +13,7 @@ import {
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
+import { RightSidebarRail } from "@/app/components/inspector/RightSidebarRail";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { TopSingleSessionHeader } from "@/app/components/inspector/TopSingleSessionHeader";
 import { Transcript } from "@/app/components/inspector/Transcript";
@@ -38,8 +39,10 @@ import {
 } from "@/app/services/queries";
 import { clearAttention } from "@/app/store/attentionStore";
 import {
+  bindSidePanelProject,
   resetSessionSelection,
   revealSidePanel,
+  setSidePanelAnimate,
   showSidePanelList,
   toggleSidePanelCollapsed,
   toggleSidePanelExpanded,
@@ -49,6 +52,7 @@ import {
   useSelectedThread,
   useSelectedThreadRunning,
   useSelectedWorkset,
+  useSidePanelAnimate,
   useSidePanelCollapsed,
   useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
@@ -116,6 +120,7 @@ export default function SessionPage() {
   const { data: entry = null } = useSessionSummary(id);
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
+  const animateSidePanel = useSidePanelAnimate();
   const expanded = useSidePanelExpanded();
   const selectedThread = useSelectedThread();
   const selectedThreadRunning = useSelectedThreadRunning();
@@ -149,6 +154,20 @@ export default function SessionPage() {
     if (id) clearAttention(id);
     resetSessionSelection();
   }, [id]);
+
+  const projectKey = entry ? (entry.summary.project_id ?? "") : null;
+  useEffect(() => {
+    if (projectKey == null) return;
+    bindSidePanelProject(projectKey);
+  }, [projectKey]);
+
+  // Restored after paint, so a launch that skipped the tween has already
+  // landed at full width before the animation comes back.
+  useEffect(() => {
+    if (animateSidePanel) return undefined;
+    const frame = requestAnimationFrame(() => setSidePanelAnimate(true));
+    return () => cancelAnimationFrame(frame);
+  }, [animateSidePanel]);
 
   if (!id) return <Navigate to={routes.list()} replace />;
   if (!isSessionPanel(panel)) {
@@ -214,12 +233,7 @@ export default function SessionPage() {
         >
           <div className="flex flex-col flex-1 min-h-0 w-full relative">
             {isMobile ? null : (
-              <TopSingleSessionHeader
-                sessionId={id}
-                snapshot={snapshot}
-                entry={entry}
-                onShowPanel={collapsed ? toggleSidePanelCollapsed : undefined}
-              />
+              <TopSingleSessionHeader sessionId={id} snapshot={snapshot} entry={entry} />
             )}
             <Transcript
               sessionId={id}
@@ -234,7 +248,7 @@ export default function SessionPage() {
                 "absolute bottom-0 left-0 right-0",
                 // The phone composer paints its own ground fade and owns its
                 // padding, so it has to reach past the column's inset.
-                isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[840px]",
+                isMobile ? "-mx-2" : "pb-2 mx-auto max-w-[720px]",
               )}
             >
               <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
@@ -244,13 +258,31 @@ export default function SessionPage() {
 
         {isMobile ? null : (
           <>
-            {/* Yields the box's share of the row to the chat as the box slides away. */}
+            {/*
+              Same motion as the left sidebar: the column width is what the chat
+              lays out against, and the panel slides over the rail that stays.
+            */}
             <div
               className={cn(
-                "h-full shrink-0 transition-[width] duration-150 ease-out",
-                collapsed ? "w-0" : "w-1/2",
+                "relative h-full shrink-0",
+                animateSidePanel && "transition-[width] duration-500 ease-in-out",
+                collapsed ? "w-[52px]" : "w-1/2",
               )}
-            />
+              style={animateSidePanel ? undefined : { transition: "none" }}
+            >
+              {collapsed ? (
+                <div className="absolute inset-y-0 right-0 w-[52px]">
+                  <RightSidebarRail
+                    sessionId={id}
+                    snapshot={snapshot}
+                    behavior={behavior}
+                    panels={panelPolicy.widePanels}
+                    onOpen={toggleSidePanelCollapsed}
+                    onSelect={focusPanel}
+                  />
+                </div>
+              ) : null}
+            </div>
             {/*
             Pinned to the right edge rather than laid out in the row: a box
             that kept its width while the row shrank would reflow its whole tree
@@ -259,10 +291,11 @@ export default function SessionPage() {
           */}
             <div
               className={cn(
-                "absolute inset-y-0 right-0 flex flex-col min-w-0 w-1/2",
-                "transition-transform duration-150 ease-out",
+                "absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0 w-1/2",
+                animateSidePanel && "transition-transform duration-500 ease-in-out",
                 collapsed && "translate-x-full",
               )}
+              style={animateSidePanel ? undefined : { transition: "none" }}
               aria-hidden={collapsed}
               inert={collapsed}
             >
