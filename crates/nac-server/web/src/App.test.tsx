@@ -22,6 +22,7 @@ vi.mock("@/app/providers/ToastProvider", () => ({
 vi.mock("@/app/components/pages/DesignPreviewPage", () => ({ default: () => null }));
 vi.mock("@/app/components/pages/ProjectRedirectPage", () => ({ default: () => null }));
 vi.mock("@/app/components/pages/ProjectsListPage", () => ({ default: () => null }));
+vi.mock("@/app/components/LeftSidebar", () => ({ LeftSidebar: () => null }));
 vi.mock("@/app/components/pages/SessionPage", () => ({
   default: function SessionPageMock() {
     const { sessionId } = useParams<{ sessionId: string }>();

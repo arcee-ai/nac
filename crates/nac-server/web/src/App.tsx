@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import { AppShell } from "@/app/components/AppShell";
+import { LeftSidebar } from "@/app/components/LeftSidebar";
 import DesignPreviewPage from "@/app/components/pages/DesignPreviewPage";
 import ProjectRedirectPage from "@/app/components/pages/ProjectRedirectPage";
 import ProjectsListPage from "@/app/components/pages/ProjectsListPage";
@@ -13,7 +14,15 @@ import { ToastProvider } from "@/app/providers/ToastProvider";
 
 export function KeyedSessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  return <SessionPage key={sessionId} />;
+  return (
+    <section className="relative flex h-full min-h-0 overflow-hidden bg-elevation-ground">
+      {/* The session page remounts per id so its draft and panel state reset.
+          The sidebar stays put, or its open project groups replay their height
+          animation on every session click. */}
+      <LeftSidebar />
+      <SessionPage key={sessionId} />
+    </section>
+  );
 }
 
 export default function App() {

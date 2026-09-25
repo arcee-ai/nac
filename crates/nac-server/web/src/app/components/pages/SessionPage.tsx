@@ -16,7 +16,6 @@ import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { RightSidebarRail } from "@/app/components/inspector/RightSidebarRail";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
-import { LeftSidebar } from "@/app/components/LeftSidebar";
 import { TopSingleSessionHeader } from "@/app/components/inspector/TopSingleSessionHeader";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
@@ -231,11 +230,7 @@ export default function SessionPage() {
   );
 
   return (
-    <section className="relative flex h-full min-h-0 overflow-hidden bg-elevation-ground">
-      {/* A phone has no room for the rail: the chat takes the screen and the
-          box comes up as the dialog below instead. */}
-      {isMobile ? null : <LeftSidebar />}
-
+    <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground">
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
         <div
           className={cn(
