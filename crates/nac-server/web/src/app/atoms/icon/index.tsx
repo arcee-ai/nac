@@ -115,8 +115,8 @@ export enum IconName {
   Google = "google",
   Timelaps = "timelaps",
   Token = "token",
-  CloseSidebar = "closeSidebar",
-  OpenSidebar = "openSidebar",
+  SidebarChevronLeft = "sidebarChevronLeft",
+  SidebarChevronRight = "sidebarChevronRight",
   Money = "money",
   AddCreditCard = "addCreditCard",
   External = "external",
@@ -145,6 +145,7 @@ export enum IconName {
   OpenMobileModal = "openMobileModal",
   ChatGpt = "chatGpt",
   Orchestrator = "orchestrator",
+  Robot = "robot",
 }
 
 interface IconProps extends Omit<React.SVGProps<SVGSVGElement>, "color"> {

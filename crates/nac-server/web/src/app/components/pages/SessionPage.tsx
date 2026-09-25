@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -9,22 +9,17 @@ import {
   Icon,
   IconName,
   Modal,
-  Tooltip,
-  TooltipPosition,
 } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
-import { SessionIdentity } from "@/app/components/inspector/SessionIdentity";
+import { TopSingleSessionHeader } from "@/app/components/inspector/TopSingleSessionHeader";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { LeftSidebar } from "@/app/components/LeftSidebar";
-import { ProjectSessionTabs } from "@/app/components/projects/ProjectSessionTabs";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
-import { parseStoreTime } from "@/app/lib/format";
-import { primarySessions } from "@/app/lib/projects";
 import { perfRender } from "@/app/lib/perfDebug";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -36,7 +31,6 @@ import {
   type SessionPanel,
 } from "@/app/lib/routes";
 import {
-  useSessions,
   useSessionSnapshot,
   useSessionSummary,
   useSshConnect,
@@ -115,14 +109,11 @@ export default function SessionPage() {
   }>();
   const navigate = useNavigate();
   const id = sessionId ?? null;
-  const [heldProjectId, setHeldProjectId] = useState<string | null>(null);
 
   perfRender("SessionPage");
 
   const { data: snapshot = null, error, refetch: refetchSnapshot } = useSessionSnapshot(id);
   const { data: entry = null } = useSessionSummary(id);
-  const { data: sessionList } = useSessions();
-  const allSessions = sessionList ?? [];
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
   const expanded = useSidePanelExpanded();
@@ -158,13 +149,6 @@ export default function SessionPage() {
     if (id) clearAttention(id);
     resetSessionSelection();
   }, [id]);
-
-  if (entry) {
-    const nextProjectId = entry.summary.project_id ?? null;
-    if (heldProjectId !== nextProjectId) {
-      setHeldProjectId(nextProjectId);
-    }
-  }
 
   if (!id) return <Navigate to={routes.list()} replace />;
   if (!isSessionPanel(panel)) {
@@ -215,16 +199,6 @@ export default function SessionPage() {
     />
   );
 
-  // If the open id has just left the list, keep the project's tabs until the
-  // router lands on a sibling. Hash history applies that navigation on a later
-  // tick than the cache update.
-  const projectId = (entry ? entry.summary.project_id : heldProjectId) ?? null;
-  const projectSessions = projectId
-    ? primarySessions(allSessions)
-        .filter((session) => session.summary.project_id === projectId)
-        .sort((a, b) => parseStoreTime(b.summary.updated_at) - parseStoreTime(a.summary.updated_at))
-    : [];
-
   return (
     <section className="relative flex h-full min-h-0 overflow-hidden bg-elevation-ground">
       {/* A phone has no room for the rail: the chat takes the screen and the
@@ -238,40 +212,29 @@ export default function SessionPage() {
             isMobile ? "px-0" : "px-2",
           )}
         >
-          {/* The phone reaches the same chats through the header's sheet; there
-            is no width here for a strip of tabs. */}
-          {isMobile ? null : (
-            <div className="w-full shrink-0 pt-3">
-              <ProjectSessionTabs
-                projectId={projectId}
-                sessions={projectSessions}
-                activeSessionId={id}
-                summary={entry?.summary ?? null}
-                trailing={
-                  collapsed ? (
-                    <Tooltip title="Show panel" position={TooltipPosition.BottomLeft}>
-                      <Button
-                        size={ButtonSize.Medium}
-                        variant={ButtonVariant.Ghost}
-                        content={ButtonContent.Icon}
-                        aria-label="Show panel"
-                        onClick={toggleSidePanelCollapsed}
-                      >
-                        <Icon iconName={IconName.CloseSidebar} />
-                      </Button>
-                    </Tooltip>
-                  ) : null
-                }
-              />
-            </div>
-          )}
-
-          <SessionIdentity
-            behavior={entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null}
-            lineage={snapshot?.lineage ?? null}
-          />
-
           <div className="flex flex-col flex-1 min-h-0 w-full relative">
+            {isMobile && (entry?.lineage ?? snapshot?.lineage) ? (
+              <div className="mt-16 flex shrink-0 items-center px-3">
+                <Button
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Ghost}
+                  onClick={() => {
+                    const parentId = (entry?.lineage ?? snapshot?.lineage)?.parent_session_id;
+                    if (parentId) navigate(routes.session(parentId, "delegated"));
+                  }}
+                >
+                  Parent chat
+                </Button>
+              </div>
+            ) : null}
+            {isMobile ? null : (
+              <TopSingleSessionHeader
+                sessionId={id}
+                snapshot={snapshot}
+                entry={entry}
+                onShowPanel={collapsed ? toggleSidePanelCollapsed : undefined}
+              />
+            )}
             <Transcript
               sessionId={id}
               snapshot={snapshot}

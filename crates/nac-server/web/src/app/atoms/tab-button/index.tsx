@@ -1,5 +1,9 @@
 import type React from "react";
 
+import { AnchorPlacement } from "../../lib/anchor";
+import HoverHint from "../hover-hint";
+import type { HoverHintConfig } from "../label";
+
 export enum TabButtonSize {
   Large = "btn-large",
   Medium = "btn-medium",
@@ -17,6 +21,10 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: TabButtonVariant;
   children: React.ReactNode;
   active?: boolean;
+  /** Info glyph at the end of the row, after any shortcut. Its hover text explains the row. */
+  hoverHint?: HoverHintConfig;
+  /** Sits before the hover hint, for a shortcut or other trailing affordance. */
+  trailing?: React.ReactNode;
 }
 
 const TabButton: React.FC<ButtonProps> & {
@@ -29,6 +37,8 @@ const TabButton: React.FC<ButtonProps> & {
   disabled,
   className = "",
   children,
+  hoverHint,
+  trailing,
   ...props
 }) => {
   const computedVariant =
@@ -54,6 +64,22 @@ const TabButton: React.FC<ButtonProps> & {
   return (
     <button onClick={() => {}} className={classes} disabled={disabled} {...props}>
       {children}
+      {trailing}
+      {hoverHint ? (
+        <span
+          className="inline-flex shrink-0"
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <HoverHint
+            title={hoverHint.title}
+            description={hoverHint.description}
+            muted={hoverHint.muted}
+            position={AnchorPlacement.CenterRight}
+          />
+        </span>
+      ) : null}
     </button>
   );
 };

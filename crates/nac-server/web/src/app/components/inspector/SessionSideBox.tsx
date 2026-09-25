@@ -257,7 +257,7 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
                 aria-label="Hide panel"
                 onClick={toggleSidePanelCollapsed}
               >
-                <Icon iconName={IconName.OpenSidebar} />
+                <Icon iconName={IconName.SidebarChevronRight} />
               </Button>
             </Tooltip>
           </div>

@@ -2,6 +2,7 @@ import type React from "react";
 
 import { cn } from "../../lib/cn";
 import ChatSessionLeadingMark from "../chat-session-fork-mark";
+import Icon, { IconName } from "../icon";
 
 interface ChatSessionButtonProps extends Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
@@ -9,8 +10,10 @@ interface ChatSessionButtonProps extends Omit<
 > {
   title: string;
   active?: boolean;
-  /** Swaps the label for a shimmering one and shows a spinner. */
+  /** Shimmers the title while the session is running. The mode icon stays. */
   running?: boolean;
+  /** Session mode glyph. A direct agent is a plane. */
+  icon?: IconName;
   /** Display title of the chat this session was forked from. */
   forkedFromTitle?: string | null;
   /** Compact identity shown after the title, such as the session behavior. */
@@ -28,18 +31,18 @@ interface ChatSessionButtonProps extends Omit<
 /**
  * One session as a list row, used by the chat popover and the mobile modal.
  *
- * The row is the title, with a fork glyph in front when this chat was cloned
- * from another. A running session replaces that glyph with the same loader the
- * unforked rows use.
+ * The row leads with the session-mode icon. A fork keeps the scheme glyph
+ * after the title, including while the chat is running.
  *
- * The actions live outside the button so they stay clickable, and they hold
- * their space at all times so a hover does not re-truncate the title beside
- * them.
+ * The actions live outside the button so they stay clickable. On desktop they
+ * leave the layout until the row is hovered or focused from the keyboard, so
+ * the title keeps the full row until then.
  */
 const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   title,
   active = false,
   running = false,
+  icon = IconName.Plane,
   forkedFromTitle,
   badge,
   badgeLabel,
@@ -51,11 +54,10 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   "aria-label": ariaLabel,
   ...props
 }) => {
-  const labelClass = running
-    ? "text-shimmer-basic"
-    : active
-      ? "text-btn-secondary-pressed"
-      : "text-btn-secondary group-hover:text-btn-secondary-hovered";
+  const toneClass = active
+    ? "text-btn-secondary-pressed"
+    : "text-btn-secondary group-hover:text-btn-secondary-hovered";
+  const labelClass = running ? "text-shimmer-basic" : toneClass;
 
   return (
     <div
@@ -80,10 +82,12 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         )}
         {...props}
       >
-        <ChatSessionLeadingMark
-          forkedFromTitle={forkedFromTitle}
-          running={running}
-          className={running ? undefined : labelClass}
+        <Icon
+          iconName={icon}
+          size={20}
+          aria-hidden
+          data-session-behavior-icon={icon}
+          className={cn("shrink-0", toneClass)}
         />
         <span
           className={cn(
@@ -94,6 +98,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         >
           {title}
         </span>
+        <ChatSessionLeadingMark forkedFromTitle={forkedFromTitle} className={toneClass} />
         {badge ? (
           <span
             title={badgeLabel}
@@ -115,9 +120,7 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         <div
           className={cn(
             "flex items-center gap-1 shrink-0",
-            isMobile
-              ? null
-              : "invisible opacity-0 transition-opacity duration-150 ease-out group-hover:visible group-hover:opacity-100 group-has-[:focus-visible]:visible group-has-[:focus-visible]:opacity-100",
+            isMobile ? null : "hidden group-hover:flex group-has-[:focus-visible]:flex",
           )}
         >
           {actions}

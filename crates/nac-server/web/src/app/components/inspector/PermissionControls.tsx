@@ -155,18 +155,25 @@ export function PermissionControls({
     : grants.length
       ? ` (${grants.length})`
       : "";
+  const modeName = autoApprove ? "Accept all" : "Manually";
+  const modeDescription = inheritedAutoApproval
+    ? "Requests are approved automatically because the parent session accepts all. Change the mode on the parent."
+    : autoApprove
+      ? "Requests are approved automatically for this session and the agents it owns."
+      : "Each request pauses until you approve or deny it.";
 
   return (
     <>
-      <Tooltip title={label} position={TooltipPosition.TopCenter}>
+      <Tooltip
+        title={`Permission: ${modeName}`}
+        description={modeDescription}
+        position={TooltipPosition.TopCenter}
+      >
         <Button
           size={ButtonSize.Small}
-          variant={
-            autoApprove || requests.length
-              ? ButtonVariant.GhostHighlightedAccent
-              : ButtonVariant.Ghost
-          }
-          content={autoApprove ? ButtonContent.IconLeft : ButtonContent.Icon}
+          variant={requests.length ? ButtonVariant.GhostHighlightedAccent : ButtonVariant.Ghost}
+          content={ButtonContent.IconLeft}
+          className="pr-3"
           aria-label={
             autoApprove
               ? inheritedAutoApproval
@@ -176,8 +183,8 @@ export function PermissionControls({
           }
           onClick={() => setManuallyOpen(true)}
         >
-          <Icon iconName={requests.length ? IconName.Important : IconName.Lock} size={16} />
-          {autoApprove ? "Auto-approve on" : null}
+          <Icon iconName={IconName.Private} size={16} />
+          <span className="label-micro">{autoApprove ? "Accept all" : "Manually"}</span>
         </Button>
       </Tooltip>
 

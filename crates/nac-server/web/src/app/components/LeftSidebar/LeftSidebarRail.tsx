@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Button, ButtonContent, ButtonVariant, Icon, IconName, Logo, Tooltip } from "@/app/atoms";
 import { TooltipPosition } from "@/app/atoms/tooltip";
 
+import { NewSessionPopover } from "./NewSessionPopover";
 import type { SidebarCommands } from "./useSidebarCommands.tsx";
 
 /** Icon column left behind once the panel has slid away. */
@@ -10,16 +11,17 @@ export function LeftSidebarRail({
   commands,
   onToggle,
   toggleKeys,
+  variant,
 }: {
   commands: SidebarCommands;
   onToggle: () => void;
   toggleKeys: string[];
+  /** All Projects drops the projects shortcut and the new-session menu. */
+  variant: "session" | "projects";
 }) {
+  const projectsPage = variant === "projects";
   return (
-    <div
-      className="flex h-full flex-col justify-between bg-elevation-level-2 p-2"
-      style={{ boxShadow: "var(--left-sidebar-closed)" }}
-    >
+    <div className="flex h-full flex-col justify-between p-2">
       <div className="flex flex-col items-center gap-4 [&>*]:shrink-0">
         <button
           type="button"
@@ -30,14 +32,26 @@ export function LeftSidebarRail({
           <Logo markOnly height={25} />
         </button>
         <RailButton label="Show sidebar" keys={toggleKeys} onClick={onToggle}>
-          <Icon iconName={IconName.OpenSidebar} />
+          <Icon iconName={IconName.SidebarChevronRight} />
         </RailButton>
-        <RailButton label="All projects" onClick={commands.openProjects}>
-          <Icon iconName={IconName.Folders} />
-        </RailButton>
-        <RailButton label="New session" onClick={commands.newSession}>
-          <Icon iconName={IconName.Add} />
-        </RailButton>
+        {projectsPage ? null : (
+          <RailButton label="All projects" onClick={commands.openProjects}>
+            <Icon iconName={IconName.Folders} />
+          </RailButton>
+        )}
+        {projectsPage ? (
+          <RailButton label={commands.createLabel} onClick={commands.newProject}>
+            <Icon iconName={IconName.Add} />
+          </RailButton>
+        ) : (
+          <NewSessionPopover projectId={commands.projectId} onUnavailable={commands.newSession}>
+            {(openMenu) => (
+              <RailButton label="New session" onClick={openMenu}>
+                <Icon iconName={IconName.Add} />
+              </RailButton>
+            )}
+          </NewSessionPopover>
+        )}
         <RailButton label={commands.mcpLabel} onClick={commands.openMcp}>
           <Icon iconName={IconName.Toolbox} />
         </RailButton>

@@ -51,8 +51,8 @@ function Row({
 
 /**
  * Every revision the session has captured, newest first, with the live working
- * tree at the top. The wide box reaches these through the footer chip; a phone
- * has no footer, so they get a panel of their own.
+ * tree at the top. A wide screen switches these from the session header; a
+ * phone has no header chip, so they get a panel of their own.
  */
 export function HistoryView({
   sessionId,

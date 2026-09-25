@@ -56,7 +56,7 @@ function Row({
 }
 
 /**
- * The snapshot chip in the box footer, switching the panels between the live
+ * The snapshot chip in the session header, switching the panels between the live
  * working tree and the checkout as it stood at the end of an earlier run.
  *
  * Nothing here writes: picking a revision only changes what is read, so it is
@@ -66,10 +66,13 @@ export function RevisionPicker({
   sessionId,
   selected,
   onSelect,
+  placement = PopoverPlacement.TopRight,
 }: {
   sessionId: string;
   selected: number | null;
   onSelect: (revision: number | null) => void;
+  /** Footer chips open upward. A header chip opens downward. */
+  placement?: PopoverPlacement;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -89,8 +92,7 @@ export function RevisionPicker({
     <Popover
       open={open}
       onClose={() => setOpen(false)}
-      // The chip sits in the footer, so the panel has to grow upwards.
-      placement={PopoverPlacement.TopRight}
+      placement={placement}
       className="min-w-0"
       content={
         <>

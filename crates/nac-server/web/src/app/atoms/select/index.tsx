@@ -4,12 +4,15 @@ import { cn } from "../../lib/cn";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
 import Popover, { PopoverSize } from "../popover";
+import type { HoverHintConfig } from "../label";
 import TabButton, { TabButtonSize, TabButtonVariant } from "../tab-button";
 
 export interface SelectItem {
   id: string;
   label: React.ReactNode;
   icon?: IconName;
+  /** Info glyph on the row. Its hover text explains that choice. */
+  hoverHint?: HoverHintConfig;
 }
 
 interface SelectProps {
@@ -31,6 +34,8 @@ interface SelectProps {
    */
   sticky?: boolean;
   className?: string;
+  /** Glyph after the label. Forms keep the disclosure chevron. */
+  trailingIcon?: IconName;
   /**
    * Applied to the trigger button. The wrapper stretching is not enough on its
    * own — the button hugs its label — so a select that has to fill a form
@@ -38,6 +43,8 @@ interface SelectProps {
    */
   triggerClassName?: string;
   panelClassName?: string;
+  /** Fired when the list opens or closes, so a surrounding tip can step aside. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 const tabSizeFor = {
@@ -59,22 +66,29 @@ const Select: React.FC<SelectProps> = ({
   disabled = false,
   sticky = false,
   className = "",
+  trailingIcon = IconName.Down,
   triggerClassName = "",
   panelClassName = "",
+  onOpenChange,
 }) => {
   const [open, setOpen] = useState(false);
   const selected = items.find((item) => item.id === value);
   const rowSize = itemSize ?? tabSizeFor[size];
 
+  const changeOpen = (next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  };
+
   const select = (id: string) => {
     onValueChange?.(id);
-    setOpen(false);
+    changeOpen(false);
   };
 
   return (
     <Popover
       open={open}
-      onClose={() => setOpen(false)}
+      onClose={() => changeOpen(false)}
       placement={placement}
       // A fixed panel measures `min-w-full` against the viewport rather than
       // against the trigger, so a portalled list hugs its content instead.
@@ -90,6 +104,7 @@ const Select: React.FC<SelectProps> = ({
               size={rowSize}
               variant={TabButtonVariant.Regular}
               active={item.id === value}
+              hoverHint={item.hoverHint}
               onClick={() => select(item.id)}
             >
               {item.icon ? <Icon iconName={item.icon} /> : null}
@@ -105,7 +120,7 @@ const Select: React.FC<SelectProps> = ({
         disabled={disabled}
         content={ButtonContent.IconRight}
         className={`${triggerClassName} overflow-hidden max-w-full`}
-        onClick={() => !disabled && setOpen(!open)}
+        onClick={() => !disabled && changeOpen(!open)}
         aria-expanded={open}
       >
         {selected?.icon ? <Icon iconName={selected.icon} /> : null}
@@ -113,10 +128,10 @@ const Select: React.FC<SelectProps> = ({
           {selected?.label ?? placeholder}
         </span>
         <Icon
-          iconName={IconName.Down}
+          iconName={trailingIcon}
           className={cn(
-            "transition-transform duration-150 ease-out",
-            open ? "rotate-180" : "rotate-0",
+            trailingIcon === IconName.Down && "transition-transform duration-150 ease-out",
+            trailingIcon === IconName.Down && (open ? "rotate-180" : "rotate-0"),
           )}
         />
       </Button>

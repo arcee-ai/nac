@@ -2,13 +2,14 @@
  * Placement of a floating box relative to its trigger, shared by the tooltip
  * and the popover. The first word is the side the box sits on, the second is
  * the direction it grows in: `BottomRight` hangs below the trigger with their
- * left edges aligned.
+ * left edges aligned. `RightTop` sits to the right with the top edges aligned.
  */
 export enum AnchorPlacement {
   TopLeft = "top-left",
   TopCenter = "top-center",
   TopRight = "top-right",
   CenterRight = "center-right",
+  RightTop = "right-top",
   BottomRight = "bottom-right",
   BottomCenter = "bottom-center",
   BottomLeft = "bottom-left",
@@ -28,10 +29,11 @@ export const anchorClasses = {
   [AnchorPlacement.BottomCenter]: "bottom-[-8px] left-1/2 translate-y-full -translate-x-1/2",
   [AnchorPlacement.BottomRight]: "bottom-[-8px] left-0 translate-y-full",
   [AnchorPlacement.CenterRight]: "top-1/2 left-[calc(100%+8px)] -translate-y-1/2",
+  [AnchorPlacement.RightTop]: "top-0 left-[calc(100%+8px)]",
 } satisfies Record<AnchorPlacement, string>;
 
 type HorizontalAnchor = "start" | "center" | "end" | "before" | "after";
-type VerticalAnchor = "above" | "below" | "middle";
+type VerticalAnchor = "above" | "below" | "middle" | "start";
 
 // The same placements expressed as anchors, for boxes that compute viewport
 // coordinates instead of relying on an offset parent.
@@ -44,6 +46,7 @@ const anchors = {
   [AnchorPlacement.BottomLeft]: { x: "end", y: "below" },
   [AnchorPlacement.CenterLeft]: { x: "before", y: "middle" },
   [AnchorPlacement.CenterRight]: { x: "after", y: "middle" },
+  [AnchorPlacement.RightTop]: { x: "after", y: "start" },
 } satisfies Record<AnchorPlacement, { x: HorizontalAnchor; y: VerticalAnchor }>;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
@@ -138,6 +141,7 @@ export function anchorCoords(
     above: trigger.top - ANCHOR_GAP - box.height,
     below: trigger.bottom + ANCHOR_GAP,
     middle: trigger.top + (trigger.height - box.height) / 2,
+    start: trigger.top,
   }[anchor.y];
   return {
     left: fit(

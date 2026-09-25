@@ -1,6 +1,7 @@
 import {
   ButtonSize,
   ButtonVariant,
+  IconName,
   PopoverPlacement,
   Select,
   TabButtonSize,
@@ -14,12 +15,22 @@ export function SmallSelect({
   onValueChange,
   placeholder,
   disabled = false,
+  size = ButtonSize.Medium,
+  trailingIcon,
+  triggerClassName,
+  placement = PopoverPlacement.CenterLeft,
+  onOpenChange,
 }: {
   items: SelectItem[];
   value: string;
   onValueChange: (id: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  size?: ButtonSize;
+  trailingIcon?: IconName;
+  triggerClassName?: string;
+  placement?: PopoverPlacement;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const isMobile = useIsMobile();
   return (
@@ -29,10 +40,13 @@ export function SmallSelect({
       onValueChange={onValueChange}
       placeholder={placeholder}
       disabled={disabled}
-      size={ButtonSize.Medium}
+      size={size}
+      trailingIcon={trailingIcon}
+      triggerClassName={triggerClassName}
       itemSize={isMobile ? TabButtonSize.Large : TabButtonSize.Medium}
       variant={ButtonVariant.Ghost}
-      placement={PopoverPlacement.CenterLeft}
+      placement={placement}
+      onOpenChange={onOpenChange}
       // Every form this select appears in scrolls its own body, which clipped
       // the list against the top of the box whenever the row sat near it.
       sticky

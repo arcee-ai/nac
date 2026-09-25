@@ -58,6 +58,7 @@ function FilterRow({
   value,
   onValueChange,
   stacked,
+  sidebar = false,
 }: {
   label: string;
   items: SelectItem[];
@@ -65,14 +66,24 @@ function FilterRow({
   onValueChange: (id: string) => void;
   /** Label above a full-width field, which is all a phone has room for. */
   stacked: boolean;
+  /** Compact row for the All Projects sidebar: primary label, hugging trigger. */
+  sidebar?: boolean;
 }) {
   return (
     <div
-      className={cn(stacked ? "flex flex-col gap-1" : "flex items-center justify-between gap-3")}
+      className={cn(
+        stacked
+          ? "flex flex-col gap-1"
+          : sidebar
+            ? "flex items-center gap-1"
+            : "flex items-center justify-between gap-3",
+      )}
     >
       <div
         className={cn(
-          stacked ? "label-medium text-basic-primary" : "label-small text-basic-secondary shrink-0",
+          stacked ? "label-medium text-basic-primary" : "label-small shrink-0",
+          sidebar || stacked ? "text-basic-primary" : "text-basic-secondary",
+          sidebar && "flex-1 min-w-0",
         )}
       >
         {label}
@@ -88,8 +99,9 @@ function FilterRow({
         // `right-0` on top of the default leaves both edges pinned, which
         // squeezes the panel to the trigger's width and spills the labels out.
         placement={PopoverPlacement.BottomLeft}
+        sticky={sidebar}
         className={stacked ? "w-full" : "min-w-0"}
-        triggerClassName={stacked ? "w-full btn-field" : ""}
+        triggerClassName={stacked ? "w-full btn-field" : sidebar ? "!gap-1.5 !pl-3" : ""}
       />
     </div>
   );
@@ -112,6 +124,7 @@ function Chips<T extends string>({
   // cast is the identity.
   labelOf = (option: T) => option as string,
   touch,
+  sidebar = false,
 }: {
   label: string;
   options: readonly T[];
@@ -120,12 +133,15 @@ function Chips<T extends string>({
   labelOf?: (value: T) => string;
   /** Taller chips and a heavier label, for the phone's filters dialog. */
   touch: boolean;
+  /** Primary 14px label and an 8px gap, matching the All Projects sidebar. */
+  sidebar?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-3">
+    <div className={cn("flex flex-col", sidebar ? "gap-2" : "gap-3")}>
       <div
         className={cn(
-          touch ? "label-medium text-basic-primary" : "label-small text-basic-secondary",
+          touch ? "label-medium text-basic-primary" : "label-small",
+          sidebar || touch ? "text-basic-primary" : "text-basic-secondary",
         )}
       >
         {label}
@@ -154,6 +170,7 @@ export function SessionFilters({
   sessions,
   showSearch = true,
   mobile = false,
+  sidebar = false,
   onChange,
 }: {
   sessions: ManagedSessionSummary[];
@@ -161,6 +178,8 @@ export function SessionFilters({
   showSearch?: boolean;
   /** Stacked fields and touch-sized chips, for the phone's filters dialog. */
   mobile?: boolean;
+  /** Compact rows for the All Projects sidebar. Search stays in the nav above. */
+  sidebar?: boolean;
   /** Runs after any filter moves. The phone's dialog closes on it. */
   onChange?: () => void;
 }) {
@@ -187,6 +206,86 @@ export function SessionFilters({
       onChange?.();
     };
 
+  const sortRows = (
+    <>
+      <FilterRow
+        label="Sort by"
+        items={SORT_ITEMS}
+        value={sort}
+        onValueChange={commit((id: string) =>
+          // SAFETY: the ids are built from SORT_ITEMS, so every value the
+          // picker can emit is a SortId.
+          setSort(id as SortId),
+        )}
+        stacked={mobile}
+        sidebar={sidebar}
+      />
+      <FilterRow
+        label="Creation date"
+        items={RANGE_ITEMS}
+        value={createdRange}
+        onValueChange={commit((id: string) =>
+          // SAFETY: the ids are built from RANGE_ITEMS, so every value the
+          // picker can emit is a RangeId.
+          setCreatedRange(id as RangeId),
+        )}
+        stacked={mobile}
+        sidebar={sidebar}
+      />
+      <FilterRow
+        label="Modification date"
+        items={RANGE_ITEMS}
+        value={modifiedRange}
+        onValueChange={commit((id: string) =>
+          // SAFETY: the ids are built from RANGE_ITEMS, so every value the
+          // picker can emit is a RangeId.
+          setModifiedRange(id as RangeId),
+        )}
+        stacked={mobile}
+        sidebar={sidebar}
+      />
+    </>
+  );
+
+  if (sidebar) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-6 py-2">{sortRows}</div>
+        {envOptions.length > 1 ? (
+          <>
+            <Divider />
+            <div className="py-2">
+              <Chips<SessionEnv>
+                label="Environment"
+                options={envOptions}
+                selected={envs}
+                onToggle={commit(toggleEnv)}
+                touch={false}
+                sidebar
+              />
+            </div>
+          </>
+        ) : null}
+        {providerOptions.length > 1 ? (
+          <>
+            <Divider />
+            <div className="py-2">
+              <Chips
+                label="Provider"
+                options={providerOptions}
+                selected={providers}
+                onToggle={commit(toggleProvider)}
+                labelOf={providerLabel}
+                touch={false}
+                sidebar
+              />
+            </div>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col">
       {showSearch ? (
@@ -205,41 +304,7 @@ export function SessionFilters({
           <Divider />
         </>
       ) : null}
-      <Section gap={mobile ? "gap-6" : "gap-4"}>
-        <FilterRow
-          label="Sort by"
-          items={SORT_ITEMS}
-          value={sort}
-          onValueChange={commit((id: string) =>
-            // SAFETY: the ids are built from SORT_ITEMS, so every value the
-            // picker can emit is a SortId.
-            setSort(id as SortId),
-          )}
-          stacked={mobile}
-        />
-        <FilterRow
-          label="Creation date"
-          items={RANGE_ITEMS}
-          value={createdRange}
-          onValueChange={commit((id: string) =>
-            // SAFETY: the ids are built from RANGE_ITEMS, so every value the
-            // picker can emit is a RangeId.
-            setCreatedRange(id as RangeId),
-          )}
-          stacked={mobile}
-        />
-        <FilterRow
-          label="Modification date"
-          items={RANGE_ITEMS}
-          value={modifiedRange}
-          onValueChange={commit((id: string) =>
-            // SAFETY: the ids are built from RANGE_ITEMS, so every value the
-            // picker can emit is a RangeId.
-            setModifiedRange(id as RangeId),
-          )}
-          stacked={mobile}
-        />
-      </Section>
+      <Section gap={mobile ? "gap-6" : "gap-4"}>{sortRows}</Section>
       {envOptions.length > 1 ? (
         <>
           <Divider />

@@ -2,6 +2,19 @@ import type { Page, Route } from "@playwright/test";
 
 import { expect, test } from "./harness";
 
+/** The projects sidebar exposes Managed host directly; phones still use the menu. */
+async function openManagedHost(page: Page) {
+  const hosted = page.getByRole("button", { name: "Managed host", exact: true });
+  const menu = page.getByRole("button", { name: "Open the menu" });
+  await expect(hosted.or(menu).first()).toBeVisible();
+  if (await hosted.first().isVisible()) {
+    await hosted.first().click();
+    return;
+  }
+  await menu.click();
+  await hosted.click();
+}
+
 type ManagedDoubleState = {
   connected: boolean;
   loginPolls: number;
@@ -433,7 +446,7 @@ test("completes the managed first-run, write-only secret, and clone journey", as
       },
     ]);
   await page.getByRole("button", { name: "Close" }).click();
-  await page.getByRole("button", { name: "Add repository" }).click();
+  await page.getByRole("button", { name: "Add repository" }).first().click();
   await expect(page.getByTestId("managed-github-settings")).toBeVisible();
   await page
     .getByTestId("managed-github-settings")
@@ -444,8 +457,7 @@ test("completes the managed first-run, write-only secret, and clone journey", as
   await expect(page.getByRole("button", { name: /arcee-ai\/managed-demo/ })).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
 
-  await page.getByRole("button", { name: "Open the menu" }).click();
-  await page.getByRole("button", { name: "Managed host" }).click();
+  await openManagedHost(page);
   await page.getByRole("button", { name: "secrets", exact: true }).click();
   await page.getByLabel("Variable name").fill("DEMO_SERVICE_TOKEN");
   await page.getByLabel("New value").fill("browser-e2e-secret-value");
@@ -454,7 +466,7 @@ test("completes the managed first-run, write-only secret, and clone journey", as
   await expect(page.getByText("browser-e2e-secret-value")).toHaveCount(0);
   await page.getByRole("button", { name: "Close" }).click();
 
-  await page.getByRole("button", { name: "Add repository" }).click();
+  await page.getByRole("button", { name: "Add repository" }).first().click();
   await page.getByLabel("Find repository").fill("managed-demo");
   await page.getByRole("button", { name: /arcee-ai\/managed-demo/ }).click();
   await expect(page.getByText("/repositories/managed-demo")).toBeVisible();
@@ -482,8 +494,7 @@ test("keeps GitHub Connected visible after device authorization and reopening se
   await installManagedDouble(page);
   await page.goto(harness.baseUrl);
   const openGitHub = async () => {
-    await page.getByRole("button", { name: "Open the menu" }).click();
-    await page.getByRole("button", { name: "Managed host" }).click();
+    await openManagedHost(page);
     await page.getByRole("button", { name: "GitHub", exact: true }).click();
   };
   await openGitHub();
@@ -513,8 +524,7 @@ test("runs and reload-recovers a durable latest-beta upgrade through the same-or
 }) => {
   const state = await installManagedDouble(page, true);
   await page.goto(harness.baseUrl);
-  await page.getByRole("button", { name: "Open the menu" }).click();
-  await page.getByRole("button", { name: "Managed host" }).click();
+  await openManagedHost(page);
 
   await expect(page.getByTestId("managed-upgrade")).toContainText("2 accepted releases ahead");
   await expect(page.getByText(currentRelease.source_revision)).toBeVisible();
@@ -535,8 +545,7 @@ test("runs and reload-recovers a durable latest-beta upgrade through the same-or
   await expect(page.getByText("Replacing NAC")).toBeVisible();
 
   await page.reload();
-  await page.getByRole("button", { name: "Open the menu" }).click();
-  await page.getByRole("button", { name: "Managed host" }).click();
+  await openManagedHost(page);
   await expect(page.getByText("Replacing NAC")).toBeVisible();
   await expect(
     page.getByText("018f47a5-34a7-7c91-bf7e-000000000001", { exact: true }),
@@ -554,8 +563,7 @@ test("retries a retained failed upgrade as a new explicit intent", async ({ harn
   state.upgradeState = "failed";
   state.upgradeStarts = 1;
   await page.goto(harness.baseUrl);
-  await page.getByRole("button", { name: "Open the menu" }).click();
-  await page.getByRole("button", { name: "Managed host" }).click();
+  await openManagedHost(page);
 
   await expect(page.getByText("Upgrade failed")).toBeVisible();
   await page.getByRole("button", { name: "Retry upgrade to latest beta" }).click();
@@ -578,8 +586,7 @@ test("explains managed upgrade authorization, incarnation, and availability reco
 
   const reopenManagedHost = async () => {
     await page.goto(harness.baseUrl);
-    await page.getByRole("button", { name: "Open the menu" }).click();
-    await page.getByRole("button", { name: "Managed host" }).click();
+    await openManagedHost(page);
   };
 
   await reopenManagedHost();
@@ -636,7 +643,7 @@ test("cancels an in-progress managed clone without publishing a Project", async 
   const state = await installManagedDouble(page, true);
   await page.goto(harness.baseUrl);
 
-  await page.getByRole("button", { name: "Add repository" }).click();
+  await page.getByRole("button", { name: "Add repository" }).first().click();
   await page.getByRole("button", { name: /arcee-ai\/managed-demo/ }).click();
   await page.getByRole("button", { name: "Clone repository" }).click();
   await expect(page.getByText("Cloning objects: 75%")).toBeVisible();

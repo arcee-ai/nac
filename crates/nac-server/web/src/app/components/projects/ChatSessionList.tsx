@@ -7,7 +7,7 @@ import { useNow } from "@/app/hooks/useNow";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun } from "@/app/lib/format";
 import { groupByRecency } from "@/app/lib/projects";
-import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
+import { sessionBehaviorIcon, sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
 /** Date buckets only shift once a day, so a minute of resolution is plenty. */
@@ -72,6 +72,7 @@ export function ChatSessionList({
                 <ChatSessionButton
                   key={entry.summary.session_id}
                   title={title}
+                  icon={sessionBehaviorIcon(entry.summary.behavior)}
                   badge={behavior.navigationLabel}
                   badgeLabel={behavior.label}
                   active={entry.summary.session_id === activeSessionId}

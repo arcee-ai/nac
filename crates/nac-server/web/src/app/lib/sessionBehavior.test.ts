@@ -27,7 +27,7 @@ describe("session behavior presentation", () => {
       topLevel: expect.stringMatching(/persistent coding agent/i),
       editsDirectly: true,
       delegation: expect.stringMatching(/fresh-context traditional coding agents/i),
-      inspection: expect.stringMatching(/Delegated work/i),
+      inspection: expect.stringMatching(/Subagents/i),
     });
     expect(sessionBehaviorPresentation("direct-with-orchestrator")).toMatchObject({
       navigationLabel: "Direct + NAC",

@@ -124,7 +124,7 @@ export function CommitPopover({
 
           <Button
             size={ButtonSize.Medium}
-            variant={ButtonVariant.Primary}
+            variant={ButtonVariant.Secondary}
             disabled={!message.trim()}
             loading={commit.isPending}
             onClick={submit}
@@ -139,7 +139,7 @@ export function CommitPopover({
         // 40px pill rather than the toolbar's flat 24px button.
         <StickyButton
           className="shrink-0"
-          variant={ButtonVariant.Primary}
+          variant={ButtonVariant.Secondary}
           disabled={Boolean(reason)}
           aria-expanded={open}
           title={reason ?? "Commit every change in the checkout"}
@@ -151,7 +151,7 @@ export function CommitPopover({
         <Button
           className="max-w-[120px] shrink-0"
           size={ButtonSize.Small}
-          variant={ButtonVariant.Primary}
+          variant={ButtonVariant.Secondary}
           disabled={Boolean(reason)}
           aria-expanded={open}
           title={reason ?? "Commit every change in the checkout"}

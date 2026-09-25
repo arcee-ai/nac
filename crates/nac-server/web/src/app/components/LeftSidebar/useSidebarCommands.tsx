@@ -11,7 +11,7 @@ import { useMcpServers, useSessions, useSshConfigs } from "@/app/services/querie
 
 /**
  * The sidebar's destinations: the same dialogs the header already opens, plus
- * a new chat in the project on screen (or a new project when none is).
+ * a new session in the project on screen (or a new project when none is).
  */
 export function useSidebarCommands() {
   const [configuring, setConfiguring] = useState(false);
@@ -46,6 +46,11 @@ export function useSidebarCommands() {
     actions.create();
   };
 
+  const newProject = () => {
+    if (managed.isManaged) managed.addRepository();
+    else actions.create();
+  };
+
   return {
     projectId,
     sessionId,
@@ -53,7 +58,8 @@ export function useSidebarCommands() {
     sshCount,
     mcpLabel: activeMcp ? `MCP servers, ${activeMcp} active` : "MCP servers",
     newSession,
-    newProject: () => actions.create(),
+    newProject,
+    createLabel: managed.isManaged ? "Add repository" : "New Project",
     openProjects: () => navigate(routes.list()),
     openMcp: () => setMcp(true),
     openSsh: () => setSsh(true),
