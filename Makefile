@@ -82,6 +82,7 @@ test-web:
 
 ## Validate Release Please configuration and pre-1.0 release calculation
 test-release:
+	bash -n .github/scripts/stable-release-preparation.sh
 	sh -n .github/scripts/stable-release-rollout.sh
 	node --test .github/scripts/release-policy.test.mjs
 	$(MAKE) test-stable-binary

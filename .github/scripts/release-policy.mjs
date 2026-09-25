@@ -34,10 +34,50 @@ export function validateDevAncestry(commit, devRef, cwd = process.cwd()) {
   throw new Error(`failed to validate stable commit ancestry: ${detail}`);
 }
 
+export function validatePreparationSource({
+  eventName,
+  eventRef,
+  eventSha,
+  requestedSha,
+  devSha,
+}) {
+  if (eventName !== "workflow_dispatch") {
+    throw new Error(`stable preparation requires workflow_dispatch, got ${JSON.stringify(eventName)}`);
+  }
+  if (eventRef !== "refs/heads/dev") {
+    throw new Error(`stable preparation must be dispatched against dev, got ${JSON.stringify(eventRef)}`);
+  }
+  for (const [name, value] of [
+    ["event SHA", eventSha],
+    ["requested dev SHA", requestedSha],
+    ["current dev SHA", devSha],
+  ]) {
+    if (!/^[0-9a-f]{40}$/i.test(value || "")) {
+      throw new Error(`expected a full ${name}, got ${JSON.stringify(value)}`);
+    }
+  }
+  if (requestedSha.toLowerCase() !== eventSha.toLowerCase()) {
+    throw new Error(`requested dev SHA ${requestedSha} does not match dispatched source ${eventSha}`);
+  }
+  if (devSha.toLowerCase() !== eventSha.toLowerCase()) {
+    throw new Error(`dispatched source ${eventSha} is not the current dev tip ${devSha}`);
+  }
+}
+
 function main() {
   const command = process.argv[2];
+  if (command === "validate-prepare") {
+    validatePreparationSource({
+      eventName: process.env.EVENT_NAME,
+      eventRef: process.env.EVENT_REF,
+      eventSha: process.env.EVENT_SHA,
+      requestedSha: process.env.REQUESTED_SHA,
+      devSha: process.env.DEV_SHA,
+    });
+    return;
+  }
   if (command !== "validate-stable") {
-    throw new Error(`usage: ${process.argv[1]} validate-stable`);
+    throw new Error(`usage: ${process.argv[1]} validate-prepare|validate-stable`);
   }
   const tag = process.env.RELEASE_TAG;
   if (!tag) throw new Error("RELEASE_TAG is required");

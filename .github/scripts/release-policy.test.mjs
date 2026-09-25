@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   parseVersion,
   validateDevAncestry,
+  validatePreparationSource,
   validateStable,
 } from "./release-policy.mjs";
 
@@ -94,6 +95,38 @@ test("stable source validation rejects a same-version commit outside dev", () =>
   }
 });
 
+test("stable preparation requires the explicitly selected current dev commit", () => {
+  const selected = "a".repeat(40);
+  const valid = {
+    eventName: "workflow_dispatch",
+    eventRef: "refs/heads/dev",
+    eventSha: selected,
+    requestedSha: selected.toUpperCase(),
+    devSha: selected,
+  };
+  validatePreparationSource(valid);
+  assert.throws(
+    () => validatePreparationSource({ ...valid, eventName: "push" }),
+    /requires workflow_dispatch/,
+  );
+  assert.throws(
+    () => validatePreparationSource({ ...valid, eventRef: "refs/heads/topic" }),
+    /dispatched against dev/,
+  );
+  assert.throws(
+    () => validatePreparationSource({ ...valid, requestedSha: "a".repeat(12) }),
+    /full requested dev SHA/,
+  );
+  assert.throws(
+    () => validatePreparationSource({ ...valid, requestedSha: "b".repeat(40) }),
+    /does not match dispatched source/,
+  );
+  assert.throws(
+    () => validatePreparationSource({ ...valid, devSha: "b".repeat(40) }),
+    /not the current dev tip/,
+  );
+});
+
 test("release please is explicitly a dev-targeted root simple release", () => {
   const config = JSON.parse(fs.readFileSync("release-please-config.json", "utf8"));
   const manifest = JSON.parse(fs.readFileSync(".release-please-manifest.json", "utf8"));
@@ -101,13 +134,53 @@ test("release please is explicitly a dev-targeted root simple release", () => {
   const stableWorkflow = fs.readFileSync(".github/workflows/stable-release.yml", "utf8");
   const managedWorkflow = fs.readFileSync(".github/workflows/managed-image.yml", "utf8");
   const rollout = fs.readFileSync(".github/scripts/stable-release-rollout.sh", "utf8");
+  const releasePleaseTriggers = workflow.slice(
+    workflow.indexOf("on:\n"),
+    workflow.indexOf("\npermissions:"),
+  );
+  const preparationJob = workflow.slice(
+    workflow.indexOf("  prepare-release-pr:"),
+    workflow.indexOf("  publish-approved-release:"),
+  );
+  const publicationJob = workflow.slice(workflow.indexOf("  publish-approved-release:"));
 
   assert.equal(config["release-type"], "simple");
   assert.equal(config["bump-minor-pre-major"], true);
   assert.deepEqual(Object.keys(config.packages), ["."]);
   assert.equal(JSON.stringify(config).includes("extra-files"), false);
   assert.equal(manifest["."], fs.readFileSync("version.txt", "utf8").trim());
+  assert.match(releasePleaseTriggers, /^on:\n  workflow_dispatch:/);
+  assert.match(releasePleaseTriggers, /dev_sha:[\s\S]*required: true/);
+  assert.match(releasePleaseTriggers, /pull_request:\n    branches: \[dev\]\n    types: \[closed\]/);
+  assert.doesNotMatch(releasePleaseTriggers, /^\s*push:/m);
   assert.match(workflow, /target-branch: dev/);
+  assert.match(preparationJob, /if: github\.event_name == 'workflow_dispatch'/);
+  assert.match(preparationJob, /release-policy\.mjs validate-prepare/);
+  assert.ok(
+    preparationJob.indexOf("validate-prepare") <
+      preparationJob.indexOf("Mint repository-scoped release token"),
+  );
+  assert.match(preparationJob, /stable-release-preparation\.sh stage/);
+  assert.match(preparationJob, /target-branch: release-preparation-source/);
+  assert.match(preparationJob, /stable-release-preparation\.sh finalize/);
+  assert.ok(
+    preparationJob.indexOf("stable-release-preparation.sh stage") <
+      preparationJob.indexOf("target-branch: release-preparation-source") &&
+      preparationJob.indexOf("target-branch: release-preparation-source") <
+        preparationJob.indexOf("stable-release-preparation.sh finalize"),
+  );
+  assert.match(preparationJob, /skip-github-release: true/);
+  assert.doesNotMatch(preparationJob, /skip-github-pull-request/);
+  assert.match(publicationJob, /github\.event\.pull_request\.merged == true/);
+  assert.match(publicationJob, /head\.repo\.full_name == github\.repository/);
+  assert.match(
+    publicationJob,
+    /release-please--branches--release-preparation-source--components--nac/,
+  );
+  assert.match(publicationJob, /target-branch: dev/);
+  assert.match(publicationJob, /skip-github-pull-request: true/);
+  assert.doesNotMatch(publicationJob, /skip-github-release/);
+  assert.equal(workflow.match(/googleapis\/release-please-action@v4/g)?.length, 2);
   assert.match(workflow, /create-github-app-token@v2/);
   assert.match(workflow, /repositories: nac/);
   assert.match(workflow, /permission-contents: write/);
@@ -141,6 +214,97 @@ test("release please is explicitly a dev-targeted root simple release", () => {
   );
   assert.match(rollout, /actions\/workflows\/release\.yml/);
   assert.match(rollout, /disabled_manually/);
+});
+
+test("stable preparation pins Release Please to one source before targeting dev", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nac-stable-preparation-"));
+  const fakeGh = path.join(root, "gh");
+  const sourceRef = path.join(root, "source-ref");
+  const prBase = path.join(root, "pr-base");
+  const selected = "a".repeat(40);
+  fs.writeFileSync(
+    fakeGh,
+    `#!/bin/sh
+set -eu
+case "$*" in
+  "api repos/test/repo/git/ref/heads/dev --jq .object.sha")
+    if [ "\${ADVANCE_AFTER_RETARGET:-no}" = yes ] && [ "$(cat "$PR_BASE" 2>/dev/null || true)" = dev ]; then
+      printf '%s\\n' "$(printf 'b%.0s' $(seq 1 40))"
+    else
+      printf '%s\\n' "$SOURCE_SHA"
+    fi
+    ;;
+  "api repos/test/repo/git/ref/heads/release-preparation-source --silent")
+    test -f "$SOURCE_REF"
+    ;;
+  api\\ --method\\ PATCH\\ repos/test/repo/git/refs/heads/release-preparation-source*)
+    printf '%s\\n' "$SOURCE_SHA" > "$SOURCE_REF"
+    ;;
+  api\\ --method\\ POST\\ repos/test/repo/git/refs*)
+    printf '%s\\n' "$SOURCE_SHA" > "$SOURCE_REF"
+    ;;
+  "api repos/test/repo/git/ref/heads/release-preparation-source --jq .object.sha")
+    cat "$SOURCE_REF"
+    ;;
+  *"repos/test/repo/pulls -f state=open"*"--jq length")
+    if [ -f "$PR_BASE" ]; then echo 1; else echo 0; fi
+    ;;
+  *"repos/test/repo/pulls -f state=open"*"--jq .[0].number // empty")
+    echo 17
+    ;;
+  *"repos/test/repo/pulls -f state=open"*"--jq .[0].base.ref // empty")
+    cat "$PR_BASE"
+    ;;
+  "api --paginate repos/test/repo/pulls/17/files --jq .[].filename")
+    printf '%s\\n' .release-please-manifest.json CHANGELOG.md version.txt
+    ;;
+  "api --method PATCH repos/test/repo/pulls/17 -f base=dev --silent")
+    echo dev > "$PR_BASE"
+    ;;
+  "api --method PATCH repos/test/repo/pulls/17 -f base=release-preparation-source --silent")
+    echo release-preparation-source > "$PR_BASE"
+    ;;
+  *) echo "unexpected gh call: $*" >&2; exit 9 ;;
+esac
+`,
+  );
+  fs.chmodSync(fakeGh, 0o755);
+  const env = {
+    ...process.env,
+    PATH: `${root}:${process.env.PATH}`,
+    GH_TOKEN: "test-token",
+    GITHUB_REPOSITORY: "test/repo",
+    GITHUB_REPOSITORY_OWNER: "test",
+    SOURCE_SHA: selected.toUpperCase(),
+    SOURCE_REF: sourceRef,
+    PR_BASE: prBase,
+  };
+  const script = ".github/scripts/stable-release-preparation.sh";
+  try {
+    const staged = spawnSync(script, ["stage"], { encoding: "utf8", env });
+    assert.equal(staged.status, 0, staged.stderr);
+    assert.equal(fs.readFileSync(sourceRef, "utf8").trim(), selected);
+
+    fs.writeFileSync(prBase, "release-preparation-source\n");
+    const finalized = spawnSync(script, ["finalize"], { encoding: "utf8", env });
+    assert.equal(finalized.status, 0, finalized.stderr);
+    assert.match(finalized.stdout, /pull\/17.*aaaaaaaa/);
+    assert.equal(fs.readFileSync(prBase, "utf8").trim(), "dev");
+
+    const restaged = spawnSync(script, ["stage"], { encoding: "utf8", env });
+    assert.equal(restaged.status, 0, restaged.stderr);
+    assert.equal(fs.readFileSync(prBase, "utf8").trim(), "release-preparation-source");
+
+    const stale = spawnSync(script, ["finalize"], {
+      encoding: "utf8",
+      env: { ...env, ADVANCE_AFTER_RETARGET: "yes" },
+    });
+    assert.equal(stale.status, 1, stale.stderr);
+    assert.match(stale.stderr, /dev changed while finalizing/);
+    assert.equal(fs.readFileSync(prBase, "utf8").trim(), "release-preparation-source");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("stable rollout verifies the distinct dev workflow before disabling legacy publication", () => {

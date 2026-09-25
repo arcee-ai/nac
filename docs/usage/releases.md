@@ -6,19 +6,38 @@ private beta images by the private managed-controller repository, while stable
 releases are explicitly selected from `dev`. NAC does not have preview,
 nightly, or standing release-candidate channels.
 
-Stable release preparation uses one Release Please PR targeting `dev`. The
-repository-level `simple` strategy owns root [`version.txt`](../../version.txt)
-and [`CHANGELOG.md`](../../CHANGELOG.md); internal Cargo crate versions remain
-independent implementation metadata and never appear in public protocol or
-provider identity. Root `version.txt` is injected at build time into the
-server, shared MCP registration, and provider user-agent surfaces. Merging the
-Release Please PR is the human stable-release approval and creates the
-canonical `vX.Y.Z` tag and GitHub Release. The release workflow tests and
-packages that exact source and uploads its binary archives to the existing
-release. Publication runs only from the separately identified
-`stable-release.yml` tag-push workflow stored in that tagged commit. The
-workflow fetches `origin/dev` and rejects a tag whose commit is not an ancestor
-of that branch, even when its `version.txt` matches.
+Stable releases require two separate maintainer decisions. First, a maintainer
+explicitly runs **Prepare stable release** from the Actions page, selects
+`dev`, and supplies the full commit SHA currently at the tip of `dev`. The
+workflow rejects any other ref, abbreviated or mismatched SHA. After minting
+the repository-scoped GitHub App token, it revalidates `dev` and pins the
+selected commit to the internal `release-preparation-source` branch. Release
+Please calculates and writes its one PR against that stable source. The
+workflow retargets the PR to `dev` only while `dev` still names the selected
+commit, and checks again afterward; if `dev` moved during finalization, the PR
+returns to the internal source branch and the run fails closed. This
+preparation mode cannot create a tag or GitHub Release. Ordinary pushes and
+pull requests do not prepare releases. Closing the prepared PR also leaves it
+closed: subsequent development does not recreate it until a maintainer
+explicitly runs preparation again. The internal source branch is an
+implementation detail, not a release channel.
+
+Second, a maintainer reviews and merges that generated Release Please PR. Only
+the merge of the same-repository
+`release-please--branches--release-preparation-source--components--nac` branch
+selects Release Please's publication mode, which cannot create another release
+PR and creates the canonical `vX.Y.Z` tag and GitHub Release. The maintainer
+never constructs or pushes the tag manually.
+
+The repository-level `simple` strategy owns root
+[`version.txt`](../../version.txt) and [`CHANGELOG.md`](../../CHANGELOG.md);
+internal Cargo crate versions remain independent implementation metadata and
+never appear in public protocol or provider identity. Root `version.txt` is
+injected at build time into the server, shared MCP registration, and provider
+user-agent surfaces. The separate `stable-release.yml` tag-push workflow tests
+and packages the exact tagged source and uploads its binary archives to the
+existing release. It fetches `origin/dev` and rejects a tag whose commit is not
+an ancestor of that branch, even when its `version.txt` matches.
 
 Before 1.0, `fix:` squash titles produce a patch, while `feat:` and breaking
 changes produce a minor release. Pull requests should use Conventional
@@ -32,7 +51,10 @@ Release Please maintain its `autorelease: pending` lifecycle label. The
 repository variable `RELEASE_PLEASE_APP_ID` and secret
 `RELEASE_PLEASE_APP_PRIVATE_KEY` provide its identity. Public NAC must not
 receive a personal access token, AWS credential, or access to the private beta
-publisher.
+publisher. GitHub only accepts `workflow_dispatch` for a workflow present on
+the default branch. NAC's existing default branch is `dev`; the preparation
+workflow therefore becomes available after this workflow change reaches
+`dev`, without a default-branch transition.
 
 The first rollout is an explicit transition between two distinct workflow
 paths. Follow this order:
@@ -47,8 +69,9 @@ paths. Follow this order:
    registration to be `active` before it disables the legacy default-branch
    `release.yml`. It then reads the legacy workflow state back and requires
    `disabled_manually`.
-3. Only after the script succeeds, install/configure the Release Please App and
-   allow it to prepare the first stable PR.
+3. Only after the script succeeds, install/configure the Release Please App.
+   A maintainer may then explicitly run **Prepare stable release** for the
+   first stable PR.
 
 Disabling `release.yml` cannot disable the new publisher because
 `stable-release.yml` has a different GitHub Actions workflow identity. The

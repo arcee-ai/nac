@@ -203,6 +203,7 @@ jobs:
 
       - name: Test stable release policy and configuration
         run: |
+          bash -n .github/scripts/stable-release-preparation.sh
           sh -n .github/scripts/stable-release-rollout.sh
           node --test .github/scripts/release-policy.test.mjs
 
