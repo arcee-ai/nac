@@ -229,6 +229,7 @@ function ProjectSessions({
                   title={title}
                   badge={behavior.navigationLabel}
                   badgeLabel={behavior.label}
+                  aria-label={`${title}, ${behavior.navigationLabel}`}
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}
