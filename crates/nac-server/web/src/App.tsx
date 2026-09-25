@@ -28,8 +28,7 @@ export default function App() {
               <Route element={<AppShell />}>
                 <Route path="/" element={<ProjectsListPage />} />
                 <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
-                <Route path="/session/:sessionId" element={<KeyedSessionPage />} />
-                <Route path="/session/:sessionId/:panel" element={<KeyedSessionPage />} />
+                <Route path="/session/:sessionId/:panel?" element={<KeyedSessionPage />} />
               </Route>
               <Route path="/design" element={<DesignPreviewPage />} />
               <Route path="*" element={<Navigate to={routes.list()} replace />} />

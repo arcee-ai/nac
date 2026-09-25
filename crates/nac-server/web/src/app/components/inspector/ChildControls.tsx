@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Button,
@@ -27,6 +27,10 @@ import { PermissionControls } from "@/app/components/inspector/PermissionControl
 interface ChildControlsProps {
   sessionId: string;
   behavior: SessionBehavior | null;
+  /** The toolbar glyph. The spawn menu opens the same dialog without it. */
+  showTrigger?: boolean;
+  /** Increments to open the dialog from outside the trigger. */
+  openRequest?: number;
 }
 
 function ChildPermissionBridge({ child }: { child: TraditionalChildRecord }) {
@@ -45,7 +49,12 @@ function ChildPermissionBridge({ child }: { child: TraditionalChildRecord }) {
 }
 
 /** Direct-primary controls for durable traditional child coding sessions. */
-export function ChildControls({ sessionId, behavior }: ChildControlsProps) {
+export function ChildControls({
+  sessionId,
+  behavior,
+  showTrigger = true,
+  openRequest = 0,
+}: ChildControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const childrenQuery = useTraditionalChildren(sessionId, direct);
   const startChild = useStartTraditionalChild();
@@ -54,6 +63,13 @@ export function ChildControls({ sessionId, behavior }: ChildControlsProps) {
   const [description, setDescription] = useState("");
   const [prompt, setPrompt] = useState("");
   const [background, setBackground] = useState(true);
+  const handledOpenRequest = useRef(0);
+
+  useEffect(() => {
+    if (!direct || openRequest === 0 || openRequest === handledOpenRequest.current) return;
+    handledOpenRequest.current = openRequest;
+    setOpen(true);
+  }, [direct, openRequest]);
 
   // Descendant transcripts never render this composer path because ownership
   // resolves them as read-only before these controls mount.
@@ -91,28 +107,30 @@ export function ChildControls({ sessionId, behavior }: ChildControlsProps) {
       {children.map((child) => (
         <ChildPermissionBridge key={child.child_session_id} child={child} />
       ))}
-      <Tooltip title="Launch coding agent" position={TooltipPosition.TopCenter}>
-        <Button
-          size={ButtonSize.Small}
-          variant={
-            children.some((child) => child.status === "running")
-              ? ButtonVariant.GhostHighlightedAccent
-              : ButtonVariant.Ghost
-          }
-          content={ButtonContent.Icon}
-          aria-label="Launch coding agent"
-          onClick={() => setOpen(true)}
-        >
-          <Icon iconName={IconName.People} size={16} />
-        </Button>
-      </Tooltip>
+      {showTrigger ? (
+        <Tooltip title="Launch coding agent" position={TooltipPosition.TopCenter}>
+          <Button
+            size={ButtonSize.Small}
+            variant={
+              children.some((child) => child.status === "running")
+                ? ButtonVariant.GhostHighlightedAccent
+                : ButtonVariant.Ghost
+            }
+            content={ButtonContent.Icon}
+            aria-label="Launch coding agent"
+            onClick={() => setOpen(true)}
+          >
+            <Icon iconName={IconName.People} size={16} />
+          </Button>
+        </Tooltip>
+      ) : null}
 
       <Modal
         open={open}
         onClose={() => setOpen(false)}
         size={ModalSize.Wide}
         title="Launch coding agent"
-        subheader="Start a fresh-context coding agent. Browse, steer, continue, and cancel it from Delegated work."
+        subheader="Start a fresh-context coding agent. Browse, steer, continue, and cancel it from Subagents."
       >
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-3 rounded-[6px] bg-elevation-level-2 p-3">

@@ -36,6 +36,7 @@ const fakes = {
   createGoal: vi.fn(),
   updateGoal: vi.fn(),
   clearGoal: vi.fn(),
+  getGoal: vi.fn(),
   cancelActiveRun: vi.fn(),
   getModelCatalog: vi.fn(),
   getStore: vi.fn(),
@@ -56,6 +57,7 @@ vi.spyOn(api, "cancelInboxItem").mockImplementation((...args) => fakes.cancelInb
 vi.spyOn(api, "createGoal").mockImplementation((...args) => fakes.createGoal(...args));
 vi.spyOn(api, "updateGoal").mockImplementation((...args) => fakes.updateGoal(...args));
 vi.spyOn(api, "clearGoal").mockImplementation((...args) => fakes.clearGoal(...args));
+vi.spyOn(api, "getGoal").mockImplementation((...args) => fakes.getGoal(...args));
 vi.spyOn(api, "cancelActiveRun").mockImplementation((...args) => fakes.cancelActiveRun(...args));
 vi.spyOn(api, "getModelCatalog").mockImplementation((...args) => fakes.getModelCatalog(...args));
 vi.spyOn(api, "getStore").mockImplementation((...args) => fakes.getStore(...args));
@@ -152,6 +154,7 @@ function composer(
   if (behavior) {
     client.setQueryData(queryKeys.sessionPermissions("session"), { requests: [], grants: [] });
     client.setQueryData(queryKeys.sessionGoal("session"), goalState);
+    fakes.getGoal.mockResolvedValue(goalState);
     client.setQueryData(queryKeys.sessionInbox("session"), inboxItems);
     client.setQueryData(queryKeys.traditionalChildren("session"), []);
   }
@@ -276,6 +279,7 @@ beforeEach(() => {
     version: 4,
   }));
   fakes.clearGoal.mockReset().mockResolvedValue(undefined);
+  fakes.getGoal.mockReset().mockResolvedValue(null);
   fakes.cancelActiveRun.mockReset().mockResolvedValue(undefined);
   fakes.getModelCatalog.mockReset().mockImplementation(() => pending());
   fakes.getStore.mockReset().mockImplementation(() => pending());
@@ -627,7 +631,7 @@ describe("direct inbox and goal journeys", () => {
       },
       false,
     );
-    expect(screen.getByText(/delegated transcript is read-only/i)).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Send a message" })).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: "Message" })).toBeNull();
     expect(screen.getByRole("button", { name: "Permissions" })).toBeTruthy();
   });
@@ -831,8 +835,9 @@ describe("direct inbox and goal journeys", () => {
     type(textarea, "/goal edit");
     fireEvent.keyDown(textarea, { key: "Enter" });
 
-    expect(await screen.findByRole("dialog")).toBeTruthy();
-    expect(screen.getAllByText("Durable goal")).toHaveLength(2);
+    expect(await screen.findByRole("textbox", { name: "Goal objective" })).toBeTruthy();
+    expect(screen.getByText("Current Goal")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close goal editor" })).toBeTruthy();
     expect(screen.getByDisplayValue("existing objective")).toBeTruthy();
   });
 });

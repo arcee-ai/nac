@@ -2,32 +2,11 @@ import type { ReactNode } from "react";
 
 import { Button, ButtonContent, ButtonVariant, Icon, IconName, Tooltip } from "@/app/atoms";
 import { TooltipPosition } from "@/app/atoms/tooltip";
+import { PanelCountBadge } from "@/app/components/inspector/PanelCountBadge";
+import { panelBadgeCount, PANEL_ICON } from "@/app/components/inspector/sessionPanelIcons";
 import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
 import type { SessionBehavior, SessionSnapshotResponse } from "@/app/types/api";
-
-const PANEL_ICON: Record<SessionPanel, IconName> = {
-  sessions: IconName.Chat,
-  threads: IconName.Flow,
-  delegated: IconName.Robot,
-  files: IconName.Folders,
-  worksets: IconName.Checklist,
-  history: IconName.History,
-};
-
-function panelBadgeCount(name: SessionPanel, subagentCount: number, worksetCount: number): number {
-  if (name === "delegated") return subagentCount;
-  if (name === "worksets") return worksetCount;
-  return 0;
-}
-
-function PanelCountBadge({ count }: { count: number }) {
-  return (
-    <span className="pointer-events-none absolute -top-1 right-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-btn-primary-disabled px-0.5 text-[9px] leading-3 font-medium text-basic-secondary">
-      {count}
-    </span>
-  );
-}
 
 /** Icon column left behind once the right panel has slid away. Matches the left rail. */
 export const RIGHT_SIDEBAR_RAIL_WIDTH = 52;

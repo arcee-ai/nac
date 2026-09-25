@@ -1,56 +1,104 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMemo, useState } from "react";
 
 import {
   Button,
   ButtonSize,
   ButtonVariant,
-  Modal,
-  ModalSize,
-  Switch,
-  TextArea,
-  TextAreaSize,
+  ChatSessionButton,
+  Icon,
+  IconName,
+  TabButton,
 } from "@/app/atoms";
+import { SubagentComposer, type SubagentTarget } from "@/app/components/inspector/SubagentComposer";
+import { SubagentPreview } from "@/app/components/inspector/SubagentPreview";
+import { PanelSplit } from "@/app/components/inspector/PanelSplit";
+import { useNow } from "@/app/hooks/useNow";
+import { cn } from "@/app/lib/cn";
+import { groupByRecency } from "@/app/lib/projects";
 import {
-  presentManagedOrchestrator,
-  presentTraditionalChild,
-  type DelegatedSessionPresentation,
-} from "@/app/features/delegation/model";
-import { DelegatedSessionRow } from "@/app/features/delegation/presentation/DelegatedSessionRow";
-import { SteeringPromptModal } from "@/app/components/inspector/SteeringPromptModal";
-import { toRunError } from "@/app/lib/providerError";
-import { routes } from "@/app/lib/routes";
-import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import {
-  useCancelManagedOrchestrator,
-  useCancelTraditionalChild,
-  useManagedOrchestrators,
-  useStartManagedOrchestrator,
-  useStartTraditionalChild,
-  useTraditionalChildren,
-} from "@/app/services/queries";
-import type { SessionBehavior } from "@/app/types/api";
+  clearSubagentLaunch,
+  openSubagentLaunch,
+  useSubagentLaunchRequest,
+  showSidePanelList,
+  useSubagentLaunch,
+} from "@/app/store/sessionLayoutStore";
+import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
+import type {
+  ManagedOrchestratorRecord,
+  SessionBehavior,
+  TraditionalChildRecord,
+  TraditionalChildStatus,
+} from "@/app/types/api";
 
-function QueryError({ label, retry }: { label: string; retry: () => void }) {
-  return (
-    <div role="alert" className="rounded-[6px] border border-error-primary p-3">
-      <div className="text-small text-error-primary">{label} could not be loaded.</div>
-      <Button
-        className="mt-2"
-        size={ButtonSize.Small}
-        variant={ButtonVariant.Ghost}
-        onClick={retry}
-      >
-        Try again
-      </Button>
-    </div>
-  );
+interface SubagentRow {
+  key: string;
+  mode: "child" | "orchestrator";
+  id: string;
+  description: string;
+  status: TraditionalChildStatus;
+  background: boolean;
+  updatedAt: string;
+  fallbackText: string | null;
+  icon: IconName;
 }
 
-function Empty({ children }: { children: string }) {
+function nonempty(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function rowFromChild(child: TraditionalChildRecord): SubagentRow {
+  return {
+    key: `child:${child.child_session_id}`,
+    mode: "child",
+    id: child.child_session_id,
+    description: child.description,
+    status: child.status,
+    background: child.execution_mode !== "foreground",
+    updatedAt: child.updated_at,
+    fallbackText:
+      nonempty(child.failure) ??
+      nonempty(child.report) ??
+      nonempty(child.change_summary) ??
+      nonempty(child.verification_summary),
+    icon: IconName.Plane,
+  };
+}
+
+function rowFromOrchestrator(orchestrator: ManagedOrchestratorRecord): SubagentRow {
+  return {
+    key: `orchestrator:${orchestrator.orchestrator_session_id}`,
+    mode: "orchestrator",
+    id: orchestrator.orchestrator_session_id,
+    description: orchestrator.description,
+    status: orchestrator.status,
+    background: orchestrator.execution_mode !== "foreground",
+    updatedAt: orchestrator.updated_at,
+    fallbackText: nonempty(orchestrator.failure) ?? nonempty(orchestrator.report),
+    icon: IconName.Orchestrator,
+  };
+}
+
+const LAUNCH_COPY = {
+  agent: {
+    title: "Launch Subagent",
+    body: "Start a fresh-context coding agent. Browse, steer, continue, and cancel it from this chat.",
+    icon: IconName.Plane,
+  },
+  orchestrator: {
+    title: "Launch Suborchestrator",
+    body: "Start a separate NAC planning session. Browse, steer, continue, and cancel it from this chat.",
+    icon: IconName.Orchestrator,
+  },
+} as const;
+
+function LaunchEmpty({ kind }: { kind: "agent" | "orchestrator" }) {
+  const copy = LAUNCH_COPY[kind];
   return (
-    <div className="rounded-[6px] border border-border-primary p-3 text-small text-basic-tertiary">
-      {children}
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4">
+      <Icon iconName={copy.icon} size={32} className="text-basic-primary" />
+      <p className="label-big mt-2 text-center text-basic-primary">{copy.title}</p>
+      <p className="label-small mt-2 max-w-[311px] text-center text-basic-tertiary">{copy.body}</p>
     </div>
   );
 }
@@ -62,186 +110,163 @@ export function DelegatedWorkView({
   sessionId: string;
   behavior: SessionBehavior;
 }) {
-  const children = useTraditionalChildren(sessionId, true);
   const supportsOrchestrators = behavior === "direct-with-orchestrator";
+  const children = useTraditionalChildren(sessionId, true);
   const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
-  const startChild = useStartTraditionalChild();
-  const cancelChild = useCancelTraditionalChild();
-  const startOrchestrator = useStartManagedOrchestrator();
-  const cancelOrchestrator = useCancelManagedOrchestrator();
-  const toast = useToast();
-  const navigate = useNavigate();
-  const [selected, setSelected] = useState<DelegatedSessionPresentation | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [background, setBackground] = useState(true);
-  const childRows = (children.data ?? []).map(presentTraditionalChild);
-  const orchestratorRows = (orchestrators.data ?? []).map(presentManagedOrchestrator);
-  const busy =
-    startChild.isPending ||
-    cancelChild.isPending ||
-    startOrchestrator.isPending ||
-    cancelOrchestrator.isPending;
+  const launch = useSubagentLaunch();
+  const launchRequest = useSubagentLaunchRequest();
+  const now = useNow(60_000);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
-  const openPrompt = (row: DelegatedSessionPresentation) => {
-    setSelected(row);
-    setPrompt("");
-    setBackground(row.modeLabel !== "Foreground");
+  const rows = useMemo(() => {
+    const childRows = (children.data ?? []).map(rowFromChild);
+    const orchestratorRows = supportsOrchestrators
+      ? (orchestrators.data ?? []).map(rowFromOrchestrator)
+      : [];
+    return [...childRows, ...orchestratorRows];
+  }, [children.data, orchestrators.data, supportsOrchestrators]);
+
+  const newestKey =
+    [...rows].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.key ?? null;
+  const resolvedKey = launch
+    ? null
+    : selectedKey && rows.some((row) => row.key === selectedKey)
+      ? selectedKey
+      : newestKey;
+  if (resolvedKey !== selectedKey) setSelectedKey(resolvedKey);
+
+  const selected = rows.find((row) => row.key === resolvedKey) ?? null;
+  const groups = useMemo(
+    () => groupByRecency(rows, (row) => ({ updatedAt: row.updatedAt, pinned: false }), now),
+    [rows, now],
+  );
+
+  const chooseLaunch = (kind: "agent" | "orchestrator") => {
+    openSubagentLaunch(kind);
+    showSidePanelList(false);
   };
-  const submit = async () => {
-    if (!selected || !prompt.trim()) {
-      toast.error("A continuation or steering prompt is required.");
-      return;
-    }
-    try {
-      if (selected.kind === "coding-agent") {
-        await startChild.mutateAsync({
-          sessionId,
-          payload: {
-            profile: "general",
-            child_session_id: selected.id,
-            description: selected.description,
-            prompt: prompt.trim(),
-            background,
-          },
-        });
-      } else {
-        await startOrchestrator.mutateAsync({
-          sessionId,
-          payload: {
-            orchestrator_session_id: selected.id,
-            description: selected.description,
-            prompt: prompt.trim(),
-            background,
-          },
-        });
-      }
-      setSelected(null);
-      setPrompt("");
-    } catch (error) {
-      toast.error(`Unable to update delegated work: ${errorMessage(toRunError(error))}`);
-    }
+  const chooseRow = (key: string) => {
+    clearSubagentLaunch();
+    setSelectedKey(key);
+    showSidePanelList(false);
   };
-  const cancel = async (row: DelegatedSessionPresentation) => {
-    try {
-      if (row.kind === "coding-agent") {
-        await cancelChild.mutateAsync({ sessionId, childId: row.id });
-      } else {
-        await cancelOrchestrator.mutateAsync({ sessionId, orchestratorId: row.id });
-      }
-    } catch (error) {
-      toast.error(`Unable to cancel delegated work: ${errorMessage(toRunError(error))}`);
-    }
-  };
-  const renderRow = (row: DelegatedSessionPresentation) => (
-    <DelegatedSessionRow
-      key={`${row.kind}:${row.id}`}
-      session={row}
-      busy={busy}
-      onOpen={() => navigate(routes.session(row.id))}
-      onPrompt={() => openPrompt(row)}
-      onCancel={() => void cancel(row)}
-    />
+
+  const target: SubagentTarget = launch
+    ? { mode: launch === "agent" ? "new-agent" : "new-orchestrator" }
+    : selected
+      ? {
+          mode: selected.mode,
+          id: selected.id,
+          description: selected.description,
+          status: selected.status,
+          background: selected.background,
+        }
+      : { mode: "new-agent" };
+
+  // A failed poll keeps the last successful payload. Only an empty failure
+  // replaces the list; otherwise the rows would vanish on a dropped refetch.
+  const failed =
+    rows.length === 0 && (children.isError || (supportsOrchestrators && orchestrators.isError));
+  const list = failed ? (
+    <div role="alert" className="rounded-[6px] border border-error-primary p-3">
+      <div className="text-small text-error-primary">Subagents could not be loaded.</div>
+      <Button
+        className="mt-2"
+        size={ButtonSize.Small}
+        variant={ButtonVariant.Ghost}
+        onClick={() => {
+          void children.refetch();
+          if (supportsOrchestrators) void orchestrators.refetch();
+        }}
+      >
+        Try again
+      </Button>
+    </div>
+  ) : (
+    <div className="flex flex-col gap-8">
+      {groups.map((group) => (
+        <div key={group.label} className="flex flex-col gap-2">
+          <div className="flex items-baseline gap-2 px-2">
+            <span className="tag-label shrink-0 text-basic-muted">{group.label}</span>
+            <span className="h-px min-w-0 flex-1 bg-divider-muted" />
+          </div>
+          <div className="flex flex-col gap-1">
+            {group.items.map((row) => (
+              <ChatSessionButton
+                key={row.key}
+                title={row.description}
+                icon={row.icon}
+                running={row.status === "running"}
+                active={!launch && selected?.key === row.key}
+                onClick={() => chooseRow(row.key)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 
   return (
-    <div className="flex flex-1 flex-col gap-5 overflow-auto p-3">
-      <div>
-        <h2 className="header-small text-basic-primary">Delegated work</h2>
-        <p className="mt-1 text-small text-basic-secondary">
-          Live parent-owned work. Open a read-only transcript, steer a running session, continue a
-          finished generation, or cancel active work here.
-        </p>
-      </div>
-      <section aria-labelledby="coding-agents-heading" className="flex flex-col gap-2">
-        <h3 id="coding-agents-heading" className="tag-label uppercase text-basic-secondary">
-          Coding agents
-        </h3>
-        {children.isPending ? (
-          <div role="status" className="text-small text-basic-secondary">
-            Loading coding agents…
-          </div>
-        ) : children.isError ? (
-          <QueryError label="Coding agents" retry={() => void children.refetch()} />
-        ) : childRows.length ? (
-          childRows.map(renderRow)
+    <PanelSplit
+      listTitle="Subagents"
+      title={launch ? LAUNCH_COPY[launch].title : selected?.description}
+      listToolbar={
+        <div className="flex flex-col gap-1 border-b border-muted p-2">
+          <TabButton active={launch === "agent"} onClick={() => chooseLaunch("agent")}>
+            <Icon iconName={IconName.Add} />
+            <span className="min-w-0 flex-1 truncate text-left">New Agent</span>
+          </TabButton>
+          {supportsOrchestrators ? (
+            <TabButton
+              active={launch === "orchestrator"}
+              onClick={() => chooseLaunch("orchestrator")}
+            >
+              <Icon iconName={IconName.Add} />
+              <span className="min-w-0 flex-1 truncate text-left">New Orchestrator</span>
+            </TabButton>
+          ) : null}
+        </div>
+      }
+      list={list}
+    >
+      <div className="flex min-h-0 flex-1 flex-col">
+        {launch ? (
+          <LaunchEmpty kind={launch} />
+        ) : selected ? (
+          <SubagentPreview
+            sessionId={selected.id}
+            title={selected.description}
+            fallbackText={selected.fallbackText}
+            icon={selected.icon}
+          />
         ) : (
-          <Empty>None yet. Launch a coding agent from the people control below the composer.</Empty>
+          <LaunchEmpty kind="agent" />
         )}
-      </section>
-      {supportsOrchestrators ? (
-        <section aria-labelledby="nac-orchestrators-heading" className="flex flex-col gap-2">
-          <h3 id="nac-orchestrators-heading" className="tag-label uppercase text-basic-secondary">
-            NAC orchestrators
-          </h3>
-          {orchestrators.isPending ? (
-            <div role="status" className="text-small text-basic-secondary">
-              Loading NAC orchestrators…
-            </div>
-          ) : orchestrators.isError ? (
-            <QueryError label="NAC orchestrators" retry={() => void orchestrators.refetch()} />
-          ) : orchestratorRows.length ? (
-            orchestratorRows.map(renderRow)
-          ) : (
-            <Empty>
-              None yet. Launch a NAC orchestrator from the flow control below the composer.
-            </Empty>
-          )}
-        </section>
-      ) : null}
-      {selected?.canSteer ? (
-        <SteeringPromptModal
-          open
-          title={`Steer ${selected.description}`}
-          subheader={`${selected.typeLabel} · generation ${selected.generation}`}
-          value={prompt}
-          submitting={startChild.isPending || startOrchestrator.isPending}
-          disabled={busy}
-          onChange={setPrompt}
-          onClose={() => setSelected(null)}
-          onSubmit={() => void submit()}
-          footerLeading={
-            <label className="flex items-center gap-2 text-small text-basic-secondary">
-              <Switch checked={background} disabled={busy} onChange={setBackground} />
-              Run in background
-            </label>
-          }
-        />
-      ) : (
-        <Modal
-          open={selected != null}
-          onClose={() => setSelected(null)}
-          size={ModalSize.Wide}
-          title={selected ? `Continue ${selected.description}` : ""}
-          subheader={
-            selected ? `${selected.typeLabel} · generation ${selected.generation}` : undefined
-          }
-        >
-          <div className="flex flex-col gap-4">
-            <TextArea
-              label="Continuation prompt"
-              aria-label="Continuation prompt"
-              textAreaSize={TextAreaSize.Medium}
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              textAreaClassName="h-[140px] resize-none"
-            />
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <label className="flex items-center gap-2 text-small text-basic-secondary">
-                <Switch checked={background} disabled={busy} onChange={setBackground} />
-                Run in background
-              </label>
-              <Button
-                variant={ButtonVariant.Primary}
-                loading={startChild.isPending || startOrchestrator.isPending}
-                disabled={busy}
-                onClick={() => void submit()}
-              >
-                Continue
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-    </div>
+        <div className={cn("shrink-0 p-2")}>
+          <SubagentComposer
+            key={`${target.mode}:${"id" in target ? target.id : "new"}:${"status" in target ? target.status : ""}`}
+            autoFocus={launch != null}
+            focusRequest={launchRequest}
+            parentSessionId={sessionId}
+            target={target}
+            permissionSessionId={"id" in target ? target.id : sessionId}
+            permissionBehavior={
+              target.mode === "orchestrator" || target.mode === "new-orchestrator"
+                ? "orchestrator"
+                : "direct"
+            }
+            onStarted={(id) => {
+              clearSubagentLaunch();
+              setSelectedKey(
+                target.mode === "new-orchestrator" || target.mode === "orchestrator"
+                  ? `orchestrator:${id}`
+                  : `child:${id}`,
+              );
+            }}
+          />
+        </div>
+      </div>
+    </PanelSplit>
   );
 }

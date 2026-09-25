@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Button,
@@ -25,10 +25,19 @@ import type { SessionBehavior } from "@/app/types/api";
 interface OrchestratorControlsProps {
   sessionId: string;
   behavior: SessionBehavior | null;
+  /** The toolbar glyph. The spawn menu opens the same dialog without it. */
+  showTrigger?: boolean;
+  /** Increments to open the dialog from outside the trigger. */
+  openRequest?: number;
 }
 
 /** Internal durable NAC orchestration controls for the delegating direct behavior. */
-export function OrchestratorControls({ sessionId, behavior }: OrchestratorControlsProps) {
+export function OrchestratorControls({
+  sessionId,
+  behavior,
+  showTrigger = true,
+  openRequest = 0,
+}: OrchestratorControlsProps) {
   const enabled = behavior === "direct-with-orchestrator";
   const query = useManagedOrchestrators(sessionId, enabled);
   const start = useStartManagedOrchestrator();
@@ -37,6 +46,13 @@ export function OrchestratorControls({ sessionId, behavior }: OrchestratorContro
   const [description, setDescription] = useState("");
   const [prompt, setPrompt] = useState("");
   const [background, setBackground] = useState(true);
+  const handledOpenRequest = useRef(0);
+
+  useEffect(() => {
+    if (!enabled || openRequest === 0 || openRequest === handledOpenRequest.current) return;
+    handledOpenRequest.current = openRequest;
+    setOpen(true);
+  }, [enabled, openRequest]);
 
   if (!enabled) return null;
   const orchestrators = query.data ?? [];
@@ -67,27 +83,29 @@ export function OrchestratorControls({ sessionId, behavior }: OrchestratorContro
   };
   return (
     <>
-      <Tooltip title="Launch NAC orchestrator" position={TooltipPosition.TopCenter}>
-        <Button
-          size={ButtonSize.Small}
-          variant={
-            orchestrators.some((item) => item.status === "running")
-              ? ButtonVariant.GhostHighlightedAccent
-              : ButtonVariant.Ghost
-          }
-          content={ButtonContent.Icon}
-          aria-label="Launch NAC orchestrator"
-          onClick={() => setOpen(true)}
-        >
-          <Icon iconName={IconName.Flow} size={16} />
-        </Button>
-      </Tooltip>
+      {showTrigger ? (
+        <Tooltip title="Launch NAC orchestrator" position={TooltipPosition.TopCenter}>
+          <Button
+            size={ButtonSize.Small}
+            variant={
+              orchestrators.some((item) => item.status === "running")
+                ? ButtonVariant.GhostHighlightedAccent
+                : ButtonVariant.Ghost
+            }
+            content={ButtonContent.Icon}
+            aria-label="Launch NAC orchestrator"
+            onClick={() => setOpen(true)}
+          >
+            <Icon iconName={IconName.Flow} size={16} />
+          </Button>
+        </Tooltip>
+      ) : null}
       <Modal
         open={open}
         onClose={() => setOpen(false)}
         size={ModalSize.Wide}
         title="Launch NAC orchestrator"
-        subheader="Start a separate NAC planning session. Browse, steer, continue, and cancel it from Delegated work."
+        subheader="Start a separate NAC planning session. Browse, steer, continue, and cancel it from Subagents."
       >
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-3 rounded-[6px] bg-elevation-level-2 p-3">

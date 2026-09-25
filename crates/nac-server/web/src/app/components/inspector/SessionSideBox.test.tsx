@@ -17,6 +17,8 @@ vi.mock("@/app/hooks/useSessionFetching", () => ({ useSessionFetching: () => fal
 vi.mock("@/app/services/queries", () => ({
   useWorkspaceRevisionChanges: () => ({ data: null }),
   useWorkspaceRevisions: () => ({ data: [], isLoading: false, error: null }),
+  useTraditionalChildren: () => ({ data: [] }),
+  useManagedOrchestrators: () => ({ data: [] }),
 }));
 vi.mock("@/app/components/inspector/FilesView", () => ({ FilesView: () => <div>files</div> }));
 vi.mock("@/app/components/inspector/DelegatedWorkView", () => ({
@@ -66,7 +68,7 @@ describe("session side box tabs", () => {
     );
 
     expect(screen.queryByRole("tab", { name: "Sessions" })).toBeNull();
-    expect(screen.getByRole("tab", { name: "Delegated work" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Subagents" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Files" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByText("files")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));

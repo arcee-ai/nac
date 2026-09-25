@@ -736,10 +736,10 @@ test("asks for immutable behavior on every first and new chat", async ({
     },
   );
   expect(directPresentation.ok()).toBe(true);
-  await expect(page.getByRole("tab", { name: "Delegated work" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Subagents" })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("tab", { name: "Delegated work" })).toBeVisible();
-  await expect(page.getByText("Delegated work", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Subagents" })).toBeVisible();
+  await expect(page.getByText("Subagents", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
 
@@ -762,9 +762,9 @@ test("asks for immutable behavior on every first and new chat", async ({
     },
   );
   expect(hybridPresentation.ok()).toBe(true);
-  await page.getByRole("tab", { name: "Delegated work" }).click();
+  await page.getByRole("tab", { name: "Subagents" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${hybridSessionId}/delegated$`));
-  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Orchestrator" })).toBeVisible();
 
   const runningGate = new ScriptGate();
   harness.provider.enqueue(
@@ -780,17 +780,17 @@ test("asks for immutable behavior on every first and new chat", async ({
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
-  await expect(page.getByText("Coding agents", { exact: true })).toBeVisible();
-  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Agent" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Orchestrator" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Sessions" })).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: "Delegated work" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Subagents" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
 
   await expect(page.getByText(hybridTitle, { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: `${orchestratorTitle}, Orchestrator` }).click();
   await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
   await page.getByRole("button", { name: `${directTitle}, Direct` }).click();
-  await expect(page.getByRole("tab", { name: "Delegated work" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Subagents" })).toBeVisible();
   runningGate.release();
   expect((await runningRequest).status()).toBe(202);
   await waitForRunIdle(request, harness, directSessionId!);
