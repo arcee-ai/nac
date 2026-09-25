@@ -1,3 +1,4 @@
+import { IconName } from "@/app/atoms/icon";
 import type { SessionPanel } from "@/app/lib/routes";
 import type { SessionBehavior, SessionLineage } from "@/app/types/api";
 
@@ -31,7 +32,7 @@ export const SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = [
     editsDirectly: true,
     editing: "The top-level agent edits files and runs commands directly.",
     delegation: "It can launch fresh-context traditional coding agents.",
-    inspection: "Delegated work shows those traditional child sessions.",
+    inspection: "Subagents shows those traditional child sessions.",
   },
   {
     id: "direct-with-orchestrator",
@@ -41,7 +42,7 @@ export const SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = [
     editsDirectly: true,
     editing: "The top-level agent edits files and runs commands directly.",
     delegation: "It can launch traditional coding agents and separate NAC orchestrator sessions.",
-    inspection: "Delegated work keeps both delegated topologies distinct.",
+    inspection: "Subagents keeps both delegated topologies distinct.",
   },
 ];
 
@@ -53,6 +54,18 @@ export function sessionBehaviorPresentation(
 
 export function sessionBehaviorLabel(behavior: SessionBehavior): string {
   return sessionBehaviorPresentation(behavior).label;
+}
+
+/** Leading glyph on a chat row. Matches the new-session choices. */
+export function sessionBehaviorIcon(behavior: SessionBehavior | null | undefined): IconName {
+  switch (behavior) {
+    case "direct":
+      return IconName.Plane;
+    case "direct-with-orchestrator":
+      return IconName.PlaneAdd;
+    default:
+      return IconName.Orchestrator;
+  }
 }
 
 export interface SessionPanelPolicy {

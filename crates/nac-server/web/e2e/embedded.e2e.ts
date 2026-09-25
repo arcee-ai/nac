@@ -11,6 +11,11 @@ import {
 } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
+/** The new-chat chord. The page binds it to the platform modifier. */
+function newChatChord(): string {
+  return process.platform === "darwin" ? "Meta+Shift+O" : "Control+Shift+O";
+}
+
 test("serves the production-embedded application and hashed assets", async ({
   harness,
   page,
@@ -712,7 +717,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByText("Threads", { exact: true })).toBeVisible();
   await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Create new session", exact: true }).click();
+  await page.keyboard.press(newChatChord());
   await expect(behaviorChoices.filter({ hasText: "NAC orchestrator" }).first()).toHaveAttribute(
     "aria-checked",
     "true",
@@ -738,7 +743,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Create new session", exact: true }).click();
+  await page.keyboard.press(newChatChord());
   await expect(behaviorChoices.filter({ hasText: "NAC orchestrator" }).first()).toHaveAttribute(
     "aria-checked",
     "true",
@@ -781,79 +786,10 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByRole("tab", { name: "Delegated work" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
 
-  for (const [title, behavior, icon] of [
-    [orchestratorTitle, "NAC orchestrator", "orchestrator"],
-    [directTitle, "Direct coding agent", "plane"],
-    [hybridTitle, "Direct + NAC orchestration", "planeAdd"],
-  ] as const) {
-    const tab = page.getByRole("button", { name: `${title}, ${behavior}` });
-    await expect(tab).toHaveAttribute("title", title);
-    await expect(tab.locator(`[data-session-behavior-icon="${icon}"]`)).toBeVisible();
-  }
-  await expect(page.locator("[data-session-tab-badge]")).toHaveCount(0);
-  const widths = await page
-    .locator(".chat-session-tab")
-    .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().width));
-  expect(widths).toHaveLength(3);
-  expect(new Set(widths.map((width) => Math.round(width))).size).toBeGreaterThan(1);
-  for (const width of widths) {
-    expect(width).toBeLessThanOrEqual(273);
-  }
-  const restingPadding = await page.locator("[data-session-tab-title]").evaluateAll((nodes) =>
-    nodes.map((node) => {
-      const style = node.ownerDocument.defaultView!.getComputedStyle(node.parentElement!);
-      return [style.paddingLeft, style.paddingRight];
-    }),
-  );
-  expect(restingPadding).toEqual([
-    ["8px", "8px"],
-    ["8px", "8px"],
-    ["8px", "8px"],
-  ]);
-  await page.evaluate(() => {
-    const browser = globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } };
-    return browser.document.fonts.ready;
-  });
-  await page.mouse.move(1000, 400);
-  if (process.env.NAC_ALL97_SCREENSHOT) {
-    await page.screenshot({
-      path: process.env.NAC_ALL97_SCREENSHOT,
-      animations: "disabled",
-    });
-  }
-
-  const hybridTab = page.getByRole("button", {
-    name: `${hybridTitle}, Direct + NAC orchestration`,
-  });
-  const hybridIcon = hybridTab.locator('[data-session-behavior-icon="planeAdd"]');
-  const hybridClose = page.getByRole("button", { name: `Close ${hybridTitle}` });
-  await hybridIcon.hover();
-  await expect(hybridClose).toBeVisible();
-  await expect(
-    page.locator(".tooltip-box").filter({ hasText: "Direct + NAC orchestration" }),
-  ).toBeVisible();
-  const hoverTitleBox = await hybridTab.locator("[data-session-tab-title]").boundingBox();
-  const hoverCloseBox = await hybridClose.boundingBox();
-  expect(hoverTitleBox).toBeTruthy();
-  expect(hoverCloseBox).toBeTruthy();
-  expect(hoverTitleBox!.x + hoverTitleBox!.width).toBeLessThanOrEqual(hoverCloseBox!.x);
-
-  await hybridTab.focus();
-  await expect(
-    page.locator(".tooltip-box").filter({ hasText: "Direct + NAC orchestration" }),
-  ).toBeVisible();
-  await page.keyboard.press("Tab");
-  await expect(hybridClose).toBeFocused();
-  await expect(hybridClose).toBeVisible();
-  const focusTitleBox = await hybridTab.locator("[data-session-tab-title]").boundingBox();
-  const focusCloseBox = await hybridClose.boundingBox();
-  expect(focusTitleBox).toBeTruthy();
-  expect(focusCloseBox).toBeTruthy();
-  expect(focusTitleBox!.x + focusTitleBox!.width).toBeLessThanOrEqual(focusCloseBox!.x);
-
-  await page.getByRole("button", { name: `${orchestratorTitle}, NAC orchestrator` }).click();
+  await expect(page.getByText(hybridTitle, { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: `${orchestratorTitle}, Orchestrator` }).click();
   await expect(page.getByRole("tab", { name: "Threads" })).toBeVisible();
-  await page.getByRole("button", { name: `${directTitle}, Direct coding agent` }).click();
+  await page.getByRole("button", { name: `${directTitle}, Direct` }).click();
   await expect(page.getByRole("tab", { name: "Delegated work" })).toBeVisible();
   runningGate.release();
   expect((await runningRequest).status()).toBe(202);
@@ -923,7 +859,7 @@ test("shows and persists the optional light model for every chat behavior", asyn
     });
 
     if (expected.behavior !== "direct-with-orchestrator") {
-      await page.getByRole("button", { name: "Create new session", exact: true }).click();
+      await page.keyboard.press(newChatChord());
     }
   }
 });

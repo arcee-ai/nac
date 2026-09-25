@@ -1,6 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
-import { type SelectItem } from "@/app/atoms";
+import {
+  ButtonSize,
+  IconName,
+  PopoverPlacement,
+  Tooltip,
+  TooltipPosition,
+  type SelectItem,
+} from "@/app/atoms";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
@@ -11,9 +18,53 @@ import { useToast } from "@/app/providers/ToastProvider";
 import { useModelCatalog, useReadyProviderModels, useUpdateConfig } from "@/app/services/queries";
 import type { BackendKind, ReasoningEffort, SessionMetadata } from "@/app/types/api";
 
+const EFFORT_ROW_HINTS: Record<string, { title: string; description: string }> = {
+  "": {
+    title: "Default effort",
+    description:
+      "NAC does not send an effort. The model answers the way it does when the level is left unset.",
+  },
+  none: {
+    title: "None",
+    description:
+      "The model answers without a reasoning pass. This is the fastest and cheapest option.",
+  },
+  minimal: {
+    title: "Minimal",
+    description:
+      "A very short reasoning pass before the answer. Slightly more careful than none, still built for speed.",
+  },
+  low: {
+    title: "Low",
+    description:
+      "A light reasoning pass. Enough for small decisions, without a long investigation.",
+  },
+  medium: {
+    title: "Medium",
+    description: "A balanced reasoning pass. The model thinks the task through, then answers.",
+  },
+  high: {
+    title: "High",
+    description:
+      "A deep reasoning pass. The model spends more time checking its work, so replies are slower and cost more.",
+  },
+  xhigh: {
+    title: "X-High",
+    description: "Extra-deep reasoning for hard problems. Longer and more expensive than high.",
+  },
+  max: {
+    title: "Max",
+    description:
+      "The deepest reasoning this model offers. Slowest and most expensive, for the hardest tasks.",
+  },
+};
+
 const COMPOSER_EFFORT_OPTIONS: SelectItem[] = [
-  { id: "", label: "Default effort" },
-  ...EFFORT_LEVEL_OPTIONS,
+  { id: "", label: "Default effort", hoverHint: { ...EFFORT_ROW_HINTS[""], muted: true } },
+  ...EFFORT_LEVEL_OPTIONS.map((item) => ({
+    ...item,
+    hoverHint: { ...EFFORT_ROW_HINTS[item.id], muted: true },
+  })),
 ];
 
 /**
@@ -53,6 +104,9 @@ export function ModelPicker({
     () => reasoningOptionsFor(resolved.supportedEfforts, currentEffort, COMPOSER_EFFORT_OPTIONS),
     [resolved.supportedEfforts, currentEffort],
   );
+  const selectedEffort = effortItems.find((item) => item.id === currentEffort)?.label;
+  const effortLabel = typeof selectedEffort === "string" ? selectedEffort : "Default effort";
+  const [effortOpen, setEffortOpen] = useState(false);
 
   const chooseModel = async (pick: CatalogPick) => {
     if (!metadata || (pick.backend === metadata.backend && pick.model === metadata.model)) return;
@@ -111,7 +165,7 @@ export function ModelPicker({
   };
 
   return (
-    <div className="flex items-center gap-1 min-w-0">
+    <div className="flex min-w-0 items-center">
       <CatalogModelPicker
         catalog={catalog.data}
         loading={catalog.isLoading}
@@ -122,13 +176,27 @@ export function ModelPicker({
         value={currentPick}
         onSelect={(pick) => void chooseModel(pick)}
       />
-      <SmallSelect
-        items={effortItems}
-        value={currentEffort}
-        placeholder="Default effort"
-        disabled={disabled || !metadata || updateConfig.isPending}
-        onValueChange={(effort) => void chooseEffort(effort)}
-      />
+      <span aria-hidden className="h-6 w-px shrink-0 bg-divider-muted" />
+      <Tooltip
+        title={`Effort: ${effortLabel}`}
+        description="How much the model reasons before it answers."
+        position={TooltipPosition.TopCenter}
+        sticky
+        disabled={effortOpen}
+      >
+        <SmallSelect
+          items={effortItems}
+          value={currentEffort}
+          placeholder="Default effort"
+          disabled={disabled || !metadata || updateConfig.isPending}
+          size={ButtonSize.Small}
+          trailingIcon={IconName.Right}
+          triggerClassName="!gap-1.5 !pl-3"
+          placement={PopoverPlacement.TopCenter}
+          onOpenChange={setEffortOpen}
+          onValueChange={(effort) => void chooseEffort(effort)}
+        />
+      </Tooltip>
     </div>
   );
 }

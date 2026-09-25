@@ -237,7 +237,7 @@ export function CatalogModelPicker({
       // Portalled: the dialog scrolls its own body, which would clip the list.
       sticky
       // Popover's root defaults to `w-fit`, which swallows `w-full` on the trigger.
-      className={cn("shrink-0", isMobile && "w-full")}
+      className={cn(compact ? "min-w-0" : "shrink-0", isMobile && "w-full")}
       panelClassName="p-2 overflow-hidden"
       // The sheet sizes to its content by default (only max-h). Pin the sheet
       // itself to 70dvh — a height on the child alone loses to flex-1 + auto parent.
@@ -326,14 +326,29 @@ export function CatalogModelPicker({
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-label={compact ? "Model" : undefined}
-        className={compact ? "max-w-[190px]" : "w-full md:w-[280px]"}
+        className={compact ? "min-w-0 max-w-full !gap-1.5 !pr-3" : "w-full md:w-[280px]"}
       >
         {compact ? <Icon iconName={IconName.Brain} /> : null}
-        <span className="flex-1 min-w-0 text-left truncate">{label}</span>
+        <span
+          className={cn(
+            "min-w-0 text-left truncate",
+            compact ? "label-micro max-w-[96px]" : "flex-1",
+          )}
+        >
+          {label}
+        </span>
         {/* Some providers name their flagship after themselves; saying it twice
-            on one line reads like a mistake. */}
+            on one line reads like a mistake. The composer draws the account
+            name quieter and shorter than the model name. */}
         {value && providerLabel(value.backend) !== label ? (
-          <span className="text-micro text-basic-muted truncate max-w-[110px]">
+          <span
+            className={cn(
+              "truncate",
+              compact
+                ? "label-micro max-w-[72px] text-basic-tertiary"
+                : "text-micro text-basic-muted max-w-[110px]",
+            )}
+          >
             {providerLabel(value.backend)}
           </span>
         ) : null}

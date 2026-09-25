@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import {
   ChatSessionButton,
+  DropdownContent,
   Icon,
   IconName,
   ProjectButton,
@@ -15,7 +16,7 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun } from "@/app/lib/format";
 import { groupByRecency, projectEntries } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
-import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
+import { sessionBehaviorIcon, sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
@@ -108,7 +109,7 @@ export function SidebarProjectList({
               )
             : entry.sessions;
         return (
-          <section key={projectId} className="border-b border-muted">
+          <section key={projectId} className="border-b border-muted py-4">
             <div className="px-2 py-1">
               <ProjectButton
                 entityId={projectId}
@@ -118,7 +119,12 @@ export function SidebarProjectList({
                 onClick={() => toggle(projectId)}
               />
             </div>
-            {open ? (
+            <DropdownContent
+              isOpen={open}
+              inert={!open}
+              aria-hidden={!open}
+              className="w-full duration-500 ease-in-out"
+            >
               <ProjectSessions
                 sessions={sessionsForProject}
                 activeSessionId={activeSessionId}
@@ -133,7 +139,7 @@ export function SidebarProjectList({
                 now={now}
                 onOpen={(sessionId) => navigate(routes.session(sessionId))}
               />
-            ) : null}
+            </DropdownContent>
           </section>
         );
       })}
@@ -243,7 +249,7 @@ function ProjectSessions({
     <div className="flex flex-col gap-1 px-2 pb-2">
       {shown.map((group) => (
         <div key={group.label} className="flex flex-col">
-          <p className="label-micro text-basic-muted uppercase px-2 pt-2 pb-1">{group.label}</p>
+          <p className="tag-label text-basic-tertiary uppercase px-2 pt-4 pb-4">{group.label}</p>
           <div className="flex flex-col gap-0.5">
             {group.items.map((entry) => {
               const title = sessionTitle(entry.summary);
@@ -252,8 +258,7 @@ function ProjectSessions({
                 <ChatSessionButton
                   key={entry.summary.session_id}
                   title={title}
-                  badge={behavior.navigationLabel}
-                  badgeLabel={behavior.label}
+                  icon={sessionBehaviorIcon(entry.summary.behavior)}
                   aria-label={`${title}, ${behavior.navigationLabel}`}
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}

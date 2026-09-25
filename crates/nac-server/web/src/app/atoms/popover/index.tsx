@@ -152,7 +152,7 @@ const Popover: React.FC<PopoverProps> & {
   );
 
   return (
-    <div ref={containerRef} className={cn("relative w-fit h-fit", className)}>
+    <div ref={containerRef} className={cn("relative w-fit h-fit leading-[0]", className)}>
       {children}
       {asSheet ? (
         <BottomSheet open={open} onClose={onClose} className={sheetClassName}>

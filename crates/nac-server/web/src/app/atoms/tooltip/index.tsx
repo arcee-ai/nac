@@ -69,6 +69,8 @@ interface StickyTooltipProps extends TooltipBoxProps {
   position: TooltipPosition;
   boxClassName?: string;
   showOnMobile?: boolean;
+  /** Keep the trigger mounted, but do not draw the tip. */
+  disabled?: boolean;
   children?: React.ReactNode;
 }
 
@@ -89,6 +91,7 @@ const StickyTooltip: React.FC<StickyTooltipProps> = ({
   className,
   boxClassName,
   showOnMobile = false,
+  disabled = false,
   children,
 }) => {
   const isMobile = useIsMobile();
@@ -108,13 +111,21 @@ const StickyTooltip: React.FC<StickyTooltipProps> = ({
   const boxRef = useRef<HTMLDivElement>(null);
 
   const show = useCallback(() => {
+    if (disabled) return;
     const anchor = anchorRef.current;
     if (anchor) setTrigger(anchor.getBoundingClientRect());
-  }, []);
+  }, [disabled]);
   const hide = useCallback(() => {
     setTrigger(null);
     setCoords(null);
   }, []);
+
+  // A tip already on screen has to leave when it becomes disabled, without
+  // unmounting the trigger — that would reset whatever the tip wraps.
+  if (disabled && trigger) {
+    setTrigger(null);
+    setCoords(null);
+  }
 
   useLayoutEffect(() => {
     if (!trigger || isMobile) return undefined;
@@ -189,14 +200,14 @@ const StickyTooltip: React.FC<StickyTooltipProps> = ({
   return (
     <div
       ref={anchorRef}
-      className={cn("w-fit h-fit", className)}
+      className={cn("w-fit h-fit leading-[0]", className)}
       onMouseEnter={isMobile ? undefined : show}
       onMouseLeave={isMobile ? undefined : hide}
       onFocusCapture={isMobile ? undefined : show}
       onBlurCapture={isMobile ? undefined : hide}
     >
       {children}
-      {!isMobile && trigger
+      {!isMobile && !disabled && trigger
         ? createPortal(
             <TooltipBox
               boxRef={boxRef}
@@ -255,9 +266,6 @@ const Tooltip: React.FC<TooltipProps> & {
 }) => {
   const isMobile = useIsMobile();
 
-  if (disabled) {
-    return <div className={cn("w-fit h-fit", className)}>{children}</div>;
-  }
   if (sticky) {
     return (
       <StickyTooltip
@@ -268,6 +276,7 @@ const Tooltip: React.FC<TooltipProps> & {
         className={className}
         boxClassName={boxClassName}
         showOnMobile={showTooltipOnMobile}
+        disabled={disabled}
       >
         {children}
       </StickyTooltip>
@@ -275,9 +284,9 @@ const Tooltip: React.FC<TooltipProps> & {
   }
   // Absolute (non-sticky) tips rely on hover; hide them on a phone.
   return (
-    <div className={cn("relative w-fit h-fit group", className)}>
+    <div className={cn("relative w-fit h-fit leading-[0] group", className)}>
       {children}
-      {!isMobile ? (
+      {!isMobile && !disabled ? (
         <TooltipBox
           title={title}
           description={description}

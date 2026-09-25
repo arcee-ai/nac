@@ -37,7 +37,7 @@ function initialOpen(): boolean {
  * put, and the 320px panel slides over it. The rail's width is what the rest of
  * the row lays out against, so opening the panel pushes the chat aside.
  */
-export function LeftSidebar() {
+export function LeftSidebar({ variant = "session" }: { variant?: "session" | "projects" }) {
   const [isOpen, setIsOpen] = useState(initialOpen);
   const toggle = useCallback(() => setIsOpen((open) => !open), []);
   const commands = useSidebarCommands();
@@ -70,7 +70,12 @@ export function LeftSidebar() {
     >
       {isOpen ? null : (
         <div className="absolute inset-y-0 left-0 w-[52px]">
-          <LeftSidebarRail commands={commands} onToggle={toggle} toggleKeys={TOGGLE_KEYS} />
+          <LeftSidebarRail
+            commands={commands}
+            onToggle={toggle}
+            toggleKeys={TOGGLE_KEYS}
+            variant={variant}
+          />
         </div>
       )}
       <div
@@ -86,6 +91,7 @@ export function LeftSidebar() {
           commands={commands}
           onToggle={toggle}
           toggleKeys={TOGGLE_KEYS}
+          variant={variant}
         />
       </div>
       {commands.modals}

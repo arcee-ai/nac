@@ -41,10 +41,12 @@ export function TopBar() {
   const managed = useManagedHost();
   const sidebarOffset = useSidebarOffset();
   const inTrail = sessionIdFromPath(pathname) !== null || projectIdFromPath(pathname) !== null;
-  // A wide session already has the sidebar for navigation, so the bar would
-  // only sit on top of the chat. A phone still needs it: there is no rail,
-  // and this is where the side box is opened.
-  if (!isMobile && sessionIdFromPath(pathname) !== null) return null;
+  // A wide session or the project list already has the sidebar for navigation,
+  // so the bar would only sit on top of that chrome. A phone still needs it:
+  // there is no rail, and this is where the side box is opened.
+  if (!isMobile && (sessionIdFromPath(pathname) !== null || pathname === routes.list())) {
+    return null;
+  }
 
   return (
     <>

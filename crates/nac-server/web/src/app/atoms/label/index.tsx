@@ -12,6 +12,8 @@ export enum LabelSize {
 export interface HoverHintConfig {
   title: string;
   description?: string;
+  /** Quieter glyph. Needed inside buttons, which paint every icon. */
+  muted?: boolean;
 }
 
 const iconSizeFor = {
@@ -70,6 +72,7 @@ const Label: React.FC<LabelProps> & { Size: typeof LabelSize } = ({
       <HoverHint
         title={hoverHint.title}
         description={hoverHint.description}
+        muted={hoverHint.muted}
         size={hintSizeFor[size]}
       />
     ) : null}

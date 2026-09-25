@@ -77,12 +77,21 @@ function Status({ busy, children }: { busy?: boolean; children: React.ReactNode 
 }
 
 /**
- * The branch chip in the box footer, opening a list of local branches with an
+ * The branch chip in the session header, opening a list of local branches with an
  * escape hatch for making a new one. Switching is refused while an agent could
  * be working in the checkout; the server enforces the same rules, because
  * another session may share this directory.
  */
-export function BranchPicker({ sessionId, branch }: { sessionId: string; branch: string }) {
+export function BranchPicker({
+  sessionId,
+  branch,
+  placement = PopoverPlacement.TopRight,
+}: {
+  sessionId: string;
+  branch: string;
+  /** Footer chips open upward. A header chip opens downward. */
+  placement?: PopoverPlacement;
+}) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -122,8 +131,8 @@ export function BranchPicker({ sessionId, branch }: { sessionId: string; branch:
     <Popover
       open={open}
       onClose={close}
-      // The chip sits in the footer, so the panel has to grow upwards.
-      placement={PopoverPlacement.TopRight}
+      placement={placement}
+      sticky
       className="min-w-0"
       content={
         <div className="h-[calc(70dvh)] md:h-[280px] flex flex-col">

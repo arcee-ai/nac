@@ -1,5 +1,7 @@
 import React, { useRef, useEffect, useState } from "react";
 
+import { cn } from "@/app/lib/cn";
+
 interface DropdownContentProps extends React.HTMLAttributes<HTMLDivElement> {
   isOpen: boolean;
   children: React.ReactNode;
@@ -104,7 +106,7 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
     <div
       {...props}
       ref={containerRef}
-      className={`${overflowClass} transition-[height] duration-150 ease-out ${className}`}
+      className={cn(overflowClass, "transition-[height] duration-150 ease-out", className)}
       style={{
         height: `${height}px`,
         ...props.style,

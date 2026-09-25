@@ -2,7 +2,6 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useNavigate } from "react-router-dom";
 
 import {
-  BoxSurface,
   Button,
   ButtonContent,
   ButtonSize,
@@ -10,12 +9,11 @@ import {
   Icon,
   IconName,
   Modal,
-  Separator,
   StickyButton,
   StickyInput,
   StickyInputVariant,
-  Tooltip,
 } from "@/app/atoms";
+import { LeftSidebar } from "@/app/components/LeftSidebar";
 import { GroupLabel } from "@/app/components/projects/GroupLabel";
 import {
   ProjectCard,
@@ -35,7 +33,6 @@ import {
   type ProjectListItem,
 } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
-import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { pinGroup, targetIndexInGroup, type DropEdge } from "@/app/lib/sessionOrder";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
@@ -258,9 +255,6 @@ export default function ProjectsListPage() {
   const pinned = items.filter(isPinned);
   const unpinned = items.filter((item) => item.kind === "project" && !isPinned(item));
   const orphans = items.filter((item) => item.kind === "orphan");
-  const projectCount = items.filter((item) => item.kind === "project").length;
-  const countLabel = `${projectCount} ${projectCount === 1 ? "project" : "projects"}`;
-
   const fullPinned = useMemo(() => pinnedGroup(projects, true), [projects]);
   const fullUnpinned = useMemo(() => pinnedGroup(projects, false), [projects]);
   const fullOrphans = useMemo(() => orphanSessions(allSessions), [allSessions]);
@@ -542,32 +536,6 @@ export default function ProjectsListPage() {
     );
   };
 
-  const newButton = managed.isManaged ? (
-    <Button
-      variant={ButtonVariant.Primary}
-      size={ButtonSize.Medium}
-      content={ButtonContent.IconLeft}
-      onClick={managed.addRepository}
-    >
-      <Icon iconName={IconName.Add} size={16} /> Add repository
-    </Button>
-  ) : (
-    <Tooltip
-      title="New project"
-      keyboardShortcuts={NEW_PROJECT_KEYS}
-      position={Tooltip.Position.BottomLeft}
-    >
-      <Button
-        variant={ButtonVariant.Primary}
-        size={ButtonSize.Medium}
-        content={ButtonContent.IconLeft}
-        onClick={projectActions.create}
-      >
-        <Icon iconName={IconName.Add} size={16} /> New
-      </Button>
-    </Tooltip>
-  );
-
   // Pinned under the bar rather than scrolling with the cards, so search and
   // filters stay in reach. The 144px of head room below clears it.
   const searchBar = (
@@ -611,27 +579,21 @@ export default function ProjectsListPage() {
     </Modal>
   );
 
-  const rail = (
-    <BoxSurface
-      title={countLabel}
-      headerContent={<div className="flex items-center gap-2 shrink-0">{newButton}</div>}
-      className="h-full"
-      bodyClassName="overflow-auto"
-    >
-      <SessionFilters sessions={allSessions} />
-    </BoxSurface>
-  );
-
   if (!isLoading && !error && all.length === 0) {
     return (
-      <ProjectsEmptyState
-        mobile={isMobile}
-        onStart={projectActions.create}
-        onAddRepository={managed.isManaged ? managed.addRepository : undefined}
-        onManagedSettings={managed.isManaged ? managed.openSettings : undefined}
-        modelReady={managed.status?.model_ready}
-        githubConnected={managed.status?.github_status === "connected"}
-      />
+      <div className="flex h-full min-h-0">
+        {isMobile ? null : <LeftSidebar variant="projects" />}
+        <div className="min-h-0 min-w-0 flex-1">
+          <ProjectsEmptyState
+            mobile={isMobile}
+            onStart={projectActions.create}
+            onAddRepository={managed.isManaged ? managed.addRepository : undefined}
+            onManagedSettings={managed.isManaged ? managed.openSettings : undefined}
+            modelReady={managed.status?.model_ready}
+            githubConnected={managed.status?.github_status === "connected"}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -644,23 +606,18 @@ export default function ProjectsListPage() {
 
   return (
     <div className="flex h-full min-h-0">
-      {isMobile ? null : <aside className="w-[360px] shrink-0 p-2 pt-16 min-h-0">{rail}</aside>}
+      {isMobile ? null : <LeftSidebar variant="projects" />}
       {isMobile ? searchBar : null}
       {isMobile ? filtersDialog : null}
 
       <div
         className={cn(
           "flex-1 min-h-0 overflow-auto",
-          isMobile ? "px-2" : "px-4",
+          isMobile ? "px-2" : "px-8",
           drag && "select-none cursor-grabbing",
         )}
       >
-        <div
-          className={cn(
-            "flex flex-col gap-6 [&>*]:shrink-0",
-            isMobile ? "pt-36 pb-8" : "pt-16 pb-2",
-          )}
-        >
+        <div className={cn("flex flex-col gap-6 [&>*]:shrink-0", isMobile ? "pt-36 pb-8" : "py-4")}>
           {error ? (
             <div className="flex items-center gap-2 label-small text-error-primary">
               <span>{errorMessage(error)}</span>
@@ -684,22 +641,19 @@ export default function ProjectsListPage() {
           ) : null}
 
           {pinned.length > 0 || showPinDropZone ? (
-            <>
-              <CardGrid single={isMobile}>
-                {pinned.map(renderCard)}
-                {showPinDropZone ? (
-                  <div
-                    data-pin-drop-zone="true"
-                    className={cn(
-                      "min-h-[112px] rounded-[8px] border-2 border-dashed",
-                      pinZoneActive && "bg-info-primary/10",
-                    )}
-                    style={{ borderColor: "var(--blue-500)" }}
-                  />
-                ) : null}
-              </CardGrid>
-              <Separator />
-            </>
+            <CardGrid single={isMobile}>
+              {pinned.map(renderCard)}
+              {showPinDropZone ? (
+                <div
+                  data-pin-drop-zone="true"
+                  className={cn(
+                    "min-h-[112px] rounded-[8px] border-2 border-dashed",
+                    pinZoneActive && "bg-info-primary/10",
+                  )}
+                  style={{ borderColor: "var(--blue-500)" }}
+                />
+              ) : null}
+            </CardGrid>
           ) : null}
           {unpinned.length > 0 ? (
             <CardGrid single={isMobile}>{unpinned.map(renderCard)}</CardGrid>
@@ -708,7 +662,7 @@ export default function ProjectsListPage() {
               what the page is, and pinning is already legible from the cards. */}
           {orphans.length > 0 ? (
             <>
-              <GroupLabel>Unassigned Sessions</GroupLabel>
+              <GroupLabel>Unassigned chat sessions</GroupLabel>
               <CardGrid single={isMobile}>{orphans.map(renderCard)}</CardGrid>
             </>
           ) : null}
