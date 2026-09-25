@@ -64,7 +64,7 @@ export function useSidebarCommands() {
     openMcp: () => setMcp(true),
     openSsh: () => setSsh(true),
     openConfigurations: () => setConfiguring(true),
-    openManaged: managed.isManaged ? managed.openSettings : null,
+    openManaged: managed.openSettings,
     modals: (
       <>
         <ConfigurationsModal open={configuring} onClose={() => setConfiguring(false)} />

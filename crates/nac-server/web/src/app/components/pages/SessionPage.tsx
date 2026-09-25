@@ -15,14 +15,14 @@ import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
 import { RightSidebarRail } from "@/app/components/inspector/RightSidebarRail";
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
-import { TopSingleSessionHeader } from "@/app/components/inspector/TopSingleSessionHeader";
 import { Transcript } from "@/app/components/inspector/Transcript";
-import { LeftSidebar } from "@/app/components/LeftSidebar";
+import { TopSingleSessionHeader } from "@/app/components/inspector/TopSingleSessionHeader";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
+import type { SessionBehavior } from "@/app/types/api";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
 import {
   DEFAULT_SESSION_PANEL,
@@ -41,8 +41,8 @@ import { clearAttention } from "@/app/store/attentionStore";
 import {
   bindSidePanelProject,
   resetSessionSelection,
-  revealSidePanel,
   setSidePanelAnimate,
+  revealSidePanel,
   showSidePanelList,
   toggleSidePanelCollapsed,
   toggleSidePanelExpanded,
@@ -131,13 +131,23 @@ export default function SessionPage() {
   useSessionStream(id);
   useRunStateSync(snapshot?.active_run);
   useAutoSshConnect(id, entry?.summary);
-  const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator";
-  const panelPolicy = sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
-  const sessionPanels = panelPolicy.mobilePanels;
+  // An omitted behavior on a loaded session is the legacy orchestrator. An
+  // unloaded session is not that default: painting Threads/Files/Worksets and
+  // then replacing them is a flash.
+  const behaviorKnown = entry != null || snapshot != null;
+  const behavior: SessionBehavior | null = behaviorKnown
+    ? (entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator")
+    : null;
+  const panelPolicy =
+    behavior == null ? null : sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
+  const sessionPanels = panelPolicy?.mobilePanels ?? [];
   const requestedPanel = isSessionPanel(panel) ? panel : DEFAULT_SESSION_PANEL;
-  const effectivePanel = sessionPanels.includes(requestedPanel)
-    ? requestedPanel
-    : panelPolicy.defaultPanel;
+  const effectivePanel =
+    panelPolicy == null
+      ? requestedPanel
+      : panelPolicy.mobilePanels.includes(requestedPanel)
+        ? requestedPanel
+        : panelPolicy.defaultPanel;
 
   useEffect(() => {
     if (!id || !snapshot || !isSessionPanel(panel) || panel === effectivePanel) return;
@@ -161,8 +171,8 @@ export default function SessionPage() {
     bindSidePanelProject(projectKey);
   }, [projectKey]);
 
-  // Restored after paint, so a launch that skipped the tween has already
-  // landed at full width before the animation comes back.
+  // Restored after paint, so the launch open has already landed at full width
+  // and putting the tween back does not replay it.
   useEffect(() => {
     if (animateSidePanel) return undefined;
     const frame = requestAnimationFrame(() => setSidePanelAnimate(true));
@@ -213,17 +223,14 @@ export default function SessionPage() {
     <SessionSideBox
       sessionId={id}
       snapshot={snapshot}
+      behavior={behavior}
       panel={effectivePanel}
       onPanelChange={goToPanel}
     />
   );
 
   return (
-    <section className="relative flex h-full min-h-0 overflow-hidden bg-elevation-ground">
-      {/* A phone has no room for the rail: the chat takes the screen and the
-          box comes up as the dialog below instead. */}
-      {isMobile ? null : <LeftSidebar />}
-
+    <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground">
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
         <div
           className={cn(
@@ -290,7 +297,7 @@ export default function SessionPage() {
                     sessionId={id}
                     snapshot={snapshot}
                     behavior={behavior}
-                    panels={panelPolicy.widePanels}
+                    panels={panelPolicy?.widePanels ?? []}
                     onOpen={toggleSidePanelCollapsed}
                     onSelect={focusPanel}
                   />
@@ -313,12 +320,7 @@ export default function SessionPage() {
               aria-hidden={collapsed}
               inert={collapsed}
             >
-              <div
-                className={cn(
-                  "flex flex-col flex-1 min-h-0 transition-opacity duration-150 ease-out",
-                  collapsed && "opacity-0",
-                )}
-              >
+              <div className="flex flex-col flex-1 min-h-0">
                 {/* While the dialog is up it owns the panels, so this half stays
                   empty behind the scrim instead of running them twice. */}
                 <div className="flex-1 min-h-0">{expanded ? null : sideBox}</div>
@@ -385,15 +387,17 @@ export default function SessionPage() {
           bodyClassName="!p-0 relative flex flex-col overflow-hidden"
         >
           <div className="flex flex-col flex-1 min-h-0">{sideBox}</div>
-          <MobileBottomBar
-            panel={effectivePanel}
-            panels={sessionPanels}
-            onPanelChange={(next) => {
-              // A fresh tab opens on the row it already has, not its list.
-              showSidePanelList(false);
-              goToPanel(next);
-            }}
-          />
+          {sessionPanels.length > 0 ? (
+            <MobileBottomBar
+              panel={effectivePanel}
+              panels={sessionPanels}
+              onPanelChange={(next) => {
+                // A fresh tab opens on the row it already has, not its list.
+                showSidePanelList(false);
+                goToPanel(next);
+              }}
+            />
+          ) : null}
         </Modal>
       ) : (
         <Modal

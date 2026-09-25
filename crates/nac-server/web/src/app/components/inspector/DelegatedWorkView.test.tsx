@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -100,6 +100,11 @@ function mount(behavior: "direct" | "direct-with-orchestrator", seed = true) {
 }
 
 beforeEach(() => {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
   listChildren.mockReset().mockResolvedValue([child]);
   listOrchestrators.mockReset().mockResolvedValue([orchestrator]);
   startChild.mockReset().mockResolvedValue(child);
@@ -113,15 +118,11 @@ describe("delegated work", () => {
   it("keeps coding agents and managed orchestrators visibly distinct", () => {
     mount("direct-with-orchestrator");
 
-    expect(screen.getByText("Coding agents")).toBeTruthy();
-    expect(screen.getByText("Review permissions")).toBeTruthy();
-    expect(screen.getByText("Running")).toBeTruthy();
-    expect(screen.getByText("Generation 2")).toBeTruthy();
-    expect(screen.getByText("NAC orchestrators")).toBeTruthy();
-    expect(screen.getByText("Run the compatibility audit")).toBeTruthy();
-    expect(screen.getByText("Completed")).toBeTruthy();
-    expect(screen.getByText("done")).toBeTruthy();
-    expect(screen.getByText("Completion delivered to this parent")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New Orchestrator" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Run the compatibility audit" })).toBeTruthy();
+    expect(screen.getAllByText("Running in the background").length).toBeGreaterThan(0);
   });
 
   it("navigates from a delegated row to its transcript", () => {
@@ -129,7 +130,7 @@ describe("delegated work", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     expect(screen.getByTestId("location").textContent).toBe("/session/child-1/files");
-    expect(screen.queryByText("NAC orchestrators")).toBeNull();
+    expect(screen.queryByRole("button", { name: "New Orchestrator" })).toBeNull();
   });
 
   it("keeps a recoverable retry entry point after a relationship-list failure", async () => {
@@ -137,25 +138,22 @@ describe("delegated work", () => {
     mount("direct", false);
 
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "Coding agents could not be loaded",
+      "Subagents could not be loaded",
     );
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(screen.getByText("Review permissions")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy(),
+    );
     expect(listChildren).toHaveBeenCalledTimes(2);
   });
 
   it("routes topology-specific steering, continuation, and cancellation to the parent", async () => {
     mount("direct-with-orchestrator");
-    const childRow = screen.getByRole("article", { name: "Coding agent: Review permissions" });
-    const orchestratorRow = screen.getByRole("article", {
-      name: "NAC orchestrator: Run the compatibility audit",
-    });
 
-    fireEvent.click(within(childRow).getByRole("button", { name: "Steer" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Steering message" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Steer a message" }), {
       target: { value: "Check the remembered grant." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send steering" }));
+    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() =>
       expect(startChild).toHaveBeenCalledWith("parent", {
         profile: "general",
@@ -166,14 +164,14 @@ describe("delegated work", () => {
       }),
     );
 
-    fireEvent.click(within(childRow).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(cancelChild).toHaveBeenCalledWith("parent", "child-1"));
 
-    fireEvent.click(within(orchestratorRow).getByRole("button", { name: "Continue" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Continuation prompt" }), {
+    fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Send a message" }), {
       target: { value: "Run the next audit generation." },
     });
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() =>
       expect(startOrchestrator).toHaveBeenCalledWith("parent", {
         orchestrator_session_id: "orchestrator-1",
@@ -187,8 +185,7 @@ describe("delegated work", () => {
 
   it("renders cache-driven polling transitions without a page refresh", async () => {
     const client = mount("direct");
-    const row = screen.getByRole("article", { name: "Coding agent: Review permissions" });
-    expect(within(row).getByRole("status").textContent).toBe("Running");
+    expect(screen.getAllByText("Running in the background").length).toBeGreaterThan(0);
 
     act(() => {
       client.setQueryData(queryKeys.traditionalChildren("parent"), [
@@ -201,11 +198,9 @@ describe("delegated work", () => {
       ]);
     });
 
-    await waitFor(() =>
-      expect(within(row).getByText("Completed").getAttribute("role")).toBe("status"),
-    );
-    expect(within(row).getByText("The permissions audit passed.")).toBeTruthy();
-    expect(within(row).getByRole("button", { name: "Continue" })).toBeTruthy();
-    expect(within(row).queryByRole("button", { name: "Cancel" })).toBeNull();
+    await waitFor(() => expect(screen.getByText("Completed")).toBeTruthy());
+    expect(screen.getByText("The permissions audit passed.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { cn } from "@/app/lib/cn";
 import { MOD } from "@/app/lib/shortcuts";
@@ -38,27 +39,32 @@ function initialOpen(): boolean {
  * the row lays out against, so opening the panel pushes the chat aside.
  */
 export function LeftSidebar({ variant = "session" }: { variant?: "session" | "projects" }) {
+  const isMobile = useIsMobile();
   const [isOpen, setIsOpen] = useState(initialOpen);
   const toggle = useCallback(() => setIsOpen((open) => !open), []);
   const commands = useSidebarCommands();
 
   useLayoutEffect(() => {
-    setSidebarOffset(isOpen ? SIDEBAR_PANEL_WIDTH : SIDEBAR_RAIL_WIDTH);
-  }, [isOpen]);
+    setSidebarOffset(isMobile ? 0 : isOpen ? SIDEBAR_PANEL_WIDTH : SIDEBAR_RAIL_WIDTH);
+  }, [isMobile, isOpen]);
 
   useLayoutEffect(() => {
     return () => setSidebarOffset(0);
   }, []);
 
   useEffect(() => {
+    if (isMobile) return;
     try {
       localStorage.setItem(STORAGE_KEY, isOpen ? "1" : "0");
     } catch {
       // Preference is convenience; the sidebar still works without it.
     }
-  }, [isOpen]);
+  }, [isMobile, isOpen]);
 
-  useKeyboardShortcuts([{ keys: TOGGLE_KEYS, onTrigger: toggle }]);
+  useKeyboardShortcuts([{ keys: TOGGLE_KEYS, onTrigger: toggle, enabled: !isMobile }]);
+
+  // A phone has no room for the rail: the chat takes the screen.
+  if (isMobile) return null;
 
   return (
     <div

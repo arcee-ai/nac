@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   Button,
@@ -16,13 +17,17 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { AgentSpawnButton } from "@/app/components/inspector/AgentSpawnMenu";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { GoalControls } from "@/app/components/inspector/GoalControls";
+import { GoalEditor, GoalFlag } from "@/app/components/inspector/GoalComposer";
 import { ChildControls } from "@/app/components/inspector/ChildControls";
 import { OrchestratorControls } from "@/app/components/inspector/OrchestratorControls";
+import { SubagentSessionComposer } from "@/app/components/inspector/SubagentComposer";
 import { SshBadge } from "@/app/components/SshBadge";
 import { resolveCatalogModel, type ResolvedCatalogModel } from "@/app/lib/catalog";
+import { routes } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import {
   displayPromptFromMessageText,
@@ -64,6 +69,7 @@ import {
   useUpdateInboxItem,
 } from "@/app/services/queries";
 import { consumePromptRequests } from "@/app/store/composerStore";
+import { openSubagentLaunch, revealSidePanel } from "@/app/store/sessionLayoutStore";
 import {
   liftSessionSpend,
   pushLocalEvent,
@@ -257,6 +263,7 @@ function contextGauge(used: number | null, resolved: ResolvedCatalogModel) {
  * model, environment, cumulative token usage and the run timer.
  */
 export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) {
+  const navigate = useNavigate();
   perfRender("ChatInputBox");
   const [value, setValue] = useState("");
   // Async submission must only clear the prompt it actually sent. A user can
@@ -303,6 +310,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const updateGoal = useUpdateGoal();
   const clearGoal = useClearGoal();
   const [goalOpenRequest, setGoalOpenRequest] = useState(0);
+  const [goalEditing, setGoalEditing] = useState(false);
+  const [goalSessionId, setGoalSessionId] = useState(sessionId);
+  if (goalSessionId !== sessionId) {
+    setGoalSessionId(sessionId);
+    setGoalEditing(false);
+  }
   const {
     data: commandDefinitions,
     isError: commandsFailed,
@@ -631,7 +644,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
       const argument = text.trim().slice("/goal".length).trim();
       if (argument === "" || argument === "edit") {
-        setGoalOpenRequest((request) => request + 1);
+        if (isMobile) setGoalOpenRequest((request) => request + 1);
+        else setGoalEditing(true);
         return;
       }
       if (argument === "clear") {
@@ -662,7 +676,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       }
       await createGoal.mutateAsync({ sessionId, payload: { objective: argument } });
     },
-    [clearGoal, createGoal, direct, goalQuery, sessionId, updateGoal],
+    [clearGoal, createGoal, direct, goalQuery, isMobile, sessionId, updateGoal],
   );
 
   /**
@@ -786,18 +800,20 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     </Tooltip>
   );
 
-  const stoppingRun = running && !runningInteractive;
-  const sendIcon = <Icon iconName={stoppingRun || stopping ? IconName.Stop : IconName.Plane} />;
+  const filled = Boolean(value.trim());
+  // An empty field during a run is the stop control. Text turns it back into send.
+  const stopFromSend = (running || stopping) && !filled;
+  const sendIcon = <Icon iconName={stopFromSend ? IconName.Stop : IconName.ArrowTop} />;
   const sendLabel = stopping
     ? "Stopping run"
-    : stoppingRun
+    : running && !filled
       ? "Stop run"
       : runningInteractive
         ? "Steer active run"
         : "Send";
-  const sendType = stoppingRun || stopping ? "button" : "submit";
-  const sendDisabled = stopping || (!stoppingRun && !canSend);
-  const onSend = stoppingRun && !stopping ? () => void stop() : undefined;
+  const sendType = stopFromSend ? "button" : "submit";
+  const sendDisabled = stopping || (!stopFromSend && !canSend);
+  const onSend = running && !filled && !stopping ? () => void stop() : undefined;
 
   const sendButton = isMobile ? (
     <StickyButton
@@ -857,7 +873,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               // — which hides that glyph — takes the width back.
               collapsed && "pr-[40px]",
             )
-          : "rounded-[4px] bg-input shadow-concave pr-[48px]",
+          : cn(
+              "rounded-[4px] bg-input shadow-concave",
+              direct ? "pl-[48px] pr-[96px]" : "pr-[48px]",
+            ),
       )}
     >
       <div className="relative flex-1 min-w-0">
@@ -880,7 +899,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         <textarea
           ref={ref}
           className={cn(
-            "relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder [scrollbar-gutter:stable]",
+            "relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap [scrollbar-gutter:stable]",
             isMobile ? "px-4 py-2" : "p-3",
             // The line below stands in for it while it is a single row, because
             // a textarea cannot ellipsize its own overflow.
@@ -1032,6 +1051,30 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       </div>
       {/* On a phone the settings glyph rides inside the pill until the field
           takes over the width, and Send always sits outside it. */}
+      {!isMobile && direct ? (
+        <AgentSpawnButton
+          className="absolute bottom-0 left-0"
+          sessionId={sessionId}
+          behavior={behavior}
+          onCreateSubagent={() => {
+            openSubagentLaunch("agent");
+            revealSidePanel(isMobile);
+            navigate(routes.session(sessionId, "delegated"));
+          }}
+          onCreateOrchestrator={() => {
+            openSubagentLaunch("orchestrator");
+            revealSidePanel(isMobile);
+            navigate(routes.session(sessionId, "delegated"));
+          }}
+        />
+      ) : null}
+      {!isMobile && direct ? (
+        <GoalFlag
+          className="absolute right-[48px] bottom-0"
+          sessionId={sessionId}
+          onOpen={() => setGoalEditing(true)}
+        />
+      ) : null}
       {!isMobile ? (
         sendButton
       ) : collapsed ? (
@@ -1132,24 +1175,15 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     );
   }
 
-  if (readOnly) {
+  if (readOnly && lineage) {
     return (
-      <div className="flex items-center gap-3 rounded-[8px] border border-border-primary bg-elevation-level-1 p-4 text-small text-basic-secondary shadow-2xl">
-        <span className="flex-1">
-          This delegated transcript is read-only. Continue, steer, or cancel it from its parent
-          chat.
-        </span>
-        <PermissionControls
-          sessionId={sessionId}
-          behavior={behavior}
-          autoApprovalAvailable={false}
-          requesterLabel={
-            lineage?.kind === "traditional-child"
-              ? `child agent “${lineage.description}”`
-              : undefined
-          }
-        />
-      </div>
+      <SubagentSessionComposer
+        parentSessionId={lineage.parent_session_id}
+        sessionId={sessionId}
+        kind={lineage.kind}
+        description={lineage.description}
+        behavior={behavior}
+      />
     );
   }
 
@@ -1166,6 +1200,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       style={isMobile ? GROUND_FADE_UP : undefined}
       onSubmit={(event) => {
         event.preventDefault();
+        if (goalEditing) return;
         if (selectedSuggestion) {
           completeSuggestion(selectedSuggestion);
           return;
@@ -1178,6 +1213,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           {fieldWithSuggestions}
           {sendButton}
         </div>
+      ) : goalEditing && direct ? (
+        <GoalEditor sessionId={sessionId} onClose={() => setGoalEditing(false)} />
       ) : (
         fieldWithSuggestions
       )}
@@ -1233,41 +1270,21 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         )}
       >
         <div className="flex flex-1 min-w-0 flex-wrap items-center gap-y-1 gap-x-4">
-          {runningInteractive ? (
-            <>
-              {runningDirect ? (
-                <Button
-                  type="button"
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Secondary}
-                  disabled={!canSend}
-                  onClick={() => void submit(value, "queue")}
-                >
-                  Queue Next
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                size={ButtonSize.Small}
-                variant={ButtonVariant.GhostDestructive}
-                disabled={mutationPending}
-                onClick={() => void stop()}
-              >
-                Stop run
-              </Button>
-            </>
+          {runningDirect ? (
+            <Button
+              type="button"
+              size={ButtonSize.Small}
+              variant={ButtonVariant.Secondary}
+              disabled={!canSend}
+              onClick={() => void submit(value, "queue")}
+            >
+              Queue Next
+            </Button>
           ) : null}
 
-          {/* A phone's settings glyph lives in the pill instead. */}
-          {isMobile ? null : settingsButton}
-
-          <PermissionControls sessionId={sessionId} behavior={behavior} />
-          <GoalControls sessionId={sessionId} behavior={behavior} openRequest={goalOpenRequest} />
-          <ChildControls sessionId={sessionId} behavior={behavior} />
-          <OrchestratorControls sessionId={sessionId} behavior={behavior} />
-
           {/* The model name is the first thing a narrow column gives up; the
-              same switch lives in the session settings the gear opens. */}
+              same switch lives in the session settings the gear opens. On a
+              wide session it leads the row, beside the effort it carries. */}
           {narrow ? null : (
             <ModelPicker
               sessionId={sessionId}
@@ -1277,18 +1294,49 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             />
           )}
 
+          {isMobile ? null : <div className="flex-1" />}
+
+          {/* Gear, hairline, and the current permission setting sit together.
+              A phone keeps the gear inside the message pill. */}
+          {isMobile ? (
+            <PermissionControls sessionId={sessionId} behavior={behavior} />
+          ) : (
+            <div className="flex items-center gap-2">
+              {settingsButton}
+              {direct ? <span aria-hidden className="h-6 w-px shrink-0 bg-divider-muted" /> : null}
+              <PermissionControls sessionId={sessionId} behavior={behavior} />
+            </div>
+          )}
+          {!isMobile && direct ? (
+            <>
+              <ChildControls sessionId={sessionId} behavior={behavior} showTrigger={false} />
+              <OrchestratorControls sessionId={sessionId} behavior={behavior} showTrigger={false} />
+            </>
+          ) : null}
+          {isMobile ? (
+            <>
+              <GoalControls
+                sessionId={sessionId}
+                behavior={behavior}
+                openRequest={goalOpenRequest}
+              />
+              <ChildControls sessionId={sessionId} behavior={behavior} />
+              <OrchestratorControls sessionId={sessionId} behavior={behavior} />
+            </>
+          ) : null}
+
           {isSsh ? (
             <SshBadge
               state={sshStatus === "connected" ? "connected" : "reconnect"}
               onReconnect={() => void reconnectSsh()}
             />
-          ) : (
+          ) : isMobile ? (
             <span className="text-[10px] leading-[12px] font-medium uppercase text-basic-tertiary shrink-0">
               {metrics.env}
             </span>
-          )}
+          ) : null}
 
-          {metrics.usage || contextTokens ? (
+          {isMobile && (metrics.usage || contextTokens) ? (
             <div className="flex items-center gap-[2px] min-w-0">
               {/* The backend reports the live context window here, not a sum
                   of the columns beside it. A fork can have context without
@@ -1333,41 +1381,43 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           ) : null}
         </div>
 
-        <div className="flex items-center gap-[10px] shrink-0">
-          {/* Priced from the model catalog, so a model the catalog has no
+        {isMobile ? (
+          <div className="flex items-center gap-[10px] shrink-0">
+            {/* Priced from the model catalog, so a model the catalog has no
               rates for shows "--" rather than a misleading zero. */}
-          {metrics.usage ? (
-            <StatBadge
-              iconName={IconName.Price}
-              iconSize={16}
-              value={formatCostMicros(metrics.usage.cost?.total)}
-              className="text-basic-primary"
-              title="Session cost"
-              showIcon={false}
-            />
-          ) : null}
+            {metrics.usage ? (
+              <StatBadge
+                iconName={IconName.Price}
+                iconSize={16}
+                value={formatCostMicros(metrics.usage.cost?.total)}
+                className="text-basic-primary"
+                title="Session cost"
+                showIcon={false}
+              />
+            ) : null}
 
-          <Tooltip
-            title={running ? "Run elapsed" : "Last response time"}
-            position={TooltipPosition.TopRight}
-          >
-            <div
-              className={cn(
-                "flex items-center gap-1 p-1 shrink-0 label-micro",
-                running ? "text-basic-primary" : "text-basic-tertiary",
-              )}
+            <Tooltip
+              title={running ? "Run elapsed" : "Last response time"}
+              position={TooltipPosition.TopRight}
             >
-              {/* The narrow row reads as the bare clock, with the Stop
+              <div
+                className={cn(
+                  "flex items-center gap-1 p-1 shrink-0 label-micro",
+                  running ? "text-basic-primary" : "text-basic-tertiary",
+                )}
+              >
+                {/* The narrow row reads as the bare clock, with the Stop
                   affordance beside the field carrying the run's state. */}
-              {narrow ? null : running ? (
-                <Loader size={LoaderSize.Small} />
-              ) : (
-                <Icon iconName={IconName.History} size={16} />
-              )}
-              <span className="block w-[40px] text-center">{formatClock(elapsedMs)}</span>
-            </div>
-          </Tooltip>
-        </div>
+                {narrow ? null : running ? (
+                  <Loader size={LoaderSize.Small} />
+                ) : (
+                  <Icon iconName={IconName.History} size={16} />
+                )}
+                <span className="block w-[40px] text-center">{formatClock(elapsedMs)}</span>
+              </div>
+            </Tooltip>
+          </div>
+        ) : null}
       </div>
     </form>
   );

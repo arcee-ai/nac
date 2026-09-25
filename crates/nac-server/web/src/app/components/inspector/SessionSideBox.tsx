@@ -3,27 +3,25 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
-  HorizontalTabsItem,
-  HorizontalTabsItemVariant,
   Icon,
   IconName,
   ProgressLoader,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { FilesView } from "@/app/components/inspector/FilesView";
+import { PanelCountBadge } from "@/app/components/inspector/PanelCountBadge";
+import { panelBadgeCount, PANEL_ICON } from "@/app/components/inspector/sessionPanelIcons";
 import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { HistoryView } from "@/app/components/inspector/HistoryView";
-import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
 import { WorksetsView } from "@/app/components/inspector/WorksetsView";
-import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useSessionFetching } from "@/app/hooks/useSessionFetching";
 import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
-import { useWorkspaceRevisionChanges } from "@/app/services/queries";
+import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
 import {
   selectRevision,
   selectThread,
@@ -36,42 +34,18 @@ import {
   useSelectedWorkset,
   useSidePanelExpanded,
 } from "@/app/store/sessionLayoutStore";
-import type { SessionSnapshotResponse, WorkspaceSnapshot } from "@/app/types/api";
+import type { SessionBehavior, SessionSnapshotResponse } from "@/app/types/api";
 
 interface SessionSideBoxProps {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
+  /**
+   * Null while the session has not loaded. Callers that omit it keep the
+   * snapshot's behavior, and an omitted stored behavior stays orchestrator.
+   */
+  behavior?: SessionBehavior | null;
   panel: SessionPanel;
   onPanelChange: (panel: SessionPanel) => void;
-}
-
-function FooterChip({
-  iconName,
-  label,
-  compact = false,
-}: {
-  iconName: IconName;
-  label: string;
-  compact?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex items-center gap-[6px] shrink-0 min-w-0 py-1 rounded-[4px]",
-        compact ? "pl-1 pr-1" : "pl-1 pr-3",
-      )}
-    >
-      <Icon iconName={iconName} size={16} color="var(--color-fill-basic-tertiary)" />
-      <span
-        className={cn(
-          "label-micro text-basic-tertiary truncate",
-          compact ? "max-w-[64px]" : "max-w-[128px]",
-        )}
-      >
-        {label}
-      </span>
-    </div>
-  );
 }
 
 /**
@@ -90,81 +64,48 @@ function SideBoxProgress({ sessionId }: { sessionId: string }) {
   );
 }
 
-/** Repo, branch, snapshot and the diff total, mirroring the Figma box footer. */
-function SideBoxFooter({
-  sessionId,
-  workspace,
-  revision,
-  compact,
-  readOnly,
-}: {
-  sessionId: string;
-  workspace: WorkspaceSnapshot | null;
-  revision: number | null;
-  /** Phone width: the chips give up room so the diff total stays visible. */
-  compact: boolean;
-  readOnly: boolean;
-}) {
-  const repo = workspace?.repo_label ?? workspace?.workspace_display ?? null;
-  const branch = workspace?.branch ?? null;
-  // A revision reports its own totals, which the panel has already fetched.
-  const changes = useWorkspaceRevisionChanges(sessionId, revision);
-  const totals =
-    revision == null ? workspace : (changes.data ?? { total_additions: 0, total_deletions: 0 });
-  const additions = totals?.total_additions ?? 0;
-  const deletions = totals?.total_deletions ?? 0;
-
-  return (
-    <div
-      className={cn(
-        "flex h-10 items-center gap-[10px] shrink-0 border-t border-muted bg-elevation-level-1",
-        compact ? "px-2 gap-1" : "px-4",
-      )}
-    >
-      <div className={cn("flex flex-1 min-w-0 items-center", compact ? "gap-1" : "gap-[10px]")}>
-        {repo ? <FooterChip iconName={IconName.Folder} label={repo} compact={compact} /> : null}
-        {branch && !readOnly ? <BranchPicker sessionId={sessionId} branch={branch} /> : null}
-        {branch && readOnly ? (
-          <FooterChip iconName={IconName.Scheme} label={branch} compact={compact} />
-        ) : null}
-        <RevisionPicker sessionId={sessionId} selected={revision} onSelect={selectRevision} />
-      </div>
-      {additions || deletions ? (
-        <div className="flex items-center gap-2 shrink-0 code code-small">
-          <span className="text-success-primary">+{additions}</span>
-          <span className="text-error-primary">-{deletions}</span>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 /**
  * The right half of the session screen: one box with the Threads / Files /
- * Worksets / Delegated work panels, sized by the shared layout store. Session
+ * Worksets / Subagents panels, sized by the shared layout store. Session
  * switching lives in the left sidebar. On a phone the panels are the body of
  * the modal box that SessionPage puts them in, and its chrome — header, bottom
  * bar — belongs to the dialog rather than to this box.
  */
-export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: SessionSideBoxProps) {
+export function SessionSideBox({
+  sessionId,
+  snapshot,
+  behavior: behaviorProp,
+  panel,
+  onPanelChange,
+}: SessionSideBoxProps) {
   const expanded = useSidePanelExpanded();
   const isMobile = useIsMobile();
-  const isTablet = useIsTablet();
   const selectedThread = useSelectedThread();
   const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
-  const behavior = snapshot?.metadata.behavior ?? "orchestrator";
+  const behavior =
+    behaviorProp !== undefined ? behaviorProp : (snapshot?.metadata.behavior ?? "orchestrator");
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const panelPolicy = sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
-  const delegatedTranscript = panelPolicy.readOnly;
-  const widePanels = panelPolicy.widePanels;
+  const panelPolicy =
+    behavior == null ? null : sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
+  const delegatedTranscript = panelPolicy?.readOnly ?? false;
+  const widePanels = panelPolicy?.widePanels ?? [];
+  const subagents = widePanels.includes("delegated");
+  const children = useTraditionalChildren(sessionId, subagents);
+  const orchestrators = useManagedOrchestrators(
+    sessionId,
+    subagents && behavior === "direct-with-orchestrator",
+  );
+  const subagentCount = (children.data?.length ?? 0) + (orchestrators.data?.length ?? 0);
 
-  // History belongs to the phone's bottom bar: a wide box reaches revisions
-  // through its footer chip, so a link to that panel lands on the default one.
+  // History belongs to the phone's bottom bar. On a wide screen the header
+  // chip switches revisions, so a link to that panel lands on the default one.
   const active =
-    widePanels.includes(panel) || (isMobile && panelPolicy.mobilePanels.includes(panel))
-      ? panel
-      : panelPolicy.defaultPanel;
+    panelPolicy == null
+      ? null
+      : widePanels.includes(panel) || (isMobile && panelPolicy.mobilePanels.includes(panel))
+        ? panel
+        : panelPolicy.defaultPanel;
 
   const body = (
     <>
@@ -209,30 +150,45 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
     >
       <div
         className={cn(
-          "flex items-center gap-4 pl-1 pt-1 shrink-0 border-b border-muted bg-elevation-level-1 relative",
+          "flex items-center gap-4 pl-3 pr-2 py-2 shrink-0 bg-elevation-level-1 relative border-b border-muted",
           // Room for the Modal's Close when this box is the fullscreen body.
-          expanded ? "pr-10" : "pr-2",
+          expanded ? "pr-10" : null,
         )}
       >
         <SideBoxProgress sessionId={sessionId} />
-        <div className="flex flex-1 min-w-0 items-center gap-1 " role="tablist">
-          {widePanels.map((name) => (
-            <HorizontalTabsItem
-              key={name}
-              role="tab"
-              aria-selected={active === name}
-              active={active === name}
-              variant={HorizontalTabsItemVariant.Neutral}
-              onClick={() => {
-                // A tablet shows one column at a time, and a new panel opens on
-                // its selected row; a desktop split ignores the flag entirely.
-                showSidePanelList(false);
-                onPanelChange(name);
-              }}
-            >
-              {SESSION_PANEL_LABEL[name]}
-            </HorizontalTabsItem>
-          ))}
+        <div className="flex flex-1 min-w-0 items-center gap-3" role="tablist">
+          {widePanels.map((name) => {
+            const selected = active === name;
+            const badge = panelBadgeCount(
+              name,
+              subagentCount,
+              snapshot?.worksets?.items.length ?? 0,
+            );
+            return (
+              <span key={name} className="relative shrink-0">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-label={SESSION_PANEL_LABEL[name]}
+                  className={cn(
+                    "btn btn-medium btn-icon-left !rounded-full",
+                    selected ? "btn-secondary-highlighted" : "btn-ghost",
+                  )}
+                  onClick={() => {
+                    // A tablet shows one column at a time, and a new panel opens on
+                    // its selected row; a desktop split ignores the flag entirely.
+                    showSidePanelList(false);
+                    onPanelChange(name);
+                  }}
+                >
+                  <Icon iconName={PANEL_ICON[name]} />
+                  {SESSION_PANEL_LABEL[name]}
+                </button>
+                {badge > 0 ? <PanelCountBadge count={badge} /> : null}
+              </span>
+            );
+          })}
         </div>
         {/* Expand/hide live here in the split; once fullscreen the Modal owns
             Close. */}
@@ -265,14 +221,6 @@ export function SessionSideBox({ sessionId, snapshot, panel, onPanelChange }: Se
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col">{body}</div>
-
-      <SideBoxFooter
-        sessionId={sessionId}
-        workspace={snapshot?.workspace ?? null}
-        revision={selectedRevision}
-        compact={isTablet}
-        readOnly={delegatedTranscript}
-      />
     </div>
   );
 }
