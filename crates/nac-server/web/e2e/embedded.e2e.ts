@@ -32,6 +32,17 @@ async function showSidePanel(page: Page) {
   await expect(open).toBeVisible();
 }
 
+/** Spawn menu → foreground child. The first prompt line is the description. */
+async function launchForegroundChild(page: Page, description: string, prompt: string) {
+  await page.getByRole("button", { name: "Spawn" }).click();
+  await page.getByRole("button", { name: "Create Subagent" }).click();
+  const field = page.getByRole("textbox", { name: "Send a message" });
+  await field.fill(`${description}\n${prompt}`);
+  const form = page.locator("form").filter({ has: field });
+  await form.getByRole("switch", { name: "Run in the background" }).click();
+  return form.getByRole("button", { name: "Send" });
+}
+
 test("serves the production-embedded application and hashed assets", async ({
   harness,
   page,
@@ -84,7 +95,10 @@ test("runs a direct session through the loopback scripted Responses provider", a
     (entry) => entry.matchedStep === "direct-text",
   );
   expect(modelRequest?.headers.authorization).toBe("Bearer nac-e2e-dummy-only");
-  expect(modelRequest?.body).toMatchObject({ model: "gpt-5.6-sol", store: false });
+  expect(modelRequest?.body).toMatchObject({
+    model: "gpt-5.6-sol",
+    store: false,
+  });
 });
 
 test.describe("with an isolated Exa credential", () => {
@@ -492,7 +506,9 @@ test("persists session auto-approval, drains pending asks, and restores manual m
     page.getByRole("button", { name: "Auto-approve on — open permissions" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
-  const toggle = page.getByRole("switch", { name: "Approve all automatically" });
+  const toggle = page.getByRole("switch", {
+    name: "Approve all automatically",
+  });
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await toggle.click();
   await expect(page.getByRole("button", { name: "Permissions" })).toBeVisible();
@@ -543,7 +559,11 @@ test("applies parent auto-approval to child agents and identifies manual child r
 
   harness.provider.enqueue(
     "child-auto-read",
-    { token: "ALL58_AUTO_CHILD", requiredTools: ["read"], forbiddenTools: ["spawn_agent"] },
+    {
+      token: "ALL58_AUTO_CHILD",
+      requiredTools: ["read"],
+      forbiddenTools: ["spawn_agent"],
+    },
     {
       kind: "function_call",
       name: "read",
@@ -558,7 +578,11 @@ test("applies parent auto-approval to child agents and identifies manual child r
   );
   harness.provider.enqueue(
     "child-manual-read",
-    { token: "ALL58_MANUAL_CHILD", requiredTools: ["read"], forbiddenTools: ["spawn_agent"] },
+    {
+      token: "ALL58_MANUAL_CHILD",
+      requiredTools: ["read"],
+      forbiddenTools: ["spawn_agent"],
+    },
     {
       kind: "function_call",
       name: "read",
@@ -583,17 +607,13 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await permissions.getByRole("switch", { name: "Approve all automatically" }).click();
   await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: "Launch coding agent" }).click();
-  let launchDialog = page.getByRole("dialog").filter({ hasText: "Launch coding agent" });
-  await launchDialog.getByRole("textbox").nth(0).fill("Automatic child");
-  await launchDialog.getByRole("textbox").nth(1).fill("ALL58_AUTO_CHILD");
-  await launchDialog.getByRole("switch").click();
+  const automaticSend = await launchForegroundChild(page, "Automatic child", "ALL58_AUTO_CHILD");
   const automaticStart = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
       response.url().endsWith(`/sessions/${sessionId}/children`),
   );
-  await page.getByRole("button", { name: "Start coding agent" }).click();
+  await automaticSend.click();
   await harness.provider.waitForRequestCount(2);
   expect((await automaticStart).status()).toBe(201);
   await expect(page.getByText("Permission required")).toHaveCount(0);
@@ -602,17 +622,13 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await page.getByRole("switch", { name: "Approve all automatically" }).click();
   await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: "Launch coding agent" }).click();
-  launchDialog = page.getByRole("dialog").filter({ hasText: "Launch coding agent" });
-  await launchDialog.getByRole("textbox").nth(0).fill("Manual child");
-  await launchDialog.getByRole("textbox").nth(1).fill("ALL58_MANUAL_CHILD");
-  await launchDialog.getByRole("switch").click();
+  const manualSend = await launchForegroundChild(page, "Manual child", "ALL58_MANUAL_CHILD");
   const manualStart = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
       response.url().endsWith(`/sessions/${sessionId}/children`),
   );
-  await page.getByRole("button", { name: "Start coding agent" }).click();
+  await manualSend.click();
   await harness.provider.waitForRequestCount(3);
 
   await expect
@@ -940,7 +956,10 @@ test("switches the active chat across configured providers from the unified comp
   await expect
     .poll(async () => {
       const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
-      const config = (await response.json()) as { backend?: string; model?: string };
+      const config = (await response.json()) as {
+        backend?: string;
+        model?: string;
+      };
       return `${config.backend}/${config.model}`;
     })
     .toBe("deepseek-chat/deepseek-v4-flash");
@@ -1158,7 +1177,10 @@ test("steers an active direct run from the ordinary composer", async ({
   expect(pending.ok()).toBe(true);
   expect(await pending.json()).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ delivery: "steer", prompt: "change course safely" }),
+      expect.objectContaining({
+        delivery: "steer",
+        prompt: "change course safely",
+      }),
     ]),
   );
   boundary.release();
@@ -1300,16 +1322,18 @@ test("interprets literal goal commands before launching goal continuation", asyn
   // The run attaches durable accounting after goal creation. Reload so the
   // versioned controls exercise the current post-attachment record.
   await page.reload();
-  await page.getByRole("button", { name: "Goal: active" }).click();
-  await expect(page.getByRole("dialog")).toContainText("ship the embedded MVP");
-  await page.getByRole("button", { name: "Pause" }).click();
+  await page.getByRole("button", { name: "Edit goal: Active" }).click();
+  await expect(page.getByRole("textbox", { name: "Goal objective" })).toHaveValue(
+    "ship the embedded MVP",
+  );
+  await page.getByRole("button", { name: "Pause goal" }).click();
   await expect
     .poll(async () => {
       const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
       return ((await response.json()) as { status?: string } | null)?.status;
     })
     .toBe("paused");
-  await page.getByRole("button", { name: "Resume" }).click();
+  await page.getByRole("button", { name: "Resume goal" }).click();
   await expect
     .poll(async () => {
       const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
@@ -1323,7 +1347,7 @@ test("interprets literal goal commands before launching goal continuation", asyn
       return await response.json();
     })
     .toBeNull();
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Close goal editor" }).click();
   await page.getByRole("button", { name: "Stop run" }).click();
   await waitForRunIdle(request, harness, sessionId);
   continuation.release();
@@ -1396,21 +1420,23 @@ test("replaces a completed durable goal from the production dialog", async ({
     replacement,
   );
 
-  await expect(page.getByRole("button", { name: "Goal: complete" })).toBeVisible();
-  await page.getByRole("button", { name: "Goal: complete" }).click();
-  await page.getByPlaceholder("Describe the concrete outcome").fill("replacement objective");
-  await page.getByRole("button", { name: "Replace and start" }).click();
+  await expect(page.getByRole("button", { name: "Edit goal: Complete" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit goal: Complete" }).click();
+  await page.getByRole("textbox", { name: "Goal objective" }).fill("replacement objective");
+  await page.getByRole("button", { name: "Replace goal" }).click();
   await replacement.accepted;
   await expect
     .poll(async () => {
       const response = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
-      return (await response.json()) as { goal_id?: string; objective?: string } | null;
+      return (await response.json()) as {
+        goal_id?: string;
+        objective?: string;
+      } | null;
     })
     .toMatchObject({ objective: "replacement objective" });
   const replacedResponse = await request.get(`${harness.baseUrl}/sessions/${sessionId}/goal`);
   const replaced = (await replacedResponse.json()) as { goal_id: string };
   expect(replaced.goal_id).not.toBe(current.goal_id);
-  await page.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Stop run" }).click();
   await waitForRunIdle(request, harness, sessionId);
   replacement.release();
@@ -1481,19 +1507,23 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await cancelled.accepted;
   await launch("Background failure", "E2E_BACKGROUND_FAILURE");
 
-  const successRow = page.locator("article").filter({ hasText: "Background success" });
-  const cancelRow = page.locator("article").filter({ hasText: "Background cancellation" });
-  const failureRow = page.locator("article").filter({ hasText: "Background failure" });
-  await expect(successRow).toContainText("Running");
-  await expect(cancelRow).toContainText("Running");
-  await expect(successRow.getByRole("button", { name: "Steer" })).toBeVisible();
-  await cancelRow.getByRole("button", { name: "Cancel" }).click();
-  await expect(cancelRow).toContainText("Cancelled");
+  const subagent = (name: string) => page.getByRole("button", { name, exact: true });
+  const composer = page.locator("form").filter({
+    has: page.getByRole("textbox", { name: /Steer a message|Send a message/ }),
+  });
+  await subagent("Background success").click();
+  await expect(composer.getByText("Running in the background")).toBeVisible();
+  await expect(composer.getByRole("textbox", { name: "Steer a message" })).toBeVisible();
+  await subagent("Background cancellation").click();
+  await composer.getByRole("button", { name: "Stop" }).click();
+  await expect(composer.getByText("Cancelled", { exact: true })).toBeVisible();
   cancelled.release();
-  await expect(failureRow).toContainText("Failed");
+  await subagent("Background failure").click();
+  await expect(composer.getByText("Failed", { exact: true })).toBeVisible();
 
   success.release();
-  await expect(successRow).toContainText("Completed");
+  await subagent("Background success").click();
+  await expect(composer.getByText("Completed", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Coding agent completed")).toContainText("Background success");
   await expect(page.getByLabel("Coding agent failed")).toContainText("Background failure");
   await expect(page.getByLabel("Coding agent cancelled")).toContainText("Background cancellation");
@@ -1501,14 +1531,22 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
 
-  await successRow.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("textbox", { name: "Continuation prompt" }).fill("E2E_GENERATION_TWO");
-  await page.getByRole("dialog").getByRole("button", { name: "Continue", exact: true }).click();
+  await composer.getByRole("textbox", { name: "Send a message" }).fill("E2E_GENERATION_TWO");
+  await composer.getByRole("button", { name: "Send" }).click();
   await continued.accepted;
-  await expect(successRow).toContainText("Running");
-  await expect(successRow).toContainText("Generation 2");
+  await expect(composer.getByText("Running in the background")).toBeVisible();
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${harness.baseUrl}/sessions/${parentId}/children`);
+      const children = (await response.json()) as Array<{
+        description: string;
+        generation: number;
+      }>;
+      return children.find((child) => child.description === "Background success")?.generation;
+    })
+    .toBe(2);
   continued.release();
-  await expect(successRow).toContainText("Completed");
+  await expect(composer.getByText("Completed", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Coding agent completed").last()).toContainText("Generation 2");
   await expect(page.getByRole("button", { name: "Open exact transcript" }).last()).toBeVisible();
   expect(successChild.child_session_id).toBeTruthy();
@@ -1581,7 +1619,10 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   );
   harness.provider.enqueue(
     "orchestrator-parent-observation",
-    { token: "Coordinate the compatibility audit", afterStep: "orchestrator-completion" },
+    {
+      token: "Coordinate the compatibility audit",
+      afterStep: "orchestrator-completion",
+    },
     { kind: "text", text: "managed completion acknowledged" },
   );
   const parentId = await createSession(request, harness, "direct-with-orchestrator");
@@ -1618,12 +1659,9 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
   await showSidePanel(page);
-  await expect(page.getByText("Coding agents", { exact: true })).toBeVisible();
-  await expect(page.getByText("NAC orchestrators", { exact: true })).toBeVisible();
-  const childRow = page.locator("article").filter({ hasText: "Inspect the child lifecycle" });
-  await expect(childRow).toContainText("Coding agent");
-  await expect(childRow).toContainText("Completed");
-  await childRow.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Inspect the child lifecycle" }).click();
+  await expect(page.getByText("Completed", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Open" }).click();
   await expect(page.getByText("Traditional coding agent", { exact: true })).toBeVisible();
   await expect(page.getByText("Inspect the child lifecycle", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
@@ -1650,20 +1688,20 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
 
   await page.getByRole("button", { name: "Parent chat" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
-  const orchestratorRow = page
-    .locator("article")
-    .filter({ hasText: "Coordinate the compatibility audit" });
-  await expect(orchestratorRow).toContainText("NAC orchestrator");
-  await expect(orchestratorRow).toContainText("Running");
-  await expect(orchestratorRow.getByRole("button", { name: "Steer" })).toBeVisible();
-  await expect(orchestratorRow.getByRole("button", { name: "Cancel" })).toBeVisible();
+  await showSidePanel(page);
+  await page.getByRole("button", { name: "Coordinate the compatibility audit" }).click();
+  const orchestratorComposer = page.locator("form").filter({
+    has: page.getByRole("textbox", { name: "Steer a message" }),
+  });
+  await expect(orchestratorComposer.getByText("Running in the background")).toBeVisible();
+  await expect(orchestratorComposer.getByRole("button", { name: "Stop" })).toBeVisible();
   orchestratorCompletion.release();
-  await expect(orchestratorRow).toContainText("Completed");
+  await expect(page.getByText("Completed", { exact: true })).toBeVisible();
   await expect(page.getByLabel("NAC orchestrator completed")).toContainText(
     "Coordinate the compatibility audit",
   );
   harness.provider.assertConsumed();
-  await orchestratorRow.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Open" }).click();
   await expect(page.getByText("Managed NAC orchestrator", { exact: true })).toBeVisible();
   await expect(page.getByText("Coordinate the compatibility audit", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();

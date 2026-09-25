@@ -58,15 +58,15 @@ export function LeftSidebarRail({
         <RailButton label="SSH" onClick={commands.openSsh}>
           <Icon iconName={IconName.Globe} />
         </RailButton>
-        {commands.openManaged ? (
-          <RailButton label="Managed host" onClick={commands.openManaged}>
-            <Icon iconName={IconName.Server} />
-          </RailButton>
-        ) : null}
       </div>
-      <RailButton label="Configurations" onClick={commands.openConfigurations}>
-        <Icon iconName={IconName.Gear} />
-      </RailButton>
+      <div className="flex flex-col items-center gap-1 [&>*]:shrink-0">
+        <RailButton label="Configurations" onClick={commands.openConfigurations}>
+          <Icon iconName={IconName.Gear} />
+        </RailButton>
+        <RailButton label="Managed host" onClick={commands.openManaged}>
+          <Icon iconName={IconName.Server} />
+        </RailButton>
+      </div>
     </div>
   );
 }

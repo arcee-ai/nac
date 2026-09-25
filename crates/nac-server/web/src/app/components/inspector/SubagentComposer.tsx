@@ -43,6 +43,7 @@ export function SubagentComposer({
   onStarted,
   autoFocus = false,
   focusRequest = 0,
+  showPermissions = true,
 }: {
   parentSessionId: string;
   target: SubagentTarget;
@@ -52,6 +53,11 @@ export function SubagentComposer({
   onStarted?: (id: string) => void;
   autoFocus?: boolean;
   focusRequest?: number;
+  /**
+   * The parent composer and a running child's bridge already present permission
+   * dialogs. The panel composer must not open a second copy of the same ask.
+   */
+  showPermissions?: boolean;
 }) {
   const toast = useToast();
   const startChild = useStartTraditionalChild();
@@ -114,7 +120,10 @@ export function SubagentComposer({
     if (!existing) return;
     try {
       if (existing.mode === "child") {
-        await cancelChild.mutateAsync({ sessionId: parentSessionId, childId: existing.id });
+        await cancelChild.mutateAsync({
+          sessionId: parentSessionId,
+          childId: existing.id,
+        });
       } else {
         await cancelOrchestrator.mutateAsync({
           sessionId: parentSessionId,
@@ -140,12 +149,14 @@ export function SubagentComposer({
       status={existing?.status}
       busy={busy}
       permission={
-        <PermissionControls
-          sessionId={permissionSessionId}
-          behavior={permissionBehavior}
-          autoApprovalAvailable={false}
-          requesterLabel={requesterLabel}
-        />
+        showPermissions ? (
+          <PermissionControls
+            sessionId={permissionSessionId}
+            behavior={permissionBehavior}
+            autoApprovalAvailable={false}
+            requesterLabel={requesterLabel}
+          />
+        ) : null
       }
     />
   );

@@ -170,12 +170,10 @@ export function LeftSidebarPanel({
             <Icon iconName={IconName.Gear} />
             <span className="text-left flex-grow">Configurations</span>
           </TabButton>
-          {commands.openManaged ? (
-            <TabButton onClick={commands.openManaged}>
-              <Icon iconName={IconName.Server} />
-              <span className="text-left flex-grow">Managed host</span>
-            </TabButton>
-          ) : null}
+          <TabButton onClick={commands.openManaged}>
+            <Icon iconName={IconName.Server} />
+            <span className="text-left flex-grow">Managed host</span>
+          </TabButton>
         </div>
         <Separator />
         <div className="flex items-center gap-2 h-10 pl-4 pr-2">

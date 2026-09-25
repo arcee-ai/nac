@@ -256,6 +256,7 @@ export function DelegatedWorkView({
                 ? "orchestrator"
                 : "direct"
             }
+            showPermissions={false}
             onStarted={(id) => {
               clearSubagentLaunch();
               setSelectedKey(
