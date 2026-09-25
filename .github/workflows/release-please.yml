@@ -1,8 +1,15 @@
 name: Prepare stable release
 
 on:
-  push:
+  workflow_dispatch:
+    inputs:
+      dev_sha:
+        description: Full commit SHA currently at the tip of dev
+        required: true
+        type: string
+  pull_request:
     branches: [dev]
+    types: [closed]
 
 permissions:
   contents: read
@@ -12,9 +19,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-please:
+  prepare-release-pr:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate exact current dev source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+          REQUESTED_SHA: ${{ inputs.dev_sha }}
+        run: |
+          git fetch --no-tags origin dev:refs/remotes/origin/dev
+          DEV_SHA="$(git rev-parse refs/remotes/origin/dev)" \
+            node .github/scripts/release-policy.mjs validate-prepare
+
       # Human/platform prerequisite: install the narrowly scoped GitHub App on
       # this repository with Contents:write, Pull requests:write, and
       # Issues:write, expose its
@@ -33,10 +57,60 @@ jobs:
           permission-pull-requests: write
           permission-issues: write
 
-      - name: Prepare or create the approved stable release
+      - name: Bind Release Please to the selected source
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SOURCE_SHA: ${{ inputs.dev_sha }}
+        run: .github/scripts/stable-release-preparation.sh stage
+
+      - name: Prepare stable release PR only
+        id: prepare
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          target-branch: release-preparation-source
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
+
+      - name: Retarget the prepared PR to dev
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SOURCE_SHA: ${{ inputs.dev_sha }}
+        run: .github/scripts/stable-release-preparation.sh finalize
+
+      - name: Require preparation to remain non-publishing
+        env:
+          RELEASE_CREATED: ${{ steps.prepare.outputs.release_created }}
+        run: test "$RELEASE_CREATED" != true
+
+  publish-approved-release:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'dev' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'release-please--branches--release-preparation-source--components--nac'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint repository-scoped release token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: nac
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+
+      - name: Create approved stable tag and GitHub Release only
         uses: googleapis/release-please-action@v4
         with:
           token: ${{ steps.app-token.outputs.token }}
           target-branch: dev
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
