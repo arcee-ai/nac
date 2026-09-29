@@ -120,7 +120,7 @@ mod tests {
     use base64::engine::general_purpose::STANDARD as BASE64;
     use base64::Engine;
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
-    use rmcp::model::{CallToolResult, Content};
+    use rmcp::model::{CallToolResult, ContentBlock as Content};
     use std::io::Cursor;
 
     use super::*;
@@ -180,5 +180,36 @@ mod tests {
         assert!(flattened.is_error);
         assert!(flattened.content.contains("unsupported_image"));
         assert!(!flattened.content.contains_images());
+    }
+
+    #[tokio::test]
+    async fn legacy_result_without_discriminator_remains_accepted() {
+        let result: CallToolResult = serde_json::from_value(serde_json::json!({
+            "content": [{"type": "text", "text": "legacy response"}],
+            "isError": false
+        }))
+        .unwrap();
+
+        let flattened = flatten_tool_result(result, false).await;
+
+        assert!(!flattened.is_error);
+        assert_eq!(flattened.content.as_text(), Some("legacy response"));
+    }
+
+    #[tokio::test]
+    async fn current_complete_result_preserves_non_object_structured_content() {
+        let result: CallToolResult = serde_json::from_value(serde_json::json!({
+            "resultType": "complete",
+            "content": [{"type": "text", "text": "current response"}],
+            "structuredContent": ["baseline", 3]
+        }))
+        .unwrap();
+
+        let flattened = flatten_tool_result(result, false).await;
+
+        assert!(!flattened.is_error);
+        assert!(flattened.content.contains("current response"));
+        assert!(flattened.content.contains("baseline"));
+        assert!(flattened.content.contains("3"));
     }
 }

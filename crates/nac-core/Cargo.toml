@@ -29,7 +29,7 @@ rusqlite = { version = "0.32", features = ["bundled", "trace"] }
 uuid = { workspace = true, features = ["serde", "v4"] }
 libc.workspace = true
 portable-pty = "0.8"
-rmcp = { workspace = true, features = ["client", "reqwest", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+rmcp = { workspace = true, features = ["auth", "client", "reqwest", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 toml.workspace = true
 toml_edit = "0.22"
 url = "2"

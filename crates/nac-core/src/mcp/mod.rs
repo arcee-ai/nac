@@ -1,3 +1,8 @@
+#![allow(
+    deprecated,
+    reason = "NAC still advertises the legacy roots capability for backward-compatible MCP clients"
+)]
+
 use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -7,7 +12,10 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::header::{HeaderName, HeaderValue};
 use rmcp::handler::client::ClientHandler;
-use rmcp::model::{CallToolRequestParams, ClientInfo, Implementation, ListRootsResult, Root, Tool};
+use rmcp::model::{
+    CallToolRequestParams, ClientConfig, Implementation, ListRootsResult, ProtocolVersion, Root,
+    Tool,
+};
 use rmcp::service::{RoleClient, RunningService};
 use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::streamable_http_client::{
@@ -113,6 +121,7 @@ const MCP_TOOL_INVENTORY_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[cfg(test)]
 pub(crate) mod test_support {
+    use rmcp::model::ProtocolVersion;
     use serde_json::{json, Value};
     use std::env;
     use std::ffi::OsString;
@@ -209,6 +218,10 @@ pub(crate) mod test_support {
                         let id = body.get("id").cloned().unwrap_or(Value::Null);
                         match method {
                             "initialize" => {
+                                assert_eq!(
+                                    body["params"]["protocolVersion"],
+                                    ProtocolVersion::LATEST_WITH_INITIALIZE.as_str()
+                                );
                                 let response = json!({
                                     "jsonrpc":"2.0",
                                     "id":id,
@@ -381,6 +394,10 @@ pub(crate) mod test_support {
         let id = body.get("id").cloned().unwrap_or(Value::Null);
         match method {
             "initialize" => {
+                assert_eq!(
+                    body["params"]["protocolVersion"],
+                    ProtocolVersion::LATEST_WITH_INITIALIZE.as_str()
+                );
                 let response = json!({
                     "jsonrpc": "2.0",
                     "id": id,

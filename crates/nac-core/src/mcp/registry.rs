@@ -308,6 +308,8 @@ impl McpRegistry {
         if let Some(arguments) = arguments {
             params = params.with_arguments(arguments);
         }
+        // Keep the high-level 3.x call: it resolves protocol-version-specific
+        // multi-round responses and returns only the final CallToolResult.
         match binding.server._service.call_tool(params).await {
             Ok(result) => flatten_tool_result(result, image_results).await,
             Err(error) => ToolResult {
@@ -323,7 +325,7 @@ impl ClientHandler for NacMcpClientHandler {
         clippy::expect_used,
         reason = "the locally constructed MCP capability object matches the protocol schema"
     )]
-    fn get_info(&self) -> ClientInfo {
+    fn get_info(&self) -> ClientConfig {
         let capabilities = if self.roots.is_empty() {
             serde_json::json!({})
         } else {
@@ -333,10 +335,11 @@ impl ClientHandler for NacMcpClientHandler {
                 }
             })
         };
-        ClientInfo::new(
+        ClientConfig::new(
             serde_json::from_value(capabilities).expect("valid MCP client capabilities"),
             mcp_implementation(nac_contracts::PRODUCT_VERSION),
         )
+        .with_protocol_version(ProtocolVersion::LATEST_WITH_INITIALIZE)
     }
 
     async fn list_roots(
@@ -424,5 +427,17 @@ mod product_identity_tests {
         let implementation = mcp_implementation("9.8.7");
         assert_eq!(implementation.name, "nac");
         assert_eq!(implementation.version, "9.8.7");
+    }
+
+    #[test]
+    fn outbound_mcp_client_preserves_the_latest_initialize_lifecycle() {
+        let info = NacMcpClientHandler { roots: Vec::new() }.get_info();
+
+        assert_eq!(
+            info.protocol_version,
+            ProtocolVersion::LATEST_WITH_INITIALIZE
+        );
+        assert!(info.protocol_version.has_initialize());
+        assert!(!ProtocolVersion::LATEST.has_initialize());
     }
 }

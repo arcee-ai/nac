@@ -11,7 +11,9 @@ use crate::{
 
 use nac_contracts::PRODUCT_VERSION;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    CallToolResult, ContentBlock as Content, Implementation, ServerCapabilities, ServerConfig,
+};
 use rmcp::schemars;
 use rmcp::tool;
 use rmcp::tool_handler;
@@ -36,8 +38,8 @@ pub struct NacMcpService {
 
 const NAC_MCP_INSTRUCTIONS: &str = "nac is an AI coding agent orchestrator. It manages coding sessions where an orchestrator agent receives your prompt, plans the work, and dispatches worker threads to execute tasks autonomously. Each worker operates independently — reading files, writing code, running commands, and calling tools — then reports back with its results. The orchestrator reviews thread output, compacts context when approaching the model's context window limit, and either dispatches more threads or produces a final response. Each worker's final output is retained as an episode you can inspect.\n\nSessions are asynchronous: send_message returns immediately with a run_id and the work continues in the background. Poll get_session_status to check completion, use steer to guide running tasks mid-flight, and inspect results with get_messages, get_thread_episodes, and get_thread_events. Sessions persist across server restarts and you can manage multiple simultaneously.";
 
-fn mcp_server_info_for_version(version: &str) -> ServerInfo {
-    ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+fn mcp_server_info_for_version(version: &str) -> ServerConfig {
+    ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
         .with_server_info(Implementation::new("nac_server", version))
         .with_instructions(NAC_MCP_INSTRUCTIONS)
 }
@@ -586,7 +588,7 @@ impl NacMcpService {
 
 #[tool_handler]
 impl ServerHandler for NacMcpService {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         mcp_server_info_for_version(PRODUCT_VERSION)
     }
 }
@@ -645,6 +647,7 @@ fn message_content(msg: &nac_core::types::Message) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::model::{ClientCapabilities, ClientConfig, ProtocolVersion};
 
     #[test]
     fn create_session_schema_exposes_optional_project_id() {
@@ -667,5 +670,47 @@ mod tests {
         assert_eq!(info.server_info.version, "9.8.7");
         assert!(info.capabilities.tools.is_some());
         assert_eq!(info.instructions.as_deref(), Some(NAC_MCP_INSTRUCTIONS));
+        assert_eq!(info.protocol_version, ProtocolVersion::LATEST);
+        assert!(!info.protocol_version.has_initialize());
+    }
+
+    #[test]
+    fn inbound_mcp_router_preserves_the_exact_eleven_tool_contract() {
+        let names = NacMcpService::tool_router()
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "create_session",
+                "get_messages",
+                "get_session_status",
+                "get_thread_episodes",
+                "get_thread_events",
+                "list_models",
+                "list_sessions",
+                "send_message",
+                "session_action",
+                "steer",
+                "update_session",
+            ]
+        );
+    }
+
+    #[test]
+    fn rmcp_versions_separate_legacy_initialization_from_current_discovery() {
+        let request = ClientConfig::new(
+            ClientCapabilities::default(),
+            Implementation::new("compatibility-test", "1.0.0"),
+        )
+        .with_protocol_version(ProtocolVersion::LATEST_WITH_INITIALIZE);
+
+        assert!(request.protocol_version.has_initialize());
+        assert_eq!(request.protocol_version, ProtocolVersion::V_2025_11_25);
+        assert_eq!(ProtocolVersion::LATEST, ProtocolVersion::V_2026_07_28);
+        assert!(!ProtocolVersion::LATEST.has_initialize());
     }
 }
