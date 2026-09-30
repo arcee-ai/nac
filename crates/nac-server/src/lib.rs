@@ -112,7 +112,7 @@ use nac_core::store::{TraditionalChildExecutionMode, TraditionalChildRecord};
 #[cfg(test)]
 use nac_core::test_support::store::TranscriptLogWriter;
 use nac_core::{
-    commands::{slash_command_definitions, SlashCommand, SlashCommandDefinition},
+    commands::{slash_command_definitions, SlashCommand},
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEvent, SessionEventBoundary,
         SessionEventEnvelope, SessionReplayGap,
@@ -1394,10 +1394,6 @@ impl SessionManager {
         self.session_state().skills(session_id).await
     }
 
-    pub async fn session_commands(&self, session_id: &str) -> Result<Vec<SlashCommandDefinition>> {
-        self.session_state().commands(session_id).await
-    }
-
     pub async fn submit_prompt(
         &self,
         session_id: &str,
@@ -1990,11 +1986,7 @@ fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPr
 }
 
 fn frontend_command_name(command: SlashCommand) -> &'static str {
-    match command {
-        SlashCommand::Compact => "compact",
-        SlashCommand::Goal => "goal",
-        SlashCommand::McpPrompt => "mcp_prompt",
-    }
+    command.definition().name.as_str()
 }
 
 fn canonicalize_dir(path: PathBuf) -> Result<PathBuf> {

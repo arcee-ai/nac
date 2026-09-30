@@ -69,7 +69,7 @@ pub(crate) async fn session_commands_handler(
     State(manager): State<SessionManager>,
     AxumPath(session_id): AxumPath<String>,
 ) -> std::result::Result<Json<Vec<nac_core::commands::SlashCommandDefinition>>, ApiError> {
-    Ok(Json(manager.session_commands(&session_id).await?))
+    Ok(Json(manager.session_state().commands(&session_id).await?))
 }
 
 #[utoipa::path(
