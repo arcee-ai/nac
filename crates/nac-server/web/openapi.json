@@ -3689,6 +3689,69 @@
         }
       }
     },
+    "/sessions/{session_id}/commands": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "get_sessions_session_id_commands",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SlashCommandDefinition"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Path extraction failed",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/compact": {
       "post": {
         "tags": [
@@ -10606,6 +10669,27 @@
           }
         }
       },
+      "McpPromptArgument": {
+        "type": "object",
+        "required": [
+          "name",
+          "required"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      },
       "McpRuntimeState": {
         "type": "string",
         "enum": [
@@ -13803,7 +13887,8 @@
         "description": "Slash commands understood by NAC.",
         "enum": [
           "compact",
-          "goal"
+          "goal",
+          "mcp_prompt"
         ]
       },
       "SlashCommandDefinition": {
@@ -13818,6 +13903,12 @@
         "properties": {
           "accepts_arguments": {
             "type": "boolean"
+          },
+          "arguments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpPromptArgument"
+            }
           },
           "command": {
             "$ref": "#/components/schemas/SlashCommand"

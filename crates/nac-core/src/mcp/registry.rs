@@ -249,7 +249,7 @@ impl McpRegistry {
                     }
                 };
 
-            let peer_info = match service.peer_info().cloned() {
+            let peer_info = match service.peer_info() {
                 Some(peer_info) => peer_info,
                 None => {
                     let reason = "completed initialization without peer info".to_string();
@@ -362,7 +362,7 @@ impl McpRegistry {
                 cwd: cwd.to_path_buf(),
                 startup_timeout,
                 capabilities,
-                instructions: peer_info.instructions,
+                instructions: peer_info.instructions.clone(),
             });
             for tool in listed_tools {
                 let qualified_name = allocate_tool_name(&server_name, &tool.name, &mut seen_names);

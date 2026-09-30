@@ -538,6 +538,7 @@ export interface components {
       server_version?: string | null;
       tools: components["schemas"]["McpProbedTool"][];
     };
+    McpPromptArgument: { description?: string | null; name: string; required: boolean };
     McpRuntimeState: "disabled" | "disconnected" | "connecting" | "connected" | "failed";
     McpRuntimeStatus: {
       auth_required: boolean;
@@ -1033,9 +1034,10 @@ export interface components {
       visible_message_count: number;
     };
     SkillCatalogEntry: { compatibility?: string | null; description: string; name: string };
-    SlashCommand: "compact" | "goal";
+    SlashCommand: "compact" | "goal" | "mcp_prompt";
     SlashCommandDefinition: {
       accepts_arguments: boolean;
+      arguments?: components["schemas"]["McpPromptArgument"][];
       command: components["schemas"]["SlashCommand"];
       description: string;
       name: string;

@@ -866,9 +866,9 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::{
         restore_env, shell_single_quote, start_auth_retry_http_mcp_server,
-        start_capability_http_mcp_server,
-        start_deadline_http_mcp_server, start_fake_http_mcp_server,
-        start_partial_catalog_http_mcp_server, toml_string, unique_temp_dir,
+        start_capability_http_mcp_server, start_deadline_http_mcp_server,
+        start_fake_http_mcp_server, start_partial_catalog_http_mcp_server, toml_string,
+        unique_temp_dir,
     };
     use super::*;
     use crate::TEST_ENV_LOCK;

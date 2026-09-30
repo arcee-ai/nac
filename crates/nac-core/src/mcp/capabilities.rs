@@ -367,11 +367,7 @@ impl McpRegistry {
                     "resource templates",
                 )?;
                 let service = server.current_service().await;
-                let result = service
-                    .read()
-                    .await
-                    .list_resource_templates(page())
-                    .await?;
+                let result = service.read().await.list_resource_templates(page()).await?;
                 json!({"server": server_name, "trust": "untrusted_remote_data", "resourceTemplates": sanitized_value(serde_json::to_value(result.resource_templates)?), "nextCursor": result.next_cursor})
             }
             READ_RESOURCE_TOOL => {
@@ -462,12 +458,13 @@ impl McpRegistry {
             GetPromptRequestParams::new(prompt_name).with_arguments(arguments)
         };
         let service = server.current_service().await;
-        service
+        let result = service
             .read()
             .await
             .get_prompt(params)
             .await
-            .map_err(Into::into)
+            .map_err(Into::into);
+        result
     }
 
     fn server_for(&self, name: &str) -> Result<&Arc<McpServer>> {
