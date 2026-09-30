@@ -112,7 +112,7 @@ use nac_core::store::{TraditionalChildExecutionMode, TraditionalChildRecord};
 #[cfg(test)]
 use nac_core::test_support::store::TranscriptLogWriter;
 use nac_core::{
-    commands::{slash_command_definitions, SlashCommand},
+    commands::SlashCommand,
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEvent, SessionEventBoundary,
         SessionEventEnvelope, SessionReplayGap,

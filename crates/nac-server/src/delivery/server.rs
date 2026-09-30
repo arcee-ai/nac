@@ -1,4 +1,5 @@
 use crate::*;
+use nac_core::commands::{slash_command_definitions, SlashCommandDefinition};
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
 
 pub(crate) fn response_compression_layer() -> CompressionLayer<impl Predicate> {
