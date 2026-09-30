@@ -1,0 +1,5 @@
+{
+  "exit": 1,
+  "stderr": "Error: TRUNCATE checkpoint busy or incomplete: [[Number(1), Number(125), Number(0)]]\n",
+  "passed_json_emitted": false
+}

@@ -1,0 +1,74 @@
+{
+  "observed_at": "2026-09-30",
+  "context": "aws-dev-apps-01",
+  "namespace": "all114-qualification",
+  "pod": "qualification",
+  "pod_uid": "078d5ed1-d822-4667-8a18-8acac0009da3",
+  "pod_created": "2026-09-30T19:26:47Z",
+  "runtime_class": "gvisor",
+  "node": "ip-10-9-158-139.us-east-2.compute.internal",
+  "pod_security_context": {
+    "fsGroup": 10001,
+    "fsGroupChangePolicy": "OnRootMismatch",
+    "runAsGroup": 10001,
+    "runAsNonRoot": true,
+    "runAsUser": 10001,
+    "seccompProfile": {
+      "type": "RuntimeDefault"
+    }
+  },
+  "containers": [
+    {
+      "name": "qualification",
+      "image": "356660933719.dkr.ecr.us-east-2.amazonaws.com/nac@sha256:e892906bd07771950846c832758952fbfb388b299f433b5fb9c97fea8a813f0a",
+      "resources": {
+        "limits": {
+          "cpu": "4",
+          "memory": "8Gi"
+        },
+        "requests": {
+          "cpu": "1",
+          "memory": "2Gi"
+        }
+      },
+      "securityContext": {
+        "allowPrivilegeEscalation": false,
+        "capabilities": {
+          "drop": [
+            "ALL"
+          ]
+        },
+        "readOnlyRootFilesystem": true
+      }
+    }
+  ],
+  "pvc": {
+    "name": "qualification",
+    "uid": "9339747b-709b-421f-81eb-890dc9583385",
+    "created": "2026-09-30T19:26:47Z",
+    "spec": {
+      "accessModes": [
+        "ReadWriteOnce"
+      ],
+      "resources": {
+        "requests": {
+          "storage": "20Gi"
+        }
+      },
+      "storageClassName": "managed-nac-gp3",
+      "volumeMode": "Filesystem",
+      "volumeName": "pvc-9339747b-709b-421f-81eb-890dc9583385"
+    },
+    "status": {
+      "accessModes": [
+        "ReadWriteOnce"
+      ],
+      "capacity": {
+        "storage": "20Gi"
+      },
+      "phase": "Bound"
+    }
+  },
+  "source_revision": "f49494033e4a4d3815fa10f204107292407f3fac",
+  "linux_artifact_run": 36766251401
+}

@@ -1,0 +1,59 @@
+{
+  "unknown_mode_exit": 1,
+  "unknown_mode_created_store": false,
+  "sqlite_one_lane": {
+    "checkpoint": {
+      "rows": [
+        [
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    "cpu_total_us": 18141,
+    "crash": {
+      "after": 1,
+      "before": 0,
+      "child_status": "signal: 9 (SIGKILL)",
+      "committed_survived": true,
+      "retry_rejected": true,
+      "uncommitted_absent": true
+    },
+    "elapsed_ms": 5262,
+    "foreign_key_rejected": "FOREIGN KEY constraint failed",
+    "iterations": 32,
+    "lock_probe": {
+      "outcome": {
+        "error": "database is locked"
+      },
+      "waited_us": 5232307
+    },
+    "mode": "sqlite",
+    "operation_us": {
+      "settlement_worker_inbox_and_rollback": {
+        "count": 1,
+        "total_us": 446
+      },
+      "transcript_append_transaction": {
+        "count": 32,
+        "cpu_p50_us": 86,
+        "cpu_p95_us": 120,
+        "cpu_p99_us": 130,
+        "cpu_total_us": 3043,
+        "max": 300,
+        "p50": 101,
+        "p95": 135,
+        "p99": 140
+      }
+    },
+    "orchestrators": 1,
+    "passed": true,
+    "peak_rss_bytes": 12795904,
+    "retry_count": 0,
+    "scope": "store-stage-only",
+    "seed": 168886546,
+    "stale_generation_rejected": 1,
+    "store_bytes": 368640
+  }
+}

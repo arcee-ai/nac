@@ -115,7 +115,7 @@ SQLite timeout. Compare the append transaction phase below instead.
 | Turso io_uring | unavailable/unavailable/unavailable | unavailable/unavailable/unavailable | no valid measurement |
 
 Ordinary Turso had higher append p95 than its corresponding SQLite lane in all
-six comparisons (about 17–26%). Native-fresh MVCC was about twice the SQLite
+six comparisons (about 12–26%). Native-fresh MVCC was about twice the SQLite
 append latency under this sequential contract. These are one bounded run per
 lane, with small samples and a shared development node/PVC. They demonstrate
 no measured benefit in this workload, not a universal engine ranking or

@@ -55,6 +55,9 @@ async fn main() -> Result<()> {
             let mode = args
                 .get(2)
                 .context("probe requires syscall or mvcc or uring")?;
+            if !["syscall", "mvcc", "uring"].contains(&mode.as_str()) {
+                bail!("unknown probe mode {mode}");
+            }
             let path = args
                 .get(3)
                 .context("probe requires disposable store path")?;

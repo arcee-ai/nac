@@ -109,11 +109,12 @@ pub async fn run(mode: &str, path: &Path, count: usize) -> Result<Value> {
         conn.query("PRAGMA quick_check").await? == vec![vec![json!("ok")]],
         "integrity"
     );
-    let checkpoint = conn.query("PRAGMA wal_checkpoint(TRUNCATE)").await;
-    let checkpoint = match checkpoint {
-        Ok(rows) => json!({"rows":rows}),
-        Err(e) => json!({"error":e.to_string()}),
-    };
+    let rows = conn.query("PRAGMA wal_checkpoint(TRUNCATE)").await?;
+    ensure!(
+        rows == vec![vec![json!(0), json!(0), json!(0)]],
+        "TRUNCATE checkpoint busy or incomplete: {rows:?}"
+    );
+    let checkpoint = json!({"rows":rows});
     drop(conn);
     drop(backend);
     let reopened = Backend::open(mode, path).await?;
