@@ -1729,12 +1729,16 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Worksets" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Worksets_managed-release" }).click();
+  // Auto-follow can move a transcript badge between pointer-down and up.
+  // Native keyboard activation also verifies these retained links are accessible.
+  await page.getByRole("button", { name: "Worksets_managed-release" }).focus();
+  await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/worksets$`));
   await expect(
     page.getByText("Verify the managed transcript topology", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /managed-ui/i }).click();
+  await page.getByRole("button", { name: /managed-ui/i }).focus();
+  await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/threads$`));
   await expect(page.getByText("managed worker completed", { exact: true })).toBeVisible();
 
