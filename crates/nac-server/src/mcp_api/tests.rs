@@ -1,5 +1,39 @@
 use super::*;
 
+#[tokio::test]
+async fn oauth_callback_listener_accepts_localhost_on_both_ip_families() {
+    let listeners = OAuthCallbackListeners::bind(0).await.unwrap();
+    let port = listeners.ipv4.local_addr().unwrap().port();
+
+    let ipv4 = TcpStream::connect(("127.0.0.1", port));
+    let (connected, accepted) = tokio::join!(ipv4, listeners.accept());
+    connected.unwrap();
+    accepted.unwrap();
+
+    if listeners.ipv6.is_some() {
+        let ipv6 = TcpStream::connect(("::1", port));
+        let (connected, accepted) = tokio::join!(ipv6, listeners.accept());
+        connected.unwrap();
+        accepted.unwrap();
+    }
+}
+
+#[test]
+fn oauth_callback_target_rejects_unrelated_and_malformed_requests() {
+    assert_eq!(
+        oauth_callback_target(
+            b"GET /mcp_library/oauth/callback?code=test&state=test HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        ),
+        Some("/mcp_library/oauth/callback?code=test&state=test")
+    );
+    assert_eq!(oauth_callback_target(b"GET / HTTP/1.1\r\n\r\n"), None);
+    assert_eq!(
+        oauth_callback_target(b"POST /mcp_library/oauth/callback HTTP/1.1\r\n\r\n"),
+        None
+    );
+    assert_eq!(oauth_callback_target(b"not http"), None);
+}
+
 #[test]
 fn recoverable_publication_conflicts_remain_http_conflicts() {
     let error: ApiError = McpServerConfigurationStoreError::RecoveryRequired {

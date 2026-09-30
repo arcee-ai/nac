@@ -48,17 +48,20 @@ pub mod mcp_configurations {
     #[cfg(feature = "test-support")]
     pub use crate::mcp::run_mcp_conformance_client;
     pub use crate::mcp::{
-        acquire_mcp_configuration_write_lease, delete_mcp_server_configuration,
-        embedded_library_entries, fetch_smithery_library_entries, insert_mcp_server_configuration,
-        list_mcp_server_configurations, load_mcp_defaults, load_mcp_server_configuration,
-        load_mcp_server_configuration_snapshot, mcp_config_path, mcp_error_requires_authorization,
-        merge_library_entries, probe_mcp_server, update_mcp_server_configuration,
+        acquire_mcp_configuration_write_lease, begin_mcp_oauth_authorization, clear_mcp_oauth,
+        configure_mcp_oauth, delete_mcp_oauth_profile, delete_mcp_server_configuration,
+        embedded_library_entries, fetch_smithery_library_entries, has_mcp_oauth_profile,
+        insert_mcp_server_configuration, list_mcp_server_configurations, load_mcp_defaults,
+        load_mcp_server_configuration, load_mcp_server_configuration_snapshot, mcp_config_path,
+        mcp_error_requires_authorization, mcp_oauth_status, merge_library_entries,
+        probe_mcp_server, rename_mcp_oauth_profile, update_mcp_server_configuration,
         update_mcp_server_configuration_at_revision, McpConfigurationWriteLease,
-        McpHeaderHelperConfig, McpLibraryAuth, McpLibraryEntry, McpProbeResult, McpProbedTool,
-        McpProtocolSelection, McpRuntimeManager, McpRuntimeState, McpRuntimeStatus,
-        McpServerConfig, McpServerConfigurationRecord, McpServerConfigurationStoreError,
-        McpToolApproval, McpToolMetadata, McpTransportConfig, MCP_TRANSPORT_STDIO,
-        MCP_TRANSPORT_STREAMABLE_HTTP,
+        McpHeaderHelperConfig, McpLibraryAuth, McpLibraryEntry, McpOAuthAuthorizationSession,
+        McpOAuthConfiguration, McpOAuthStatus, McpProbeResult, McpProbedTool, McpProtocolSelection,
+        McpRuntimeManager, McpRuntimeState, McpRuntimeStatus, McpServerConfig,
+        McpServerConfigurationRecord, McpServerConfigurationStoreError, McpToolApproval,
+        McpToolMetadata, McpTransportConfig, MCP_OAUTH_CALLBACK_PATH, MCP_OAUTH_REDIRECT_URI,
+        MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
     };
 }
 

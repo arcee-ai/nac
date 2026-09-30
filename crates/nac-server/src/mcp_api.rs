@@ -8,8 +8,12 @@
 //! reference verbatim or a masked preview of a literal, and an update request
 //! may send null for a value to keep what is stored.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::LazyLock;
+use std::time::Duration;
 
 use axum::extract::{rejection::JsonRejection, Path as AxumPath, State};
 use axum::http::StatusCode;
@@ -20,6 +24,8 @@ use nac_core::mcp_configurations::{
     McpToolApproval, McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
 };
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
 use crate::{ApiError, RequestField, SessionManager};
 
@@ -226,6 +232,51 @@ pub struct TestMcpServerResponse {
     pub tools: Vec<McpProbedTool>,
     pub probe: Option<McpProbeResult>,
 }
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct ConfigureMcpOAuthRequest {
+    #[schema(write_only)]
+    pub client_id_credential: String,
+    #[schema(write_only)]
+    pub client_secret_credential: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum McpOAuthPublicStatus {
+    NeedsConfiguration,
+    NeedsAuthorization,
+    Connecting,
+    Connected,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct McpOAuthStatusResponse {
+    pub status: McpOAuthPublicStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct AuthenticateMcpOAuthResponse {
+    pub status: McpOAuthPublicStatus,
+    pub authorization_url: String,
+}
+
+enum OAuthFlowState {
+    Connecting {
+        generation: u64,
+        task: tokio::task::JoinHandle<()>,
+    },
+    Failed,
+}
+
+static OAUTH_FLOWS: LazyLock<tokio::sync::Mutex<HashMap<String, OAuthFlowState>>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
+static OAUTH_FLOW_GENERATION: AtomicU64 = AtomicU64::new(1);
+const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// True when the whole value is one `${ENV_VAR}` reference and nothing else.
 fn is_env_reference(value: &str) -> bool {
@@ -586,6 +637,14 @@ pub async fn update_server_handler(
         configuration,
         revision,
     )?;
+    mcp::rename_mcp_oauth_profile(manager.root_cwd(), &server_name, &record.name).map_err(
+        |_| {
+            oauth_error(
+                StatusCode::CONFLICT,
+                "MCP OAuth configuration could not be renamed",
+            )
+        },
+    )?;
     manager.mcp_runtime().forget(&server_name).await;
     Ok(Json(view(record)))
 }
@@ -608,6 +667,12 @@ pub async fn delete_server_handler(
     if !mcp::delete_mcp_server_configuration(&path, &server_name)? {
         return Err(McpServerConfigurationStoreError::NotFound(server_name).into());
     }
+    mcp::delete_mcp_oauth_profile(manager.root_cwd(), &server_name).map_err(|_| {
+        oauth_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "MCP OAuth cleanup failed",
+        )
+    })?;
     manager.mcp_runtime().forget(&server_name).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -879,6 +944,325 @@ pub async fn test_server_handler(
             }))
         }
     }
+}
+
+fn oauth_endpoint(manager: &SessionManager, server_name: &str) -> Result<String, ApiError> {
+    let record = mcp::load_mcp_server_configuration(&config_path(manager)?, server_name)?;
+    if record.transport != MCP_TRANSPORT_STREAMABLE_HTTP {
+        return Err(ApiError::bad_request(
+            "OAuth is available only for streamable HTTP MCP servers".to_string(),
+        ));
+    }
+    record
+        .url
+        .filter(|url| !url.trim().is_empty())
+        .ok_or_else(|| ApiError::bad_request("the MCP server URL is missing".to_string()))
+}
+
+fn oauth_error(status: StatusCode, message: &'static str) -> ApiError {
+    ApiError::new(status, message.to_string())
+}
+
+fn public_oauth_status(status: mcp::McpOAuthStatus) -> McpOAuthPublicStatus {
+    match status {
+        mcp::McpOAuthStatus::NeedsConfiguration => McpOAuthPublicStatus::NeedsConfiguration,
+        mcp::McpOAuthStatus::NeedsAuthorization => McpOAuthPublicStatus::NeedsAuthorization,
+        mcp::McpOAuthStatus::Connected => McpOAuthPublicStatus::Connected,
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/mcp_library/servers/{server_name}/oauth/configure",
+    operation_id = "post_mcp_library_servers_server_name_oauth_configure",
+    tag = "mcp-library",
+    params(("server_name" = String, Path)),
+    request_body(content = ConfigureMcpOAuthRequest, content_type = "application/json"),
+    responses((status = 200, description = "OAuth configuration saved", body = McpOAuthStatusResponse, content_type = "application/json"), (status = 400, description = "Configuration rejected", body = crate::ApiErrorBody, content_type = "application/json"), (status = 404, description = "MCP server not found", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
+pub async fn configure_oauth_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(server_name): AxumPath<String>,
+    payload: Result<Json<ConfigureMcpOAuthRequest>, JsonRejection>,
+) -> Result<Json<McpOAuthStatusResponse>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    let endpoint = oauth_endpoint(&manager, &server_name)?;
+    let status = mcp::configure_mcp_oauth(
+        manager.root_cwd(),
+        &server_name,
+        &endpoint,
+        mcp::McpOAuthConfiguration {
+            client_id_credential: request.client_id_credential,
+            client_secret_credential: request.client_secret_credential,
+            scopes: request.scopes,
+        },
+    )
+    .map_err(|_| {
+        oauth_error(
+            StatusCode::BAD_REQUEST,
+            "MCP OAuth configuration was rejected",
+        )
+    })?;
+    Ok(Json(McpOAuthStatusResponse {
+        status: public_oauth_status(status),
+        message: None,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/mcp_library/servers/{server_name}/oauth/status",
+    operation_id = "get_mcp_library_servers_server_name_oauth_status",
+    tag = "mcp-library",
+    params(("server_name" = String, Path)),
+    responses((status = 200, description = "OAuth status", body = McpOAuthStatusResponse, content_type = "application/json"), (status = 404, description = "MCP server not found", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
+pub async fn oauth_status_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(server_name): AxumPath<String>,
+) -> Result<Json<McpOAuthStatusResponse>, ApiError> {
+    let endpoint = oauth_endpoint(&manager, &server_name)?;
+    let flows = OAUTH_FLOWS.lock().await;
+    if let Some(flow) = flows.get(&server_name) {
+        let (status, message) = match flow {
+            OAuthFlowState::Connecting { .. } => (McpOAuthPublicStatus::Connecting, None),
+            OAuthFlowState::Failed => (
+                McpOAuthPublicStatus::Failed,
+                Some(
+                    "OAuth authorization did not complete; start authentication again".to_string(),
+                ),
+            ),
+        };
+        return Ok(Json(McpOAuthStatusResponse { status, message }));
+    }
+    drop(flows);
+    let status = mcp::mcp_oauth_status(manager.root_cwd(), &server_name, &endpoint)
+        .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?;
+    Ok(Json(McpOAuthStatusResponse {
+        status: public_oauth_status(status),
+        message: None,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/mcp_library/servers/{server_name}/oauth/authenticate",
+    operation_id = "post_mcp_library_servers_server_name_oauth_authenticate",
+    tag = "mcp-library",
+    params(("server_name" = String, Path)),
+    responses((status = 200, description = "OAuth browser authorization ready", body = AuthenticateMcpOAuthResponse, content_type = "application/json"), (status = 400, description = "Authentication could not start", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Loopback callback is unavailable", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
+pub async fn authenticate_oauth_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(server_name): AxumPath<String>,
+) -> Result<Json<AuthenticateMcpOAuthResponse>, ApiError> {
+    let endpoint = oauth_endpoint(&manager, &server_name)?;
+
+    let old_tasks = {
+        let mut flows = OAUTH_FLOWS.lock().await;
+        flows
+            .drain()
+            .filter_map(|(_, flow)| match flow {
+                OAuthFlowState::Connecting { task, .. } => Some(task),
+                OAuthFlowState::Failed => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    for task in old_tasks {
+        task.abort();
+        let _ = task.await;
+    }
+
+    let listeners = OAuthCallbackListeners::bind(1456).await.map_err(|_| {
+        oauth_error(
+            StatusCode::CONFLICT,
+            "the local OAuth callback port is unavailable",
+        )
+    })?;
+    let session = mcp::begin_mcp_oauth_authorization(manager.root_cwd(), &server_name, &endpoint)
+        .await
+        .map_err(|_| {
+            oauth_error(
+                StatusCode::BAD_REQUEST,
+                "MCP OAuth authentication could not start",
+            )
+        })?;
+    let authorization_url = session.authorization_url().to_string();
+    let generation = OAUTH_FLOW_GENERATION.fetch_add(1, Ordering::Relaxed);
+    let completion_name = server_name.clone();
+    let (start_sender, start_receiver) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        if start_receiver.await.is_err() {
+            return;
+        }
+        let success = run_oauth_callback(listeners, session).await;
+        let mut flows = OAUTH_FLOWS.lock().await;
+        let current = flows.get(&completion_name);
+        if !matches!(current, Some(OAuthFlowState::Connecting { generation: value, .. }) if *value == generation)
+        {
+            return;
+        }
+        if success {
+            flows.remove(&completion_name);
+        } else {
+            flows.insert(completion_name, OAuthFlowState::Failed);
+        }
+    });
+    {
+        let mut flows = OAUTH_FLOWS.lock().await;
+        flows.insert(server_name, OAuthFlowState::Connecting { generation, task });
+    }
+    let _ = start_sender.send(());
+    Ok(Json(AuthenticateMcpOAuthResponse {
+        status: McpOAuthPublicStatus::Connecting,
+        authorization_url,
+    }))
+}
+
+struct OAuthCallbackListeners {
+    ipv4: TcpListener,
+    ipv6: Option<TcpListener>,
+}
+
+impl OAuthCallbackListeners {
+    async fn bind(port: u16) -> std::io::Result<Self> {
+        let ipv4 = TcpListener::bind(("127.0.0.1", port)).await?;
+        let port = ipv4.local_addr()?.port();
+        let ipv6 = match TcpListener::bind(("::1", port)).await {
+            Ok(listener) => Some(listener),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::AddrNotAvailable | ErrorKind::Unsupported
+                ) =>
+            {
+                None
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(Self { ipv4, ipv6 })
+    }
+
+    async fn accept(&self) -> std::io::Result<TcpStream> {
+        if let Some(ipv6) = &self.ipv6 {
+            tokio::select! {
+                accepted = self.ipv4.accept() => accepted.map(|(stream, _)| stream),
+                accepted = ipv6.accept() => accepted.map(|(stream, _)| stream),
+            }
+        } else {
+            self.ipv4.accept().await.map(|(stream, _)| stream)
+        }
+    }
+}
+
+async fn run_oauth_callback(
+    listeners: OAuthCallbackListeners,
+    session: mcp::McpOAuthAuthorizationSession,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + OAUTH_CALLBACK_TIMEOUT;
+    loop {
+        let Ok(Ok(mut stream)) = tokio::time::timeout_at(deadline, listeners.accept()).await else {
+            return false;
+        };
+        let mut request = vec![0_u8; 8192];
+        let read_deadline = std::cmp::min(
+            deadline,
+            tokio::time::Instant::now() + Duration::from_secs(5),
+        );
+        let Ok(Ok(read)) = tokio::time::timeout_at(read_deadline, stream.read(&mut request)).await
+        else {
+            continue;
+        };
+        let Some(target) = oauth_callback_target(&request[..read]) else {
+            write_oauth_callback_response(
+                &mut stream,
+                "404 Not Found",
+                "This is not an active OAuth callback.",
+            )
+            .await;
+            continue;
+        };
+        let callback_url = format!("http://localhost:1456{target}");
+        if !session.matches_callback_state(&callback_url) {
+            write_oauth_callback_response(
+                &mut stream,
+                "400 Bad Request",
+                "This OAuth callback is stale or invalid. Return to NAC and try again.",
+            )
+            .await;
+            continue;
+        }
+        let success = session.handle_callback_url(&callback_url).await.is_ok();
+        let (status, body) = if success {
+            (
+                "200 OK",
+                "Authorization complete. You can close this window.",
+            )
+        } else {
+            (
+                "400 Bad Request",
+                "Authorization could not be completed. Return to NAC and try again.",
+            )
+        };
+        write_oauth_callback_response(&mut stream, status, body).await;
+        return success;
+    }
+}
+
+fn oauth_callback_target(request: &[u8]) -> Option<&str> {
+    if request.is_empty() || request.len() == 8192 {
+        return None;
+    }
+    let request = std::str::from_utf8(request).ok()?;
+    let line = request.lines().next()?;
+    let mut parts = line.split_whitespace();
+    let (Some("GET"), Some(target), Some(version)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return None;
+    };
+    (version.starts_with("HTTP/1.")
+        && parts.next().is_none()
+        && target.split('?').next() == Some(mcp::MCP_OAUTH_CALLBACK_PATH))
+    .then_some(target)
+}
+
+async fn write_oauth_callback_response(stream: &mut TcpStream, status: &str, body: &str) {
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes()).await;
+    let _ = stream.shutdown().await;
+}
+
+#[utoipa::path(
+    post,
+    path = "/mcp_library/servers/{server_name}/oauth/logout",
+    operation_id = "post_mcp_library_servers_server_name_oauth_logout",
+    tag = "mcp-library",
+    params(("server_name" = String, Path)),
+    responses((status = 200, description = "OAuth credentials cleared", body = McpOAuthStatusResponse, content_type = "application/json"), (status = 404, description = "MCP server not found", body = crate::ApiErrorBody, content_type = "application/json"))
+)]
+pub async fn logout_oauth_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(server_name): AxumPath<String>,
+) -> Result<Json<McpOAuthStatusResponse>, ApiError> {
+    let _ = oauth_endpoint(&manager, &server_name)?;
+    let flow = OAUTH_FLOWS.lock().await.remove(&server_name);
+    if let Some(OAuthFlowState::Connecting { task, .. }) = flow {
+        task.abort();
+        let _ = task.await;
+    }
+    let status = mcp::clear_mcp_oauth(manager.root_cwd(), &server_name).map_err(|_| {
+        oauth_error(
+            StatusCode::BAD_REQUEST,
+            "MCP OAuth logout could not complete",
+        )
+    })?;
+    Ok(Json(McpOAuthStatusResponse {
+        status: public_oauth_status(status),
+        message: None,
+    }))
 }
 
 impl From<McpServerConfigurationStoreError> for ApiError {

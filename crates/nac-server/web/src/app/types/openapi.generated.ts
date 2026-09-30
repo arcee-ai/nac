@@ -135,6 +135,10 @@ export interface components {
       text?: string | null;
       thread_name?: string | null;
     };
+    AuthenticateMcpOAuthResponse: {
+      authorization_url: string;
+      status: components["schemas"]["McpOAuthPublicStatus"];
+    };
     AuthStatus: "ready" | "no_credential";
     BackendKind:
       | "deepseek-chat"
@@ -192,6 +196,11 @@ export interface components {
           reason: components["schemas"]["CompactionSkipReason"];
           status: "unchanged";
         };
+    ConfigureMcpOAuthRequest: {
+      client_id_credential: string;
+      client_secret_credential: string;
+      scopes: string[];
+    };
     CostTier: {
       cache_read: number;
       cache_write: number;
@@ -545,6 +554,16 @@ export interface components {
       | "log"
       | "progress"
       | "subscription_ended";
+    McpOAuthPublicStatus:
+      | "needs_configuration"
+      | "needs_authorization"
+      | "connecting"
+      | "connected"
+      | "failed";
+    McpOAuthStatusResponse: {
+      message?: string | null;
+      status: components["schemas"]["McpOAuthPublicStatus"];
+    };
     McpProbedTool: {
       _meta?: unknown;
       annotations?: unknown;
