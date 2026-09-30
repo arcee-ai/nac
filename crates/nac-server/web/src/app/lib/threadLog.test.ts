@@ -40,6 +40,25 @@ function page(ids: number[], hasOlder: boolean): ThreadEventPage {
 }
 
 describe("tool-call status", () => {
+  it("renders MCP refresh failures as named error lines", () => {
+    expect(
+      threadLogLine(
+        {
+          type: "mcp_notification",
+          server_name: "docs",
+          kind: "catalog_refresh_failed",
+          message: "using last-known-good tools",
+        },
+        7,
+      ),
+    ).toMatchObject({
+      key: "log-7",
+      name: "docs",
+      body: "using last-known-good tools",
+      isError: true,
+    });
+  });
+
   it.each(["error", "timed_out", "cancelled"] as const)(
     "renders typed %s tool completions as failures",
     (completion_status) => {

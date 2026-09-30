@@ -123,6 +123,63 @@ impl McpServerConfig {
             "execution_timeout_ms",
         )
     }
+
+    pub(super) fn configured_redactions(&self) -> Vec<String> {
+        let mut values = Vec::new();
+        let mut push = |value: String| {
+            if values.len() < 128 && value.chars().count() >= 4 && !values.contains(&value) {
+                values.push(value);
+            }
+        };
+        match &self.transport {
+            McpTransportConfig::Stdio { env, env_vars, .. } => {
+                for value in env.values().filter_map(|value| expand_env(value).ok()) {
+                    push(value);
+                }
+                for name in env_vars {
+                    if let Ok(value) = env::var(name) {
+                        push(value);
+                    }
+                }
+            }
+            McpTransportConfig::StreamableHttp {
+                headers,
+                env_headers,
+                bearer_token_env_var,
+                header_helper,
+                ..
+            } => {
+                for value in headers.values().filter_map(|value| expand_env(value).ok()) {
+                    push(value);
+                }
+                for env_name in env_headers.values() {
+                    if let Ok(value) = env::var(env_name) {
+                        push(value);
+                    }
+                }
+                if let Some(env_name) = bearer_token_env_var {
+                    if let Ok(value) = env::var(env_name) {
+                        push(value);
+                    }
+                }
+                if let Some(helper) = header_helper {
+                    for value in helper
+                        .env
+                        .values()
+                        .filter_map(|value| expand_env(value).ok())
+                    {
+                        push(value);
+                    }
+                    for name in &helper.env_vars {
+                        if let Ok(value) = env::var(name) {
+                            push(value);
+                        }
+                    }
+                }
+            }
+        }
+        values
+    }
 }
 
 pub(super) fn timeout_value(

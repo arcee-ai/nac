@@ -117,6 +117,13 @@ export interface components {
           thread_name?: string | null;
           type: "mcp_server_skipped";
         }
+      | {
+          kind: components["schemas"]["McpNotificationKind"];
+          message: string;
+          server_name: string;
+          thread_name?: string | null;
+          type: "mcp_notification";
+        }
       | { message: string; thread_name?: string | null; type: "model_error" }
       | { thread_name?: string | null; type: "run_finished" };
     ApiErrorBody: { error: string };
@@ -525,6 +532,13 @@ export interface components {
       url: string;
     };
     McpLibraryResponse: { entries: components["schemas"]["McpLibraryEntry"][] };
+    McpNotificationKind:
+      | "catalog_refreshed"
+      | "catalog_refresh_failed"
+      | "resource_updated"
+      | "log"
+      | "progress"
+      | "subscription_ended";
     McpProbedTool: { description?: string | null; name: string };
     McpProbeResult: {
       capabilities: string[];

@@ -148,6 +148,18 @@ pub enum ToolCompletionStatus {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum McpNotificationKind {
+    CatalogRefreshed,
+    CatalogRefreshFailed,
+    ResourceUpdated,
+    Log,
+    Progress,
+    SubscriptionEnded,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -275,6 +287,15 @@ pub enum AgentEvent {
         thread_name: Option<String>,
         server_name: String,
         reason: String,
+    },
+    /// Bounded, credential-redacted MCP server activity. These notifications
+    /// are live-only because older durable event readers do not know this
+    /// vocabulary and catalog state is reconstructed from the server.
+    McpNotification {
+        thread_name: Option<String>,
+        server_name: String,
+        kind: McpNotificationKind,
+        message: String,
     },
     /// A model call the provider itself refused, reported with credentials
     /// redacted.
@@ -1043,6 +1064,7 @@ fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
         | AgentEvent::TokenUsageUpdated { .. }
         | AgentEvent::ThreadLog { .. }
         | AgentEvent::McpServerSkipped { .. }
+        | AgentEvent::McpNotification { .. }
         | AgentEvent::ModelError { .. }
         | AgentEvent::OrchestratorSteeringQueued { .. }
         | AgentEvent::OrchestratorSteeringDelivered { .. }
@@ -1188,6 +1210,17 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             thread_name,
             server_name,
             reason: bounded_provider_message(&redact_credentials(&reason, &[])),
+        },
+        AgentEvent::McpNotification {
+            thread_name,
+            server_name,
+            kind,
+            message,
+        } => AgentEvent::McpNotification {
+            thread_name,
+            server_name: safe_tool_name(&server_name),
+            kind,
+            message: bounded_provider_message(&redact_credentials(&message, &[])),
         },
         AgentEvent::ModelError {
             thread_name,

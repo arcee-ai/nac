@@ -8,7 +8,7 @@ use serde_json::Value;
 use tokio::sync::{Mutex, Notify, RwLock};
 
 use crate::events::EventSink;
-use crate::mcp::McpRegistry;
+use crate::mcp::{McpRegistry, McpToolCapture};
 use crate::sandbox::ExecutionBackend;
 use crate::skills::SkillRegistry;
 use crate::terminal::TerminalManager;
@@ -469,6 +469,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         event_sink: EventSink::none(),
         backend,
         mcp: None,
+        mcp_tools: Arc::new(HashMap::new()),
         skills: None,
         terminal_manager: TerminalManager::new(),
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,

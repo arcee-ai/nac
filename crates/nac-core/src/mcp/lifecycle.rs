@@ -98,9 +98,11 @@ impl McpRuntimeManager {
             None,
         )
         .await;
-        let handler = NacMcpClientHandler {
-            roots: mcp_roots_for_policy(&self.cwd, None, McpRootPolicy::None)?,
-        };
+        let handler = NacMcpClientHandler::unbound(mcp_roots_for_policy(
+            &self.cwd,
+            None,
+            McpRootPolicy::None,
+        )?);
         let mut service =
             match connect_server(name, &config, &handler, &self.cwd, startup_timeout).await {
                 Ok(service) => service,

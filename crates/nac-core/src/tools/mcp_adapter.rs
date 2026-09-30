@@ -4,12 +4,12 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::{kernel, ToolResult};
-use crate::mcp::McpRegistry;
+use crate::mcp::{McpRegistry, McpToolCapture};
 use crate::types::ToolDefinition;
 
 struct McpTool {
     definition: ToolDefinition,
-    registry: Arc<McpRegistry>,
+    capture: Option<McpToolCapture>,
     image_results: bool,
     execution_timeout: Duration,
 }
@@ -70,9 +70,16 @@ impl kernel::NativeTool for McpTool {
         _context: &'a kernel::ToolCallContext,
     ) -> futures_util::future::BoxFuture<'a, ToolResult> {
         Box::pin(async move {
-            self.registry
-                .call_tool(&self.definition.function.name, input, self.image_results)
-                .await
+            let Some(capture) = self.capture.as_ref() else {
+                return ToolResult::text(
+                    format!(
+                        "Error: unknown MCP tool '{}'",
+                        self.definition.function.name
+                    ),
+                    true,
+                );
+            };
+            capture.call(input, self.image_results).await
         })
     }
 }
@@ -156,20 +163,24 @@ pub(super) async fn invoke(
     services: kernel::ToolServices<'_>,
     context: &kernel::ToolCallContext,
 ) -> ToolResult {
-    let Some(definition) = registry.tool_definition(name) else {
-        return ToolResult::text(format!("Error: unknown MCP tool '{name}'"), true);
-    };
     let snapshot = if registry.is_capability_tool(name) {
+        let Some(definition) = registry.tool_definition(name) else {
+            return ToolResult::text(format!("Error: unknown MCP tool '{name}'"), true);
+        };
         capability_snapshot(definition, registry)
     } else {
-        snapshot(
-            definition,
-            registry
-                .execution_timeout(name)
-                .unwrap_or(kernel::DEFAULT_TOOL_TIMEOUT),
-            registry,
-            services.client.supports_image_tool_results(),
-        )
+        let capture = services.runtime.mcp_tools.get(name).cloned().or_else(|| {
+            services
+                .runtime
+                .allowed_tools
+                .is_none()
+                .then(|| registry.capture_tool(name))
+                .flatten()
+        });
+        let Some(capture) = capture else {
+            return ToolResult::text(format!("Error: unknown MCP tool '{name}'"), true);
+        };
+        snapshot(capture, services.client.supports_image_tool_results())
     };
     snapshot.invoke(name, input, services, context).await
 }
@@ -198,19 +209,15 @@ fn capability_snapshot(
     clippy::expect_used,
     reason = "a one-element imported capability registry cannot collide or omit its element"
 )]
-fn snapshot(
-    definition: ToolDefinition,
-    execution_timeout: Duration,
-    registry: Arc<McpRegistry>,
-    image_results: bool,
-) -> kernel::ToolSnapshot {
+fn snapshot(capture: McpToolCapture, image_results: bool) -> kernel::ToolSnapshot {
+    let definition = capture.definition();
     let name = definition.function.name.clone();
     kernel::ToolRegistry::builder()
         .register(McpTool {
             definition,
-            registry,
+            capture: Some(capture.clone()),
             image_results,
-            execution_timeout,
+            execution_timeout: capture.execution_timeout(),
         })
         .finish()
         .expect("one imported MCP capability is collision-free")
@@ -248,19 +255,24 @@ mod tests {
         runtime.session_id = Some("session-a".to_string());
         runtime.permission_broker = Some(broker);
         let client = crate::model::ModelClient::new_for_test();
-        let snapshot = snapshot(
-            ToolDefinition {
-                def_type: "function".to_string(),
-                function: FunctionDef {
-                    name: "mcp__fake__echo".to_string(),
-                    description: "test".to_string(),
-                    parameters: serde_json::json!({"type":"object"}),
+        let snapshot = kernel::ToolRegistry::builder()
+            .register(McpTool {
+                definition: ToolDefinition {
+                    def_type: "function".to_string(),
+                    function: FunctionDef {
+                        name: "mcp__fake__echo".to_string(),
+                        description: "test".to_string(),
+                        parameters: serde_json::json!({"type":"object"}),
+                    },
                 },
-            },
-            kernel::DEFAULT_TOOL_TIMEOUT,
-            Arc::new(McpRegistry::empty_for_test()),
-            false,
-        );
+                capture: None,
+                image_results: false,
+                execution_timeout: kernel::DEFAULT_TOOL_TIMEOUT,
+            })
+            .finish()
+            .unwrap()
+            .snapshot(["mcp__fake__echo"])
+            .unwrap();
         let result = snapshot
             .invoke(
                 "mcp__fake__echo",

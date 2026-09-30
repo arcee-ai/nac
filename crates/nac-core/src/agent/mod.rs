@@ -139,6 +139,7 @@ pub struct Agent {
     mode: AgentMode,
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
+    base_tool_defs: Vec<ToolDefinition>,
     admission_controlled_tools: bool,
     direct_primary: bool,
     native_web_capabilities: NativeWebCapabilities,
@@ -303,6 +304,7 @@ impl Agent {
                 system_prompt.push_str(&light_model_prompt_guidance(light));
             }
         }
+        let base_tool_defs = tool_defs.clone();
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
         }
@@ -341,6 +343,9 @@ impl Agent {
         }
 
         let local_paths = crate::paths::PathContext::new(&config.config_cwd);
+        if let Some(mcp) = config.mcp.as_ref() {
+            mcp.set_event_sink(config.event_sink.clone(), config.thread_name.clone());
+        }
         let workspace_lease_identity =
             crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
         let backend = crate::sandbox::select_execution_backend(
@@ -385,6 +390,7 @@ impl Agent {
             mode,
             messages,
             tool_defs,
+            base_tool_defs,
             admission_controlled_tools: mode == AgentMode::Direct,
             direct_primary: mode == AgentMode::Direct,
             native_web_capabilities,
@@ -399,6 +405,7 @@ impl Agent {
                 worker_executable: config.worker_executable,
                 backend,
                 mcp: config.mcp,
+                mcp_tools: Arc::new(HashMap::new()),
                 skills: config.skills,
                 terminal_manager,
                 command_cancellation: crate::tools::ThreadCancellation::default(),
@@ -444,23 +451,20 @@ impl Agent {
             .set_worker_credential(credential);
     }
 
-    /// Build one immutable model-request capability view. The Exa credential
-    /// and the tool names are replaced together before the request and the
-    /// resulting runtime is cloned into exactly that response's tool round.
+    /// Build one immutable capability view for the next model request and tool round.
     fn refresh_model_request_capabilities(&mut self) -> Result<Vec<ToolDefinition>> {
         let credential = self.native_web_capabilities.resolve_credential()?;
-        Ok(self.install_model_request_capabilities(credential))
+        Ok(self.install_capabilities(credential))
     }
 
-    fn install_model_request_capabilities(
-        &mut self,
-        credential: Option<String>,
-    ) -> Vec<ToolDefinition> {
+    fn install_capabilities(&mut self, credential: Option<String>) -> Vec<ToolDefinition> {
         let credential = credential
             .filter(|_| self.native_web_capabilities.is_eligible())
             .map(crate::tools::web::ExaCredential::new)
             .map(Arc::new);
-        let mut definitions = self.tool_defs.clone();
+        let mut definitions = self
+            .tool_runtime
+            .model_tool_definitions(&self.base_tool_defs, &self.tool_defs);
         if credential.is_some() {
             definitions.extend(crate::tools::web::definitions());
         }
@@ -479,7 +483,7 @@ impl Agent {
         &mut self,
         credential: Option<&str>,
     ) -> Vec<ToolDefinition> {
-        self.install_model_request_capabilities(credential.map(str::to_string))
+        self.install_capabilities(credential.map(str::to_string))
     }
 
     #[cfg(test)]
@@ -999,7 +1003,8 @@ impl Agent {
 
     pub fn set_event_sink(&mut self, sink: EventSink) {
         self.event_sink = sink.clone();
-        self.tool_runtime.event_sink = sink;
+        self.tool_runtime
+            .set_event_sink(sink, self.thread_name.clone());
     }
 
     pub(crate) fn configure_permission_broker(

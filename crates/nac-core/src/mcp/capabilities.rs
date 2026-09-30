@@ -240,7 +240,8 @@ impl McpRegistry {
     }
 
     pub fn prompt_commands(&self) -> Vec<McpPromptCommand> {
-        let mut commands: Vec<_> = self.prompt_commands.values().cloned().collect();
+        let snapshot = self.sync.snapshot();
+        let mut commands: Vec<_> = snapshot.prompt_commands.values().cloned().collect();
         commands.sort_by(|left, right| left.command_name.cmp(&right.command_name));
         commands.truncate(MAX_PROMPT_COMMANDS);
         commands
@@ -254,7 +255,8 @@ impl McpRegistry {
         let body = trimmed.strip_prefix('/')?;
         let name_end = body.find(char::is_whitespace).unwrap_or(body.len());
         let command_name = &body[..name_end];
-        let command = self.prompt_commands.get(command_name)?;
+        let snapshot = self.sync.snapshot();
+        let command = snapshot.prompt_commands.get(command_name)?;
         let arguments_text = body[name_end..].trim();
         let arguments = if arguments_text.is_empty() {
             Map::new()
@@ -308,7 +310,8 @@ impl McpRegistry {
         &self,
         invocation: McpPromptInvocation,
     ) -> Result<crate::commands::PreparedPrompt> {
-        let command = self
+        let snapshot = self.sync.snapshot();
+        let command = snapshot
             .prompt_commands
             .get(&invocation.command_name)
             .ok_or_else(|| {
@@ -316,7 +319,8 @@ impl McpRegistry {
                     "MCP prompt command '/{}' is unavailable",
                     invocation.command_name
                 )
-            })?;
+            })?
+            .clone();
         let result = timeout(
             MCP_PROMPT_RESOLUTION_TIMEOUT,
             self.get_prompt(
@@ -677,10 +681,12 @@ mod tests {
                 required: true,
             }],
         };
-        McpRegistry {
-            prompt_commands: Arc::new(HashMap::from([(command.command_name.clone(), command)])),
-            ..McpRegistry::empty_for_test()
-        }
+        let registry = McpRegistry::empty_for_test();
+        registry.sync.initialize(
+            HashMap::new(),
+            HashMap::from([(command.command_name.clone(), command)]),
+        );
+        registry
     }
 
     #[test]

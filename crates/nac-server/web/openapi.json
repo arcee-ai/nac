@@ -8249,6 +8249,39 @@
           },
           {
             "type": "object",
+            "description": "Bounded, credential-redacted MCP server activity. These notifications\nare live-only because older durable event readers do not know this\nvocabulary and catalog state is reconstructed from the server.",
+            "required": [
+              "server_name",
+              "kind",
+              "message",
+              "type"
+            ],
+            "properties": {
+              "kind": {
+                "$ref": "#/components/schemas/McpNotificationKind"
+              },
+              "message": {
+                "type": "string"
+              },
+              "server_name": {
+                "type": "string"
+              },
+              "thread_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mcp_notification"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "A model call the provider itself refused, reported with credentials\nredacted.\n\nOrdinary errors are reduced to a constant before they leave the process,\nbecause their text can carry paths and tool output. What a provider says\nabout its own API — no credits, bad key, rate limit, context too long —\ncarries none of that and is the one thing the user has to see to act, so\nit travels intact apart from credential material, which is masked before\nthe event leaves the process. Live-only, like the other events whose\nabsence keeps the persisted stream readable by older builds.",
             "required": [
               "message",
@@ -10584,6 +10617,17 @@
             }
           }
         }
+      },
+      "McpNotificationKind": {
+        "type": "string",
+        "enum": [
+          "catalog_refreshed",
+          "catalog_refresh_failed",
+          "resource_updated",
+          "log",
+          "progress",
+          "subscription_ended"
+        ]
       },
       "McpProbeResult": {
         "type": "object",

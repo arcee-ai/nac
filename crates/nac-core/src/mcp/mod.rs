@@ -37,11 +37,13 @@ use crate::types::{FunctionDef, ToolDefinition};
 pub(crate) mod capabilities;
 mod config;
 mod file_config;
+mod invocation;
 mod library;
 mod lifecycle;
 mod naming;
 mod registry;
 mod result;
+mod sync;
 mod transport;
 
 pub use capabilities::{McpPromptArgument, McpPromptCommand, McpPromptInvocation};
@@ -55,6 +57,7 @@ pub use file_config::{
     McpServerConfigurationRecord, McpServerConfigurationStoreError, MCP_TRANSPORT_STDIO,
     MCP_TRANSPORT_STREAMABLE_HTTP,
 };
+pub(crate) use invocation::McpToolCapture;
 pub use library::{
     embedded_library_entries, fetch_smithery_library_entries, merge_library_entries,
     McpLibraryAuth, McpLibraryEntry,
@@ -96,9 +99,8 @@ pub async fn probe_mcp_server(
     defaults: &McpDefaults,
     cwd: &Path,
 ) -> Result<McpProbeResult> {
-    let handler = NacMcpClientHandler {
-        roots: mcp_roots_for_policy(cwd, None, McpRootPolicy::None)?,
-    };
+    let handler =
+        NacMcpClientHandler::unbound(mcp_roots_for_policy(cwd, None, McpRootPolicy::None)?);
     let startup_timeout = config.startup_timeout(defaults)?;
     let catalog_timeout = config.catalog_timeout(defaults)?;
     let mut service = connect_server(name, config, &handler, cwd, startup_timeout).await?;
@@ -201,6 +203,7 @@ use config::*;
 use naming::*;
 use registry::*;
 use result::*;
+use sync::*;
 use transport::*;
 
 type McpService = RunningService<RoleClient, NacMcpClientHandler>;
@@ -855,7 +858,7 @@ mod tests {
     use super::*;
     use crate::TEST_ENV_LOCK;
     use serde_json::json;
-    use std::fs;
+    use std::{collections::HashSet, fs};
 
     const MANAGED_EXA_CANARY: &str = "managed-server-mcp-isolation-canary";
 
@@ -1389,7 +1392,7 @@ args = ["-c", "true"]
                 header_helper: Some(helper),
             },
         };
-        let handler = NacMcpClientHandler { roots: Vec::new() };
+        let handler = NacMcpClientHandler::unbound(Vec::new());
         let started = std::time::Instant::now();
 
         let mut service = connect_server(
@@ -1442,7 +1445,7 @@ done
                 cwd: None,
             },
         };
-        let handler = NacMcpClientHandler { roots: Vec::new() };
+        let handler = NacMcpClientHandler::unbound(Vec::new());
 
         let error = match connect_server(
             "hung-stdio",
@@ -1593,7 +1596,18 @@ url = {}
             .registry
             .expect("valid MCP capability should remain mounted");
         let mut runtime = crate::tools::test_runtime();
-        runtime.mcp = Some(registry);
+        runtime.mcp = Some(Arc::clone(&registry));
+        let advertised = runtime.model_tool_definitions(&[], &[]);
+        runtime.allowed_tools = Some(Arc::new(
+            advertised
+                .iter()
+                .map(|definition| definition.function.name.clone())
+                .collect::<HashSet<_>>(),
+        ));
+        let server = Arc::clone(registry.servers.get("hung").expect("mounted server"));
+        registry.sync.replace_tools(&server, Vec::new());
+        assert!(registry.capture_tool("mcp__hung__echo").is_none());
+        assert!(runtime.mcp_tools.contains_key("mcp__hung__echo"));
         let client = crate::model::ModelClient::new_for_test();
         let timed_out = crate::tools::execute_tool(
             "mcp__hung__echo",

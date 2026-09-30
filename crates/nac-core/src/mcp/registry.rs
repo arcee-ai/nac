@@ -9,9 +9,8 @@ const MAX_PROMPT_DISCOVERY_PAGES: usize = 32;
 
 #[derive(Clone)]
 pub struct McpRegistry {
-    pub(super) tools: Arc<HashMap<String, Arc<McpToolBinding>>>,
     pub(super) servers: Arc<BTreeMap<String, Arc<McpServer>>>,
-    pub(super) prompt_commands: Arc<HashMap<String, McpPromptCommand>>,
+    pub(super) sync: Arc<McpSyncState>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,33 +27,58 @@ pub enum McpRootPolicy {
 
 #[derive(Clone)]
 pub(super) struct McpToolBinding {
-    tool_name: String,
-    definition: ToolDefinition,
-    server: Arc<McpServer>,
-    execution_timeout: Duration,
+    pub(super) tool_name: String,
+    pub(super) definition: ToolDefinition,
+    pub(super) server: std::sync::Weak<McpServer>,
+    pub(super) execution_timeout: Duration,
 }
 
 pub(super) struct McpServer {
     pub(super) name: String,
-    service: tokio::sync::RwLock<SharedMcpService>,
-    refresh: tokio::sync::Mutex<()>,
-    config: McpServerConfig,
-    handler: NacMcpClientHandler,
-    cwd: PathBuf,
-    startup_timeout: Duration,
+    pub(super) service: tokio::sync::RwLock<SharedMcpService>,
+    pub(super) refresh: tokio::sync::Mutex<()>,
+    pub(super) config: McpServerConfig,
+    pub(super) handler: NacMcpClientHandler,
+    pub(super) cwd: PathBuf,
+    pub(super) startup_timeout: Duration,
+    pub(super) catalog_timeout: Duration,
+    pub(super) execution_timeout: Duration,
+    pub(super) protocol_version: ProtocolVersion,
     pub(super) capabilities: rmcp::model::ServerCapabilities,
     pub(super) instructions: Option<String>,
+    pub(super) sync: Arc<McpSyncState>,
+    pub(super) catalog_refresh: tokio::sync::Mutex<()>,
+    pub(super) last_catalog_refresh: std::sync::Mutex<HashMap<&'static str, std::time::Instant>>,
+    pub(super) legacy_subscriptions: std::sync::Mutex<std::collections::HashSet<String>>,
+    pub(super) notification_task: McpNotificationTask,
 }
 
 impl McpServer {
     pub(super) async fn current_service(&self) -> SharedMcpService {
         self.service.read().await.clone()
     }
+
+    pub(super) fn should_seed_resources(&self) -> bool {
+        self.protocol_version >= ProtocolVersion::V_2026_07_28
+            || self
+                .capabilities
+                .resources
+                .as_ref()
+                .is_some_and(|resources| resources.subscribe == Some(true))
+    }
+
+    pub(super) fn reset_legacy_subscriptions(&self) {
+        self.legacy_subscriptions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+    }
 }
 
 #[derive(Clone)]
 pub(super) struct NacMcpClientHandler {
     pub(super) roots: Vec<Root>,
+    pub(super) binding: Arc<McpHandlerBinding>,
 }
 
 /// A configured MCP server that could not be loaded for a worker, and why.
@@ -137,10 +161,11 @@ fn file_servers_for_policy(
 impl McpRegistry {
     #[cfg(test)]
     pub(crate) fn empty_for_test() -> Self {
+        let sync = Arc::new(McpSyncState::new());
+        sync.initialize(HashMap::new(), HashMap::new());
         Self {
-            tools: Arc::new(HashMap::new()),
             servers: Arc::new(BTreeMap::new()),
-            prompt_commands: Arc::new(HashMap::new()),
+            sync,
         }
     }
 
@@ -169,9 +194,8 @@ impl McpRegistry {
             });
         }
 
-        let handler = NacMcpClientHandler {
-            roots: mcp_roots_for_policy(cwd, sandbox, root_policy)?,
-        };
+        let roots = mcp_roots_for_policy(cwd, sandbox, root_policy)?;
+        let sync = Arc::new(McpSyncState::new());
 
         let mut tools = HashMap::new();
         let mut mounted_services = Vec::new();
@@ -225,6 +249,7 @@ impl McpRegistry {
                     continue;
                 }
             };
+            let handler = NacMcpClientHandler::unbound(roots.clone());
             let mut service =
                 match connect_server(&server_name, &server_config, &handler, cwd, startup_timeout)
                     .await
@@ -267,6 +292,7 @@ impl McpRegistry {
                 }
             };
             let capabilities = peer_info.capabilities.clone();
+            let protocol_version = peer_info.protocol_version.clone();
             let listed_tools = if capabilities.tools.is_none() {
                 Vec::new()
             } else {
@@ -350,6 +376,11 @@ impl McpRegistry {
                     }
                 }
             };
+            // Initial resource exposure belongs to the capability slice.
+            // Synchronization starts from an empty subscription set and fills
+            // it on the first advertised resource-list change, avoiding extra
+            // startup requests and preserving predecessor admission behavior.
+            let listed_resource_uris = Vec::new();
 
             seen_endpoints.insert(endpoint, server_name.clone());
             let service = Arc::new(tokio::sync::RwLock::new(service));
@@ -361,9 +392,20 @@ impl McpRegistry {
                 handler: handler.clone(),
                 cwd: cwd.to_path_buf(),
                 startup_timeout,
+                catalog_timeout,
+                execution_timeout,
+                protocol_version,
                 capabilities,
                 instructions: peer_info.instructions.clone(),
+                sync: Arc::clone(&sync),
+                catalog_refresh: tokio::sync::Mutex::new(()),
+                last_catalog_refresh: std::sync::Mutex::new(HashMap::new()),
+                legacy_subscriptions: std::sync::Mutex::new(std::collections::HashSet::new()),
+                notification_task: McpNotificationTask::default(),
             });
+            handler.bind(&server);
+            sync.set_redactions(&server_name, server_config.configured_redactions());
+            sync.set_resources(&server_name, listed_resource_uris);
             for tool in listed_tools {
                 let qualified_name = allocate_tool_name(&server_name, &tool.name, &mut seen_names);
                 let mut definition = tool_definition(&qualified_name, &server_name, &tool);
@@ -392,7 +434,7 @@ impl McpRegistry {
                     Arc::new(McpToolBinding {
                         tool_name: tool.name.to_string(),
                         definition,
-                        server: Arc::clone(&server),
+                        server: Arc::downgrade(&server),
                         execution_timeout,
                     }),
                 );
@@ -435,13 +477,16 @@ impl McpRegistry {
             mounted_servers.insert(server_name, server);
         }
 
+        sync.initialize(tools, prompt_commands);
+        for server in mounted_servers.values() {
+            server.start_notification_processing().await;
+        }
         let registry = if mounted_servers.is_empty() {
             None
         } else {
             Some(Arc::new(Self {
-                tools: Arc::new(tools),
                 servers: Arc::new(mounted_servers),
-                prompt_commands: Arc::new(prompt_commands),
+                sync,
             }))
         };
 
@@ -449,7 +494,8 @@ impl McpRegistry {
     }
 
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
-        let mut definitions: Vec<ToolDefinition> = self
+        let snapshot = self.sync.snapshot();
+        let mut definitions: Vec<ToolDefinition> = snapshot
             .tools
             .values()
             .map(|binding| binding.definition.clone())
@@ -459,110 +505,67 @@ impl McpRegistry {
     }
 
     pub fn model_tool_definitions(&self) -> Vec<ToolDefinition> {
-        let mut definitions = self.tool_definitions();
+        self.model_tool_snapshot().0
+    }
+
+    pub(crate) fn model_tool_snapshot(
+        &self,
+    ) -> (Vec<ToolDefinition>, HashMap<String, McpToolCapture>) {
+        let snapshot = self.sync.snapshot();
+        let mut captures = HashMap::new();
+        let mut definitions = Vec::new();
+        let mut names: Vec<_> = snapshot.tools.keys().collect();
+        names.sort();
+        for name in names {
+            let binding = &snapshot.tools[name];
+            let Some(server) = binding.server.upgrade() else {
+                continue;
+            };
+            definitions.push(binding.definition.clone());
+            captures.insert(
+                name.clone(),
+                McpToolCapture {
+                    binding: Arc::clone(binding),
+                    server,
+                },
+            );
+        }
         definitions.extend(capability_tool_definitions());
         definitions.sort_by(|left, right| left.function.name.cmp(&right.function.name));
-        definitions
+        (definitions, captures)
+    }
+
+    pub(crate) fn set_event_sink(
+        &self,
+        sink: crate::events::EventSink,
+        thread_name: Option<String>,
+    ) {
+        self.sync.set_target(sink, thread_name);
     }
 
     pub(crate) fn tool_definition(&self, name: &str) -> Option<ToolDefinition> {
-        self.tools
+        self.sync
+            .snapshot()
+            .tools
             .get(name)
             .map(|binding| binding.definition.clone())
             .or_else(|| capability_tool_definition(name))
     }
 
-    pub(crate) fn execution_timeout(&self, name: &str) -> Option<Duration> {
-        self.tools
-            .get(name)
-            .map(|binding| binding.execution_timeout)
+    pub(crate) fn capture_tool(&self, name: &str) -> Option<McpToolCapture> {
+        let binding = self.sync.snapshot().tools.get(name).cloned()?;
+        let server = binding.server.upgrade()?;
+        Some(McpToolCapture { binding, server })
     }
 
     pub async fn call_tool(&self, name: &str, args: Value, image_results: bool) -> ToolResult {
-        let Some(binding) = self.tools.get(name) else {
+        let Some(capture) = self.capture_tool(name) else {
             return ToolResult {
                 content: format!("Error: unknown MCP tool '{name}'").into(),
                 is_error: true,
             };
         };
-
-        let arguments = match args {
-            Value::Object(map) => Some(map),
-            Value::Null => None,
-            _ => {
-                return ToolResult {
-                    content: format!("Error: MCP tool '{name}' requires object arguments").into(),
-                    is_error: true,
-                }
-            }
-        };
-
-        let mut params = CallToolRequestParams::new(binding.tool_name.clone());
-        if let Some(arguments) = arguments {
-            params = params.with_arguments(arguments);
-        }
-        // Keep the high-level 3.x call: it resolves protocol-version-specific
-        // multi-round responses and returns only the final CallToolResult.
-        let service = binding.server.service.read().await.clone();
-        let first_result = service.read().await.call_tool(params.clone()).await;
-        match first_result {
-            Ok(result) => flatten_tool_result(result, image_results).await,
-            Err(error)
-                if binding.server.config.has_header_helper() && authorization_required(&error) =>
-            {
-                let _refresh = binding.server.refresh.lock().await;
-                let refreshed_service = {
-                    let current = binding.server.service.read().await.clone();
-                    if Arc::ptr_eq(&current, &service) {
-                        match connect_server(
-                            &binding.server.name,
-                            &binding.server.config,
-                            &binding.server.handler,
-                            &binding.server.cwd,
-                            binding.server.startup_timeout,
-                        )
-                        .await
-                        {
-                            Ok(refreshed) => {
-                                let refreshed = Arc::new(tokio::sync::RwLock::new(refreshed));
-                                let replaced = {
-                                    let mut current = binding.server.service.write().await;
-                                    std::mem::replace(&mut *current, Arc::clone(&refreshed))
-                                };
-                                close_shared_mcp_service(replaced).await;
-                                refreshed
-                            }
-                            Err(refresh_error) => {
-                                return ToolResult {
-                                    content: format!(
-                                        "Error calling MCP tool '{name}': authentication refresh failed: {refresh_error:#}"
-                                    )
-                                    .into(),
-                                    is_error: true,
-                                };
-                            }
-                        }
-                    } else {
-                        current
-                    }
-                };
-                let refreshed_result = refreshed_service.read().await.call_tool(params).await;
-                match refreshed_result {
-                    Ok(result) => flatten_tool_result(result, image_results).await,
-                    Err(error) => ToolResult {
-                        content: format!(
-                            "Error calling MCP tool '{name}' after authentication refresh: {error}"
-                        )
-                        .into(),
-                        is_error: true,
-                    },
-                }
-            }
-            Err(error) => ToolResult {
-                content: format!("Error calling MCP tool '{name}': {error}").into(),
-                is_error: true,
-            },
-        }
+        capture.call(args, image_results).await
     }
 }
 
@@ -619,6 +622,48 @@ impl ClientHandler for NacMcpClientHandler {
         _request_context: rmcp::service::RequestContext<RoleClient>,
     ) -> std::result::Result<ListRootsResult, rmcp::model::ErrorData> {
         Ok(ListRootsResult::new(self.roots.clone()))
+    }
+
+    async fn on_progress(
+        &self,
+        params: rmcp::model::ProgressNotificationParam,
+        _context: rmcp::service::NotificationContext<RoleClient>,
+    ) {
+        self.observe_progress(params);
+    }
+
+    async fn on_logging_message(
+        &self,
+        params: rmcp::model::LoggingMessageNotificationParam,
+        _context: rmcp::service::NotificationContext<RoleClient>,
+    ) {
+        self.observe_log(params);
+    }
+
+    async fn on_resource_updated(
+        &self,
+        params: rmcp::model::ResourceUpdatedNotificationParam,
+        _context: rmcp::service::NotificationContext<RoleClient>,
+    ) {
+        self.observe_resource_update(params);
+    }
+
+    async fn on_resource_list_changed(
+        &self,
+        context: rmcp::service::NotificationContext<RoleClient>,
+    ) {
+        self.refresh_resources(context).await;
+    }
+
+    async fn on_tool_list_changed(&self, context: rmcp::service::NotificationContext<RoleClient>) {
+        self.refresh_tools(context).await;
+    }
+
+    async fn on_prompt_list_changed(
+        &self,
+        context: rmcp::service::NotificationContext<RoleClient>,
+    ) {
+        self.refresh_prompts(context).await;
     }
 }
 
@@ -703,7 +748,7 @@ mod product_identity_tests {
 
     #[test]
     fn outbound_mcp_client_preserves_the_latest_initialize_lifecycle() {
-        let info = NacMcpClientHandler { roots: Vec::new() }.get_info();
+        let info = NacMcpClientHandler::unbound(Vec::new()).get_info();
 
         assert_eq!(
             info.protocol_version,

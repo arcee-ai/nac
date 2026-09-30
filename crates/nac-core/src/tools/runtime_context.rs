@@ -17,6 +17,7 @@ pub struct ToolRuntime {
     pub event_sink: EventSink,
     pub backend: Arc<ExecutionBackend>,
     pub mcp: Option<Arc<McpRegistry>>,
+    pub(crate) mcp_tools: Arc<HashMap<String, McpToolCapture>>,
     pub skills: Option<Arc<SkillRegistry>>,
     pub terminal_manager: TerminalManager,
     pub command_cancellation: ThreadCancellation,
@@ -50,6 +51,31 @@ pub struct ToolRuntime {
 }
 
 impl ToolRuntime {
+    pub(crate) fn model_tool_definitions(
+        &mut self,
+        base: &[ToolDefinition],
+        fallback: &[ToolDefinition],
+    ) -> Vec<ToolDefinition> {
+        match self.mcp.as_ref() {
+            Some(mcp) => {
+                let (mcp_definitions, captures) = mcp.model_tool_snapshot();
+                self.mcp_tools = Arc::new(captures);
+                base.iter().cloned().chain(mcp_definitions).collect()
+            }
+            None => {
+                self.mcp_tools = Arc::new(HashMap::new());
+                fallback.to_vec()
+            }
+        }
+    }
+
+    pub(crate) fn set_event_sink(&mut self, sink: EventSink, thread_name: Option<String>) {
+        if let Some(mcp) = self.mcp.as_ref() {
+            mcp.set_event_sink(sink.clone(), thread_name);
+        }
+        self.event_sink = sink;
+    }
+
     pub(crate) fn allows_tool(&self, name: &str) -> bool {
         self.allowed_tools
             .as_ref()
