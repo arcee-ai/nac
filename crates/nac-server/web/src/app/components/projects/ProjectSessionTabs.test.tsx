@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 
+import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
+import { ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -60,12 +62,14 @@ describe("project session tab behavior identity", () => {
     ];
     render(
       <MemoryRouter>
-        <ProjectSessionTabs
-          projectId="project"
-          sessions={sessions}
-          activeSessionId="direct"
-          summary={sessions[1].summary}
-        />
+        <UiPolicyContext.Provider value={ORCHESTRATION_UI_POLICY}>
+          <ProjectSessionTabs
+            projectId="project"
+            sessions={sessions}
+            activeSessionId="direct"
+            summary={sessions[1].summary}
+          />
+        </UiPolicyContext.Provider>
       </MemoryRouter>,
     );
 

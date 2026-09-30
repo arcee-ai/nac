@@ -1,3 +1,5 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { visibleSessions, firstChatAdmission } from "@/app/features/ui-policy/policy";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 
@@ -23,6 +25,7 @@ const firstChatByProject = new Map<string, Promise<void>>();
 export default function ProjectRedirectPage() {
   const { projectId = "" } = useParams();
   const actions = useProjectActions();
+  const policy = useUiPolicy();
   const projectsQuery = useProjects();
   const sessionsQuery = useSessions();
   const [confirmedProjectId, setConfirmedProjectId] = useState<string | null>(null);
@@ -48,8 +51,9 @@ export default function ProjectRedirectPage() {
     [projectsQuery.data, projectId],
   );
   const newest = useMemo(
-    () => newestPrimarySessionForProject(sessionsQuery.data ?? [], projectId),
-    [sessionsQuery.data, projectId],
+    () =>
+      newestPrimarySessionForProject(visibleSessions(policy, sessionsQuery.data ?? []), projectId),
+    [sessionsQuery.data, projectId, policy],
   );
 
   const loading = projectsQuery.isLoading || sessionsQuery.isLoading;
@@ -70,12 +74,15 @@ export default function ProjectRedirectPage() {
     if (!needsFirstChat) return;
     let pending = firstChatByProject.get(projectId);
     if (!pending) {
-      pending = startChat(projectId, true).finally(() => {
+      pending = startChat(
+        projectId,
+        firstChatAdmission(policy, sessionsQuery.data ?? [], projectId),
+      ).finally(() => {
         firstChatByProject.delete(projectId);
       });
       firstChatByProject.set(projectId, pending);
     }
-  }, [needsFirstChat, startChat, projectId]);
+  }, [needsFirstChat, startChat, projectId, policy, sessionsQuery.data]);
 
   // Deleted, or a stale link — the listing is the only honest place to land.
   const ownershipConfirmed = confirmedProjectId === projectId;

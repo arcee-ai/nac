@@ -23,9 +23,11 @@ export type EmbeddedHarness = {
   provider: ScriptedProvider;
   runRoot: string;
   waitForNoWorkerProcesses: () => Promise<void>;
+  restart: (orchestration: string | null) => Promise<void>;
 };
 
-type RunningHarness = EmbeddedHarness & {
+type RunningHarness = Omit<EmbeddedHarness, "restart"> & {
+  stopServer: () => Promise<void>;
   server: ChildProcess;
   output: string[];
   stop: () => Promise<void>;
@@ -38,16 +40,30 @@ type Fixtures = {
 
 type Options = {
   exaCredential: string | undefined;
+  orchestration: string | null;
 };
 
 export const test = base.extend<Fixtures & Options>({
   exaCredential: [undefined, { option: true }],
-  harness: async ({ request, exaCredential }, use, testInfo) => {
+  orchestration: ["1", { option: true }],
+  harness: async ({ request, exaCredential, orchestration }, use, testInfo) => {
     void request;
-    const running = await startHarness(testInfo, exaCredential);
+    let running = await startHarness(testInfo, exaCredential, orchestration);
+    const harness: EmbeddedHarness = {
+      ...running,
+      restart: async (nextGate) => {
+        if (exaCredential != null)
+          throw new Error("Gate restart fixture requires the ordinary embedded harness");
+        const previousOutput = running.output;
+        await running.stopServer();
+        running = await startHarness(testInfo, exaCredential, nextGate, running.provider);
+        running.output.unshift(...previousOutput);
+        Object.assign(harness, running);
+      },
+    };
     let useError: unknown;
     try {
-      await use(running);
+      await use(harness);
     } catch (error) {
       useError = error;
     }
@@ -267,6 +283,8 @@ export async function waitForRunIdle(
 async function startHarness(
   testInfo: TestInfo,
   exaCredential: string | undefined,
+  orchestration: string | null,
+  existingProvider?: ScriptedProvider,
 ): Promise<RunningHarness> {
   if (process.platform === "win32") {
     throw new Error(
@@ -289,8 +307,8 @@ async function startHarness(
     process.env.NAC_E2E_BINARY ?? path.join(repoRoot, "target/debug/nac-web"),
   );
   await fs.access(binaryPath);
-  const provider = new ScriptedProvider();
-  await provider.start();
+  const provider = existingProvider ?? new ScriptedProvider();
+  if (!existingProvider) await provider.start();
   let exa: ExaDouble | undefined;
   try {
     if (exaCredential != null) exa = await ExaDouble.start(runRoot);
@@ -335,6 +353,7 @@ async function startHarness(
         LANG: "C.UTF-8",
         BROWSER: "none",
         RUST_BACKTRACE: "1",
+        ...(orchestration === null ? {} : { NAC_ORCHESTRATION: orchestration }),
         NAC_E2E_API_KEY: "nac-e2e-dummy-only",
         // Conventional selectors make two independent provider routes
         // available to the unified model picker without placing either value
@@ -449,6 +468,7 @@ async function startHarness(
     },
     server,
     output,
+    stopServer: () => terminateProcessGroup(server),
     stop: async () => {
       const pid = server.pid;
       const cleanup = await Promise.allSettled([

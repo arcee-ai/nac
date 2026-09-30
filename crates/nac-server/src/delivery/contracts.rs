@@ -248,6 +248,10 @@ pub struct CreateSessionRequest {
     /// Chat requests leave this false.
     #[serde(default)]
     pub first_chat: bool,
+    /// Opt-in first-chat admission restricted to the requested immutable behavior.
+    /// Omission preserves newest-primary admission across all behaviors.
+    #[serde(default)]
+    pub first_chat_same_behavior: bool,
     /// Explicit project selection. Projects are never inferred from `cwd`.
     pub project_id: Option<String>,
     #[schema(value_type = Option<String>)]
@@ -322,6 +326,7 @@ impl CreateSessionRequest {
         application::session_creation::SessionCreationCommand {
             behavior: self.behavior,
             first_chat: self.first_chat,
+            first_chat_same_behavior: self.first_chat_same_behavior,
             project_id: self.project_id,
             cwd: self.cwd,
             model: application_field(self.model),

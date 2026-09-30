@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
+import { UiPolicyProvider } from "@/app/features/ui-policy/UiPolicyProvider";
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { AppShell } from "@/app/components/AppShell";
 import { LeftSidebar } from "@/app/components/LeftSidebar";
 import DesignPreviewPage from "@/app/components/pages/DesignPreviewPage";
@@ -25,26 +27,37 @@ export function KeyedSessionPage() {
   );
 }
 
+function DesignRoute() {
+  const policy = useUiPolicy();
+  return policy.orchestrationEnabled ? (
+    <DesignPreviewPage />
+  ) : (
+    <Navigate to={routes.list()} replace />
+  );
+}
+
 export default function App() {
   return (
-    <ToastProvider>
-      {/* Projects sit outside sessions: deleting a project reaches its chats,
+    <UiPolicyProvider>
+      <ToastProvider>
+        {/* Projects sit outside sessions: deleting a project reaches its chats,
           never the other way round. */}
-      <SessionActionsProvider>
-        <ProjectActionsProvider>
-          <ManagedHostProvider>
-            <Routes>
-              <Route element={<AppShell />}>
-                <Route path="/" element={<ProjectsListPage />} />
-                <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
-                <Route path="/session/:sessionId/:panel?" element={<KeyedSessionPage />} />
-              </Route>
-              <Route path="/design" element={<DesignPreviewPage />} />
-              <Route path="*" element={<Navigate to={routes.list()} replace />} />
-            </Routes>
-          </ManagedHostProvider>
-        </ProjectActionsProvider>
-      </SessionActionsProvider>
-    </ToastProvider>
+        <SessionActionsProvider>
+          <ProjectActionsProvider>
+            <ManagedHostProvider>
+              <Routes>
+                <Route element={<AppShell />}>
+                  <Route path="/" element={<ProjectsListPage />} />
+                  <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
+                  <Route path="/session/:sessionId/:panel?" element={<KeyedSessionPage />} />
+                </Route>
+                <Route path="/design" element={<DesignRoute />} />
+                <Route path="*" element={<Navigate to={routes.list()} replace />} />
+              </Routes>
+            </ManagedHostProvider>
+          </ProjectActionsProvider>
+        </SessionActionsProvider>
+      </ToastProvider>
+    </UiPolicyProvider>
   );
 }

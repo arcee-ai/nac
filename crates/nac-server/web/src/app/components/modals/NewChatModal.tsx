@@ -1,3 +1,9 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import {
+  creationBehavior,
+  visibleSessions,
+  firstChatAdmission,
+} from "@/app/features/ui-policy/policy";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -120,7 +126,10 @@ function NewChatForm({
   const projects = useProjects();
   const sessions = useSessions();
   const modelConfigs = useModelConfigs();
-  const [behavior, setBehavior] = useState<SessionBehavior>("orchestrator");
+  const policy = useUiPolicy();
+  const [behavior, setBehavior] = useState<SessionBehavior>(
+    policy.orchestrationEnabled ? "orchestrator" : "direct",
+  );
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [light, setLight] = useState<LightSelection>({ mode: "single", light: null });
   const [error, setError] = useState("");
@@ -175,7 +184,7 @@ function NewChatForm({
       setError("Choose the primary model before creating this chat.");
       return;
     }
-    if (light.mode === "dual" && !light.light) {
+    if (policy.orchestrationEnabled && light.mode === "dual" && !light.light) {
       setError("Pick the light model before creating this chat.");
       return;
     }
@@ -190,7 +199,10 @@ function NewChatForm({
           navigate(routes.list(), { replace: true });
           return;
         }
-        const existing = newestPrimarySessionForProject(sessions, projectId);
+        const existing = newestPrimarySessionForProject(
+          visibleSessions(policy, sessions),
+          projectId,
+        );
         if (existing) {
           onClose();
           navigate(routes.session(existing.summary.session_id), { replace: true });
@@ -211,7 +223,11 @@ function NewChatForm({
       if (selection.kind === "save") {
         const record = await createModelConfig.mutateAsync({
           ...selection.request,
-          light_model: light.mode === "dual" ? light.light : null,
+          light_model: policy.orchestrationEnabled
+            ? light.mode === "dual"
+              ? light.light
+              : null
+            : (selectedLight ?? null),
         });
         selected = {
           // SAFETY: the server echoes the BackendKind wire value it stored.
@@ -228,14 +244,16 @@ function NewChatForm({
         selected = selection;
       }
 
-      const finalLight =
-        light.mode === "dual" && light.light
+      const finalLight = !policy.orchestrationEnabled
+        ? (selectedLight ?? null)
+        : light.mode === "dual" && light.light
           ? inheritPrimaryCredential(light.light, selected.backend, selected.api_key_env)
           : null;
       const request: CreateSessionRequest = {
         project_id: projectId,
-        behavior,
-        first_chat: firstChat,
+        behavior: creationBehavior(policy, behavior),
+        first_chat: firstChat && firstChatAdmission(policy, sessions.data ?? [], projectId),
+        first_chat_same_behavior: !policy.orchestrationEnabled,
         backend: selected.backend,
         model: selected.model,
         base_url: selected.base_url,
@@ -267,7 +285,11 @@ function NewChatForm({
       flush
       className="h-[700px]"
       title="New Chat"
-      subheader="Choose this chat's behavior and models. These settings apply to this chat without changing the project default."
+      subheader={
+        policy.orchestrationEnabled
+          ? "Choose this chat's behavior and models. These settings apply to this chat without changing the project default."
+          : "Choose this chat's model. These settings apply to this chat without changing the project default."
+      }
       footer={
         <Button
           variant={ButtonVariant.Primary}
@@ -279,7 +301,9 @@ function NewChatForm({
         </Button>
       }
     >
-      <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+      {policy.orchestrationEnabled ? (
+        <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+      ) : null}
       {inheritancePending ? (
         <div className="flex items-center gap-2 py-6 text-micro text-basic-muted" role="status">
           <Loader size={LoaderSize.Micro} />
@@ -306,12 +330,14 @@ function NewChatForm({
           >
             {advanced ? "Back to unified models" : "Advanced presets and provider setup"}
           </Button>
-          <LightModelSection
-            key={selectedLightKey}
-            initial={selectedLight}
-            behavior={behavior}
-            onChange={onLight}
-          />
+          {policy.orchestrationEnabled ? (
+            <LightModelSection
+              key={selectedLightKey}
+              initial={selectedLight}
+              behavior={behavior}
+              onChange={onLight}
+            />
+          ) : null}
           {error && !advanced ? (
             <p className="text-micro text-error-primary" role="alert">
               {error}

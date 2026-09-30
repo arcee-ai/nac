@@ -1,3 +1,5 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { useCallback, useMemo } from "react";
 import {
   keepPreviousData,
@@ -544,4 +546,14 @@ export function useDismissSessionFork() {
       void invalidate.sessionRoot(id);
     },
   });
+}
+
+export function useVisibleSessions() {
+  const query = useSessions();
+  const policy = useUiPolicy();
+  const data = useMemo(
+    () => (query.data ? visibleSessions(policy, query.data) : undefined),
+    [query.data, policy],
+  );
+  return { ...query, data };
 }

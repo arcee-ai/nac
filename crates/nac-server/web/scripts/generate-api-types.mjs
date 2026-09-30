@@ -17,6 +17,7 @@ const clientOutputPath = path.join(webDir, "packages/nac-client/src/openapi.gene
 const check = process.argv.slice(2).includes("--check");
 
 const clientSchemaRoots = [
+  "UiConfiguration",
   "AssistantStreamDelta",
   "LaggedEvent",
   "ReadinessResponse",

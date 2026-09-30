@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 
+import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
+import { ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -45,14 +47,16 @@ describe("chat session behavior identity", () => {
   it("shows compact behavior badges with full accessible names in chat lists", () => {
     const onOpen = vi.fn();
     render(
-      <ChatSessionList
-        sessions={[
-          session("orchestrator", "Plan the release", "orchestrator"),
-          session("direct", "Fix the parser", "direct"),
-          session("hybrid", "Coordinate the migration", "direct-with-orchestrator"),
-        ]}
-        onOpen={onOpen}
-      />,
+      <UiPolicyContext.Provider value={ORCHESTRATION_UI_POLICY}>
+        <ChatSessionList
+          sessions={[
+            session("orchestrator", "Plan the release", "orchestrator"),
+            session("direct", "Fix the parser", "direct"),
+            session("hybrid", "Coordinate the migration", "direct-with-orchestrator"),
+          ]}
+          onOpen={onOpen}
+        />
+      </UiPolicyContext.Provider>,
     );
 
     expect(screen.getByRole("button", { name: "Plan the release, NAC orchestrator" })).toBeTruthy();

@@ -297,3 +297,69 @@ async fn project_sibling_inherits_public_http_opt_in() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[tokio::test]
+async fn first_chat_same_behavior_is_additive_and_concurrent_direct_admission_is_unique() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("first_chat_behavior");
+    let workspace = root.join("workspace");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("project-test-key"));
+    let manager = test_manager(&root);
+    let project = manager
+        .projects()
+        .create(application::projects::CreateProject {
+            name: None,
+            description: None,
+            cwd: workspace,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        })
+        .await
+        .unwrap();
+    let legacy = manager
+        .create_session(CreateSessionRequest {
+            project_id: Some(project.project_id.clone()),
+            model: RequestField::Value("gpt-5.2".into()),
+            backend: RequestField::Value("openai-responses".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let request = CreateSessionRequest {
+        project_id: Some(project.project_id.clone()),
+        behavior: sessions::SessionBehavior::Direct,
+        first_chat: true,
+        first_chat_same_behavior: true,
+        ..Default::default()
+    };
+    let (left, right) = tokio::join!(
+        manager.create_session(request.clone()),
+        manager.create_session(request)
+    );
+    let left = left.unwrap();
+    let right = right.unwrap();
+    assert_eq!(left.metadata.session_id, right.metadata.session_id);
+    assert_ne!(left.metadata.session_id, legacy.metadata.session_id);
+    assert_eq!(left.metadata.behavior, sessions::SessionBehavior::Direct);
+    assert_eq!(
+        legacy.metadata.behavior,
+        sessions::SessionBehavior::Orchestrator
+    );
+    // Legacy callers still receive the newest primary regardless of requested behavior.
+    let legacy_caller = manager
+        .create_session(CreateSessionRequest {
+            project_id: Some(project.project_id),
+            first_chat: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(legacy_caller.metadata.session_id, left.metadata.session_id);
+    manager.cancel_local_active_runs_for_shutdown().await;
+    let _ = std::fs::remove_dir_all(root);
+}

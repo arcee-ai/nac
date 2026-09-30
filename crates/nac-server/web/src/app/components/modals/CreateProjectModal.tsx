@@ -1,3 +1,5 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { creationBehavior } from "@/app/features/ui-policy/policy";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -155,7 +157,10 @@ function CreateProjectForm({
   const createModelConfig = useCreateModelConfig();
 
   const [mode, setMode] = useState<Mode>("local");
-  const [behavior, setBehavior] = useState<SessionBehavior>("orchestrator");
+  const policy = useUiPolicy();
+  const [behavior, setBehavior] = useState<SessionBehavior>(
+    policy.orchestrationEnabled ? "orchestrator" : "direct",
+  );
   const [cwd, setCwd] = useState(defaultCwd);
   const [name, setName] = useState("");
   const [reasoning, setReasoning] = useState("");
@@ -340,7 +345,7 @@ function CreateProjectForm({
       });
       return;
     }
-    if (light.mode === "dual" && !light.light) {
+    if (policy.orchestrationEnabled && light.mode === "dual" && !light.light) {
       setError({
         field: "config",
         message: "Pick the light model before creating a project.",
@@ -420,16 +425,18 @@ function CreateProjectForm({
       return;
     }
 
-    const launchLight =
-      light.mode === "dual" && light.light
+    const launchLight = !policy.orchestrationEnabled
+      ? (savedLight ?? null)
+      : light.mode === "dual" && light.light
         ? inheritPrimaryCredential(light.light, backend, apiKeyEnv)
         : null;
 
     // The location is the project's, so the request must not restate it: the
     // server rejects a project-selected create that also carries a cwd.
     const body: CreateSessionRequest = {
-      behavior,
+      behavior: creationBehavior(policy, behavior),
       first_chat: true,
+      first_chat_same_behavior: !policy.orchestrationEnabled,
       project_id: projectId,
       model,
       base_url: baseUrl,
@@ -542,7 +549,9 @@ function CreateProjectForm({
       }
     >
       <div className="flex flex-col gap-8 md:gap-6 [&>*]:shrink-0">
-        <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+        {policy.orchestrationEnabled ? (
+          <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+        ) : null}
 
         <div className="flex flex-col gap-1">
           <FieldLabel label="Environment" hint="Where NAC runs commands and accesses files." />
@@ -645,12 +654,14 @@ function CreateProjectForm({
             onChange={onSelection}
           >
             <div className="flex flex-col gap-2">
-              <LightModelSection
-                key={savedLightKey}
-                initial={savedLight}
-                behavior={behavior}
-                onChange={onLight}
-              />
+              {policy.orchestrationEnabled ? (
+                <LightModelSection
+                  key={savedLightKey}
+                  initial={savedLight}
+                  behavior={behavior}
+                  onChange={onLight}
+                />
+              ) : null}
               <Separator />
               <ConfigRow
                 label="Reasoning Effort"

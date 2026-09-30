@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -258,6 +259,7 @@ function SettingsForm({
   const managedHostQuery = useManagedHostStatus();
   const managedHost = managedHostQuery.data ?? null;
   const createModelConfig = useCreateModelConfig();
+  const policy = useUiPolicy();
   const [openingSummary] = useState(summary);
   const updatePresentation = useUpdatePresentation();
 
@@ -281,7 +283,8 @@ function SettingsForm({
       ? String(initial.orchestrator_compaction_threshold)
       : "",
   );
-  const compactionAutoRef = useRef(initial.orchestrator_compaction_threshold == null);
+  // A persisted null is disabled, not an invitation to change it on mount.
+  const compactionAutoRef = useRef(false);
   // An explicitly selected saved preset owns even a disabled (`null`)
   // compaction policy. Keep an empty explicit value from being replaced by
   // the catalog's automatic 70% suggestion until the user edits it.
@@ -360,7 +363,7 @@ function SettingsForm({
     if (
       !compactionPresetRef.current &&
       compactionPlaceholder !== "auto" &&
-      (compactionRef.current === "" || compactionAutoRef.current)
+      compactionAutoRef.current
     ) {
       compactionAutoRef.current = true;
       compactionRef.current = compactionPlaceholder;
@@ -408,7 +411,7 @@ function SettingsForm({
 
   const submit = async () => {
     if (busy || !selection) return;
-    if (light.mode === "dual" && !light.light) {
+    if (policy.orchestrationEnabled && light.mode === "dual" && !light.light) {
       setError("Pick the light model before saving.");
       return;
     }
@@ -473,22 +476,27 @@ function SettingsForm({
       return;
     }
 
-    if (light.mode === "dual") {
-      // Guarded before a named configuration can be created above.
-      if (!light.light) return;
-      const finalLight = inheritPrimaryCredential(
-        light.light,
-        selected.backend,
-        selected.api_key_env,
-        initial.api_key_env,
-      );
-      if (lightNeedsRepair || !sameLightModel(finalLight, initialLight)) {
-        patch.light_model = finalLight;
+    if (policy.orchestrationEnabled) {
+      if (light.mode === "dual") {
+        // Guarded before a named configuration can be created above.
+        if (!light.light) return;
+        const finalLight = inheritPrimaryCredential(
+          light.light,
+          selected.backend,
+          selected.api_key_env,
+          initial.api_key_env,
+        );
+        if (lightNeedsRepair || !sameLightModel(finalLight, initialLight)) {
+          patch.light_model = finalLight;
+        }
+      } else if (initialLight || lightNeedsRepair) {
+        patch.light_model = null;
       }
-    } else if (initialLight || lightNeedsRepair) {
-      patch.light_model = null;
+    } else if (!sameLightModel(light.light, initialLight)) {
+      // Explicit preset selection still reproduces its complete tuple. Hiding
+      // the control alone leaves the raw existing value untouched.
+      patch.light_model = light.light;
     }
-
     setError("");
     // The title lives on a different endpoint, so it is saved either way — a
     // rename should not be lost because the configuration happened to be
@@ -620,12 +628,14 @@ function SettingsForm({
           onChange={onConfigurationChange}
         >
           <div className="flex flex-col gap-2">
-            <LightModelSection
-              key={JSON.stringify(lightSeed)}
-              initial={lightSeed}
-              behavior={openingSummary.behavior ?? "orchestrator"}
-              onChange={setLight}
-            />
+            {policy.orchestrationEnabled ? (
+              <LightModelSection
+                key={JSON.stringify(lightSeed)}
+                initial={lightSeed}
+                behavior={openingSummary.behavior ?? "orchestrator"}
+                onChange={setLight}
+              />
+            ) : null}
             <Separator />
             <button
               type="button"

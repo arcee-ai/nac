@@ -1,3 +1,5 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -237,7 +239,8 @@ export default function ProjectsListPage() {
 
   const { data, isLoading, error, refetch } = useSessionsWithWorkspaceStats();
   const projectsQuery = useProjects();
-  const allSessions = useMemo(() => data ?? [], [data]);
+  const policy = useUiPolicy();
+  const allSessions = useMemo(() => visibleSessions(policy, data ?? []), [data, policy]);
   const projects = useMemo(() => projectsQuery.data?.projects ?? [], [projectsQuery.data]);
   const all = useMemo(() => projectListItems(projects, allSessions), [projects, allSessions]);
   const items = useVisibleProjectItems(all);

@@ -1,10 +1,13 @@
 /** @vitest-environment jsdom */
 
+import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
+import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { openSubagentLaunch, clearSubagentLaunch } from "@/app/store/sessionLayoutStore";
 import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
@@ -60,7 +63,11 @@ const cancelChild = vi.spyOn(api, "cancelTraditionalChild");
 const startOrchestrator = vi.spyOn(api, "startManagedOrchestrator");
 const cancelOrchestrator = vi.spyOn(api, "cancelManagedOrchestrator");
 
-function mount(behavior: "direct" | "direct-with-orchestrator", seed = true) {
+function mount(
+  behavior: "direct" | "direct-with-orchestrator",
+  seed = true,
+  orchestrationEnabled = true,
+) {
   window.matchMedia = () =>
     ({
       matches: false,
@@ -81,19 +88,23 @@ function mount(behavior: "direct" | "direct-with-orchestrator", seed = true) {
   }
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/sessions/parent"]}>
-        <Routes>
-          <Route
-            path="*"
-            element={
-              <ToastProvider>
-                <DelegatedWorkView sessionId="parent" behavior={behavior} />
-                <Location />
-              </ToastProvider>
-            }
-          />
-        </Routes>
-      </MemoryRouter>
+      <UiPolicyContext.Provider
+        value={orchestrationEnabled ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}
+      >
+        <MemoryRouter initialEntries={["/sessions/parent"]}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <ToastProvider>
+                  <DelegatedWorkView sessionId="parent" behavior={behavior} />
+                  <Location />
+                </ToastProvider>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </UiPolicyContext.Provider>
     </QueryClientProvider>,
   );
   return client;
@@ -112,7 +123,10 @@ beforeEach(() => {
   startOrchestrator.mockReset().mockResolvedValue(orchestrator);
   cancelOrchestrator.mockReset().mockResolvedValue({ ...orchestrator, status: "cancelled" });
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  clearSubagentLaunch();
+});
 
 describe("delegated work", () => {
   it("keeps coding agents and managed orchestrators visibly distinct", () => {
@@ -203,4 +217,14 @@ describe("delegated work", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
+});
+
+it("hides cached managed relationships and normalizes a stale managed launch while retaining children", async () => {
+  openSubagentLaunch("orchestrator");
+  mount("direct-with-orchestrator", true, false);
+  expect(screen.queryByText("Launch Orchestrator")).toBeNull();
+  expect(screen.queryByRole("button", { name: "New Orchestrator" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Run the compatibility audit" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy();
+  await waitFor(() => expect(listOrchestrators).not.toHaveBeenCalled());
 });

@@ -12,4 +12,5 @@ pub(crate) mod session_state;
 pub(crate) mod session_terminals;
 pub(crate) mod sessions;
 pub(crate) mod ssh_configurations;
+pub(crate) mod ui_configuration;
 pub(crate) mod workspace;

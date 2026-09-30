@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/app/services/api";
@@ -182,6 +183,8 @@ export function useCancelTraditionalChild() {
 }
 
 export function useManagedOrchestrators(sessionId: string, enabled: boolean) {
+  const policy = useUiPolicy();
+  enabled = enabled && policy.orchestrationEnabled;
   return useQuery<ManagedOrchestratorRecord[]>({
     queryKey: queryKeys.managedOrchestrators(sessionId),
     queryFn: ({ signal }) => api.listManagedOrchestrators(sessionId, signal),

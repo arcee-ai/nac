@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 
+import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
+import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -123,16 +125,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderModal() {
+function renderModal(orchestration = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(queryKeys.storeInfo, { root_cwd: "/workspace" } as StoreInfo);
   const view = render(
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MemoryRouter>
-          <CreateProjectModal open onClose={vi.fn()} />
-        </MemoryRouter>
-      </ToastProvider>
+      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+        <ToastProvider>
+          <MemoryRouter>
+            <CreateProjectModal open onClose={vi.fn()} />
+          </MemoryRouter>
+        </ToastProvider>
+      </UiPolicyContext.Provider>
     </QueryClientProvider>,
   );
   return { client, view };
@@ -169,6 +173,28 @@ it("sends explicit null when the first chat changes a saved Dual preset to Singl
     fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
     await waitFor(() => expect(api.createSession).toHaveBeenCalled());
     expect(vi.mocked(api.createSession).mock.calls[0]?.[0].light_model).toBeNull();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("default project creation requests direct without clearing a hidden dual preset", async () => {
+  const { client, view } = renderModal(false);
+  try {
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Select dual preset" }));
+    expect(screen.queryByRole("button", { name: "Use one model" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() => expect(api.createSession).toHaveBeenCalled());
+    expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        behavior: "direct",
+        first_chat: true,
+        first_chat_same_behavior: true,
+        light_model: expect.objectContaining({ model: "gpt-5-mini" }),
+      }),
+    );
   } finally {
     view.unmount();
     client.clear();

@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 
+import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
+import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -85,9 +87,13 @@ afterEach(() => {
 function renderReadySettings({
   threshold = 111,
   headersJson = "{}",
+  orchestration = true,
+  lightModel = null,
 }: {
   threshold?: number | null;
   headersJson?: string;
+  orchestration?: boolean;
+  lightModel?: RawSessionConfig["light_model"];
 } = {}) {
   const initial = {
     backend: "openai-responses",
@@ -137,7 +143,7 @@ function renderReadySettings({
     config_version: 1,
     ...initial,
     extra_headers_json: headersJson,
-    light_model: null,
+    light_model: lightModel,
     orchestrator_compaction_threshold: threshold,
     diagnostics: [],
   } as RawSessionConfig);
@@ -172,11 +178,13 @@ function renderReadySettings({
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MemoryRouter>
-          <SettingsModal open id="settings-session" onClose={vi.fn()} />
-        </MemoryRouter>
-      </ToastProvider>
+      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+        <ToastProvider>
+          <MemoryRouter>
+            <SettingsModal open id="settings-session" onClose={vi.fn()} />
+          </MemoryRouter>
+        </ToastProvider>
+      </UiPolicyContext.Provider>
     </QueryClientProvider>,
   );
   return { client, update, view };
@@ -243,11 +251,13 @@ it("holds a fast settings submit until managed status authorizes the mounted mod
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MemoryRouter>
-          <SettingsModal open id="managed-session" onClose={onClose} />
-        </MemoryRouter>
-      </ToastProvider>
+      <UiPolicyContext.Provider value={ORCHESTRATION_UI_POLICY}>
+        <ToastProvider>
+          <MemoryRouter>
+            <SettingsModal open id="managed-session" onClose={onClose} />
+          </MemoryRouter>
+        </ToastProvider>
+      </UiPolicyContext.Provider>
     </QueryClientProvider>,
   );
 
@@ -318,6 +328,27 @@ it("repairs malformed stored extra headers to an explicit empty object", async (
         extra_headers: {},
       }),
     );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("saving direct settings keeps a hidden light model and disabled compaction intact", async () => {
+  const { client, view, update } = renderReadySettings({
+    orchestration: false,
+    threshold: null,
+    headersJson: "{not-json}",
+    lightModel: { model: "gpt-5-mini", backend: "openai-responses", api_key_env: "OTHER_ACCOUNT" },
+  });
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: "Keep current configuration" }));
+    expect(screen.queryByText("Optional light model")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    const patch = update.mock.calls[0]?.[1];
+    expect(patch).not.toHaveProperty("light_model");
+    expect(patch).not.toHaveProperty("orchestrator_compaction_threshold");
   } finally {
     view.unmount();
     client.clear();

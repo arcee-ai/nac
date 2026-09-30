@@ -18,6 +18,7 @@ const BASE = "/assets/dist/";
 // Prefixes owned by the axum API router; everything else is frontend.
 export const API_PREFIXES = [
   "/health",
+  "/ui-config",
   "/store",
   "/sessions",
   "/projects",

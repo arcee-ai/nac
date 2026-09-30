@@ -20,7 +20,7 @@ import {
 } from "@/app/atoms";
 import { TooltipPosition } from "@/app/atoms/tooltip";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
-import { useProjects, useSessions, useStoreInfo } from "@/app/services/queries";
+import { useProjects, useVisibleSessions, useStoreInfo } from "@/app/services/queries";
 import { setQuery as setProjectQuery, useFilterQuery } from "@/app/store/sessionFiltersStore";
 
 import { NewSessionPopover } from "./NewSessionPopover";
@@ -45,7 +45,7 @@ export function LeftSidebarPanel({
   const projectsPage = variant === "projects";
   const [query, setQuery] = useState("");
   const projectQuery = useFilterQuery();
-  const { data: sessions = [] } = useSessions();
+  const { data: sessions = [] } = useVisibleSessions();
   const { data: projectList } = useProjects();
   const { data: storeInfo } = useStoreInfo();
   const storePath = storeInfo?.store_path ?? "";

@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -88,6 +89,7 @@ export function ProjectSessionTabs({
   leading?: React.ReactNode;
   trailing?: React.ReactNode;
 }) {
+  const policy = useUiPolicy();
   const navigate = useNavigate();
   const projectActions = useProjectActions();
   const sessionActions = useSessionActions();
@@ -280,7 +282,7 @@ export function ProjectSessionTabs({
                 <ChatSessionTab
                   title={sessionTitle(entry.summary)}
                   behaviorIcon={SESSION_BEHAVIOR_ICONS[behavior.id]}
-                  behaviorLabel={behavior.label}
+                  behaviorLabel={policy.orchestrationEnabled ? behavior.label : undefined}
                   active={sessionId === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}

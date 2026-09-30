@@ -1,4 +1,4 @@
-import type { ReadinessResponse, RecentEventsResponse, SessionEventBoundary, SessionEventEnvelope, SessionSnapshotResponse } from "./types.js";
+import type { UiConfiguration, ReadinessResponse, RecentEventsResponse, SessionEventBoundary, SessionEventEnvelope, SessionSnapshotResponse } from "./types.js";
 export declare const NAC_HTTP_CLIENT_VERSION: 1;
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type NacCredentialPolicy = "same-origin" | "include" | "omit";
@@ -127,6 +127,7 @@ export declare class NacTransport {
 export declare class NacClient {
     readonly transport: NacTransport;
     constructor(options?: NacClientOptions);
+    getUiConfiguration(signal?: AbortSignal): Promise<UiConfiguration>;
     getReadiness(signal?: AbortSignal): Promise<ReadinessResponse>;
     checkCompatibility(signal?: AbortSignal): Promise<ReadinessResponse>;
     getSession(sessionId: string, options?: SessionSnapshotOptions): Promise<SessionSnapshotResponse>;

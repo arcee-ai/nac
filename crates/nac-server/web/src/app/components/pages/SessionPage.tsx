@@ -1,3 +1,6 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { sessionAvailable } from "@/app/features/ui-policy/policy";
+import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
@@ -114,6 +117,8 @@ export default function SessionPage() {
   }>();
   const navigate = useNavigate();
   const id = sessionId ?? null;
+  const policy = useUiPolicy();
+  const projectActions = useProjectActions();
 
   perfRender("SessionPage");
 
@@ -129,9 +134,7 @@ export default function SessionPage() {
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const isMobile = useIsMobile();
-  useSessionStream(id);
-  useRunStateSync(snapshot?.active_run);
-  useAutoSshConnect(id, entry?.summary);
+
   // An omitted behavior on a loaded session is the legacy orchestrator. An
   // unloaded session is not that default: painting Threads/Files/Worksets and
   // then replacing them is a flash.
@@ -139,6 +142,11 @@ export default function SessionPage() {
   const behavior: SessionBehavior | null = behaviorKnown
     ? (entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator")
     : null;
+  const available =
+    !behaviorKnown || sessionAvailable(policy, behavior, entry?.lineage ?? snapshot?.lineage);
+  useSessionStream(available ? id : null);
+  useRunStateSync(available ? snapshot?.active_run : null);
+  useAutoSshConnect(available ? id : null, available ? entry?.summary : null);
   const panelPolicy =
     behavior == null ? null : sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
   const sessionPanels = panelPolicy?.mobilePanels ?? [];
@@ -181,6 +189,25 @@ export default function SessionPage() {
     return () => cancelAnimationFrame(frame);
   }, [animateSidePanel]);
 
+  if (behaviorKnown && !available)
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
+        <h1 className="heading-small">This chat is unavailable in direct-only mode</h1>
+        <p>
+          Its saved behavior and history are preserved. An operator can enable orchestration to open
+          it.
+        </p>
+        <Button
+          onClick={() => {
+            const projectId = entry?.summary.project_id ?? snapshot?.metadata.project_id;
+            if (projectId) void projectActions.newChat(projectId);
+            else projectActions.create();
+          }}
+        >
+          New direct chat
+        </Button>
+      </div>
+    );
   if (!id) return <Navigate to={routes.list()} replace />;
   if (!isSessionPanel(panel)) {
     return <Navigate to={routes.session(id, DEFAULT_SESSION_PANEL)} replace />;

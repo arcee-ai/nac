@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 
+import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
+import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -192,15 +194,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderModal() {
+function renderModal(orchestration = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MemoryRouter>
-          <NewChatModal projectId="project" onClose={vi.fn()} />
-        </MemoryRouter>
-      </ToastProvider>
+      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+        <ToastProvider>
+          <MemoryRouter>
+            <NewChatModal projectId="project" onClose={vi.fn()} />
+          </MemoryRouter>
+        </ToastProvider>
+      </UiPolicyContext.Provider>
     </QueryClientProvider>,
   );
   return { client, view };
@@ -226,6 +230,7 @@ it("shows and preserves the inherited primary and light models for a direct chat
         project_id: "project",
         behavior: "direct",
         first_chat: false,
+        first_chat_same_behavior: false,
         backend: "openai-responses",
         model: "gpt-5.6-sol",
         base_url: "https://api.openai.com/v1",
@@ -283,6 +288,34 @@ it("sends an explicitly selected preset's compaction threshold instead of inheri
         model: "deepseek-chat",
         orchestrator_compaction_threshold: 222,
       }),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("default presentation explicitly creates direct and preserves the hidden inherited light tuple", async () => {
+  const create = vi.spyOn(api, "createSession").mockResolvedValue({
+    metadata: { session_id: "direct-chat" },
+    messages: [],
+    message_created_at: [],
+  } as unknown as SessionSnapshotResponse);
+  const { client, view } = renderModal(false);
+  try {
+    await screen.findByText("Primary model: gpt-5.6-sol");
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByText(/Light model for/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create chat" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          behavior: "direct",
+          light_model: light,
+          first_chat: false,
+          first_chat_same_behavior: true,
+        }),
+      ),
     );
   } finally {
     view.unmount();

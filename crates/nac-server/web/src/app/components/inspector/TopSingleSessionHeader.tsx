@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -27,7 +28,11 @@ import {
   sessionEnvLabel,
   tokenUsage,
 } from "@/app/lib/format";
-import { useModelCatalog, useSessions, useWorkspaceRevisionChanges } from "@/app/services/queries";
+import {
+  useModelCatalog,
+  useVisibleSessions,
+  useWorkspaceRevisionChanges,
+} from "@/app/services/queries";
 import { selectRevision, useSelectedRevision } from "@/app/store/sessionLayoutStore";
 import {
   liftSessionSpend,
@@ -108,7 +113,7 @@ export function TopSingleSessionHeader({
 }) {
   const navigate = useNavigate();
   const sessionTitle = useSessionTitle();
-  const { data: sessions = [] } = useSessions();
+  const { data: sessions = [] } = useVisibleSessions();
   const running = useRunning(sessionId);
   const stopping = useCancelArmed(sessionId);
   const runUsage = useRunUsage();
@@ -156,6 +161,7 @@ export function TopSingleSessionHeader({
   const openParent = () => {
     if (lineage) navigate(routes.session(lineage.parent_session_id, "delegated"));
   };
+  const policy = useUiPolicy();
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
   const title = sessionTitle(entry?.summary);
 
@@ -199,7 +205,7 @@ export function TopSingleSessionHeader({
               <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-1 py-[2px] text-basic-tertiary">
                 {relationship}
               </span>
-            ) : behavior ? (
+            ) : behavior && policy.orchestrationEnabled ? (
               <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-1 py-[2px] text-basic-tertiary">
                 {BEHAVIOR_BADGE[behavior]}
               </span>

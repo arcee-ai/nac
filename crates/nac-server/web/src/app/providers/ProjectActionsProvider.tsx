@@ -1,3 +1,5 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { visibleSessions } from "@/app/features/ui-policy/policy";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -49,7 +51,13 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   const toast = useToast();
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { data: sessions = [], isSuccess: sessionsLoaded } = useSessions();
+  const sessionsQuery = useSessions();
+  const policy = useUiPolicy();
+  const sessionsLoaded = sessionsQuery.isSuccess;
+  const sessions = useMemo(
+    () => visibleSessions(policy, sessionsQuery.data ?? []),
+    [sessionsQuery.data, policy],
+  );
   const { data: projectList } = useProjects();
   const pin = useToggleProjectPin();
   const assignSession = useAssignSessionToProject();

@@ -37,7 +37,7 @@ import {
   useAssignSessionToProject,
   useCreateProject,
   useProjects,
-  useSessions,
+  useVisibleSessions,
 } from "@/app/services/queries";
 import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
@@ -83,7 +83,7 @@ export function MobileProjectSessionModal({
   const sessionActions = useSessionActions();
   const sessionTitle = useSessionTitle();
   const { data: projectList } = useProjects();
-  const { data: allSessions = [] } = useSessions();
+  const { data: allSessions = [] } = useVisibleSessions();
   const orphan = summary != null && !projectId;
   const project = findProject(projectList?.projects ?? [], projectId);
 

@@ -1,3 +1,4 @@
+use super::ui_configuration::{self, UiConfiguration};
 use crate::*;
 use nac_core::commands::{slash_command_definitions, SlashCommandDefinition};
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
@@ -593,6 +594,7 @@ fn embedded_frontend_router() -> Router {
 fn documented_api() -> OpenApiRouter<SessionManager> {
     OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
+        .routes(routes!(ui_configuration::get_ui_configuration))
         .routes(routes!(managed_status::healthz_handler))
         .routes(routes!(managed_status::readyz_handler))
         .routes(routes!(managed_status::managed_status_handler))
@@ -787,7 +789,9 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
     let documented = documented_api().with_state(manager.clone());
     let (router, openapi) = documented.split_for_parts();
     (
-        router.nest_service("/mcp", mcp::streamable_http_service(manager)),
+        router
+            .nest_service("/mcp", mcp::streamable_http_service(manager))
+            .layer(axum::Extension(UiConfiguration::from_environment())),
         openapi,
     )
 }

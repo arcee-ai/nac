@@ -201,6 +201,9 @@ export class NacClient {
     constructor(options = {}) {
         this.transport = new NacTransport(options);
     }
+    getUiConfiguration(signal) {
+        return this.transport.request("GET", "/ui-config", { signal });
+    }
     getReadiness(signal) {
         return this.transport.request("GET", "/readyz", {
             signal,

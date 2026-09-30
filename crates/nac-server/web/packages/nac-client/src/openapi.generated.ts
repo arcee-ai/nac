@@ -452,6 +452,7 @@ export interface components {
       | { image: components["schemas"]["ToolImageSchema"]; type: "image" };
     ToolContentSchema: string | components["schemas"]["ToolContentPartSchema"][];
     ToolImageSchema: { data: string; mime_type: string };
+    UiConfiguration: { diagnostic?: string | null; orchestration_enabled: boolean };
     WorksetItemSnapshot: {
       acceptance: string;
       depends_on: string[];

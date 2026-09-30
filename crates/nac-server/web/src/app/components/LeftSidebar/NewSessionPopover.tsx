@@ -1,3 +1,5 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { creationBehavior } from "@/app/features/ui-policy/policy";
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -51,6 +53,7 @@ export function NewSessionPopover({
   className?: string;
   children: (openMenu: () => void) => ReactNode;
 }) {
+  const policy = useUiPolicy();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const toast = useToast();
@@ -61,13 +64,20 @@ export function NewSessionPopover({
       onUnavailable();
       return;
     }
+    if (!policy.orchestrationEnabled) {
+      void start("direct");
+      return;
+    }
     setOpen((current) => !current);
   };
 
   const start = async (behavior: SessionBehavior) => {
     if (!projectId || createSession.isPending) return;
     try {
-      const snapshot = await createSession.mutateAsync({ project_id: projectId, behavior });
+      const snapshot = await createSession.mutateAsync({
+        project_id: projectId,
+        behavior: creationBehavior(policy, behavior),
+      });
       const sessionId = snapshot.metadata.session_id;
       setOpen(false);
       if (sessionId) navigate(routes.session(sessionId));

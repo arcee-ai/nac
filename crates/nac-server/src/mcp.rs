@@ -216,6 +216,7 @@ impl NacMcpService {
         let request = CreateSessionRequest {
             behavior: nac_core::sessions::SessionBehavior::Orchestrator,
             first_chat: false,
+            first_chat_same_behavior: false,
             project_id: params.project_id,
             cwd: params.cwd.map(std::path::PathBuf::from),
             model: field(params.model),

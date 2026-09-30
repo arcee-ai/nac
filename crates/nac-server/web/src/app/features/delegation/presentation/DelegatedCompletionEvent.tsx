@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -11,6 +12,8 @@ import { routes } from "@/app/lib/routes";
 import type { DelegatedCompletionTurn } from "@/app/lib/transcript";
 
 export function DelegatedCompletionEvent({ turn }: { turn: DelegatedCompletionTurn }) {
+  const policy = useUiPolicy();
+  const available = policy.orchestrationEnabled || turn.completion.kind === "coding-agent";
   const navigate = useNavigate();
   const type = turn.completion.kind === "coding-agent" ? "Coding agent" : "NAC orchestrator";
   const variant =
@@ -38,13 +41,15 @@ export function DelegatedCompletionEvent({ turn }: { turn: DelegatedCompletionTu
         {turn.completion.verification ? (
           <span className="whitespace-pre-wrap">Verification: {turn.completion.verification}</span>
         ) : null}
-        <Button
-          size={ButtonSize.Small}
-          variant={ButtonVariant.Ghost}
-          onClick={() => navigate(routes.session(turn.completion.sessionId))}
-        >
-          Open exact transcript
-        </Button>
+        {available ? (
+          <Button
+            size={ButtonSize.Small}
+            variant={ButtonVariant.Ghost}
+            onClick={() => navigate(routes.session(turn.completion.sessionId))}
+          >
+            Open exact transcript
+          </Button>
+        ) : null}
       </span>
     </ChatSessionMessage>
   );

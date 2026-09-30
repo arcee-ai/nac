@@ -1065,6 +1065,7 @@ async fn create_session_rejects_ssh_host_combined_with_sandbox() {
     let request = CreateSessionRequest {
         behavior: sessions::SessionBehavior::Orchestrator,
         first_chat: false,
+        first_chat_same_behavior: false,
         project_id: None,
         cwd: None,
         model: RequestField::Omitted,
@@ -1105,6 +1106,7 @@ async fn server_create_rejects_removed_backend_names_as_bad_requests() {
             .create_session(CreateSessionRequest {
                 behavior: sessions::SessionBehavior::Orchestrator,
                 first_chat: false,
+                first_chat_same_behavior: false,
                 project_id: None,
                 cwd: None,
                 model: RequestField::Omitted,

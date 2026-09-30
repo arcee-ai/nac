@@ -257,6 +257,7 @@ export interface components {
       cwd?: string | null;
       extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
       first_chat?: boolean;
+      first_chat_same_behavior?: boolean;
       light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
       model?: components["schemas"]["RequestField_String_String"];
       orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
@@ -1252,6 +1253,7 @@ export interface components {
       | "failed"
       | "cancelled"
       | "interrupted";
+    UiConfiguration: { diagnostic?: string | null; orchestration_enabled: boolean };
     UpdateConfigRequest: {
       allow_insecure_http?: components["schemas"]["RequestField_bool_bool"];
       api_key_env?: components["schemas"]["RequestField_String_String"];

@@ -82,6 +82,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/credentials"),
     ("GET", "/fs/browse"),
     ("GET", "/health"),
+    ("GET", "/ui-config"),
     ("GET", "/healthz"),
     ("GET", "/managed/github"),
     ("GET", "/managed/github/clone-operations/{operation_id}"),

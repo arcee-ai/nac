@@ -1,16 +1,41 @@
 # Session behaviors
 
-Every session has one immutable persisted behavior. The web asks which behavior
-to use when it creates the first chat in a project and again for every **New
-chat** action. It preselects **NAC orchestrator** each time and does not remember
-the previous choice. The chosen behavior is shown above the transcript for the
-lifetime of the chat.
+Every session has one immutable persisted behavior. The shipped web UI defaults
+to a persistent direct coding agent: every creation entrypoint sends explicit
+`behavior: "direct"`, and orchestration choices, Threads/Worksets, managed
+orchestrator controls, mode badges, and unused light-model controls are hidden.
+Direct Files/History, traditional children, permissions, goals, queueing,
+compaction, tool results, and local/SSH/sandbox/managed execution remain available.
+Hidden light-model settings and saved presets are preserved; direct light-model
+execution remains deferred.
+
+To restore the established three-mode UI, start the same binary with
+`NAC_ORCHESTRATION=1`. Exactly `1` enables orchestration; `0` or an unset variable
+selects direct-only presentation. Aliases such as `true` and `enabled`, blank
+values, whitespace, and other values fail closed with a startup and browser
+configuration diagnostic. Change the environment, restart nac-web, and reload
+the browser. No frontend rebuild is required. The server captures this setting
+when it builds its router and exposes it through `GET /ui-config`; endpoint-aware
+clients consume the same typed bootstrap. Creation is unavailable while that
+endpoint's configuration is loading or failed, with an explicit retry on failure.
+Vite development previews proxy the same route to the configured API server.
+
+With orchestration enabled, the web asks which behavior to use for each first
+and New Chat action, preselects **NAC orchestrator** on each modal opening, and
+shows the chosen mode above the transcript. Existing orchestrator/hybrid/managed
+sessions keep their IDs, data, behavior, and lineage. Direct-only navigation
+excludes them; deep links show an unavailable view with **New direct chat**.
+Enabling orchestration restores access. This presentation setting changes no
+tool authorization, backend, inbound MCP exposure, or legacy REST defaults.
 
 An empty-project route refreshes project and chat ownership before presenting
-the required first-chat dialog. The create is also server-idempotent, so two
-browser tabs that submit that required dialog concurrently converge on one
-primary chat. This idempotency applies only to the required first chat; an
-explicit **New chat** remains a request for another session.
+the required first-chat dialog. Concurrent required-first-chat submissions
+converge on one primary chat. Direct-only UI additionally sends the additive
+`first_chat_same_behavior: true` so a legacy session created during that race
+cannot become its result. Omitted/false retains the existing API semantics of
+returning the newest primary session regardless of behavior. Projects containing
+only hidden legacy sessions use ordinary New Chat creation (`first_chat: false`)
+instead. Explicit New Chat always remains a request for another session.
 
 The wire values are:
 

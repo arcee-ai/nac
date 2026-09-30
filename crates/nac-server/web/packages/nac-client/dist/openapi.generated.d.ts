@@ -502,6 +502,10 @@ export interface components {
             data: string;
             mime_type: string;
         };
+        UiConfiguration: {
+            diagnostic?: string | null;
+            orchestration_enabled: boolean;
+        };
         WorksetItemSnapshot: {
             acceptance: string;
             depends_on: string[];

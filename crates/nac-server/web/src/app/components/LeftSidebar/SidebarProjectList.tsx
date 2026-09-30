@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -227,6 +228,7 @@ function ProjectSessions({
   onOpen: (sessionId: string) => void;
 }) {
   const sessionTitle = useSessionTitle();
+  const policy = useUiPolicy();
   const sessionActions = useSessionActions();
   const groups = useMemo(
     () =>
@@ -263,7 +265,9 @@ function ProjectSessions({
                   key={entry.summary.session_id}
                   title={title}
                   icon={sessionBehaviorIcon(entry.summary.behavior)}
-                  aria-label={`${title}, ${behavior.navigationLabel}`}
+                  aria-label={
+                    policy.orchestrationEnabled ? `${title}, ${behavior.navigationLabel}` : title
+                  }
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}
