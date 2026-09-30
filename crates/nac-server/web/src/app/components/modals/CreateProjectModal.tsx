@@ -62,7 +62,7 @@ import {
 } from "@/app/services/queries";
 import type { SessionBehavior, SshTarget } from "@/app/types/api";
 
-import { savedModelSelection } from "@/app/features/setup/modelSelection";
+import { savedModelSelection, sameModelSelection } from "@/app/features/setup/modelSelection";
 import { projectChatRequest, type SandboxOptions } from "@/app/features/setup/projectLaunch";
 
 type Mode = "local" | "ssh" | "sandbox";
@@ -229,12 +229,11 @@ function CreateProjectForm({
   };
 
   // Stable, so the panel does not re-emit its selection on every render.
-  const projectionKey = useRef("");
+  const projectedSelection = useRef<LaunchModelSelection | null>(null);
   const onSelection = useCallback((next: LaunchModelSelection | null) => {
     setSelection(next);
-    const key = JSON.stringify(next);
-    if (key === projectionKey.current) return;
-    projectionKey.current = key;
+    if (!next || sameModelSelection(projectedSelection.current, next)) return;
+    projectedSelection.current = next;
     if (next?.kind === "resolved" && next.orchestrator_compaction_threshold !== undefined) {
       const threshold = next.orchestrator_compaction_threshold;
       const value = threshold == null ? "" : String(threshold);

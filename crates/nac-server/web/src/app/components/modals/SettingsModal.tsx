@@ -40,7 +40,7 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { useToast } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import { ModelSetupSection } from "@/app/features/setup/ModelSetupSection";
-import { savedModelSelection } from "@/app/features/setup/modelSelection";
+import { savedModelSelection, sameModelSelection } from "@/app/features/setup/modelSelection";
 import { saveSettings } from "@/app/features/setup/workflow";
 import { useSetupAction } from "@/app/features/setup/useSetupAction";
 import {
@@ -280,13 +280,11 @@ function SettingsForm({
     diagnostic.startsWith("malformed stored light model"),
   );
 
-  const projectionKey = useRef("");
+  const projectedSelection = useRef<LaunchModelSelection | null>(null);
   const onConfigurationChange = useCallback((next: LaunchModelSelection | null) => {
     setSelection(next);
-    if (!next) return;
-    const key = JSON.stringify(next);
-    if (key === projectionKey.current) return;
-    projectionKey.current = key;
+    if (!next || sameModelSelection(projectedSelection.current, next)) return;
+    projectedSelection.current = next;
     const values = next.kind === "resolved" ? next : next.request;
     setBackend(values.backend);
     setModel(values.model);

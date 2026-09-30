@@ -520,20 +520,21 @@ export function ConfigurationsPanel({
       extra_headers: savedRecord?.extra_headers ?? null,
       orchestrator_compaction_threshold:
         initial && picked === null
-          ? undefined
+          ? initial.orchestrator_compaction_threshold
           : savedRecord
             ? (savedRecord.orchestrator_compaction_threshold ?? null)
             : undefined,
       // Matching an existing session to a saved setup is presentation only:
       // the session may have changed its light model independently. Emit the
       // preset's light model only after the user deliberately chooses it.
+      // An automatic match projects the opening tuple, including its own light value.
       light_model:
         initial && picked === null
-          ? undefined
+          ? initial.light_model
           : savedRecord
             ? (savedRecord.light_model ?? null)
             : undefined,
-      config_id: savedRecord?.config_id ?? null,
+      config_id: initial && picked === null ? initial.config_id : (savedRecord?.config_id ?? null),
     };
   }, [
     source.kind,
