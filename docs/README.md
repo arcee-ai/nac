@@ -17,6 +17,7 @@ Detailed documentation for nac. The [root README](../README.md) has install, aut
   - [Model configuration](configuration/model.md)
   - [Catalog and cost](configuration/catalog.md)
   - [Providers and logins](configuration/credentials.md)
+  - [Slack MCP acceptance fixture](configuration/slack-mcp-acceptance.md)
 - [HTTP API](api/http.md)
 - [Managed NAC host](managed/README.md)
   - [Deterministic managed load](managed/deterministic-load.md)
