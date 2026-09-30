@@ -65,6 +65,11 @@ impl McpRedactor {
             }));
         }
         self.redact_value(&mut value, metadata);
+        if serde_json::to_vec(&value).ok()?.len() > MAX_MCP_METADATA_BYTES {
+            return Some(serde_json::json!({
+                "_nac": "metadata_limit_exceeded"
+            }));
+        }
         Some(value)
     }
 
@@ -453,6 +458,17 @@ mod tests {
         assert_eq!(
             flattened.content.as_text(),
             Some("Error: content_limit_exceeded: MCP non-image result exceeds the byte limit")
+        );
+    }
+
+    #[test]
+    fn metadata_remains_bounded_when_exact_redaction_expands_it() {
+        let redactor = McpRedactor::new(vec!["x".to_string()]);
+        let value = "x".repeat(MAX_MCP_METADATA_BYTES / 2);
+
+        assert_eq!(
+            redactor.safe_value(Some(&value)),
+            Some(serde_json::json!({"_nac": "metadata_limit_exceeded"}))
         );
     }
 }
