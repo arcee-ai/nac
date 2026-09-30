@@ -55,8 +55,12 @@ run [36766251401](https://github.com/arcee-ai/nac/actions/runs/36766251401),
 stable build/test/lint and managed image contract/build/quality checks.
 That run supplied the actual managed store-stage probe binary.
 
-The final offline test fixture Linux binary is being built from bdc5e69a in
+The offline test fixture Linux binary was built from bdc5e69a in
 run [36770538600](https://github.com/arcee-ai/nac/actions/runs/36770538600).
+That run passed its full Linux SQLite control and built the actual io_uring
+probe, then failed because its Rust toolchain lacked the Clippy component.
+The workflow now explicitly installs rustfmt and clippy. The uploaded binary
+has valid source provenance, but this failed run is not a green CI gate.
 Final managed control and cleanup receipts are appended after execution and
 preservation. Exact PR-head CI status is recorded on ALL-114 at handoff;
 successful prior heads are never substituted for that gate.

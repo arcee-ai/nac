@@ -152,6 +152,9 @@ ALL-112's full adapter still returns a concrete SQLite SessionManager; core,
 worker and assertions call SQLite APIs directly. The SQL probes do not prove
 full orchestrator/worker lifecycle, lease cancellation, ambiguous dispatch,
 completion/recovery, or canonical transcript contract conformance on Turso.
+The subset also lacks session-event cursor mutations, timed lease renewal and
+expiry, and the application's actual cancellation/claim machinery; generation
+and revision CAS probes are not substitutes for those behaviors.
 An engine switch must retain the path-backed seam and final ALL-111/113
 contracts. Production defaults were not changed to manufacture that evidence.
 

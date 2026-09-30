@@ -49,6 +49,29 @@ and retains the SQLite artifacts and synthetic fixture copies. A failing
 SQLite control remains a failed gate even when artifacts can be collected.
 This Linux CI lane is not evidence of gVisor/PVC behavior.
 
+For a managed reproduction, first obtain development-test authorization and
+inspect the live reconciler ref, RuntimeClass, storage class and managed pod
+security contract. Use `managed-pod.yaml` only in a fresh disposable namespace;
+abort if its namespace/PVC already belongs to another run. Copy the exact-head
+CI artifact and record original hashes before optionally stripping debug data.
+Archive that exact Git source revision into `/home/runner/work/nac/nac` (the
+Linux fixture's compiled workspace path), initialize a fully tracked Git tree,
+and verify its tree hash against the source revision. Copy synthetic fixture
+stores and schema into the dedicated PVC.
+
+Run the native test binary with `NAC_MANAGED_LOAD_WORKER` set to the artifact's
+native nac-web, `TMPDIR=/data/tmp`, and `NAC_MANAGED_LOAD_COPY_STORE_DIR` set to
+a new directory. The invocation is
+`nac-server-test tests::managed_load::managed_load_scenario --ignored --exact --nocapture --test-threads=1`.
+Use Git's `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=safe.directory`, and
+`GIT_CONFIG_VALUE_0=/home/runner/work/nac/nac` for this exact disposable path;
+the model fixture clears HOME, so a home-based safe-directory setting is not
+sufficient. The test-only embedded catalog makes this fixture offline.
+Run `run_matrix.py` against the PVC with separate output files. Copy all JSON,
+logs, source/binary/schema/fixture hashes and runtime receipts out before
+deleting only the named disposable namespace/PVC. Raw stores are synthetic;
+retain local consistent copies if needed, never switch them into a serving host.
+
 The full ALL-112 `LoadStoreAdapter` currently constructs a concrete SQLite
 manager. Core and worker calls remain SQLite-bound. The standalone probes do
 not constitute an end-to-end Turso implementation of that harness. This is an

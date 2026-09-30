@@ -22,7 +22,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
-          components: rustfmt
+          components: rustfmt, clippy
       - uses: actions/setup-node@v4
         with:
           node-version: 24.20.0
