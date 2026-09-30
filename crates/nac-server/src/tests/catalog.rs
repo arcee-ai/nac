@@ -1,4 +1,5 @@
 use super::*;
+use nac_core::commands::slash_command_definitions;
 
 #[tokio::test]
 async fn provider_models_route_maps_caller_url_hygiene_to_bad_request() {
