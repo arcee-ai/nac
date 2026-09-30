@@ -1,4 +1,3 @@
-use super::capabilities::{MAX_PROMPT_ARGUMENTS, MAX_PROMPT_NAME_CHARS};
 use super::*;
 use crate::events::{AgentEvent, EventSink, McpNotificationKind};
 use rmcp::model::{
@@ -11,11 +10,8 @@ use std::num::NonZeroUsize;
 use std::sync::{Mutex as StdMutex, OnceLock, RwLock as StdRwLock, Weak};
 use std::time::Instant;
 use tokio::task::JoinHandle;
-const MAX_DISCOVERED_PROMPTS: usize = 256;
-
 const MAX_SUBSCRIBED_RESOURCES: usize = 256;
 const SUBSCRIPTION_CHANNEL_CAPACITY: usize = 64;
-const MIN_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 const MIN_OBSERVATION_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_OBSERVATION_CHARS: usize = 600;
 
@@ -32,7 +28,7 @@ struct ObservationTarget {
 }
 
 pub(super) struct McpSyncState {
-    snapshot: StdRwLock<Arc<McpCatalogSnapshot>>,
+    pub(super) snapshot: StdRwLock<Arc<McpCatalogSnapshot>>,
     resources: StdRwLock<HashMap<String, Vec<String>>>,
     target: StdRwLock<ObservationTarget>,
     redactions: StdRwLock<HashMap<String, Vec<String>>>,
@@ -145,92 +141,6 @@ impl McpSyncState {
             .unwrap_or_default()
     }
 
-    pub(super) fn replace_tools(&self, server: &Arc<McpServer>, tools: Vec<Tool>) {
-        let mut snapshot = self
-            .snapshot
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let current = snapshot.clone();
-        let mut next_tools = current.tools.clone();
-        next_tools.retain(|_, binding| {
-            binding
-                .server
-                .upgrade()
-                .is_some_and(|owner| owner.name != server.name)
-        });
-        let mut occupied: HashSet<String> = next_tools.keys().cloned().collect();
-        for tool in tools {
-            let qualified_name = unique_tool_name(&server.name, &tool.name, &mut occupied);
-            let mut definition = tool_definition(&qualified_name, &server.name, &tool);
-            if definition.function.parameters["properties"]
-                .as_object()
-                .is_some_and(|properties| properties.contains_key("_nac"))
-                || crate::tools::kernel::decorate_timeout_schema(
-                    &mut definition.function.parameters,
-                )
-                .is_err()
-            {
-                continue;
-            }
-            next_tools.insert(
-                qualified_name,
-                Arc::new(McpToolBinding {
-                    tool_name: tool.name.to_string(),
-                    definition,
-                    server: Arc::downgrade(server),
-                    execution_timeout: server.execution_timeout,
-                }),
-            );
-        }
-        *snapshot = Arc::new(McpCatalogSnapshot {
-            tools: next_tools,
-            prompt_commands: current.prompt_commands.clone(),
-        });
-    }
-
-    pub(super) fn replace_prompts(
-        &self,
-        server: &Arc<McpServer>,
-        prompts: Vec<rmcp::model::Prompt>,
-    ) {
-        let mut snapshot = self
-            .snapshot
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let current = snapshot.clone();
-        let mut commands = current.prompt_commands.clone();
-        commands.retain(|_, command| command.server_name != server.name);
-        let mut occupied: HashSet<String> = current
-            .tools
-            .keys()
-            .chain(commands.keys())
-            .cloned()
-            .collect();
-        for prompt in prompts {
-            if prompt.name.is_empty()
-                || prompt.name.chars().count() > MAX_PROMPT_NAME_CHARS
-                || prompt.arguments.as_ref().is_some_and(|arguments| {
-                    arguments.len() > MAX_PROMPT_ARGUMENTS
-                        || arguments.iter().any(|argument| {
-                            argument.name.is_empty()
-                                || argument.name.chars().count() > MAX_PROMPT_NAME_CHARS
-                        })
-                })
-            {
-                continue;
-            }
-            let name = unique_tool_name(&server.name, &prompt.name, &mut occupied);
-            commands.insert(
-                name.clone(),
-                McpPromptCommand::from_prompt(name, server.name.clone(), prompt),
-            );
-        }
-        *snapshot = Arc::new(McpCatalogSnapshot {
-            tools: current.tools.clone(),
-            prompt_commands: commands,
-        });
-    }
-
     pub(super) fn emit(&self, server: &str, kind: McpNotificationKind, message: impl AsRef<str>) {
         let now = Instant::now();
         {
@@ -290,7 +200,11 @@ impl McpSyncState {
     }
 }
 
-fn unique_tool_name(server: &str, remote: &str, occupied: &mut HashSet<String>) -> String {
+pub(super) fn unique_tool_name(
+    server: &str,
+    remote: &str,
+    occupied: &mut HashSet<String>,
+) -> String {
     let mut seen = HashMap::new();
     let base = allocate_tool_name(server, remote, &mut seen);
     if occupied.insert(base.clone()) {
@@ -370,94 +284,7 @@ impl NacMcpClientHandler {
 }
 
 impl McpServer {
-    fn refresh_allowed(&self, catalog: &'static str) -> bool {
-        let now = Instant::now();
-        let mut last = self
-            .last_catalog_refresh
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if last
-            .get(catalog)
-            .is_some_and(|previous| now.duration_since(*previous) < MIN_REFRESH_INTERVAL)
-        {
-            return false;
-        }
-        last.insert(catalog, now);
-        true
-    }
-
-    async fn refresh_tools(self: &Arc<Self>, peer: &Peer<RoleClient>) {
-        if !self.refresh_allowed("tools") {
-            return;
-        }
-        let _refresh = self.catalog_refresh.lock().await;
-        match timeout(self.catalog_timeout, peer.list_all_tools()).await {
-            Ok(Ok(tools)) => {
-                self.sync.replace_tools(self, tools);
-                self.sync.emit(
-                    &self.name,
-                    McpNotificationKind::CatalogRefreshed,
-                    "tool catalog refreshed",
-                );
-            }
-            Ok(Err(error)) => self.refresh_failed("tool", error.to_string()),
-            Err(_) => self.refresh_failed("tool", "refresh timed out".to_string()),
-        }
-    }
-
-    async fn refresh_prompts(self: &Arc<Self>, peer: &Peer<RoleClient>) {
-        if !self.refresh_allowed("prompts") {
-            return;
-        }
-        let _refresh = self.catalog_refresh.lock().await;
-        match timeout(self.catalog_timeout, list_bounded_prompts_peer(peer)).await {
-            Ok(Ok(prompts)) => {
-                self.sync.replace_prompts(self, prompts);
-                self.sync.emit(
-                    &self.name,
-                    McpNotificationKind::CatalogRefreshed,
-                    "prompt catalog refreshed",
-                );
-            }
-            Ok(Err(error)) => self.refresh_failed("prompt", format!("{error:#}")),
-            Err(_) => self.refresh_failed("prompt", "refresh timed out".to_string()),
-        }
-    }
-
-    async fn refresh_resources(self: &Arc<Self>, peer: &Peer<RoleClient>) {
-        if !self.refresh_allowed("resources") {
-            return;
-        }
-        let _refresh = self.catalog_refresh.lock().await;
-        match timeout(self.catalog_timeout, peer.list_all_resources()).await {
-            Ok(Ok(resources)) => {
-                self.sync
-                    .set_resources(&self.name, bounded_resource_uris(resources));
-                self.sync.emit(
-                    &self.name,
-                    McpNotificationKind::CatalogRefreshed,
-                    "resource catalog refreshed",
-                );
-                if self.protocol_version < ProtocolVersion::V_2026_07_28 {
-                    self.reconcile_legacy_subscriptions(peer).await;
-                }
-            }
-            Ok(Err(error)) => self.refresh_failed("resource", error.to_string()),
-            Err(_) => self.refresh_failed("resource", "refresh timed out".to_string()),
-        }
-    }
-
-    fn refresh_failed(&self, catalog: &str, error: String) {
-        self.sync.emit(
-            &self.name,
-            McpNotificationKind::CatalogRefreshFailed,
-            format!(
-                "{catalog} catalog refresh failed; retaining last-known-good snapshot: {error}"
-            ),
-        );
-    }
-
-    async fn reconcile_legacy_subscriptions(&self, peer: &Peer<RoleClient>) {
+    pub(super) async fn reconcile_legacy_subscriptions(&self, peer: &Peer<RoleClient>) {
         if !self
             .capabilities
             .resources
@@ -473,11 +300,14 @@ impl McpServer {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         for uri in wanted.difference(&current) {
-            if peer
-                .subscribe(SubscribeRequestParams::new(uri.clone()))
-                .await
-                .is_ok()
-            {
+            if matches!(
+                timeout(
+                    self.catalog_timeout,
+                    peer.subscribe(SubscribeRequestParams::new(uri.clone()))
+                )
+                .await,
+                Ok(Ok(_))
+            ) {
                 self.legacy_subscriptions
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -485,9 +315,11 @@ impl McpServer {
             }
         }
         for uri in current.difference(&wanted) {
-            let _ = peer
-                .unsubscribe(UnsubscribeRequestParams::new(uri.clone()))
-                .await;
+            let _ = timeout(
+                self.catalog_timeout,
+                peer.unsubscribe(UnsubscribeRequestParams::new(uri.clone())),
+            )
+            .await;
             self.legacy_subscriptions
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -555,15 +387,18 @@ impl McpServer {
         self.reset_legacy_subscriptions();
         let service = self.current_service().await;
         let peer = service.read().await.peer().clone();
-        if self.should_seed_resources() {
-            self.refresh_resources(&peer).await;
-        }
-        if self.protocol_version < ProtocolVersion::V_2026_07_28 {
-            return;
-        }
         let weak = Arc::downgrade(self);
         let task = tokio::spawn(async move {
-            run_subscription(weak, peer).await;
+            let Some(server) = weak.upgrade() else {
+                return;
+            };
+            if server.should_seed_resources() {
+                server.refresh_resources(&peer).await;
+            }
+            if server.protocol_version >= ProtocolVersion::V_2026_07_28 {
+                drop(server);
+                run_subscription(weak, peer).await;
+            }
         });
         self.notification_task.replace(task);
     }
@@ -638,14 +473,6 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>) {
             return;
         }
     }
-}
-
-async fn list_bounded_prompts_peer(peer: &Peer<RoleClient>) -> Result<Vec<rmcp::model::Prompt>> {
-    let prompts = peer.list_all_prompts().await?;
-    if prompts.len() > MAX_DISCOVERED_PROMPTS {
-        bail!("prompt catalog exceeds the {MAX_DISCOVERED_PROMPTS}-entry bound");
-    }
-    Ok(prompts)
 }
 
 pub(super) fn bounded_resource_uris(resources: Vec<rmcp::model::Resource>) -> Vec<String> {

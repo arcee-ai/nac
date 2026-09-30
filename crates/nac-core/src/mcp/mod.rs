@@ -35,6 +35,7 @@ use crate::tools::ToolResult;
 use crate::types::{FunctionDef, ToolDefinition};
 
 pub(crate) mod capabilities;
+mod catalog_sync;
 mod config;
 mod file_config;
 mod invocation;
@@ -199,6 +200,7 @@ pub fn mcp_error_requires_authorization(error: &anyhow::Error) -> bool {
     error.chain().any(authorization_required)
 }
 
+use catalog_sync::*;
 use config::*;
 use naming::*;
 use registry::*;

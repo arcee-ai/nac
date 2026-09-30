@@ -47,8 +47,9 @@ pub(super) struct McpServer {
     pub(super) capabilities: rmcp::model::ServerCapabilities,
     pub(super) instructions: Option<String>,
     pub(super) sync: Arc<McpSyncState>,
-    pub(super) catalog_refresh: tokio::sync::Mutex<()>,
-    pub(super) last_catalog_refresh: std::sync::Mutex<HashMap<&'static str, std::time::Instant>>,
+    pub(super) tool_catalog_refresh: McpCatalogRefreshGate,
+    pub(super) prompt_catalog_refresh: McpCatalogRefreshGate,
+    pub(super) resource_catalog_refresh: McpCatalogRefreshGate,
     pub(super) legacy_subscriptions: std::sync::Mutex<std::collections::HashSet<String>>,
     pub(super) notification_task: McpNotificationTask,
 }
@@ -398,8 +399,9 @@ impl McpRegistry {
                 capabilities,
                 instructions: peer_info.instructions.clone(),
                 sync: Arc::clone(&sync),
-                catalog_refresh: tokio::sync::Mutex::new(()),
-                last_catalog_refresh: std::sync::Mutex::new(HashMap::new()),
+                tool_catalog_refresh: McpCatalogRefreshGate::default(),
+                prompt_catalog_refresh: McpCatalogRefreshGate::default(),
+                resource_catalog_refresh: McpCatalogRefreshGate::default(),
                 legacy_subscriptions: std::sync::Mutex::new(std::collections::HashSet::new()),
                 notification_task: McpNotificationTask::default(),
             });
