@@ -117,6 +117,13 @@ export interface components {
           thread_name?: string | null;
           type: "mcp_server_skipped";
         }
+      | {
+          kind: components["schemas"]["McpNotificationKind"];
+          message: string;
+          server_name: string;
+          thread_name?: string | null;
+          type: "mcp_notification";
+        }
       | { message: string; thread_name?: string | null; type: "model_error" }
       | { thread_name?: string | null; type: "run_finished" };
     AssistantStreamDelta: {
@@ -162,6 +169,13 @@ export interface components {
     EpisodeStatus: "ok" | "error" | "timed_out" | "cancelled";
     FunctionCall: { arguments: string; name: string };
     LaggedEvent: { missed: number };
+    McpNotificationKind:
+      | "catalog_refreshed"
+      | "catalog_refresh_failed"
+      | "resource_updated"
+      | "log"
+      | "progress"
+      | "subscription_ended";
     Message:
       | { content: string; role: "system" }
       | { content: string; role: "user" }

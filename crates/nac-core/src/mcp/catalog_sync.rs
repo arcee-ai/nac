@@ -13,12 +13,19 @@ const MIN_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 struct CatalogRefreshState {
     running: bool,
     pending: bool,
+    completed: u64,
     last_started: Option<Instant>,
 }
 
-#[derive(Default)]
 pub(super) struct McpCatalogRefreshGate {
     state: StdMutex<CatalogRefreshState>,
+    progress: tokio::sync::watch::Sender<CatalogRefreshProgress>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct CatalogRefreshProgress {
+    completed: u64,
+    running: bool,
 }
 
 struct McpCatalogRefreshPermit<'a> {
@@ -26,19 +33,46 @@ struct McpCatalogRefreshPermit<'a> {
     running: bool,
 }
 
+struct McpCatalogRefreshWaiter {
+    progress: tokio::sync::watch::Receiver<CatalogRefreshProgress>,
+    target: u64,
+}
+
+enum McpCatalogRefreshRequest<'a> {
+    Drive(McpCatalogRefreshPermit<'a>),
+    Wait(McpCatalogRefreshWaiter),
+}
+
+impl Default for McpCatalogRefreshGate {
+    fn default() -> Self {
+        let (progress, _) = tokio::sync::watch::channel(CatalogRefreshProgress::default());
+        Self {
+            state: StdMutex::new(CatalogRefreshState::default()),
+            progress,
+        }
+    }
+}
+
 impl McpCatalogRefreshGate {
-    fn begin(&self) -> Option<McpCatalogRefreshPermit<'_>> {
+    fn begin(&self) -> McpCatalogRefreshRequest<'_> {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.running {
             state.pending = true;
-            return None;
+            return McpCatalogRefreshRequest::Wait(McpCatalogRefreshWaiter {
+                progress: self.progress.subscribe(),
+                target: state.completed.saturating_add(2),
+            });
         }
         state.running = true;
         state.pending = false;
-        Some(McpCatalogRefreshPermit {
+        self.progress.send_replace(CatalogRefreshProgress {
+            completed: state.completed,
+            running: true,
+        });
+        McpCatalogRefreshRequest::Drive(McpCatalogRefreshPermit {
             gate: self,
             running: true,
         })
@@ -68,13 +102,36 @@ impl McpCatalogRefreshPermit<'_> {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if state.pending {
+        state.completed = state.completed.saturating_add(1);
+        let again = if state.pending {
             state.pending = false;
             true
         } else {
             state.running = false;
             self.running = false;
             false
+        };
+        self.gate.progress.send_replace(CatalogRefreshProgress {
+            completed: state.completed,
+            running: state.running,
+        });
+        again
+    }
+}
+
+impl McpCatalogRefreshWaiter {
+    async fn wait(mut self) -> bool {
+        loop {
+            let progress = *self.progress.borrow_and_update();
+            if progress.completed >= self.target {
+                return true;
+            }
+            if !progress.running {
+                return false;
+            }
+            if self.progress.changed().await.is_err() {
+                return false;
+            }
         }
     }
 }
@@ -82,11 +139,17 @@ impl McpCatalogRefreshPermit<'_> {
 impl Drop for McpCatalogRefreshPermit<'_> {
     fn drop(&mut self) {
         if self.running {
-            self.gate
+            let mut state = self
+                .gate
                 .state
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .running = false;
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.running = false;
+            state.pending = false;
+            self.gate.progress.send_replace(CatalogRefreshProgress {
+                completed: state.completed,
+                running: false,
+            });
         }
     }
 }
@@ -194,8 +257,15 @@ impl McpServer {
 
     pub(super) async fn refresh_tools(self: &Arc<Self>, peer: &Peer<RoleClient>) {
         let gate = &self.tool_catalog_refresh;
-        let Some(mut permit) = gate.begin() else {
-            return;
+        let mut permit = loop {
+            match gate.begin() {
+                McpCatalogRefreshRequest::Drive(permit) => break permit,
+                McpCatalogRefreshRequest::Wait(waiter) => {
+                    if waiter.wait().await {
+                        return;
+                    }
+                }
+            }
         };
         loop {
             Self::wait_for_refresh_turn(gate).await;
@@ -219,8 +289,15 @@ impl McpServer {
 
     pub(super) async fn refresh_prompts(self: &Arc<Self>, peer: &Peer<RoleClient>) {
         let gate = &self.prompt_catalog_refresh;
-        let Some(mut permit) = gate.begin() else {
-            return;
+        let mut permit = loop {
+            match gate.begin() {
+                McpCatalogRefreshRequest::Drive(permit) => break permit,
+                McpCatalogRefreshRequest::Wait(waiter) => {
+                    if waiter.wait().await {
+                        return;
+                    }
+                }
+            }
         };
         loop {
             Self::wait_for_refresh_turn(gate).await;
@@ -244,8 +321,15 @@ impl McpServer {
 
     pub(super) async fn refresh_resources(self: &Arc<Self>, peer: &Peer<RoleClient>) {
         let gate = &self.resource_catalog_refresh;
-        let Some(mut permit) = gate.begin() else {
-            return;
+        let mut permit = loop {
+            match gate.begin() {
+                McpCatalogRefreshRequest::Drive(permit) => break permit,
+                McpCatalogRefreshRequest::Wait(waiter) => {
+                    if waiter.wait().await {
+                        return;
+                    }
+                }
+            }
         };
         loop {
             Self::wait_for_refresh_turn(gate).await;
@@ -304,23 +388,39 @@ mod tests {
         );
     }
 
-    #[test]
-    fn refresh_gate_coalesces_concurrent_requests_into_one_trailing_turn() {
+    #[tokio::test]
+    async fn refresh_gate_coalesces_and_waits_for_one_trailing_turn() {
         let gate = McpCatalogRefreshGate::default();
-        let mut permit = gate.begin().expect("first request drives refresh");
-        assert!(gate.begin().is_none());
-        assert!(gate.begin().is_none());
+        let McpCatalogRefreshRequest::Drive(mut permit) = gate.begin() else {
+            panic!("first request must drive refresh");
+        };
+        let McpCatalogRefreshRequest::Wait(waiter) = gate.begin() else {
+            panic!("concurrent request must wait");
+        };
+        assert!(matches!(gate.begin(), McpCatalogRefreshRequest::Wait(_)));
+        let mut waiting = Box::pin(waiter.wait());
+
         assert!(permit.finish_iteration());
+        assert!(tokio::time::timeout(Duration::from_millis(1), &mut waiting)
+            .await
+            .is_err());
         assert!(!permit.finish_iteration());
-        assert!(gate.begin().is_some());
+        assert!(waiting.await);
+        assert!(matches!(gate.begin(), McpCatalogRefreshRequest::Drive(_)));
     }
 
-    #[test]
-    fn dropping_refresh_driver_releases_the_gate() {
+    #[tokio::test]
+    async fn dropping_refresh_driver_wakes_a_successor() {
         let gate = McpCatalogRefreshGate::default();
-        let permit = gate.begin().expect("first request drives refresh");
-        assert!(gate.begin().is_none());
+        let McpCatalogRefreshRequest::Drive(permit) = gate.begin() else {
+            panic!("first request must drive refresh");
+        };
+        let McpCatalogRefreshRequest::Wait(waiter) = gate.begin() else {
+            panic!("concurrent request must wait");
+        };
+
         drop(permit);
-        assert!(gate.begin().is_some());
+        assert!(!waiter.wait().await);
+        assert!(matches!(gate.begin(), McpCatalogRefreshRequest::Drive(_)));
     }
 }
