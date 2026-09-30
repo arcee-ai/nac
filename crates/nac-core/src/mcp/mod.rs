@@ -1249,6 +1249,74 @@ args = ["-c", "true"]
         server.join().unwrap();
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stdio_startup_timeout_reaps_uninitialized_child() {
+        let root = unique_temp_dir("nac-mcp-stdio-startup-timeout");
+        fs::create_dir_all(&root).unwrap();
+        let script = root.join("hung-mcp.sh");
+        let pid_file = root.join("server.pid");
+        fs::write(
+            &script,
+            r#"#!/bin/sh
+printf '%s' "$$" > "$MCP_PID_FILE"
+while :; do
+  sleep 1
+done
+"#,
+        )
+        .unwrap();
+        let config = McpServerConfig {
+            enabled: true,
+            library_id: None,
+            required: false,
+            startup_timeout_ms: Some(300),
+            catalog_timeout_ms: None,
+            execution_timeout_ms: None,
+            transport: McpTransportConfig::Stdio {
+                command: "/bin/sh".to_string(),
+                args: vec![script.display().to_string()],
+                env: BTreeMap::from([("MCP_PID_FILE".to_string(), pid_file.display().to_string())]),
+                env_vars: Vec::new(),
+                cwd: None,
+            },
+        };
+        let handler = NacMcpClientHandler { roots: Vec::new() };
+
+        let error = match connect_server(
+            "hung-stdio",
+            &config,
+            &handler,
+            &root,
+            Duration::from_millis(300),
+        )
+        .await
+        {
+            Ok(mut service) => {
+                close_mcp_service(&mut service).await;
+                panic!("hung stdio server unexpectedly initialized");
+            }
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("timed out connecting stdio"));
+
+        let pid = fs::read_to_string(&pid_file)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline && unsafe { libc::kill(pid, 0) } == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_ne!(
+            unsafe { libc::kill(pid, 0) },
+            0,
+            "startup timeout left the uninitialized stdio MCP child running"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[tokio::test]
     async fn stdio_server_runs_on_host_when_sandboxed() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();

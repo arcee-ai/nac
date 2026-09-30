@@ -185,6 +185,10 @@ pub(super) fn build_stdio_command(
     command.stdin(std::process::Stdio::piped());
     command.stdout(std::process::Stdio::piped());
     command.stderr(std::process::Stdio::inherit());
+    // The transport owns this child after `serve` begins. If initialization is
+    // cancelled or times out before a RunningService exists, dropping that
+    // in-flight transport must still terminate the process.
+    command.kill_on_drop(true);
     Ok(command)
 }
 
