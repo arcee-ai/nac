@@ -15,9 +15,9 @@ use axum::extract::{rejection::JsonRejection, Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::Json;
 use nac_core::mcp_configurations::{
-    self as mcp, McpHeaderHelperConfig, McpProbeResult, McpProbedTool, McpServerConfig,
-    McpServerConfigurationRecord, McpServerConfigurationStoreError, McpToolApproval,
-    McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
+    self as mcp, McpHeaderHelperConfig, McpProbeResult, McpProbedTool, McpProtocolSelection,
+    McpServerConfig, McpServerConfigurationRecord, McpServerConfigurationStoreError,
+    McpToolApproval, McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
 };
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +49,7 @@ pub struct McpServerView {
     pub startup_timeout_ms: Option<u64>,
     pub catalog_timeout_ms: Option<u64>,
     pub execution_timeout_ms: Option<u64>,
+    pub protocol: McpProtocolSelection,
     #[schema(value_type = McpTransportSchema)]
     pub transport: String,
     pub command: Option<String>,
@@ -83,6 +84,8 @@ pub struct CreateMcpServerRequest {
     pub startup_timeout_ms: Option<u64>,
     pub catalog_timeout_ms: Option<u64>,
     pub execution_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub protocol: McpProtocolSelection,
     #[schema(value_type = McpTransportSchema)]
     pub transport: String,
     pub command: Option<String>,
@@ -137,6 +140,8 @@ pub struct UpdateMcpServerRequest {
     pub catalog_timeout_ms: RequestField<u64>,
     #[serde(default)]
     pub execution_timeout_ms: RequestField<u64>,
+    #[serde(default)]
+    pub protocol: RequestField<McpProtocolSelection>,
     #[serde(default)]
     pub transport: RequestField<String>,
     #[serde(default)]
@@ -210,6 +215,7 @@ pub struct TestMcpServerRequest {
     pub startup_timeout_ms: Option<u64>,
     pub catalog_timeout_ms: Option<u64>,
     pub execution_timeout_ms: Option<u64>,
+    pub protocol: Option<McpProtocolSelection>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -269,6 +275,7 @@ fn view(record: McpServerConfigurationRecord) -> McpServerView {
         startup_timeout_ms: record.startup_timeout_ms,
         catalog_timeout_ms: record.catalog_timeout_ms,
         execution_timeout_ms: record.execution_timeout_ms,
+        protocol: record.protocol,
         transport: record.transport,
         command: record.command,
         args: record.args,
@@ -401,6 +408,7 @@ pub async fn create_server_handler(
         startup_timeout_ms: request.startup_timeout_ms,
         catalog_timeout_ms: request.catalog_timeout_ms,
         execution_timeout_ms: request.execution_timeout_ms,
+        protocol: request.protocol,
         transport: request.transport,
         command: request.command,
         args: request.args,
@@ -470,6 +478,10 @@ pub async fn update_server_handler(
             request.execution_timeout_ms,
             existing.execution_timeout_ms,
         ),
+        protocol: match request.protocol {
+            RequestField::Value(protocol) => protocol,
+            RequestField::Null | RequestField::Omitted => existing.protocol,
+        },
         transport: match request.transport {
             RequestField::Value(transport) => transport,
             RequestField::Null | RequestField::Omitted => existing.transport.clone(),
@@ -645,6 +657,10 @@ pub async fn test_server_handler(
             .as_ref()
             .and_then(|record| record.execution_timeout_ms)
     });
+    let protocol = request
+        .protocol
+        .or_else(|| stored.as_ref().map(|record| record.protocol))
+        .unwrap_or_default();
 
     let config = match transport.as_str() {
         MCP_TRANSPORT_STDIO => {
@@ -708,6 +724,7 @@ pub async fn test_server_handler(
                 startup_timeout_ms,
                 catalog_timeout_ms,
                 execution_timeout_ms,
+                protocol,
                 allowed_tools: None,
                 denied_tools: Vec::new(),
                 approval: McpToolApproval::Ask,
@@ -815,6 +832,7 @@ pub async fn test_server_handler(
                 startup_timeout_ms,
                 catalog_timeout_ms,
                 execution_timeout_ms,
+                protocol,
                 allowed_tools: None,
                 denied_tools: Vec::new(),
                 approval: McpToolApproval::Ask,

@@ -8886,6 +8886,9 @@
           "name": {
             "type": "string"
           },
+          "protocol": {
+            "$ref": "#/components/schemas/McpProtocolSelection"
+          },
           "required": {
             "type": "boolean"
           },
@@ -10771,6 +10774,15 @@
           }
         }
       },
+      "McpProtocolSelection": {
+        "type": "string",
+        "description": "Selects the MCP lifecycle independently for each configured server.",
+        "enum": [
+          "legacy",
+          "auto",
+          "current"
+        ]
+      },
       "McpRuntimeState": {
         "type": "string",
         "enum": [
@@ -10868,6 +10880,7 @@
           "name",
           "enabled",
           "required",
+          "protocol",
           "transport",
           "args",
           "env",
@@ -10991,6 +11004,9 @@
           },
           "name": {
             "type": "string"
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/McpProtocolSelection"
           },
           "required": {
             "type": "boolean"
@@ -12487,6 +12503,22 @@
                 ]
               }
             }
+          }
+        ]
+      },
+      "RequestField_McpProtocolSelection_McpProtocolSelection": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "string",
+            "description": "Selects the MCP lifecycle independently for each configured server.",
+            "enum": [
+              "legacy",
+              "auto",
+              "current"
+            ]
           }
         ]
       },
@@ -14517,6 +14549,16 @@
               "null"
             ]
           },
+          "protocol": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpProtocolSelection"
+              }
+            ]
+          },
           "startup_timeout_ms": {
             "type": [
               "integer",
@@ -15298,6 +15340,9 @@
           },
           "name": {
             "$ref": "#/components/schemas/RequestField_String_String"
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/RequestField_McpProtocolSelection_McpProtocolSelection"
           },
           "required": {
             "$ref": "#/components/schemas/RequestField_bool_bool"

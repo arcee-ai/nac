@@ -32,6 +32,10 @@ pub struct McpServerConfig {
     pub catalog_timeout_ms: Option<u64>,
     #[serde(default)]
     pub execution_timeout_ms: Option<u64>,
+    /// MCP lifecycle used to negotiate the wire protocol. Omission preserves
+    /// the pre-discovery initialize handshake for existing configurations.
+    #[serde(default)]
+    pub protocol: McpProtocolSelection,
     /// Optional exact-name allowlist. Omission exposes every listed tool;
     /// an explicitly empty list exposes none.
     #[serde(default)]
@@ -47,6 +51,39 @@ pub struct McpServerConfig {
     pub tool_approvals: BTreeMap<String, McpToolApproval>,
     #[serde(flatten)]
     pub transport: McpTransportConfig,
+}
+
+/// Selects the MCP lifecycle independently for each configured server.
+#[derive(Debug, Clone, Copy, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum McpProtocolSelection {
+    /// Use the initialize handshake and the latest protocol revision that
+    /// still defines it (`2025-11-25`).
+    #[default]
+    Legacy,
+    /// Try current stateless discovery, then fall back to legacy initialize
+    /// only when the peer identifies itself as legacy or does not respond.
+    Auto,
+    /// Require current stateless discovery (`2026-07-28`).
+    Current,
+}
+
+impl McpProtocolSelection {
+    pub(super) fn lifecycle(self) -> rmcp::service::ClientLifecycleMode {
+        use rmcp::service::ClientLifecycleMode;
+
+        match self {
+            Self::Legacy => ClientLifecycleMode::Initialize,
+            Self::Auto => ClientLifecycleMode::Auto {
+                preferred_versions: vec![rmcp::model::ProtocolVersion::V_2026_07_28],
+                legacy_version: Some(rmcp::model::ProtocolVersion::LATEST_WITH_INITIALIZE),
+            },
+            Self::Current => ClientLifecycleMode::Discover {
+                preferred_versions: vec![rmcp::model::ProtocolVersion::V_2026_07_28],
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -417,6 +454,7 @@ catalog_timeout_ms = 5600
             startup_timeout_ms: None,
             catalog_timeout_ms: None,
             execution_timeout_ms: None,
+            protocol: McpProtocolSelection::Legacy,
             allowed_tools: None,
             denied_tools: Vec::new(),
             approval: McpToolApproval::Ask,
@@ -457,5 +495,50 @@ catalog_timeout_ms = 5600
 
         assert_eq!(config.approval_for("other"), McpToolApproval::Ask);
         assert_eq!(config.approval_for("safe"), McpToolApproval::Allow);
+    }
+
+    #[test]
+    fn protocol_defaults_to_legacy_and_accepts_every_explicit_mode() {
+        let legacy: McpServerConfig = toml::from_str(
+            r#"transport = "streamable_http"
+            url = "https://example.test/mcp""#,
+        )
+        .unwrap();
+        assert_eq!(legacy.protocol, McpProtocolSelection::Legacy);
+
+        for (value, expected) in [
+            ("legacy", McpProtocolSelection::Legacy),
+            ("auto", McpProtocolSelection::Auto),
+            ("current", McpProtocolSelection::Current),
+        ] {
+            let parsed: McpServerConfig = toml::from_str(&format!(
+                "protocol = \"{value}\"\ntransport = \"streamable_http\"\nurl = \"https://example.test/mcp\""
+            ))
+            .unwrap();
+            assert_eq!(parsed.protocol, expected);
+        }
+    }
+
+    #[test]
+    fn protocol_modes_map_to_the_intended_sdk_lifecycle() {
+        use rmcp::service::ClientLifecycleMode;
+
+        assert_eq!(
+            McpProtocolSelection::Legacy.lifecycle(),
+            ClientLifecycleMode::Initialize
+        );
+        assert_eq!(
+            McpProtocolSelection::Auto.lifecycle(),
+            ClientLifecycleMode::Auto {
+                preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+                legacy_version: Some(ProtocolVersion::LATEST_WITH_INITIALIZE),
+            }
+        );
+        assert_eq!(
+            McpProtocolSelection::Current.lifecycle(),
+            ClientLifecycleMode::Discover {
+                preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+            }
+        );
     }
 }

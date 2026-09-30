@@ -45,6 +45,8 @@ pub mod ssh_configurations {
 /// when adding one. The dashboard edits `config.toml` directly; sessions parse
 /// the file when a worker launches.
 pub mod mcp_configurations {
+    #[cfg(feature = "test-support")]
+    pub use crate::mcp::run_mcp_conformance_client;
     pub use crate::mcp::{
         acquire_mcp_configuration_write_lease, delete_mcp_server_configuration,
         embedded_library_entries, fetch_smithery_library_entries, insert_mcp_server_configuration,
@@ -53,9 +55,10 @@ pub mod mcp_configurations {
         merge_library_entries, probe_mcp_server, update_mcp_server_configuration,
         update_mcp_server_configuration_at_revision, McpConfigurationWriteLease,
         McpHeaderHelperConfig, McpLibraryAuth, McpLibraryEntry, McpProbeResult, McpProbedTool,
-        McpRuntimeManager, McpRuntimeState, McpRuntimeStatus, McpServerConfig,
-        McpServerConfigurationRecord, McpServerConfigurationStoreError, McpToolApproval,
-        McpToolMetadata, McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
+        McpProtocolSelection, McpRuntimeManager, McpRuntimeState, McpRuntimeStatus,
+        McpServerConfig, McpServerConfigurationRecord, McpServerConfigurationStoreError,
+        McpToolApproval, McpToolMetadata, McpTransportConfig, MCP_TRANSPORT_STDIO,
+        MCP_TRANSPORT_STREAMABLE_HTTP,
     };
 }
 

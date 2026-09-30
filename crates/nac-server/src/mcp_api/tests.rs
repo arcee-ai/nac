@@ -34,6 +34,28 @@ fn create_request_allows_omitted_tool_policy_fields() {
     assert!(request.denied_tools.is_empty());
     assert_eq!(request.approval, McpToolApproval::Ask);
     assert!(request.tool_approvals.is_empty());
+    assert_eq!(request.protocol, McpProtocolSelection::Legacy);
+}
+
+#[test]
+fn create_request_and_view_preserve_an_explicit_protocol_mode() {
+    let request: CreateMcpServerRequest = serde_json::from_value(serde_json::json!({
+        "name": "current",
+        "protocol": "current",
+        "transport": MCP_TRANSPORT_STREAMABLE_HTTP,
+        "url": "https://example.test/mcp"
+    }))
+    .unwrap();
+    assert_eq!(request.protocol, McpProtocolSelection::Current);
+
+    let record = McpServerConfigurationRecord {
+        name: request.name,
+        protocol: request.protocol,
+        transport: request.transport,
+        url: request.url,
+        ..McpServerConfigurationRecord::default()
+    };
+    assert_eq!(view(record).protocol, McpProtocolSelection::Current);
 }
 
 #[test]

@@ -1,0 +1,30 @@
+# ALL-131 covers NAC's outbound MCP protocol client. OAuth is owned by
+# ALL-124/ALL-126, and interactive elicitation is intentionally not added just
+# to satisfy a nominal test. Any passing entry is treated by the official
+# runner as a stale baseline and fails the command.
+client:
+  - elicitation-sep1034-client-defaults
+  - auth/metadata-default
+  - auth/metadata-var1
+  - auth/metadata-var2
+  - auth/metadata-var3
+  - auth/basic-cimd
+  - auth/scope-from-www-authenticate
+  - auth/scope-from-scopes-supported
+  - auth/scope-omitted-when-undefined
+  - auth/scope-step-up
+  - auth/scope-retry-limit
+  - auth/token-endpoint-auth-basic
+  - auth/token-endpoint-auth-post
+  - auth/token-endpoint-auth-none
+  - auth/pre-registration
+  - auth/offline-access-scope
+  - auth/offline-access-not-supported
+  - auth/authorization-server-migration
+  - auth/iss-supported
+  - auth/iss-not-advertised
+  - auth/iss-supported-missing
+  - auth/iss-wrong-issuer
+  - auth/iss-unexpected
+  - auth/iss-normalized
+  - auth/metadata-issuer-mismatch

@@ -219,6 +219,7 @@ export interface components {
       headers?: Record<string, string>;
       library_id?: string | null;
       name: string;
+      protocol?: components["schemas"]["McpProtocolSelection"];
       required?: boolean;
       startup_timeout_ms?: number | null;
       tool_approvals?: Record<string, components["schemas"]["McpToolApproval"]>;
@@ -565,6 +566,7 @@ export interface components {
       tools: components["schemas"]["McpProbedTool"][];
     };
     McpPromptArgument: { description?: string | null; name: string; required: boolean };
+    McpProtocolSelection: "legacy" | "auto" | "current";
     McpRuntimeState: "disabled" | "disconnected" | "connecting" | "connected" | "failed";
     McpRuntimeStatus: {
       auth_required: boolean;
@@ -597,6 +599,7 @@ export interface components {
       headers: Record<string, string>;
       library_id?: string | null;
       name: string;
+      protocol: components["schemas"]["McpProtocolSelection"];
       required: boolean;
       startup_timeout_ms?: number | null;
       tool_approvals: Record<string, components["schemas"]["McpToolApproval"]>;
@@ -835,6 +838,7 @@ export interface components {
       model: string;
       reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
     };
+    RequestField_McpProtocolSelection_McpProtocolSelection: null | ("legacy" | "auto" | "current");
     RequestField_McpToolApproval_McpToolApproval: null | ("allow" | "ask");
     RequestField_ReasoningEffort_ReasoningEffort:
       | null
@@ -1139,6 +1143,7 @@ export interface components {
       header_helper?: null | components["schemas"]["UpdateMcpHeaderHelperRequest"];
       headers?: Record<string, string | null> | null;
       name?: string | null;
+      protocol?: null | components["schemas"]["McpProtocolSelection"];
       startup_timeout_ms?: number | null;
       stored_name?: string | null;
       transport?: string | null;
@@ -1295,6 +1300,7 @@ export interface components {
       headers?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_Option_String"];
       library_id?: components["schemas"]["RequestField_String_String"];
       name?: components["schemas"]["RequestField_String_String"];
+      protocol?: components["schemas"]["RequestField_McpProtocolSelection_McpProtocolSelection"];
       required?: components["schemas"]["RequestField_bool_bool"];
       startup_timeout_ms?: components["schemas"]["RequestField_u64_u64"];
       tool_approvals?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_McpToolApproval"];

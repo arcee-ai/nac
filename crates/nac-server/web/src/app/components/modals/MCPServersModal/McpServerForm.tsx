@@ -30,11 +30,27 @@ import {
   useTestMcpServer,
   useUpdateMcpServer,
 } from "@/app/services/queries";
-import type { McpLibraryEntry, McpProbedTool, McpServerView, McpTransport } from "@/app/types/api";
+import type {
+  McpLibraryEntry,
+  McpProbedTool,
+  McpProtocolSelection,
+  McpServerView,
+  McpTransport,
+} from "@/app/types/api";
 
 const TRANSPORT_ITEMS: { id: McpTransport; label: string }[] = [
   { id: "streamable_http", label: "Streamable HTTP" },
   { id: "stdio", label: "Stdio" },
+];
+
+const PROTOCOL_ITEMS: { id: McpProtocolSelection; label: string; hint: string }[] = [
+  { id: "legacy", label: "Legacy", hint: "Use the 2025-11-25 initialize handshake." },
+  {
+    id: "auto",
+    label: "Auto",
+    hint: "Try 2026-07-28 discovery, then safely fall back to legacy.",
+  },
+  { id: "current", label: "Current", hint: "Require 2026-07-28 stateless discovery." },
 ];
 
 function splitArgs(text: string): string[] {
@@ -88,6 +104,7 @@ export function McpServerForm({
   const [name, setName] = useState(record?.name ?? template?.name ?? "");
   const [enabled, setEnabled] = useState(record?.enabled ?? true);
   const [required, setRequired] = useState(record?.required ?? false);
+  const [protocol, setProtocol] = useState<McpProtocolSelection>(record?.protocol ?? "legacy");
   const [transport, setTransport] = useState<McpTransport>(() =>
     knownTransport(record?.transport ?? template?.transport),
   );
@@ -182,6 +199,7 @@ export function McpServerForm({
           startup_timeout_ms: optionalMillis(startupTimeout),
           catalog_timeout_ms: optionalMillis(catalogTimeout),
           execution_timeout_ms: optionalMillis(executionTimeout),
+          protocol,
           transport,
           command: transport === "stdio" ? command.trim() : null,
           args: transport === "stdio" ? splitArgs(argsText) : [],
@@ -211,6 +229,7 @@ export function McpServerForm({
             startup_timeout_ms: optionalMillis(startupTimeout),
             catalog_timeout_ms: optionalMillis(catalogTimeout),
             execution_timeout_ms: optionalMillis(executionTimeout),
+            protocol,
             transport,
             command: transport === "stdio" ? command.trim() : null,
             args: transport === "stdio" ? splitArgs(argsText) : [],
@@ -300,6 +319,7 @@ export function McpServerForm({
         startup_timeout_ms: optionalMillis(startupTimeout),
         catalog_timeout_ms: optionalMillis(catalogTimeout),
         execution_timeout_ms: optionalMillis(executionTimeout),
+        protocol,
       });
       if (!result.connected) {
         toast.error(`Test failed: ${result.error ?? "connection failed"}`);
@@ -440,6 +460,27 @@ export function McpServerForm({
                   content={ButtonContent.Text}
                   aria-pressed={transport === item.id}
                   onClick={() => setTransport(item.id)}
+                >
+                  {item.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <FieldLabel
+              label="Protocol"
+              hint={PROTOCOL_ITEMS.find((item) => item.id === protocol)?.hint}
+            />
+            <div className="flex flex-wrap gap-2">
+              {PROTOCOL_ITEMS.map((item) => (
+                <Button
+                  key={item.id}
+                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                  variant={protocol === item.id ? ButtonVariant.Primary : ButtonVariant.Secondary}
+                  content={ButtonContent.Text}
+                  aria-pressed={protocol === item.id}
+                  onClick={() => setProtocol(item.id)}
                 >
                   {item.label}
                 </Button>

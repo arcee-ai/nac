@@ -47,15 +47,20 @@ pub(super) async fn connect_server(
                 .unwrap_or_else(|| cwd.to_path_buf());
             let transport =
                 TokioChildProcess::new(build_stdio_command(&command, &args, &env, &cwd)?)?;
-            timeout(startup_timeout, handler.clone().serve(transport))
-                .await
-                .map_err(|_| {
-                    anyhow!(
-                        "timed out connecting stdio MCP server '{name}' after {}ms",
-                        startup_timeout.as_millis()
-                    )
-                })?
-                .with_context(|| format!("failed to connect stdio MCP server '{name}'"))
+            timeout(
+                startup_timeout,
+                handler
+                    .clone()
+                    .serve_with_lifecycle(transport, config.protocol.lifecycle()),
+            )
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "timed out connecting stdio MCP server '{name}' after {}ms",
+                    startup_timeout.as_millis()
+                )
+            })?
+            .with_context(|| format!("failed to connect stdio MCP server '{name}'"))
         }
         McpTransportConfig::StreamableHttp {
             url,
@@ -76,8 +81,14 @@ pub(super) async fn connect_server(
                 bearer_token_env_var: bearer_token_env_var.as_deref(),
                 helper_headers: helper_headers.as_ref(),
             };
-            match connect_http_server_with_timeout(name, handler, &parameters, startup_timeout)
-                .await
+            match connect_http_server_with_timeout(
+                name,
+                config.protocol,
+                handler,
+                &parameters,
+                startup_timeout,
+            )
+            .await
             {
                 Ok(service) => Ok(service),
                 Err(error) => {
@@ -92,8 +103,14 @@ pub(super) async fn connect_server(
                         helper_headers: Some(&refreshed),
                         ..parameters
                     };
-                    connect_http_server_with_timeout(name, handler, &parameters, startup_timeout)
-                        .await
+                    connect_http_server_with_timeout(
+                        name,
+                        config.protocol,
+                        handler,
+                        &parameters,
+                        startup_timeout,
+                    )
+                    .await
                 }
             }
         }
@@ -111,13 +128,14 @@ struct HttpConnectionParameters<'a> {
 
 async fn connect_http_server_with_timeout(
     name: &str,
+    protocol: McpProtocolSelection,
     handler: &NacMcpClientHandler,
     parameters: &HttpConnectionParameters<'_>,
     startup_timeout: Duration,
 ) -> Result<McpService> {
     timeout(
         startup_timeout,
-        connect_http_server(name, handler, parameters),
+        connect_http_server(name, protocol, handler, parameters),
     )
     .await
     .map_err(|_| {
@@ -130,6 +148,7 @@ async fn connect_http_server_with_timeout(
 
 async fn connect_http_server(
     name: &str,
+    protocol: McpProtocolSelection,
     handler: &NacMcpClientHandler,
     parameters: &HttpConnectionParameters<'_>,
 ) -> Result<McpService> {
@@ -142,7 +161,7 @@ async fn connect_http_server(
     )?);
     handler
         .clone()
-        .serve(transport)
+        .serve_with_lifecycle(transport, protocol.lifecycle())
         .await
         .with_context(|| format!("failed to connect HTTP MCP server '{name}'"))
 }

@@ -1,4 +1,4 @@
-.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size test-mcp-conformance generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -75,6 +75,10 @@ test: test-source-size test-source-workflow test-source-binary test-rust test-we
 
 test-rust:
 	$(CARGO) test --workspace --locked
+
+## Run the official frozen client requirements for every advertised MCP revision
+test-mcp-conformance:
+	sh scripts/test-mcp-conformance.sh
 
 ## Run frontend unit and component tests
 test-web:

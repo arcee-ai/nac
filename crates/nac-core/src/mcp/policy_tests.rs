@@ -11,6 +11,7 @@ async fn probe_keeps_required_tools_when_optional_catalogs_fail() {
         startup_timeout_ms: None,
         catalog_timeout_ms: None,
         execution_timeout_ms: None,
+        protocol: McpProtocolSelection::Legacy,
         allowed_tools: None,
         denied_tools: Vec::new(),
         approval: McpToolApproval::Ask,

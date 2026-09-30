@@ -64,6 +64,9 @@ execution_timeout_ms = 300000
 # headers) and stdio (command, args, env).
 # enabled defaults to true; required defaults to false. A required enabled
 # server rejects session admission when startup or catalog discovery fails.
+# protocol defaults to "legacy" (2025-11-25 initialize). "auto" attempts
+# 2026-07-28 stateless discovery with safe legacy fallback, while "current"
+# requires 2026-07-28 and never falls back.
 # String values (command, args, env values, url, header values) expand ${ENV_VAR};
 # the variable must be set. library_id is dashboard bookkeeping and is ignored
 # at connect. Advertised server instructions are included as bounded, attributed,
@@ -80,6 +83,7 @@ execution_timeout_ms = 300000
 [mcp_servers.exa_web_search]
 enabled = true
 required = false
+protocol = "auto"
 transport = "streamable_http"
 url = "https://mcp.exa.ai/mcp"
 # allowed_tools = ["web_search_exa"]
