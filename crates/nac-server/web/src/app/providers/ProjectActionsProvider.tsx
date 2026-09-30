@@ -129,13 +129,17 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   // the one place holding both full lists, so it is where that memory is kept
   // clear of chats and projects that have since been deleted.
   useEffect(() => {
-    if (!sessionsLoaded || !projectList) return;
+    const existingSessions = sessionsQuery.data;
+    if (!sessionsLoaded || !existingSessions || !projectList) return;
+    // Presentation-hidden sessions still exist and keep their browser memory.
     pruneChatTabs(
-      sessions.map((entry) => entry.summary.session_id),
+      existingSessions.map((entry) => entry.summary.session_id),
       projectList.projects.map((project) => project.project_id),
     );
-    pruneSessionNavigation(primarySessions(sessions).map((entry) => entry.summary.session_id));
-  }, [sessionsLoaded, sessions, projectList]);
+    pruneSessionNavigation(
+      primarySessions(existingSessions).map((entry) => entry.summary.session_id),
+    );
+  }, [sessionsLoaded, sessionsQuery.data, projectList]);
 
   // Which project the screen is about, whether it was reached by its own route
   // or through one of its chats.
