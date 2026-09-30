@@ -1,0 +1,37 @@
+{
+  "purpose": "one owner-authorized 90-second test-only diagnostic after original 20-second FAIL",
+  "sources": [
+    {
+      "namespace": "flux-system",
+      "name": "flux-system",
+      "url": "ssh://git@github.com/arcee-ai/flux-k8s-infra",
+      "revision": "main@sha1:6e2d88b5c26fc5cc1757301f69d9fbbaa38f7463"
+    }
+  ],
+  "runtime": {
+    "handler": "runsc",
+    "scheduling": {
+      "nodeSelector": {
+        "sandbox.gvisor.dev/runtime": "runsc"
+      },
+      "tolerations": [
+        {
+          "effect": "NoSchedule",
+          "key": "sandbox.gvisor.dev/runtime",
+          "operator": "Equal",
+          "value": "runsc"
+        }
+      ]
+    }
+  },
+  "storage": {
+    "provisioner": "ebs.csi.aws.com",
+    "parameters": {
+      "encrypted": "true",
+      "fsType": "ext4",
+      "type": "gp3"
+    },
+    "reclaimPolicy": "Delete"
+  },
+  "existing_managed_security_contract_preserved": true
+}

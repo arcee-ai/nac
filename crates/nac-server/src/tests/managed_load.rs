@@ -6,13 +6,65 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 use store_adapter::*;
 const DEFAULT_SEED: u64 = 0xA11_0112;
 const VARIANTS: [usize; 3] = [1, 2, 4];
-const PHASE_TIMEOUT: Duration = Duration::from_secs(20);
+#[derive(Debug, PartialEq, Eq)]
+struct PhaseTimeout {
+    limit: Duration,
+    diagnostic: bool,
+}
+const DEFAULT_PHASE_TIMEOUT: PhaseTimeout = PhaseTimeout {
+    limit: Duration::from_secs(20),
+    diagnostic: false,
+};
+static PHASE_TIMEOUT_SETTINGS: OnceLock<PhaseTimeout> = OnceLock::new();
+fn phase_settings() -> &'static PhaseTimeout {
+    PHASE_TIMEOUT_SETTINGS
+        .get()
+        .unwrap_or(&DEFAULT_PHASE_TIMEOUT)
+}
+fn phase_timeout() -> Duration {
+    phase_settings().limit
+}
+fn parse_phase_timeout(value: Option<&str>) -> Result<PhaseTimeout, &'static str> {
+    let seconds = value
+        .map(str::parse::<u64>)
+        .transpose()
+        .map_err(|_| "phase timeout must be an integer number of seconds")?
+        .unwrap_or(20);
+    if !(1..=90).contains(&seconds) {
+        return Err("diagnostic phase timeout must be within 1..=90 seconds");
+    }
+    Ok(PhaseTimeout {
+        limit: Duration::from_secs(seconds),
+        diagnostic: value.is_some(),
+    })
+}
+#[test]
+fn managed_load_phase_timeout_override_is_bounded_and_fail_closed() {
+    assert_eq!(parse_phase_timeout(None).unwrap(), DEFAULT_PHASE_TIMEOUT);
+    for seconds in ["1", "20", "90"] {
+        let settings = parse_phase_timeout(Some(seconds)).unwrap();
+        assert_eq!(settings.limit.as_secs(), seconds.parse::<u64>().unwrap());
+        assert!(settings.diagnostic);
+    }
+    for invalid in [
+        "0",
+        "91",
+        "-1",
+        "",
+        "abc",
+        "1.5",
+        " 90",
+        "18446744073709551616",
+    ] {
+        assert!(parse_phase_timeout(Some(invalid)).is_err(), "{invalid}");
+    }
+}
 const PROBE_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct PlannedOrchestrator {
@@ -90,7 +142,7 @@ impl CompletionGate {
         if !self.enabled {
             return;
         }
-        let deadline = Instant::now() + PHASE_TIMEOUT;
+        let deadline = Instant::now() + phase_timeout();
         let mut next = self.next_ordinal.lock().unwrap();
         while *next != ordinal {
             let remaining = deadline
@@ -132,7 +184,7 @@ impl PhaseGate {
     }
 
     fn arrive_and_wait(&self, label: &str) {
-        let deadline = Instant::now() + PHASE_TIMEOUT;
+        let deadline = Instant::now() + phase_timeout();
         let mut state = self.state.lock().unwrap();
         state.arrived += 1;
         self.ready.notify_all();
@@ -150,7 +202,7 @@ impl PhaseGate {
     }
 
     fn wait_until_arrived(&self, expected_arrivals: usize, label: &str) {
-        let deadline = Instant::now() + PHASE_TIMEOUT;
+        let deadline = Instant::now() + phase_timeout();
         let mut state = self.state.lock().unwrap();
         while state.arrived < expected_arrivals {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -398,7 +450,7 @@ fn handle_model_request(
 
 fn read_http_body(stream: &mut TcpStream) -> Vec<u8> {
     stream
-        .set_read_timeout(Some(PHASE_TIMEOUT))
+        .set_read_timeout(Some(phase_timeout()))
         .expect("set request read timeout");
     let mut request = Vec::new();
     let mut buffer = [0_u8; 4096];
@@ -519,6 +571,8 @@ struct VariantEvidence {
     orchestrators: usize,
     store: &'static str,
     elapsed_ms: u128,
+    phase_timeout_ms: u128,
+    diagnostic_timeout_override: bool,
     injected_phase_delay_ms: u128,
     logical_plan: LogicalPlan,
     model_requests: Vec<ModelRequest>,
@@ -562,6 +616,8 @@ struct FaultRunMetadata {
     logical_plan: Option<LogicalPlan>,
     store: &'static str,
     elapsed_ms: u128,
+    phase_timeout_ms: u128,
+    diagnostic_timeout_override: bool,
     error_identity: &'static str,
     store_configuration: StoreConfiguration,
     checkpoint: CheckpointEvidence,
@@ -644,6 +700,8 @@ fn fault_metadata(
         logical_plan,
         store: adapter.identity(),
         elapsed_ms: started.elapsed().as_millis(),
+        phase_timeout_ms: phase_timeout().as_millis(),
+        diagnostic_timeout_override: phase_settings().diagnostic,
         error_identity,
         store_configuration: adapter.configuration(store_path),
         checkpoint: adapter.checkpoint(store_path),
@@ -654,6 +712,21 @@ fn fault_metadata(
 #[ignore = "bounded repo-level scenario; run with make test-managed-load"]
 async fn managed_load_scenario() {
     let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let timeout_value = match std::env::var("NAC_MANAGED_LOAD_PHASE_TIMEOUT_SECONDS") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            panic!("phase timeout must be Unicode integer text")
+        }
+    };
+    PHASE_TIMEOUT_SETTINGS
+        .set(parse_phase_timeout(timeout_value.as_deref()).expect("valid bounded phase timeout"))
+        .expect("one immutable timeout configuration per fixture process");
+    eprintln!(
+        "ALL-112 phase timeout: {}s (diagnostic_override={})",
+        phase_timeout().as_secs(),
+        phase_settings().diagnostic
+    );
     crate::mcp_api::preload_embedded_library_for_test().await;
     let worker = PathBuf::from(
         std::env::var_os("NAC_MANAGED_LOAD_WORKER")
@@ -773,7 +846,7 @@ fn exercise_busy_conflict(adapter: &dyn LoadStoreAdapter, seed: u64) -> BusyConf
         );
         result_sender.send((started.elapsed(), result)).unwrap();
     });
-    let busy_deadline = Instant::now() + PHASE_TIMEOUT;
+    let busy_deadline = Instant::now() + phase_timeout();
     while nac_core::store::thread_event_busy_observations() == 0 {
         assert!(
             Instant::now() < busy_deadline,
@@ -785,7 +858,7 @@ fn exercise_busy_conflict(adapter: &dyn LoadStoreAdapter, seed: u64) -> BusyConf
     thread::sleep(held);
     let blocked_while_held = result_receiver.try_recv().is_err();
     blocker.execute_batch("COMMIT").unwrap();
-    let (waited, result) = result_receiver.recv_timeout(PHASE_TIMEOUT).unwrap();
+    let (waited, result) = result_receiver.recv_timeout(phase_timeout()).unwrap();
     result.unwrap();
     contender.join().unwrap();
     adapter.assert_integrity(&store_path);
@@ -848,7 +921,7 @@ async fn exercise_append_failure(
     )
     .await;
     wait_for_parent_idle(&parent).await;
-    assert_eq!(requests.recv_timeout(PHASE_TIMEOUT).unwrap(), 0);
+    assert_eq!(requests.recv_timeout(phase_timeout()).unwrap(), 0);
     let relation =
         nac_core::store::load_managed_orchestrator(&store_path, &plan.orchestrators[0].session_id)
             .unwrap()
@@ -912,12 +985,12 @@ async fn exercise_monitor_failure(
         start_planned_orchestrator(router(manager.clone()), &plan.orchestrators[0]).await;
     assert_eq!(response.status(), StatusCode::CREATED);
     let requests = tokio::task::spawn_blocking(move || {
-        assert_eq!(requests.recv_timeout(PHASE_TIMEOUT).unwrap(), 0);
+        assert_eq!(requests.recv_timeout(phase_timeout()).unwrap(), 0);
         requests
     })
     .await
     .unwrap();
-    tokio::time::timeout(PHASE_TIMEOUT, async {
+    tokio::time::timeout(phase_timeout(), async {
         while crate::delegation_runtime::pending_managed_monitor_failures() != 0 {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -928,7 +1001,7 @@ async fn exercise_monitor_failure(
         .attach_session(&plan.orchestrators[0].session_id)
         .await
         .unwrap();
-    tokio::time::timeout(PHASE_TIMEOUT, async {
+    tokio::time::timeout(phase_timeout(), async {
         while service.has_active_operation() {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -946,7 +1019,7 @@ async fn exercise_monitor_failure(
         .unwrap();
     wait_for_parent_idle(&parent).await;
     tokio::task::spawn_blocking(move || {
-        assert_eq!(requests.recv_timeout(PHASE_TIMEOUT).unwrap(), 1);
+        assert_eq!(requests.recv_timeout(phase_timeout()).unwrap(), 1);
     })
     .await
     .unwrap();
@@ -1015,7 +1088,7 @@ async fn exercise_worker_interruption(
     model.wait_for_worker_requests().await;
 
     let cancelled = tokio::time::timeout(
-        PHASE_TIMEOUT,
+        phase_timeout(),
         manager
             .delegation()
             .cancel_managed_orchestrator("all112-parent", &plan.orchestrators[0].session_id),
@@ -1112,7 +1185,7 @@ async fn exercise_restart_recovery(
     let rebuilt = adapter.create_manager(&root, worker);
     let parent = rebuilt.attach_session("all112-parent").await.unwrap();
     tokio::task::spawn_blocking(move || {
-        assert_eq!(requests.recv_timeout(PHASE_TIMEOUT).unwrap(), 0);
+        assert_eq!(requests.recv_timeout(phase_timeout()).unwrap(), 0);
     })
     .await
     .unwrap();
@@ -1185,7 +1258,7 @@ async fn wait_for_relation_status(
     orchestrator_session_id: &str,
     expected: ManagedOrchestratorStatus,
 ) {
-    tokio::time::timeout(PHASE_TIMEOUT, async {
+    tokio::time::timeout(phase_timeout(), async {
         loop {
             let status =
                 nac_core::store::load_managed_orchestrator(store_path, orchestrator_session_id)
@@ -1203,7 +1276,7 @@ async fn wait_for_relation_status(
 }
 
 async fn wait_for_parent_idle(parent: &nac_core::session_service::SessionService) {
-    tokio::time::timeout(PHASE_TIMEOUT, async {
+    tokio::time::timeout(phase_timeout(), async {
         while parent.has_active_operation() {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -1340,7 +1413,7 @@ async fn run_variant_with_mode(
                 ManagedOrchestratorStatus::Completed,
             )
             .await;
-            tokio::time::timeout(PHASE_TIMEOUT, async {
+            tokio::time::timeout(phase_timeout(), async {
                 loop {
                     let rows = nac_core::store::TranscriptLogWriter::new(&root.join("store.db"))
                         .unwrap()
@@ -1370,7 +1443,7 @@ async fn run_variant_with_mode(
     let settlement_timeout = if mode == LoadMode::ConcurrentSettlementProbe {
         PROBE_SETTLEMENT_TIMEOUT
     } else {
-        PHASE_TIMEOUT
+        phase_timeout()
     };
     let settlement = tokio::time::timeout(settlement_timeout, async {
         loop {
@@ -1421,7 +1494,7 @@ async fn run_variant_with_mode(
                 .await
                 .unwrap();
         }
-        tokio::time::timeout(PHASE_TIMEOUT, async {
+        tokio::time::timeout(phase_timeout(), async {
             loop {
                 let relations = nac_core::store::list_managed_orchestrators(
                     &root.join("store.db"),
@@ -1676,6 +1749,8 @@ async fn run_variant_with_mode(
         orchestrators: orchestrator_count,
         store: adapter.identity(),
         elapsed_ms: started.elapsed().as_millis(),
+        phase_timeout_ms: phase_timeout().as_millis(),
+        diagnostic_timeout_override: phase_settings().diagnostic,
         injected_phase_delay_ms: phase_delay.as_millis(),
         logical_plan: plan,
         model_requests,

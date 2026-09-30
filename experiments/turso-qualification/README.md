@@ -67,6 +67,15 @@ Use Git's `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=safe.directory`, and
 `GIT_CONFIG_VALUE_0=/home/runner/work/nac/nac` for this exact disposable path;
 the model fixture clears HOME, so a home-based safe-directory setting is not
 sufficient. The test-only embedded catalog makes this fixture offline.
+Allison authorized one longer diagnostic with
+`NAC_MANAGED_LOAD_PHASE_TIMEOUT_SECONDS=90`. This test-only override is parsed
+once, immutable for the fixture process, capped at 90 seconds, and rejects
+invalid/zero/out-of-range values before starting the fixture. Its default remains
+20 seconds; metadata records both the selected limit and diagnostic flag.
+An extended result does not replace the retained 20-second acceptance failure.
+Run it once in fresh disposable resources and stop if any phase reaches 90s;
+do not increase the limit or alter production timeouts. The separate unconstrained
+settlement probe retains its original five-second diagnostic threshold.
 Run `run_matrix.py` against the PVC with separate output files. Copy all JSON,
 logs, source/binary/schema/fixture hashes and runtime receipts out before
 deleting only the named disposable namespace/PVC. Raw stores are synthetic;

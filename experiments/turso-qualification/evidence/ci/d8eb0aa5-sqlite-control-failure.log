@@ -1,0 +1,43 @@
+linux-evidence	Run the SQLite control and retain consistent fixture copies	﻿2026-09-30T20:39:27.5801454Z ##[group]Run mkdir -p "$NAC_MANAGED_LOAD_COPY_STORE_DIR"
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.5801713Z ^[[36;1mmkdir -p "$NAC_MANAGED_LOAD_COPY_STORE_DIR"^[[0m
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.5801880Z ^[[36;1mmake test-managed-load^[[0m
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.5831562Z shell: /usr/bin/bash -e {0}
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.5831700Z env:
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.5831810Z   CARGO_HOME: /home/runner/.cargo
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.5831946Z   CARGO_INCREMENTAL: 0
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.5832062Z   CARGO_TERM_COLOR: always
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.5832256Z   NAC_MANAGED_LOAD_COPY_STORE_DIR: /home/runner/work/nac/nac/target/all114-fixtures
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.5832475Z ##[endgroup]
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.5886145Z cargo build --locked -p nac-server --bin nac-web
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:27.7023155Z ^[[1m^[[92m   Compiling^[[0m nac-server v0.1.4 (/home/runner/work/nac/nac/crates/nac-server)
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:42.4604968Z ^[[1m^[[92m    Finished^[[0m `dev` profile [unoptimized + debuginfo] target(s) in 14.86s
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:42.5772988Z NAC_MANAGED_LOAD_WORKER="/home/runner/work/nac/nac/target/debug/nac-web" \
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:42.5773634Z 	cargo test --locked -p nac-server \
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:42.5774089Z 		tests::managed_load::managed_load_scenario -- --ignored --exact --nocapture --test-threads=1
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:39:42.7292585Z ^[[1m^[[92m   Compiling^[[0m nac-server v0.1.4 (/home/runner/work/nac/nac/crates/nac-server)
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:08.0635705Z ^[[1m^[[92m    Finished^[[0m `test` profile [unoptimized + debuginfo] target(s) in 25.48s
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:08.0796515Z ^[[1m^[[92m     Running^[[0m unittests src/lib.rs (target/debug/deps/nac_server-bff8664dc93c69b0)
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:08.0819206Z 
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:08.0819624Z running 1 test
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:13.2661078Z ALL-112 artifact: /home/runner/work/nac/nac/crates/nac-server/../../target/managed-load/all-112-seed-168886546-orchestrators-1.json
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:15.1883999Z ALL-112 artifact: /home/runner/work/nac/nac/crates/nac-server/../../target/managed-load/all-112-seed-168886546-orchestrators-2.json
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:16.2576489Z nac: run failed: database disk image is malformed
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0629205Z 
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0629960Z thread 'tokio-rt-worker' (8367) panicked at crates/nac-server/src/tests/managed_load.rs:160:13:
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0630445Z timed out waiting for worker requests
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0630845Z note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0633539Z 
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0633995Z thread 'tests::managed_load::managed_load_scenario' (8363) panicked at crates/nac-server/src/tests/managed_load.rs:285:14:
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0634521Z called `Result::unwrap()` on an `Err` value: JoinError::Panic(Id(197), "timed out waiting for worker requests", ...)
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0738907Z test tests::managed_load::managed_load_scenario ... FAILED
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0739200Z 
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0739452Z failures:
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0739586Z 
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0743738Z failures:
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0743977Z     tests::managed_load::managed_load_scenario
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0744160Z 
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0744501Z test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 212 filtered out; finished in 27.99s
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0744795Z 
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0772563Z ^[[1m^[[91merror^[[0m: test failed, to rerun pass `-p nac-server --lib`
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0820063Z make: *** [Makefile:166: test-managed-load] Error 101
+linux-evidence	Run the SQLite control and retain consistent fixture copies	2026-09-30T20:40:36.0832584Z ##[error]Process completed with exit code 2.

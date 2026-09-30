@@ -66,6 +66,19 @@ on ae661b83 passed the full Linux SQLite control, probe build, formatting and
 Clippy including io_uring. Exact PR-head CI status is recorded on ALL-114 at handoff;
 successful prior heads are never substituted for that gate.
 
+The later d8eb0aa5 qualification run
+[36773860118](https://github.com/arcee-ai/nac/actions/runs/36773860118) failed its
+default-20s Linux SQLite control after emitting 1/2 artifacts. The four-way lane
+logged `database disk image is malformed`, then timed out waiting for worker
+requests (test 27.99s, exit101; make exit2). [Exact SQLite step output](evidence/ci/d8eb0aa5-sqlite-control-failure.log)
+and [provenance](evidence/ci/d8eb0aa5-provenance.json) are retained. This is a
+Linux full-control failure, not a gVisor result or an established engine cause.
+That revision did not upload the failing temporary store, so its corruption
+state cannot be retrospectively verified. The CI watcher also encountered a
+GitHub TLS handshake timeout; that transport interruption is separate from
+the actual failed correctness gate. Later source updates or passes do not
+erase either observation.
+
 ## Single final offline managed full control: FAIL
 
 The native worker and test binary from bdc5e69a were installed in a new `/data/offline`
@@ -151,3 +164,20 @@ no recoverable cloud PVC is retained. [Cleanup receipt](evidence/managed/cleanup
 records the scoped removal. Recovery of these synthetic test stores is from
 the retained local archives or reproduction; no production backup is involved.
 [Evidence manifest](evidence/manifest.json) hashes every retained receipt.
+
+## Authorized extended diagnostic
+
+After the original control and disposable cleanup were retained, Allison asked
+whether extending the timeout could obtain full results. One fresh managed run
+at 90 seconds per phase was authorized. The override is test-only, default 20s,
+parsed once and immutable per fixture process, bounded to 1..=90 seconds and
+fails closed before fixture startup for invalid/zero/out-of-range/non-Unicode
+values. Focused parsing coverage checks default/valid bounds and invalid,
+negative, fractional, whitespace and overflow inputs. Successful scenario and
+fault metadata include timeout milliseconds and a diagnostic override flag.
+The separate unconstrained settlement probe's five-second limit is unchanged.
+
+The original 20s managed FAIL remains the acceptance outcome. A longer pass
+would measure eventual settlement/latency, not a healthy managed acceptance.
+The diagnostic is one run only; any phase reaching 90s ends it without a higher
+timeout or a second review cycle. Final diagnostic receipts follow execution.

@@ -1,0 +1,16 @@
+{
+  "source_revision": "d8eb0aa56ec345ca979d0cb5891240ec2db81448",
+  "run_id": 36773860118,
+  "run_url": "https://github.com/arcee-ai/nac/actions/runs/36773860118",
+  "default_phase_timeout_seconds": 20,
+  "scope": "Linux CI full SQLite control; not gVisor/PVC",
+  "one_and_two_orchestrators": "artifacts emitted before failure",
+  "four_orchestrators": "database disk image is malformed, then worker request timeout; no success artifact",
+  "test_elapsed_seconds": 27.99,
+  "test_exit": 101,
+  "make_exit": 2,
+  "gate": "FAIL; retained despite later diagnostic source updates",
+  "sqlite_step_log_sha256": "5eac79f0a53c6e02076296202ed2108e20797c2e71abf2a5f9b3e70dd5c34d73",
+  "failed_store_not_uploaded_by_this_revision": true,
+  "cause": "unestablished"
+}
