@@ -5,6 +5,9 @@ experiment-only dependency; NAC production stays on SQLite. The checked-in
 schema is the 50 schema objects exported from an actual ALL-112 synthetic
 schema-v29 store, with no customer data. Store files remain untracked.
 
+Read [DECISION.md](DECISION.md) for the NO-GO recommendation, actual managed
+evidence, compatibility failures, residual risks and restore prerequisites.
+
 Build the probe:
 
 ```sh
@@ -25,6 +28,21 @@ Use `schema NEW_DB COPIED_FIXTURE` to export the current schema and create an
 empty SQLite schema control. Use `probe syscall|mvcc|uring DISPOSABLE_DB [DDL]`
 to test a new Turso store from DDL or a separate copy of the synthetic fixture.
 The mode probe emits JSON compatibility observations, not an adoption verdict.
+
+Run the separate-file matrix with an empty output destination:
+
+```sh
+python3 experiments/turso-qualification/run_matrix.py \
+  --binary target/all114-probe/debug/nac-turso-qualification \
+  --fixtures /absolute/path/to/synthetic-copies \
+  --output /absolute/path/to/new-output-directory
+```
+
+This is a store-stage SQL contract with sequential round-robin appends,
+1/2/4 logical workload sizes, contention and process-crash gates. It is not
+an end-to-end NAC Turso adapter or concurrent-writer throughput benchmark.
+Each lane has a 45-second watchdog; failed lanes remain in matrix.json.
+The Linux build additionally runs isolated Clippy with warnings denied.
 
 The `Embedded Turso qualification` PR workflow builds exact-head Linux binaries
 and retains the SQLite artifacts and synthetic fixture copies. A failing

@@ -253,6 +253,12 @@ pub async fn warm_library_cache() {
     let _ = library_entries().await;
 }
 
+/// Keep the bounded managed fixture independent of an external registry.
+#[cfg(test)]
+pub(super) async fn preload_embedded_library_for_test() {
+    *LIBRARY_CACHE.lock().await = Some((Instant::now(), mcp::embedded_library_entries()));
+}
+
 /// Serializes refreshes without holding `LIBRARY_CACHE` across the fetch, so
 /// readers keep getting the cached catalog while a refresh is in flight.
 static LIBRARY_REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());

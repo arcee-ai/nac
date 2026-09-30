@@ -1,0 +1,14 @@
+fatal: detected dubious ownership in repository at '/home/runner/work/nac/nac'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /home/runner/work/nac/nac
+fatal: detected dubious ownership in repository at '/home/runner/work/nac/nac'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /home/runner/work/nac/nac
+
+running 1 test
+test tests::serving_store_ownership_rejects_a_second_manager_and_allows_restart ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 212 filtered out; finished in 0.00s
+

@@ -1,0 +1,17 @@
+
+running 1 test
+test tests::managed_load::managed_load_scenario ... MCP library registry fetch failed: failed to reach the Smithery registry: error sending request for url (https://registry.smithery.ai/servers?q=is%3Averified%20software%20development%20and%20coding%20tools&pageSize=16): operation timed out
+
+thread 'tests::managed_load::managed_load_scenario' (523) panicked at crates/nac-server/src/tests/managed_load.rs:1201:25:
+managed orchestrator did not reach expected status Completed
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    tests::managed_load::managed_load_scenario
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 212 filtered out; finished in 20.80s
+
+command terminated with exit code 101

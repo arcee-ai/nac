@@ -6,6 +6,8 @@ on:
       - experiments/turso-qualification/**
       - .github/workflows/turso-qualification.yml
       - crates/nac-server/src/tests/managed_load.rs
+      - crates/nac-server/src/tests/managed_load_store.rs
+      - crates/nac-server/src/mcp_api.rs
 
 permissions:
   contents: read
@@ -52,6 +54,7 @@ jobs:
         run: |
           cargo build --locked --manifest-path experiments/turso-qualification/Cargo.toml --features uring
           cargo fmt --manifest-path experiments/turso-qualification/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path experiments/turso-qualification/Cargo.toml --features uring -- -D warnings
       - name: Record exact source and baseline outcome
         if: always()
         run: |

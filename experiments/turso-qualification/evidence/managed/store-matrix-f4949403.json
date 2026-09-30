@@ -1,0 +1,1723 @@
+{
+  "scope": "store-stage-only",
+  "platform": "Linux-4.19.0-gvisor-x86_64-with-glibc2.36",
+  "binary_sha256": "4e6f7b0f1563485d58fe8dbd1d284ab3afeb47225fc2795ba7e6cb494a189ed2",
+  "schema_sha256": "f72dba2b2b0bdf5cbfd642b8321eaa8f6c0bfe99bb00daec1817706bbbb34678",
+  "seed": 168886546,
+  "turso_version": "0.8.1",
+  "lanes": [
+    {
+      "mode": "sqlite",
+      "fixture": "fresh",
+      "orchestrators": 1,
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/data/managed-store-matrix/sqlite-fresh-1.db",
+          "1"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5218.113308999818,
+        "cpu_user_us": 40000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5208,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5027371
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 1,
+              "total_us": 4423
+            },
+            "transcript_append_transaction": {
+              "count": 32,
+              "max": 4432,
+              "p50": 3242,
+              "p95": 3556,
+              "p99": 3562
+            }
+          },
+          "orchestrators": 1,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 1,
+          "store_bytes": 368640
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/sqlite-fresh-1-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/sqlite-fresh-1-workload.stderr"
+      },
+      "files": {
+        "sqlite-fresh-1.db": 368640
+      }
+    },
+    {
+      "mode": "sqlite",
+      "fixture": "fresh",
+      "orchestrators": 2,
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/data/managed-store-matrix/sqlite-fresh-2.db",
+          "2"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5336.51940499999,
+        "cpu_user_us": 49999,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5327,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5028078
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 2,
+              "total_us": 8786
+            },
+            "transcript_append_transaction": {
+              "count": 64,
+              "max": 3430,
+              "p50": 3194,
+              "p95": 3355,
+              "p99": 3393
+            }
+          },
+          "orchestrators": 2,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 2,
+          "store_bytes": 380928
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/sqlite-fresh-2-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/sqlite-fresh-2-workload.stderr"
+      },
+      "files": {
+        "sqlite-fresh-2.db": 380928
+      }
+    },
+    {
+      "mode": "sqlite",
+      "fixture": "fresh",
+      "orchestrators": 4,
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/data/managed-store-matrix/sqlite-fresh-4.db",
+          "4"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5569.290780999836,
+        "cpu_user_us": 120000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5560,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5027929
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 4,
+              "total_us": 16974
+            },
+            "transcript_append_transaction": {
+              "count": 128,
+              "max": 3879,
+              "p50": 3145,
+              "p95": 3434,
+              "p99": 3704
+            }
+          },
+          "orchestrators": 4,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 4,
+          "store_bytes": 413696
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/sqlite-fresh-4-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/sqlite-fresh-4-workload.stderr"
+      },
+      "files": {
+        "sqlite-fresh-4.db": 413696
+      }
+    },
+    {
+      "mode": "sqlite",
+      "fixture": "copied",
+      "orchestrators": 1,
+      "fixture_sha256": "249d9c7956803b50cda6cd159d8e0c7bb9602676e998dbc66282d8bb6d31e200",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/data/managed-store-matrix/sqlite-copied-1.db",
+          "1"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5212.699527000041,
+        "cpu_user_us": 80000,
+        "cpu_system_us": 49999,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5204,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5024156
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 1,
+              "total_us": 4302
+            },
+            "transcript_append_transaction": {
+              "count": 32,
+              "max": 3343,
+              "p50": 3135,
+              "p95": 3268,
+              "p99": 3342
+            }
+          },
+          "orchestrators": 1,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 1,
+          "store_bytes": 372736
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/sqlite-copied-1-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/sqlite-copied-1-workload.stderr"
+      },
+      "files": {
+        "sqlite-copied-1.db": 372736
+      }
+    },
+    {
+      "mode": "sqlite",
+      "fixture": "copied",
+      "orchestrators": 2,
+      "fixture_sha256": "ebeeff5292a9974d37d7813817d69703e1e62b9e378254d027e06f51ed0e6c65",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/data/managed-store-matrix/sqlite-copied-2.db",
+          "2"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5329.614045999961,
+        "cpu_user_us": 110000,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5322,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5024804
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 2,
+              "total_us": 8217
+            },
+            "transcript_append_transaction": {
+              "count": 64,
+              "max": 7244,
+              "p50": 3102,
+              "p95": 3259,
+              "p99": 4002
+            }
+          },
+          "orchestrators": 2,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 2,
+          "store_bytes": 389120
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/sqlite-copied-2-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/sqlite-copied-2-workload.stderr"
+      },
+      "files": {
+        "sqlite-copied-2.db": 389120
+      }
+    },
+    {
+      "mode": "sqlite",
+      "fixture": "copied",
+      "orchestrators": 4,
+      "fixture_sha256": "98c74c56951db74a899cbfb583d0378f6ec6928660dbc588e922fd34c221a188",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/data/managed-store-matrix/sqlite-copied-4.db",
+          "4"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5570.082214999957,
+        "cpu_user_us": 110000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5562,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5027273
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 4,
+              "total_us": 16489
+            },
+            "transcript_append_transaction": {
+              "count": 128,
+              "max": 6508,
+              "p50": 3155,
+              "p95": 3341,
+              "p99": 3436
+            }
+          },
+          "orchestrators": 4,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 4,
+          "store_bytes": 446464
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/sqlite-copied-4-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/sqlite-copied-4-workload.stderr"
+      },
+      "files": {
+        "sqlite-copied-4.db": 446464
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "fresh",
+      "orchestrators": 1,
+      "prepare": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "syscall",
+          "/data/managed-store-matrix/syscall-fresh-1.db",
+          "/data/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 284.2069040000297,
+        "cpu_user_us": 90000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"wal\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 274,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "syscall",
+          "path": "/data/managed-store-matrix/syscall-fresh-1.db"
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/syscall-fresh-1-prepare.stdout",
+        "stderr_path": "/data/managed-store-matrix/syscall-fresh-1-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/data/managed-store-matrix/syscall-fresh-1.db",
+          "1"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 242.35741799998323,
+        "cpu_user_us": 99999,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 233,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 646
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 1,
+              "total_us": 13890
+            },
+            "transcript_append_transaction": {
+              "count": 32,
+              "max": 10367,
+              "p50": 3658,
+              "p95": 3981,
+              "p99": 3983
+            }
+          },
+          "orchestrators": 1,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 1,
+          "store_bytes": 385024
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/syscall-fresh-1-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/syscall-fresh-1-workload.stderr"
+      },
+      "files": {
+        "syscall-fresh-1.db-wal": 4152,
+        "syscall-fresh-1.db": 385024
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "fresh",
+      "orchestrators": 2,
+      "prepare": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "syscall",
+          "/data/managed-store-matrix/syscall-fresh-2.db",
+          "/data/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 286.72106799990615,
+        "cpu_user_us": 90000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"wal\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 277,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "syscall",
+          "path": "/data/managed-store-matrix/syscall-fresh-2.db"
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/syscall-fresh-2-prepare.stdout",
+        "stderr_path": "/data/managed-store-matrix/syscall-fresh-2-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/data/managed-store-matrix/syscall-fresh-2.db",
+          "2"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 396.2376160000076,
+        "cpu_user_us": 169999,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 387,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 629
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 2,
+              "total_us": 29528
+            },
+            "transcript_append_transaction": {
+              "count": 64,
+              "max": 10628,
+              "p50": 3692,
+              "p95": 3934,
+              "p99": 4955
+            }
+          },
+          "orchestrators": 2,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 2,
+          "store_bytes": 397312
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/syscall-fresh-2-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/syscall-fresh-2-workload.stderr"
+      },
+      "files": {
+        "syscall-fresh-2.db": 397312,
+        "syscall-fresh-2.db-wal": 4152
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "fresh",
+      "orchestrators": 4,
+      "prepare": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "syscall",
+          "/data/managed-store-matrix/syscall-fresh-4.db",
+          "/data/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 294.5094579999932,
+        "cpu_user_us": 160000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"wal\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 282,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "syscall",
+          "path": "/data/managed-store-matrix/syscall-fresh-4.db"
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/syscall-fresh-4-prepare.stdout",
+        "stderr_path": "/data/managed-store-matrix/syscall-fresh-4-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/data/managed-store-matrix/syscall-fresh-4.db",
+          "4"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 694.9411440000404,
+        "cpu_user_us": 250000,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 685,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 614
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 4,
+              "total_us": 58449
+            },
+            "transcript_append_transaction": {
+              "count": 128,
+              "max": 8995,
+              "p50": 3721,
+              "p95": 3956,
+              "p99": 4081
+            }
+          },
+          "orchestrators": 4,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 4,
+          "store_bytes": 430080
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/syscall-fresh-4-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/syscall-fresh-4-workload.stderr"
+      },
+      "files": {
+        "syscall-fresh-4.db-wal": 4152,
+        "syscall-fresh-4.db": 430080
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "copied",
+      "orchestrators": 1,
+      "fixture_sha256": "249d9c7956803b50cda6cd159d8e0c7bb9602676e998dbc66282d8bb6d31e200",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/data/managed-store-matrix/syscall-copied-1.db",
+          "1"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 245.00249200013968,
+        "cpu_user_us": 130000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 236,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 654
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 1,
+              "total_us": 15396
+            },
+            "transcript_append_transaction": {
+              "count": 32,
+              "max": 9197,
+              "p50": 3773,
+              "p95": 4104,
+              "p99": 4114
+            }
+          },
+          "orchestrators": 1,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 1,
+          "store_bytes": 372736
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/syscall-copied-1-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/syscall-copied-1-workload.stderr"
+      },
+      "files": {
+        "syscall-copied-1.db": 372736,
+        "syscall-copied-1.db-wal": 4152
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "copied",
+      "orchestrators": 2,
+      "fixture_sha256": "ebeeff5292a9974d37d7813817d69703e1e62b9e378254d027e06f51ed0e6c65",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/data/managed-store-matrix/syscall-copied-2.db",
+          "2"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 393.73612400004276,
+        "cpu_user_us": 210000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 385,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 683
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 2,
+              "total_us": 28545
+            },
+            "transcript_append_transaction": {
+              "count": 64,
+              "max": 9421,
+              "p50": 3720,
+              "p95": 3880,
+              "p99": 3983
+            }
+          },
+          "orchestrators": 2,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 2,
+          "store_bytes": 389120
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/syscall-copied-2-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/syscall-copied-2-workload.stderr"
+      },
+      "files": {
+        "syscall-copied-2.db": 389120,
+        "syscall-copied-2.db-wal": 4152
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "copied",
+      "orchestrators": 4,
+      "fixture_sha256": "98c74c56951db74a899cbfb583d0378f6ec6928660dbc588e922fd34c221a188",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/data/managed-store-matrix/syscall-copied-4.db",
+          "4"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 708.1810999998197,
+        "cpu_user_us": 310000,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 698,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 699
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 4,
+              "total_us": 59693
+            },
+            "transcript_append_transaction": {
+              "count": 128,
+              "max": 10400,
+              "p50": 3765,
+              "p95": 4179,
+              "p99": 4407
+            }
+          },
+          "orchestrators": 4,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 4,
+          "store_bytes": 446464
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/syscall-copied-4-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/syscall-copied-4-workload.stderr"
+      },
+      "files": {
+        "syscall-copied-4.db-wal": 4152,
+        "syscall-copied-4.db": 446464
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "fresh",
+      "orchestrators": 1,
+      "prepare": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "uring",
+          "/data/managed-store-matrix/uring-fresh-1.db",
+          "/data/schema-v29.sql"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 9.214517999907912,
+        "cpu_user_us": 10000,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": null,
+        "stderr": "Error: io_uring_setup: not supported (host kernel version 4.19.0-gvisor)\n",
+        "stdout_path": "/data/managed-store-matrix/uring-fresh-1-prepare.stdout",
+        "stderr_path": "/data/managed-store-matrix/uring-fresh-1-prepare.stderr"
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "fresh",
+      "orchestrators": 2,
+      "prepare": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "uring",
+          "/data/managed-store-matrix/uring-fresh-2.db",
+          "/data/schema-v29.sql"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 7.359994999887931,
+        "cpu_user_us": 10000,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": null,
+        "stderr": "Error: io_uring_setup: not supported (host kernel version 4.19.0-gvisor)\n",
+        "stdout_path": "/data/managed-store-matrix/uring-fresh-2-prepare.stdout",
+        "stderr_path": "/data/managed-store-matrix/uring-fresh-2-prepare.stderr"
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "fresh",
+      "orchestrators": 4,
+      "prepare": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "uring",
+          "/data/managed-store-matrix/uring-fresh-4.db",
+          "/data/schema-v29.sql"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 6.93112499993731,
+        "cpu_user_us": 10000,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": null,
+        "stderr": "Error: io_uring_setup: not supported (host kernel version 4.19.0-gvisor)\n",
+        "stdout_path": "/data/managed-store-matrix/uring-fresh-4-prepare.stdout",
+        "stderr_path": "/data/managed-store-matrix/uring-fresh-4-prepare.stderr"
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "copied",
+      "orchestrators": 1,
+      "fixture_sha256": "249d9c7956803b50cda6cd159d8e0c7bb9602676e998dbc66282d8bb6d31e200",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "uring",
+          "/data/managed-store-matrix/uring-copied-1.db",
+          "1"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 6.888799999842377,
+        "cpu_user_us": 10000,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": null,
+        "stderr": "Error: io_uring_setup: not supported (host kernel version 4.19.0-gvisor)\n",
+        "stdout_path": "/data/managed-store-matrix/uring-copied-1-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/uring-copied-1-workload.stderr"
+      },
+      "files": {
+        "uring-copied-1.db": 360448
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "copied",
+      "orchestrators": 2,
+      "fixture_sha256": "ebeeff5292a9974d37d7813817d69703e1e62b9e378254d027e06f51ed0e6c65",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "uring",
+          "/data/managed-store-matrix/uring-copied-2.db",
+          "2"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 6.7320559999188845,
+        "cpu_user_us": 30000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": null,
+        "stderr": "Error: io_uring_setup: not supported (host kernel version 4.19.0-gvisor)\n",
+        "stdout_path": "/data/managed-store-matrix/uring-copied-2-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/uring-copied-2-workload.stderr"
+      },
+      "files": {
+        "uring-copied-2.db": 364544
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "copied",
+      "orchestrators": 4,
+      "fixture_sha256": "98c74c56951db74a899cbfb583d0378f6ec6928660dbc588e922fd34c221a188",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "uring",
+          "/data/managed-store-matrix/uring-copied-4.db",
+          "4"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 7.358764999935374,
+        "cpu_user_us": 0,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": null,
+        "stderr": "Error: io_uring_setup: not supported (host kernel version 4.19.0-gvisor)\n",
+        "stdout_path": "/data/managed-store-matrix/uring-copied-4-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/uring-copied-4-workload.stderr"
+      },
+      "files": {
+        "uring-copied-4.db": 385024
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "fresh",
+      "orchestrators": 1,
+      "prepare": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "mvcc",
+          "/data/managed-store-matrix/mvcc-fresh-1.db",
+          "/data/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 321.1070090001158,
+        "cpu_user_us": 99999,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"mvcc\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 312,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "mvcc",
+          "path": "/data/managed-store-matrix/mvcc-fresh-1.db"
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/mvcc-fresh-1-prepare.stdout",
+        "stderr_path": "/data/managed-store-matrix/mvcc-fresh-1-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/data/managed-store-matrix/mvcc-fresh-1.db",
+          "1"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 411.79802599981485,
+        "cpu_user_us": 199999,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 402,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "Write-write conflict"
+            },
+            "waited_us": 5821
+          },
+          "mode": "mvcc",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 1,
+              "total_us": 26185
+            },
+            "transcript_append_transaction": {
+              "count": 32,
+              "max": 13264,
+              "p50": 6584,
+              "p95": 6831,
+              "p99": 6932
+            }
+          },
+          "orchestrators": 1,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 1,
+          "store_bytes": 389120
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/mvcc-fresh-1-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/mvcc-fresh-1-workload.stderr"
+      },
+      "files": {
+        "mvcc-fresh-1.db-log": 255,
+        "mvcc-fresh-1.db-wal": 0,
+        "mvcc-fresh-1.db": 389120
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "fresh",
+      "orchestrators": 2,
+      "prepare": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "mvcc",
+          "/data/managed-store-matrix/mvcc-fresh-2.db",
+          "/data/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 318.62094000007346,
+        "cpu_user_us": 130000,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"mvcc\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 308,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "mvcc",
+          "path": "/data/managed-store-matrix/mvcc-fresh-2.db"
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/mvcc-fresh-2-prepare.stdout",
+        "stderr_path": "/data/managed-store-matrix/mvcc-fresh-2-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/data/managed-store-matrix/mvcc-fresh-2.db",
+          "2"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 678.2863490000182,
+        "cpu_user_us": 310000,
+        "cpu_system_us": 40000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 668,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "Write-write conflict"
+            },
+            "waited_us": 5558
+          },
+          "mode": "mvcc",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 2,
+              "total_us": 53452
+            },
+            "transcript_append_transaction": {
+              "count": 64,
+              "max": 13257,
+              "p50": 6720,
+              "p95": 6912,
+              "p99": 7146
+            }
+          },
+          "orchestrators": 2,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 2,
+          "store_bytes": 401408
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/mvcc-fresh-2-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/mvcc-fresh-2-workload.stderr"
+      },
+      "files": {
+        "mvcc-fresh-2.db-wal": 0,
+        "mvcc-fresh-2.db-log": 255,
+        "mvcc-fresh-2.db": 401408
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "fresh",
+      "orchestrators": 4,
+      "prepare": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "mvcc",
+          "/data/managed-store-matrix/mvcc-fresh-4.db",
+          "/data/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 319.1065759999674,
+        "cpu_user_us": 190000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"mvcc\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 309,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "mvcc",
+          "path": "/data/managed-store-matrix/mvcc-fresh-4.db"
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/mvcc-fresh-4-prepare.stdout",
+        "stderr_path": "/data/managed-store-matrix/mvcc-fresh-4-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/data/managed-store-matrix/mvcc-fresh-4.db",
+          "4"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 1198.5745369997858,
+        "cpu_user_us": 560000,
+        "cpu_system_us": 10000,
+        "peak_rss_bytes": 86593536,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 1189,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "Write-write conflict"
+            },
+            "waited_us": 6408
+          },
+          "mode": "mvcc",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 4,
+              "total_us": 107389
+            },
+            "transcript_append_transaction": {
+              "count": 128,
+              "max": 13352,
+              "p50": 6689,
+              "p95": 6997,
+              "p99": 7103
+            }
+          },
+          "orchestrators": 4,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 4,
+          "store_bytes": 434176
+        },
+        "stderr": "",
+        "stdout_path": "/data/managed-store-matrix/mvcc-fresh-4-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/mvcc-fresh-4-workload.stderr"
+      },
+      "files": {
+        "mvcc-fresh-4.db": 434176,
+        "mvcc-fresh-4.db-log": 255,
+        "mvcc-fresh-4.db-wal": 0
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "copied",
+      "orchestrators": 1,
+      "fixture_sha256": "249d9c7956803b50cda6cd159d8e0c7bb9602676e998dbc66282d8bb6d31e200",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/data/managed-store-matrix/mvcc-copied-1.db",
+          "1"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 79.69429800004946,
+        "cpu_user_us": 10000,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": null,
+        "stderr": "Error: Internal error: missing backing table for sequence \"__turso_internal_autoincrement_thread_events\"\n",
+        "stdout_path": "/data/managed-store-matrix/mvcc-copied-1-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/mvcc-copied-1-workload.stderr"
+      },
+      "files": {
+        "mvcc-copied-1.db": 364544,
+        "mvcc-copied-1.db-wal": 0,
+        "mvcc-copied-1.db-log": 1277
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "copied",
+      "orchestrators": 2,
+      "fixture_sha256": "ebeeff5292a9974d37d7813817d69703e1e62b9e378254d027e06f51ed0e6c65",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/data/managed-store-matrix/mvcc-copied-2.db",
+          "2"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 94.53234500006147,
+        "cpu_user_us": 40000,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": null,
+        "stderr": "Error: Internal error: missing backing table for sequence \"__turso_internal_autoincrement_thread_events\"\n",
+        "stdout_path": "/data/managed-store-matrix/mvcc-copied-2-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/mvcc-copied-2-workload.stderr"
+      },
+      "files": {
+        "mvcc-copied-2.db-wal": 0,
+        "mvcc-copied-2.db": 368640,
+        "mvcc-copied-2.db-log": 2255
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "copied",
+      "orchestrators": 4,
+      "fixture_sha256": "98c74c56951db74a899cbfb583d0378f6ec6928660dbc588e922fd34c221a188",
+      "workload": {
+        "command": [
+          "/data/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/data/managed-store-matrix/mvcc-copied-4.db",
+          "4"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 126.62968500012539,
+        "cpu_user_us": 49999,
+        "cpu_system_us": 0,
+        "peak_rss_bytes": 86593536,
+        "value": null,
+        "stderr": "Error: Internal error: missing backing table for sequence \"__turso_internal_autoincrement_thread_events\"\n",
+        "stdout_path": "/data/managed-store-matrix/mvcc-copied-4-workload.stdout",
+        "stderr_path": "/data/managed-store-matrix/mvcc-copied-4-workload.stderr"
+      },
+      "files": {
+        "mvcc-copied-4.db-wal": 0,
+        "mvcc-copied-4.db-log": 4211,
+        "mvcc-copied-4.db": 389120
+      }
+    }
+  ]
+}

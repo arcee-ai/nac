@@ -20,6 +20,7 @@ fn percentile(values: &[u128], percent: usize) -> u128 {
 pub async fn run(mode: &str, path: &Path, count: usize) -> Result<Value> {
     ensure!([1, 2, 4].contains(&count), "only 1/2/4 supported");
     let started = Instant::now();
+    let initial_usage = crate::resources::usage()?;
     let backend = Backend::open(mode, path).await?;
     let conn = backend.connect()?;
     conn.batch("PRAGMA foreign_keys=ON;").await?;
@@ -43,22 +44,26 @@ pub async fn run(mode: &str, path: &Path, count: usize) -> Result<Value> {
         "BEGIN IMMEDIATE"
     };
     let mut latency = Vec::new();
+    let mut cpu = Vec::new();
     let mut operation_us = serde_json::Map::new();
     // Round-robin order is fixed. No retries, external models, or timing sleeps.
     for position in 0..ITERATIONS {
         for ordinal in 0..count {
             let id = format!("{prefix}-{ordinal}");
             let t = Instant::now();
+            let before_cpu = crate::resources::usage()?.cpu_us;
             conn.execute(begin).await?;
             let message = json!({"role":"assistant","content":format!("seed-{SEED}-worker-{ordinal}-{}", "x".repeat(192))}).to_string();
             let event = json!({"nac_transcript_message":{"idx":position,"kind":"assistant","message":message}}).to_string();
             conn.execute(&format!("INSERT INTO thread_events(session_id,thread_name,event_json,created_at) VALUES('{id}','__orchestrator__','{event}','fixed')")).await?;
             conn.execute("COMMIT").await?;
             latency.push(t.elapsed().as_micros());
+            cpu.push((crate::resources::usage()?.cpu_us - before_cpu) as u128);
         }
     }
     latency.sort_unstable();
-    operation_us.insert("transcript_append_transaction".into(), json!({"count":latency.len(),"p50":percentile(&latency,50),"p95":percentile(&latency,95),"p99":percentile(&latency,99),"max":latency.last()}));
+    cpu.sort_unstable();
+    operation_us.insert("transcript_append_transaction".into(), json!({"count":latency.len(),"p50":percentile(&latency,50),"p95":percentile(&latency,95),"p99":percentile(&latency,99),"max":latency.last(),"cpu_total_us":cpu.iter().sum::<u128>(),"cpu_p50_us":percentile(&cpu,50),"cpu_p95_us":percentile(&cpu,95),"cpu_p99_us":percentile(&cpu,99)}));
     let gates = Instant::now();
     let mut stale_rejected = 0;
     for ordinal in 0..count {
@@ -131,8 +136,9 @@ pub async fn run(mode: &str, path: &Path, count: usize) -> Result<Value> {
     drop(conn);
     drop(reopened);
     let crash = crate::crash::probe(mode, path, &parent, previous).await?;
+    let final_usage = crate::resources::usage()?;
     Ok(
-        json!({"scope":"store-stage-only","seed":SEED,"orchestrators":count,"mode":mode,"iterations":ITERATIONS,"passed":true,"stale_generation_rejected":stale_rejected,"foreign_key_rejected":orphan.err().map(|e|e.to_string()),"checkpoint":checkpoint,"lock_probe":conflict,"crash":crash,"operation_us":operation_us,"retry_count":0,"elapsed_ms":started.elapsed().as_millis(),"store_bytes":std::fs::metadata(path)?.len()}),
+        json!({"cpu_total_us":final_usage.cpu_us-initial_usage.cpu_us,"peak_rss_bytes":final_usage.peak_rss_bytes,"scope":"store-stage-only","seed":SEED,"orchestrators":count,"mode":mode,"iterations":ITERATIONS,"passed":true,"stale_generation_rejected":stale_rejected,"foreign_key_rejected":orphan.err().map(|e|e.to_string()),"checkpoint":checkpoint,"lock_probe":conflict,"crash":crash,"operation_us":operation_us,"retry_count":0,"elapsed_ms":started.elapsed().as_millis(),"store_bytes":std::fs::metadata(path)?.len()}),
     )
 }
 

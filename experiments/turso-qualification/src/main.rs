@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time::Instant;
 mod crash;
 mod engine;
+mod resources;
 mod workload;
 
 #[tokio::main]
@@ -79,9 +80,9 @@ async fn main() -> Result<()> {
             }
             let mut failures = Vec::new();
             if let Some(ddl) = ddl {
-                if let Err(e) = conn.execute_batch(std::fs::read_to_string(ddl)?).await {
-                    failures.push(format!("schema: {e}"));
-                }
+                conn.execute_batch(std::fs::read_to_string(ddl)?)
+                    .await
+                    .context("current schema DDL must succeed before measurement")?;
             }
             let mut checks = serde_json::Map::new();
             for sql in [

@@ -1,0 +1,12 @@
+
+running 1 test
+test tests::managed_load::managed_load_scenario ... nac: failed to capture workspace revision: '/home/runner/work/nac/nac' is not a git repository: fatal: not a git repository (or any parent up to mount point /home/runner/work/nac)
+nac: failed to capture workspace revision: '/home/runner/work/nac/nac' is not a git repository: fatal: not a git repository (or any parent up to mount point /home/runner/work/nac)
+
+thread 'tests::managed_load::managed_load_scenario' (26) panicked at crates/nac-server/src/tests/managed_load.rs:1541:13:
+assertion `left == right` failed
+  left: ["thread_started", "run_started", "thread_finished"]
+ right: ["thread_started", "run_started", "assistant_message", "run_finished", "thread_finished"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+Segmentation fault
+command terminated with exit code 139

@@ -654,6 +654,7 @@ fn fault_metadata(
 #[ignore = "bounded repo-level scenario; run with make test-managed-load"]
 async fn managed_load_scenario() {
     let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    crate::mcp_api::preload_embedded_library_for_test().await;
     let worker = PathBuf::from(
         std::env::var_os("NAC_MANAGED_LOAD_WORKER")
             .expect("NAC_MANAGED_LOAD_WORKER is set by make test-managed-load"),

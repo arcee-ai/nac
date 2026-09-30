@@ -1,0 +1,1723 @@
+{
+  "scope": "store-stage-only",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "binary_sha256": "8413eba5f04cd09d45c3620700cd7a6d4304c586cdcddee0871510f3d8c76500",
+  "schema_sha256": "f72dba2b2b0bdf5cbfd642b8321eaa8f6c0bfe99bb00daec1817706bbbb34678",
+  "seed": 168886546,
+  "turso_version": "0.8.1",
+  "lanes": [
+    {
+      "mode": "sqlite",
+      "fixture": "fresh",
+      "orchestrators": 1,
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/private/tmp/all114-local-matrix-final/sqlite-fresh-1.db",
+          "1"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5240.993915999752,
+        "cpu_user_us": 14804,
+        "cpu_system_us": 14537,
+        "peak_rss_bytes": 13156352,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5227,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5206448
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 1,
+              "total_us": 682
+            },
+            "transcript_append_transaction": {
+              "count": 32,
+              "max": 319,
+              "p50": 111,
+              "p95": 229,
+              "p99": 240
+            }
+          },
+          "orchestrators": 1,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 1,
+          "store_bytes": 368640
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/sqlite-fresh-1-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/sqlite-fresh-1-workload.stderr"
+      },
+      "files": {
+        "sqlite-fresh-1.db": 368640
+      }
+    },
+    {
+      "mode": "sqlite",
+      "fixture": "fresh",
+      "orchestrators": 2,
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/private/tmp/all114-local-matrix-final/sqlite-fresh-2.db",
+          "2"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5256.583291999959,
+        "cpu_user_us": 21484,
+        "cpu_system_us": 19767,
+        "peak_rss_bytes": 13058048,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5249,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5217196
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 2,
+              "total_us": 671
+            },
+            "transcript_append_transaction": {
+              "count": 64,
+              "max": 135,
+              "p50": 91,
+              "p95": 124,
+              "p99": 132
+            }
+          },
+          "orchestrators": 2,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 2,
+          "store_bytes": 380928
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/sqlite-fresh-2-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/sqlite-fresh-2-workload.stderr"
+      },
+      "files": {
+        "sqlite-fresh-2.db": 380928
+      }
+    },
+    {
+      "mode": "sqlite",
+      "fixture": "fresh",
+      "orchestrators": 4,
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/private/tmp/all114-local-matrix-final/sqlite-fresh-4.db",
+          "4"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5257.155417000831,
+        "cpu_user_us": 23337,
+        "cpu_system_us": 21134,
+        "peak_rss_bytes": 13238272,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5248,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5212035
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 4,
+              "total_us": 1356
+            },
+            "transcript_append_transaction": {
+              "count": 128,
+              "max": 147,
+              "p50": 99,
+              "p95": 122,
+              "p99": 133
+            }
+          },
+          "orchestrators": 4,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 4,
+          "store_bytes": 413696
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/sqlite-fresh-4-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/sqlite-fresh-4-workload.stderr"
+      },
+      "files": {
+        "sqlite-fresh-4.db": 413696
+      }
+    },
+    {
+      "mode": "sqlite",
+      "fixture": "copied",
+      "orchestrators": 1,
+      "fixture_sha256": "0f17158a68092daa04730919b8826ea6f6ab2fbe3450a651f1ffa2f57796a3da",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/private/tmp/all114-local-matrix-final/sqlite-copied-1.db",
+          "1"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5240.465249999943,
+        "cpu_user_us": 22525,
+        "cpu_system_us": 21089,
+        "peak_rss_bytes": 13041664,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5231,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5200774
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 1,
+              "total_us": 529
+            },
+            "transcript_append_transaction": {
+              "count": 32,
+              "max": 200,
+              "p50": 124,
+              "p95": 146,
+              "p99": 150
+            }
+          },
+          "orchestrators": 1,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 1,
+          "store_bytes": 372736
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/sqlite-copied-1-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/sqlite-copied-1-workload.stderr"
+      },
+      "files": {
+        "sqlite-copied-1.db": 372736
+      }
+    },
+    {
+      "mode": "sqlite",
+      "fixture": "copied",
+      "orchestrators": 2,
+      "fixture_sha256": "52e36df2a5b95907bb51d9b4660f0667f2cfa39459a307cfa8cf1d301293672c",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/private/tmp/all114-local-matrix-final/sqlite-copied-2.db",
+          "2"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5261.599292000028,
+        "cpu_user_us": 24277,
+        "cpu_system_us": 22001,
+        "peak_rss_bytes": 13107200,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5251,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5216380
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 2,
+              "total_us": 907
+            },
+            "transcript_append_transaction": {
+              "count": 64,
+              "max": 179,
+              "p50": 122,
+              "p95": 150,
+              "p99": 173
+            }
+          },
+          "orchestrators": 2,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 2,
+          "store_bytes": 389120
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/sqlite-copied-2-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/sqlite-copied-2-workload.stderr"
+      },
+      "files": {
+        "sqlite-copied-2.db": 389120
+      }
+    },
+    {
+      "mode": "sqlite",
+      "fixture": "copied",
+      "orchestrators": 4,
+      "fixture_sha256": "642a194010c0b3bf000523db6bd16e5ddecacec7c354578798378603f978922e",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "sqlite",
+          "/private/tmp/all114-local-matrix-final/sqlite-copied-4.db",
+          "4"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 5269.472416999633,
+        "cpu_user_us": 28398,
+        "cpu_system_us": 27413,
+        "peak_rss_bytes": 13287424,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 5258,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 5213773
+          },
+          "mode": "sqlite",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 4,
+              "total_us": 1516
+            },
+            "transcript_append_transaction": {
+              "count": 128,
+              "max": 178,
+              "p50": 107,
+              "p95": 143,
+              "p99": 155
+            }
+          },
+          "orchestrators": 4,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 4,
+          "store_bytes": 446464
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/sqlite-copied-4-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/sqlite-copied-4-workload.stderr"
+      },
+      "files": {
+        "sqlite-copied-4.db": 446464
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "fresh",
+      "orchestrators": 1,
+      "prepare": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "syscall",
+          "/private/tmp/all114-local-matrix-final/syscall-fresh-1.db",
+          "/Users/allison/.codex/worktrees/1842/allison-demo/experiments/turso-qualification/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 66.33425000018178,
+        "cpu_user_us": 44287,
+        "cpu_system_us": 20530,
+        "peak_rss_bytes": 29458432,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"wal\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 55,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "syscall",
+          "path": "/private/tmp/all114-local-matrix-final/syscall-fresh-1.db"
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-1-prepare.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-1-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/private/tmp/all114-local-matrix-final/syscall-fresh-1.db",
+          "1"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 43.38020900013362,
+        "cpu_user_us": 31628,
+        "cpu_system_us": 12178,
+        "peak_rss_bytes": 30277632,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 37,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 282
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 1,
+              "total_us": 3309
+            },
+            "transcript_append_transaction": {
+              "count": 32,
+              "max": 1431,
+              "p50": 224,
+              "p95": 326,
+              "p99": 326
+            }
+          },
+          "orchestrators": 1,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 1,
+          "store_bytes": 385024
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-1-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-1-workload.stderr"
+      },
+      "files": {
+        "syscall-fresh-1.db": 385024,
+        "syscall-fresh-1.db-wal": 4152
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "fresh",
+      "orchestrators": 2,
+      "prepare": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "syscall",
+          "/private/tmp/all114-local-matrix-final/syscall-fresh-2.db",
+          "/Users/allison/.codex/worktrees/1842/allison-demo/experiments/turso-qualification/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 45.30970899941167,
+        "cpu_user_us": 37531,
+        "cpu_system_us": 7751,
+        "peak_rss_bytes": 29425664,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"wal\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 39,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "syscall",
+          "path": "/private/tmp/all114-local-matrix-final/syscall-fresh-2.db"
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-2-prepare.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-2-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/private/tmp/all114-local-matrix-final/syscall-fresh-2.db",
+          "2"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 54.33545800042339,
+        "cpu_user_us": 42072,
+        "cpu_system_us": 11235,
+        "peak_rss_bytes": 30179328,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 48,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 292
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 2,
+              "total_us": 6193
+            },
+            "transcript_append_transaction": {
+              "count": 64,
+              "max": 1334,
+              "p50": 214,
+              "p95": 281,
+              "p99": 376
+            }
+          },
+          "orchestrators": 2,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 2,
+          "store_bytes": 397312
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-2-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-2-workload.stderr"
+      },
+      "files": {
+        "syscall-fresh-2.db-wal": 4152,
+        "syscall-fresh-2.db": 397312
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "fresh",
+      "orchestrators": 4,
+      "prepare": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "syscall",
+          "/private/tmp/all114-local-matrix-final/syscall-fresh-4.db",
+          "/Users/allison/.codex/worktrees/1842/allison-demo/experiments/turso-qualification/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 45.94079100024828,
+        "cpu_user_us": 37966,
+        "cpu_system_us": 8267,
+        "peak_rss_bytes": 29458432,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"wal\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 39,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "syscall",
+          "path": "/private/tmp/all114-local-matrix-final/syscall-fresh-4.db"
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-4-prepare.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-4-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/private/tmp/all114-local-matrix-final/syscall-fresh-4.db",
+          "4"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 79.04887500080804,
+        "cpu_user_us": 62179,
+        "cpu_system_us": 14995,
+        "peak_rss_bytes": 30457856,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 72,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 275
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 4,
+              "total_us": 12052
+            },
+            "transcript_append_transaction": {
+              "count": 128,
+              "max": 1373,
+              "p50": 225,
+              "p95": 284,
+              "p99": 331
+            }
+          },
+          "orchestrators": 4,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 4,
+          "store_bytes": 430080
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-4-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/syscall-fresh-4-workload.stderr"
+      },
+      "files": {
+        "syscall-fresh-4.db-wal": 4152,
+        "syscall-fresh-4.db": 430080
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "copied",
+      "orchestrators": 1,
+      "fixture_sha256": "0f17158a68092daa04730919b8826ea6f6ab2fbe3450a651f1ffa2f57796a3da",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/private/tmp/all114-local-matrix-final/syscall-copied-1.db",
+          "1"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 42.65683399989939,
+        "cpu_user_us": 31820,
+        "cpu_system_us": 10152,
+        "peak_rss_bytes": 30195712,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 36,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 313
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 1,
+              "total_us": 3288
+            },
+            "transcript_append_transaction": {
+              "count": 32,
+              "max": 1372,
+              "p50": 230,
+              "p95": 307,
+              "p99": 330
+            }
+          },
+          "orchestrators": 1,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 1,
+          "store_bytes": 372736
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/syscall-copied-1-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/syscall-copied-1-workload.stderr"
+      },
+      "files": {
+        "syscall-copied-1.db": 372736,
+        "syscall-copied-1.db-wal": 4152
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "copied",
+      "orchestrators": 2,
+      "fixture_sha256": "52e36df2a5b95907bb51d9b4660f0667f2cfa39459a307cfa8cf1d301293672c",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/private/tmp/all114-local-matrix-final/syscall-copied-2.db",
+          "2"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 53.50616699979582,
+        "cpu_user_us": 41100,
+        "cpu_system_us": 11738,
+        "peak_rss_bytes": 30244864,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 47,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 290
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 2,
+              "total_us": 6115
+            },
+            "transcript_append_transaction": {
+              "count": 64,
+              "max": 1321,
+              "p50": 220,
+              "p95": 285,
+              "p99": 321
+            }
+          },
+          "orchestrators": 2,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 2,
+          "store_bytes": 389120
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/syscall-copied-2-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/syscall-copied-2-workload.stderr"
+      },
+      "files": {
+        "syscall-copied-2.db-wal": 4152,
+        "syscall-copied-2.db": 389120
+      }
+    },
+    {
+      "mode": "syscall",
+      "fixture": "copied",
+      "orchestrators": 4,
+      "fixture_sha256": "642a194010c0b3bf000523db6bd16e5ddecacec7c354578798378603f978922e",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "syscall",
+          "/private/tmp/all114-local-matrix-final/syscall-copied-4.db",
+          "4"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 78.04579200001172,
+        "cpu_user_us": 61860,
+        "cpu_system_us": 15052,
+        "peak_rss_bytes": 30457856,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 72,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "database is locked"
+            },
+            "waited_us": 277
+          },
+          "mode": "syscall",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 4,
+              "total_us": 11922
+            },
+            "transcript_append_transaction": {
+              "count": 128,
+              "max": 1318,
+              "p50": 223,
+              "p95": 289,
+              "p99": 444
+            }
+          },
+          "orchestrators": 4,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 4,
+          "store_bytes": 446464
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/syscall-copied-4-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/syscall-copied-4-workload.stderr"
+      },
+      "files": {
+        "syscall-copied-4.db-wal": 4152,
+        "syscall-copied-4.db": 446464
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "fresh",
+      "orchestrators": 1,
+      "prepare": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "uring",
+          "/private/tmp/all114-local-matrix-final/uring-fresh-1.db",
+          "/Users/allison/.codex/worktrees/1842/allison-demo/experiments/turso-qualification/schema-v29.sql"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 5.379707999964012,
+        "cpu_user_us": 2529,
+        "cpu_system_us": 3427,
+        "peak_rss_bytes": 8912896,
+        "value": null,
+        "stderr": "Error: io_uring unavailable: requires Linux build with uring feature\n",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/uring-fresh-1-prepare.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/uring-fresh-1-prepare.stderr"
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "fresh",
+      "orchestrators": 2,
+      "prepare": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "uring",
+          "/private/tmp/all114-local-matrix-final/uring-fresh-2.db",
+          "/Users/allison/.codex/worktrees/1842/allison-demo/experiments/turso-qualification/schema-v29.sql"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 4.737125000247033,
+        "cpu_user_us": 2379,
+        "cpu_system_us": 2286,
+        "peak_rss_bytes": 8847360,
+        "value": null,
+        "stderr": "Error: io_uring unavailable: requires Linux build with uring feature\n",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/uring-fresh-2-prepare.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/uring-fresh-2-prepare.stderr"
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "fresh",
+      "orchestrators": 4,
+      "prepare": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "uring",
+          "/private/tmp/all114-local-matrix-final/uring-fresh-4.db",
+          "/Users/allison/.codex/worktrees/1842/allison-demo/experiments/turso-qualification/schema-v29.sql"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 4.756833999636001,
+        "cpu_user_us": 2245,
+        "cpu_system_us": 3430,
+        "peak_rss_bytes": 8880128,
+        "value": null,
+        "stderr": "Error: io_uring unavailable: requires Linux build with uring feature\n",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/uring-fresh-4-prepare.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/uring-fresh-4-prepare.stderr"
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "copied",
+      "orchestrators": 1,
+      "fixture_sha256": "0f17158a68092daa04730919b8826ea6f6ab2fbe3450a651f1ffa2f57796a3da",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "uring",
+          "/private/tmp/all114-local-matrix-final/uring-copied-1.db",
+          "1"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 4.7898749999149,
+        "cpu_user_us": 2476,
+        "cpu_system_us": 2662,
+        "peak_rss_bytes": 9093120,
+        "value": null,
+        "stderr": "Error: io_uring requires Linux with the uring feature\n",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/uring-copied-1-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/uring-copied-1-workload.stderr"
+      },
+      "files": {
+        "uring-copied-1.db": 360448
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "copied",
+      "orchestrators": 2,
+      "fixture_sha256": "52e36df2a5b95907bb51d9b4660f0667f2cfa39459a307cfa8cf1d301293672c",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "uring",
+          "/private/tmp/all114-local-matrix-final/uring-copied-2.db",
+          "2"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 4.815915999643039,
+        "cpu_user_us": 2350,
+        "cpu_system_us": 4220,
+        "peak_rss_bytes": 9207808,
+        "value": null,
+        "stderr": "Error: io_uring requires Linux with the uring feature\n",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/uring-copied-2-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/uring-copied-2-workload.stderr"
+      },
+      "files": {
+        "uring-copied-2.db": 364544
+      }
+    },
+    {
+      "mode": "uring",
+      "fixture": "copied",
+      "orchestrators": 4,
+      "fixture_sha256": "642a194010c0b3bf000523db6bd16e5ddecacec7c354578798378603f978922e",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "uring",
+          "/private/tmp/all114-local-matrix-final/uring-copied-4.db",
+          "4"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 5.095124999570544,
+        "cpu_user_us": 2448,
+        "cpu_system_us": 3852,
+        "peak_rss_bytes": 9207808,
+        "value": null,
+        "stderr": "Error: io_uring requires Linux with the uring feature\n",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/uring-copied-4-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/uring-copied-4-workload.stderr"
+      },
+      "files": {
+        "uring-copied-4.db": 385024
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "fresh",
+      "orchestrators": 1,
+      "prepare": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "mvcc",
+          "/private/tmp/all114-local-matrix-final/mvcc-fresh-1.db",
+          "/Users/allison/.codex/worktrees/1842/allison-demo/experiments/turso-qualification/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 48.04754199994932,
+        "cpu_user_us": 41323,
+        "cpu_system_us": 6869,
+        "peak_rss_bytes": 30425088,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"mvcc\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 42,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "mvcc",
+          "path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-1.db"
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-1-prepare.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-1-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/private/tmp/all114-local-matrix-final/mvcc-fresh-1.db",
+          "1"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 68.9690419994804,
+        "cpu_user_us": 56505,
+        "cpu_system_us": 10254,
+        "peak_rss_bytes": 32227328,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 62,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "Write-write conflict"
+            },
+            "waited_us": 1478
+          },
+          "mode": "mvcc",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 1,
+              "total_us": 5268
+            },
+            "transcript_append_transaction": {
+              "count": 32,
+              "max": 1423,
+              "p50": 349,
+              "p95": 432,
+              "p99": 468
+            }
+          },
+          "orchestrators": 1,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 1,
+          "store_bytes": 389120
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-1-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-1-workload.stderr"
+      },
+      "files": {
+        "mvcc-fresh-1.db": 389120,
+        "mvcc-fresh-1.db-log": 255,
+        "mvcc-fresh-1.db-wal": 0
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "fresh",
+      "orchestrators": 2,
+      "prepare": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "mvcc",
+          "/private/tmp/all114-local-matrix-final/mvcc-fresh-2.db",
+          "/Users/allison/.codex/worktrees/1842/allison-demo/experiments/turso-qualification/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 48.84858300010819,
+        "cpu_user_us": 42041,
+        "cpu_system_us": 6046,
+        "peak_rss_bytes": 30408704,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"mvcc\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 42,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "mvcc",
+          "path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-2.db"
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-2-prepare.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-2-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/private/tmp/all114-local-matrix-final/mvcc-fresh-2.db",
+          "2"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 93.5292499998468,
+        "cpu_user_us": 78510,
+        "cpu_system_us": 13566,
+        "peak_rss_bytes": 32555008,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 87,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "Write-write conflict"
+            },
+            "waited_us": 1742
+          },
+          "mode": "mvcc",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 2,
+              "total_us": 10510
+            },
+            "transcript_append_transaction": {
+              "count": 64,
+              "max": 1481,
+              "p50": 357,
+              "p95": 409,
+              "p99": 473
+            }
+          },
+          "orchestrators": 2,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 2,
+          "store_bytes": 401408
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-2-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-2-workload.stderr"
+      },
+      "files": {
+        "mvcc-fresh-2.db-wal": 0,
+        "mvcc-fresh-2.db-log": 255,
+        "mvcc-fresh-2.db": 401408
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "fresh",
+      "orchestrators": 4,
+      "prepare": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "probe",
+          "mvcc",
+          "/private/tmp/all114-local-matrix-final/mvcc-fresh-4.db",
+          "/Users/allison/.codex/worktrees/1842/allison-demo/experiments/turso-qualification/schema-v29.sql"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 48.61375000018597,
+        "cpu_user_us": 41497,
+        "cpu_system_us": 7097,
+        "peak_rss_bytes": 30244864,
+        "value": {
+          "candidate": "turso=0.8.1",
+          "checks": {
+            "PRAGMA foreign_key_check": [],
+            "PRAGMA foreign_keys": [
+              "Integer(1)"
+            ],
+            "PRAGMA journal_mode": [
+              "Text(\"mvcc\")"
+            ],
+            "PRAGMA quick_check": [
+              "Text(\"ok\")"
+            ],
+            "PRAGMA synchronous": [
+              "Integer(2)"
+            ],
+            "PRAGMA user_version": [
+              "Integer(29)"
+            ],
+            "PRAGMA wal_checkpoint(TRUNCATE)": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM sessions": [
+              "Integer(0)"
+            ],
+            "SELECT COUNT(*) FROM thread_events": [
+              "Integer(0)"
+            ]
+          },
+          "elapsed_ms": 42,
+          "failures": [
+            "SELECT COUNT(*) FROM pragma_foreign_key_check: Parse error: no such table: pragma_foreign_key_check"
+          ],
+          "mode": "mvcc",
+          "path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-4.db"
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-4-prepare.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-4-prepare.stderr"
+      },
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/private/tmp/all114-local-matrix-final/mvcc-fresh-4.db",
+          "4"
+        ],
+        "exit": 0,
+        "timed_out": false,
+        "wall_ms": 136.55383300010726,
+        "cpu_user_us": 117988,
+        "cpu_system_us": 15847,
+        "peak_rss_bytes": 32768000,
+        "value": {
+          "checkpoint": {
+            "rows": [
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "crash": {
+            "after": 1,
+            "before": 0,
+            "child_status": "signal: 9 (SIGKILL)",
+            "committed_survived": true,
+            "retry_rejected": true,
+            "uncommitted_absent": true
+          },
+          "elapsed_ms": 130,
+          "foreign_key_rejected": "FOREIGN KEY constraint failed",
+          "iterations": 32,
+          "lock_probe": {
+            "outcome": {
+              "error": "Write-write conflict"
+            },
+            "waited_us": 1442
+          },
+          "mode": "mvcc",
+          "operation_us": {
+            "settlement_worker_inbox_and_rollback": {
+              "count": 4,
+              "total_us": 21645
+            },
+            "transcript_append_transaction": {
+              "count": 128,
+              "max": 1469,
+              "p50": 383,
+              "p95": 447,
+              "p99": 463
+            }
+          },
+          "orchestrators": 4,
+          "passed": true,
+          "retry_count": 0,
+          "scope": "store-stage-only",
+          "seed": 168886546,
+          "stale_generation_rejected": 4,
+          "store_bytes": 434176
+        },
+        "stderr": "",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-4-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/mvcc-fresh-4-workload.stderr"
+      },
+      "files": {
+        "mvcc-fresh-4.db-wal": 0,
+        "mvcc-fresh-4.db": 434176,
+        "mvcc-fresh-4.db-log": 255
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "copied",
+      "orchestrators": 1,
+      "fixture_sha256": "0f17158a68092daa04730919b8826ea6f6ab2fbe3450a651f1ffa2f57796a3da",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/private/tmp/all114-local-matrix-final/mvcc-copied-1.db",
+          "1"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 16.5732499999649,
+        "cpu_user_us": 11399,
+        "cpu_system_us": 6280,
+        "peak_rss_bytes": 30015488,
+        "value": null,
+        "stderr": "Error: Internal error: missing backing table for sequence \"__turso_internal_autoincrement_thread_events\"\n",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/mvcc-copied-1-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/mvcc-copied-1-workload.stderr"
+      },
+      "files": {
+        "mvcc-copied-1.db-wal": 0,
+        "mvcc-copied-1.db": 364544,
+        "mvcc-copied-1.db-log": 1277
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "copied",
+      "orchestrators": 2,
+      "fixture_sha256": "52e36df2a5b95907bb51d9b4660f0667f2cfa39459a307cfa8cf1d301293672c",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/private/tmp/all114-local-matrix-final/mvcc-copied-2.db",
+          "2"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 17.649333000008482,
+        "cpu_user_us": 12615,
+        "cpu_system_us": 5790,
+        "peak_rss_bytes": 29966336,
+        "value": null,
+        "stderr": "Error: Internal error: missing backing table for sequence \"__turso_internal_autoincrement_thread_events\"\n",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/mvcc-copied-2-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/mvcc-copied-2-workload.stderr"
+      },
+      "files": {
+        "mvcc-copied-2.db": 368640,
+        "mvcc-copied-2.db-log": 2255,
+        "mvcc-copied-2.db-wal": 0
+      }
+    },
+    {
+      "mode": "mvcc",
+      "fixture": "copied",
+      "orchestrators": 4,
+      "fixture_sha256": "642a194010c0b3bf000523db6bd16e5ddecacec7c354578798378603f978922e",
+      "workload": {
+        "command": [
+          "/Users/allison/.codex/worktrees/1842/allison-demo/target/all114-probe/debug/nac-turso-qualification",
+          "workload",
+          "mvcc",
+          "/private/tmp/all114-local-matrix-final/mvcc-copied-4.db",
+          "4"
+        ],
+        "exit": 1,
+        "timed_out": false,
+        "wall_ms": 21.086416999423818,
+        "cpu_user_us": 15349,
+        "cpu_system_us": 6085,
+        "peak_rss_bytes": 29966336,
+        "value": null,
+        "stderr": "Error: Internal error: missing backing table for sequence \"__turso_internal_autoincrement_thread_events\"\n",
+        "stdout_path": "/private/tmp/all114-local-matrix-final/mvcc-copied-4-workload.stdout",
+        "stderr_path": "/private/tmp/all114-local-matrix-final/mvcc-copied-4-workload.stderr"
+      },
+      "files": {
+        "mvcc-copied-4.db-log": 4211,
+        "mvcc-copied-4.db-wal": 0,
+        "mvcc-copied-4.db": 389120
+      }
+    }
+  ]
+}

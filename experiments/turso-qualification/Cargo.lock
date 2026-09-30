@@ -1102,6 +1102,7 @@ name = "nac-turso-qualification"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "libc",
  "rusqlite",
  "serde_json",
  "tokio",
