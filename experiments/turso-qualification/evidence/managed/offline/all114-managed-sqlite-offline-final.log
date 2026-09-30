@@ -1,0 +1,16 @@
+
+running 1 test
+test tests::managed_load::managed_load_scenario ... 
+thread 'tests::managed_load::managed_load_scenario' (596) panicked at crates/nac-server/src/tests/managed_load.rs:1202:25:
+managed orchestrator did not reach expected status Completed
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    tests::managed_load::managed_load_scenario
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 212 filtered out; finished in 20.95s
+
+command terminated with exit code 101

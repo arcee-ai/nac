@@ -1,0 +1,205 @@
+{
+  "scope": "prior full managed SQLite control with registry timeout; same synthetic schema",
+  "source_revision": "26aa4007d7724b00af9ac53254401201666b4bd4",
+  "store_path": "/data/tmp/nac_server_test_managed_load_1_168886546_1790798396317256330/store.db",
+  "schema_version": 29,
+  "quick_check": [
+    "ok"
+  ],
+  "foreign_key_check_count": 0,
+  "relations": [
+    {
+      "orchestrator_session_id": "all112-1-0a110112-0",
+      "status": "running",
+      "generation": 1,
+      "run_id": "a82bbb2f-7e48-4296-9a02-82965708eb2a",
+      "completion_inbox_id": null,
+      "version": 1
+    }
+  ],
+  "recoveries": [
+    {
+      "session_id": "all112-1-0a110112-0",
+      "run_id": "a82bbb2f-7e48-4296-9a02-82965708eb2a",
+      "submitted_message_id": 1,
+      "status": "active",
+      "terminal_disposition": "completed"
+    }
+  ],
+  "orchestrator_transcript_positions": [
+    {
+      "event_id": 1,
+      "session_id": "all112-1-0a110112-0",
+      "idx": 0,
+      "created_at": "2026-09-30 19:59:56"
+    },
+    {
+      "event_id": 2,
+      "session_id": "all112-1-0a110112-0",
+      "idx": 1,
+      "created_at": "2026-09-30 19:59:56"
+    },
+    {
+      "event_id": 8,
+      "session_id": "all112-1-0a110112-0",
+      "idx": 2,
+      "created_at": "2026-09-30 20:00:16"
+    },
+    {
+      "event_id": 9,
+      "session_id": "all112-1-0a110112-0",
+      "idx": 3,
+      "created_at": "2026-09-30 20:00:16"
+    }
+  ],
+  "worker_events": [
+    {
+      "event_id": 3,
+      "session_id": "all112-1-0a110112-0",
+      "created_at": "2026-09-30 19:59:56",
+      "thread": "worker-0",
+      "kind": "thread_started",
+      "keys": [
+        "type",
+        "name",
+        "action",
+        "source_threads"
+      ],
+      "exit_code": null,
+      "timed_out": null
+    },
+    {
+      "event_id": 4,
+      "session_id": "all112-1-0a110112-0",
+      "created_at": "2026-09-30 19:59:56",
+      "thread": "worker-0",
+      "kind": "run_started",
+      "keys": [
+        "type",
+        "thread_name",
+        "prompt_preview"
+      ],
+      "exit_code": null,
+      "timed_out": null
+    },
+    {
+      "event_id": 5,
+      "session_id": "all112-1-0a110112-0",
+      "created_at": "2026-09-30 19:59:57",
+      "thread": "worker-0",
+      "kind": "assistant_message",
+      "keys": [
+        "type",
+        "thread_name",
+        "content",
+        "usage"
+      ],
+      "exit_code": null,
+      "timed_out": null
+    },
+    {
+      "event_id": 6,
+      "session_id": "all112-1-0a110112-0",
+      "created_at": "2026-09-30 19:59:57",
+      "thread": "worker-0",
+      "kind": "run_finished",
+      "keys": [
+        "type",
+        "thread_name"
+      ],
+      "exit_code": null,
+      "timed_out": null
+    },
+    {
+      "event_id": 7,
+      "session_id": "all112-1-0a110112-0",
+      "created_at": "2026-09-30 20:00:16",
+      "thread": "worker-0",
+      "kind": "thread_finished",
+      "keys": [
+        "type",
+        "name",
+        "exit_code",
+        "timed_out",
+        "usage"
+      ],
+      "exit_code": 0,
+      "timed_out": false
+    }
+  ],
+  "sessions": [
+    {
+      "session_id": "all112-parent",
+      "behavior": "direct-with-orchestrator",
+      "visible_message_count": 0,
+      "last_response_duration_ms": null,
+      "previous_response_duration_ms": null,
+      "config_version": 0,
+      "run_count": 0,
+      "created_at": "2026-09-30 19:59:56.318751270",
+      "updated_at": "2026-09-30 19:59:56.318751270"
+    },
+    {
+      "session_id": "all112-1-0a110112-0",
+      "behavior": "orchestrator",
+      "visible_message_count": 2,
+      "last_response_duration_ms": 20332,
+      "previous_response_duration_ms": null,
+      "config_version": 0,
+      "run_count": 1,
+      "created_at": "2026-09-30 19:59:56.358137655",
+      "updated_at": "2026-09-30 20:00:17.007800475"
+    }
+  ],
+  "threads": [
+    {
+      "name": "worker-0",
+      "session_id": "all112-1-0a110112-0",
+      "created_at": "2026-09-30 19:59:57",
+      "updated_at": "2026-09-30 19:59:57"
+    }
+  ],
+  "episodes": [
+    {
+      "id": 1,
+      "thread_name": "worker-0",
+      "session_id": "all112-1-0a110112-0",
+      "created_at": "2026-09-30 19:59:57",
+      "status": "ok"
+    }
+  ],
+  "store_files": [
+    {
+      "path": "/data/tmp/nac_server_test_managed_load_1_168886546_1790798396317256330/store.db",
+      "bytes": 352256,
+      "sha256": "1426110c96d76089b62d1f07d3ef99947e72460238ccca4767cf5434674034bc"
+    },
+    {
+      "path": "/data/tmp/nac_server_test_managed_load_1_168886546_1790798396317256330/store.db-shm",
+      "bytes": 32768,
+      "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+    },
+    {
+      "path": "/data/tmp/nac_server_test_managed_load_1_168886546_1790798396317256330/store.db-wal",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "run_lock_files": [
+    {
+      "path": "/data/tmp/nac_server_test_managed_load_1_168886546_1790798396317256330/store.db.run-locks/61353236396634653632643332666264393630643834353763663933653837646261386537326566396332336434623239316666323465366466646139336462.workspace",
+      "bytes": 0,
+      "text": ""
+    },
+    {
+      "path": "/data/tmp/nac_server_test_managed_load_1_168886546_1790798396317256330/store.db.run-locks/616c6c3131322d312d30613131303131322d30.lock",
+      "bytes": 0,
+      "text": ""
+    },
+    {
+      "path": "/data/tmp/nac_server_test_managed_load_1_168886546_1790798396317256330/store.db.run-locks/616c6c3131322d706172656e74.lock",
+      "bytes": 0,
+      "text": ""
+    }
+  ]
+}

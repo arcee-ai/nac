@@ -1,0 +1,28 @@
+[master 2c76ab9] offline-fixture
+ 32 files changed, 6120 insertions(+), 3 deletions(-)
+ create mode 100644 experiments/turso-qualification/DECISION.md
+ create mode 100644 experiments/turso-qualification/evidence/local/failure-provenance.json
+ create mode 100644 experiments/turso-qualification/evidence/local/offline/all-112-seed-168886546-faults.json
+ create mode 100644 experiments/turso-qualification/evidence/local/offline/all-112-seed-168886546-orchestrators-1.json
+ create mode 100644 experiments/turso-qualification/evidence/local/offline/all-112-seed-168886546-orchestrators-2.json
+ create mode 100644 experiments/turso-qualification/evidence/local/offline/all-112-seed-168886546-orchestrators-4.json
+ create mode 100644 experiments/turso-qualification/evidence/local/offline/all-112-seed-168887298-fault-slow-io.json
+ create mode 100644 experiments/turso-qualification/evidence/local/offline/all-112-seed-168935683-concurrent-settlement-probe.json
+ create mode 100644 experiments/turso-qualification/evidence/local/offline/sqlite-control.log
+ create mode 100644 experiments/turso-qualification/evidence/local/store-matrix.json
+ create mode 100644 experiments/turso-qualification/evidence/managed-fixture-prerequisite-failure.log
+ create mode 100644 experiments/turso-qualification/evidence/managed-uring-preflight.log
+ create mode 100644 experiments/turso-qualification/evidence/managed/all114-managed-fixture-tree.log
+ create mode 100644 experiments/turso-qualification/evidence/managed/all114-managed-owner-contract.log
+ create mode 100644 experiments/turso-qualification/evidence/managed/all114-managed-probe-f4949403.log
+ create mode 100644 experiments/turso-qualification/evidence/managed/all114-managed-sqlite-valid-prereqs.log
+ create mode 100644 experiments/turso-qualification/evidence/managed/all114-managed-worker-diagnostic.log
+ create mode 100644 experiments/turso-qualification/evidence/managed/sqlite-tree-valid-before-offline.log
+ create mode 100644 experiments/turso-qualification/evidence/managed/store-matrix-f4949403.json
+ create mode 100644 experiments/turso-qualification/managed-pod.yaml
+ create mode 100644 experiments/turso-qualification/run_matrix.py
+ create mode 100644 experiments/turso-qualification/src/crash.rs
+ create mode 100644 experiments/turso-qualification/src/engine.rs
+ create mode 100644 experiments/turso-qualification/src/resources.rs
+ create mode 100644 experiments/turso-qualification/src/workload.rs
+51525ac7fe8a1942365743b27037b03b0d3cdd85

@@ -1,0 +1,221 @@
+{
+  "algorithm": "SHA-256",
+  "scope": "all retained experiment evidence except this self-referential manifest",
+  "files": [
+    {
+      "path": "local/all-112-seed-168886546-faults.json",
+      "bytes": 10070,
+      "sha256": "15f5347a524eaefaf0cc1b488731883567db2f5dd196282c4e5e8e9416de6712"
+    },
+    {
+      "path": "local/all-112-seed-168886546-orchestrators-1.json",
+      "bytes": 4765,
+      "sha256": "dfec6486d2cd844466c69a5cd9ce019ea83fa55b7ae2f0ce2dc120240b47f4f7"
+    },
+    {
+      "path": "local/all-112-seed-168886546-orchestrators-2.json",
+      "bytes": 5981,
+      "sha256": "a6ef5d2dc0ecbc440d567f87ee90eef8866d80e984daaa24bf07621eff0c9609"
+    },
+    {
+      "path": "local/all-112-seed-168886546-orchestrators-4.json",
+      "bytes": 8434,
+      "sha256": "bb8145d4448baf2362a11e52cae187958fa020a864146328135c9d5445d51d0f"
+    },
+    {
+      "path": "local/all-112-seed-168887298-fault-slow-io.json",
+      "bytes": 4758,
+      "sha256": "3331a0be8b00213252fcb7af3a4599239422811cb54ff86048f79fffb4b153cb"
+    },
+    {
+      "path": "local/all-112-seed-168935683-concurrent-settlement-probe.json",
+      "bytes": 8485,
+      "sha256": "61d05679802282785706dc66535811d04657c9430744ebe4af6adee4631039a8"
+    },
+    {
+      "path": "local/failure-provenance.json",
+      "bytes": 800,
+      "sha256": "aaee34c72672d088ca42791c8ad57256531a601220ada7d6fbde660b37951924"
+    },
+    {
+      "path": "local/offline/all-112-seed-168886546-faults.json",
+      "bytes": 10075,
+      "sha256": "ce2e9ff7bc3385b04625cb6057630da274055fd0daa15b55d7284726a285343c"
+    },
+    {
+      "path": "local/offline/all-112-seed-168886546-orchestrators-1.json",
+      "bytes": 4762,
+      "sha256": "a83c148dac53841031ec87b63df8f09314fda216ebbd74dee1f2bc8e484f23e9"
+    },
+    {
+      "path": "local/offline/all-112-seed-168886546-orchestrators-2.json",
+      "bytes": 5987,
+      "sha256": "8e6c8a26565dfc5b1d3574cf6be7cb41b1eb749e878d832c364586c8945b602d"
+    },
+    {
+      "path": "local/offline/all-112-seed-168886546-orchestrators-4.json",
+      "bytes": 8441,
+      "sha256": "ca9e6e18f9726b176c0a9a1a79c84fc747dbc1f170b9384d8577556d02b12090"
+    },
+    {
+      "path": "local/offline/all-112-seed-168887298-fault-slow-io.json",
+      "bytes": 4763,
+      "sha256": "17806db924946b093bc0db8950c6cc4b3e05bb546626f2d9ced7c8c0b6b903a0"
+    },
+    {
+      "path": "local/offline/all-112-seed-168935683-concurrent-settlement-probe.json",
+      "bytes": 8489,
+      "sha256": "c517a5d6c903c995e192d38912a33635be62e2701c0a2b8e468e7257a9a0b2eb"
+    },
+    {
+      "path": "local/offline/sqlite-control.log",
+      "bytes": 2620,
+      "sha256": "6588f12e3a5ba047554d027bfbd66e6d43a2bae5c638893ef89246b1b79b0f28"
+    },
+    {
+      "path": "local/sqlite-control-pass.log",
+      "bytes": 13267,
+      "sha256": "959aea4589b3feb1c8bb87f951fe964f69c35589ab4c22bfa5fd35c430acdfdf"
+    },
+    {
+      "path": "local/sqlite-copy-pass.log",
+      "bytes": 2721,
+      "sha256": "2002c307a871d959d200637ab20f925638635a5d460dfbf4356bc2e705218ba8"
+    },
+    {
+      "path": "local/sqlite-ordered-failure.log",
+      "bytes": 2116,
+      "sha256": "55907ed2f3f1a6f30577c8242da71670c5003a379ad92d02bf9db7928b13bbf4"
+    },
+    {
+      "path": "local/store-matrix.json",
+      "bytes": 54664,
+      "sha256": "872a654b924eccb69bae15b9dc906dd63de1cbcb76406dda2e91a68318f3d5ca"
+    },
+    {
+      "path": "managed/all114-managed-fixture-tree.log",
+      "bytes": 41,
+      "sha256": "f54d538195d6ec13c0c8ca004f4766249413d9250a61a604b01f86b354ed854f"
+    },
+    {
+      "path": "managed/all114-managed-owner-contract.log",
+      "bytes": 589,
+      "sha256": "22ee92c26db38c47e375971603f1b8716b575f40f02ee31b85efc18cbbc95be0"
+    },
+    {
+      "path": "managed/all114-managed-probe-f4949403.log",
+      "bytes": 168,
+      "sha256": "8bb53f07432b582f29942593e4bb99f5d12246d7105a7b30a44a0746f2cc47d2"
+    },
+    {
+      "path": "managed/all114-managed-sqlite-valid-prereqs.log",
+      "bytes": 788,
+      "sha256": "de48ca229985c24348e86858ca71d3fe6b3aee887b2ba4d8b68ca647fd6c97e3"
+    },
+    {
+      "path": "managed/all114-managed-worker-diagnostic.log",
+      "bytes": 1081,
+      "sha256": "c3619368ebd82a77c3411d0c8f4efc8969c62beb4ce07d0e150fc2ef3b455d0d"
+    },
+    {
+      "path": "managed/cleanup.json",
+      "bytes": 455,
+      "sha256": "2bc70165737a70381c64877233d01a3da489510a869b3f882d627c13b637c39a"
+    },
+    {
+      "path": "managed/cleanup.log",
+      "bytes": 86,
+      "sha256": "3055439f0ab2853ebc85127b4c6514d09a84a60255f430bcc0a2c3cf137271e6"
+    },
+    {
+      "path": "managed/offline/all114-final-container.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed/offline/all114-final-processes.log",
+      "bytes": 68,
+      "sha256": "75e5c2b5a31b32f357bce9017db021ce93402f885f3a1cac9442cfe064ef493e"
+    },
+    {
+      "path": "managed/offline/all114-managed-sqlite-offline-final.log",
+      "bytes": 548,
+      "sha256": "316621083661a63239de4367361ab676abd4e3d70d5a2527f68fcc8cc2eb2287"
+    },
+    {
+      "path": "managed/offline/all114-offline-final-diagnostic.json",
+      "bytes": 5556,
+      "sha256": "fcf9a083b87db575da5ab55d8ec4ef00d8a7716569b5baa1cdc950c79763afb0"
+    },
+    {
+      "path": "managed/offline/all114-offline-managed-binaries.log",
+      "bytes": 392,
+      "sha256": "4a49bd0e8bdada49c93c9b013c5fee80ac7951e76c7b1dd8973da8e126b8e55c"
+    },
+    {
+      "path": "managed/offline/all114-offline-managed-tree.log",
+      "bytes": 2495,
+      "sha256": "00412fe0f8a753dd568cc067d3fed05edf7c24a733ed62c26eb3f4e819d8b1c7"
+    },
+    {
+      "path": "managed/offline/prior-control-archive.json",
+      "bytes": 1931,
+      "sha256": "ecf3c9424869d73c2fab65c596285d1ce123cfa2de1a8a1341382cb5db8ffb1c"
+    },
+    {
+      "path": "managed/offline/prior-registry-diagnostic.json",
+      "bytes": 5560,
+      "sha256": "a4bedb6b1f6e93e096ea47c6ddc364a9b10b6e3524b0f8aa7d8fbdbcb181c58e"
+    },
+    {
+      "path": "managed/offline/raw-control-archive.json",
+      "bytes": 1967,
+      "sha256": "478ab853cad0a53b11f20c77c2143badae73ca9f892b38ce2ebc1043ddb5cb59"
+    },
+    {
+      "path": "managed/raw-store-archive.json",
+      "bytes": 18292,
+      "sha256": "9b888a6b7feb89ec1df26f198a940117e884809af57e93dfedbaaf7ab3e20d9c"
+    },
+    {
+      "path": "managed/runtime-provenance.json",
+      "bytes": 1846,
+      "sha256": "f2cdad62d1804f6a12273f2e685c53f9549875b151ad1a98563e1316e3ff1259"
+    },
+    {
+      "path": "managed/runtime-receipt.log",
+      "bytes": 400,
+      "sha256": "579c88567603289d408b0dddd3b5d77ee7c5d4d2593eb586e6fdd1a729715775"
+    },
+    {
+      "path": "managed/sqlite-tree-valid-before-offline.log",
+      "bytes": 788,
+      "sha256": "28562daba8d82c6726421a560d2877a63efb954746d9d3a1b9108b239a57d2db"
+    },
+    {
+      "path": "managed/store-matrix-f4949403.json",
+      "bytes": 51447,
+      "sha256": "dbfeec1bc73609ab5d5e06d1a363bc90b96ec591a3d76f7a0056493edb880b5a"
+    },
+    {
+      "path": "managed-fixture-prerequisite-failure.log",
+      "bytes": 878,
+      "sha256": "69cad6dbf735e430772460309519e3b819017bb3bb4ac4a5d724d8bfb18c742c"
+    },
+    {
+      "path": "managed-uring-preflight.log",
+      "bytes": 433,
+      "sha256": "e884e4e5a42e643d563c4c2a100100bd11b078ffe53ead79db3677ed88c3e50b"
+    },
+    {
+      "path": "review/all114-checkpoint-negative.json",
+      "bytes": 150,
+      "sha256": "05b7c995994fd0f4be542b0d8339ee05e1cfd1579aaba46c962d2c46f8524eec"
+    },
+    {
+      "path": "review/all114-review-fixes.json",
+      "bytes": 1287,
+      "sha256": "8a79ce69201c0313a494b1e2e848d275dd58c7b34ff84aa3ce13b6777ef05c8b"
+    }
+  ]
+}

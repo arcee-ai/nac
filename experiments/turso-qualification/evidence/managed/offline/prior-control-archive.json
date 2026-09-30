@@ -1,0 +1,42 @@
+{
+  "local_recovery_path": "/private/tmp/all114-prior-registry-control-raw.tar.gz",
+  "archive_sha256": "245b27ad950d6de1dec960c06e958012359658a14779d9a4c07b75bb1897dd16",
+  "scope": "synthetic prior registry-timeout control",
+  "files": [
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790798396317256330/nac-home/config.toml.lock",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790798396317256330/store.db",
+      "bytes": 352256,
+      "sha256": "1426110c96d76089b62d1f07d3ef99947e72460238ccca4767cf5434674034bc"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790798396317256330/store.db-shm",
+      "bytes": 32768,
+      "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790798396317256330/store.db.run-locks/61353236396634653632643332666264393630643834353763663933653837646261386537326566396332336434623239316666323465366466646139336462.workspace",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790798396317256330/store.db.run-locks/616c6c3131322d312d30613131303131322d30.lock",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790798396317256330/store.db.run-locks/616c6c3131322d706172656e74.lock",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790798396317256330/store.db-wal",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

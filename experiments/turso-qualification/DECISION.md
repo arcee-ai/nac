@@ -178,15 +178,25 @@ emitted all five expected events and exited 0, but the fixture timed out before
 managed Completed. The denied external Smithery catalog warmup was present
 in the logs. Independent coordinator inspection found contiguous transcript
 through index 3, terminal disposition completed and relationship still running
-around the 20-second deadline. This is a harness/runtime prerequisite diagnosis,
+around the 20-second deadline. This is an observed full-control boundary,
 not an engine-causality finding. A wrapper diagnostic is labeled separately
 because it changes the process topology. The exact fixture Git tree was then
 made fully tracked (`7952570af366d9f2e147bdda6f095b8877cb8c42`).
 
 The final fixture adds only a test-compiled preload of the embedded catalog,
 so catalog refresh does not require external networking during qualification.
-Its final local/managed results are recorded in the verification addendum;
-prior failed invocations remain independently retained.
+Its final local control passed, but the single final offline managed control
+still failed after 20.95 seconds waiting for Completed, with no registry
+request. Worker run output finished around 20 seconds before its process-exit
+event; after teardown the transcript was contiguous through index 3 and the
+run's terminal disposition completed, while the managed relation remained
+running with no completion inbox. Clean integrity/FK checks do not make that
+an application pass. The catalog warmup is therefore not the sole explanation.
+Exact timestamps, run IDs, generation, worker events, lock-file metadata,
+binary/tree/store hashes and prior-control comparison are retained in
+[VERIFICATION.md](VERIFICATION.md). The unresolved process-exit/host-settlement
+boundary is input for [ALL-116](https://linear.app/arcee/issue/ALL-116) and
+[ALL-117](https://linear.app/arcee/issue/ALL-117), not an engine conclusion.
 
 ## Compatibility and rejected alternatives
 

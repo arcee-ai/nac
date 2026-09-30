@@ -1,0 +1,42 @@
+{
+  "local_recovery_path": "/private/tmp/all114-offline-failed-control-raw.tar.gz",
+  "archive_sha256": "03f998672bd01269db8bda996c8f3c2cae96906d3064ab8588a4780fd0fdf708",
+  "scope": "synthetic failed test store, sidecars and lock metadata; not production data",
+  "files": [
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790799861683054394/nac-home/config.toml.lock",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790799861683054394/store.db",
+      "bytes": 352256,
+      "sha256": "594beaf09c0ac3659bfb04910783c63c8f7aa761e7a76f17d46fabfe55e81341"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790799861683054394/store.db-shm",
+      "bytes": 32768,
+      "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790799861683054394/store.db.run-locks/61353236396634653632643332666264393630643834353763663933653837646261386537326566396332336434623239316666323465366466646139336462.workspace",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790799861683054394/store.db.run-locks/616c6c3131322d312d30613131303131322d30.lock",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790799861683054394/store.db.run-locks/616c6c3131322d706172656e74.lock",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nac_server_test_managed_load_1_168886546_1790799861683054394/store.db-wal",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

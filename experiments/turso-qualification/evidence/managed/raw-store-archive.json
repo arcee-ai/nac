@@ -1,0 +1,507 @@
+{
+  "archive_sha256": "d3ee2e96dbe61a4c6a79e346618d4bf4104e0fb515b2109ab3e49391857493db",
+  "local_recovery_path": "/private/tmp/all114-managed-store-matrix-raw.tar.gz",
+  "scope": "synthetic disposable stores and complete lane output; not a production backup",
+  "files": [
+    {
+      "path": "managed-store-matrix/sqlite-copied-2-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-4.db",
+      "bytes": 434176,
+      "sha256": "be723150bf4cdd791b63a82fc4f5b07674606f4eccd92963a5ae7ea5ac103bd2"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-4-workload.stdout",
+      "bytes": 671,
+      "sha256": "031f762a5e0d2083b651a474ec6e1bbc080f17fa705ce39a3d7754aab05cfdb6"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-2-prepare.stdout",
+      "bytes": 605,
+      "sha256": "4d559a43355590368c37faec3140445071aa74c053613f995e6b1f42784605b3"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-2.db",
+      "bytes": 389120,
+      "sha256": "0b2eedf8234a9c29b765033a10d3da0b0485cae96fe3e2d355291ac8fe879ed2"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-4.db-log",
+      "bytes": 255,
+      "sha256": "00c113a84192d96b5d76571577597dc9e2c3a13e1f27bc00c4b0036c3c851e59"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-1.db-wal",
+      "bytes": 4152,
+      "sha256": "8b79c8628ba180fd24d2f385a3d75dcb45bcb4bb3ca2c73e26bea241cbcefdef"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-2.db-wal",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-2-workload.stdout",
+      "bytes": 671,
+      "sha256": "17ed574042241b3e0533c78e9ed0e2bad4ab8b19af399a5ae284be510e5a113a"
+    },
+    {
+      "path": "managed-store-matrix/uring-copied-4.db",
+      "bytes": 385024,
+      "sha256": "98c74c56951db74a899cbfb583d0378f6ec6928660dbc588e922fd34c221a188"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-2.db",
+      "bytes": 368640,
+      "sha256": "4c94e5b905de65f831e857ad291bee4ea184c78d1c042b663ed33ff93ff26a5b"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-1-workload.stdout",
+      "bytes": 671,
+      "sha256": "f9a37c7ee0b20cbaab9ec7f767030c68dddc7520a8ee2f8282132165f503c0b8"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-fresh-1.db",
+      "bytes": 368640,
+      "sha256": "a36e832cf88ea7ad49c4d9d32d58f31b98e8f522d8f9691ca4aaf3a0df808451"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-fresh-1-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-4-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-copied-4-workload.stdout",
+      "bytes": 675,
+      "sha256": "6bc81eee9b925e153af67b656203bf279746f218d8b436b684f32c09af7b49ea"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-4-prepare.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-4-workload.stdout",
+      "bytes": 672,
+      "sha256": "024bcd3d083a9ba747ff9cb58140f7a125ab5dff3f13456d850b6b983d1ba438"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-copied-1-workload.stdout",
+      "bytes": 673,
+      "sha256": "a4ec874f28b1f5378d0a0552f2783faaa640cefaa8d784284d45c7227726c667"
+    },
+    {
+      "path": "managed-store-matrix/matrix.json",
+      "bytes": 51447,
+      "sha256": "dbfeec1bc73609ab5d5e06d1a363bc90b96ec591a3d76f7a0056493edb880b5a"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-2-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/uring-fresh-4-prepare.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-2-workload.stderr",
+      "bytes": 105,
+      "sha256": "2f60cf65720c38fa89450e4768b4582eb24d49b490f84599d64f3c50ec1e474b"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-2-prepare.stdout",
+      "bytes": 610,
+      "sha256": "5e4d011ecd8bd175bca813760fd91a9c0a6f37256b192d4cd5ff280a51fceac6"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-4.db-wal",
+      "bytes": 4152,
+      "sha256": "3751dc9edf84cd166181b467682b944ce906f20b9496290b74e76bbcc21bbcb6"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-1-prepare.stdout",
+      "bytes": 610,
+      "sha256": "5b29f480cf663aeeecf3e717ab366a4a1dc20f5b570b3d9b10b1e997d47fd37a"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-1.db",
+      "bytes": 372736,
+      "sha256": "38e3ac4eb767fa27fbcd72046da08928dc34f842b58d391ef0a721cad6aaabad"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-fresh-1-workload.stdout",
+      "bytes": 673,
+      "sha256": "3f243bfbfe01c2a99018c2c64824de50e924d4af7aa91e481ecaf39b6c1b63eb"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-4.db-wal",
+      "bytes": 4152,
+      "sha256": "860c61018cea055d0f8517b3eb29bfd4e003ceb8874602238e6528813d55853b"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-2-workload.stdout",
+      "bytes": 671,
+      "sha256": "863392cdebad607c5d28d0b9c16924e491c6c50b3734f663804cbdf2faee5d2b"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-1.db-log",
+      "bytes": 255,
+      "sha256": "0b3bae7b235e5474728e5925c8352b6394568c0ab212fdda710549d590cab704"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-fresh-4-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-fresh-2.db",
+      "bytes": 380928,
+      "sha256": "b2e2c9c6423648296240967c1ca3dfab3dea202a32d3577a50557e946010faad"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-fresh-2-workload.stdout",
+      "bytes": 673,
+      "sha256": "3713d7b999fa41e8585c6598d41bab5259ce669c4325a545d967f6dfc9fedad1"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-1-prepare.stdout",
+      "bytes": 605,
+      "sha256": "aab603866c17c30d356e093ce278e08c4c7a38b29e54492e62da0d3f8f3edb65"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-2.db-wal",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/uring-copied-2-workload.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/uring-fresh-2-prepare.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-2-workload.stdout",
+      "bytes": 670,
+      "sha256": "dea82820d4ad716d7074ab6e9a149fde66402961864f90803152b7f706f62867"
+    },
+    {
+      "path": "managed-store-matrix/uring-fresh-1-prepare.stderr",
+      "bytes": 73,
+      "sha256": "2148f19d901c3b833f8ffc7e65d402f0e23f6e686e279d5f363fbb183d3aadde"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-4.db",
+      "bytes": 430080,
+      "sha256": "72e27effb354a9e80ad7659529d7e876499734cb781eb6ae072137400ddb3f29"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-1.db",
+      "bytes": 364544,
+      "sha256": "26025c4ee200a9a4f4c0b13330d5dcd58079923ad976780112a9e12d53d8c6d3"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-4.db-wal",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-1-prepare.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-copied-4.db",
+      "bytes": 446464,
+      "sha256": "7517ea2e165be3e5d0468b6f75164d2f9424b99ad9303cea238062372a9b4d3c"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-4-workload.stderr",
+      "bytes": 105,
+      "sha256": "2f60cf65720c38fa89450e4768b4582eb24d49b490f84599d64f3c50ec1e474b"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-2.db",
+      "bytes": 397312,
+      "sha256": "fa4c8a123a2bdb808a2858d92f93a00ae4737c201a297d79ebbbc40421047642"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-4-prepare.stdout",
+      "bytes": 610,
+      "sha256": "642efd2832e903d16ddb5fe96f5c389e7f40a81002fcef0e32ae042affe7959a"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-fresh-4-workload.stdout",
+      "bytes": 675,
+      "sha256": "1fee94536b954ddf7468e3746075c07994061d3cf1a28ca1dfe63c979769919f"
+    },
+    {
+      "path": "managed-store-matrix/uring-copied-4-workload.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-1-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/uring-copied-1-workload.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-2-workload.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-2-prepare.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-4-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-1.db",
+      "bytes": 385024,
+      "sha256": "80c6c9b77b50bc6508d0a4d5db8ee78b8b641041ede49a4320e5b3263f29ce10"
+    },
+    {
+      "path": "managed-store-matrix/uring-copied-1.db",
+      "bytes": 360448,
+      "sha256": "249d9c7956803b50cda6cd159d8e0c7bb9602676e998dbc66282d8bb6d31e200"
+    },
+    {
+      "path": "managed-store-matrix/uring-fresh-1-prepare.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-2-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/uring-copied-2-workload.stderr",
+      "bytes": 73,
+      "sha256": "2148f19d901c3b833f8ffc7e65d402f0e23f6e686e279d5f363fbb183d3aadde"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-1-workload.stderr",
+      "bytes": 105,
+      "sha256": "2f60cf65720c38fa89450e4768b4582eb24d49b490f84599d64f3c50ec1e474b"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-2-prepare.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-4.db-log",
+      "bytes": 4211,
+      "sha256": "396f99672ecde7571371500e643363f1bd9e6c3c788e56bca1b4de10c93a0f0d"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-1-workload.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-1-workload.stdout",
+      "bytes": 670,
+      "sha256": "4f8c84a3a6d3ee58b49c69a4d9a7a8cb7b942c9bfdc559daafd09f9709c3ef67"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-2.db-log",
+      "bytes": 2255,
+      "sha256": "339841088039ebc180ad5c020885a21a654e9a07dd5492fade4f05c5e102025f"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-2.db-log",
+      "bytes": 255,
+      "sha256": "f8dc824a6c1264752925d310a582b924b9b138ae778fe8f110142083fdd253e0"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-1-prepare.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-4-workload.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-1-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-fresh-4.db",
+      "bytes": 413696,
+      "sha256": "48c8f838f122c650989708c0580d0403481158a17b1912137139daaee9db6734"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-2.db",
+      "bytes": 401408,
+      "sha256": "f12a812e7faa51062ec167104fd641958bda3e6ffe3400d79dea5dc5733148a3"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-copied-1-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/uring-fresh-4-prepare.stderr",
+      "bytes": 73,
+      "sha256": "2148f19d901c3b833f8ffc7e65d402f0e23f6e686e279d5f363fbb183d3aadde"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-copied-2.db",
+      "bytes": 389120,
+      "sha256": "c11ac4184c6a3c02c66a850ade0b9438568d1652b62b22069ab5e7bdfbf486c5"
+    },
+    {
+      "path": "managed-store-matrix/uring-copied-1-workload.stderr",
+      "bytes": 73,
+      "sha256": "2148f19d901c3b833f8ffc7e65d402f0e23f6e686e279d5f363fbb183d3aadde"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-2-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/uring-copied-2.db",
+      "bytes": 364544,
+      "sha256": "ebeeff5292a9974d37d7813817d69703e1e62b9e378254d027e06f51ed0e6c65"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-4-prepare.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-1.db-wal",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-1.db-log",
+      "bytes": 1277,
+      "sha256": "0a856cc943a9e5572b61f5ab216885db41efe07fcc88614e2b7f2a6e1aea6f30"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-copied-1.db",
+      "bytes": 372736,
+      "sha256": "a633e7fc7a4de3a23fe8f59ea31b2d3a5bfa9737689f59748fdf45abe20d2d8a"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-4-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-1.db-wal",
+      "bytes": 4152,
+      "sha256": "47c22ee4abfefc7e786e452fcbff0fb254c930fb5d559cc5e6666be476c3028b"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-copied-2-workload.stdout",
+      "bytes": 673,
+      "sha256": "6ddeafad03eef1648d17260e0cee0e68f41b35521e227e06e67c2403580dd3ed"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-4.db-wal",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-1-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-copied-4.db",
+      "bytes": 389120,
+      "sha256": "0d2efe38fef39645c11b1b742d2030be480a369a85a8ecd68333ac3f05c5c045"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-fresh-2-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-4.db",
+      "bytes": 446464,
+      "sha256": "dd2a54696ba83a08d1f387d042e37e26f260ec2caa3730edd535cc89f24cc19f"
+    },
+    {
+      "path": "managed-store-matrix/uring-fresh-2-prepare.stderr",
+      "bytes": 73,
+      "sha256": "2148f19d901c3b833f8ffc7e65d402f0e23f6e686e279d5f363fbb183d3aadde"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-1.db-wal",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/syscall-copied-2.db-wal",
+      "bytes": 4152,
+      "sha256": "728eb43ce1306fb8c79e47e2fe0345f99e2da694ffc4cca92d1d0a5626cb9fb0"
+    },
+    {
+      "path": "managed-store-matrix/uring-copied-4-workload.stderr",
+      "bytes": 73,
+      "sha256": "2148f19d901c3b833f8ffc7e65d402f0e23f6e686e279d5f363fbb183d3aadde"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-4-prepare.stdout",
+      "bytes": 605,
+      "sha256": "f0c52c78a526e59a90b9a986defc37dbdb2cde839a0d1194159190067cb8fba9"
+    },
+    {
+      "path": "managed-store-matrix/sqlite-copied-4-workload.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-1.db",
+      "bytes": 389120,
+      "sha256": "fdb22e7965db2686b96ed6609081a71e0cfd7cb3200d5ff44564a7072d756e6a"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-1-workload.stdout",
+      "bytes": 671,
+      "sha256": "12c123ebb643e579f29cd5bc3ce42f641c0e636d6f490c9244a6d9323f3e88c9"
+    },
+    {
+      "path": "managed-store-matrix/syscall-fresh-2.db-wal",
+      "bytes": 4152,
+      "sha256": "11ef6b17e15e3008701ff8843667a6348bc4e0a7b51a11f52bf741e48c11d5f1"
+    },
+    {
+      "path": "managed-store-matrix/mvcc-fresh-4-workload.stdout",
+      "bytes": 674,
+      "sha256": "5415f65e6d64bdb5e89c2c18eae81be21a0c0589c285a138fc9c411c091eaf47"
+    }
+  ]
+}

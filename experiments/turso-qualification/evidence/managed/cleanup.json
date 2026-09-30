@@ -1,0 +1,12 @@
+{
+  "context": "aws-dev-apps-01",
+  "namespace": "all114-qualification",
+  "namespace_absent": true,
+  "pvc_deleted_with_namespace": true,
+  "pv": "pvc-9339747b-709b-421f-81eb-890dc9583385",
+  "pv_absent": true,
+  "reclaim_policy": "Delete",
+  "retained_cloud_pvc": false,
+  "preservation_verified_before_delete": true,
+  "synthetic_recovery": "local archive paths and SHA-256 manifests; tracked decision/diagnostics/measurement JSON; no customer data"
+}
