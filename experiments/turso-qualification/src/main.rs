@@ -2,11 +2,28 @@ use anyhow::{bail, Context, Result};
 use serde_json::json;
 use std::path::Path;
 use std::time::Instant;
+mod crash;
+mod engine;
+mod workload;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("crash-child") => {
+            crash::child(
+                args.get(2).context("mode")?,
+                Path::new(args.get(3).context("path")?),
+                args.get(4).context("session")?,
+            )
+            .await?;
+        }
+        Some("workload") => {
+            let mode = args.get(2).context("workload mode")?;
+            let path = Path::new(args.get(3).context("workload disposable path")?);
+            let count = args.get(4).context("workload 1/2/4")?.parse()?;
+            println!("{}", workload::run(mode, path, count).await?);
+        }
         Some("schema") => {
             let path = Path::new(args.get(2).context("schema requires a new store path")?);
             if path.exists() {

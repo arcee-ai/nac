@@ -1,0 +1,87 @@
+# Disposable ALL-114 verification only. No serving NACInstance or user PVC.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: all114-qualification
+  labels:
+    purpose: all114-qualification
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qualification
+  namespace: all114-qualification
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: managed-nac-gp3
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: isolated
+  namespace: all114-qualification
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qualification
+  namespace: all114-qualification
+  labels:
+    purpose: all114-qualification
+spec:
+  runtimeClassName: gvisor
+  automountServiceAccountToken: false
+  terminationGracePeriodSeconds: 15
+  securityContext:
+    runAsUser: 10001
+    runAsGroup: 10001
+    runAsNonRoot: true
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: qualification
+      # Existing accepted managed-runtime image. Test executables are separately
+      # pinned to the ALL-114 CI artifact head and are copied into /data.
+      image: 356660933719.dkr.ecr.us-east-2.amazonaws.com/nac@sha256:e892906bd07771950846c832758952fbfb388b299f433b5fb9c97fea8a813f0a
+      command: [/bin/sh, -c, "exec sleep 7200"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/nac
+        - name: evidence
+          mountPath: /home/runner/work/nac/nac
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: qualification
+    - name: tmp
+      emptyDir: {}
+    - name: home
+      emptyDir: {}
+    - name: evidence
+      emptyDir: {}

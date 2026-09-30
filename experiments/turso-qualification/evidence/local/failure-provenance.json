@@ -1,0 +1,16 @@
+{
+  "command": "NAC_MANAGED_LOAD_COPY_STORE_DIR=/private/tmp/all114-copied-stores make test-managed-load > /private/tmp/all114-sqlite-copied.log 2>&1",
+  "source_revision": "34e10bf77e9cfea1a208c1c9bf13b0659224b458",
+  "seed": 168886546,
+  "lane": "ordered-four-way",
+  "gap": "expected start idx 1, found 2",
+  "stderr_timeout": [
+    "managed completion ordering timed out",
+    "managed orchestrator did not reach expected status Completed"
+  ],
+  "log_sha256": "55907ed2f3f1a6f30577c8242da71670c5003a379ad92d02bf9db7928b13bbf4",
+  "log_mtime": "2026-09-30T12:03:48-07:00",
+  "platform": "aarch64-apple-darwin",
+  "test_modification": "optional VACUUM INTO export after teardown gated on phase_delay.is_zero; no copy ran because default phase delay is 100ms",
+  "production_seam_changes": false
+}
