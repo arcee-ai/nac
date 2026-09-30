@@ -1,13 +1,14 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { StrictMode } from "react";
 import { act, render, type RenderResult } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useDelegatedPermissionStream, useSessionStream } from "@/app/hooks/useSessionStream";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
-import { resetRuntime } from "@/app/store/runtimeStore";
+import { captureRuntimeActivation, resetRuntime } from "@/app/store/runtimeStore";
 import type {
   Message,
   MessagePageMetadata,
@@ -132,8 +133,8 @@ function transcriptEnvelope(sequenceId: number): SessionEventEnvelope {
   } as SessionEventEnvelope;
 }
 
-function Harness() {
-  useSessionStream(SESSION_ID);
+function Harness({ id = SESSION_ID }: { id?: string }) {
+  useSessionStream(id);
   return null;
 }
 
@@ -165,6 +166,55 @@ afterEach(() => {
 });
 
 describe("session stream request coordination", () => {
+  it("releases StrictMode's old subscription and never cancels a durable run", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const cancel = vi.spyOn(api, "cancelActiveRun");
+    const renderer = render(
+      <StrictMode>
+        <QueryClientProvider client={client}>
+          <Harness />
+        </QueryClientProvider>
+      </StrictMode>,
+    );
+    await act(async () => undefined);
+    expect(FakeEventSource.instances.filter((entry) => entry.readyState !== 2)).toHaveLength(1);
+    const current = captureRuntimeActivation(SESSION_ID);
+    expect(current()).toBe(true);
+    await act(async () => renderer.unmount());
+    expect(current()).toBe(false);
+    expect(FakeEventSource.instances.every((entry) => entry.readyState === 2)).toBe(true);
+    expect(cancel).not.toHaveBeenCalled();
+    cancel.mockRestore();
+  });
+
+  it("aborts a released session's read and keeps its late page out of the next chat", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const late = deferred<MessagesPageResponse>();
+    stream.getPage.mockReturnValue(late.promise);
+    const renderer = await mount(client);
+    const oldSource = source();
+    await act(async () => {
+      oldSource.emit("session_event", transcriptEnvelope(1));
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    const readSignal = stream.getPage.mock.calls[0][1].signal;
+    const current = snapshot([user("next chat")]);
+    client.setQueryData(queryKeys.sessionSnapshot("next-chat"), current);
+    renderer.rerender(
+      <QueryClientProvider client={client}>
+        <Harness id="next-chat" />
+      </QueryClientProvider>,
+    );
+    expect(readSignal.aborted).toBe(true);
+    expect(oldSource.readyState).toBe(2);
+    await act(async () => {
+      late.resolve(page([user("stale")], 1));
+      await flushAsyncWork();
+    });
+    expect(client.getQueryData(queryKeys.sessionSnapshot("next-chat"))).toBe(current);
+    await act(async () => renderer.unmount());
+  });
+
   it("keeps a child permission stream live without mounting the child transcript", async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },

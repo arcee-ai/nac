@@ -4,7 +4,7 @@ import {
   visibleSessions,
   firstChatAdmission,
 } from "@/app/features/ui-policy/policy";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Button, ButtonVariant, Loader, LoaderSize, Modal, ModalSize } from "@/app/atoms";
@@ -120,6 +120,15 @@ function NewChatForm({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const activation = useRef({ active: true, reads: new AbortController() });
+  useEffect(() => {
+    const current = { active: true, reads: new AbortController() };
+    activation.current = current;
+    return () => {
+      current.active = false;
+      current.reads.abort();
+    };
+  }, [projectId]);
   const toast = useToast();
   const createSession = useCreateSession();
   const createModelConfig = useCreateModelConfig();
@@ -188,12 +197,14 @@ function NewChatForm({
       setError("Pick the light model before creating this chat.");
       return;
     }
+    const current = activation.current;
     try {
       if (firstChat) {
         const [projects, sessions] = await Promise.all([
-          api.listProjects(),
-          api.listSessions({ projectId }),
+          api.listProjects(current.reads.signal),
+          api.listSessions({ projectId }, current.reads.signal),
         ]);
+        if (!current.active) return;
         if (!projects.projects.some((project) => project.project_id === projectId)) {
           onClose();
           navigate(routes.list(), { replace: true });
@@ -229,6 +240,7 @@ function NewChatForm({
               : null
             : (selectedLight ?? null),
         });
+        if (!current.active) return;
         selected = {
           // SAFETY: the server echoes the BackendKind wire value it stored.
           backend: record.backend as BackendKind,
@@ -269,10 +281,12 @@ function NewChatForm({
         request.orchestrator_compaction_threshold = selected.orchestrator_compaction_threshold;
       }
       const snapshot = await createSession.mutateAsync(request);
+      if (!current.active) return;
       const sessionId = snapshot.metadata.session_id;
       onClose();
       if (sessionId) navigate(routes.session(sessionId));
     } catch (error) {
+      if (!current.active) return;
       toast.error(`Failed to start a chat: ${humanErrorText(toRunError(error))}`);
     }
   };

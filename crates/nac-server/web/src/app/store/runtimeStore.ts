@@ -165,7 +165,16 @@ const { setState, getState, useStore } = runtimeStore;
 
 const MAX_EVENTS = 300;
 
+let runtimeActivation = {};
+
+/** Capture this presentation activation, including same-session reopen/StrictMode. */
+export function captureRuntimeActivation(sessionId: string): () => boolean {
+  const activation = runtimeActivation;
+  return () => activation === runtimeActivation && getState().sessionId === sessionId;
+}
+
 export function resetRuntime(sessionId: string | null): void {
+  runtimeActivation = {};
   setState({
     sessionId,
     running: false,

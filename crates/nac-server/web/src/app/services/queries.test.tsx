@@ -12,7 +12,7 @@ import {
   useSessionSkills,
   useThreadEventPages,
 } from "@/app/services/queries";
-import { fenceSessionSnapshot } from "@/app/services/sessionRefresh";
+import { fenceSessionSnapshot, sessionRefreshKey } from "@/app/services/sessionRefresh";
 import type {
   ManagedSessionSummary,
   MessagesPageResponse,
@@ -215,7 +215,7 @@ describe("paged read fencing", () => {
 
     fireEvent.click(renderer.getByRole("button", { name: "Load" }));
     await waitFor(() => expect(requests.getMessages).toHaveBeenCalledOnce());
-    fenceSessionSnapshot(id, true);
+    fenceSessionSnapshot(sessionRefreshKey(client, id), true);
     await act(async () => {
       // SAFETY: test fixture — the page carries only the fields the merge
       // reads; the remaining response fields are omitted.

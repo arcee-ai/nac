@@ -679,7 +679,8 @@ export const api = {
   generateOverview: (id: string) =>
     request<{ session_id: string; summary: string }>("POST", `${sessionPath(id)}/overview`),
 
-  submitRun: (id: string, prompt: string) => nacClient.submitPrompt(id, prompt),
+  submitRun: (id: string, prompt: string, signal?: AbortSignal) =>
+    nacClient.submitPrompt(id, prompt, signal),
 
   cancelActiveRun: (id: string) => request<void>("POST", `${sessionPath(id)}/cancel-active-run`),
 

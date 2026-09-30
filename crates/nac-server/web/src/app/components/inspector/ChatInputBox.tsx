@@ -18,6 +18,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { AgentSpawnButton } from "@/app/components/inspector/AgentSpawnMenu";
+import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { GoalControls } from "@/app/components/inspector/GoalControls";
@@ -71,6 +72,7 @@ import {
 import { consumePromptRequests } from "@/app/store/composerStore";
 import { openSubagentLaunch, revealSidePanel } from "@/app/store/sessionLayoutStore";
 import {
+  captureRuntimeActivation,
   liftSessionSpend,
   pushLocalEvent,
   useCancelArmed,
@@ -635,9 +637,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const runGoalCommand = useCallback(
     async (text: string) => {
       if (!direct) throw new Error("Durable goals are available only in direct chats");
+      const current = captureRuntimeActivation(sessionId);
       let goal = goalQuery.data;
       if (goal === undefined) {
         const result = await goalQuery.refetch();
+        if (!current()) return;
         if (result.error) throw result.error;
         goal = result.data;
       }
@@ -698,11 +702,13 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         if (ref.current) ref.current.style.height = `${rowPx}px`;
       };
       submitInFlight.current = true;
+      const current = captureRuntimeActivation(sessionId);
 
       try {
         let definitions = commandDefinitions;
         if (text.trimStart().startsWith("/") && definitions === undefined) {
           const result = await refetchCommands();
+          if (!current()) return;
           definitions = result.data;
           if (definitions === undefined) {
             toast.error("Unable to load slash commands");
@@ -714,9 +720,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         if (command?.command === "compact") {
           try {
             await compactSession.mutateAsync(sessionId);
+            if (!current()) return;
             pushLocalEvent("compaction", "▶ compacting context…");
             clearField();
           } catch (error) {
+            if (!current()) return;
             pushLocalEvent("error", `compact failed: ${errorMessage(toRunError(error))}`, true);
             toast.error(`Failed to compact: ${humanErrorText(toRunError(error), backend)}`);
           }
@@ -725,8 +733,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         if (command?.command === "goal") {
           try {
             await runGoalCommand(prompt);
+            if (!current()) return;
             clearField();
           } catch (error) {
+            if (!current()) return;
             toast.error(`Goal command failed: ${humanErrorText(toRunError(error))}`);
           }
           return;
@@ -736,18 +746,23 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           return;
         }
         try {
-          if (runningDirect || requestedDelivery) {
-            const delivery = requestedDelivery ?? "steer";
-            await createInboxItem.mutateAsync({ sessionId, delivery, prompt });
-            pushLocalEvent("steering", `▶ ${delivery}: ${prompt.slice(0, 80)}`);
-          } else if (runningClassic) {
-            await steerOrchestrator.mutateAsync({ id: sessionId, instruction: prompt });
-          } else {
-            await submitRun.mutateAsync({ id: sessionId, prompt });
-            pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
+          const result = await runCommand(
+            deliverPrompt({
+              mode: runningDirect ? "direct-running" : runningClassic ? "classic-running" : "idle",
+              delivery: requestedDelivery,
+              inbox: (delivery) => createInboxItem.mutateAsync({ sessionId, delivery, prompt }),
+              steer: () => steerOrchestrator.mutateAsync({ id: sessionId, instruction: prompt }),
+              submit: () => submitRun.mutateAsync({ id: sessionId, prompt }),
+            }),
+          );
+          if (!current()) return;
+          if (result === "submitted") pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
+          else if (runningDirect || requestedDelivery) {
+            pushLocalEvent("steering", `▶ ${requestedDelivery ?? "steer"}: ${prompt.slice(0, 80)}`);
           }
           clearField();
         } catch (error) {
+          if (!current()) return;
           pushLocalEvent("error", `submit failed: ${errorMessage(toRunError(error))}`, true);
           toast.error(`Failed to send: ${humanErrorText(toRunError(error), backend)}`);
         }
@@ -1282,17 +1297,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             </Button>
           ) : null}
 
-          {/* The model name is the first thing a narrow column gives up; the
-              same switch lives in the session settings the gear opens. On a
-              wide session it leads the row, beside the effort it carries. */}
-          {narrow ? null : (
-            <ModelPicker
-              sessionId={sessionId}
-              metadata={snapshot?.metadata ?? null}
-              label={metrics.model}
-              disabled={busy}
-            />
-          )}
+          <ModelPicker
+            sessionId={sessionId}
+            metadata={snapshot?.metadata ?? null}
+            label={metrics.model}
+            disabled={busy}
+          />
 
           {isMobile ? null : <div className="flex-1" />}
 

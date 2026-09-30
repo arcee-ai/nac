@@ -5,7 +5,7 @@ import { RenameModal } from "@/app/components/modals/RenameModal";
 import { SettingsModal } from "@/app/components/modals/SettingsModal";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useCancelRun, useTogglePin } from "@/app/services/queries";
-import { pushLocalEvent } from "@/app/store/runtimeStore";
+import { captureRuntimeActivation, pushLocalEvent } from "@/app/store/runtimeStore";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 import { toRunError } from "@/app/lib/providerError";
 
@@ -62,9 +62,10 @@ export function SessionActionsProvider({ children }: { children: React.ReactNode
         }
       },
       stopRun: async (sessionId) => {
+        const current = captureRuntimeActivation(sessionId);
         try {
           await cancelRun.mutateAsync(sessionId);
-          pushLocalEvent("run", "■ run cancellation requested");
+          if (current()) pushLocalEvent("run", "■ run cancellation requested");
           toast.success("Run cancellation requested");
         } catch (error) {
           toast.error(`Failed to stop run: ${errorMessage(toRunError(error))}`);

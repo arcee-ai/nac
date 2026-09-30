@@ -3,8 +3,9 @@
 import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
 import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { NewChatModal } from "@/app/components/modals/NewChatModal";
@@ -321,4 +322,49 @@ it("default presentation explicitly creates direct and preserves the hidden inhe
     view.unmount();
     client.clear();
   }
+});
+
+function DismissibleLauncher() {
+  const [open, setOpen] = useState(true);
+  const location = useLocation();
+  return (
+    <>
+      <button onClick={() => setOpen(false)}>Dismiss launcher</button>
+      <output aria-label="Current route">{location.pathname}</output>
+      <NewChatModal projectId={open ? "project" : null} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
+it("accepts late creation in its cache without navigating a dismissed launcher", async () => {
+  const pending = Promise.withResolvers<SessionSnapshotResponse>();
+  const create = vi.spyOn(api, "createSession").mockReturnValue(pending.promise);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <UiPolicyContext.Provider value={DIRECT_UI_POLICY}>
+        <ToastProvider>
+          <MemoryRouter>
+            <DismissibleLauncher />
+          </MemoryRouter>
+        </ToastProvider>
+      </UiPolicyContext.Provider>
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Primary model: gpt-5.6-sol");
+  fireEvent.click(screen.getByRole("button", { name: "Create chat" }));
+  await waitFor(() => expect(create).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss launcher" }));
+  // SAFETY: creation adapter reads the identity and caches the response opaquely.
+  const snapshot = { metadata: { session_id: "late-chat" } } as unknown as SessionSnapshotResponse;
+  await act(async () => {
+    pending.resolve(snapshot);
+    await pending.promise;
+  });
+  await waitFor(() =>
+    expect(client.getQueryData(["session", "late-chat", "snapshot"])).toEqual(snapshot),
+  );
+  expect(screen.getByLabelText("Current route").textContent).toBe("/");
+  view.unmount();
+  client.clear();
 });
