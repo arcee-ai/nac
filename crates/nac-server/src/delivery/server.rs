@@ -507,7 +507,7 @@ struct ApiDoc;
 pub fn router(manager: SessionManager) -> Router {
     // The registry answer takes a few seconds, so it is warmed in the
     // background rather than on the first picker open.
-    tokio::spawn(mcp_api::warm_library_cache());
+    tokio::spawn(mcp_catalog_api::warm_library_cache());
     let (api, openapi) = api_router(manager.clone());
     let docs = Router::new()
         .merge(
@@ -625,16 +625,20 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::ssh_configurations::update_handler,
             delivery::ssh_configurations::delete_handler
         ))
-        .routes(routes!(mcp_api::library_handler))
+        .routes(routes!(mcp_catalog_api::library_handler))
         .routes(routes!(
             mcp_api::list_servers_handler,
             mcp_api::create_server_handler
         ))
         .routes(routes!(mcp_api::test_server_handler))
+        .routes(routes!(mcp_runtime_api::status_handler))
         .routes(routes!(
             mcp_api::update_server_handler,
             mcp_api::delete_server_handler
         ))
+        .routes(routes!(mcp_runtime_api::connect_handler))
+        .routes(routes!(mcp_runtime_api::disconnect_handler))
+        .routes(routes!(mcp_runtime_api::reload_handler))
         .routes(routes!(managed_auth::list_handler))
         .routes(routes!(managed_auth::logout_handler))
         .routes(routes!(managed_auth::start_login_handler))

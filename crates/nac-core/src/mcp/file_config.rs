@@ -20,17 +20,26 @@ pub const MCP_TRANSPORT_STDIO: &str = "stdio";
 pub const MCP_TRANSPORT_STREAMABLE_HTTP: &str = "streamable_http";
 
 /// A named MCP server as `config.toml` defines it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct McpServerConfigurationRecord {
     pub name: String,
     pub enabled: bool,
+    pub required: bool,
+    pub startup_timeout_ms: Option<u64>,
+    pub catalog_timeout_ms: Option<u64>,
+    pub execution_timeout_ms: Option<u64>,
     /// `stdio` or `streamable_http`.
     pub transport: String,
     pub command: Option<String>,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+    pub env_vars: Vec<String>,
+    pub cwd: Option<String>,
     pub url: Option<String>,
     pub headers: BTreeMap<String, String>,
+    pub env_headers: BTreeMap<String, String>,
+    pub bearer_token_env_var: Option<String>,
+    pub header_helper: Option<McpHeaderHelperConfig>,
     /// Library catalog entry this server was created from, when it was.
     pub library_id: Option<String>,
 }
@@ -269,17 +278,44 @@ fn validated_record(
     configuration: McpServerConfigurationRecord,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
     let transport = configuration.transport.trim().to_string();
-    let (command, url) = match transport.as_str() {
+    let (command, cwd, url, bearer_token_env_var, header_helper) = match transport.as_str() {
         MCP_TRANSPORT_STDIO => (
             Some(nonblank(
                 configuration.command.as_deref().unwrap_or(""),
                 "command",
             )?),
+            configuration
+                .cwd
+                .map(|value| nonblank(&value, "cwd"))
+                .transpose()?,
+            None,
+            None,
             None,
         ),
         MCP_TRANSPORT_STREAMABLE_HTTP => (
             None,
+            None,
             Some(nonblank(configuration.url.as_deref().unwrap_or(""), "url")?),
+            configuration
+                .bearer_token_env_var
+                .map(|value| nonblank(&value, "bearer_token_env_var"))
+                .transpose()?,
+            configuration
+                .header_helper
+                .map(|mut helper| {
+                    helper.command = nonblank(&helper.command, "header_helper.command")?;
+                    helper.cwd = helper
+                        .cwd
+                        .map(|value| nonblank(&value, "header_helper.cwd"))
+                        .transpose()?;
+                    timeout_value(
+                        helper.timeout_ms,
+                        Duration::from_secs(5),
+                        "header_helper.timeout_ms",
+                    )?;
+                    Ok::<_, McpServerConfigurationStoreError>(helper)
+                })
+                .transpose()?,
         ),
         other => {
             return Err(McpServerConfigurationStoreError::InvalidInput(format!(
@@ -288,15 +324,31 @@ fn validated_record(
             )))
         }
     };
+    for (value, field) in [
+        (configuration.startup_timeout_ms, "startup_timeout_ms"),
+        (configuration.catalog_timeout_ms, "catalog_timeout_ms"),
+        (configuration.execution_timeout_ms, "execution_timeout_ms"),
+    ] {
+        timeout_value(value, Duration::from_secs(1), field)?;
+    }
     Ok(McpServerConfigurationRecord {
         name: validate_name(&configuration.name)?,
         enabled: configuration.enabled,
+        required: configuration.required,
+        startup_timeout_ms: configuration.startup_timeout_ms,
+        catalog_timeout_ms: configuration.catalog_timeout_ms,
+        execution_timeout_ms: configuration.execution_timeout_ms,
         transport,
         command,
         args: configuration.args,
         env: configuration.env,
+        env_vars: configuration.env_vars,
+        cwd,
         url,
         headers: configuration.headers,
+        env_headers: configuration.env_headers,
+        bearer_token_env_var,
+        header_helper,
         library_id: configuration
             .library_id
             .map(|id| id.trim().to_string())
@@ -864,6 +916,11 @@ fn strings_of(item: &Item) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn integer_of(item: &Item) -> Option<u64> {
+    item.as_integer()
+        .and_then(|value| u64::try_from(value).ok())
+}
+
 fn map_of(item: &Item) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
     if let Some(table) = item.as_table_like() {
@@ -889,14 +946,37 @@ fn record_of(name: &str, item: &Item) -> McpServerConfigurationRecord {
     McpServerConfigurationRecord {
         name: name.to_string(),
         enabled: field("enabled").as_bool().unwrap_or(true),
+        required: field("required").as_bool().unwrap_or(false),
+        startup_timeout_ms: integer_of(field("startup_timeout_ms")),
+        catalog_timeout_ms: integer_of(field("catalog_timeout_ms")),
+        execution_timeout_ms: integer_of(field("execution_timeout_ms")),
         transport: string_of(field("transport")).unwrap_or_default(),
         command: string_of(field("command")),
         args: strings_of(field("args")),
         env: map_of(field("env")),
+        env_vars: strings_of(field("env_vars")),
+        cwd: string_of(field("cwd")),
         url: string_of(field("url")),
         headers: map_of(field("headers")),
+        env_headers: map_of(field("env_headers")),
+        bearer_token_env_var: string_of(field("bearer_token_env_var")),
+        header_helper: header_helper_of(field("header_helper")),
         library_id: string_of(field("library_id")),
     }
+}
+
+fn header_helper_of(item: &Item) -> Option<McpHeaderHelperConfig> {
+    let table = item.as_table_like()?;
+    let empty = Item::None;
+    let item = |key: &str| table.get(key).unwrap_or(&empty);
+    Some(McpHeaderHelperConfig {
+        command: string_of(item("command")).unwrap_or_default(),
+        args: strings_of(item("args")),
+        cwd: string_of(item("cwd")),
+        env: map_of(item("env")),
+        env_vars: strings_of(item("env_vars")),
+        timeout_ms: integer_of(item("timeout_ms")),
+    })
 }
 
 fn inline_map(values: &BTreeMap<String, String>) -> InlineTable {
@@ -911,6 +991,18 @@ fn table_of(record: &McpServerConfigurationRecord) -> Table {
     let mut table = Table::new();
     if !record.enabled {
         table["enabled"] = toml_edit::value(false);
+    }
+    if record.required {
+        table["required"] = toml_edit::value(true);
+    }
+    for (key, value) in [
+        ("startup_timeout_ms", record.startup_timeout_ms),
+        ("catalog_timeout_ms", record.catalog_timeout_ms),
+        ("execution_timeout_ms", record.execution_timeout_ms),
+    ] {
+        if let Some(value) = value {
+            table[key] = toml_edit::value(i64::try_from(value).unwrap_or(i64::MAX));
+        }
     }
     table["transport"] = toml_edit::value(record.transport.as_str());
     match record.transport.as_str() {
@@ -928,6 +1020,12 @@ fn table_of(record: &McpServerConfigurationRecord) -> Table {
             if !record.env.is_empty() {
                 table["env"] = toml_edit::value(inline_map(&record.env));
             }
+            if !record.env_vars.is_empty() {
+                table["env_vars"] = toml_edit::value(string_array(&record.env_vars));
+            }
+            if let Some(cwd) = &record.cwd {
+                table["cwd"] = toml_edit::value(cwd.as_str());
+            }
         }
         _ => {
             if let Some(url) = &record.url {
@@ -936,10 +1034,51 @@ fn table_of(record: &McpServerConfigurationRecord) -> Table {
             if !record.headers.is_empty() {
                 table["headers"] = toml_edit::value(inline_map(&record.headers));
             }
+            if !record.env_headers.is_empty() {
+                table["env_headers"] = toml_edit::value(inline_map(&record.env_headers));
+            }
+            if let Some(variable) = &record.bearer_token_env_var {
+                table["bearer_token_env_var"] = toml_edit::value(variable.as_str());
+            }
+            if let Some(helper) = &record.header_helper {
+                table["header_helper"] = toml_edit::value(header_helper_table(helper));
+            }
         }
     }
     if let Some(library_id) = &record.library_id {
         table["library_id"] = toml_edit::value(library_id.as_str());
+    }
+    table
+}
+
+fn string_array(values: &[String]) -> toml_edit::Array {
+    let mut array = toml_edit::Array::new();
+    for value in values {
+        array.push(value.as_str());
+    }
+    array
+}
+
+fn header_helper_table(helper: &McpHeaderHelperConfig) -> InlineTable {
+    let mut table = InlineTable::new();
+    table.insert("command", helper.command.as_str().into());
+    if !helper.args.is_empty() {
+        table.insert("args", string_array(&helper.args).into());
+    }
+    if let Some(cwd) = &helper.cwd {
+        table.insert("cwd", cwd.as_str().into());
+    }
+    if !helper.env.is_empty() {
+        table.insert("env", inline_map(&helper.env).into());
+    }
+    if !helper.env_vars.is_empty() {
+        table.insert("env_vars", string_array(&helper.env_vars).into());
+    }
+    if let Some(timeout_ms) = helper.timeout_ms {
+        table.insert(
+            "timeout_ms",
+            i64::try_from(timeout_ms).unwrap_or(i64::MAX).into(),
+        );
     }
     table
 }
@@ -1109,6 +1248,7 @@ mod tests {
                 "Bearer secret-token".to_string(),
             )]),
             library_id: Some("example".to_string()),
+            ..McpServerConfigurationRecord::default()
         }
     }
 
@@ -1136,6 +1276,46 @@ mod tests {
 
         assert!(delete_mcp_server_configuration(&path, "renamed").unwrap());
         assert!(list_mcp_server_configurations(&path).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn extended_operability_fields_roundtrip_without_touching_global_defaults() {
+        let path = temp_config();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "[mcp]\nstartup_timeout_ms = 9000\n\n[unrelated]\nkeep = true\n",
+        )
+        .unwrap();
+        let mut server = http_server("operable");
+        server.required = true;
+        server.startup_timeout_ms = Some(1_200);
+        server.catalog_timeout_ms = Some(2_300);
+        server.execution_timeout_ms = Some(3_400);
+        server.env_headers = BTreeMap::from([("X-Key".to_string(), "MCP_KEY".to_string())]);
+        server.bearer_token_env_var = Some("MCP_TOKEN".to_string());
+        server.header_helper = Some(McpHeaderHelperConfig {
+            command: "refresh-headers".to_string(),
+            args: vec!["--json".to_string()],
+            cwd: Some("helpers".to_string()),
+            env: BTreeMap::from([("TOKEN".to_string(), "secret".to_string())]),
+            env_vars: vec!["HOME".to_string()],
+            timeout_ms: Some(800),
+        });
+
+        let created = insert_mcp_server_configuration(&path, server).unwrap();
+        assert_eq!(
+            load_mcp_server_configuration(&path, "operable").unwrap(),
+            created
+        );
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("startup_timeout_ms = 9000"));
+        assert!(raw.contains("[unrelated]"));
+        assert!(raw.contains("header_helper"));
+        let strict: super::config::McpConfigFile = toml::from_str(&raw).unwrap();
+        assert_eq!(strict.mcp.startup_timeout_ms, Some(9_000));
+        assert!(strict.mcp_servers["operable"].required);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -1588,6 +1768,7 @@ mod tests {
             url: None,
             headers: BTreeMap::new(),
             library_id: None,
+            ..McpServerConfigurationRecord::default()
         };
         insert_mcp_server_configuration(&path, stdio).unwrap();
         insert_mcp_server_configuration(&path, http_server("example")).unwrap();
@@ -1604,13 +1785,15 @@ mod tests {
         assert!(!local.enabled);
         assert!(matches!(
             &local.transport,
-            McpTransportConfig::Stdio { command, args, env }
+            McpTransportConfig::Stdio {
+                command, args, env, ..
+            }
                 if command == "npx" && args.len() == 2 && env["TOKEN"] == "${TOKEN}"
         ));
         let example = &parsed.mcp_servers["example"];
         assert!(matches!(
             &example.transport,
-            McpTransportConfig::StreamableHttp { url, headers }
+            McpTransportConfig::StreamableHttp { url, headers, .. }
                 if url == "https://mcp.example.com/mcp"
                     && headers["Authorization"] == "Bearer secret-token"
         ));

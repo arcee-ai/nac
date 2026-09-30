@@ -1594,6 +1594,36 @@
         }
       }
     },
+    "/mcp_library/servers/status": {
+      "get": {
+        "tags": [
+          "mcp-library"
+        ],
+        "operationId": "get_mcp_library_servers_status",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpRuntimeStatusList"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/mcp_library/servers/test": {
       "post": {
         "tags": [
@@ -1798,6 +1828,126 @@
             }
           },
           "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp_library/servers/{server_name}/connect": {
+      "post": {
+        "tags": [
+          "mcp-library"
+        ],
+        "operationId": "post_mcp_library_servers_server_name_connect",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpRuntimeStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp_library/servers/{server_name}/disconnect": {
+      "post": {
+        "tags": [
+          "mcp-library"
+        ],
+        "operationId": "post_mcp_library_servers_server_name_disconnect",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpRuntimeStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp_library/servers/{server_name}/reload": {
+      "post": {
+        "tags": [
+          "mcp-library"
+        ],
+        "operationId": "post_mcp_library_servers_server_name_reload",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpRuntimeStatus"
+                }
+              }
+            }
+          },
+          "400": {
             "description": "Request failed",
             "content": {
               "application/json": {
@@ -8523,7 +8673,27 @@
               "type": "string"
             }
           },
+          "bearer_token_env_var": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "catalog_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cwd": {
             "type": [
               "string",
               "null"
@@ -8545,6 +8715,39 @@
             "example": {
               "TOKEN": "fake-token"
             }
+          },
+          "env_headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "env_vars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "execution_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "header_helper": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpHeaderHelperConfig"
+              }
+            ]
           },
           "headers": {
             "type": "object",
@@ -8568,6 +8771,17 @@
           },
           "name": {
             "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "startup_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           },
           "transport": {
             "$ref": "#/components/schemas/McpTransportSchema"
@@ -10166,6 +10380,52 @@
           }
         }
       },
+      "McpHeaderHelperConfig": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "command": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "env_vars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "McpLibraryAuth": {
         "type": "string",
         "description": "What a library server needs before it can connect.",
@@ -10262,6 +10522,64 @@
           }
         }
       },
+      "McpProbeResult": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "capabilities",
+          "tools",
+          "prompt_count",
+          "resource_count",
+          "resource_template_count"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "instructions": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "prompt_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "resource_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "resource_template_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "server_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "server_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpProbedTool"
+            }
+          }
+        }
+      },
       "McpProbedTool": {
         "type": "object",
         "description": "A tool a probe discovered on a server, before anything is saved.",
@@ -10277,6 +10595,82 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "McpRuntimeState": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "disconnected",
+          "connecting",
+          "connected",
+          "failed"
+        ]
+      },
+      "McpRuntimeStatus": {
+        "type": "object",
+        "required": [
+          "name",
+          "state",
+          "required",
+          "auth_required",
+          "tool_count"
+        ],
+        "properties": {
+          "auth_required": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "server_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "server_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/McpRuntimeState"
+          },
+          "tool_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "McpRuntimeStatusList": {
+        "type": "object",
+        "required": [
+          "servers"
+        ],
+        "properties": {
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpRuntimeStatus"
+            }
           }
         }
       },
@@ -10300,10 +10694,13 @@
         "required": [
           "name",
           "enabled",
+          "required",
           "transport",
           "args",
           "env",
-          "headers"
+          "env_vars",
+          "headers",
+          "env_headers"
         ],
         "properties": {
           "args": {
@@ -10312,7 +10709,27 @@
               "type": "string"
             }
           },
+          "bearer_token_env_var": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "catalog_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cwd": {
             "type": [
               "string",
               "null"
@@ -10329,6 +10746,39 @@
             "propertyNames": {
               "type": "string"
             }
+          },
+          "env_headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "env_vars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "execution_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "header_helper": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpHeaderHelperConfig"
+              }
+            ]
           },
           "headers": {
             "type": "object",
@@ -10347,6 +10797,17 @@
           },
           "name": {
             "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "startup_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           },
           "transport": {
             "$ref": "#/components/schemas/McpTransportSchema"
@@ -11825,6 +12286,64 @@
           },
           {
             "type": "string"
+          }
+        ]
+      },
+      "RequestField_UpdateMcpHeaderHelperRequest_UpdateMcpHeaderHelperRequest": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "command": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "writeOnly": true
+                },
+                "propertyNames": {
+                  "type": "string",
+                  "writeOnly": true
+                }
+              },
+              "env_vars": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "timeout_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
           }
         ]
       },
@@ -13636,7 +14155,27 @@
               "type": "string"
             }
           },
+          "bearer_token_env_var": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "catalog_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cwd": {
             "type": [
               "string",
               "null"
@@ -13661,6 +14200,45 @@
             "example": {
               "TOKEN": "fake-probe-token"
             }
+          },
+          "env_headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "env_vars": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "execution_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "header_helper": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UpdateMcpHeaderHelperRequest"
+              }
+            ]
           },
           "headers": {
             "type": [
@@ -13688,6 +14266,14 @@
               "null"
             ]
           },
+          "startup_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "stored_name": {
             "type": [
               "string",
@@ -13711,9 +14297,33 @@
       "TestMcpServerResponse": {
         "type": "object",
         "required": [
+          "connected",
+          "auth_required",
           "tools"
         ],
         "properties": {
+          "auth_required": {
+            "type": "boolean"
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "probe": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpProbeResult"
+              }
+            ]
+          },
           "tools": {
             "type": "array",
             "items": {
@@ -14332,6 +14942,57 @@
           }
         }
       },
+      "UpdateMcpHeaderHelperRequest": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "command": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "writeOnly": true
+            },
+            "propertyNames": {
+              "type": "string",
+              "writeOnly": true
+            }
+          },
+          "env_vars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "UpdateMcpServerRequest": {
         "type": "object",
         "description": "Edits a stored server in place. Every field is tri-state: omit it to keep\nwhat is stored, send null to clear it, send a value to replace it.\n\n`env` and `headers` replace the whole map when sent, except that a null\nvalue under a key keeps the stored value for that key — the stored value\nis never echoed back, so this is how an untouched secret survives an edit.",
@@ -14339,7 +15000,16 @@
           "args": {
             "$ref": "#/components/schemas/RequestField_Vec_Vec_String"
           },
+          "bearer_token_env_var": {
+            "$ref": "#/components/schemas/RequestField_String_String"
+          },
+          "catalog_timeout_ms": {
+            "$ref": "#/components/schemas/RequestField_u64_u64"
+          },
           "command": {
+            "$ref": "#/components/schemas/RequestField_String_String"
+          },
+          "cwd": {
             "$ref": "#/components/schemas/RequestField_String_String"
           },
           "enabled": {
@@ -14347,6 +15017,18 @@
           },
           "env": {
             "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_Option_String"
+          },
+          "env_headers": {
+            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_String"
+          },
+          "env_vars": {
+            "$ref": "#/components/schemas/RequestField_Vec_Vec_String"
+          },
+          "execution_timeout_ms": {
+            "$ref": "#/components/schemas/RequestField_u64_u64"
+          },
+          "header_helper": {
+            "$ref": "#/components/schemas/RequestField_UpdateMcpHeaderHelperRequest_UpdateMcpHeaderHelperRequest"
           },
           "headers": {
             "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_Option_String"
@@ -14356,6 +15038,12 @@
           },
           "name": {
             "$ref": "#/components/schemas/RequestField_String_String"
+          },
+          "required": {
+            "$ref": "#/components/schemas/RequestField_bool_bool"
+          },
+          "startup_timeout_ms": {
+            "$ref": "#/components/schemas/RequestField_u64_u64"
           },
           "transport": {
             "$ref": "#/components/schemas/RequestField_String_String"

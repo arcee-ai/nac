@@ -1,0 +1,75 @@
+use super::*;
+
+#[test]
+fn recoverable_publication_conflicts_remain_http_conflicts() {
+    let error: ApiError = McpServerConfigurationStoreError::RecoveryRequired {
+        config: PathBuf::from("/tmp/config.toml"),
+        preserved: PathBuf::from("/tmp/config.toml.saved.tmp"),
+    }
+    .into();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("removes the preserved file"));
+    assert!(error.message.contains("byte-identical"));
+}
+
+#[test]
+fn references_pass_through_and_literals_are_masked() {
+    assert_eq!(redact_value("${GITHUB_TOKEN}"), "${GITHUB_TOKEN}");
+    assert_eq!(redact_value("Bearer ${GITHUB_TOKEN}"), "****");
+    assert_eq!(redact_value("sk-secret${odd"), "****");
+    assert_eq!(redact_value("sk-1234567890abcdef"), "****cdef");
+    assert_eq!(redact_value("short"), "****");
+}
+
+#[test]
+fn merge_map_keeps_stored_values_for_null_entries() {
+    let stored = BTreeMap::from([("Authorization".to_string(), "Bearer real".to_string())]);
+    let sent = BTreeMap::from([
+        ("Authorization".to_string(), None),
+        ("X-Extra".to_string(), Some("literal".to_string())),
+    ]);
+    let merged = merge_map(sent, &stored).unwrap();
+    assert_eq!(merged.get("Authorization").unwrap(), "Bearer real");
+    assert_eq!(merged.get("X-Extra").unwrap(), "literal");
+
+    let missing = BTreeMap::from([("Unknown".to_string(), None)]);
+    assert!(merge_map(missing, &stored).is_err());
+}
+
+#[test]
+fn header_helper_environment_is_redacted_in_views() {
+    let record = McpServerConfigurationRecord {
+        name: "remote".to_string(),
+        enabled: true,
+        transport: MCP_TRANSPORT_STREAMABLE_HTTP.to_string(),
+        url: Some("https://example.com/mcp".to_string()),
+        header_helper: Some(McpHeaderHelperConfig {
+            command: "refresh".to_string(),
+            env: BTreeMap::from([
+                ("TOKEN".to_string(), "literal-super-secret".to_string()),
+                ("REFERENCE".to_string(), "${SAFE_REFERENCE}".to_string()),
+            ]),
+            ..McpHeaderHelperConfig::default()
+        }),
+        ..McpServerConfigurationRecord::default()
+    };
+    let helper = view(record).header_helper.unwrap();
+    assert_eq!(helper.env["TOKEN"], "****cret");
+    assert_eq!(helper.env["REFERENCE"], "${SAFE_REFERENCE}");
+}
+
+#[test]
+fn borrowed_http_credentials_are_bound_to_the_stored_origin() {
+    let record = McpServerConfigurationRecord {
+        name: "remote".to_string(),
+        enabled: true,
+        transport: MCP_TRANSPORT_STREAMABLE_HTTP.to_string(),
+        url: Some("https://trusted.example/mcp".to_string()),
+        ..McpServerConfigurationRecord::default()
+    };
+
+    require_stored_http_origin(true, Some(&record), "https://trusted.example/mcp").unwrap();
+    assert!(require_stored_http_origin(true, Some(&record), "https://other.example/mcp").is_err());
+    assert!(require_stored_http_origin(true, None, "https://trusted.example/mcp").is_err());
+    require_stored_http_origin(false, Some(&record), "https://other.example/mcp").unwrap();
+}

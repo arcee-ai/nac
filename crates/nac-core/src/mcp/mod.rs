@@ -24,6 +24,7 @@ use rmcp::transport::streamable_http_client::{
 use rmcp::ServiceExt;
 use serde::Deserialize;
 use serde_json::Value;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 use url::Url;
@@ -36,12 +37,13 @@ use crate::types::{FunctionDef, ToolDefinition};
 mod config;
 mod file_config;
 mod library;
+mod lifecycle;
 mod naming;
 mod registry;
 mod result;
 mod transport;
 
-pub use config::{McpServerConfig, McpTransportConfig};
+pub use config::{McpDefaults, McpHeaderHelperConfig, McpServerConfig, McpTransportConfig};
 pub use file_config::{
     acquire_mcp_configuration_write_lease, delete_mcp_server_configuration,
     insert_mcp_server_configuration, list_mcp_server_configurations, load_mcp_server_configuration,
@@ -54,6 +56,7 @@ pub use library::{
     embedded_library_entries, fetch_smithery_library_entries, merge_library_entries,
     McpLibraryAuth, McpLibraryEntry,
 };
+pub use lifecycle::{McpRuntimeManager, McpRuntimeState, McpRuntimeStatus};
 pub use registry::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 
 /// A tool a probe discovered on a server, before anything is saved.
@@ -64,6 +67,20 @@ pub struct McpProbedTool {
     pub description: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct McpProbeResult {
+    pub protocol_version: String,
+    pub server_name: Option<String>,
+    pub server_version: Option<String>,
+    pub instructions: Option<String>,
+    pub capabilities: Vec<String>,
+    pub tools: Vec<McpProbedTool>,
+    pub prompt_count: usize,
+    pub resource_count: usize,
+    pub resource_template_count: usize,
+}
+
 /// Connects to a single server, lists its tools and disconnects. This is the
 /// dashboard's "test connection": it runs against an unsaved draft, so no
 /// registry or store is involved and no workspace roots are advertised.
@@ -71,27 +88,30 @@ pub async fn probe_mcp_server(
     name: &str,
     config: &McpServerConfig,
     cwd: &Path,
-) -> Result<Vec<McpProbedTool>> {
+) -> Result<McpProbeResult> {
     let handler = NacMcpClientHandler {
         roots: mcp_roots_for_policy(cwd, None, McpRootPolicy::None)?,
     };
-    let service = timeout(
-        MCP_CONNECT_TIMEOUT,
-        connect_server(name, config, &handler, cwd),
-    )
-    .await
-    .map_err(|_| {
-        anyhow!(
-            "timed out connecting after {}s",
-            MCP_CONNECT_TIMEOUT.as_secs()
-        )
-    })??;
-    let tools = timeout(MCP_TOOL_INVENTORY_TIMEOUT, service.list_all_tools())
+    let defaults = McpDefaults::default();
+    let startup_timeout = config.startup_timeout(&defaults)?;
+    let catalog_timeout = config.catalog_timeout(&defaults)?;
+    let service = timeout(startup_timeout, connect_server(name, config, &handler, cwd))
         .await
         .map_err(|_| {
             anyhow!(
-                "timed out listing tools after {}s",
-                MCP_TOOL_INVENTORY_TIMEOUT.as_secs()
+                "timed out connecting after {}ms",
+                startup_timeout.as_millis()
+            )
+        })??;
+    let peer = service
+        .peer_info()
+        .context("MCP server did not provide initialization metadata")?;
+    let tools = timeout(catalog_timeout, service.list_all_tools())
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "timed out listing tools after {}ms",
+                catalog_timeout.as_millis()
             )
         })?
         .context("failed to list tools")?;
@@ -105,8 +125,66 @@ pub async fn probe_mcp_server(
                 .map(std::string::ToString::to_string),
         })
         .collect();
+    let prompt_count = if peer.capabilities.prompts.is_some() {
+        timeout(catalog_timeout, service.list_all_prompts())
+            .await
+            .map_err(|_| anyhow!("timed out listing prompts"))??
+            .len()
+    } else {
+        0
+    };
+    let resource_count = if peer.capabilities.resources.is_some() {
+        timeout(catalog_timeout, service.list_all_resources())
+            .await
+            .map_err(|_| anyhow!("timed out listing resources"))??
+            .len()
+    } else {
+        0
+    };
+    let resource_template_count = if peer.capabilities.resources.is_some() {
+        timeout(catalog_timeout, service.list_all_resource_templates())
+            .await
+            .map_err(|_| anyhow!("timed out listing resource templates"))??
+            .len()
+    } else {
+        0
+    };
+    let capabilities = capability_names(&peer.capabilities);
+    let result = McpProbeResult {
+        protocol_version: peer.protocol_version.to_string(),
+        server_name: peer.server_info.as_ref().map(|info| info.name.clone()),
+        server_version: peer.server_info.as_ref().map(|info| info.version.clone()),
+        instructions: peer.instructions.clone(),
+        capabilities,
+        tools: probed,
+        prompt_count,
+        resource_count,
+        resource_template_count,
+    };
     let _ = service.cancel().await;
-    Ok(probed)
+    Ok(result)
+}
+
+fn capability_names(capabilities: &rmcp::model::ServerCapabilities) -> Vec<String> {
+    let mut names = Vec::new();
+    for (present, name) in [
+        (capabilities.tools.is_some(), "tools"),
+        (capabilities.prompts.is_some(), "prompts"),
+        (capabilities.resources.is_some(), "resources"),
+        (capabilities.logging.is_some(), "logging"),
+        (capabilities.completions.is_some(), "completions"),
+        (capabilities.experimental.is_some(), "experimental"),
+        (capabilities.extensions.is_some(), "extensions"),
+    ] {
+        if present {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+pub fn mcp_error_requires_authorization(error: &anyhow::Error) -> bool {
+    error.chain().any(authorization_required)
 }
 
 use config::*;
@@ -118,6 +196,9 @@ use transport::*;
 type McpService = RunningService<RoleClient, NacMcpClientHandler>;
 const MCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const MCP_TOOL_INVENTORY_TIMEOUT: Duration = Duration::from_secs(15);
+const MCP_EXECUTION_TIMEOUT: Duration = crate::tools::kernel::DEFAULT_TOOL_TIMEOUT;
+const MIN_TIMEOUT_MS: u64 = 100;
+const MAX_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 
 #[cfg(test)]
 pub(crate) mod test_support {
@@ -634,6 +715,16 @@ headers = {{ Authorization = "Bearer ${{EXA_API_KEY}}" }}
     }
 
     #[test]
+    fn authorization_challenges_are_classified_without_rendering_credentials() {
+        let error = rmcp::transport::streamable_http_client::AuthRequiredError::new(
+            "Bearer realm=\"mcp\"".to_string(),
+        );
+        assert!(authorization_required(&error));
+        let wrapped = anyhow!(error).context("MCP connection failed");
+        assert!(mcp_error_requires_authorization(&wrapped));
+    }
+
+    #[test]
     fn allocate_tool_name_suffixes_collisions() {
         let mut seen = HashMap::new();
         assert_eq!(
@@ -789,6 +880,68 @@ args = ["-c", "true"]
         restore_env("NAC_HOME", original_nac_home);
         restore_env("XDG_CONFIG_HOME", original_xdg);
         let _ = fs::remove_dir_all(&nac_home);
+    }
+
+    #[tokio::test]
+    async fn required_server_failure_rejects_registry_admission() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = env::var_os("NAC_HOME");
+        let original_xdg = env::var_os("XDG_CONFIG_HOME");
+        let nac_home = unique_temp_dir("nac-mcp-required-fail");
+        fs::create_dir_all(&nac_home).unwrap();
+        fs::write(
+            nac_home.join("config.toml"),
+            r#"
+[mcp_servers.required_local]
+required = true
+startup_timeout_ms = 500
+transport = "stdio"
+command = "/bin/sh"
+args = ["-c", "true"]
+"#,
+        )
+        .unwrap();
+        unsafe { env::set_var("NAC_HOME", &nac_home) };
+
+        let cwd = std::env::current_dir().unwrap();
+        let error = McpRegistry::load_reporting_skips(
+            &cwd,
+            None,
+            &PathContext::new(&cwd),
+            McpTransportPolicy::All,
+            McpRootPolicy::None,
+        )
+        .await
+        .err()
+        .expect("required server failure must reject admission");
+        assert!(format!("{error:#}").contains("required MCP server 'required_local'"));
+
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+        let _ = fs::remove_dir_all(&nac_home);
+    }
+
+    #[tokio::test]
+    async fn header_helper_forwards_env_and_parses_bounded_json() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original = env::var_os("NAC_MCP_HELPER_TOKEN");
+        unsafe { env::set_var("NAC_MCP_HELPER_TOKEN", "helper-secret") };
+        let helper = McpHeaderHelperConfig {
+            command: "/bin/sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                "printf '{\"Authorization\":\"Bearer %s\"}' \"$NAC_MCP_HELPER_TOKEN\"".to_string(),
+            ],
+            env_vars: vec!["NAC_MCP_HELPER_TOKEN".to_string()],
+            timeout_ms: Some(1_000),
+            ..McpHeaderHelperConfig::default()
+        };
+        let headers = run_header_helper(&helper, Path::new("/tmp")).await.unwrap();
+        assert_eq!(
+            headers.get("Authorization").map(String::as_str),
+            Some("Bearer helper-secret")
+        );
+        restore_env("NAC_MCP_HELPER_TOKEN", original);
     }
 
     #[tokio::test]
@@ -1096,6 +1249,7 @@ url = {}
                 url: Some(http_url),
                 headers: std::collections::BTreeMap::new(),
                 library_id: Some("saved".to_string()),
+                ..McpServerConfigurationRecord::default()
             },
         )
         .unwrap();

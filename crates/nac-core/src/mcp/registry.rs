@@ -22,10 +22,16 @@ struct McpToolBinding {
     tool_name: String,
     definition: ToolDefinition,
     server: Arc<McpServer>,
+    execution_timeout: Duration,
 }
 
 struct McpServer {
-    _service: Arc<McpService>,
+    name: String,
+    service: tokio::sync::RwLock<Arc<McpService>>,
+    refresh: tokio::sync::Mutex<()>,
+    config: McpServerConfig,
+    handler: NacMcpClientHandler,
+    cwd: PathBuf,
 }
 
 #[derive(Clone)]
@@ -53,12 +59,16 @@ pub(crate) struct McpLoadOutcome {
 fn file_servers_for_policy(
     paths: &PathContext,
     transport_policy: McpTransportPolicy,
-) -> (BTreeMap<String, McpServerConfig>, Option<McpSkippedServer>) {
+) -> (
+    McpDefaults,
+    BTreeMap<String, McpServerConfig>,
+    Option<McpSkippedServer>,
+) {
     let Some(path) = default_config_path(paths) else {
-        return (BTreeMap::new(), None);
+        return (McpDefaults::default(), BTreeMap::new(), None);
     };
     if !super::file_config::mcp_configuration_state_exists(&path) {
-        return (BTreeMap::new(), None);
+        return (McpDefaults::default(), BTreeMap::new(), None);
     }
     let raw = match super::read_mcp_configuration_consistently(&path) {
         Ok(raw) => raw,
@@ -70,6 +80,7 @@ fn file_servers_for_policy(
                 error
             );
             return (
+                McpDefaults::default(),
                 BTreeMap::new(),
                 Some(McpSkippedServer {
                     name: path.display().to_string(),
@@ -79,7 +90,7 @@ fn file_servers_for_policy(
         }
     };
     match mcp_config_for_policy(&raw, transport_policy) {
-        Ok(config) => (config.mcp_servers, None),
+        Ok(config) => (config.mcp, config.mcp_servers, None),
         Err(error) => {
             let reason = format!("invalid config: {error:#}");
             eprintln!(
@@ -88,6 +99,7 @@ fn file_servers_for_policy(
                 error
             );
             (
+                McpDefaults::default(),
                 BTreeMap::new(),
                 Some(McpSkippedServer {
                     name: path.display().to_string(),
@@ -117,7 +129,7 @@ impl McpRegistry {
         transport_policy: McpTransportPolicy,
         root_policy: McpRootPolicy,
     ) -> Result<McpLoadOutcome> {
-        let (servers, config_error) = file_servers_for_policy(paths, transport_policy);
+        let (defaults, servers, config_error) = file_servers_for_policy(paths, transport_policy);
         if let Some(skipped) = config_error {
             return Ok(McpLoadOutcome {
                 registry: None,
@@ -151,6 +163,9 @@ impl McpRegistry {
             let endpoint = endpoint_key(&server_config.transport);
             if let Some(existing) = seen_endpoints.get(&endpoint) {
                 let reason = format!("same endpoint as server '{existing}'");
+                if server_config.required {
+                    bail!("required MCP server '{server_name}' cannot mount: {reason}");
+                }
                 eprintln!("Skipping MCP server '{server_name}': {reason}");
                 skipped.push(McpSkippedServer {
                     name: server_name,
@@ -159,8 +174,29 @@ impl McpRegistry {
                 continue;
             }
 
+            let resolved_timeouts = (|| {
+                Ok::<_, anyhow::Error>((
+                    server_config.startup_timeout(&defaults)?,
+                    server_config.catalog_timeout(&defaults)?,
+                    server_config.execution_timeout(&defaults)?,
+                ))
+            })();
+            let (startup_timeout, catalog_timeout, execution_timeout) = match resolved_timeouts {
+                Ok(timeouts) => timeouts,
+                Err(error) => {
+                    let reason = format!("invalid timeout configuration: {error:#}");
+                    if server_config.required {
+                        bail!("required MCP server '{server_name}' {reason}");
+                    }
+                    skipped.push(McpSkippedServer {
+                        name: server_name,
+                        reason,
+                    });
+                    continue;
+                }
+            };
             let service = match timeout(
-                MCP_CONNECT_TIMEOUT,
+                startup_timeout,
                 connect_server(&server_name, &server_config, &handler, cwd),
             )
             .await
@@ -168,6 +204,9 @@ impl McpRegistry {
                 Ok(Ok(service)) => Arc::new(service),
                 Ok(Err(error)) => {
                     let reason = format!("{error:#}");
+                    if server_config.required {
+                        bail!("required MCP server '{server_name}' failed to connect: {reason}");
+                    }
                     eprintln!(
                         "MCP server '{server_name}' is unavailable and will be skipped: {reason}"
                     );
@@ -179,9 +218,12 @@ impl McpRegistry {
                 }
                 Err(_) => {
                     let reason = format!(
-                        "timed out during connect after {}s",
-                        MCP_CONNECT_TIMEOUT.as_secs()
+                        "timed out during connect after {}ms",
+                        startup_timeout.as_millis()
                     );
+                    if server_config.required {
+                        bail!("required MCP server '{server_name}' {reason}");
+                    }
                     eprintln!("MCP server '{server_name}' {reason} and will be skipped");
                     skipped.push(McpSkippedServer {
                         name: server_name,
@@ -191,12 +233,13 @@ impl McpRegistry {
                 }
             };
 
-            let listed_tools = match timeout(MCP_TOOL_INVENTORY_TIMEOUT, service.list_all_tools())
-                .await
-            {
+            let listed_tools = match timeout(catalog_timeout, service.list_all_tools()).await {
                 Ok(Ok(tools)) => tools,
                 Ok(Err(error)) => {
                     let reason = format!("{error:#}");
+                    if server_config.required {
+                        bail!("required MCP server '{server_name}' failed to list tools: {reason}");
+                    }
                     eprintln!(
                             "MCP server '{server_name}' could not list tools and will be skipped: {reason}"
                         );
@@ -208,9 +251,12 @@ impl McpRegistry {
                 }
                 Err(_) => {
                     let reason = format!(
-                        "timed out while listing tools after {}s",
-                        MCP_TOOL_INVENTORY_TIMEOUT.as_secs()
+                        "timed out while listing tools after {}ms",
+                        catalog_timeout.as_millis()
                     );
+                    if server_config.required {
+                        bail!("required MCP server '{server_name}' {reason}");
+                    }
                     eprintln!("MCP server '{server_name}' {reason} and will be skipped");
                     skipped.push(McpSkippedServer {
                         name: server_name,
@@ -222,7 +268,12 @@ impl McpRegistry {
 
             seen_endpoints.insert(endpoint, server_name.clone());
             let server = Arc::new(McpServer {
-                _service: Arc::clone(&service),
+                name: server_name.clone(),
+                service: tokio::sync::RwLock::new(Arc::clone(&service)),
+                refresh: tokio::sync::Mutex::new(()),
+                config: server_config.clone(),
+                handler: handler.clone(),
+                cwd: cwd.to_path_buf(),
             });
             for tool in listed_tools {
                 let qualified_name = allocate_tool_name(&server_name, &tool.name, &mut seen_names);
@@ -253,6 +304,7 @@ impl McpRegistry {
                         tool_name: tool.name.to_string(),
                         definition,
                         server: Arc::clone(&server),
+                        execution_timeout,
                     }),
                 );
             }
@@ -285,6 +337,12 @@ impl McpRegistry {
             .map(|binding| binding.definition.clone())
     }
 
+    pub(crate) fn execution_timeout(&self, name: &str) -> Option<Duration> {
+        self.tools
+            .get(name)
+            .map(|binding| binding.execution_timeout)
+    }
+
     pub async fn call_tool(&self, name: &str, args: Value, image_results: bool) -> ToolResult {
         let Some(binding) = self.tools.get(name) else {
             return ToolResult {
@@ -310,8 +368,54 @@ impl McpRegistry {
         }
         // Keep the high-level 3.x call: it resolves protocol-version-specific
         // multi-round responses and returns only the final CallToolResult.
-        match binding.server._service.call_tool(params).await {
+        let service = binding.server.service.read().await.clone();
+        match service.call_tool(params.clone()).await {
             Ok(result) => flatten_tool_result(result, image_results).await,
+            Err(error)
+                if binding.server.config.has_header_helper() && authorization_required(&error) =>
+            {
+                let _refresh = binding.server.refresh.lock().await;
+                let refreshed_service = {
+                    let current = binding.server.service.read().await.clone();
+                    if Arc::ptr_eq(&current, &service) {
+                        match connect_server(
+                            &binding.server.name,
+                            &binding.server.config,
+                            &binding.server.handler,
+                            &binding.server.cwd,
+                        )
+                        .await
+                        {
+                            Ok(refreshed) => {
+                                let refreshed = Arc::new(refreshed);
+                                *binding.server.service.write().await = Arc::clone(&refreshed);
+                                refreshed
+                            }
+                            Err(refresh_error) => {
+                                return ToolResult {
+                                    content: format!(
+                                        "Error calling MCP tool '{name}': authentication refresh failed: {refresh_error:#}"
+                                    )
+                                    .into(),
+                                    is_error: true,
+                                };
+                            }
+                        }
+                    } else {
+                        current
+                    }
+                };
+                match refreshed_service.call_tool(params).await {
+                    Ok(result) => flatten_tool_result(result, image_results).await,
+                    Err(error) => ToolResult {
+                        content: format!(
+                            "Error calling MCP tool '{name}' after authentication refresh: {error}"
+                        )
+                        .into(),
+                        is_error: true,
+                    },
+                }
+            }
             Err(error) => ToolResult {
                 content: format!("Error calling MCP tool '{name}': {error}").into(),
                 is_error: true,

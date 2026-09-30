@@ -343,6 +343,10 @@ export type McpProbedTool = ApiSchema<"McpProbedTool">;
 
 export type TestMcpServerResponse = ApiSchema<"TestMcpServerResponse">;
 
+export type McpRuntimeStatus = ApiSchema<"McpRuntimeStatus">;
+
+export type McpRuntimeStatusList = ApiSchema<"McpRuntimeStatusList">;
+
 export type ProviderModel = ApiSchema<"ProviderModel">;
 
 export type ProviderModelsRequest = ApiSchema<"ProviderModelsRequest">;

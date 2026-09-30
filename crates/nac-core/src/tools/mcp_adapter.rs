@@ -11,6 +11,7 @@ struct McpTool {
     definition: ToolDefinition,
     registry: Arc<McpRegistry>,
     image_results: bool,
+    execution_timeout: Duration,
 }
 
 impl kernel::NativeTool for McpTool {
@@ -32,7 +33,7 @@ impl kernel::NativeTool for McpTool {
         requested: Option<Duration>,
     ) -> Result<kernel::ToolTimeout, ToolResult> {
         Ok(kernel::ToolTimeout {
-            duration: requested.unwrap_or(kernel::DEFAULT_TOOL_TIMEOUT),
+            duration: requested.unwrap_or(self.execution_timeout),
             disposition: kernel::ToolTimeoutDisposition::Bounded,
             remote_outcome_uncertain: true,
         })
@@ -88,6 +89,9 @@ pub(super) async fn invoke(
     };
     let snapshot = snapshot(
         definition,
+        registry
+            .execution_timeout(name)
+            .unwrap_or(kernel::DEFAULT_TOOL_TIMEOUT),
         registry,
         services.client.supports_image_tool_results(),
     );
@@ -100,6 +104,7 @@ pub(super) async fn invoke(
 )]
 fn snapshot(
     definition: ToolDefinition,
+    execution_timeout: Duration,
     registry: Arc<McpRegistry>,
     image_results: bool,
 ) -> kernel::ToolSnapshot {
@@ -109,6 +114,7 @@ fn snapshot(
             definition,
             registry,
             image_results,
+            execution_timeout,
         })
         .finish()
         .expect("one imported MCP capability is collision-free")
@@ -155,6 +161,7 @@ mod tests {
                     parameters: serde_json::json!({"type":"object"}),
                 },
             },
+            kernel::DEFAULT_TOOL_TIMEOUT,
             Arc::new(McpRegistry::empty_for_test()),
             false,
         );

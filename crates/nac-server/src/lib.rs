@@ -13,6 +13,8 @@ mod managed_github;
 mod managed_status;
 mod mcp;
 mod mcp_api;
+mod mcp_catalog_api;
+mod mcp_runtime_api;
 mod orchestration;
 mod revert;
 pub(crate) use managed_control::running_target as managed_running_target;
@@ -72,6 +74,7 @@ pub use mcp_api::{
     CreateMcpServerRequest, McpLibraryResponse, McpServerList, McpServerView, TestMcpServerRequest,
     TestMcpServerResponse, UpdateMcpServerRequest,
 };
+pub use mcp_runtime_api::McpRuntimeStatusList;
 pub use revert::{
     RegenerateSessionError, RegenerateSessionRequest, RevertSessionError, RevertSessionRequest,
     RevertSessionResponse,
@@ -313,6 +316,7 @@ pub struct SessionManager {
 
 struct SessionManagerInner {
     root_cwd: PathBuf,
+    mcp_runtime: Arc<nac_core::mcp_configurations::McpRuntimeManager>,
     store_path: PathBuf,
     _store_ownership: application::persistence::StoreOwnership,
     worker_executable: PathBuf,
@@ -561,6 +565,9 @@ impl SessionManager {
         };
         let manager = Self {
             inner: Arc::new(SessionManagerInner {
+                mcp_runtime: Arc::new(nac_core::mcp_configurations::McpRuntimeManager::new(
+                    root_cwd.clone(),
+                )),
                 root_cwd,
                 store_path: store_path.clone(),
                 _store_ownership: store_ownership,

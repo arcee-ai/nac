@@ -41,6 +41,8 @@ import type {
   McpLibraryResponse,
   McpServerList,
   McpServerView,
+  McpRuntimeStatus,
+  McpRuntimeStatusList,
   CreateMcpServerRequest,
   UpdateMcpServerRequest,
   TestMcpServerRequest,
@@ -385,6 +387,27 @@ export const api = {
     request<TestMcpServerResponse>("POST", "/mcp_library/servers/test", {
       body: payload,
     }),
+
+  listMcpRuntimeStatus: (signal?: AbortSignal) =>
+    request<McpRuntimeStatusList>("GET", "/mcp_library/servers/status", { signal }),
+
+  connectMcpServer: (serverName: string) =>
+    request<McpRuntimeStatus>(
+      "POST",
+      `/mcp_library/servers/${encodeURIComponent(serverName)}/connect`,
+    ),
+
+  disconnectMcpServer: (serverName: string) =>
+    request<McpRuntimeStatus>(
+      "POST",
+      `/mcp_library/servers/${encodeURIComponent(serverName)}/disconnect`,
+    ),
+
+  reloadMcpServer: (serverName: string) =>
+    request<McpRuntimeStatus>(
+      "POST",
+      `/mcp_library/servers/${encodeURIComponent(serverName)}/reload`,
+    ),
 
   /** Resolves a saved configuration's credential and lists its models. */
   resolveModelConfig: (configId: string) =>
