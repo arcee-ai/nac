@@ -238,6 +238,7 @@ it("shows and preserves the inherited primary and light models for a direct chat
         allow_insecure_http: false,
         api_key_env: "OPENAI_API_KEY",
         reasoning_effort: "high",
+        orchestrator_compaction_threshold: null,
         extra_headers: { "X-Test": "yes" },
         light_model: light,
       }),

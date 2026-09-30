@@ -10,9 +10,15 @@ import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { type CatalogPick, defaultCatalogPick, resolveCatalogModel } from "@/app/lib/catalog";
-import { providerLabel } from "@/app/lib/providers";
+import { providerLabel, providerUsesApiKey } from "@/app/lib/providers";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
-import { useModelCatalog, useReadyProviderModels } from "@/app/services/queries";
+import {
+  useModelCatalog,
+  useModelConfigs,
+  useResolvedModelConfig,
+  useReadyProviderModels,
+} from "@/app/services/queries";
+import { savedModelSelection } from "@/app/features/setup/modelSelection";
 import type { ReasoningEffort } from "@/app/types/api";
 
 const PRIMARY_EFFORT_OPTIONS: SelectItem[] = [
@@ -31,16 +37,35 @@ interface PrimaryChoice {
  * outside this component.
  */
 export function PrimaryModelSection({
-  initial,
+  initial: suppliedInitial,
+  inheritSavedDefault = false,
   onChange,
 }: {
   initial?: ConfigurationsPanelInitial;
+  inheritSavedDefault?: boolean;
   onChange: (selection: LaunchModelSelection | null) => void;
 }) {
   const catalog = useModelCatalog();
   const managedModel = useManagedModelProfile();
   const liveByBackend = useReadyProviderModels(catalog.data);
   const [chosen, setChosen] = useState<PrimaryChoice | null>(null);
+  const saved = useModelConfigs(inheritSavedDefault && !suppliedInitial);
+  const latest =
+    inheritSavedDefault && !suppliedInitial ? saved.data?.configurations.at(-1) : undefined;
+  const initial = useMemo(
+    () =>
+      suppliedInitial ??
+      (latest
+        ? { ...savedModelSelection(latest), extra_headers: latest.extra_headers }
+        : undefined),
+    [suppliedInitial, latest],
+  );
+  const resolved = useResolvedModelConfig(latest && !chosen ? latest.config_id : null, "");
+  const savedPending =
+    inheritSavedDefault &&
+    !suppliedInitial &&
+    !chosen &&
+    (saved.isPending || (latest && !resolved.data));
 
   const initialChoice = useMemo<PrimaryChoice | null>(
     () =>
@@ -56,10 +81,32 @@ export function PrimaryModelSection({
         : null,
     [initial],
   );
+  const managedIndex = managedModel.defaultPick
+    ? liveByBackend.get(managedModel.defaultPick.backend)
+    : undefined;
+  const managedPending =
+    managedModel.configured &&
+    managedModel.credentialReady &&
+    (catalog.isPending || managedIndex === null);
+  const managedDefault =
+    managedIndex === undefined ||
+    (managedModel.defaultPick &&
+      managedIndex?.some((entry) => entry.id === managedModel.defaultPick?.model))
+      ? managedModel.defaultPick
+      : null;
   const fallback = useMemo(() => defaultCatalogPick(catalog.data), [catalog.data]);
   const effective = useMemo<PrimaryChoice | null>(
-    () => chosen ?? initialChoice ?? (fallback ? { pick: fallback, effort: "" } : null),
-    [chosen, initialChoice, fallback],
+    () =>
+      chosen ??
+      initialChoice ??
+      (managedModel.configured
+        ? managedDefault
+          ? { pick: managedDefault, effort: "" }
+          : null
+        : fallback
+          ? { pick: fallback, effort: "" }
+          : null),
+    [chosen, initialChoice, fallback, managedDefault, managedModel.configured],
   );
   const provider = catalog.data?.providers.find((entry) => entry.id === effective?.pick.backend);
   const preservesInitialRoute = Boolean(
@@ -70,8 +117,28 @@ export function PrimaryModelSection({
     (effective && managedModel.matches(effective.pick) && managedModel.credentialReady),
   );
 
+  const isManagedPick = effective ? managedModel.matches(effective.pick) : false;
+  const effectiveIndex =
+    isManagedPick && effective ? liveByBackend.get(effective.pick.backend) : undefined;
   const selection = useMemo<LaunchModelSelection | null>(() => {
-    if (!effective || !effective.pick.baseUrl) return null;
+    if (
+      savedPending ||
+      managedModel.initializing ||
+      managedPending ||
+      !effective ||
+      !effective.pick.baseUrl
+    )
+      return null;
+    if (isManagedPick) {
+      const index = effectiveIndex;
+      if (
+        !managedModel.credentialReady ||
+        index === null ||
+        (index && !index.some((entry) => entry.id === effective.pick.model))
+      )
+        return null;
+    }
+    if (!providerUsesApiKey(effective.pick.backend) && !providerReady) return null;
     if (preservesInitialRoute && initial) {
       return {
         kind: "resolved",
@@ -82,7 +149,9 @@ export function PrimaryModelSection({
         api_key_env: initial.api_key_env,
         reasoning_effort: effective.effort || null,
         extra_headers: initial.extra_headers,
-        light_model: undefined,
+        light_model: initial.light_model,
+        orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
+        config_id: initial.config_id,
       };
     }
     if (!providerReady) return null;
@@ -99,7 +168,19 @@ export function PrimaryModelSection({
       extra_headers: null,
       light_model: undefined,
     };
-  }, [effective, initial, preservesInitialRoute, provider, providerReady]);
+  }, [
+    effective,
+    initial,
+    preservesInitialRoute,
+    provider,
+    providerReady,
+    managedModel.initializing,
+    managedModel.credentialReady,
+    isManagedPick,
+    managedPending,
+    effectiveIndex,
+    savedPending,
+  ]);
 
   useEffect(() => onChange(selection), [onChange, selection]);
 
@@ -158,9 +239,15 @@ export function PrimaryModelSection({
           />
         }
       />
+      {latest && resolved.isError ? (
+        <p role="alert" className="text-micro text-error-primary">
+          The saved project setup could not be resolved. Review it in Advanced or choose another
+          model.
+        </p>
+      ) : null}
       {effective && !preservesInitialRoute && !providerReady ? (
         <p className="text-micro text-error-primary" role="alert">
-          Connect {providerLabel(effective.pick.backend)} in Advanced provider setup before
+          Connect {providerLabel(effective.pick.backend)} in Provider connections or Advanced before
           selecting this model.
         </p>
       ) : null}

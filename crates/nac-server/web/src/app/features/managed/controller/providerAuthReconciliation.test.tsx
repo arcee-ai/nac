@@ -125,3 +125,96 @@ it("refetches the unified catalog when logout removes readiness", async () => {
     client.clear();
   }
 });
+
+it("does not open a provider tab or cancel the durable login when its view detaches during start", async () => {
+  const pending = Promise.withResolvers<Awaited<ReturnType<typeof api.startManagedLogin>>>();
+  vi.spyOn(api, "startManagedLogin").mockReturnValue(pending.promise);
+  const cancel = vi.spyOn(api, "cancelManagedLogin").mockResolvedValue(undefined);
+  const open = vi.fn();
+  vi.stubGlobal("open", open);
+  const client = new QueryClient();
+  const hook = renderHook(() => useDeviceLogin(), { wrapper: wrapper(client) });
+  let starting: Promise<void> | undefined;
+  act(() => {
+    starting = hook.result.current.start("codex");
+  });
+  hook.unmount();
+  pending.resolve({
+    provider: "codex",
+    login_id: "late",
+    verification_uri: "https://example.test/device",
+    user_code: "ABCD",
+    expires_in_secs: 600,
+  });
+  await starting;
+  expect(open).not.toHaveBeenCalled();
+  expect(cancel).not.toHaveBeenCalled();
+  client.clear();
+});
+
+it("explicit cancellation during start cancels the eventual server identity exactly once", async () => {
+  const pending = Promise.withResolvers<Awaited<ReturnType<typeof api.startManagedLogin>>>();
+  const begin = vi.spyOn(api, "startManagedLogin").mockReturnValue(pending.promise);
+  const cancel = vi.spyOn(api, "cancelManagedLogin").mockResolvedValue(undefined);
+  const open = vi.fn();
+  vi.stubGlobal("open", open);
+  const client = new QueryClient();
+  const hook = renderHook(() => useDeviceLogin(), { wrapper: wrapper(client) });
+  let starting: Promise<void> | undefined;
+  act(() => {
+    starting = hook.result.current.start("codex");
+  });
+  await act(async () => {
+    await hook.result.current.start("codex");
+    await hook.result.current.cancel();
+  });
+  await act(async () => {
+    pending.resolve({
+      provider: "codex",
+      login_id: "cancelled",
+      verification_uri: "https://example.test/device",
+      user_code: "ABCD",
+      expires_in_secs: 600,
+    });
+    await starting;
+  });
+  expect(begin).toHaveBeenCalledTimes(1);
+  expect(cancel).toHaveBeenCalledExactlyOnceWith("codex", "cancelled");
+  expect(hook.result.current.state.status).toBe("idle");
+  expect(open).not.toHaveBeenCalled();
+  hook.unmount();
+  client.clear();
+});
+
+it("settles host readiness and catalog after a completed observation detaches, without a late success callback", async () => {
+  const pending = Promise.withResolvers<Awaited<ReturnType<typeof api.pollManagedLogin>>>();
+  vi.stubGlobal("open", vi.fn());
+  vi.spyOn(api, "startManagedLogin").mockResolvedValue({
+    provider: "codex",
+    login_id: "origin",
+    verification_uri: "https://example.test/device",
+    user_code: "ABCD",
+    expires_in_secs: 600,
+  });
+  const poll = vi.spyOn(api, "pollManagedLogin").mockReturnValue(pending.promise);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  const success = vi.fn();
+  const hook = renderHook(() => useDeviceLogin(success), { wrapper: wrapper(client) });
+  await act(async () => {
+    await hook.result.current.start("codex");
+  });
+  await waitFor(() => expect(poll).toHaveBeenCalled());
+  const signal = poll.mock.calls[0]?.[2];
+  hook.unmount();
+  expect(signal?.aborted).toBe(true);
+  pending.resolve({ state: "complete", auth: { provider: "codex", signed_in: true } } as Awaited<
+    ReturnType<typeof api.pollManagedLogin>
+  >);
+  await waitFor(() =>
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.managedHostStatus }),
+  );
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.modelCatalog });
+  expect(success).not.toHaveBeenCalled();
+  client.clear();
+});

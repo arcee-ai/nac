@@ -4,17 +4,24 @@ import {
   visibleSessions,
   firstChatAdmission,
 } from "@/app/features/ui-policy/policy";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { Button, ButtonVariant, Loader, LoaderSize, Modal, ModalSize } from "@/app/atoms";
 import {
-  ConfigurationsPanel,
   type ConfigurationsPanelInitial,
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
-import { PrimaryModelSection } from "@/app/components/modals/PrimaryModelSection";
+import { ModelSetupSection } from "@/app/features/setup/ModelSetupSection";
+import { useSetupAction } from "@/app/features/setup/useSetupAction";
+import { createConfiguredChat } from "@/app/features/setup/workflow";
+import {
+  classifySetupFailure,
+  setupFailureMessage,
+  setupReconciliation,
+} from "@/app/features/setup/browserAdapters";
 import { SessionBehaviorPicker } from "@/app/components/modals/SessionBehaviorPicker";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { inheritPrimaryCredential } from "@/app/lib/modelConfig";
@@ -22,9 +29,7 @@ import {
   newestCreatedPrimarySessionForProject,
   newestPrimarySessionForProject,
 } from "@/app/lib/projects";
-import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
-import { useToast } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import {
   useCreateModelConfig,
@@ -71,6 +76,9 @@ function fromSavedConfiguration(record: ModelConfigurationRecord): InheritedMode
       api_key_env: record.api_key_env ?? null,
       reasoning_effort: record.reasoning_effort ?? null,
       extra_headers: record.extra_headers,
+      orchestrator_compaction_threshold: record.orchestrator_compaction_threshold,
+      light_model: record.light_model ?? null,
+      config_id: record.config_id,
     },
     light: record.light_model ?? null,
   };
@@ -91,6 +99,8 @@ function fromSessionConfiguration(
       api_key_env: config.api_key_env ?? null,
       reasoning_effort: config.reasoning_effort ?? null,
       extra_headers: parseHeaders(config.extra_headers_json),
+      orchestrator_compaction_threshold: config.orchestrator_compaction_threshold,
+      light_model: config.light_model ?? null,
     },
     light: config.light_model ?? null,
   };
@@ -107,7 +117,9 @@ export function NewChatModal({
 }) {
   const mounted = useExitTransition(projectId !== null);
   if (!mounted || projectId === null) return null;
-  return <NewChatForm projectId={projectId} firstChat={firstChat} onClose={onClose} />;
+  return (
+    <NewChatForm key={projectId} projectId={projectId} firstChat={firstChat} onClose={onClose} />
+  );
 }
 
 function NewChatForm({
@@ -120,16 +132,8 @@ function NewChatForm({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
-  const activation = useRef({ active: true, reads: new AbortController() });
-  useEffect(() => {
-    const current = { active: true, reads: new AbortController() };
-    activation.current = current;
-    return () => {
-      current.active = false;
-      current.reads.abort();
-    };
-  }, [projectId]);
-  const toast = useToast();
+  const action = useSetupAction();
+  const client = useQueryClient();
   const createSession = useCreateSession();
   const createModelConfig = useCreateModelConfig();
   const projects = useProjects();
@@ -142,7 +146,6 @@ function NewChatForm({
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [light, setLight] = useState<LightSelection>({ mode: "single", light: null });
   const [error, setError] = useState("");
-  const [advanced, setAdvanced] = useState(false);
 
   const project = projects.data?.projects.find((entry) => entry.project_id === projectId) ?? null;
   const sibling = newestCreatedPrimarySessionForProject(sessions.data ?? [], projectId);
@@ -166,16 +169,30 @@ function NewChatForm({
     sessions.isPending ||
     modelConfigs.isPending ||
     (Boolean(sibling) && !project?.default_model_config_id && siblingConfig.isPending);
-  const busy = createSession.isPending || createModelConfig.isPending;
+  const inheritanceError =
+    projects.error ||
+    sessions.error ||
+    siblingConfig.error ||
+    (project?.default_model_config_id &&
+      (modelConfigs.error || (!modelConfigs.isPending && !defaultConfig)
+        ? new Error(
+            "The project default is unavailable. Review the project settings before creating a chat.",
+          )
+        : null));
+  const busy = action.busy;
 
   const onSelection = useCallback((next: LaunchModelSelection | null) => {
     setSelection(next);
-    setError("");
+    setError((current) =>
+      /refresh and review|reopen setup|outcome is unknown/i.test(current) ? current : "",
+    );
   }, []);
 
   const onLight = useCallback((next: LightSelection) => {
     setLight(next);
-    setError("");
+    setError((current) =>
+      /refresh and review|reopen setup|outcome is unknown/i.test(current) ? current : "",
+    );
   }, []);
 
   // A saved setup selected inside the primary picker owns its light-model
@@ -188,7 +205,7 @@ function NewChatForm({
   const selectedLightKey = JSON.stringify(selectedLight);
 
   const submit = async () => {
-    if (busy || inheritancePending) return;
+    if (busy || action.needsReview || inheritancePending || Boolean(inheritanceError)) return;
     if (!selection) {
       setError("Choose the primary model before creating this chat.");
       return;
@@ -197,97 +214,113 @@ function NewChatForm({
       setError("Pick the light model before creating this chat.");
       return;
     }
-    const current = activation.current;
     try {
-      if (firstChat) {
-        const [projects, sessions] = await Promise.all([
-          api.listProjects(current.reads.signal),
-          api.listSessions({ projectId }, current.reads.signal),
-        ]);
-        if (!current.active) return;
-        if (!projects.projects.some((project) => project.project_id === projectId)) {
-          onClose();
-          navigate(routes.list(), { replace: true });
-          return;
-        }
-        const existing = newestPrimarySessionForProject(
-          visibleSessions(policy, sessions),
-          projectId,
-        );
-        if (existing) {
-          onClose();
-          navigate(routes.session(existing.summary.session_id), { replace: true });
-          return;
-        }
-      }
+      const destination = await action.run((current) =>
+        createConfiguredChat({
+          current: current.current,
+          classify: classifySetupFailure,
+          reconcile: setupReconciliation(client),
+          existing: firstChat
+            ? async () => {
+                const [projects, sessions] = await Promise.all([
+                  api.listProjects(current.signal),
+                  api.listSessions({ projectId }, current.signal),
+                ]);
+                if (!projects.projects.some((project) => project.project_id === projectId))
+                  return routes.list();
+                const existing = newestPrimarySessionForProject(
+                  visibleSessions(policy, sessions),
+                  projectId,
+                );
+                return existing ? routes.session(existing.summary.session_id) : null;
+              }
+            : undefined,
+          persistsModel: selection.kind === "save",
+          model: async () => {
+            let selected: {
+              backend: BackendKind;
+              model: string;
+              base_url: string;
+              allow_insecure_http: boolean;
+              api_key_env: string | null;
+              reasoning_effort: string | null;
+              extra_headers: Record<string, string> | null;
+              orchestrator_compaction_threshold?: number | null;
+            };
+            if (selection.kind === "save") {
+              const record = await createModelConfig.mutateAsync({
+                ...selection.request,
+                light_model: policy.orchestrationEnabled
+                  ? light.mode === "dual"
+                    ? light.light
+                    : null
+                  : (selectedLight ?? null),
+              });
+              if (current.current())
+                setSelection({
+                  kind: "resolved",
+                  ...record,
+                  backend: record.backend as BackendKind,
+                  api_key_env: record.api_key_env ?? null,
+                  reasoning_effort: record.reasoning_effort ?? null,
+                  light_model: record.light_model ?? null,
+                });
+              selected = {
+                // SAFETY: the server echoes the BackendKind wire value it stored.
+                backend: record.backend as BackendKind,
+                model: record.model,
+                base_url: record.base_url,
+                allow_insecure_http: record.allow_insecure_http ?? false,
+                api_key_env: record.api_key_env ?? null,
+                reasoning_effort: record.reasoning_effort ?? null,
+                extra_headers: record.extra_headers,
+                orchestrator_compaction_threshold: record.orchestrator_compaction_threshold ?? null,
+              };
+            } else {
+              selected = selection;
+            }
 
-      let selected: {
-        backend: BackendKind;
-        model: string;
-        base_url: string;
-        allow_insecure_http: boolean;
-        api_key_env: string | null;
-        reasoning_effort: string | null;
-        extra_headers: Record<string, string> | null;
-        orchestrator_compaction_threshold?: number | null;
-      };
-      if (selection.kind === "save") {
-        const record = await createModelConfig.mutateAsync({
-          ...selection.request,
-          light_model: policy.orchestrationEnabled
-            ? light.mode === "dual"
-              ? light.light
-              : null
-            : (selectedLight ?? null),
-        });
-        if (!current.active) return;
-        selected = {
-          // SAFETY: the server echoes the BackendKind wire value it stored.
-          backend: record.backend as BackendKind,
-          model: record.model,
-          base_url: record.base_url,
-          allow_insecure_http: record.allow_insecure_http ?? false,
-          api_key_env: record.api_key_env ?? null,
-          reasoning_effort: record.reasoning_effort ?? null,
-          extra_headers: record.extra_headers,
-          orchestrator_compaction_threshold: record.orchestrator_compaction_threshold ?? null,
-        };
-      } else {
-        selected = selection;
+            return selected;
+          },
+          chat: async (selected) => {
+            const finalLight = !policy.orchestrationEnabled
+              ? (selectedLight ?? null)
+              : light.mode === "dual" && light.light
+                ? inheritPrimaryCredential(light.light, selected.backend, selected.api_key_env)
+                : null;
+            const request: CreateSessionRequest = {
+              project_id: projectId,
+              behavior: creationBehavior(policy, behavior),
+              first_chat: firstChat && firstChatAdmission(policy, sessions.data ?? [], projectId),
+              first_chat_same_behavior: !policy.orchestrationEnabled,
+              backend: selected.backend,
+              model: selected.model,
+              base_url: selected.base_url,
+              allow_insecure_http: selected.allow_insecure_http,
+              api_key_env: selected.api_key_env,
+              reasoning_effort: selected.reasoning_effort,
+              extra_headers: selected.extra_headers,
+              // Explicit null matters: it lets a user turn an inherited dual-model
+              // project default into a single-model chat without changing the project.
+              light_model: finalLight,
+            };
+            if (selected.orchestrator_compaction_threshold !== undefined) {
+              request.orchestrator_compaction_threshold =
+                selected.orchestrator_compaction_threshold;
+            }
+            const snapshot = await createSession.mutateAsync(request);
+            return snapshot.metadata.session_id
+              ? routes.session(snapshot.metadata.session_id)
+              : routes.project(projectId);
+          },
+        }),
+      );
+      if (destination) {
+        onClose();
+        navigate(destination, { replace: firstChat });
       }
-
-      const finalLight = !policy.orchestrationEnabled
-        ? (selectedLight ?? null)
-        : light.mode === "dual" && light.light
-          ? inheritPrimaryCredential(light.light, selected.backend, selected.api_key_env)
-          : null;
-      const request: CreateSessionRequest = {
-        project_id: projectId,
-        behavior: creationBehavior(policy, behavior),
-        first_chat: firstChat && firstChatAdmission(policy, sessions.data ?? [], projectId),
-        first_chat_same_behavior: !policy.orchestrationEnabled,
-        backend: selected.backend,
-        model: selected.model,
-        base_url: selected.base_url,
-        allow_insecure_http: selected.allow_insecure_http,
-        api_key_env: selected.api_key_env,
-        reasoning_effort: selected.reasoning_effort,
-        extra_headers: selected.extra_headers,
-        // Explicit null matters: it lets a user turn an inherited dual-model
-        // project default into a single-model chat without changing the project.
-        light_model: finalLight,
-      };
-      if (selected.orchestrator_compaction_threshold !== undefined) {
-        request.orchestrator_compaction_threshold = selected.orchestrator_compaction_threshold;
-      }
-      const snapshot = await createSession.mutateAsync(request);
-      if (!current.active) return;
-      const sessionId = snapshot.metadata.session_id;
-      onClose();
-      if (sessionId) navigate(routes.session(sessionId));
     } catch (error) {
-      if (!current.active) return;
-      toast.error(`Failed to start a chat: ${humanErrorText(toRunError(error))}`);
+      setError(setupFailureMessage(error));
     }
   };
 
@@ -308,7 +341,13 @@ function NewChatForm({
         <Button
           variant={ButtonVariant.Primary}
           loading={busy}
-          disabled={busy || inheritancePending || !selection}
+          disabled={
+            busy ||
+            action.needsReview ||
+            inheritancePending ||
+            Boolean(inheritanceError) ||
+            !selection
+          }
           onClick={() => void submit()}
         >
           Create chat
@@ -318,32 +357,34 @@ function NewChatForm({
       {policy.orchestrationEnabled ? (
         <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
       ) : null}
-      {inheritancePending ? (
+      {inheritanceError ? (
+        <p role="alert" className="text-micro text-error-primary">
+          The inherited settings could not be loaded. Reopen New Chat to refresh and review them.
+        </p>
+      ) : inheritancePending ? (
         <div className="flex items-center gap-2 py-6 text-micro text-basic-muted" role="status">
           <Loader size={LoaderSize.Micro} />
           Loading the project's model settings…
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {advanced ? (
-            <ConfigurationsPanel
-              invalid={Boolean(error)}
-              errorText={error || undefined}
-              initial={inherited?.initial}
-              onChange={onSelection}
-            />
-          ) : (
-            <PrimaryModelSection initial={inherited?.initial} onChange={onSelection} />
-          )}
-          <Button
-            variant={ButtonVariant.Secondary}
-            onClick={() => {
-              setAdvanced((value) => !value);
-              setError("");
-            }}
-          >
-            {advanced ? "Back to unified models" : "Advanced presets and provider setup"}
-          </Button>
+          <p className="text-micro text-basic-muted">
+            {defaultConfig
+              ? "Inherited from the project default"
+              : inherited
+                ? "Inherited from the latest chat"
+                : "No saved project model default"}
+            {inherited
+              ? `: ${inherited.initial.model} · ${inherited.initial.backend} · reasoning ${inherited.initial.reasoning_effort ?? "model default"}.`
+              : "."}{" "}
+            Changes below override this chat only.
+          </p>
+          <ModelSetupSection
+            initial={inherited?.initial}
+            onChange={onSelection}
+            invalid={Boolean(error)}
+            errorText={error || undefined}
+          />
           {policy.orchestrationEnabled ? (
             <LightModelSection
               key={selectedLightKey}
@@ -351,11 +392,6 @@ function NewChatForm({
               behavior={behavior}
               onChange={onLight}
             />
-          ) : null}
-          {error && !advanced ? (
-            <p className="text-micro text-error-primary" role="alert">
-              {error}
-            </p>
           ) : null}
         </div>
       )}

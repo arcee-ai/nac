@@ -359,6 +359,74 @@ it("preserves exact inherited advanced settings when duplicate presets share bas
   }
 });
 
+it("selects the entire saved tuple even when discovery only offers the previous session model", async () => {
+  const preset = {
+    config_id: "exact-preset",
+    name: "Exact future setup",
+    backend: "openai-responses" as const,
+    model: "gpt-5.6-terra",
+    base_url: "https://gateway.example/v1",
+    allow_insecure_http: false,
+    api_key_env: "EXACT_PRESET_KEY",
+    reasoning_effort: "low" as const,
+    extra_headers: { "X-Preset": "exact" },
+    light_model: null,
+    orchestrator_compaction_threshold: null,
+    created_at: "2026-09-08T00:00:00Z",
+    updated_at: "2026-09-08T00:00:00Z",
+  };
+  vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
+  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
+  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [preset] });
+  vi.spyOn(api, "resolveModelConfig").mockResolvedValue({
+    ...preset,
+    models: [{ id: "gpt-5.6-sol", display_name: "Previous session model" }],
+    models_error: null,
+  });
+  const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <ConfigurationsPanel
+          invalid={false}
+          initial={{
+            backend: preset.backend,
+            model: "gpt-5.6-sol",
+            base_url: preset.base_url,
+            api_key_env: "PREVIOUS_KEY",
+            reasoning_effort: "high",
+            extra_headers: {},
+          }}
+          onChange={onChange}
+        />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: "Create New" }));
+    fireEvent.click(await screen.findByText(preset.name));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith({
+        kind: "resolved",
+        config_id: preset.config_id,
+        backend: preset.backend,
+        model: preset.model,
+        base_url: preset.base_url,
+        allow_insecure_http: false,
+        api_key_env: preset.api_key_env,
+        reasoning_effort: preset.reasoning_effort,
+        extra_headers: preset.extra_headers,
+        light_model: null,
+        orchestrator_compaction_threshold: null,
+      }),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
 it("emits a custom public HTTPS endpoint without a separate trust repair", async () => {
   vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
   vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });

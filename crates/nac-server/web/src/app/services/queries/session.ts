@@ -315,6 +315,7 @@ export interface RenameSessionVariables {
 export function useUpdatePresentation() {
   const invalidate = useQueryInvalidators();
   return useMutation({
+    retry: false,
     mutationFn: ({ id, title, pinned, expectedVersion }: RenameSessionVariables) =>
       api.updatePresentation(id, {
         title,
@@ -392,6 +393,7 @@ export function useUpdateConfig() {
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({ id, patch }: { id: string; patch: UpdateConfigRequest }) =>
       api.updateConfig(id, patch),
     onSuccess: (_data, { id }) => {

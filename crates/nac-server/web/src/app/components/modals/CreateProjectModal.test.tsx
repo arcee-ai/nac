@@ -183,6 +183,9 @@ it("default project creation requests direct without clearing a hidden dual pres
   const { client, view } = renderModal(false);
   try {
     expect(screen.queryByRole("radiogroup")).toBeNull();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Select dual preset" }));
     expect(screen.queryByRole("button", { name: "Use one model" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Create Project" }));

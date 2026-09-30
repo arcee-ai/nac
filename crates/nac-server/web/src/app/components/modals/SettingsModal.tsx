@@ -1,4 +1,5 @@
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -10,27 +11,16 @@ import {
   IconName,
   Input,
   InputSize,
-  InputWrapper,
-  Loader,
-  LoaderSize,
   Modal,
   ModalSize,
-  Select,
-  type SelectItem,
   Separator,
   StickyButton,
   TextArea,
   TextAreaSize,
-  Tooltip,
-  TooltipPosition,
 } from "@/app/atoms";
 import { SshBadge } from "@/app/components/SshBadge";
-import {
-  ConfigurationsPanel,
-  type LaunchModelSelection,
-} from "@/app/components/modals/ConfigurationsPanel";
+import { type LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
-import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
 import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
@@ -38,10 +28,7 @@ import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { matchesManagedModelPick } from "@/app/features/managed/model";
 import { useManagedHostStatus } from "@/app/features/managed/queries";
 import { resolveCatalogModel } from "@/app/lib/catalog";
-import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
-import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
-import { isGeneratedCredentialName, MASKED_KEY, type Validation } from "@/app/lib/apiKey";
 import {
   inheritPrimaryCredential,
   buildSettingsPatch,
@@ -50,27 +37,33 @@ import {
   type SettingsInitialValues,
 } from "@/app/lib/modelConfig";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
-import { managedAuthLabel } from "@/app/lib/providers";
-import { humanErrorText, toRunError } from "@/app/lib/providerError";
-import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { ApiError } from "@/app/services/api";
+import { useToast } from "@/app/providers/ToastProvider";
+import { api } from "@/app/services/api";
+import { ModelSetupSection } from "@/app/features/setup/ModelSetupSection";
+import { savedModelSelection } from "@/app/features/setup/modelSelection";
+import { saveSettings } from "@/app/features/setup/workflow";
+import { useSetupAction } from "@/app/features/setup/useSetupAction";
 import {
-  useManagedLogout,
-  useManagedProviderModels,
+  ConfigurationChanged,
+  SetupValidation,
+  classifySetupFailure,
+  setupFailureMessage,
+  setupReconciliation,
+} from "@/app/features/setup/browserAdapters";
+import {
   useCreateModelConfig,
   useModelCatalog,
   useSessionConfig,
-  useSessionSnapshot,
   useSessionSummary,
   useUpdateConfig,
   useUpdatePresentation,
+  useUpdateProject,
 } from "@/app/services/queries";
 import { sshTargetFromSummary, useSshConnectionStatus } from "@/app/store/sshConnectionStore";
 import type {
   BackendKind,
   LightModelSettings,
   RawSessionConfig,
-  SessionMetadata,
   SessionSummarySnapshot,
   SshTarget,
 } from "@/app/types/api";
@@ -100,21 +93,6 @@ function parseHeadersJson(json: string | null | undefined): {
   } catch {
     return { headers: {}, invalid: true };
   }
-}
-
-function initialFromMetadata(meta: SessionMetadata): SettingsInitialValues {
-  return {
-    model: meta.model,
-    backend: meta.backend,
-    base_url: meta.base_url ?? "",
-    allow_insecure_http: false,
-    reasoning_effort: meta.reasoning_effort || null,
-    api_key_env: meta.api_key_env || null,
-    extra_headers: meta.extra_headers ?? {},
-    // SessionMetadata does not carry the compaction threshold; the config
-    // row does, and is merged in by the caller when available.
-    orchestrator_compaction_threshold: null,
-  };
 }
 
 function initialFromConfig(config: RawSessionConfig): SettingsInitialValues {
@@ -182,7 +160,6 @@ export function SettingsModal({
   // Keyed on `mounted` rather than `open`: dropping the queries the moment the
   // dialog starts closing would blank the form out mid-slide.
   const mounted = useExitTransition(open);
-  const { data: snapshot } = useSessionSnapshot(mounted ? id : null);
   const { data: entry, isLoading: isSummaryLoading } = useSessionSummary(mounted ? id : null);
   // Fetched for diagnostics ("repair required") and as a fallback source when
   // the live snapshot is unavailable.
@@ -190,19 +167,7 @@ export function SettingsModal({
 
   if (!mounted || !id) return null;
 
-  const meta = snapshot?.metadata;
-  const storedHeaders = parseHeadersJson(config?.extra_headers_json);
-  const initial = meta
-    ? {
-        ...initialFromMetadata(meta),
-        // Metadata lacks the compaction threshold, but the config row (always
-        // fetched) carries it, so the field shows the live value.
-        orchestrator_compaction_threshold: config?.orchestrator_compaction_threshold ?? null,
-        extra_headers_invalid: storedHeaders.invalid,
-      }
-    : config
-      ? initialFromConfig(config)
-      : null;
+  const initial = config ? initialFromConfig(config) : null;
 
   // The form seeds its light-model state from `config` once at mount, so it
   // must not mount before /config settles — a light model arriving later
@@ -221,6 +186,8 @@ export function SettingsModal({
 
   return (
     <SettingsForm
+      key={`${id}:${open ? "open" : "closing"}`}
+      initialVersion={config?.config_version}
       open={open}
       id={id}
       initial={initial}
@@ -238,6 +205,7 @@ function SettingsForm({
   id,
   initial,
   initialLight,
+  initialVersion,
   summary,
   diagnostics,
   onClose,
@@ -245,6 +213,7 @@ function SettingsForm({
   open: boolean;
   id: string;
   initial: SettingsInitialValues;
+  initialVersion?: number;
   /** The light model the session currently runs with, if any. */
   initialLight: LightModelSettings | null;
   /** Carries the presentation version the title save has to match. */
@@ -254,13 +223,18 @@ function SettingsForm({
 }) {
   const isMobile = useIsMobile();
   const toast = useToast();
+  const client = useQueryClient();
+  const action = useSetupAction(open);
   const sessionTitle = useSessionTitle();
   const updateConfig = useUpdateConfig();
+  const updateProject = useUpdateProject();
+  const [updateProjectDefault, setUpdateProjectDefault] = useState(false);
   const managedHostQuery = useManagedHostStatus();
   const managedHost = managedHostQuery.data ?? null;
   const createModelConfig = useCreateModelConfig();
   const policy = useUiPolicy();
   const [openingSummary] = useState(summary);
+  const [openingVersion] = useState(initialVersion);
   const updatePresentation = useUpdatePresentation();
 
   const initialTitle = openingSummary.title ?? "";
@@ -297,6 +271,7 @@ function SettingsForm({
   });
   const [lightSeed, setLightSeed] = useState(initialLight);
   const [advanced, setAdvanced] = useState(false);
+  const [clearMalformedLight, setClearMalformedLight] = useState(false);
 
   // A malformed stored light model loads as null with only a diagnostic; the
   // server then refuses patches that omit light_model, so saving must always
@@ -305,9 +280,13 @@ function SettingsForm({
     diagnostic.startsWith("malformed stored light model"),
   );
 
+  const projectionKey = useRef("");
   const onConfigurationChange = useCallback((next: LaunchModelSelection | null) => {
     setSelection(next);
     if (!next) return;
+    const key = JSON.stringify(next);
+    if (key === projectionKey.current) return;
+    projectionKey.current = key;
     const values = next.kind === "resolved" ? next : next.request;
     setBackend(values.backend);
     setModel(values.model);
@@ -371,8 +350,9 @@ function SettingsForm({
     }
   }, [compactionPlaceholder, selection]);
 
-  const blocked = !selection;
+  const blocked = !selection || action.needsReview || action.busy;
   const busy =
+    action.busy ||
     managedHostQuery.isPending ||
     updateConfig.isPending ||
     updatePresentation.isPending ||
@@ -390,62 +370,21 @@ function SettingsForm({
     setSshConnection(target);
   };
 
-  const saveTitle = async () => {
-    if (title.trim() === initialTitle.trim()) return;
-    try {
-      await updatePresentation.mutateAsync({
-        id,
-        title: title.trim(),
-        pinned: Boolean(openingSummary.pinned),
-        expectedVersion: openingSummary.presentation_version ?? 0,
-      });
-    } catch (saveError) {
-      const conflict = saveError instanceof ApiError && saveError.status === 409;
-      toast.error(
-        conflict
-          ? "The title was not saved — the session changed in the meantime"
-          : `The title was not saved: ${errorMessage(toRunError(saveError))}`,
-      );
-    }
-  };
+  const saveTitle = () =>
+    updatePresentation.mutateAsync({
+      id,
+      title: title.trim(),
+      pinned: Boolean(openingSummary.pinned),
+      expectedVersion: openingSummary.presentation_version ?? 0,
+    });
 
-  const submit = async () => {
-    if (busy || !selection) return;
-    if (policy.orchestrationEnabled && light.mode === "dual" && !light.light) {
-      setError("Pick the light model before saving.");
-      return;
-    }
-
-    interface SelectedModelConfig {
-      backend: BackendKind;
-      model: string;
-      base_url: string;
-      allow_insecure_http: boolean;
-      api_key_env: string | null;
-    }
-    let selected: SelectedModelConfig;
-    try {
-      if (selection.kind === "save") {
-        const record = await createModelConfig.mutateAsync({
-          ...selection.request,
-          light_model: light.mode === "dual" ? light.light : null,
-        });
-        selected = {
-          // SAFETY: the server echoes the BackendKind wire value it stored.
-          backend: record.backend as BackendKind,
-          model: record.model,
-          base_url: record.base_url,
-          allow_insecure_http: record.allow_insecure_http ?? false,
-          api_key_env: record.api_key_env ?? null,
-        };
-      } else {
-        selected = selection;
-      }
-    } catch (saveError) {
-      setError(`The configuration could not be saved: ${humanErrorText(toRunError(saveError))}`);
-      return;
-    }
-
+  const patchFor = (selected: {
+    backend: BackendKind;
+    model: string;
+    base_url: string;
+    allow_insecure_http: boolean;
+    api_key_env: string | null;
+  }) => {
     let patch;
     try {
       const allowsCredentiallessSelection = Boolean(
@@ -472,14 +411,14 @@ function SettingsForm({
         allowsCredentiallessSelection,
       );
     } catch (validationError) {
-      setError(errorMessage(toRunError(validationError)));
-      return;
+      throw new SetupValidation(
+        validationError instanceof Error ? validationError.message : String(validationError),
+      );
     }
-
     if (policy.orchestrationEnabled) {
       if (light.mode === "dual") {
         // Guarded before a named configuration can be created above.
-        if (!light.light) return;
+        if (!light.light) throw new SetupValidation("Pick the light model before saving.");
         const finalLight = inheritPrimaryCredential(
           light.light,
           selected.backend,
@@ -492,33 +431,97 @@ function SettingsForm({
       } else if (initialLight || lightNeedsRepair) {
         patch.light_model = null;
       }
+    } else if (clearMalformedLight) {
+      patch.light_model = null;
     } else if (!sameLightModel(light.light, initialLight)) {
       // Explicit preset selection still reproduces its complete tuple. Hiding
       // the control alone leaves the raw existing value untouched.
       patch.light_model = light.light;
     }
-    setError("");
-    // The title lives on a different endpoint, so it is saved either way — a
-    // rename should not be lost because the configuration happened to be
-    // untouched, nor the other way round.
-    await saveTitle();
+    return patch;
+  };
 
-    if (Object.keys(patch).length === 0) {
-      onClose();
+  const submit = async () => {
+    if (busy || action.needsReview || !selection) return;
+    if (updateProjectDefault && selection.kind === "resolved" && !selection.config_id) {
+      setError("Choose a saved preset in Advanced before updating the project default.");
+      return;
+    }
+    if (policy.orchestrationEnabled && light.mode === "dual" && !light.light) {
+      setError("Pick the light model before saving.");
       return;
     }
 
+    let configurationChanged = false;
     try {
-      await updateConfig.mutateAsync({ id, patch });
+      const values = selection.kind === "save" ? selection.request : selection;
+      const preview = patchFor({
+        ...values,
+        base_url: values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "",
+        allow_insecure_http: values.allow_insecure_http ?? false,
+        api_key_env:
+          selection.kind === "resolved"
+            ? selection.api_key_env
+            : selection.request.api_key
+              ? "PENDING_SAVED_CREDENTIAL"
+              : null,
+      });
+      configurationChanged = selection.kind === "save" || Object.keys(preview).length > 0;
+    } catch (validationError) {
+      setError(setupFailureMessage(validationError));
+      return;
+    }
+    try {
+      const result = await action.run((current) =>
+        saveSettings({
+          current: current.current,
+          classify: classifySetupFailure,
+          reconcile: setupReconciliation(client, id),
+          check: async () => {
+            const latest = await api.getConfig(id, current.signal);
+            if (openingVersion !== undefined && latest.config_version !== openingVersion)
+              throw new ConfigurationChanged();
+          },
+          persistsModel: selection.kind === "save",
+          model: async () => {
+            if (selection.kind === "save") {
+              const record = await createModelConfig.mutateAsync({
+                ...selection.request,
+                light_model: light.mode === "dual" ? light.light : null,
+              });
+              const selected = savedModelSelection(record);
+              if (current.current()) setSelection(selected);
+              return selected;
+            }
+            return selection;
+          },
+          configurationSaved: configurationChanged,
+          configuration: async (selected) => {
+            const patch = patchFor(selected);
+
+            if (Object.keys(patch).length > 0) await updateConfig.mutateAsync({ id, patch });
+          },
+          title: title.trim() !== initialTitle.trim() ? saveTitle : undefined,
+          projectDefault:
+            updateProjectDefault && openingSummary.project_id
+              ? (selected) => {
+                  if (!selected.config_id)
+                    throw new SetupValidation(
+                      "Choose a saved preset before updating the project default.",
+                    );
+                  return updateProject.mutateAsync({
+                    projectId: openingSummary.project_id!,
+                    payload: { default_model_config_id: selected.config_id },
+                  });
+                }
+              : undefined,
+        }),
+      );
+      if (!result) return;
       toast.success("Session settings saved");
       onClose();
     } catch (saveError) {
-      const busyRun = saveError instanceof ApiError && saveError.status === 409;
-      toast.error(
-        busyRun
-          ? "Session is busy — try again after the run finishes"
-          : `Error: ${humanErrorText(toRunError(saveError), backend)}`,
-      );
+      setError(setupFailureMessage(saveError));
     }
   };
 
@@ -547,6 +550,7 @@ function SettingsForm({
       {isMobile ? (
         <StickyButton
           variant={ButtonVariant.Primary}
+          aria-label="Save"
           content={ButtonContent.Text}
           onClick={submit}
           disabled={blocked}
@@ -557,6 +561,7 @@ function SettingsForm({
       ) : (
         <Button
           variant={ButtonVariant.Primary}
+          aria-label="Save"
           size={ButtonSize.Large}
           content={ButtonContent.Text}
           onClick={submit}
@@ -581,6 +586,10 @@ function SettingsForm({
       }
     >
       <div className="flex flex-col gap-6 [&>*]:shrink-0">
+        <p className="text-micro text-basic-muted">
+          Changes apply to this inactive primary chat. Project defaults and existing children keep
+          their settings.
+        </p>
         {diagnostics.length > 0 ? (
           <div className="rounded-[4px] border border-error-muted bg-error-tertiary p-3 text-micro text-error-primary">
             <div className="label-small mb-1">Repair required</div>
@@ -604,6 +613,7 @@ function SettingsForm({
 
         <Input
           label="Session title"
+          aria-label="Session title"
           inputSize={isMobile ? InputSize.Large : InputSize.Medium}
           placeholder={sessionTitle(openingSummary) || "Session name"}
           hintText="Leave empty to restore the automatic title (the last prompt)."
@@ -611,7 +621,8 @@ function SettingsForm({
           onChange={(event) => setTitle(event.target.value)}
         />
 
-        <ConfigurationsPanel
+        <ModelSetupSection
+          simple={!policy.orchestrationEnabled}
           invalid={Boolean(error)}
           errorText={error || undefined}
           initial={{
@@ -624,6 +635,8 @@ function SettingsForm({
             api_key_env: initial.api_key_env,
             reasoning_effort: initial.reasoning_effort,
             extra_headers: initial.extra_headers,
+            orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
+            light_model: initialLight,
           }}
           onChange={onConfigurationChange}
         >
@@ -635,6 +648,22 @@ function SettingsForm({
                 behavior={openingSummary.behavior ?? "orchestrator"}
                 onChange={setLight}
               />
+            ) : null}
+            {openingSummary.project_id ? (
+              <label className="flex items-start gap-2 text-micro">
+                <input
+                  type="checkbox"
+                  checked={updateProjectDefault}
+                  onChange={(event) => setUpdateProjectDefault(event.target.checked)}
+                />{" "}
+                <span>
+                  Use selected preset as the project default
+                  <span className="block text-basic-muted">
+                    Future chats inherit that saved preset, including its Advanced values. Existing
+                    chats and children keep their settings.
+                  </span>
+                </span>
+              </label>
             ) : null}
             <Separator />
             <button
@@ -649,6 +678,16 @@ function SettingsForm({
             </button>
             {advanced ? (
               <>
+                {lightNeedsRepair && !policy.orchestrationEnabled ? (
+                  <label className="text-micro">
+                    <input
+                      type="checkbox"
+                      checked={clearMalformedLight}
+                      onChange={(event) => setClearMalformedLight(event.target.checked)}
+                    />{" "}
+                    Clear malformed legacy light settings
+                  </label>
+                ) : null}
                 <Separator />
                 <ConfigRow
                   label="Reasoning Effort"
@@ -671,6 +710,7 @@ function SettingsForm({
                         inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                         className={CONTROL_WIDTH}
                         inputClassName="md:text-right"
+                        aria-label="Context limit"
                         placeholder={compactionPlaceholder}
                         inputMode="numeric"
                         value={compaction}
@@ -698,271 +738,8 @@ function SettingsForm({
               </>
             ) : null}
           </div>
-        </ConfigurationsPanel>
-
-        {error ? <p className="text-error-primary text-micro">{error}</p> : null}
+        </ModelSetupSection>
       </div>
     </SettingsShell>
   );
 }
-
-/**
- * The key a key-authenticated session runs on. A stored key never comes back
- * from the server, so it can only be replaced, not read: the row shows a
- * stand-in until the user starts typing a new one, and reports how the key
- * checked out through the glyph in the leading slot.
- */
-function ApiKeyField({
-  editing,
-  draft,
-  stored,
-  validation,
-  onDraft,
-  onClear,
-  onRestore,
-}: {
-  editing: boolean;
-  draft: string;
-  /** The selector the session currently authenticates through, if any. */
-  stored: string;
-  validation: Validation;
-  onDraft: (value: string) => void;
-  /**
-   * Empties the field. Replacing a key and removing one arrive at the same
-   * place — a key that cannot be read back can only be overwritten — so the two
-   * buttons differ in what they say rather than in what they leave behind.
-   */
-  onClear: () => void;
-  onRestore: () => void;
-}) {
-  const isMobile = useIsMobile();
-  const invalid = validation.status === "error";
-  const hint = editing
-    ? "Paste the provider key. NAC keeps it and hands the session a selector, never the secret."
-    : isGeneratedCredentialName(stored)
-      ? "Kept by NAC for this session. Replacing it files a new key and leaves the old one where it is."
-      : `Read from ${stored}: the environment variable, or a key of that name kept by NAC.`;
-
-  return (
-    <InputWrapper
-      label="API key"
-      required
-      validation={invalid}
-      validationText={invalid ? validation.message : undefined}
-      hintText={hint}
-    >
-      <div className="flex items-center gap-2">
-        <Input
-          className="flex-1 min-w-0"
-          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-          type="password"
-          autoComplete="off"
-          placeholder="Paste the provider key"
-          value={editing ? draft : MASKED_KEY}
-          readOnly={!editing}
-          validation={invalid}
-          leadingSlot={<KeyStatus status={validation.status} />}
-          onChange={(event) => onDraft(event.target.value)}
-        />
-        <Tooltip
-          title={editing ? "Keep the current key" : "Replace the key"}
-          position={TooltipPosition.TopCenter}
-        >
-          <Button
-            variant={ButtonVariant.Secondary}
-            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-            content={ButtonContent.Icon}
-            aria-label={editing ? "Keep the current key" : "Replace the key"}
-            disabled={editing && !stored}
-            onClick={editing ? onRestore : onClear}
-          >
-            <Icon iconName={editing ? IconName.Close : IconName.Edit} />
-          </Button>
-        </Tooltip>
-        <Tooltip title="Remove the key from this session" position={TooltipPosition.TopCenter}>
-          <Button
-            variant={ButtonVariant.SecondaryDestructive}
-            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-            content={ButtonContent.Icon}
-            aria-label="Remove the key from this session"
-            disabled={editing && !draft}
-            onClick={onClear}
-          >
-            <Icon iconName={IconName.Trash} />
-          </Button>
-        </Tooltip>
-      </div>
-    </InputWrapper>
-  );
-}
-
-/**
- * What a managed provider shows in place of a key: the credential is a browser
- * login shared by every session on that provider, so this row signs in and out
- * rather than editing anything the session owns. It is named after the account
- * being signed into rather than after authentication in the abstract, so the
- * button never leaves the destination to guesswork.
- */
-function AuthenticationField({ backend }: { backend: BackendKind }) {
-  const isMobile = useIsMobile();
-  const buttonSize = isMobile ? ButtonSize.Large : ButtonSize.Medium;
-  const { provider, signedIn } = useManagedSignIn(backend);
-  const { state, start, cancel } = useDeviceLogin();
-  const logout = useManagedLogout();
-  // A credential on file is not the same as a working one, so the row leans on
-  // the request that actually spends it rather than on the file being there.
-  const reach = useManagedProviderModels(backend, Boolean(provider) && signedIn);
-
-  if (!provider) return null;
-
-  const label = managedAuthLabel(provider);
-  const failed = state.status === "failed";
-  const expired = signedIn && reach.isError;
-  const control =
-    state.status === "waiting" ? (
-      <div className="flex items-center gap-2">
-        <Loader size={LoaderSize.Micro} />
-        {state.prompt.user_code ? (
-          <>
-            <span className="text-micro text-basic-muted">Code</span>
-            <span className="label-small text-basic-primary tabular-nums">
-              {state.prompt.user_code}
-            </span>
-          </>
-        ) : (
-          <span className="text-micro text-basic-muted">Waiting for the browser</span>
-        )}
-        <Button
-          variant={ButtonVariant.Ghost}
-          size={buttonSize}
-          content={ButtonContent.Text}
-          onClick={() => void cancel()}
-        >
-          Cancel
-        </Button>
-      </div>
-    ) : signedIn ? (
-      <div className="flex items-center gap-2">
-        {expired ? (
-          <Button
-            variant={ButtonVariant.Primary}
-            size={buttonSize}
-            content={ButtonContent.IconRight}
-            loading={state.status === "starting"}
-            onClick={() => void start(provider)}
-          >
-            <span>Sign in again</span>
-            <Icon iconName={IconName.External} />
-          </Button>
-        ) : (
-          <div
-            // Height rather than padding, so the chip lines up with whichever
-            // size the buttons beside it take.
-            className={`flex items-center gap-1.5 rounded-[4px] bg-success-secondary pl-2 pr-4 ${isMobile ? "h-12" : "py-2"}`}
-          >
-            <Icon iconName={IconName.CheckCircle} className="text-success-primary" />
-            <span className="label-small text-success-primary">Success</span>
-          </div>
-        )}
-        <Button
-          variant={ButtonVariant.Ghost}
-          size={buttonSize}
-          content={ButtonContent.Text}
-          loading={logout.isPending}
-          onClick={() => void logout.mutateAsync(provider).catch(() => {})}
-        >
-          Sign out
-        </Button>
-      </div>
-    ) : (
-      <Button
-        variant={ButtonVariant.Primary}
-        size={buttonSize}
-        content={ButtonContent.IconRight}
-        loading={state.status === "starting"}
-        onClick={() => void start(provider)}
-      >
-        <span>Sign in with {label}</span>
-        <Icon iconName={IconName.External} />
-      </Button>
-    );
-
-  return (
-    <InputWrapper
-      label={`${label} sign-in`}
-      validation={failed || expired}
-      validationText={
-        failed || expired
-          ? humanErrorText(failed ? state.message : reach.error, backend)
-          : undefined
-      }
-      hintText={
-        signedIn
-          ? `This provider authenticates with ${label} in your browser; the login is shared by every session on it.`
-          : `This provider authenticates with ${label} in your browser instead of with an API key. The session cannot run until you sign in.`
-      }
-    >
-      <div className="flex items-center">{control}</div>
-    </InputWrapper>
-  );
-}
-
-/**
- * The model the session runs. A provider that answers with a model index picks
- * from that list; a hand-written gateway that has none is typed in, and a
- * credential that is not working yet has nothing to offer either way.
- */
-function ModelField({
-  value,
-  models,
-  available,
-  onChange,
-}: {
-  value: string;
-  models: SelectItem[];
-  /** Whether the credential is in a state that can reach a model at all. */
-  available: boolean;
-  onChange: (model: string) => void;
-}) {
-  const isMobile = useIsMobile();
-  if (models.length === 0 && available) {
-    return (
-      <Input
-        label="Model"
-        inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    );
-  }
-
-  // A model configured earlier may no longer be listed — a renamed or retired
-  // one still has to show as what the session runs today.
-  const items = models.some((item) => item.id === value)
-    ? models
-    : value
-      ? [...models, { id: value, label: value }]
-      : models;
-
-  return (
-    <InputWrapper label="Model">
-      <Select
-        items={items}
-        value={value}
-        onValueChange={onChange}
-        disabled={!available}
-        placeholder="–"
-        className="w-full"
-        triggerClassName="w-full"
-        panelClassName="max-h-64 overflow-auto"
-        size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-      />
-    </InputWrapper>
-  );
-}
-
-// Kept temporarily as implementation references while the shared configuration
-// panel owns the active settings UI.
-void ApiKeyField;
-void AuthenticationField;
-void ModelField;

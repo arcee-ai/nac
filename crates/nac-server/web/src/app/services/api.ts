@@ -317,8 +317,8 @@ export const api = {
     }),
 
   /** Validates the key as a side effect: a bad key cannot list models. */
-  listProviderModels: (payload: ProviderModelsRequest) =>
-    request<ProviderModelList>("POST", "/providers/models", { body: payload }),
+  listProviderModels: (payload: ProviderModelsRequest, signal?: AbortSignal) =>
+    request<ProviderModelList>("POST", "/providers/models", { body: payload, signal }),
 
   /**
    * The server's own catalog: limits, prices and effort support for the models
@@ -417,15 +417,17 @@ export const api = {
     ),
 
   /** Resolves a saved configuration's credential and lists its models. */
-  resolveModelConfig: (configId: string) =>
+  resolveModelConfig: (configId: string, signal?: AbortSignal) =>
     request<ResolvedModelConfiguration>(
       "POST",
       `/model-configs/${encodeURIComponent(configId)}/models`,
+      { signal },
     ),
 
-  resolveConfigFile: (path: string) =>
+  resolveConfigFile: (path: string, signal?: AbortSignal) =>
     request<ResolvedModelConfiguration>("POST", "/model-configs/from-file", {
       body: { path },
+      signal,
     }),
 
   listProjects: (signal?: AbortSignal) => request<ProjectList>("GET", "/projects", { signal }),

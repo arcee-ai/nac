@@ -47,6 +47,10 @@ server remains the source of business truth and wire schemas.
 - `components/modals/ConfigurationsPanel.tsx` and `SettingsModal.tsx` keep the
   existing dense configuration forms whose field validation and save ordering
   are exercised as one workflow. Managed-host panels do not belong there.
+- `components/modals/CreateProjectModal.tsx` keeps the coupled project location,
+  SSH/sandbox fields and advanced launch draft in one accessible form. Ordered
+  commands and session-request construction belong in `features/setup`, while
+  the modal retains local field state and its presentation.
 - `components/inspector/ThreadsView.tsx` keeps orchestrator thread/workset
   navigation and episode rendering together. Direct-child and managed-host
   workflows remain separate features.

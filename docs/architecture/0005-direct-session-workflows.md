@@ -118,3 +118,60 @@ Compare production JS file counts, summed bytes and per-file deterministic
 persistence baseline is separately held/unavailable; local scripted-provider
 coverage is not evidence that its hosted incident is fixed. Container image
 execution requires container infrastructure and is a separate coverage lane.
+
+## Setup and provider workflows (ALL-136)
+
+`features/setup/workflow.ts` owns ordered optional-preset → project → first-chat
+and revision-review → optional-preset → session-configuration → optional-title
+commands. Stages retain accepted durable progress; they never roll back a saved
+project/preset or replay a command. A partial, conflicting or unknown save needs
+a fresh view of canonical state before another attempt. Local field validation
+runs before saving a provider preset. A no-op configuration is not counted as a
+write. The browser review of `config_version` catches stale editors before any
+write; it is a preflight, not an atomic browser concurrency guarantee. The
+existing server lifecycle/resource leases, inactive-primary check and durable
+revision-checked mutation remain authoritative. No wire contract changed.
+
+The synchronous scoped lifetime follows the ALL-135 Scope acquisition/disposal
+pattern. Closing, changing identity or reopening a form aborts its reads and
+suppresses local navigation/toasts, while already-dispatched commands settle
+the originating QueryClient. Identity-keyed forms keep drafts and revisions
+bound to their original project/session. Form state stays in React; TanStack
+owns discovery caches, AbortSignals, device-login observation/polling and
+invalidation. Effect never substitutes a transport or a second cache.
+
+Managed authentication commands live in `features/managed/controller/` and use
+the existing facades. Authentication settlement resets entitled-model queries
+(aborting old discovery), refreshes auth/catalog/host readiness and invalidates
+resolved presets/files. A delayed start cannot open a browser tab after detach.
+Only explicit Cancel abandons a device login; if Cancel races start, its eventual
+server login identity is cancelled once. Leaving the form only detaches local
+observation. Multiple provider accounts continue to coexist independently of
+the chat's selected backend or credential selector.
+
+Interaction review identified nested provider login behind model setup, overly
+dense ordinary project/settings controls, implicit preset substitution and
+unreported partial title/configuration saves. The ordinary path now shows one
+primary model/reasoning choice, a separate Provider connections disclosure and
+explicit inherited-vs-chat-only copy. Advanced retains saved presets, custom
+endpoints, headers, compaction, SSH/config-file and execution options. The saved
+project-launch default is still resolved before implicit submission. Switching
+presentations preserves the entire tuple, including disabled/numeric compaction,
+explicit empty headers, selectors and hidden light settings. Matching an
+inherited preset includes these fields and a known preset identity. Direct mode
+keeps optional light controls hidden and offers explicit malformed-legacy repair;
+opt-in orchestration retains its existing controls. Project-default changes
+require the explicit “Use selected preset as the project default” checkbox in
+Advanced; its pointer update uses the existing project API after the session
+and optional title saves succeed. Session changes leave
+existing descendant snapshots intact; future children use the accepted parent
+configuration through the existing server creation path.
+
+Adjacent coverage checks full saved-tuple selection even when discovery omits
+the saved model, disabled/numeric compaction, hidden legacy-light repair, stale
+editors, partial/unknown outcomes, device-login detach/cancel and account-change
+discovery fencing. `e2e/setup.e2e.ts` exercises the ordinary keyboard path,
+mobile/desktop footer reachability, provider-account coexistence, explicit
+project-default updates and existing/future child configuration behavior against
+the embedded production bundle. OAuth responses are isolated local fixtures;
+these journeys do not claim a real provider login or hosted/container coverage.

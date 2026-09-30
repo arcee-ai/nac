@@ -139,9 +139,10 @@ export function useManagedProviderModels(
 ) {
   return useQuery<ProviderModelList>({
     queryKey: managedQueryKeys.providerModels(backend ?? "", baseUrl),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api.listProviderModels(
         baseUrl ? { backend: backend!, base_url: baseUrl } : { backend: backend! },
+        signal,
       ),
     enabled: enabled && backend !== null,
     retry: false,
@@ -155,7 +156,7 @@ export function useReadyProviderModels(catalog: ModelCatalog | undefined) {
   const results = useQueries({
     queries: ready.map((request) => ({
       queryKey: managedQueryKeys.providerModels(request.backend, request.base_url),
-      queryFn: () => api.listProviderModels(request),
+      queryFn: ({ signal }: { signal: AbortSignal }) => api.listProviderModels(request, signal),
       retry: false,
       staleTime: 5 * 60_000,
     })),

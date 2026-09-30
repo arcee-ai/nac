@@ -30,6 +30,7 @@ import { ManagedModelCredentialStatus } from "@/app/features/managed/presentatio
 import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
 import { KEY_DEBOUNCE_MS, modelItems, type Validation } from "@/app/lib/apiKey";
 import { type CatalogPick, defaultCatalogPick } from "@/app/lib/catalog";
+import { sameLightModel } from "@/app/lib/modelConfig";
 import { cn } from "@/app/lib/cn";
 import { PROVIDER_KINDS, providerLabel, providerUsesApiKey } from "@/app/lib/providers";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
@@ -90,6 +91,9 @@ export interface ConfigurationsPanelInitial {
   api_key_env: string | null;
   reasoning_effort: string | null;
   extra_headers: Record<string, string>;
+  orchestrator_compaction_threshold?: number | null;
+  light_model?: LightModelSettings | null;
+  config_id?: string | null;
 }
 
 /** A base URL the user writes by hand, for a gateway nac has no defaults for. */
@@ -212,6 +216,12 @@ export function ConfigurationsPanel({
   const initialSaved = initial
     ? configurations.find(
         (entry) =>
+          (!initial.config_id || entry.config_id === initial.config_id) &&
+          (initial.orchestrator_compaction_threshold === undefined ||
+            entry.orchestrator_compaction_threshold ===
+              initial.orchestrator_compaction_threshold) &&
+          (initial.light_model === undefined ||
+            sameLightModel(entry.light_model ?? null, initial.light_model)) &&
           entry.backend === initial.backend &&
           entry.model === initial.model &&
           entry.base_url === initial.base_url &&
@@ -353,11 +363,15 @@ export function ConfigurationsPanel({
       ? ((needsKey ? keyQuery.data?.models : loginQuery.data?.models) ?? [])
       : (resolved?.models ?? []);
   const configuredModel = source.kind === "new" ? "" : (resolved?.model ?? "");
-  const chosenModel = models.some((model) => model.id === defaultModel)
-    ? defaultModel
-    : models.some((model) => model.id === configuredModel)
-      ? configuredModel
-      : (models[0]?.id ?? modelOverride ?? (defaultModel || configuredModel));
+  // A saved/file source names an exact model; discovery must not silently
+  // replace it with the first offered model. Only new credential setup needs
+  // an implicit choice from the discovered list.
+  const chosenModel =
+    source.kind !== "new"
+      ? defaultModel || modelOverride || configuredModel || models[0]?.id || ""
+      : models.some((model) => model.id === defaultModel)
+        ? defaultModel
+        : (models[0]?.id ?? modelOverride ?? defaultModel);
 
   /** Passing null hands the choice back to the default above. */
   const switchSource = (next: Source | null) => {
@@ -404,8 +418,8 @@ export function ConfigurationsPanel({
         api_key_env: initial.api_key_env,
         reasoning_effort: initial.reasoning_effort,
         extra_headers: initial.extra_headers,
-        orchestrator_compaction_threshold: undefined,
-        light_model: undefined,
+        orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
+        light_model: initial.light_model,
       };
     }
 

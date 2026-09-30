@@ -1,117 +1,120 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
+import { useSetupLifetime } from "@/app/features/setup/lifetime";
 import type { DeviceLoginStarted, ManagedAuthProvider } from "@/app/types/api";
 import { toRunError } from "@/app/lib/providerError";
-
-/**
- * How often the outcome is collected. The provider is polled by the server at
- * whatever interval it asked for; this only decides how quickly the page
- * notices that the wait is over.
- */
-const POLL_MS = 2000;
+import { authenticationCommand, runAuthentication } from "./authenticationWorkflow";
 
 export type DeviceLoginState =
   | { status: "idle" }
   | { status: "starting" }
-  /** The code has been issued and the browser tab is open. */
   | { status: "waiting"; prompt: DeviceLoginStarted }
   | { status: "failed"; message: string };
 
-/**
- * Drives a device login from the page: asks the server to start one, sends the
- * user to the provider, and waits for the approval to come back.
- *
- * Leaving the page does not abandon the login — the server keeps waiting, and
- * a login started here can still be collected after a reload. Only `cancel`
- * gives up on it.
- */
+interface Attempt {
+  provider: ManagedAuthProvider;
+  prompt?: DeviceLoginStarted;
+  cancelled: boolean;
+  current: () => boolean;
+}
+
+/** Detach aborts observation only. Explicit Cancel alone abandons the server login. */
 export function useDeviceLogin(onSuccess?: () => void) {
   const client = useQueryClient();
+  const lifetime = useSetupLifetime();
   const [state, setState] = useState<DeviceLoginState>({ status: "idle" });
-  const active = useRef<{
-    provider: ManagedAuthProvider;
-    loginId: string;
-  } | null>(null);
-
-  // Kept in a ref so a caller that rebuilds the callback each render does not
-  // restart the polling loop.
+  const active = useRef<Attempt | null>(null);
   const onSuccessRef = useRef(onSuccess);
   useEffect(() => {
     onSuccessRef.current = onSuccess;
   }, [onSuccess]);
 
-  const start = useCallback(async (provider: ManagedAuthProvider) => {
-    setState({ status: "starting" });
-    try {
-      const started = await api.startManagedLogin(provider);
-      active.current = { provider, loginId: started.login_id };
-      setState({ status: "waiting", prompt: started });
-      // Opened straight from the click so the popup blocker treats it as the
-      // user's own navigation.
-      window.open(started.verification_uri, "_blank", "noopener,noreferrer");
-    } catch (error) {
-      active.current = null;
-      setState({ status: "failed", message: errorMessage(toRunError(error)) });
-    }
-  }, []);
-
-  const cancel = useCallback(async () => {
-    const pending = active.current;
-    active.current = null;
-    setState({ status: "idle" });
-    if (!pending) return;
-    try {
-      await api.cancelManagedLogin(pending.provider, pending.loginId);
-    } catch {
-      // Nothing was stored, and the server drops the login once its code
-      // expires, so a failed cancel costs nothing.
-    }
-  }, []);
-
-  useEffect(() => {
-    if (state.status !== "waiting") return;
-    const { provider, login_id: loginId } = state.prompt;
-    const controller = new AbortController();
-    let stopped = false;
-    let timer = 0;
-
-    const poll = async () => {
+  const start = useCallback(
+    async (provider: ManagedAuthProvider) => {
+      const lease = lifetime.current;
+      if (!lease?.current() || active.current) return;
+      const attempt: Attempt = { provider, cancelled: false, current: lease.current };
+      active.current = attempt;
+      setState({ status: "starting" });
       try {
-        const outcome = await api.pollManagedLogin(provider, loginId, controller.signal);
-        if (stopped) return;
-        if (outcome.state === "complete") {
-          active.current = null;
-          setState({ status: "idle" });
-          // Readiness and the entitled model index both change atomically with
-          // the stored login, so rebuild their catalog-derived caches.
-          void refreshProviderAuthentication(client);
-          onSuccessRef.current?.();
+        const prompt = await runAuthentication(
+          authenticationCommand({
+            command: () => api.startManagedLogin(provider),
+          }),
+        );
+        attempt.prompt = prompt;
+        if (attempt.cancelled) {
+          await api.cancelManagedLogin(provider, prompt.login_id).catch(() => {});
           return;
         }
-        if (outcome.state === "failed") {
-          active.current = null;
-          setState({ status: "failed", message: outcome.error });
-          return;
-        }
-        timer = window.setTimeout(() => void poll(), POLL_MS);
+        if (!attempt.current() || active.current !== attempt) return;
+        setState({ status: "waiting", prompt });
+        window.open(prompt.verification_uri, "_blank", "noopener,noreferrer");
       } catch (error) {
-        if (stopped) return;
+        if (!attempt.current() || active.current !== attempt) return;
         active.current = null;
         setState({ status: "failed", message: errorMessage(toRunError(error)) });
       }
-    };
+    },
+    [lifetime],
+  );
 
-    timer = window.setTimeout(() => void poll(), POLL_MS);
-    return () => {
-      stopped = true;
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [state, client]);
+  const cancel = useCallback(async () => {
+    const attempt = active.current;
+    if (!attempt) return;
+    attempt.cancelled = true;
+    active.current = null;
+    if (attempt.current()) setState({ status: "idle" });
+    if (attempt.prompt)
+      await api.cancelManagedLogin(attempt.provider, attempt.prompt.login_id).catch(() => {});
+  }, []);
 
-  return { state, start, cancel };
+  const prompt = state.status === "waiting" ? state.prompt : null;
+  const outcome = useQuery({
+    queryKey: ["provider-device-login", prompt?.provider, prompt?.login_id],
+    enabled: prompt !== null,
+    queryFn: async ({ signal }) => {
+      if (!prompt) throw new Error("No provider login to observe");
+      const result = await api.pollManagedLogin(prompt.provider, prompt.login_id, signal);
+      // Reconcile the originating cache before exposing completion, even if the view detaches.
+      if (result.state === "complete") await refreshProviderAuthentication(client);
+      return result;
+    },
+    retry: false,
+    refetchInterval: (query) =>
+      !query.state.error && (!query.state.data || query.state.data.state === "pending")
+        ? 2000
+        : false,
+    refetchIntervalInBackground: true,
+    gcTime: 0,
+  });
+
+  useEffect(() => {
+    const attempt = active.current;
+    if (
+      !prompt ||
+      !attempt?.current() ||
+      attempt.prompt !== prompt ||
+      (!outcome.error && outcome.data?.state === "pending") ||
+      (!outcome.error && !outcome.data)
+    )
+      return;
+    active.current = null;
+    if (outcome.data?.state === "complete") onSuccessRef.current?.();
+  }, [outcome.data, outcome.error, prompt]);
+
+  const visibleState: DeviceLoginState =
+    prompt && outcome.error
+      ? { status: "failed", message: errorMessage(toRunError(outcome.error)) }
+      : prompt && outcome.data?.state === "failed"
+        ? { status: "failed", message: outcome.data.error }
+        : prompt && outcome.data?.state === "complete"
+          ? { status: "idle" }
+          : state;
+
+  return { state: visibleState, start, cancel };
 }
