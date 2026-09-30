@@ -580,20 +580,56 @@ fn sanitized_value(mut value: Value) -> Value {
 }
 
 fn bounded_json(value: Value) -> String {
+    const PROVENANCE_KEYS: [&str; 5] = ["trust", "server", "prompt", "uri", "argument"];
     let serialized = serde_json::to_string(&value).unwrap_or_else(|error| {
         json!({"error": format!("failed to serialize MCP result: {error}")}).to_string()
     });
-    let (text, truncated) = truncate_chars(&serialized, MAX_CAPABILITY_OUTPUT_CHARS);
-    if truncated {
-        json!({
-            "truncated": true,
-            "characterLimit": MAX_CAPABILITY_OUTPUT_CHARS,
-            "dataPrefix": text
-        })
-        .to_string()
-    } else {
-        text
+    if serialized.chars().count() <= MAX_CAPABILITY_OUTPUT_CHARS {
+        return serialized;
     }
+
+    let mut wrapper = Map::from_iter([
+        ("truncated".to_string(), Value::Bool(true)),
+        (
+            "characterLimit".to_string(),
+            Value::from(MAX_CAPABILITY_OUTPUT_CHARS),
+        ),
+        ("dataPrefix".to_string(), Value::String(String::new())),
+    ]);
+    if let Some(source) = value.as_object() {
+        for key in PROVENANCE_KEYS {
+            if let Some(Value::String(value)) = source.get(key) {
+                wrapper.insert(key.to_string(), Value::String(value.clone()));
+                if Value::Object(wrapper.clone()).to_string().chars().count()
+                    > MAX_CAPABILITY_OUTPUT_CHARS
+                {
+                    wrapper.remove(key);
+                }
+            }
+        }
+    }
+
+    let chars: Vec<char> = serialized.chars().collect();
+    let mut accepted = Value::Object(wrapper.clone()).to_string();
+    let mut low = 0usize;
+    let mut high = chars.len().min(MAX_CAPABILITY_OUTPUT_CHARS);
+    while low <= high {
+        let middle = low + (high - low) / 2;
+        wrapper.insert(
+            "dataPrefix".to_string(),
+            Value::String(chars[..middle].iter().collect()),
+        );
+        let candidate = Value::Object(wrapper.clone()).to_string();
+        if candidate.chars().count() <= MAX_CAPABILITY_OUTPUT_CHARS {
+            accepted = candidate;
+            low = middle.saturating_add(1);
+        } else if middle == 0 {
+            break;
+        } else {
+            high = middle - 1;
+        }
+    }
+    accepted
 }
 
 fn truncate_chars(value: &str, limit: usize) -> (String, bool) {
@@ -712,9 +748,29 @@ mod tests {
         assert!(sanitized.get("_meta").is_none());
         assert!(sanitized["nested"][0].get("_meta").is_none());
 
-        let output = bounded_json(json!({"text": "x".repeat(MAX_CAPABILITY_OUTPUT_CHARS * 2)}));
+        let output = bounded_json(json!({
+            "server": "docs",
+            "prompt": "review",
+            "trust": "untrusted_remote_prompt_data",
+            "text": "\\\"".repeat(MAX_CAPABILITY_OUTPUT_CHARS)
+        }));
         let value: Value = serde_json::from_str(&output).expect("bounded JSON remains valid");
         assert_eq!(value["truncated"], true);
         assert_eq!(value["characterLimit"], MAX_CAPABILITY_OUTPUT_CHARS);
+        assert_eq!(value["server"], "docs");
+        assert_eq!(value["prompt"], "review");
+        assert_eq!(value["trust"], "untrusted_remote_prompt_data");
+        assert!(output.chars().count() <= MAX_CAPABILITY_OUTPUT_CHARS);
+
+        let output = bounded_json(json!({
+            "trust": "untrusted_remote_prompt_data",
+            "uri": "x".repeat(MAX_CAPABILITY_OUTPUT_CHARS * 2),
+            "text": "also truncated"
+        }));
+        let value: Value = serde_json::from_str(&output).expect("oversized provenance stays valid");
+        assert_eq!(value["truncated"], true);
+        assert_eq!(value["trust"], "untrusted_remote_prompt_data");
+        assert!(value.get("uri").is_none());
+        assert!(output.chars().count() <= MAX_CAPABILITY_OUTPUT_CHARS);
     }
 }

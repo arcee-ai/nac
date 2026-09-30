@@ -249,10 +249,22 @@ impl McpRegistry {
                     }
                 };
 
-            let Some(peer_info) = service.peer_info().cloned() else {
-                close_mcp_service(&mut service).await;
-                close_mounted_services(&mut mounted_services).await;
-                bail!("MCP server '{server_name}' completed without peer info");
+            let peer_info = match service.peer_info().cloned() {
+                Some(peer_info) => peer_info,
+                None => {
+                    let reason = "completed initialization without peer info".to_string();
+                    close_mcp_service(&mut service).await;
+                    if server_config.required {
+                        close_mounted_services(&mut mounted_services).await;
+                        bail!("required MCP server '{server_name}' {reason}");
+                    }
+                    eprintln!("MCP server '{server_name}' {reason} and will be skipped");
+                    skipped.push(McpSkippedServer {
+                        name: server_name,
+                        reason,
+                    });
+                    continue;
+                }
             };
             let capabilities = peer_info.capabilities.clone();
             let listed_tools = if capabilities.tools.is_none() {
