@@ -46,11 +46,12 @@ mod transport;
 pub use config::{McpDefaults, McpHeaderHelperConfig, McpServerConfig, McpTransportConfig};
 pub use file_config::{
     acquire_mcp_configuration_write_lease, delete_mcp_server_configuration,
-    insert_mcp_server_configuration, list_mcp_server_configurations, load_mcp_server_configuration,
-    load_mcp_server_configuration_snapshot, mcp_config_path, read_mcp_configuration_consistently,
-    update_mcp_server_configuration, update_mcp_server_configuration_at_revision,
-    McpConfigurationWriteLease, McpServerConfigurationRecord, McpServerConfigurationStoreError,
-    MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
+    insert_mcp_server_configuration, list_mcp_server_configurations, load_mcp_defaults,
+    load_mcp_server_configuration, load_mcp_server_configuration_snapshot, mcp_config_path,
+    read_mcp_configuration_consistently, update_mcp_server_configuration,
+    update_mcp_server_configuration_at_revision, McpConfigurationWriteLease,
+    McpServerConfigurationRecord, McpServerConfigurationStoreError, MCP_TRANSPORT_STDIO,
+    MCP_TRANSPORT_STREAMABLE_HTTP,
 };
 pub use library::{
     embedded_library_entries, fetch_smithery_library_entries, merge_library_entries,
@@ -79,6 +80,9 @@ pub struct McpProbeResult {
     pub prompt_count: usize,
     pub resource_count: usize,
     pub resource_template_count: usize,
+    /// Best-effort catalog sections that could not be listed after the
+    /// required tool catalog had already succeeded.
+    pub catalog_warnings: Vec<String>,
 }
 
 /// Connects to a single server, lists its tools and disconnects. This is the
@@ -87,34 +91,33 @@ pub struct McpProbeResult {
 pub async fn probe_mcp_server(
     name: &str,
     config: &McpServerConfig,
+    defaults: &McpDefaults,
     cwd: &Path,
 ) -> Result<McpProbeResult> {
     let handler = NacMcpClientHandler {
         roots: mcp_roots_for_policy(cwd, None, McpRootPolicy::None)?,
     };
-    let defaults = McpDefaults::default();
-    let startup_timeout = config.startup_timeout(&defaults)?;
-    let catalog_timeout = config.catalog_timeout(&defaults)?;
-    let service = timeout(startup_timeout, connect_server(name, config, &handler, cwd))
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "timed out connecting after {}ms",
-                startup_timeout.as_millis()
-            )
-        })??;
-    let peer = service
-        .peer_info()
-        .context("MCP server did not provide initialization metadata")?;
-    let tools = timeout(catalog_timeout, service.list_all_tools())
-        .await
-        .map_err(|_| {
-            anyhow!(
+    let startup_timeout = config.startup_timeout(defaults)?;
+    let catalog_timeout = config.catalog_timeout(defaults)?;
+    let mut service = connect_server(name, config, &handler, cwd, startup_timeout).await?;
+    let Some(peer) = service.peer_info() else {
+        close_mcp_service(&mut service).await;
+        bail!("MCP server did not provide initialization metadata");
+    };
+    let tools = match timeout(catalog_timeout, service.list_all_tools()).await {
+        Ok(Ok(tools)) => tools,
+        Ok(Err(error)) => {
+            close_mcp_service(&mut service).await;
+            return Err(anyhow!(error).context("failed to list tools"));
+        }
+        Err(_) => {
+            close_mcp_service(&mut service).await;
+            bail!(
                 "timed out listing tools after {}ms",
                 catalog_timeout.as_millis()
-            )
-        })?
-        .context("failed to list tools")?;
+            );
+        }
+    };
     let probed = tools
         .into_iter()
         .map(|tool| McpProbedTool {
@@ -125,27 +128,49 @@ pub async fn probe_mcp_server(
                 .map(std::string::ToString::to_string),
         })
         .collect();
+    let mut catalog_warnings = Vec::new();
     let prompt_count = if peer.capabilities.prompts.is_some() {
-        timeout(catalog_timeout, service.list_all_prompts())
-            .await
-            .map_err(|_| anyhow!("timed out listing prompts"))??
-            .len()
+        match timeout(catalog_timeout, service.list_all_prompts()).await {
+            Ok(Ok(prompts)) => prompts.len(),
+            Ok(Err(_)) => {
+                catalog_warnings.push("prompt listing failed".to_string());
+                0
+            }
+            Err(_) => {
+                catalog_warnings.push("prompt listing timed out".to_string());
+                0
+            }
+        }
     } else {
         0
     };
     let resource_count = if peer.capabilities.resources.is_some() {
-        timeout(catalog_timeout, service.list_all_resources())
-            .await
-            .map_err(|_| anyhow!("timed out listing resources"))??
-            .len()
+        match timeout(catalog_timeout, service.list_all_resources()).await {
+            Ok(Ok(resources)) => resources.len(),
+            Ok(Err(_)) => {
+                catalog_warnings.push("resource listing failed".to_string());
+                0
+            }
+            Err(_) => {
+                catalog_warnings.push("resource listing timed out".to_string());
+                0
+            }
+        }
     } else {
         0
     };
     let resource_template_count = if peer.capabilities.resources.is_some() {
-        timeout(catalog_timeout, service.list_all_resource_templates())
-            .await
-            .map_err(|_| anyhow!("timed out listing resource templates"))??
-            .len()
+        match timeout(catalog_timeout, service.list_all_resource_templates()).await {
+            Ok(Ok(templates)) => templates.len(),
+            Ok(Err(_)) => {
+                catalog_warnings.push("resource-template listing failed".to_string());
+                0
+            }
+            Err(_) => {
+                catalog_warnings.push("resource-template listing timed out".to_string());
+                0
+            }
+        }
     } else {
         0
     };
@@ -160,8 +185,9 @@ pub async fn probe_mcp_server(
         prompt_count,
         resource_count,
         resource_template_count,
+        catalog_warnings,
     };
-    let _ = service.cancel().await;
+    close_mcp_service(&mut service).await;
     Ok(result)
 }
 
@@ -194,11 +220,26 @@ use result::*;
 use transport::*;
 
 type McpService = RunningService<RoleClient, NacMcpClientHandler>;
+type SharedMcpService = Arc<tokio::sync::RwLock<McpService>>;
 const MCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const MCP_TOOL_INVENTORY_TIMEOUT: Duration = Duration::from_secs(15);
 const MCP_EXECUTION_TIMEOUT: Duration = crate::tools::kernel::DEFAULT_TOOL_TIMEOUT;
+const MCP_SERVICE_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 const MIN_TIMEOUT_MS: u64 = 100;
 const MAX_TIMEOUT_MS: u64 = 10 * 60 * 1000;
+
+async fn close_mcp_service(service: &mut McpService) {
+    let _ = service.close_with_timeout(MCP_SERVICE_CLOSE_TIMEOUT).await;
+}
+
+async fn close_shared_mcp_service(service: SharedMcpService) {
+    {
+        let service = service.read().await;
+        service.cancellation_token().cancel();
+    }
+    let mut service = service.write().await;
+    close_mcp_service(&mut service).await;
+}
 
 #[cfg(test)]
 pub(crate) mod test_support {
@@ -262,6 +303,163 @@ pub(crate) mod test_support {
                     Ok((mut stream, _)) => {
                         if handle_fake_http_mcp_request(&mut stream) {
                             break;
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        (url, handle)
+    }
+
+    pub(crate) fn start_partial_catalog_http_mcp_server() -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind partial MCP server");
+        listener
+            .set_nonblocking(true)
+            .expect("set partial MCP listener nonblocking");
+        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let handle = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut failed_catalogs = 0;
+            while Instant::now() < deadline && failed_catalogs < 3 {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let Some(request) = read_fake_http_request(&mut stream) else {
+                            continue;
+                        };
+                        let Some(body) = request.body else {
+                            continue;
+                        };
+                        let method = body.get("method").and_then(Value::as_str).unwrap_or("");
+                        let id = body.get("id").cloned().unwrap_or(Value::Null);
+                        match method {
+                            "initialize" => {
+                                let response = json!({
+                                    "jsonrpc":"2.0",
+                                    "id":id,
+                                    "result":{
+                                        "protocolVersion":"2025-06-18",
+                                        "capabilities":{
+                                            "tools":{"listChanged":false},
+                                            "prompts":{"listChanged":false},
+                                            "resources":{"subscribe":false,"listChanged":false}
+                                        },
+                                        "serverInfo":{"name":"partial-catalog","version":"0.1.0"}
+                                    }
+                                });
+                                write_fake_http_response(
+                                    &mut stream,
+                                    "200 OK",
+                                    Some("application/json"),
+                                    &response.to_string(),
+                                );
+                            }
+                            "notifications/initialized" => {
+                                write_fake_http_response(&mut stream, "202 Accepted", None, "");
+                            }
+                            "tools/list" => {
+                                let response = json!({
+                                    "jsonrpc":"2.0",
+                                    "id":id,
+                                    "result":{"tools":[{
+                                        "name":"echo",
+                                        "description":"Required tool catalog remains usable",
+                                        "inputSchema":{"type":"object","properties":{}}
+                                    }]}
+                                });
+                                write_fake_http_response(
+                                    &mut stream,
+                                    "200 OK",
+                                    Some("application/json"),
+                                    &response.to_string(),
+                                );
+                            }
+                            "prompts/list" | "resources/list" | "resources/templates/list" => {
+                                failed_catalogs += 1;
+                                let response = json!({
+                                    "jsonrpc":"2.0",
+                                    "id":id,
+                                    "error":{"code":-32603,"message":"catalog unavailable"}
+                                });
+                                write_fake_http_response(
+                                    &mut stream,
+                                    "200 OK",
+                                    Some("application/json"),
+                                    &response.to_string(),
+                                );
+                            }
+                            _ => write_fake_http_response(&mut stream, "202 Accepted", None, ""),
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        (url, handle)
+    }
+
+    pub(crate) fn start_auth_retry_http_mcp_server() -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind auth retry MCP server");
+        listener
+            .set_nonblocking(true)
+            .expect("set auth retry MCP listener nonblocking");
+        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let handle = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut initialize_attempts = 0;
+            let mut initialized = false;
+            while Instant::now() < deadline && !initialized {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let Some(request) = read_fake_http_request(&mut stream) else {
+                            continue;
+                        };
+                        let Some(body) = request.body else {
+                            continue;
+                        };
+                        let method = body.get("method").and_then(Value::as_str).unwrap_or("");
+                        if method == "notifications/initialized" && initialize_attempts == 2 {
+                            write_fake_http_response(&mut stream, "202 Accepted", None, "");
+                            initialized = true;
+                            continue;
+                        }
+                        if method != "initialize" {
+                            write_fake_http_response(&mut stream, "202 Accepted", None, "");
+                            continue;
+                        }
+                        initialize_attempts += 1;
+                        thread::sleep(Duration::from_millis(200));
+                        if initialize_attempts == 1 {
+                            write_fake_http_response_with_headers(
+                                &mut stream,
+                                "401 Unauthorized",
+                                &["WWW-Authenticate: Bearer realm=\"mcp\""],
+                                None,
+                                "",
+                            );
+                        } else {
+                            let id = body.get("id").cloned().unwrap_or(Value::Null);
+                            let response = json!({
+                                "jsonrpc":"2.0",
+                                "id":id,
+                                "result":{
+                                    "protocolVersion":"2025-06-18",
+                                    "capabilities":{"tools":{"listChanged":false}},
+                                    "serverInfo":{"name":"auth-retry","version":"0.1.0"}
+                                }
+                            });
+                            write_fake_http_response(
+                                &mut stream,
+                                "200 OK",
+                                Some("application/json"),
+                                &response.to_string(),
+                            );
                         }
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -543,11 +741,25 @@ pub(crate) mod test_support {
         content_type: Option<&str>,
         body: &str,
     ) {
+        write_fake_http_response_with_headers(stream, status, &[], content_type, body);
+    }
+
+    fn write_fake_http_response_with_headers(
+        stream: &mut TcpStream,
+        status: &str,
+        headers: &[&str],
+        content_type: Option<&str>,
+        body: &str,
+    ) {
         let content_type = content_type
             .map(|value| format!("Content-Type: {value}\r\n"))
             .unwrap_or_default();
+        let headers = headers
+            .iter()
+            .map(|header| format!("{header}\r\n"))
+            .collect::<String>();
         let response = format!(
-            "HTTP/1.1 {status}\r\n{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "HTTP/1.1 {status}\r\n{headers}{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
         let _ = stream.write_all(response.as_bytes());
@@ -558,8 +770,9 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::test_support::{
-        restore_env, shell_single_quote, start_deadline_http_mcp_server,
-        start_fake_http_mcp_server, toml_string, unique_temp_dir,
+        restore_env, shell_single_quote, start_auth_retry_http_mcp_server,
+        start_deadline_http_mcp_server, start_fake_http_mcp_server,
+        start_partial_catalog_http_mcp_server, toml_string, unique_temp_dir,
     };
     use super::*;
     use crate::TEST_ENV_LOCK;
@@ -942,6 +1155,98 @@ args = ["-c", "true"]
             Some("Bearer helper-secret")
         );
         restore_env("NAC_MCP_HELPER_TOKEN", original);
+    }
+
+    #[tokio::test]
+    async fn probe_keeps_required_tools_when_optional_catalogs_fail() {
+        let (url, server) = start_partial_catalog_http_mcp_server();
+        let config = McpServerConfig {
+            enabled: true,
+            library_id: None,
+            required: false,
+            startup_timeout_ms: None,
+            catalog_timeout_ms: None,
+            execution_timeout_ms: None,
+            transport: McpTransportConfig::StreamableHttp {
+                url,
+                headers: BTreeMap::new(),
+                env_headers: BTreeMap::new(),
+                bearer_token_env_var: None,
+                header_helper: None,
+            },
+        };
+
+        let result = probe_mcp_server(
+            "partial",
+            &config,
+            &McpDefaults::default(),
+            Path::new("/tmp"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.tools.len(), 1);
+        assert_eq!(result.tools[0].name, "echo");
+        assert_eq!(result.prompt_count, 0);
+        assert_eq!(result.resource_count, 0);
+        assert_eq!(result.resource_template_count, 0);
+        assert_eq!(
+            result.catalog_warnings,
+            [
+                "prompt listing failed",
+                "resource listing failed",
+                "resource-template listing failed"
+            ]
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn refreshed_auth_handshake_gets_a_fresh_startup_budget() {
+        let (url, server) = start_auth_retry_http_mcp_server();
+        let helper = McpHeaderHelperConfig {
+            command: "/bin/sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                "sleep 0.15; printf '{\"Authorization\":\"Bearer refreshed\"}'".to_string(),
+            ],
+            timeout_ms: Some(1_000),
+            ..McpHeaderHelperConfig::default()
+        };
+        let config = McpServerConfig {
+            enabled: true,
+            library_id: None,
+            required: false,
+            startup_timeout_ms: Some(500),
+            catalog_timeout_ms: None,
+            execution_timeout_ms: None,
+            transport: McpTransportConfig::StreamableHttp {
+                url,
+                headers: BTreeMap::new(),
+                env_headers: BTreeMap::new(),
+                bearer_token_env_var: None,
+                header_helper: Some(helper),
+            },
+        };
+        let handler = NacMcpClientHandler { roots: Vec::new() };
+        let started = std::time::Instant::now();
+
+        let mut service = connect_server(
+            "auth-retry",
+            &config,
+            &handler,
+            Path::new("/tmp"),
+            Duration::from_millis(500),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            started.elapsed() > Duration::from_millis(500),
+            "the test must exceed one startup budget to cover the old outer timeout"
+        );
+        close_mcp_service(&mut service).await;
+        server.join().unwrap();
     }
 
     #[tokio::test]

@@ -773,7 +773,8 @@ pub async fn test_server_handler(
         }
     };
 
-    match mcp::probe_mcp_server(&name, &config, manager.root_cwd()).await {
+    let defaults = mcp::load_mcp_defaults(&config_path(&manager)?)?;
+    match mcp::probe_mcp_server(&name, &config, &defaults, manager.root_cwd()).await {
         Ok(probe) => Ok(Json(TestMcpServerResponse {
             connected: true,
             auth_required: false,

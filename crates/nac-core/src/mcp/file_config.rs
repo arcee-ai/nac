@@ -742,6 +742,26 @@ pub fn read_mcp_configuration_consistently(path: &Path) -> ConfigurationResult<S
     }
 }
 
+/// Reads only the global `[mcp]` defaults without requiring every server entry
+/// to deserialize. Dashboard draft probes use this so their inherited budgets
+/// match worker admission while preserving tolerant CRUD for unrelated rows.
+pub fn load_mcp_defaults(path: &Path) -> ConfigurationResult<McpDefaults> {
+    #[derive(Default, serde::Deserialize)]
+    struct DefaultsOnly {
+        #[serde(default)]
+        mcp: McpDefaults,
+    }
+
+    let raw = read_mcp_configuration_consistently(path)?;
+    toml::from_str::<DefaultsOnly>(&raw)
+        .map(|config| config.mcp)
+        .map_err(|error| {
+            McpServerConfigurationStoreError::InvalidInput(format!(
+                "failed to parse global MCP defaults: {error}"
+            ))
+        })
+}
+
 #[cfg(test)]
 thread_local! {
     static BEFORE_EXCHANGE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
@@ -1316,6 +1336,35 @@ mod tests {
         let strict: super::config::McpConfigFile = toml::from_str(&raw).unwrap();
         assert_eq!(strict.mcp.startup_timeout_ms, Some(9_000));
         assert!(strict.mcp_servers["operable"].required);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn global_defaults_load_without_deserializing_unrelated_server_rows() {
+        let path = std::env::temp_dir()
+            .join(format!("nac-mcp-defaults-{}", uuid::Uuid::new_v4()))
+            .join("config.toml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"
+[mcp]
+startup_timeout_ms = 321
+catalog_timeout_ms = 654
+execution_timeout_ms = 987
+
+[mcp_servers.unrelated]
+transport = "stdio"
+args = ["missing-command-is-tolerated-by-default-loader"]
+"#,
+        )
+        .unwrap();
+
+        let defaults = load_mcp_defaults(&path).unwrap();
+        assert_eq!(defaults.startup_timeout_ms, Some(321));
+        assert_eq!(defaults.catalog_timeout_ms, Some(654));
+        assert_eq!(defaults.execution_timeout_ms, Some(987));
+
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

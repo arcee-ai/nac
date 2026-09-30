@@ -10530,7 +10530,8 @@
           "tools",
           "prompt_count",
           "resource_count",
-          "resource_template_count"
+          "resource_template_count",
+          "catalog_warnings"
         ],
         "properties": {
           "capabilities": {
@@ -10538,6 +10539,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "catalog_warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Best-effort catalog sections that could not be listed after the\nrequired tool catalog had already succeeded."
           },
           "instructions": {
             "type": [

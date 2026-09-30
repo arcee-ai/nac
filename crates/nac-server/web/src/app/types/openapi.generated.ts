@@ -528,6 +528,7 @@ export interface components {
     McpProbedTool: { description?: string | null; name: string };
     McpProbeResult: {
       capabilities: string[];
+      catalog_warnings: string[];
       instructions?: string | null;
       prompt_count: number;
       protocol_version: string;

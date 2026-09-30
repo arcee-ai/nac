@@ -27,7 +27,7 @@ pub struct McpRuntimeStatus {
 
 struct RuntimeEntry {
     status: McpRuntimeStatus,
-    _service: Option<Arc<McpService>>,
+    service: Option<SharedMcpService>,
 }
 
 /// Process-local operational connections for the dashboard. Worker registries
@@ -101,39 +101,25 @@ impl McpRuntimeManager {
         let handler = NacMcpClientHandler {
             roots: mcp_roots_for_policy(&self.cwd, None, McpRootPolicy::None)?,
         };
-        let service = match timeout(
-            startup_timeout,
-            connect_server(name, &config, &handler, &self.cwd),
-        )
-        .await
-        {
-            Ok(Ok(service)) => Arc::new(service),
-            Ok(Err(error)) => return Ok(self.record_failure(name, &config, error).await),
-            Err(_) => {
-                return Ok(self
-                    .record_failure(
-                        name,
-                        &config,
-                        anyhow!(
-                            "timed out connecting after {}ms",
-                            startup_timeout.as_millis()
-                        ),
-                    )
-                    .await)
-            }
-        };
+        let mut service =
+            match connect_server(name, &config, &handler, &self.cwd, startup_timeout).await {
+                Ok(service) => service,
+                Err(error) => return Ok(self.record_failure(name, &config, error).await),
+            };
         let tools = match timeout(catalog_timeout, service.list_all_tools()).await {
             Ok(Ok(tools)) => tools,
             Ok(Err(error)) => {
+                close_mcp_service(&mut service).await;
                 return Ok(self
                     .record_failure(
                         name,
                         &config,
                         anyhow!(error).context("failed to list tools"),
                     )
-                    .await)
+                    .await);
             }
             Err(_) => {
+                close_mcp_service(&mut service).await;
                 return Ok(self
                     .record_failure(
                         name,
@@ -143,7 +129,7 @@ impl McpRuntimeManager {
                             catalog_timeout.as_millis()
                         ),
                     )
-                    .await)
+                    .await);
             }
         };
         let peer = service.peer_info();
@@ -164,6 +150,7 @@ impl McpRuntimeManager {
                 .map(|info| info.version.clone()),
             tool_count: tools.len(),
         };
+        let service = Arc::new(tokio::sync::RwLock::new(service));
         self.set_entry(status.clone(), Some(service)).await;
         Ok(status)
     }
@@ -188,13 +175,13 @@ impl McpRuntimeManager {
 
     pub async fn reload(&self, name: &str) -> Result<McpRuntimeStatus> {
         let _operation = self.operation.lock().await;
-        self.entries.write().await.remove(name);
+        self.remove_entry(name).await;
         self.connect_inner(name).await
     }
 
     pub async fn forget(&self, name: &str) {
         let _operation = self.operation.lock().await;
-        self.entries.write().await.remove(name);
+        self.remove_entry(name).await;
     }
 
     async fn record_failure(
@@ -224,14 +211,28 @@ impl McpRuntimeManager {
         status
     }
 
-    async fn set_entry(&self, status: McpRuntimeStatus, service: Option<Arc<McpService>>) {
-        self.entries.write().await.insert(
-            status.name.clone(),
-            RuntimeEntry {
-                status,
-                _service: service,
-            },
-        );
+    async fn set_entry(&self, status: McpRuntimeStatus, service: Option<SharedMcpService>) {
+        let replaced = self
+            .entries
+            .write()
+            .await
+            .insert(status.name.clone(), RuntimeEntry { status, service })
+            .and_then(|entry| entry.service);
+        if let Some(replaced) = replaced {
+            close_shared_mcp_service(replaced).await;
+        }
+    }
+
+    async fn remove_entry(&self, name: &str) {
+        let removed = self
+            .entries
+            .write()
+            .await
+            .remove(name)
+            .and_then(|entry| entry.service);
+        if let Some(removed) = removed {
+            close_shared_mcp_service(removed).await;
+        }
     }
 
     fn configured_servers(&self) -> Result<(McpDefaults, BTreeMap<String, McpServerConfig>)> {
@@ -301,6 +302,77 @@ command = "never-spawned"
         assert!(statuses[0].required);
         let connected = manager.connect("disabled").await.unwrap();
         assert_eq!(connected.state, McpRuntimeState::Disabled);
+
+        crate::mcp::test_support::restore_env("NAC_HOME", original_nac_home);
+        crate::mcp::test_support::restore_env("XDG_CONFIG_HOME", original_xdg);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn disconnect_closes_and_reaps_stdio_server() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = env::var_os("NAC_HOME");
+        let original_xdg = env::var_os("XDG_CONFIG_HOME");
+        let root = crate::mcp::test_support::unique_temp_dir("nac-mcp-runtime-close");
+        std::fs::create_dir_all(&root).unwrap();
+        let script = root.join("fake-mcp.sh");
+        let pid_file = root.join("server.pid");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+printf '%s' "$$" > "$MCP_PID_FILE"
+while IFS= read -r line; do
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"stdio-close-test","version":"0.1.0"}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}\n' "$id"
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("config.toml"),
+            format!(
+                r#"
+[mcp_servers.local]
+transport = "stdio"
+command = "/bin/sh"
+args = [{}]
+env = {{ MCP_PID_FILE = {} }}
+"#,
+                serde_json::to_string(&script.display().to_string()).unwrap(),
+                serde_json::to_string(&pid_file.display().to_string()).unwrap(),
+            ),
+        )
+        .unwrap();
+        unsafe { env::set_var("NAC_HOME", &root) };
+
+        let manager = McpRuntimeManager::new(root.clone());
+        let connected = manager.connect("local").await.unwrap();
+        assert_eq!(connected.state, McpRuntimeState::Connected);
+        let pid = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        assert_eq!(unsafe { libc::kill(pid, 0) }, 0);
+
+        let disconnected = manager.disconnect("local").await.unwrap();
+        assert_eq!(disconnected.state, McpRuntimeState::Disconnected);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline && unsafe { libc::kill(pid, 0) } == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_ne!(
+            unsafe { libc::kill(pid, 0) },
+            0,
+            "disconnect left the stdio MCP child running"
+        );
 
         crate::mcp::test_support::restore_env("NAC_HOME", original_nac_home);
         crate::mcp::test_support::restore_env("XDG_CONFIG_HOME", original_xdg);

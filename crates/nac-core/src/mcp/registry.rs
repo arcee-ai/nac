@@ -27,11 +27,12 @@ struct McpToolBinding {
 
 struct McpServer {
     name: String,
-    service: tokio::sync::RwLock<Arc<McpService>>,
+    service: tokio::sync::RwLock<SharedMcpService>,
     refresh: tokio::sync::Mutex<()>,
     config: McpServerConfig,
     handler: NacMcpClientHandler,
     cwd: PathBuf,
+    startup_timeout: Duration,
 }
 
 #[derive(Clone)]
@@ -195,48 +196,34 @@ impl McpRegistry {
                     continue;
                 }
             };
-            let service = match timeout(
-                startup_timeout,
-                connect_server(&server_name, &server_config, &handler, cwd),
-            )
-            .await
-            {
-                Ok(Ok(service)) => Arc::new(service),
-                Ok(Err(error)) => {
-                    let reason = format!("{error:#}");
-                    if server_config.required {
-                        bail!("required MCP server '{server_name}' failed to connect: {reason}");
-                    }
-                    eprintln!(
+            let mut service =
+                match connect_server(&server_name, &server_config, &handler, cwd, startup_timeout)
+                    .await
+                {
+                    Ok(service) => service,
+                    Err(error) => {
+                        let reason = format!("{error:#}");
+                        if server_config.required {
+                            bail!(
+                                "required MCP server '{server_name}' failed to connect: {reason}"
+                            );
+                        }
+                        eprintln!(
                         "MCP server '{server_name}' is unavailable and will be skipped: {reason}"
                     );
-                    skipped.push(McpSkippedServer {
-                        name: server_name,
-                        reason,
-                    });
-                    continue;
-                }
-                Err(_) => {
-                    let reason = format!(
-                        "timed out during connect after {}ms",
-                        startup_timeout.as_millis()
-                    );
-                    if server_config.required {
-                        bail!("required MCP server '{server_name}' {reason}");
+                        skipped.push(McpSkippedServer {
+                            name: server_name,
+                            reason,
+                        });
+                        continue;
                     }
-                    eprintln!("MCP server '{server_name}' {reason} and will be skipped");
-                    skipped.push(McpSkippedServer {
-                        name: server_name,
-                        reason,
-                    });
-                    continue;
-                }
-            };
+                };
 
             let listed_tools = match timeout(catalog_timeout, service.list_all_tools()).await {
                 Ok(Ok(tools)) => tools,
                 Ok(Err(error)) => {
                     let reason = format!("{error:#}");
+                    close_mcp_service(&mut service).await;
                     if server_config.required {
                         bail!("required MCP server '{server_name}' failed to list tools: {reason}");
                     }
@@ -254,6 +241,7 @@ impl McpRegistry {
                         "timed out while listing tools after {}ms",
                         catalog_timeout.as_millis()
                     );
+                    close_mcp_service(&mut service).await;
                     if server_config.required {
                         bail!("required MCP server '{server_name}' {reason}");
                     }
@@ -267,6 +255,7 @@ impl McpRegistry {
             };
 
             seen_endpoints.insert(endpoint, server_name.clone());
+            let service = Arc::new(tokio::sync::RwLock::new(service));
             let server = Arc::new(McpServer {
                 name: server_name.clone(),
                 service: tokio::sync::RwLock::new(Arc::clone(&service)),
@@ -274,7 +263,9 @@ impl McpRegistry {
                 config: server_config.clone(),
                 handler: handler.clone(),
                 cwd: cwd.to_path_buf(),
+                startup_timeout,
             });
+            let mounted_before = tools.len();
             for tool in listed_tools {
                 let qualified_name = allocate_tool_name(&server_name, &tool.name, &mut seen_names);
                 let mut definition = tool_definition(&qualified_name, &server_name, &tool);
@@ -307,6 +298,9 @@ impl McpRegistry {
                         execution_timeout,
                     }),
                 );
+            }
+            if tools.len() == mounted_before {
+                close_shared_mcp_service(service).await;
             }
         }
 
@@ -369,7 +363,8 @@ impl McpRegistry {
         // Keep the high-level 3.x call: it resolves protocol-version-specific
         // multi-round responses and returns only the final CallToolResult.
         let service = binding.server.service.read().await.clone();
-        match service.call_tool(params.clone()).await {
+        let first_result = service.read().await.call_tool(params.clone()).await;
+        match first_result {
             Ok(result) => flatten_tool_result(result, image_results).await,
             Err(error)
                 if binding.server.config.has_header_helper() && authorization_required(&error) =>
@@ -383,12 +378,17 @@ impl McpRegistry {
                             &binding.server.config,
                             &binding.server.handler,
                             &binding.server.cwd,
+                            binding.server.startup_timeout,
                         )
                         .await
                         {
                             Ok(refreshed) => {
-                                let refreshed = Arc::new(refreshed);
-                                *binding.server.service.write().await = Arc::clone(&refreshed);
+                                let refreshed = Arc::new(tokio::sync::RwLock::new(refreshed));
+                                let replaced = {
+                                    let mut current = binding.server.service.write().await;
+                                    std::mem::replace(&mut *current, Arc::clone(&refreshed))
+                                };
+                                close_shared_mcp_service(replaced).await;
                                 refreshed
                             }
                             Err(refresh_error) => {
@@ -405,7 +405,8 @@ impl McpRegistry {
                         current
                     }
                 };
-                match refreshed_service.call_tool(params).await {
+                let refreshed_result = refreshed_service.read().await.call_tool(params).await;
+                match refreshed_result {
                     Ok(result) => flatten_tool_result(result, image_results).await,
                     Err(error) => ToolResult {
                         content: format!(

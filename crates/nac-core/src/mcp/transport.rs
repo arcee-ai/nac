@@ -5,6 +5,7 @@ pub(super) async fn connect_server(
     config: &McpServerConfig,
     handler: &NacMcpClientHandler,
     cwd: &Path,
+    startup_timeout: Duration,
 ) -> Result<McpService> {
     match config.transport.clone() {
         McpTransportConfig::Stdio {
@@ -33,10 +34,14 @@ pub(super) async fn connect_server(
                 .unwrap_or_else(|| cwd.to_path_buf());
             let transport =
                 TokioChildProcess::new(build_stdio_command(&command, &args, &env, &cwd)?)?;
-            handler
-                .clone()
-                .serve(transport)
+            timeout(startup_timeout, handler.clone().serve(transport))
                 .await
+                .map_err(|_| {
+                    anyhow!(
+                        "timed out connecting stdio MCP server '{name}' after {}ms",
+                        startup_timeout.as_millis()
+                    )
+                })?
                 .with_context(|| format!("failed to connect stdio MCP server '{name}'"))
         }
         McpTransportConfig::StreamableHttp {
@@ -51,16 +56,15 @@ pub(super) async fn connect_server(
                 Some(helper) => Some(run_header_helper(helper, cwd).await?),
                 None => None,
             };
-            match connect_http_server(
-                name,
-                handler,
-                &url,
-                &headers,
-                &env_headers,
-                bearer_token_env_var.as_deref(),
-                helper_headers.as_ref(),
-            )
-            .await
+            let parameters = HttpConnectionParameters {
+                url: &url,
+                headers: &headers,
+                env_headers: &env_headers,
+                bearer_token_env_var: bearer_token_env_var.as_deref(),
+                helper_headers: helper_headers.as_ref(),
+            };
+            match connect_http_server_with_timeout(name, handler, &parameters, startup_timeout)
+                .await
             {
                 Ok(service) => Ok(service),
                 Err(error) => {
@@ -71,37 +75,57 @@ pub(super) async fn connect_server(
                         return Err(error);
                     };
                     let refreshed = run_header_helper(helper, cwd).await?;
-                    connect_http_server(
-                        name,
-                        handler,
-                        &url,
-                        &headers,
-                        &env_headers,
-                        bearer_token_env_var.as_deref(),
-                        Some(&refreshed),
-                    )
-                    .await
+                    let parameters = HttpConnectionParameters {
+                        helper_headers: Some(&refreshed),
+                        ..parameters
+                    };
+                    connect_http_server_with_timeout(name, handler, &parameters, startup_timeout)
+                        .await
                 }
             }
         }
     }
 }
 
+#[derive(Clone, Copy)]
+struct HttpConnectionParameters<'a> {
+    url: &'a str,
+    headers: &'a BTreeMap<String, String>,
+    env_headers: &'a BTreeMap<String, String>,
+    bearer_token_env_var: Option<&'a str>,
+    helper_headers: Option<&'a BTreeMap<String, String>>,
+}
+
+async fn connect_http_server_with_timeout(
+    name: &str,
+    handler: &NacMcpClientHandler,
+    parameters: &HttpConnectionParameters<'_>,
+    startup_timeout: Duration,
+) -> Result<McpService> {
+    timeout(
+        startup_timeout,
+        connect_http_server(name, handler, parameters),
+    )
+    .await
+    .map_err(|_| {
+        anyhow!(
+            "timed out connecting HTTP MCP server '{name}' after {}ms",
+            startup_timeout.as_millis()
+        )
+    })?
+}
+
 async fn connect_http_server(
     name: &str,
     handler: &NacMcpClientHandler,
-    url: &str,
-    headers: &BTreeMap<String, String>,
-    env_headers: &BTreeMap<String, String>,
-    bearer_token_env_var: Option<&str>,
-    helper_headers: Option<&BTreeMap<String, String>>,
+    parameters: &HttpConnectionParameters<'_>,
 ) -> Result<McpService> {
     let transport = StreamableHttpClientTransport::from_config(build_http_transport_config(
-        url,
-        headers,
-        env_headers,
-        bearer_token_env_var,
-        helper_headers,
+        parameters.url,
+        parameters.headers,
+        parameters.env_headers,
+        parameters.bearer_token_env_var,
+        parameters.helper_headers,
     )?);
     handler
         .clone()
