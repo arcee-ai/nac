@@ -43,11 +43,13 @@ use compaction::{CompactionPolicy, CompactionState, PreparedProviderView};
 use failed_tool_round::failed_tool_round;
 pub(crate) use preview::key_arg_preview;
 use preview::*;
+use prompt_rendering::{
+    light_model_prompt_guidance, render_orchestrator_system_prompt, render_worker_system_prompt,
+};
 pub(crate) use prompt_rendering::{
     render_direct_system_prompt, render_direct_with_orchestrator_system_prompt,
     render_general_child_system_prompt,
 };
-use prompt_rendering::{render_orchestrator_system_prompt, render_worker_system_prompt};
 use tool_exec::{execute_tools_parallel, finalize_tool_results};
 pub(crate) use transcript_state::truncate_incomplete_tool_turn;
 use transcript_state::{
@@ -130,19 +132,6 @@ pub struct AgentConfig {
     /// Light worker model client; `None` keeps single-model dispatch.
     pub light_client: Option<Arc<ModelClient>>,
     pub permission_rules: Vec<crate::permissions::PermissionRule>,
-}
-
-/// Light-model addendum to the orchestrator system prompt: names the light
-/// model so weight classification has a real signal.
-fn light_model_prompt_guidance(light: &ModelClient) -> String {
-    format!(
-        "\n\nA light worker model is configured. Every thread dispatch requires a \
-         weight classification: light routes the dispatch to the light model — {} — \
-         and heavy runs your own model. Classify by the genuine difficulty of the \
-         bounded action: light for mechanical or well-scoped work (setup, running \
-         tests, simple edits), heavy for work needing real reasoning or broad context.",
-        tools::thread::describe_light_model(light)
-    )
 }
 
 pub struct Agent {
@@ -548,6 +537,11 @@ impl Agent {
     /// launch. The clone is cheap (the registry is behind `Arc`).
     pub fn skills(&self) -> Option<Arc<SkillRegistry>> {
         self.tool_runtime.skills.clone()
+    }
+
+    /// The immutable MCP capability registry captured for this session.
+    pub fn mcp_registry(&self) -> Option<Arc<McpRegistry>> {
+        self.tool_runtime.mcp.clone()
     }
 
     pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {

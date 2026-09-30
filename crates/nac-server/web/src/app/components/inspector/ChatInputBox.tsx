@@ -320,7 +320,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     data: commandDefinitions,
     isError: commandsFailed,
     refetch: refetchCommands,
-  } = useSlashCommands();
+  } = useSlashCommands(sessionId);
   const { data: skillDefinitions, isError: skillsFailed } = useSessionSkills(sessionId);
   const ref = useRef<HTMLTextAreaElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
@@ -731,7 +731,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           }
           return;
         }
-        if (command) {
+        if (command && command.command !== "mcp_prompt") {
           toast.error(`Unsupported slash command: /${command.name}`);
           return;
         }

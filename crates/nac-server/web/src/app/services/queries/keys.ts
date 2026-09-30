@@ -41,6 +41,7 @@ export const queryKeys = {
   managedProviderModelsAll: ["managed-provider-models"] as const,
   modelCatalog: ["model-catalog"] as const,
   slashCommands: ["slash-commands"] as const,
+  sessionCommands: (id: string) => ["session", id, "commands"] as const,
   resolvedModelConfig: (configId: string) => ["model-config-resolved", configId] as const,
   resolvedModelConfigsAll: ["model-config-resolved"] as const,
   resolvedConfigFile: (path: string) => ["config-file-resolved", path] as const,

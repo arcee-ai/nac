@@ -73,6 +73,9 @@ impl<'a> SessionIntentApplication<'a> {
                     frontend_command_name(command)
                 ));
             }
+            PreparedUserInput::McpPrompt(invocation) => {
+                service.resolve_mcp_prompt(invocation).await?
+            }
             PreparedUserInput::SubmitPrompt(prompt) => prompt,
         };
         service
@@ -320,6 +323,17 @@ impl<'a> SessionStateApplication<'a> {
             .attach_session(session_id)
             .await?
             .skill_catalog_entries())
+    }
+
+    pub(crate) async fn commands(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<nac_core::commands::SlashCommandDefinition>> {
+        Ok(self
+            .manager
+            .attach_session(session_id)
+            .await?
+            .slash_command_definitions())
     }
 }
 

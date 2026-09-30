@@ -374,7 +374,7 @@ pub(super) async fn build_resume_config_from_snapshot(
 
     store::initialize(&store_path)?;
 
-    let (skills, agents_md_status, agents_md_message) = if ssh.is_some() {
+    let (skills, agents_md_status, mut agents_md_message) = if ssh.is_some() {
         let config_paths = PathContext::new(&config_cwd);
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
         (skills, "off".to_string(), None)
@@ -392,6 +392,45 @@ pub(super) async fn build_resume_config_from_snapshot(
             .flatten();
         (skills, agents_md.status_text(), message)
     };
+    let mcp_paths = if ssh.is_some() {
+        PathContext::new(&config_cwd)
+    } else {
+        PathContext::new(&workspace_cwd)
+    };
+    let mcp = if agent_mode == AgentMode::Direct {
+        McpRegistry::load_reporting_skips(
+            &workspace_cwd,
+            sandbox.as_ref(),
+            &mcp_paths,
+            if ssh.is_some() {
+                McpTransportPolicy::StreamableHttpOnly
+            } else {
+                McpTransportPolicy::All
+            },
+            if ssh.is_some() {
+                McpRootPolicy::None
+            } else {
+                McpRootPolicy::Workspace
+            },
+        )
+        .await?
+        .registry
+    } else {
+        None
+    };
+    if let Some(instructions) = mcp
+        .as_ref()
+        .and_then(|registry| registry.instructions_message())
+    {
+        agents_md_message = Some(match agents_md_message {
+            Some(existing) => format!("{existing}\n\n{instructions}"),
+            None => instructions,
+        });
+    }
+    let extra_tool_defs = mcp
+        .as_ref()
+        .map(|registry| registry.model_tool_definitions())
+        .unwrap_or_default();
     let working_directory = sandbox
         .as_ref()
         .map(super::super::sandbox::SandboxSession::workdir_display)
@@ -431,9 +470,9 @@ pub(super) async fn build_resume_config_from_snapshot(
             worker_executable,
             sandbox,
             ssh,
-            mcp: None,
+            mcp,
             skills,
-            extra_tool_defs: Vec::new(),
+            extra_tool_defs,
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
             light_client,

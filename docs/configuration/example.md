@@ -60,11 +60,18 @@ startup_timeout_ms = 15000
 catalog_timeout_ms = 15000
 execution_timeout_ms = 300000
 
-# Table key is the local server name. Transports: streamable_http and stdio.
+# Table key is the local server name. Transports: streamable_http (url, optional
+# headers) and stdio (command, args, env).
 # enabled defaults to true; required defaults to false. A required enabled
 # server rejects session admission when startup or catalog discovery fails.
-# String values expand ${ENV_VAR}; the variable must be set. library_id is
-# dashboard bookkeeping and is ignored at connect.
+# String values (command, args, env values, url, header values) expand ${ENV_VAR};
+# the variable must be set. library_id is dashboard bookkeeping and is ignored
+# at connect. Advertised server instructions are included as bounded, attributed,
+# untrusted guidance. Tools remain namespaced as mcp__<server>__<tool>. Resources,
+# resource templates, prompts, and prompt-argument completion use NAC's shared
+# MCP capability tools; exact resource reads still pass through permission policy.
+# Advertised prompts also appear as session slash commands and accept a JSON
+# object of string arguments, for example: /mcp__docs__review {"tone":"strict"}.
 [mcp_servers.exa_web_search]
 enabled = true
 required = false

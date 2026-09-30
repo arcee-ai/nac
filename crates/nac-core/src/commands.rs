@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::mcp::{McpPromptCommand, McpPromptInvocation, McpRegistry};
 use crate::skills::SkillRegistry;
 
 /// Sentinel element wrapping the skill blocks that `$skillname` prompt
@@ -29,47 +30,88 @@ const MANAGED_ORCHESTRATOR_COMPLETION_PREFIX: &str =
 pub enum SlashCommand {
     Compact,
     Goal,
+    McpPrompt,
 }
 
 /// User-facing metadata shared by command parsing and frontend discovery.
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SlashCommandDefinition {
     pub command: SlashCommand,
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: String,
+    pub description: String,
     pub accepts_arguments: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub arguments: Vec<crate::mcp::McpPromptArgument>,
 }
 
-const SLASH_COMMANDS: &[SlashCommandDefinition] = &[
-    SlashCommandDefinition {
-        command: SlashCommand::Compact,
-        name: "compact",
-        description: "Compact the current session context",
-        accepts_arguments: false,
-    },
-    SlashCommandDefinition {
-        command: SlashCommand::Goal,
-        name: "goal",
-        description: "Create or control a durable direct-session goal",
+static SLASH_COMMANDS: std::sync::LazyLock<Vec<SlashCommandDefinition>> =
+    std::sync::LazyLock::new(|| {
+        vec![
+            SlashCommandDefinition {
+                command: SlashCommand::Compact,
+                name: "compact".to_string(),
+                description: "Compact the current session context".to_string(),
+                accepts_arguments: false,
+                arguments: Vec::new(),
+            },
+            SlashCommandDefinition {
+                command: SlashCommand::Goal,
+                name: "goal".to_string(),
+                description: "Create or control a durable direct-session goal".to_string(),
+                accepts_arguments: true,
+                arguments: Vec::new(),
+            },
+        ]
+    });
+
+static MCP_PROMPT_COMMAND: std::sync::LazyLock<SlashCommandDefinition> =
+    std::sync::LazyLock::new(|| SlashCommandDefinition {
+        command: SlashCommand::McpPrompt,
+        name: "mcp_prompt".to_string(),
+        description: "Invoke a prompt advertised by a mounted MCP server".to_string(),
         accepts_arguments: true,
-    },
-];
+        arguments: Vec::new(),
+    });
 
 pub fn slash_command_definitions() -> &'static [SlashCommandDefinition] {
-    SLASH_COMMANDS
+    &SLASH_COMMANDS
+}
+
+pub fn session_slash_command_definitions(mcp: Option<&McpRegistry>) -> Vec<SlashCommandDefinition> {
+    let mut definitions = SLASH_COMMANDS.clone();
+    if let Some(mcp) = mcp {
+        definitions.extend(mcp.prompt_commands().into_iter().map(mcp_prompt_definition));
+    }
+    definitions
+}
+
+fn mcp_prompt_definition(command: McpPromptCommand) -> SlashCommandDefinition {
+    SlashCommandDefinition {
+        command: SlashCommand::McpPrompt,
+        name: command.command_name,
+        description: format!(
+            "{} (MCP server: {})",
+            command.description, command.server_name
+        ),
+        accepts_arguments: !command.arguments.is_empty(),
+        arguments: command.arguments,
+    }
 }
 
 impl SlashCommand {
     #[expect(
         clippy::expect_used,
-        reason = "the static slash-command table exhaustively defines this closed enum"
+        reason = "the two built-in variants are declared in the adjacent static registry"
     )]
     pub fn definition(self) -> &'static SlashCommandDefinition {
-        SLASH_COMMANDS
-            .iter()
-            .find(|definition| definition.command == self)
-            .expect("every slash command must have a definition")
+        match self {
+            Self::McpPrompt => &MCP_PROMPT_COMMAND,
+            Self::Compact | Self::Goal => SLASH_COMMANDS
+                .iter()
+                .find(|definition| definition.command == self)
+                .expect("every built-in slash command has a static definition"),
+        }
     }
 }
 
@@ -88,6 +130,7 @@ pub enum PreparedUserInput {
     Empty,
     SubmitPrompt(PreparedPrompt),
     FrontendCommand(SlashCommand),
+    McpPrompt(McpPromptInvocation),
     InvalidSlashCommand { message: String },
 }
 
@@ -95,9 +138,25 @@ pub enum PreparedUserInput {
 /// submitted prompt are resolved against the session's skill registry: the
 /// raw and display prompts stay exactly what the user typed, while the
 /// agent prompt gets the recognized skills' rendered content appended.
+#[cfg(test)]
 pub(crate) fn prepare_user_input(input: &str, skills: Option<&SkillRegistry>) -> PreparedUserInput {
+    prepare_user_input_with_mcp(input, skills, None)
+}
+
+pub(crate) fn prepare_user_input_with_mcp(
+    input: &str,
+    skills: Option<&SkillRegistry>,
+    mcp: Option<&McpRegistry>,
+) -> PreparedUserInput {
     if input.trim().is_empty() {
         return PreparedUserInput::Empty;
+    }
+
+    if let Some(invocation) = mcp.and_then(|registry| registry.parse_prompt_invocation(input)) {
+        return match invocation {
+            Ok(invocation) => PreparedUserInput::McpPrompt(invocation),
+            Err(message) => PreparedUserInput::InvalidSlashCommand { message },
+        };
     }
 
     match parse_slash_command(input) {
@@ -202,6 +261,9 @@ pub fn display_prompt_from_message(content: &str) -> String {
     if let Some(collapsed) = invoked_skills_display_prompt(content) {
         return collapsed;
     }
+    if let Some(collapsed) = invoked_mcp_prompt_display_prompt(content) {
+        return collapsed;
+    }
     if content.starts_with("<nac_goal_continuation goal_id=\"")
         && content.ends_with("\n</nac_goal_continuation>")
     {
@@ -242,6 +304,15 @@ pub fn display_prompt_from_message(content: &str) -> String {
         }
     }
     workset_command_display_prompt(content).unwrap_or_else(|| content.to_string())
+}
+
+fn invoked_mcp_prompt_display_prompt(content: &str) -> Option<String> {
+    let tail = content.strip_suffix(crate::mcp::capabilities::INVOKED_MCP_PROMPT_CLOSE)?;
+    let (head, payload) =
+        tail.rsplit_once(crate::mcp::capabilities::INVOKED_MCP_PROMPT_SEPARATOR)?;
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    (value.get("trust").and_then(serde_json::Value::as_str) == Some("untrusted_remote_prompt_data"))
+        .then(|| head.to_string())
 }
 
 /// Collapses a `$skillname`-expanded prompt back to what the user typed.
@@ -328,6 +399,26 @@ mod tests {
     use crate::skills::SkillRecord;
     use std::path::PathBuf;
 
+    #[test]
+    fn display_prompt_collapses_only_well_formed_mcp_prompt_payloads() {
+        let expanded = format!(
+            "/mcp__docs__review {{\"tone\":\"strict\"}}{}{{\"server\":\"docs\",\"trust\":\"untrusted_remote_prompt_data\",\"result\":{{}}}}{}",
+            crate::mcp::capabilities::INVOKED_MCP_PROMPT_SEPARATOR,
+            crate::mcp::capabilities::INVOKED_MCP_PROMPT_CLOSE
+        );
+        assert_eq!(
+            display_prompt_from_message(&expanded),
+            "/mcp__docs__review {\"tone\":\"strict\"}"
+        );
+
+        let user_text = format!(
+            "ordinary text{}{{\"trust\":\"system\"}}{}",
+            crate::mcp::capabilities::INVOKED_MCP_PROMPT_SEPARATOR,
+            crate::mcp::capabilities::INVOKED_MCP_PROMPT_CLOSE
+        );
+        assert_eq!(display_prompt_from_message(&user_text), user_text);
+    }
+
     fn test_registry(skills: &[(&str, &str)]) -> SkillRegistry {
         SkillRegistry::load_for_test(
             skills
@@ -356,6 +447,18 @@ mod tests {
                 Some(Ok(definition.command))
             );
         }
+    }
+
+    #[test]
+    fn every_slash_command_variant_has_safe_static_metadata() {
+        for command in [
+            SlashCommand::Compact,
+            SlashCommand::Goal,
+            SlashCommand::McpPrompt,
+        ] {
+            assert_eq!(command.definition().command, command);
+        }
+        assert_eq!(SlashCommand::McpPrompt.definition().name, "mcp_prompt");
     }
 
     #[test]

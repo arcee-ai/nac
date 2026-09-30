@@ -3,6 +3,19 @@ const ORCHESTRATOR_SYSTEM_PROMPT: &str = include_str!("prompts/nac_orchestrator.
 const DIRECT_SYSTEM_PROMPT: &str = include_str!("prompts/nac_direct.md");
 const GENERAL_CHILD_SYSTEM_PROMPT: &str = include_str!("prompts/nac_direct_child.md");
 
+/// Light-model addendum to the orchestrator system prompt: names the light
+/// model so weight classification has a real signal.
+pub(super) fn light_model_prompt_guidance(light: &crate::model::ModelClient) -> String {
+    format!(
+        "\n\nA light worker model is configured. Every thread dispatch requires a \
+         weight classification: light routes the dispatch to the light model — {} — \
+         and heavy runs your own model. Classify by the genuine difficulty of the \
+         bounded action: light for mechanical or well-scoped work (setup, running \
+         tests, simple edits), heavy for work needing real reasoning or broad context.",
+        crate::tools::thread::describe_light_model(light)
+    )
+}
+
 #[expect(
     clippy::expect_used,
     reason = "the checked-in worker prompt must retain its working-directory placeholder"

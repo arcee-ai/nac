@@ -594,6 +594,8 @@ pub struct SessionService {
     /// so `prepare_user_input` can expand top-level `$skillname` references
     /// without taking the agent lock.
     skills: Option<Arc<SkillRegistry>>,
+    /// MCP capability and prompt inventory captured at session construction.
+    mcp: Option<Arc<crate::mcp::McpRegistry>>,
     terminal_manager: crate::terminal::TerminalManager,
     permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
     /// A sandbox service owns container-local state even while it has no run
@@ -865,7 +867,22 @@ impl SessionService {
     }
 
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
-        commands::prepare_user_input(input, self.skills.as_deref())
+        commands::prepare_user_input_with_mcp(input, self.skills.as_deref(), self.mcp.as_deref())
+    }
+
+    pub fn slash_command_definitions(&self) -> Vec<crate::commands::SlashCommandDefinition> {
+        commands::session_slash_command_definitions(self.mcp.as_deref())
+    }
+
+    pub async fn resolve_mcp_prompt(
+        &self,
+        invocation: crate::mcp::McpPromptInvocation,
+    ) -> Result<PreparedPrompt> {
+        let registry = self
+            .mcp
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("MCP prompt capability is unavailable"))?;
+        registry.resolve_prompt_invocation(invocation).await
     }
 
     pub fn skill_catalog_entries(&self) -> Vec<crate::skill_catalog::SkillCatalogEntry> {

@@ -77,6 +77,78 @@ impl kernel::NativeTool for McpTool {
     }
 }
 
+struct McpCapabilityTool {
+    definition: ToolDefinition,
+    registry: Arc<McpRegistry>,
+}
+
+impl kernel::NativeTool for McpCapabilityTool {
+    type Input = Value;
+
+    fn definition(&self) -> ToolDefinition {
+        self.definition.clone()
+    }
+
+    fn admission(&self) -> kernel::ToolAdmission {
+        kernel::ToolAdmission::Parallel
+    }
+
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        if input.is_object() {
+            Ok(input)
+        } else {
+            Err(ToolResult::text(
+                format!(
+                    "Error: {} requires object arguments",
+                    self.definition.function.name
+                ),
+                true,
+            ))
+        }
+    }
+
+    fn permission_resources(
+        &self,
+        input: &Self::Input,
+        _services: kernel::ToolServices<'_>,
+    ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+        self.registry
+            .capability_permission_resource(&self.definition.function.name, input)
+            .map(|resource| vec![resource])
+    }
+
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        resources: &[kernel::PermissionResource],
+        _services: kernel::ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        let rebound = self
+            .registry
+            .capability_permission_resource(&self.definition.function.name, input)?;
+        if resources != [rebound] {
+            return Err(ToolResult::text(
+                "Error: authorized MCP capability target changed before execution",
+                true,
+            ));
+        }
+        Ok(())
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: Self::Input,
+        _services: kernel::ToolServices<'a>,
+        _context: &'a kernel::ToolCallContext,
+    ) -> futures_util::future::BoxFuture<'a, ToolResult> {
+        Box::pin(async move {
+            self.registry
+                .call_capability(&self.definition.function.name, input)
+                .await
+        })
+    }
+}
+
 pub(super) async fn invoke(
     registry: Arc<McpRegistry>,
     name: &str,
@@ -87,15 +159,39 @@ pub(super) async fn invoke(
     let Some(definition) = registry.tool_definition(name) else {
         return ToolResult::text(format!("Error: unknown MCP tool '{name}'"), true);
     };
-    let snapshot = snapshot(
-        definition,
-        registry
-            .execution_timeout(name)
-            .unwrap_or(kernel::DEFAULT_TOOL_TIMEOUT),
-        registry,
-        services.client.supports_image_tool_results(),
-    );
+    let snapshot = if registry.is_capability_tool(name) {
+        capability_snapshot(definition, registry)
+    } else {
+        snapshot(
+            definition,
+            registry
+                .execution_timeout(name)
+                .unwrap_or(kernel::DEFAULT_TOOL_TIMEOUT),
+            registry,
+            services.client.supports_image_tool_results(),
+        )
+    };
     snapshot.invoke(name, input, services, context).await
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "a one-element MCP capability registry cannot collide or omit its element"
+)]
+fn capability_snapshot(
+    definition: ToolDefinition,
+    registry: Arc<McpRegistry>,
+) -> kernel::ToolSnapshot {
+    let name = definition.function.name.clone();
+    kernel::ToolRegistry::builder()
+        .register(McpCapabilityTool {
+            definition,
+            registry,
+        })
+        .finish()
+        .expect("one MCP capability is collision-free")
+        .snapshot([name.as_str()])
+        .expect("the MCP capability was just registered")
 }
 
 #[expect(
@@ -180,6 +276,54 @@ mod tests {
         assert!(result.is_error);
         assert!(result.content.to_string().contains("permission denied"));
         assert!(!result.content.to_string().contains("unknown MCP tool"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn resource_read_is_denied_before_server_lookup_or_transport() {
+        let directory = std::env::temp_dir().join(format!(
+            "nac-mcp-resource-permission-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let store_path = directory.join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session-a");
+        let broker = Arc::new(crate::permissions::PermissionBroker::new(
+            store_path.clone(),
+            "session-a".to_string(),
+            crate::permissions::PermissionBackend::Local,
+            0,
+            [crate::permissions::PermissionRule::new(
+                "mcp_resource_read",
+                "mcp:docs:resource:doc://private",
+                crate::permissions::PermissionEffect::Deny,
+            )],
+        ));
+        let mut runtime = crate::tools::test_runtime();
+        runtime.store_path = store_path;
+        runtime.session_id = Some("session-a".to_string());
+        runtime.permission_broker = Some(broker);
+        let client = crate::model::ModelClient::new_for_test();
+        let registry = Arc::new(McpRegistry::empty_for_test());
+        let definition = registry
+            .tool_definition(crate::mcp::capabilities::READ_RESOURCE_TOOL)
+            .expect("resource definition");
+        let snapshot = capability_snapshot(definition, registry);
+        let result = snapshot
+            .invoke(
+                crate::mcp::capabilities::READ_RESOURCE_TOOL,
+                serde_json::json!({"server": "docs", "uri": "doc://private"}),
+                kernel::ToolServices {
+                    runtime: &runtime,
+                    client: &client,
+                },
+                &kernel::ToolCallContext::default(),
+            )
+            .await;
+
+        assert!(result.is_error);
+        assert!(result.content.to_string().contains("permission denied"));
+        assert!(!result.content.to_string().contains("unavailable"));
         let _ = std::fs::remove_dir_all(directory);
     }
 }

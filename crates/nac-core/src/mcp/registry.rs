@@ -1,8 +1,17 @@
+use super::capabilities::{
+    capability_tool_definition, capability_tool_definitions, MAX_PROMPT_ARGUMENTS,
+    MAX_PROMPT_NAME_CHARS,
+};
 use super::*;
+
+const MAX_DISCOVERED_PROMPTS: usize = 256;
+const MAX_PROMPT_DISCOVERY_PAGES: usize = 32;
 
 #[derive(Clone)]
 pub struct McpRegistry {
-    tools: Arc<HashMap<String, Arc<McpToolBinding>>>,
+    pub(super) tools: Arc<HashMap<String, Arc<McpToolBinding>>>,
+    pub(super) servers: Arc<BTreeMap<String, Arc<McpServer>>>,
+    pub(super) prompt_commands: Arc<HashMap<String, McpPromptCommand>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -18,21 +27,29 @@ pub enum McpRootPolicy {
 }
 
 #[derive(Clone)]
-struct McpToolBinding {
+pub(super) struct McpToolBinding {
     tool_name: String,
     definition: ToolDefinition,
     server: Arc<McpServer>,
     execution_timeout: Duration,
 }
 
-struct McpServer {
-    name: String,
+pub(super) struct McpServer {
+    pub(super) name: String,
     service: tokio::sync::RwLock<SharedMcpService>,
     refresh: tokio::sync::Mutex<()>,
     config: McpServerConfig,
     handler: NacMcpClientHandler,
     cwd: PathBuf,
     startup_timeout: Duration,
+    pub(super) capabilities: rmcp::model::ServerCapabilities,
+    pub(super) instructions: Option<String>,
+}
+
+impl McpServer {
+    pub(super) async fn current_service(&self) -> SharedMcpService {
+        self.service.read().await.clone()
+    }
 }
 
 #[derive(Clone)]
@@ -122,6 +139,8 @@ impl McpRegistry {
     pub(crate) fn empty_for_test() -> Self {
         Self {
             tools: Arc::new(HashMap::new()),
+            servers: Arc::new(BTreeMap::new()),
+            prompt_commands: Arc::new(HashMap::new()),
         }
     }
 
@@ -156,6 +175,8 @@ impl McpRegistry {
 
         let mut tools = HashMap::new();
         let mut mounted_services = Vec::new();
+        let mut mounted_servers = BTreeMap::new();
+        let mut prompt_commands = HashMap::new();
         let mut skipped = Vec::new();
         let mut seen_names = HashMap::<String, usize>::new();
         let mut seen_endpoints = HashMap::<String, String>::new();
@@ -164,10 +185,9 @@ impl McpRegistry {
             if !server_config.enabled {
                 continue;
             }
-            // Two names for the same endpoint would mount every tool twice
-            // under different prefixes, so only the first name that mounts
-            // tools claims the endpoint; a failed attempt leaves it free for
-            // a later twin.
+            // Two names for the same endpoint would mount the same advertised
+            // capability surface twice under different provenance, so only a
+            // successfully connected server claims the endpoint.
             let endpoint = endpoint_key(&server_config.transport);
             if let Some(existing) = seen_endpoints.get(&endpoint) {
                 let reason = format!("same endpoint as server '{existing}'");
@@ -229,40 +249,93 @@ impl McpRegistry {
                     }
                 };
 
-            let listed_tools = match timeout(catalog_timeout, service.list_all_tools()).await {
-                Ok(Ok(tools)) => tools,
-                Ok(Err(error)) => {
-                    let reason = format!("{error:#}");
-                    close_mcp_service(&mut service).await;
-                    if server_config.required {
-                        close_mounted_services(&mut mounted_services).await;
-                        bail!("required MCP server '{server_name}' failed to list tools: {reason}");
-                    }
-                    eprintln!(
+            let Some(peer_info) = service.peer_info().cloned() else {
+                close_mcp_service(&mut service).await;
+                close_mounted_services(&mut mounted_services).await;
+                bail!("MCP server '{server_name}' completed without peer info");
+            };
+            let capabilities = peer_info.capabilities.clone();
+            let listed_tools = if capabilities.tools.is_none() {
+                Vec::new()
+            } else {
+                match timeout(catalog_timeout, service.list_all_tools()).await {
+                    Ok(Ok(tools)) => tools,
+                    Ok(Err(error)) => {
+                        let reason = format!("failed to list tools: {error:#}");
+                        close_mcp_service(&mut service).await;
+                        if server_config.required {
+                            close_mounted_services(&mut mounted_services).await;
+                            bail!("required MCP server '{server_name}' {reason}");
+                        }
+                        eprintln!(
                             "MCP server '{server_name}' could not list tools and will be skipped: {reason}"
                         );
-                    skipped.push(McpSkippedServer {
-                        name: server_name,
-                        reason,
-                    });
-                    continue;
-                }
-                Err(_) => {
-                    let reason = format!(
-                        "timed out while listing tools after {}ms",
-                        catalog_timeout.as_millis()
-                    );
-                    close_mcp_service(&mut service).await;
-                    if server_config.required {
-                        close_mounted_services(&mut mounted_services).await;
-                        bail!("required MCP server '{server_name}' {reason}");
+                        skipped.push(McpSkippedServer {
+                            name: server_name,
+                            reason,
+                        });
+                        continue;
                     }
-                    eprintln!("MCP server '{server_name}' {reason} and will be skipped");
-                    skipped.push(McpSkippedServer {
-                        name: server_name,
-                        reason,
-                    });
-                    continue;
+                    Err(_) => {
+                        let reason = format!(
+                            "timed out while listing tools after {}ms",
+                            catalog_timeout.as_millis()
+                        );
+                        close_mcp_service(&mut service).await;
+                        if server_config.required {
+                            close_mounted_services(&mut mounted_services).await;
+                            bail!("required MCP server '{server_name}' {reason}");
+                        }
+                        eprintln!("MCP server '{server_name}' {reason} and will be skipped");
+                        skipped.push(McpSkippedServer {
+                            name: server_name,
+                            reason,
+                        });
+                        continue;
+                    }
+                }
+            };
+
+            let listed_prompts = if capabilities.prompts.is_none() {
+                Vec::new()
+            } else {
+                match timeout(catalog_timeout, list_bounded_prompts(&service)).await {
+                    Ok(Ok(prompts)) => prompts,
+                    Ok(Err(error)) => {
+                        let reason = format!("could not list prompts: {error:#}");
+                        if server_config.required {
+                            close_mcp_service(&mut service).await;
+                            close_mounted_services(&mut mounted_services).await;
+                            bail!("required MCP server '{server_name}' {reason}");
+                        }
+                        eprintln!(
+                            "MCP server '{server_name}' {reason}; prompt commands will be unavailable"
+                        );
+                        skipped.push(McpSkippedServer {
+                            name: server_name.clone(),
+                            reason,
+                        });
+                        Vec::new()
+                    }
+                    Err(_) => {
+                        let reason = format!(
+                            "timed out while listing prompts after {}ms",
+                            catalog_timeout.as_millis()
+                        );
+                        if server_config.required {
+                            close_mcp_service(&mut service).await;
+                            close_mounted_services(&mut mounted_services).await;
+                            bail!("required MCP server '{server_name}' {reason}");
+                        }
+                        eprintln!(
+                            "MCP server '{server_name}' {reason}; prompt commands will be unavailable"
+                        );
+                        skipped.push(McpSkippedServer {
+                            name: server_name.clone(),
+                            reason,
+                        });
+                        Vec::new()
+                    }
                 }
             };
 
@@ -276,8 +349,9 @@ impl McpRegistry {
                 handler: handler.clone(),
                 cwd: cwd.to_path_buf(),
                 startup_timeout,
+                capabilities,
+                instructions: peer_info.instructions,
             });
-            let mounted_before = tools.len();
             for tool in listed_tools {
                 let qualified_name = allocate_tool_name(&server_name, &tool.name, &mut seen_names);
                 let mut definition = tool_definition(&qualified_name, &server_name, &tool);
@@ -311,18 +385,51 @@ impl McpRegistry {
                     }),
                 );
             }
-            if tools.len() == mounted_before {
-                close_shared_mcp_service(service).await;
-            } else {
-                mounted_services.push(service);
+            for prompt in listed_prompts {
+                if prompt.name.is_empty() || prompt.name.chars().count() > MAX_PROMPT_NAME_CHARS {
+                    skipped.push(McpSkippedServer {
+                        name: server_name.clone(),
+                        reason: format!(
+                            "prompt capability skipped: name must contain 1..={MAX_PROMPT_NAME_CHARS} characters"
+                        ),
+                    });
+                    continue;
+                }
+                if prompt.arguments.as_ref().is_some_and(|arguments| {
+                    arguments.len() > MAX_PROMPT_ARGUMENTS
+                        || arguments.iter().any(|argument| {
+                            argument.name.is_empty()
+                                || argument.name.chars().count() > MAX_PROMPT_NAME_CHARS
+                        })
+                }) {
+                    skipped.push(McpSkippedServer {
+                        name: server_name.clone(),
+                        reason: format!(
+                            "prompt capability '{}' skipped: arguments exceed NAC count or name bounds",
+                            prompt.name
+                        ),
+                    });
+                    continue;
+                }
+                let command_name = allocate_tool_name(&server_name, &prompt.name, &mut seen_names);
+                let command = McpPromptCommand::from_prompt(
+                    command_name.clone(),
+                    server_name.clone(),
+                    prompt,
+                );
+                prompt_commands.insert(command_name, command);
             }
+            mounted_services.push(service);
+            mounted_servers.insert(server_name, server);
         }
 
-        let registry = if tools.is_empty() {
+        let registry = if mounted_servers.is_empty() {
             None
         } else {
             Some(Arc::new(Self {
                 tools: Arc::new(tools),
+                servers: Arc::new(mounted_servers),
+                prompt_commands: Arc::new(prompt_commands),
             }))
         };
 
@@ -339,10 +446,18 @@ impl McpRegistry {
         definitions
     }
 
+    pub fn model_tool_definitions(&self) -> Vec<ToolDefinition> {
+        let mut definitions = self.tool_definitions();
+        definitions.extend(capability_tool_definitions());
+        definitions.sort_by(|left, right| left.function.name.cmp(&right.function.name));
+        definitions
+    }
+
     pub(crate) fn tool_definition(&self, name: &str) -> Option<ToolDefinition> {
         self.tools
             .get(name)
             .map(|binding| binding.definition.clone())
+            .or_else(|| capability_tool_definition(name))
     }
 
     pub(crate) fn execution_timeout(&self, name: &str) -> Option<Duration> {
@@ -437,6 +552,32 @@ impl McpRegistry {
             },
         }
     }
+}
+
+async fn list_bounded_prompts(service: &McpService) -> Result<Vec<rmcp::model::Prompt>> {
+    let mut prompts = Vec::new();
+    let mut cursor = None;
+    let mut seen_cursors = std::collections::HashSet::new();
+    for _ in 0..MAX_PROMPT_DISCOVERY_PAGES {
+        let result = service
+            .list_prompts(Some(
+                rmcp::model::PaginatedRequestParams::default().with_cursor(cursor.clone()),
+            ))
+            .await?;
+        let remaining = MAX_DISCOVERED_PROMPTS.saturating_sub(prompts.len());
+        prompts.extend(result.prompts.into_iter().take(remaining));
+        if prompts.len() == MAX_DISCOVERED_PROMPTS {
+            break;
+        }
+        let Some(next_cursor) = result.next_cursor else {
+            break;
+        };
+        if !seen_cursors.insert(next_cursor.clone()) {
+            bail!("prompt discovery returned a repeated pagination cursor");
+        }
+        cursor = Some(next_cursor);
+    }
+    Ok(prompts)
 }
 
 impl ClientHandler for NacMcpClientHandler {

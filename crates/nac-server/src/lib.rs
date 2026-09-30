@@ -1394,6 +1394,10 @@ impl SessionManager {
         self.session_state().skills(session_id).await
     }
 
+    pub async fn session_commands(&self, session_id: &str) -> Result<Vec<SlashCommandDefinition>> {
+        self.session_state().commands(session_id).await
+    }
+
     pub async fn submit_prompt(
         &self,
         session_id: &str,
@@ -1986,7 +1990,11 @@ fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPr
 }
 
 fn frontend_command_name(command: SlashCommand) -> &'static str {
-    command.definition().name
+    match command {
+        SlashCommand::Compact => "compact",
+        SlashCommand::Goal => "goal",
+        SlashCommand::McpPrompt => "mcp_prompt",
+    }
 }
 
 fn canonicalize_dir(path: PathBuf) -> Result<PathBuf> {

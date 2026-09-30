@@ -392,7 +392,12 @@ pub async fn execute_tool_with_context(
             true,
         );
     }
-    if name.starts_with("mcp__") {
+    if name.starts_with("mcp__")
+        || runtime
+            .mcp
+            .as_ref()
+            .is_some_and(|registry| registry.is_capability_tool(name))
+    {
         let Some(registry) = &runtime.mcp else {
             return ToolResult {
                 content: (format!("Error: MCP tool '{name}' is not available")).into(),

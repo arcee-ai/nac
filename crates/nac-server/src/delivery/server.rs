@@ -752,6 +752,9 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::session_lifecycle::update_config_handler
         ))
         .routes(routes!(delivery::session_lifecycle::session_skills_handler))
+        .routes(routes!(
+            delivery::session_lifecycle::session_commands_handler
+        ))
         .routes(routes!(delivery::session_runs::submit_prompt))
         .routes(routes!(compaction::handler))
         .routes(routes!(revert::handler))
@@ -1392,6 +1395,6 @@ async fn models_handler(State(manager): State<SessionManager>) -> Json<ModelList
     tag = "system",
     responses((status = 200, description = "Success", body = Vec<SlashCommandDefinition>, content_type = "application/json"))
 )]
-async fn commands_handler() -> Json<&'static [SlashCommandDefinition]> {
-    Json(slash_command_definitions())
+async fn commands_handler() -> Json<Vec<SlashCommandDefinition>> {
+    Json(slash_command_definitions().to_vec())
 }

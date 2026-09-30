@@ -108,6 +108,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/sessions/{session_id}/children"),
     ("GET", "/sessions/{session_id}/children/{child_session_id}"),
     ("GET", "/sessions/{session_id}/config"),
+    ("GET", "/sessions/{session_id}/commands"),
     ("GET", "/sessions/{session_id}/skills"),
     ("GET", "/sessions/{session_id}/events"),
     ("GET", "/sessions/{session_id}/events/stream"),

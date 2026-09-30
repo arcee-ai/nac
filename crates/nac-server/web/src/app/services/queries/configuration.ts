@@ -322,12 +322,12 @@ export async function refreshProviderAuthentication(client: QueryClient): Promis
   ]);
 }
 
-/** Static slash-command metadata served from the core command registry. */
-export function useSlashCommands() {
+/** Session-scoped slash commands, including prompts discovered from mounted MCP servers. */
+export function useSlashCommands(sessionId: string) {
   return useQuery<SlashCommandDefinition[]>({
-    queryKey: queryKeys.slashCommands,
-    queryFn: ({ signal }) => api.listCommands(signal),
-    staleTime: Infinity,
+    queryKey: queryKeys.sessionCommands(sessionId),
+    queryFn: ({ signal }) => api.listSessionCommands(sessionId, signal),
+    refetchOnMount: "always",
     retry: false,
   });
 }

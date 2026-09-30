@@ -330,6 +330,13 @@ export const api = {
   listCommands: (signal?: AbortSignal) =>
     request<SlashCommandDefinition[]>("GET", "/commands", { signal }),
 
+  listSessionCommands: (sessionId: string, signal?: AbortSignal) =>
+    request<SlashCommandDefinition[]>(
+      "GET",
+      `/sessions/${encodeURIComponent(sessionId)}/commands`,
+      { signal },
+    ),
+
   listSessionSkills: (sessionId: string, signal?: AbortSignal) =>
     request<SkillCatalogEntry[]>("GET", `/sessions/${encodeURIComponent(sessionId)}/skills`, {
       signal,

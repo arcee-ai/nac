@@ -34,6 +34,7 @@ use crate::sandbox::SandboxSession;
 use crate::tools::ToolResult;
 use crate::types::{FunctionDef, ToolDefinition};
 
+pub(crate) mod capabilities;
 mod config;
 mod file_config;
 mod library;
@@ -43,6 +44,7 @@ mod registry;
 mod result;
 mod transport;
 
+pub use capabilities::{McpPromptArgument, McpPromptCommand, McpPromptInvocation};
 pub use config::{McpDefaults, McpHeaderHelperConfig, McpServerConfig, McpTransportConfig};
 pub use file_config::{
     acquire_mcp_configuration_write_lease, delete_mcp_server_configuration,
@@ -606,6 +608,99 @@ pub(crate) mod test_support {
         (url, handle, arguments)
     }
 
+    pub(crate) fn start_capability_http_mcp_server() -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind capability MCP server");
+        listener
+            .set_nonblocking(true)
+            .expect("set capability MCP listener nonblocking");
+        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let handle = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let Some(request) = read_fake_http_request(&mut stream) else {
+                            continue;
+                        };
+                        let Some(body) = request.body else {
+                            continue;
+                        };
+                        let method = body.get("method").and_then(Value::as_str).unwrap_or("");
+                        let id = body.get("id").cloned().unwrap_or(Value::Null);
+                        let result = match method {
+                            "initialize" => json!({
+                                "protocolVersion": "2025-06-18",
+                                "capabilities": {
+                                    "resources": {"listChanged": false, "subscribe": false},
+                                    "prompts": {"listChanged": false},
+                                    "completions": {}
+                                },
+                                "serverInfo": {"name": "capability-http-mcp", "version": "0.1.0"},
+                                "instructions": "Use the docs server only for documentation lookup."
+                            }),
+                            "prompts/list" => json!({
+                                "prompts": [{
+                                    "name": "review",
+                                    "description": "Review a document",
+                                    "arguments": [{"name": "tone", "required": true}]
+                                }]
+                            }),
+                            "resources/list" => json!({
+                                "resources": [{"uri": "doc://guide", "name": "Guide", "_meta": {"sessionId": "hidden"}}],
+                                "nextCursor": "resource-page-2"
+                            }),
+                            "resources/templates/list" => json!({
+                                "resourceTemplates": [{"uriTemplate": "doc://{name}", "name": "Document"}],
+                                "nextCursor": "template-page-2"
+                            }),
+                            "resources/read" => json!({
+                                "contents": [{"uri": "doc://guide", "mimeType": "text/plain", "text": "remote text", "_meta": {"sessionId": "hidden"}}]
+                            }),
+                            "prompts/get" => json!({
+                                "description": "Resolved review",
+                                "messages": [{"role": "user", "content": {"type": "text", "text": "Review strictly"}}],
+                                "_meta": {"sessionId": "hidden"}
+                            }),
+                            "completion/complete" => json!({
+                                "completion": {"values": ["strict", "friendly"], "total": 2, "hasMore": false}
+                            }),
+                            "notifications/initialized" => {
+                                write_fake_http_response(&mut stream, "202 Accepted", None, "");
+                                continue;
+                            }
+                            _ => {
+                                let response = json!({
+                                    "jsonrpc": "2.0",
+                                    "id": id,
+                                    "error": {"code": -32601, "message": "method not found"}
+                                });
+                                write_fake_http_response(
+                                    &mut stream,
+                                    "200 OK",
+                                    Some("application/json"),
+                                    &response.to_string(),
+                                );
+                                continue;
+                            }
+                        };
+                        let response = json!({"jsonrpc": "2.0", "id": id, "result": result});
+                        write_fake_http_response(
+                            &mut stream,
+                            "200 OK",
+                            Some("application/json"),
+                            &response.to_string(),
+                        );
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        (url, handle)
+    }
+
     struct FakeHttpRequest {
         method: String,
         body: Option<Value>,
@@ -771,6 +866,7 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::{
         restore_env, shell_single_quote, start_auth_retry_http_mcp_server,
+        start_capability_http_mcp_server,
         start_deadline_http_mcp_server, start_fake_http_mcp_server,
         start_partial_catalog_http_mcp_server, toml_string, unique_temp_dir,
     };
@@ -1552,6 +1648,109 @@ url = {}
     }
 
     #[tokio::test]
+    async fn capability_only_server_mounts_resources_prompts_and_completion() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = env::var_os("NAC_HOME");
+        let original_xdg = env::var_os("XDG_CONFIG_HOME");
+        let nac_home = unique_temp_dir("nac-mcp-capabilities");
+        fs::create_dir_all(&nac_home).unwrap();
+        let (http_url, _http_server) = start_capability_http_mcp_server();
+        fs::write(
+            nac_home.join("config.toml"),
+            format!(
+                r#"
+[mcp_servers.docs]
+transport = "streamable_http"
+url = {}
+"#,
+                toml_string(&http_url)
+            ),
+        )
+        .unwrap();
+        unsafe {
+            env::set_var("NAC_HOME", &nac_home);
+        }
+
+        let cwd = std::env::current_dir().unwrap();
+        let outcome = McpRegistry::load_reporting_skips(
+            &cwd,
+            None,
+            &PathContext::new(&cwd),
+            McpTransportPolicy::All,
+            McpRootPolicy::None,
+        )
+        .await
+        .expect("capability-only MCP server should load");
+        assert!(outcome.skipped.is_empty());
+        let registry = outcome.registry.expect("capability server remains mounted");
+        assert!(registry.tool_definitions().is_empty());
+        assert_eq!(registry.model_tool_definitions().len(), 6);
+        assert!(registry
+            .instructions_message()
+            .unwrap()
+            .contains("server=\"docs\""));
+        assert_eq!(
+            registry.prompt_commands()[0].command_name,
+            "mcp__docs__review"
+        );
+
+        let resources = registry
+            .call_capability(capabilities::LIST_RESOURCES_TOOL, json!({"server": "docs"}))
+            .await;
+        let resources = resources.content.to_string();
+        assert!(!resources.contains("sessionId"));
+        assert!(resources.contains("resource-page-2"));
+        assert!(resources.contains("doc://guide"));
+
+        let templates = registry
+            .call_capability(
+                capabilities::LIST_RESOURCE_TEMPLATES_TOOL,
+                json!({"server": "docs"}),
+            )
+            .await;
+        assert!(templates.content.to_string().contains("template-page-2"));
+
+        let resource = registry
+            .call_capability(
+                capabilities::READ_RESOURCE_TOOL,
+                json!({"server": "docs", "uri": "doc://guide"}),
+            )
+            .await;
+        assert!(!resource.is_error);
+        assert!(resource.content.to_string().contains("remote text"));
+        assert!(!resource.content.to_string().contains("sessionId"));
+
+        let prompt = registry
+            .resolve_prompt_invocation(McpPromptInvocation {
+                raw_prompt: "/mcp__docs__review {\"tone\":\"strict\"}".to_string(),
+                command_name: "mcp__docs__review".to_string(),
+                arguments: serde_json::from_value(json!({"tone": "strict"})).unwrap(),
+            })
+            .await
+            .expect("prompt resolves");
+        assert!(prompt.agent_prompt.contains("untrusted_remote_prompt_data"));
+        assert!(!prompt.agent_prompt.contains("sessionId"));
+
+        let completion = registry
+            .call_capability(
+                capabilities::COMPLETE_PROMPT_ARGUMENT_TOOL,
+                json!({
+                    "server": "docs",
+                    "name": "review",
+                    "argument": "tone",
+                    "value": "str"
+                }),
+            )
+            .await;
+        assert!(!completion.is_error);
+        assert!(completion.content.to_string().contains("strict"));
+
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+        let _ = fs::remove_dir_all(&nac_home);
+    }
+
+    #[tokio::test]
     async fn http_only_policy_loads_streamable_http_tools_and_skips_stdio() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let original_nac_home = env::var_os("NAC_HOME");
@@ -1726,6 +1925,17 @@ url = {}
         let definitions = registry.tool_definitions();
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].function.name, "mcp__saved__echo");
+        let unsupported = registry
+            .call_capability(
+                capabilities::LIST_RESOURCES_TOOL,
+                json!({"server": "saved"}),
+            )
+            .await;
+        assert!(unsupported.is_error);
+        assert!(unsupported
+            .content
+            .to_string()
+            .contains("does not advertise resources support"));
 
         drop(registry);
         http_server.join().unwrap();
