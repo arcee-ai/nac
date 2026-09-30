@@ -1,0 +1,19 @@
+[package]
+name = "nac-turso-qualification"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Deliberately separate from the production workspace and its dependency graph.
+[workspace]
+
+[features]
+uring = ["turso_core/io_uring"]
+
+[dependencies]
+anyhow = "1"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+turso = { version = "=0.8.1", default-features = false }
+turso_core = { version = "=0.8.1", default-features = false, features = ["fs"] }

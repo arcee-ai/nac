@@ -1,0 +1,74 @@
+name: Embedded Turso qualification
+
+on:
+  pull_request:
+    paths:
+      - experiments/turso-qualification/**
+      - .github/workflows/turso-qualification.yml
+      - crates/nac-server/src/tests/managed_load.rs
+
+permissions:
+  contents: read
+
+jobs:
+  linux-evidence:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+      - name: Set up the locked repository
+        run: make setup
+      - name: Build the exact Linux worker and test harness
+        run: |
+          cargo build --locked -p nac-server --bin nac-web
+          cargo test --locked -p nac-server --lib --no-run --message-format=json > harness-build.json
+          python3 - <<'PY'
+          import json, shutil
+          for line in open('harness-build.json'):
+              value = json.loads(line)
+              if value.get('executable') and value.get('target', {}).get('name') == 'nac_server':
+                  shutil.copy2(value['executable'], 'target/debug/nac-server-test')
+          PY
+      - name: Run the SQLite control and retain consistent fixture copies
+        id: sqlite
+        continue-on-error: true
+        env:
+          NAC_MANAGED_LOAD_COPY_STORE_DIR: ${{ github.workspace }}/target/all114-fixtures
+        run: |
+          mkdir -p "$NAC_MANAGED_LOAD_COPY_STORE_DIR"
+          make test-managed-load
+      - name: Build the separate pinned Turso experiment with io_uring compiled
+        env:
+          CARGO_TARGET_DIR: target/all114-probe
+          CARGO_BUILD_JOBS: 2
+        run: |
+          cargo build --locked --manifest-path experiments/turso-qualification/Cargo.toml --features uring
+          cargo fmt --manifest-path experiments/turso-qualification/Cargo.toml -- --check
+      - name: Record exact source and baseline outcome
+        if: always()
+        run: |
+          mkdir -p target/all114-evidence
+          git rev-parse HEAD > target/all114-evidence/source-revision.txt
+          printf '%s\n' '${{ steps.sqlite.outcome }}' > target/all114-evidence/sqlite-outcome.txt
+          cp experiments/turso-qualification/Cargo.lock target/all114-evidence/experiment-Cargo.lock
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: all114-linux-${{ github.event.pull_request.head.sha }}
+          retention-days: 7
+          path: |
+            target/debug/nac-web
+            target/debug/nac-server-test
+            target/all114-probe/debug/nac-turso-qualification
+            target/all114-fixtures/
+            target/managed-load/
+            target/all114-evidence/
+      - name: Preserve a failed SQLite correctness gate
+        if: steps.sqlite.outcome != 'success'
+        run: exit 1

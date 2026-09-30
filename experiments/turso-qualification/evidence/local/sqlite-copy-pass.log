@@ -1,0 +1,42 @@
+cargo build --locked -p nac-server --bin nac-web
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+NAC_MANAGED_LOAD_WORKER="/Users/allison/.codex/worktrees/1842/allison-demo/target/debug/nac-web" \
+		cargo test --locked -p nac-server \
+			tests::managed_load::managed_load_scenario -- --ignored --exact --nocapture --test-threads=1
+   Compiling nac-server v0.1.4 (/Users/allison/.codex/worktrees/1842/allison-demo/crates/nac-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.42s
+     Running unittests src/lib.rs (target/debug/deps/nac_server-ae82944902a9ab55)
+
+running 1 test
+test tests::managed_load::managed_load_scenario ... ALL-112 artifact: /Users/allison/.codex/worktrees/1842/allison-demo/crates/nac-server/../../target/managed-load/all-112-seed-168886546-orchestrators-1.json
+ALL-112 artifact: /Users/allison/.codex/worktrees/1842/allison-demo/crates/nac-server/../../target/managed-load/all-112-seed-168886546-orchestrators-2.json
+ALL-112 artifact: /Users/allison/.codex/worktrees/1842/allison-demo/crates/nac-server/../../target/managed-load/all-112-seed-168886546-orchestrators-4.json
+ALL-112 artifact: /Users/allison/.codex/worktrees/1842/allison-demo/crates/nac-server/../../target/managed-load/all-112-seed-168887298-fault-slow-io.json
+ALL-112 artifact: /Users/allison/.codex/worktrees/1842/allison-demo/crates/nac-server/../../target/managed-load/all-112-seed-168935683-concurrent-settlement-probe.json
+nac: run failed: injected ALL-112 append failure
+nac: failed to stage typed run failure: run '3eb81c3e-3b2c-482f-9fb6-18a049d49329' is no longer the active durable run for session 'all112-1-0a110b8b-0'
+nac: managed orchestrator monitor failed for all112-1-0a110a65-0: injected deterministic managed orchestrator monitor failure
+nac: evicted idle session all112-1-0a110c21-0
+ALL-112 artifact: /Users/allison/.codex/worktrees/1842/allison-demo/crates/nac-server/../../target/managed-load/all-112-seed-168886546-faults.json
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 212 filtered out; finished in 14.11s
+
+     Running unittests src/main.rs (target/debug/deps/nac_web-df54a96779c562ae)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 0.00s
+
+     Running tests/source_binary_contract.rs (target/debug/deps/source_binary_contract-259513b34601bed3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/stable_binary_contract.rs (target/debug/deps/stable_binary_contract-85f3823a3526edc4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+

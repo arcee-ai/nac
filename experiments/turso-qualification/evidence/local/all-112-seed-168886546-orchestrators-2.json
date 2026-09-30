@@ -1,0 +1,254 @@
+{
+  "mode": "ordered_healthy",
+  "seed": 168886546,
+  "orchestrators": 2,
+  "store": "sqlite-wal",
+  "elapsed_ms": 909,
+  "injected_phase_delay_ms": 100,
+  "logical_plan": {
+    "seed": 168886546,
+    "orchestrators": [
+      {
+        "ordinal": 0,
+        "session_id": "all112-2-0a110112-0",
+        "description": "ALL112_DESCRIPTION:2:0a110112:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "prompt": "ALL112_ORCHESTRATOR_PROMPT:2:0a110112:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "worker_thread": "worker-0",
+        "worker_action": "ALL112_WORKER_ACTION:2:0a110112:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 1,
+        "session_id": "all112-2-0a110112-1",
+        "description": "ALL112_DESCRIPTION:2:0a110112:1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "prompt": "ALL112_ORCHESTRATOR_PROMPT:2:0a110112:1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "worker_thread": "worker-1",
+        "worker_action": "ALL112_WORKER_ACTION:2:0a110112:1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  "model_requests": [
+    {
+      "phase": "orchestrator-start",
+      "ordinal": 1
+    },
+    {
+      "phase": "orchestrator-start",
+      "ordinal": 0
+    },
+    {
+      "phase": "worker",
+      "ordinal": 0
+    },
+    {
+      "phase": "orchestrator-final",
+      "ordinal": 0
+    },
+    {
+      "phase": "parent-completion",
+      "ordinal": null
+    },
+    {
+      "phase": "worker",
+      "ordinal": 1
+    },
+    {
+      "phase": "orchestrator-final",
+      "ordinal": 1
+    },
+    {
+      "phase": "parent-completion",
+      "ordinal": null
+    }
+  ],
+  "probe_samples": [
+    {
+      "phase": "orchestrator-barrier",
+      "route": "/healthz",
+      "status": 200,
+      "latency_us": 84
+    },
+    {
+      "phase": "orchestrator-barrier",
+      "route": "/readyz",
+      "status": 200,
+      "latency_us": 3687
+    },
+    {
+      "phase": "worker-barrier",
+      "route": "/healthz",
+      "status": 200,
+      "latency_us": 99
+    },
+    {
+      "phase": "worker-barrier",
+      "route": "/readyz",
+      "status": 200,
+      "latency_us": 3797
+    }
+  ],
+  "transcript_counts": [
+    4,
+    4
+  ],
+  "parent_transcript_rows": 4,
+  "event_counts": [
+    5,
+    5
+  ],
+  "event_kinds": [
+    [
+      "thread_started",
+      "run_started",
+      "assistant_message",
+      "run_finished",
+      "thread_finished"
+    ],
+    [
+      "thread_started",
+      "run_started",
+      "assistant_message",
+      "run_finished",
+      "thread_finished"
+    ]
+  ],
+  "worker_episode_counts": [
+    1,
+    1
+  ],
+  "terminal_statuses": [
+    "completed",
+    "completed"
+  ],
+  "terminal_failures": [
+    null,
+    null
+  ],
+  "child_recovery_statuses": [
+    null,
+    null
+  ],
+  "settlement_timeout_recovered": false,
+  "outcome": "completed",
+  "completion_inbox_count": 2,
+  "build_id": "dev-34e10bf77e9cfea1a208c1c9bf13b0659224b458",
+  "source_revision": "34e10bf77e9cfea1a208c1c9bf13b0659224b458",
+  "store_configuration": {
+    "engine": "sqlite",
+    "journal_mode": "wal",
+    "synchronous": 2,
+    "mmap_size": 0,
+    "schema_version": 29,
+    "page_count": 89,
+    "page_size": 4096,
+    "database_bytes": 364544,
+    "wal_bytes": 0,
+    "shm_bytes": 32768
+  },
+  "checkpoint": {
+    "busy": 0,
+    "log_frames": 0,
+    "checkpointed_frames": 0,
+    "duration_us": 482
+  },
+  "telemetry": {
+    "store_latency_us": {
+      "checkpoint": {
+        "count": 1,
+        "min": 482,
+        "p50": 482,
+        "p95": 482,
+        "max": 482
+      },
+      "commit": {
+        "count": 28,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 1000
+      },
+      "connection_acquire": {
+        "count": 294,
+        "min": 42,
+        "p50": 61,
+        "p95": 82,
+        "max": 136
+      },
+      "event_persistence": {
+        "count": 10,
+        "min": 103,
+        "p50": 136,
+        "p95": 199,
+        "max": 1683
+      },
+      "managed_monitor_poll": {
+        "count": 18,
+        "min": 688,
+        "p50": 902,
+        "p95": 2221,
+        "max": 2480
+      },
+      "recovery": {
+        "count": 6,
+        "min": 674,
+        "p50": 724,
+        "p95": 914,
+        "max": 935
+      },
+      "terminal_settlement": {
+        "count": 2,
+        "min": 1134,
+        "p50": 1134,
+        "p95": 1134,
+        "max": 1143
+      },
+      "transaction": {
+        "count": 28,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      }
+    },
+    "api_latency_us": {
+      "/healthz": {
+        "count": 2,
+        "min": 24,
+        "p50": 24,
+        "p95": 24,
+        "max": 29
+      },
+      "/readyz": {
+        "count": 2,
+        "min": 3662,
+        "p50": 3662,
+        "p95": 3662,
+        "max": 3776
+      },
+      "/sessions/{session_id}/orchestrators": {
+        "count": 2,
+        "min": 24663,
+        "p50": 24663,
+        "p95": 24663,
+        "max": 25982
+      }
+    },
+    "max_connection_active": 2,
+    "max_persistence_queue_active": 2,
+    "max_orchestrators_active": 2,
+    "max_child_processes_active": 2,
+    "child_process_started": [
+      88914,
+      88916
+    ],
+    "child_process_stopped": [
+      88914,
+      88916
+    ],
+    "max_cpu_time_us": 696288,
+    "max_resident_memory_bytes": 0,
+    "accepted": 2213,
+    "dropped": 0,
+    "exported": 2213,
+    "failures": 0
+  }
+}

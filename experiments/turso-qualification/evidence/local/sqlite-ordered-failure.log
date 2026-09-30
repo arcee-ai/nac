@@ -1,0 +1,38 @@
+cargo build --locked -p nac-server --bin nac-web
+    Blocking waiting for file lock on build directory
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 37s
+NAC_MANAGED_LOAD_WORKER="/Users/allison/.codex/worktrees/1842/allison-demo/target/debug/nac-web" \
+		cargo test --locked -p nac-server \
+			tests::managed_load::managed_load_scenario -- --ignored --exact --nocapture --test-threads=1
+   Compiling nac-server v0.1.4 (/Users/allison/.codex/worktrees/1842/allison-demo/crates/nac-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.99s
+     Running unittests src/lib.rs (target/debug/deps/nac_server-ae82944902a9ab55)
+
+running 1 test
+test tests::managed_load::managed_load_scenario ... ALL-112 artifact: /Users/allison/.codex/worktrees/1842/allison-demo/crates/nac-server/../../target/managed-load/all-112-seed-168886546-orchestrators-1.json
+ALL-112 artifact: /Users/allison/.codex/worktrees/1842/allison-demo/crates/nac-server/../../target/managed-load/all-112-seed-168886546-orchestrators-2.json
+nac: run failed: transcript log append is not contiguous: expected start idx 1, found 2
+
+thread '<unnamed>' (345764) panicked at crates/nac-server/src/tests/managed_load.rs:98:13:
+managed completion ordering timed out
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread '<unnamed>' (347006) panicked at crates/nac-server/src/tests/managed_load.rs:91:49:
+called `Result::unwrap()` on an `Err` value: PoisonError { .. }
+
+thread '<unnamed>' (347572) panicked at crates/nac-server/src/tests/managed_load.rs:91:49:
+called `Result::unwrap()` on an `Err` value: PoisonError { .. }
+
+thread 'tests::managed_load::managed_load_scenario' (345034) panicked at crates/nac-server/src/tests/managed_load.rs:1321:25:
+managed orchestrator did not reach expected status Completed
+FAILED
+
+failures:
+
+failures:
+    tests::managed_load::managed_load_scenario
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 212 filtered out; finished in 23.76s
+
+error: test failed, to rerun pass `-p nac-server --lib`
+make: *** [test-managed-load] Error 101
