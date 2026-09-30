@@ -13,6 +13,17 @@ pub struct McpRegistry {
     pub(super) sync: Arc<McpSyncState>,
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct McpToolMetadata {
+    pub title: Option<String>,
+    pub output_schema: Option<Value>,
+    pub annotations: Option<Value>,
+    pub icons: Option<Value>,
+    #[serde(rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum McpTransportPolicy {
     All,
@@ -29,6 +40,8 @@ pub enum McpRootPolicy {
 pub(super) struct McpToolBinding {
     pub(super) tool_name: String,
     pub(super) definition: ToolDefinition,
+    pub(super) metadata: McpToolMetadata,
+    pub(super) approval: McpToolApproval,
     pub(super) server: std::sync::Weak<McpServer>,
     pub(super) execution_timeout: Duration,
 }
@@ -44,6 +57,7 @@ pub(super) struct McpServer {
     pub(super) startup_timeout: Duration,
     pub(super) catalog_timeout: Duration,
     pub(super) execution_timeout: Duration,
+    pub(super) redactor: McpRedactor,
     pub(super) protocol_version: ProtocolVersion,
     pub(super) capabilities: rmcp::model::ServerCapabilities,
     pub(super) instructions: Option<String>,
@@ -238,6 +252,8 @@ impl McpRegistry {
             if !server_config.enabled {
                 continue;
             }
+            let redaction_values = redaction_values(&server_config)?;
+            let redactor = McpRedactor::new(redaction_values.clone());
             // Two names for the same endpoint would mount the same advertised
             // capability surface twice under different provenance, so only a
             // successfully connected server claims the endpoint.
@@ -285,7 +301,7 @@ impl McpRegistry {
                 {
                     Ok(service) => service,
                     Err(error) => {
-                        let reason = format!("{error:#}");
+                        let reason = redactor.redact(&format!("{error:#}"));
                         if server_config.required {
                             close_mounted_services(&mut mounted_services).await;
                             bail!(
@@ -294,7 +310,7 @@ impl McpRegistry {
                         }
                         eprintln!(
                         "MCP server '{server_name}' is unavailable and will be skipped: {reason}"
-                    );
+                        );
                         skipped.push(McpSkippedServer {
                             name: server_name,
                             reason,
@@ -328,7 +344,7 @@ impl McpRegistry {
                 match timeout(catalog_timeout, service.list_all_tools()).await {
                     Ok(Ok(tools)) => tools,
                     Ok(Err(error)) => {
-                        let reason = format!("failed to list tools: {error:#}");
+                        let reason = redactor.redact(&format!("failed to list tools: {error:#}"));
                         close_mcp_service(&mut service).await;
                         if server_config.required {
                             close_mounted_services(&mut mounted_services).await;
@@ -424,6 +440,7 @@ impl McpRegistry {
                 startup_timeout,
                 catalog_timeout,
                 execution_timeout,
+                redactor: redactor.clone(),
                 protocol_version,
                 capabilities,
                 instructions: peer_info.instructions.clone(),
@@ -438,11 +455,43 @@ impl McpRegistry {
                 notification_task: McpNotificationTask::default(),
             });
             handler.bind(&server);
-            sync.set_redactions(&server_name, server_config.configured_redactions());
+            sync.set_redactions(&server_name, redaction_values);
             sync.set_resources(&server_name, listed_resource_uris);
             for tool in listed_tools {
+                if !server_config.exposes_tool(&tool.name) {
+                    continue;
+                }
                 let qualified_name = allocate_tool_name(&server_name, &tool.name, &mut seen_names);
                 let mut definition = tool_definition(&qualified_name, &server_name, &tool);
+                definition.function.description = redactor.redact(&definition.function.description);
+                if definition.function.description.len() > MAX_MCP_METADATA_BYTES {
+                    skipped.push(McpSkippedServer {
+                        name: qualified_name.clone(),
+                        reason: "tool capability skipped: description exceeds the metadata limit"
+                            .to_string(),
+                    });
+                    continue;
+                }
+                definition.function.parameters =
+                    match redactor.safe_value(Some(tool.input_schema.as_ref())) {
+                        Some(value)
+                            if value.get("_nac").and_then(Value::as_str)
+                                != Some("metadata_limit_exceeded") =>
+                        {
+                            value
+                        }
+                        _ => {
+                            skipped.push(McpSkippedServer {
+                            name: qualified_name.clone(),
+                            reason:
+                                "tool capability skipped: input schema exceeds the metadata limit"
+                                    .to_string(),
+                        });
+                            continue;
+                        }
+                    };
+                let metadata = tool_metadata(&tool, &redactor);
+                let approval = effective_tool_approval(&server_config, &tool);
                 if definition.function.parameters["properties"]
                     .as_object()
                     .is_some_and(|properties| properties.contains_key("_nac"))
@@ -468,6 +517,8 @@ impl McpRegistry {
                     Arc::new(McpToolBinding {
                         tool_name: tool.name.to_string(),
                         definition,
+                        metadata,
+                        approval,
                         server: Arc::downgrade(&server),
                         execution_timeout,
                     }),
@@ -528,13 +579,20 @@ impl McpRegistry {
     }
 
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.tool_catalog()
+            .into_iter()
+            .map(|(definition, _)| definition)
+            .collect()
+    }
+
+    pub(crate) fn tool_catalog(&self) -> Vec<(ToolDefinition, McpToolMetadata)> {
         let snapshot = self.sync.snapshot();
-        let mut definitions: Vec<ToolDefinition> = snapshot
+        let mut definitions: Vec<(ToolDefinition, McpToolMetadata)> = snapshot
             .tools
             .values()
-            .map(|binding| binding.definition.clone())
+            .map(|binding| (binding.definition.clone(), binding.metadata.clone()))
             .collect();
-        definitions.sort_by(|left, right| left.function.name.cmp(&right.function.name));
+        definitions.sort_by(|left, right| left.0.function.name.cmp(&right.0.function.name));
         definitions
     }
 
@@ -591,6 +649,30 @@ impl McpRegistry {
         let binding = self.sync.snapshot().tools.get(name).cloned()?;
         let server = binding.server.upgrade()?;
         Some(McpToolCapture { binding, server })
+    }
+
+    pub(crate) fn tool_approval(&self, name: &str) -> Option<McpToolApproval> {
+        self.sync
+            .snapshot()
+            .tools
+            .get(name)
+            .map(|binding| binding.approval)
+    }
+
+    pub(crate) fn permission_rules(&self) -> Vec<crate::permissions::PermissionRule> {
+        let snapshot = self.sync.snapshot();
+        let mut bindings = snapshot.tools.iter().collect::<Vec<_>>();
+        bindings.sort_by_key(|(name, _)| *name);
+        bindings
+            .into_iter()
+            .map(|(name, binding)| {
+                let effect = match binding.approval {
+                    McpToolApproval::Allow => crate::permissions::PermissionEffect::Allow,
+                    McpToolApproval::Ask => crate::permissions::PermissionEffect::Ask,
+                };
+                crate::permissions::PermissionRule::new("mcp_call", name, effect)
+            })
+            .collect()
     }
 
     pub async fn call_tool(&self, name: &str, args: Value, image_results: bool) -> ToolResult {
@@ -770,6 +852,29 @@ pub(super) fn tool_definition(full_name: &str, server_name: &str, tool: &Tool) -
     }
 }
 
+pub(super) fn tool_metadata(tool: &Tool, redactor: &McpRedactor) -> McpToolMetadata {
+    McpToolMetadata {
+        title: tool.title.as_ref().map(|value| redactor.safe_text(value)),
+        output_schema: redactor.safe_value(tool.output_schema.as_deref()),
+        annotations: redactor.safe_value(tool.annotations.as_ref()),
+        icons: redactor.safe_value(tool.icons.as_ref()),
+        meta: redactor.safe_metadata_value(tool.meta.as_ref()),
+    }
+}
+
+pub(super) fn effective_tool_approval(config: &McpServerConfig, tool: &Tool) -> McpToolApproval {
+    let approval = config.approval_for(&tool.name);
+    if approval == McpToolApproval::Allow
+        && tool.annotations.as_ref().is_some_and(|annotations| {
+            annotations.destructive_hint == Some(true) || annotations.open_world_hint == Some(true)
+        })
+    {
+        McpToolApproval::Ask
+    } else {
+        approval
+    }
+}
+
 #[cfg(test)]
 mod product_identity_tests {
     use super::*;
@@ -791,5 +896,55 @@ mod product_identity_tests {
         );
         assert!(info.protocol_version.has_initialize());
         assert!(!ProtocolVersion::LATEST.has_initialize());
+    }
+
+    #[test]
+    fn tool_metadata_preserves_supported_fields_and_redacts_exact_secrets() {
+        let tool: Tool = serde_json::from_value(serde_json::json!({
+            "name": "lookup",
+            "title": "Lookup secret-value",
+            "description": "Lookup",
+            "inputSchema": {"type": "object"},
+            "outputSchema": {"type": "object", "properties": {"answer": {"type": "string"}, "token": {"type": "string"}}},
+            "annotations": {"readOnlyHint": true, "openWorldHint": false},
+            "icons": [{"src": "https://example.test/icon.png", "mimeType": "image/png"}],
+            "_meta": {"vendor": "secret-value", "token": "not-a-configured-secret"}
+        }))
+        .unwrap();
+        let metadata = tool_metadata(&tool, &McpRedactor::new(vec!["secret-value".to_string()]));
+
+        assert_eq!(metadata.title.as_deref(), Some("Lookup [REDACTED]"));
+        assert_eq!(metadata.output_schema.as_ref().unwrap()["type"], "object");
+        assert_eq!(
+            metadata.output_schema.as_ref().unwrap()["properties"]["token"]["type"],
+            "string"
+        );
+        assert_eq!(metadata.annotations.as_ref().unwrap()["readOnlyHint"], true);
+        assert_eq!(metadata.icons.as_ref().unwrap()[0]["mimeType"], "image/png");
+        assert_eq!(metadata.meta.as_ref().unwrap()["vendor"], "[REDACTED]");
+        assert_eq!(metadata.meta.as_ref().unwrap()["token"], "[REDACTED]");
+    }
+
+    #[test]
+    fn untrusted_risk_annotations_only_tighten_an_allow() {
+        let tool: Tool = serde_json::from_value(serde_json::json!({
+            "name": "publish",
+            "inputSchema": {"type": "object"},
+            "annotations": {"readOnlyHint": true, "openWorldHint": true}
+        }))
+        .unwrap();
+        let mut config: McpServerConfig = toml::from_str(
+            r#"transport = "streamable_http"
+            url = "https://example.test/mcp"
+            approval = "allow""#,
+        )
+        .unwrap();
+        config
+            .tool_approvals
+            .insert("publish".to_string(), McpToolApproval::Allow);
+        assert_eq!(
+            effective_tool_approval(&config, &tool),
+            McpToolApproval::Ask
+        );
     }
 }

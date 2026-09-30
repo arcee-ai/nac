@@ -37,6 +37,9 @@ pub struct ToolRuntime {
     /// service attaches. Workers and the existing orchestrator retain their
     /// established allow-through behavior.
     pub permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
+    /// Construction-time rules retained so headless imported capabilities can
+    /// fail closed on `ask` while still honoring an explicit final allow.
+    pub(crate) permission_rules: Arc<Vec<crate::permissions::PermissionRule>>,
     /// Direct-only bridge for exact mid-run durable-goal baselines.
     pub(crate) goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
     /// Optional process-environment capability, read immediately before each
@@ -117,6 +120,17 @@ impl ToolRuntime {
             }
         }
     }
+}
+
+pub(crate) fn mcp_rules(
+    mcp: Option<&Arc<McpRegistry>>,
+    configured: &[crate::permissions::PermissionRule],
+) -> Arc<Vec<crate::permissions::PermissionRule>> {
+    let mut rules = mcp
+        .map(|registry| registry.permission_rules())
+        .unwrap_or_default();
+    rules.extend_from_slice(configured);
+    Arc::new(rules)
 }
 
 pub(super) fn shared_workspace_gate(runtime: &ToolRuntime) -> Arc<SharedWorkspaceGate> {

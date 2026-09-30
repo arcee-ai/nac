@@ -12,7 +12,7 @@ use crate::mcp::McpRegistry;
 use crate::model::{CoalescedDeltas, DeltaSink, ModelClient, ModelStreamDelta, TokenUsage};
 use crate::sandbox::{SandboxSession, SshConnection};
 use crate::skills::SkillRegistry;
-use crate::tools::{self, ToolResult, ToolRuntime};
+use crate::tools::{self, mcp_rules, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition};
 
 mod compaction;
@@ -192,7 +192,6 @@ pub struct Agent {
     /// flight. Deltas remain live-only during an ordinary run, but keeping a
     /// local copy lets cancellation commit the text the user already saw.
     partial_stream: StdMutex<ModelStreamDelta>,
-    permission_rules: Vec<crate::permissions::PermissionRule>,
 }
 
 /// Path-backed writer and identity needed to append to the orchestrator
@@ -410,7 +409,7 @@ impl Agent {
                 event_sink: config.event_sink.clone(),
                 worker_executable: config.worker_executable,
                 backend,
-                mcp: config.mcp,
+                mcp: config.mcp.clone(),
                 mcp_tools: Arc::new(HashMap::new()),
                 skills: config.skills,
                 terminal_manager,
@@ -420,6 +419,7 @@ impl Agent {
                 light_client: config.light_client,
                 allowed_tools: Some(allowed_tools),
                 permission_broker: None,
+                permission_rules: mcp_rules(config.mcp.as_ref(), &config.permission_rules),
                 goal_runtime,
                 command_environment: None,
                 web_credential: None,
@@ -440,7 +440,6 @@ impl Agent {
             recovered_run_failure: None,
             last_usage: None,
             partial_stream: StdMutex::new(ModelStreamDelta::default()),
-            permission_rules: config.permission_rules,
         })
     }
 
@@ -1051,7 +1050,7 @@ impl Agent {
             session_id,
             backend,
             session_config_version,
-            self.permission_rules.clone(),
+            self.tool_runtime.permission_rules.as_ref().clone(),
         ));
         self.tool_runtime.permission_broker = Some(Arc::clone(&broker));
         Some(broker)

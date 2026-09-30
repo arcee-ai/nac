@@ -54,8 +54,8 @@ pub mod mcp_configurations {
         update_mcp_server_configuration_at_revision, McpConfigurationWriteLease,
         McpHeaderHelperConfig, McpLibraryAuth, McpLibraryEntry, McpProbeResult, McpProbedTool,
         McpRuntimeManager, McpRuntimeState, McpRuntimeStatus, McpServerConfig,
-        McpServerConfigurationRecord, McpServerConfigurationStoreError, McpTransportConfig,
-        MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
+        McpServerConfigurationRecord, McpServerConfigurationStoreError, McpToolApproval,
+        McpToolMetadata, McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
     };
 }
 

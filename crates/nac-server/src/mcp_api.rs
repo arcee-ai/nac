@@ -16,8 +16,8 @@ use axum::http::StatusCode;
 use axum::Json;
 use nac_core::mcp_configurations::{
     self as mcp, McpHeaderHelperConfig, McpProbeResult, McpProbedTool, McpServerConfig,
-    McpServerConfigurationRecord, McpServerConfigurationStoreError, McpTransportConfig,
-    MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
+    McpServerConfigurationRecord, McpServerConfigurationStoreError, McpToolApproval,
+    McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
 };
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +62,10 @@ pub struct McpServerView {
     pub bearer_token_env_var: Option<String>,
     pub header_helper: Option<McpHeaderHelperConfig>,
     pub library_id: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+    pub denied_tools: Vec<String>,
+    pub approval: McpToolApproval,
+    pub tool_approvals: BTreeMap<String, McpToolApproval>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -99,6 +103,13 @@ pub struct CreateMcpServerRequest {
     pub bearer_token_env_var: Option<String>,
     pub header_helper: Option<McpHeaderHelperConfig>,
     pub library_id: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub denied_tools: Vec<String>,
+    #[serde(default)]
+    pub approval: McpToolApproval,
+    #[serde(default)]
+    pub tool_approvals: BTreeMap<String, McpToolApproval>,
 }
 
 fn default_enabled() -> bool {
@@ -151,6 +162,14 @@ pub struct UpdateMcpServerRequest {
     pub header_helper: RequestField<UpdateMcpHeaderHelperRequest>,
     #[serde(default)]
     pub library_id: RequestField<String>,
+    #[serde(default)]
+    pub allowed_tools: RequestField<Vec<String>>,
+    #[serde(default)]
+    pub denied_tools: RequestField<Vec<String>>,
+    #[serde(default)]
+    pub approval: RequestField<McpToolApproval>,
+    #[serde(default)]
+    pub tool_approvals: RequestField<BTreeMap<String, McpToolApproval>>,
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
@@ -259,6 +278,10 @@ fn view(record: McpServerConfigurationRecord) -> McpServerView {
         bearer_token_env_var: record.bearer_token_env_var,
         header_helper,
         library_id: record.library_id,
+        allowed_tools: record.allowed_tools,
+        denied_tools: record.denied_tools,
+        approval: record.approval,
+        tool_approvals: record.tool_approvals,
     }
 }
 
@@ -378,6 +401,10 @@ pub async fn create_server_handler(
         bearer_token_env_var: request.bearer_token_env_var,
         header_helper: request.header_helper,
         library_id: request.library_id,
+        allowed_tools: request.allowed_tools,
+        denied_tools: request.denied_tools,
+        approval: request.approval,
+        tool_approvals: request.tool_approvals,
     };
     let _write = CONFIG_WRITE.lock().await;
     let path = config_path(&manager)?;
@@ -510,6 +537,25 @@ pub async fn update_server_handler(
             RequestField::Value(id) => Some(id),
             RequestField::Null => None,
             RequestField::Omitted => existing.library_id,
+        },
+        allowed_tools: match request.allowed_tools {
+            RequestField::Value(tools) => Some(tools),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.allowed_tools,
+        },
+        denied_tools: match request.denied_tools {
+            RequestField::Value(tools) => tools,
+            RequestField::Null => Vec::new(),
+            RequestField::Omitted => existing.denied_tools,
+        },
+        approval: match request.approval {
+            RequestField::Value(approval) => approval,
+            RequestField::Null | RequestField::Omitted => existing.approval,
+        },
+        tool_approvals: match request.tool_approvals {
+            RequestField::Value(approvals) => approvals,
+            RequestField::Null => BTreeMap::new(),
+            RequestField::Omitted => existing.tool_approvals,
         },
     };
 
@@ -653,6 +699,10 @@ pub async fn test_server_handler(
                 startup_timeout_ms,
                 catalog_timeout_ms,
                 execution_timeout_ms,
+                allowed_tools: None,
+                denied_tools: Vec::new(),
+                approval: McpToolApproval::Ask,
+                tool_approvals: BTreeMap::new(),
                 transport: McpTransportConfig::Stdio {
                     command,
                     args,
@@ -756,6 +806,10 @@ pub async fn test_server_handler(
                 startup_timeout_ms,
                 catalog_timeout_ms,
                 execution_timeout_ms,
+                allowed_tools: None,
+                denied_tools: Vec::new(),
+                approval: McpToolApproval::Ask,
+                tool_approvals: BTreeMap::new(),
                 transport: McpTransportConfig::StreamableHttp {
                     url,
                     headers,

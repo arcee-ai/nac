@@ -48,7 +48,9 @@ mod sync;
 mod transport;
 
 pub use capabilities::{McpPromptArgument, McpPromptCommand, McpPromptInvocation};
-pub use config::{McpDefaults, McpHeaderHelperConfig, McpServerConfig, McpTransportConfig};
+pub use config::{
+    McpDefaults, McpHeaderHelperConfig, McpServerConfig, McpToolApproval, McpTransportConfig,
+};
 pub use file_config::{
     acquire_mcp_configuration_write_lease, delete_mcp_server_configuration,
     insert_mcp_server_configuration, list_mcp_server_configurations, load_mcp_defaults,
@@ -64,7 +66,7 @@ pub use library::{
     McpLibraryAuth, McpLibraryEntry,
 };
 pub use lifecycle::{McpRuntimeManager, McpRuntimeState, McpRuntimeStatus};
-pub use registry::{McpRegistry, McpRootPolicy, McpTransportPolicy};
+pub use registry::{McpRegistry, McpRootPolicy, McpToolMetadata, McpTransportPolicy};
 
 /// A tool a probe discovered on a server, before anything is saved.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -72,6 +74,12 @@ pub use registry::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 pub struct McpProbedTool {
     pub name: String,
     pub description: Option<String>,
+    pub title: Option<String>,
+    pub output_schema: Option<Value>,
+    pub annotations: Option<Value>,
+    pub icons: Option<Value>,
+    #[serde(rename = "_meta")]
+    pub meta: Option<Value>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -123,14 +131,23 @@ pub async fn probe_mcp_server(
             );
         }
     };
+    let redactor = McpRedactor::new(redaction_values(config)?);
     let probed = tools
         .into_iter()
-        .map(|tool| McpProbedTool {
-            name: tool.name.to_string(),
-            description: tool
-                .description
-                .as_ref()
-                .map(std::string::ToString::to_string),
+        .map(|tool| {
+            let metadata = tool_metadata(&tool, &redactor);
+            McpProbedTool {
+                name: tool.name.to_string(),
+                description: tool
+                    .description
+                    .as_ref()
+                    .map(|value| redactor.safe_text(value)),
+                title: metadata.title,
+                output_schema: metadata.output_schema,
+                annotations: metadata.annotations,
+                icons: metadata.icons,
+                meta: metadata.meta,
+            }
         })
         .collect();
     let mut catalog_warnings = Vec::new();
@@ -774,8 +791,13 @@ pub(crate) mod test_support {
                     "result": {
                         "tools": [{
                             "name": "echo",
+                            "title": "Echo",
                             "description": "Echo from fake HTTP MCP",
-                            "inputSchema": { "type": "object", "properties": {} }
+                            "inputSchema": { "type": "object", "properties": {} },
+                            "outputSchema": { "type": "object", "properties": { "echoed": { "type": "string" } } },
+                            "annotations": { "readOnlyHint": true, "openWorldHint": false },
+                            "icons": [{ "src": "https://example.test/echo.png", "mimeType": "image/png" }],
+                            "_meta": { "vendor": "fake" }
                         }]
                     }
                 });
@@ -1550,6 +1572,7 @@ args = ["-c", {}]
 [mcp_servers.hung]
 transport = "streamable_http"
 url = {}
+approval = "allow"
 "#,
                 toml_string(&http_url)
             ),
@@ -1921,6 +1944,21 @@ url = {}
             .content
             .to_string()
             .contains("does not advertise resources support"));
+        let catalog = registry.tool_catalog();
+        assert_eq!(catalog[0].1.title.as_deref(), Some("Echo"));
+        assert_eq!(
+            catalog[0].1.output_schema.as_ref().unwrap()["type"],
+            "object"
+        );
+        assert_eq!(
+            catalog[0].1.annotations.as_ref().unwrap()["readOnlyHint"],
+            true
+        );
+        assert_eq!(
+            catalog[0].1.icons.as_ref().unwrap()[0]["mimeType"],
+            "image/png"
+        );
+        assert_eq!(catalog[0].1.meta.as_ref().unwrap()["vendor"], "fake");
 
         drop(registry);
         http_server.join().unwrap();

@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::{kernel, ToolResult};
-use crate::mcp::{McpRegistry, McpToolCapture};
+use crate::mcp::{McpRegistry, McpToolApproval, McpToolCapture};
 use crate::types::ToolDefinition;
 
 struct McpTool {
@@ -12,6 +12,7 @@ struct McpTool {
     capture: Option<McpToolCapture>,
     image_results: bool,
     execution_timeout: Duration,
+    approval: McpToolApproval,
 }
 
 impl kernel::NativeTool for McpTool {
@@ -55,12 +56,38 @@ impl kernel::NativeTool for McpTool {
     fn permission_resources(
         &self,
         _input: &Self::Input,
-        _services: kernel::ToolServices<'_>,
+        services: kernel::ToolServices<'_>,
     ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
-        Ok(vec![kernel::PermissionResource::new(
-            "mcp_call",
-            self.definition.function.name.clone(),
-        )])
+        let mut resource =
+            kernel::PermissionResource::new("mcp_call", self.definition.function.name.clone());
+        if services.runtime.permission_broker.is_none() {
+            let mut rules = vec![crate::permissions::PermissionRule::new(
+                "mcp_call",
+                self.definition.function.name.clone(),
+                match self.approval {
+                    McpToolApproval::Allow => crate::permissions::PermissionEffect::Allow,
+                    McpToolApproval::Ask => crate::permissions::PermissionEffect::Ask,
+                },
+            )];
+            rules.extend(services.runtime.permission_rules.iter().cloned());
+            let backend = crate::permissions::PermissionBackend::from_execution_backend(
+                services.runtime.backend.as_ref(),
+            );
+            let decision = crate::permissions::PermissionPolicy::for_backend(backend, rules)
+                .evaluate(std::slice::from_ref(&resource), &[]);
+            if decision.effect != crate::permissions::PermissionEffect::Allow {
+                resource = resource.with_hard_denial(match decision.effect {
+                    crate::permissions::PermissionEffect::Deny => {
+                        "MCP tool is denied by permission policy"
+                    }
+                    crate::permissions::PermissionEffect::Ask => {
+                        "MCP tool requires interactive approval, but this run has no approval broker"
+                    }
+                    crate::permissions::PermissionEffect::Allow => unreachable!(),
+                });
+            }
+        }
+        Ok(vec![resource])
     }
 
     fn execute<'a>(
@@ -180,7 +207,12 @@ pub(super) async fn invoke(
         let Some(capture) = capture else {
             return ToolResult::text(format!("Error: unknown MCP tool '{name}'"), true);
         };
-        snapshot(capture, services.client.supports_image_tool_results())
+        let approval = registry.tool_approval(name).unwrap_or(McpToolApproval::Ask);
+        snapshot(
+            capture,
+            services.client.supports_image_tool_results(),
+            approval,
+        )
     };
     snapshot.invoke(name, input, services, context).await
 }
@@ -209,7 +241,11 @@ fn capability_snapshot(
     clippy::expect_used,
     reason = "a one-element imported capability registry cannot collide or omit its element"
 )]
-fn snapshot(capture: McpToolCapture, image_results: bool) -> kernel::ToolSnapshot {
+fn snapshot(
+    capture: McpToolCapture,
+    image_results: bool,
+    approval: McpToolApproval,
+) -> kernel::ToolSnapshot {
     let definition = capture.definition();
     let name = definition.function.name.clone();
     kernel::ToolRegistry::builder()
@@ -218,6 +254,7 @@ fn snapshot(capture: McpToolCapture, image_results: bool) -> kernel::ToolSnapsho
             capture: Some(capture.clone()),
             image_results,
             execution_timeout: capture.execution_timeout(),
+            approval,
         })
         .finish()
         .expect("one imported MCP capability is collision-free")
@@ -229,6 +266,32 @@ fn snapshot(capture: McpToolCapture, image_results: bool) -> kernel::ToolSnapsho
 mod tests {
     use super::*;
     use crate::types::FunctionDef;
+
+    fn test_definition() -> ToolDefinition {
+        ToolDefinition {
+            def_type: "function".to_string(),
+            function: FunctionDef {
+                name: "mcp__fake__echo".to_string(),
+                description: "test".to_string(),
+                parameters: serde_json::json!({"type":"object"}),
+            },
+        }
+    }
+
+    fn test_imported_snapshot(approval: McpToolApproval) -> kernel::ToolSnapshot {
+        kernel::ToolRegistry::builder()
+            .register(McpTool {
+                definition: test_definition(),
+                capture: None,
+                image_results: false,
+                execution_timeout: kernel::DEFAULT_TOOL_TIMEOUT,
+                approval,
+            })
+            .finish()
+            .unwrap()
+            .snapshot(["mcp__fake__echo"])
+            .unwrap()
+    }
 
     #[tokio::test]
     async fn imported_tool_is_denied_by_policy_before_transport_execution() {
@@ -255,24 +318,7 @@ mod tests {
         runtime.session_id = Some("session-a".to_string());
         runtime.permission_broker = Some(broker);
         let client = crate::model::ModelClient::new_for_test();
-        let snapshot = kernel::ToolRegistry::builder()
-            .register(McpTool {
-                definition: ToolDefinition {
-                    def_type: "function".to_string(),
-                    function: FunctionDef {
-                        name: "mcp__fake__echo".to_string(),
-                        description: "test".to_string(),
-                        parameters: serde_json::json!({"type":"object"}),
-                    },
-                },
-                capture: None,
-                image_results: false,
-                execution_timeout: kernel::DEFAULT_TOOL_TIMEOUT,
-            })
-            .finish()
-            .unwrap()
-            .snapshot(["mcp__fake__echo"])
-            .unwrap();
+        let snapshot = test_imported_snapshot(McpToolApproval::Ask);
         let result = snapshot
             .invoke(
                 "mcp__fake__echo",
@@ -337,5 +383,59 @@ mod tests {
         assert!(result.content.to_string().contains("permission denied"));
         assert!(!result.content.to_string().contains("unavailable"));
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn headless_imported_tool_defaults_to_approval_gated() {
+        let runtime = crate::tools::test_runtime();
+        let client = crate::model::ModelClient::new_for_test();
+        let snapshot = test_imported_snapshot(McpToolApproval::Ask);
+
+        let result = snapshot
+            .invoke(
+                "mcp__fake__echo",
+                serde_json::json!({}),
+                kernel::ToolServices {
+                    runtime: &runtime,
+                    client: &client,
+                },
+                &kernel::ToolCallContext::default(),
+            )
+            .await;
+
+        assert!(result.is_error);
+        assert!(result
+            .content
+            .to_string()
+            .contains("requires interactive approval"));
+        assert!(!result.content.to_string().contains("unknown MCP tool"));
+    }
+
+    #[tokio::test]
+    async fn explicit_nac_allow_overrides_headless_server_ask() {
+        let mut runtime = crate::tools::test_runtime();
+        runtime.permission_rules = Arc::new(vec![crate::permissions::PermissionRule::new(
+            "mcp_call",
+            "mcp__fake__echo",
+            crate::permissions::PermissionEffect::Allow,
+        )]);
+        let client = crate::model::ModelClient::new_for_test();
+        let snapshot = test_imported_snapshot(McpToolApproval::Ask);
+
+        let result = snapshot
+            .invoke(
+                "mcp__fake__echo",
+                serde_json::json!({}),
+                kernel::ToolServices {
+                    runtime: &runtime,
+                    client: &client,
+                },
+                &kernel::ToolCallContext::default(),
+            )
+            .await;
+
+        assert!(result.is_error);
+        assert!(result.content.to_string().contains("unknown MCP tool"));
+        assert!(!result.content.to_string().contains("permission denied"));
     }
 }

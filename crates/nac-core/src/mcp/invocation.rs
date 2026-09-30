@@ -34,7 +34,9 @@ impl McpToolCapture {
         let service = self.server.service.read().await.clone();
         let first_result = service.read().await.call_tool(params.clone()).await;
         match first_result {
-            Ok(result) => flatten_tool_result(result, image_results).await,
+            Ok(result) => {
+                flatten_tool_result(result, image_results, self.server.redactor.clone()).await
+            }
             Err(error)
                 if self.server.config.has_header_helper() && authorization_required(&error) =>
             {
@@ -66,9 +68,9 @@ impl McpToolCapture {
                             }
                             Err(refresh_error) => {
                                 return ToolResult {
-                                    content: format!(
+                                    content: self.server.redactor.redact(&format!(
                                         "Error calling MCP tool '{name}': authentication refresh failed: {refresh_error:#}"
-                                    )
+                                    ))
                                     .into(),
                                     is_error: true,
                                 };
@@ -80,18 +82,28 @@ impl McpToolCapture {
                 };
                 let refreshed_result = refreshed_service.read().await.call_tool(params).await;
                 match refreshed_result {
-                    Ok(result) => flatten_tool_result(result, image_results).await,
+                    Ok(result) => {
+                        flatten_tool_result(result, image_results, self.server.redactor.clone())
+                            .await
+                    }
                     Err(error) => ToolResult {
-                        content: format!(
+                        content: self
+                            .server
+                            .redactor
+                            .redact(&format!(
                             "Error calling MCP tool '{name}' after authentication refresh: {error}"
-                        )
-                        .into(),
+                        ))
+                            .into(),
                         is_error: true,
                     },
                 }
             }
             Err(error) => ToolResult {
-                content: format!("Error calling MCP tool '{name}': {error}").into(),
+                content: self
+                    .server
+                    .redactor
+                    .redact(&format!("Error calling MCP tool '{name}': {error}"))
+                    .into(),
                 is_error: true,
             },
         }

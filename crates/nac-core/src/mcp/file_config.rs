@@ -42,6 +42,10 @@ pub struct McpServerConfigurationRecord {
     pub header_helper: Option<McpHeaderHelperConfig>,
     /// Library catalog entry this server was created from, when it was.
     pub library_id: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+    pub denied_tools: Vec<String>,
+    pub approval: McpToolApproval,
+    pub tool_approvals: BTreeMap<String, McpToolApproval>,
 }
 
 #[derive(Debug)]
@@ -353,6 +357,10 @@ fn validated_record(
             .library_id
             .map(|id| id.trim().to_string())
             .filter(|id| !id.is_empty()),
+        allowed_tools: configuration.allowed_tools,
+        denied_tools: configuration.denied_tools,
+        approval: configuration.approval,
+        tool_approvals: configuration.tool_approvals,
     })
 }
 
@@ -953,6 +961,13 @@ fn map_of(item: &Item) -> BTreeMap<String, String> {
     map
 }
 
+fn approval_of(item: &Item) -> McpToolApproval {
+    match item.as_str() {
+        Some("allow") => McpToolApproval::Allow,
+        _ => McpToolApproval::Ask,
+    }
+}
+
 /// An entry as the file has it. Reads are lenient — a hand-written entry the
 /// connect path would reject still shows up in the dashboard, where it can be
 /// repaired — while writes validate.
@@ -982,6 +997,13 @@ fn record_of(name: &str, item: &Item) -> McpServerConfigurationRecord {
         bearer_token_env_var: string_of(field("bearer_token_env_var")),
         header_helper: header_helper_of(field("header_helper")),
         library_id: string_of(field("library_id")),
+        allowed_tools: item
+            .as_table_like()
+            .is_some_and(|table| table.contains_key("allowed_tools"))
+            .then(|| strings_of(field("allowed_tools"))),
+        denied_tools: strings_of(field("denied_tools")),
+        approval: approval_of(field("approval")),
+        tool_approvals: approval_map_of(field("tool_approvals")),
     }
 }
 
@@ -997,6 +1019,23 @@ fn header_helper_of(item: &Item) -> Option<McpHeaderHelperConfig> {
         env_vars: strings_of(item("env_vars")),
         timeout_ms: integer_of(item("timeout_ms")),
     })
+}
+
+fn approval_map_of(item: &Item) -> BTreeMap<String, McpToolApproval> {
+    item.as_table_like()
+        .map(|table| {
+            table
+                .iter()
+                .filter_map(|(name, value)| {
+                    value.as_str().and_then(|value| match value {
+                        "allow" => Some((name.to_string(), McpToolApproval::Allow)),
+                        "ask" => Some((name.to_string(), McpToolApproval::Ask)),
+                        _ => None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn inline_map(values: &BTreeMap<String, String>) -> InlineTable {
@@ -1067,6 +1106,34 @@ fn table_of(record: &McpServerConfigurationRecord) -> Table {
     }
     if let Some(library_id) = &record.library_id {
         table["library_id"] = toml_edit::value(library_id.as_str());
+    }
+    if let Some(allowed_tools) = &record.allowed_tools {
+        let mut values = toml_edit::Array::new();
+        for tool in allowed_tools {
+            values.push(tool.as_str());
+        }
+        table["allowed_tools"] = toml_edit::value(values);
+    }
+    if !record.denied_tools.is_empty() {
+        let mut values = toml_edit::Array::new();
+        for tool in &record.denied_tools {
+            values.push(tool.as_str());
+        }
+        table["denied_tools"] = toml_edit::value(values);
+    }
+    if record.approval != McpToolApproval::default() {
+        table["approval"] = toml_edit::value("allow");
+    }
+    if !record.tool_approvals.is_empty() {
+        let mut values = InlineTable::new();
+        for (name, approval) in &record.tool_approvals {
+            let value = match approval {
+                McpToolApproval::Allow => "allow",
+                McpToolApproval::Ask => "ask",
+            };
+            values.insert(name, value.into());
+        }
+        table["tool_approvals"] = toml_edit::value(values);
     }
     table
 }
@@ -1268,6 +1335,10 @@ mod tests {
                 "Bearer secret-token".to_string(),
             )]),
             library_id: Some("example".to_string()),
+            allowed_tools: Some(vec!["read".to_string(), "publish".to_string()]),
+            denied_tools: vec!["publish".to_string()],
+            approval: McpToolApproval::Allow,
+            tool_approvals: BTreeMap::from([("read".to_string(), McpToolApproval::Ask)]),
             ..McpServerConfigurationRecord::default()
         }
     }
@@ -1280,6 +1351,12 @@ mod tests {
         assert_eq!(created.name, "example");
         assert_eq!(created.url.as_deref(), Some("https://mcp.example.com/mcp"));
         assert!(created.enabled);
+        assert_eq!(
+            created.allowed_tools.as_deref(),
+            Some(&["read".to_string(), "publish".to_string()][..])
+        );
+        assert_eq!(created.approval, McpToolApproval::Allow);
+        assert_eq!(created.tool_approvals["read"], McpToolApproval::Ask);
 
         let listed = list_mcp_server_configurations(&path).unwrap();
         assert_eq!(listed, vec![created.clone()]);
@@ -1846,6 +1923,13 @@ args = ["missing-command-is-tolerated-by-default-loader"]
                 if url == "https://mcp.example.com/mcp"
                     && headers["Authorization"] == "Bearer secret-token"
         ));
+        assert_eq!(
+            example.allowed_tools.as_deref(),
+            Some(&["read".to_string(), "publish".to_string()][..])
+        );
+        assert_eq!(example.denied_tools, ["publish"]);
+        assert_eq!(example.approval, McpToolApproval::Allow);
+        assert_eq!(example.tool_approvals["read"], McpToolApproval::Ask);
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

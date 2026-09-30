@@ -72,11 +72,20 @@ execution_timeout_ms = 300000
 # MCP capability tools; exact resource reads still pass through permission policy.
 # Advertised prompts also appear as session slash commands and accept a JSON
 # object of string arguments, for example: /mcp__docs__review {"tone":"strict"}.
+# allowed_tools is an optional exact-name allowlist (an empty list
+# exposes no tools); denied_tools is an exact-name denylist and always wins.
+# approval defaults to "ask". tool_approvals applies exact-name "allow" or
+# "ask" overrides. Risk annotations from a server may tighten "allow" to
+# "ask", but annotations can never grant access.
 [mcp_servers.exa_web_search]
 enabled = true
 required = false
 transport = "streamable_http"
 url = "https://mcp.exa.ai/mcp"
+# allowed_tools = ["web_search_exa"]
+# denied_tools = []
+# approval = "ask"
+# tool_approvals = { web_search_exa = "allow" }
 # headers = { "x-api-key" = "${EXA_API_KEY}" }
 # env_headers = { "x-api-key" = "EXA_API_KEY" }
 # bearer_token_env_var = "EXA_BEARER_TOKEN"

@@ -8763,6 +8763,18 @@
           "transport"
         ],
         "properties": {
+          "allowed_tools": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "approval": {
+            "$ref": "#/components/schemas/McpToolApproval"
+          },
           "args": {
             "type": "array",
             "items": {
@@ -8794,6 +8806,12 @@
               "string",
               "null"
             ]
+          },
+          "denied_tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "enabled": {
             "type": "boolean"
@@ -8878,6 +8896,15 @@
             ],
             "format": "int64",
             "minimum": 0
+          },
+          "tool_approvals": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/McpToolApproval"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           },
           "transport": {
             "$ref": "#/components/schemas/McpTransportSchema"
@@ -10702,14 +10729,24 @@
           "name"
         ],
         "properties": {
+          "_meta": {},
+          "annotations": {},
           "description": {
             "type": [
               "string",
               "null"
             ]
           },
+          "icons": {},
           "name": {
             "type": "string"
+          },
+          "output_schema": {},
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -10836,9 +10873,24 @@
           "env",
           "env_vars",
           "headers",
-          "env_headers"
+          "env_headers",
+          "denied_tools",
+          "approval",
+          "tool_approvals"
         ],
         "properties": {
+          "allowed_tools": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "approval": {
+            "$ref": "#/components/schemas/McpToolApproval"
+          },
           "args": {
             "type": "array",
             "items": {
@@ -10870,6 +10922,12 @@
               "string",
               "null"
             ]
+          },
+          "denied_tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "enabled": {
             "type": "boolean"
@@ -10945,6 +11003,15 @@
             "format": "int64",
             "minimum": 0
           },
+          "tool_approvals": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/McpToolApproval"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "transport": {
             "$ref": "#/components/schemas/McpTransportSchema"
           },
@@ -10955,6 +11022,13 @@
             ]
           }
         }
+      },
+      "McpToolApproval": {
+        "type": "string",
+        "enum": [
+          "allow",
+          "ask"
+        ]
       },
       "McpTransportSchema": {
         "type": "string",
@@ -12262,6 +12336,26 @@
           }
         }
       },
+      "RequestField_BTreeMap_BTreeMap_String_McpToolApproval": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "ask"
+              ]
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        ]
+      },
       "RequestField_BTreeMap_BTreeMap_String_Option_String": {
         "oneOf": [
           {
@@ -12393,6 +12487,20 @@
                 ]
               }
             }
+          }
+        ]
+      },
+      "RequestField_McpToolApproval_McpToolApproval": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "string",
+            "enum": [
+              "allow",
+              "ask"
+            ]
           }
         ]
       },
@@ -15140,6 +15248,12 @@
         "type": "object",
         "description": "Edits a stored server in place. Every field is tri-state: omit it to keep\nwhat is stored, send null to clear it, send a value to replace it.\n\n`env` and `headers` replace the whole map when sent, except that a null\nvalue under a key keeps the stored value for that key — the stored value\nis never echoed back, so this is how an untouched secret survives an edit.",
         "properties": {
+          "allowed_tools": {
+            "$ref": "#/components/schemas/RequestField_Vec_Vec_String"
+          },
+          "approval": {
+            "$ref": "#/components/schemas/RequestField_McpToolApproval_McpToolApproval"
+          },
           "args": {
             "$ref": "#/components/schemas/RequestField_Vec_Vec_String"
           },
@@ -15154,6 +15268,9 @@
           },
           "cwd": {
             "$ref": "#/components/schemas/RequestField_String_String"
+          },
+          "denied_tools": {
+            "$ref": "#/components/schemas/RequestField_Vec_Vec_String"
           },
           "enabled": {
             "$ref": "#/components/schemas/RequestField_bool_bool"
@@ -15187,6 +15304,9 @@
           },
           "startup_timeout_ms": {
             "$ref": "#/components/schemas/RequestField_u64_u64"
+          },
+          "tool_approvals": {
+            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_McpToolApproval"
           },
           "transport": {
             "$ref": "#/components/schemas/RequestField_String_String"

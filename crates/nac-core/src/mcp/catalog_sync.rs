@@ -214,9 +214,29 @@ impl McpSyncState {
             .cloned()
             .collect();
         for tool in tools {
+            if !server.config.exposes_tool(&tool.name) {
+                continue;
+            }
             let qualified_name =
                 stable_catalog_name(&server.name, &tool.name, &previous_names, &mut occupied);
             let mut definition = tool_definition(&qualified_name, &server.name, &tool);
+            definition.function.description =
+                server.redactor.redact(&definition.function.description);
+            if definition.function.description.len() > MAX_MCP_METADATA_BYTES {
+                continue;
+            }
+            definition.function.parameters =
+                match server.redactor.safe_value(Some(tool.input_schema.as_ref())) {
+                    Some(value)
+                        if value.get("_nac").and_then(Value::as_str)
+                            != Some("metadata_limit_exceeded") =>
+                    {
+                        value
+                    }
+                    _ => continue,
+                };
+            let metadata = tool_metadata(&tool, &server.redactor);
+            let approval = effective_tool_approval(&server.config, &tool);
             if definition.function.parameters["properties"]
                 .as_object()
                 .is_some_and(|properties| properties.contains_key("_nac"))
@@ -232,6 +252,8 @@ impl McpSyncState {
                 Arc::new(McpToolBinding {
                     tool_name: tool.name.to_string(),
                     definition,
+                    metadata,
+                    approval,
                     server: Arc::downgrade(server),
                     execution_timeout: server.execution_timeout,
                 }),

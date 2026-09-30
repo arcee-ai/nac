@@ -32,6 +32,19 @@ pub struct McpServerConfig {
     pub catalog_timeout_ms: Option<u64>,
     #[serde(default)]
     pub execution_timeout_ms: Option<u64>,
+    /// Optional exact-name allowlist. Omission exposes every listed tool;
+    /// an explicitly empty list exposes none.
+    #[serde(default)]
+    pub allowed_tools: Option<Vec<String>>,
+    /// Exact tool names that must never be mounted. Deny wins over allow.
+    #[serde(default)]
+    pub denied_tools: Vec<String>,
+    /// Default authorization posture for mounted tools.
+    #[serde(default)]
+    pub approval: McpToolApproval,
+    /// Exact-name overrides of the server authorization posture.
+    #[serde(default)]
+    pub tool_approvals: BTreeMap<String, McpToolApproval>,
     #[serde(flatten)]
     pub transport: McpTransportConfig,
 }
@@ -60,6 +73,32 @@ pub struct McpHeaderHelperConfig {
     pub env_vars: Vec<String>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum McpToolApproval {
+    Allow,
+    #[default]
+    Ask,
+}
+
+impl McpServerConfig {
+    pub(super) fn exposes_tool(&self, name: &str) -> bool {
+        !self.denied_tools.iter().any(|denied| denied == name)
+            && self
+                .allowed_tools
+                .as_ref()
+                .is_none_or(|allowed| allowed.iter().any(|allowed| allowed == name))
+    }
+
+    pub(super) fn approval_for(&self, name: &str) -> McpToolApproval {
+        self.tool_approvals
+            .get(name)
+            .copied()
+            .unwrap_or(self.approval)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -270,6 +309,46 @@ pub(super) fn expand_env(input: &str) -> Result<String> {
     Ok(out)
 }
 
+pub(super) fn redaction_values(config: &McpServerConfig) -> Result<Vec<String>> {
+    let mut inputs = Vec::new();
+    let mut values = config.configured_redactions();
+    match &config.transport {
+        McpTransportConfig::Stdio {
+            command, args, env, ..
+        } => {
+            inputs.push(command.as_str());
+            inputs.extend(args.iter().map(String::as_str));
+            inputs.extend(env.values().map(String::as_str));
+        }
+        McpTransportConfig::StreamableHttp { url, headers, .. } => {
+            inputs.push(url.as_str());
+            inputs.extend(headers.values().map(String::as_str));
+        }
+    }
+
+    for input in inputs {
+        let mut rest = input;
+        while let Some(start) = rest.find("${") {
+            let after_start = &rest[start + 2..];
+            let Some(end) = after_start.find('}') else {
+                break;
+            };
+            let name = &after_start[..end];
+            if let Ok(value) = env::var(name) {
+                if !value.is_empty() {
+                    values.push(value);
+                }
+            }
+            rest = &after_start[end + 1..];
+        }
+    }
+    values.retain(|value| value.chars().count() >= 4);
+    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    values.dedup();
+    values.truncate(128);
+    Ok(values)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,5 +407,55 @@ catalog_timeout_ms = 5600
         assert!(
             timeout_value(Some(MAX_TIMEOUT_MS + 1), Duration::from_secs(1), "timeout").is_err()
         );
+    }
+
+    fn config() -> McpServerConfig {
+        McpServerConfig {
+            enabled: true,
+            library_id: None,
+            required: false,
+            startup_timeout_ms: None,
+            catalog_timeout_ms: None,
+            execution_timeout_ms: None,
+            allowed_tools: None,
+            denied_tools: Vec::new(),
+            approval: McpToolApproval::Ask,
+            tool_approvals: BTreeMap::new(),
+            transport: McpTransportConfig::StreamableHttp {
+                url: "https://example.test/mcp".to_string(),
+                headers: BTreeMap::new(),
+                env_headers: BTreeMap::new(),
+                bearer_token_env_var: None,
+                header_helper: None,
+            },
+        }
+    }
+
+    #[test]
+    fn allow_and_deny_lists_are_exact_and_deny_wins() {
+        let mut config = config();
+        config.allowed_tools = Some(vec!["read".to_string(), "write".to_string()]);
+        config.denied_tools = vec!["write".to_string()];
+
+        assert!(config.exposes_tool("read"));
+        assert!(!config.exposes_tool("write"));
+        assert!(!config.exposes_tool("reader"));
+    }
+
+    #[test]
+    fn approval_defaults_to_ask_and_exact_overrides_apply() {
+        let parsed: McpConfigFile = toml::from_str(
+            r#"
+            [mcp_servers.demo]
+            transport = "streamable_http"
+            url = "https://example.test/mcp"
+            tool_approvals = { safe = "allow" }
+            "#,
+        )
+        .unwrap();
+        let config = &parsed.mcp_servers["demo"];
+
+        assert_eq!(config.approval_for("other"), McpToolApproval::Ask);
+        assert_eq!(config.approval_for("safe"), McpToolApproval::Allow);
     }
 }

@@ -202,11 +202,14 @@ export interface components {
     CreateGoalRequest: { objective: string; token_budget?: number | null };
     CreateInboxItemRequest: { delivery: components["schemas"]["InboxDelivery"]; prompt: string };
     CreateMcpServerRequest: {
+      allowed_tools?: string[] | null;
+      approval?: components["schemas"]["McpToolApproval"];
       args?: string[];
       bearer_token_env_var?: string | null;
       catalog_timeout_ms?: number | null;
       command?: string | null;
       cwd?: string | null;
+      denied_tools?: string[];
       enabled?: boolean;
       env?: Record<string, string>;
       env_headers?: Record<string, string>;
@@ -218,6 +221,7 @@ export interface components {
       name: string;
       required?: boolean;
       startup_timeout_ms?: number | null;
+      tool_approvals?: Record<string, components["schemas"]["McpToolApproval"]>;
       transport: components["schemas"]["McpTransportSchema"];
       url?: string | null;
     };
@@ -539,7 +543,15 @@ export interface components {
       | "log"
       | "progress"
       | "subscription_ended";
-    McpProbedTool: { description?: string | null; name: string };
+    McpProbedTool: {
+      _meta?: unknown;
+      annotations?: unknown;
+      description?: string | null;
+      icons?: unknown;
+      name: string;
+      output_schema?: unknown;
+      title?: string | null;
+    };
     McpProbeResult: {
       capabilities: string[];
       catalog_warnings: string[];
@@ -568,11 +580,14 @@ export interface components {
     McpRuntimeStatusList: { servers: components["schemas"]["McpRuntimeStatus"][] };
     McpServerList: { servers: components["schemas"]["McpServerView"][] };
     McpServerView: {
+      allowed_tools?: string[] | null;
+      approval: components["schemas"]["McpToolApproval"];
       args: string[];
       bearer_token_env_var?: string | null;
       catalog_timeout_ms?: number | null;
       command?: string | null;
       cwd?: string | null;
+      denied_tools: string[];
       enabled: boolean;
       env: Record<string, string>;
       env_headers: Record<string, string>;
@@ -584,9 +599,11 @@ export interface components {
       name: string;
       required: boolean;
       startup_timeout_ms?: number | null;
+      tool_approvals: Record<string, components["schemas"]["McpToolApproval"]>;
       transport: components["schemas"]["McpTransportSchema"];
       url?: string | null;
     };
+    McpToolApproval: "allow" | "ask";
     McpTransportSchema: "stdio" | "streamable_http";
     Message:
       | { content: string; role: "system" }
@@ -807,6 +824,7 @@ export interface components {
           | "arcee-api"
         );
     RequestField_bool_bool: null | boolean;
+    RequestField_BTreeMap_BTreeMap_String_McpToolApproval: null | Record<string, "allow" | "ask">;
     RequestField_BTreeMap_BTreeMap_String_Option_String: null | Record<string, null | string>;
     RequestField_BTreeMap_BTreeMap_String_String: null | Record<string, string>;
     RequestField_HeadersRequest_HeadersRequest: null | (Record<string, string> | string);
@@ -817,6 +835,7 @@ export interface components {
       model: string;
       reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
     };
+    RequestField_McpToolApproval_McpToolApproval: null | ("allow" | "ask");
     RequestField_ReasoningEffort_ReasoningEffort:
       | null
       | ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max");
@@ -1259,11 +1278,14 @@ export interface components {
       timeout_ms?: number | null;
     };
     UpdateMcpServerRequest: {
+      allowed_tools?: components["schemas"]["RequestField_Vec_Vec_String"];
+      approval?: components["schemas"]["RequestField_McpToolApproval_McpToolApproval"];
       args?: components["schemas"]["RequestField_Vec_Vec_String"];
       bearer_token_env_var?: components["schemas"]["RequestField_String_String"];
       catalog_timeout_ms?: components["schemas"]["RequestField_u64_u64"];
       command?: components["schemas"]["RequestField_String_String"];
       cwd?: components["schemas"]["RequestField_String_String"];
+      denied_tools?: components["schemas"]["RequestField_Vec_Vec_String"];
       enabled?: components["schemas"]["RequestField_bool_bool"];
       env?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_Option_String"];
       env_headers?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_String"];
@@ -1275,6 +1297,7 @@ export interface components {
       name?: components["schemas"]["RequestField_String_String"];
       required?: components["schemas"]["RequestField_bool_bool"];
       startup_timeout_ms?: components["schemas"]["RequestField_u64_u64"];
+      tool_approvals?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_McpToolApproval"];
       transport?: components["schemas"]["RequestField_String_String"];
       url?: components["schemas"]["RequestField_String_String"];
     };
