@@ -1,0 +1,334 @@
+{
+  "mode": "ordered_healthy",
+  "seed": 168886546,
+  "orchestrators": 4,
+  "store": "sqlite-wal",
+  "elapsed_ms": 24183,
+  "phase_timeout_ms": 90000,
+  "diagnostic_timeout_override": true,
+  "injected_phase_delay_ms": 100,
+  "logical_plan": {
+    "seed": 168886546,
+    "orchestrators": [
+      {
+        "ordinal": 0,
+        "session_id": "all112-4-0a110112-0",
+        "description": "ALL112_DESCRIPTION:4:0a110112:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "prompt": "ALL112_ORCHESTRATOR_PROMPT:4:0a110112:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "worker_thread": "worker-0",
+        "worker_action": "ALL112_WORKER_ACTION:4:0a110112:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 1,
+        "session_id": "all112-4-0a110112-1",
+        "description": "ALL112_DESCRIPTION:4:0a110112:1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "prompt": "ALL112_ORCHESTRATOR_PROMPT:4:0a110112:1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "worker_thread": "worker-1",
+        "worker_action": "ALL112_WORKER_ACTION:4:0a110112:1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 2,
+        "session_id": "all112-4-0a110112-2",
+        "description": "ALL112_DESCRIPTION:4:0a110112:2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "prompt": "ALL112_ORCHESTRATOR_PROMPT:4:0a110112:2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "worker_thread": "worker-2",
+        "worker_action": "ALL112_WORKER_ACTION:4:0a110112:2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 3,
+        "session_id": "all112-4-0a110112-3",
+        "description": "ALL112_DESCRIPTION:4:0a110112:3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "prompt": "ALL112_ORCHESTRATOR_PROMPT:4:0a110112:3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "worker_thread": "worker-3",
+        "worker_action": "ALL112_WORKER_ACTION:4:0a110112:3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  "model_requests": [
+    {
+      "phase": "orchestrator-start",
+      "ordinal": 1
+    },
+    {
+      "phase": "orchestrator-start",
+      "ordinal": 0
+    },
+    {
+      "phase": "orchestrator-start",
+      "ordinal": 2
+    },
+    {
+      "phase": "orchestrator-start",
+      "ordinal": 3
+    },
+    {
+      "phase": "worker",
+      "ordinal": 0
+    },
+    {
+      "phase": "orchestrator-final",
+      "ordinal": 0
+    },
+    {
+      "phase": "parent-completion",
+      "ordinal": null
+    },
+    {
+      "phase": "worker",
+      "ordinal": 1
+    },
+    {
+      "phase": "orchestrator-final",
+      "ordinal": 1
+    },
+    {
+      "phase": "parent-completion",
+      "ordinal": null
+    },
+    {
+      "phase": "worker",
+      "ordinal": 2
+    },
+    {
+      "phase": "orchestrator-final",
+      "ordinal": 2
+    },
+    {
+      "phase": "parent-completion",
+      "ordinal": null
+    },
+    {
+      "phase": "worker",
+      "ordinal": 3
+    },
+    {
+      "phase": "orchestrator-final",
+      "ordinal": 3
+    },
+    {
+      "phase": "parent-completion",
+      "ordinal": null
+    }
+  ],
+  "probe_samples": [
+    {
+      "phase": "orchestrator-barrier",
+      "route": "/healthz",
+      "status": 200,
+      "latency_us": 240
+    },
+    {
+      "phase": "orchestrator-barrier",
+      "route": "/readyz",
+      "status": 200,
+      "latency_us": 12261
+    },
+    {
+      "phase": "worker-barrier",
+      "route": "/healthz",
+      "status": 200,
+      "latency_us": 264
+    },
+    {
+      "phase": "worker-barrier",
+      "route": "/readyz",
+      "status": 200,
+      "latency_us": 24253
+    }
+  ],
+  "transcript_counts": [
+    4,
+    4,
+    4,
+    4
+  ],
+  "parent_transcript_rows": 8,
+  "event_counts": [
+    5,
+    5,
+    5,
+    5
+  ],
+  "event_kinds": [
+    [
+      "thread_started",
+      "run_started",
+      "assistant_message",
+      "run_finished",
+      "thread_finished"
+    ],
+    [
+      "thread_started",
+      "run_started",
+      "assistant_message",
+      "run_finished",
+      "thread_finished"
+    ],
+    [
+      "thread_started",
+      "run_started",
+      "assistant_message",
+      "run_finished",
+      "thread_finished"
+    ],
+    [
+      "thread_started",
+      "run_started",
+      "assistant_message",
+      "run_finished",
+      "thread_finished"
+    ]
+  ],
+  "worker_episode_counts": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "terminal_statuses": [
+    "completed",
+    "completed",
+    "completed",
+    "completed"
+  ],
+  "terminal_failures": [
+    null,
+    null,
+    null,
+    null
+  ],
+  "child_recovery_statuses": [
+    null,
+    null,
+    null,
+    null
+  ],
+  "settlement_timeout_recovered": false,
+  "outcome": "completed",
+  "completion_inbox_count": 4,
+  "build_id": "dev-1786551cee45c34c0f1d571720e99c0e150fd4c4",
+  "source_revision": "1786551cee45c34c0f1d571720e99c0e150fd4c4",
+  "store_configuration": {
+    "engine": "sqlite",
+    "journal_mode": "wal",
+    "synchronous": 2,
+    "mmap_size": 0,
+    "schema_version": 29,
+    "page_count": 94,
+    "page_size": 4096,
+    "database_bytes": 385024,
+    "wal_bytes": 0,
+    "shm_bytes": 32768
+  },
+  "checkpoint": {
+    "busy": 0,
+    "log_frames": 0,
+    "checkpointed_frames": 0,
+    "duration_us": 1179
+  },
+  "telemetry": {
+    "store_latency_us": {
+      "checkpoint": {
+        "count": 1,
+        "min": 1179,
+        "p50": 1179,
+        "p95": 1179,
+        "max": 1179
+      },
+      "commit": {
+        "count": 54,
+        "min": 0,
+        "p50": 0,
+        "p95": 6000,
+        "max": 7000
+      },
+      "connection_acquire": {
+        "count": 4982,
+        "min": 132,
+        "p50": 245,
+        "p95": 380,
+        "max": 3847
+      },
+      "event_persistence": {
+        "count": 20,
+        "min": 1500,
+        "p50": 5314,
+        "p95": 12209,
+        "max": 12999
+      },
+      "managed_monitor_poll": {
+        "count": 2087,
+        "min": 1771,
+        "p50": 2198,
+        "p95": 3185,
+        "max": 17093
+      },
+      "recovery": {
+        "count": 12,
+        "min": 2063,
+        "p50": 2276,
+        "p95": 2529,
+        "max": 2584
+      },
+      "terminal_settlement": {
+        "count": 4,
+        "min": 6907,
+        "p50": 11768,
+        "p95": 11838,
+        "max": 11873
+      },
+      "transaction": {
+        "count": 54,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 1000
+      }
+    },
+    "api_latency_us": {
+      "/healthz": {
+        "count": 2,
+        "min": 73,
+        "p50": 73,
+        "p95": 73,
+        "max": 73
+      },
+      "/readyz": {
+        "count": 2,
+        "min": 12178,
+        "p50": 12178,
+        "p95": 12178,
+        "max": 24182
+      },
+      "/sessions/{session_id}/orchestrators": {
+        "count": 4,
+        "min": 66403,
+        "p50": 66573,
+        "p95": 67358,
+        "max": 73937
+      }
+    },
+    "max_connection_active": 4,
+    "max_persistence_queue_active": 4,
+    "max_orchestrators_active": 4,
+    "max_child_processes_active": 4,
+    "child_process_started": [
+      149,
+      155,
+      157,
+      163
+    ],
+    "child_process_stopped": [
+      149,
+      155,
+      157,
+      163
+    ],
+    "max_cpu_time_us": 79050000,
+    "max_resident_memory_bytes": 180953088,
+    "accepted": 39277,
+    "dropped": 0,
+    "exported": 39277,
+    "failures": 0
+  }
+}

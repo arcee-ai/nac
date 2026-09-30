@@ -1,0 +1,217 @@
+{
+  "mode": "ordered_healthy",
+  "seed": 168887298,
+  "orchestrators": 1,
+  "store": "sqlite-wal",
+  "elapsed_ms": 21193,
+  "phase_timeout_ms": 90000,
+  "diagnostic_timeout_override": true,
+  "injected_phase_delay_ms": 100,
+  "logical_plan": {
+    "seed": 168887298,
+    "orchestrators": [
+      {
+        "ordinal": 0,
+        "session_id": "all112-1-0a110402-0",
+        "description": "ALL112_DESCRIPTION:1:0a110402:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "prompt": "ALL112_ORCHESTRATOR_PROMPT:1:0a110402:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "worker_thread": "worker-0",
+        "worker_action": "ALL112_WORKER_ACTION:1:0a110402:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  "model_requests": [
+    {
+      "phase": "orchestrator-start",
+      "ordinal": 0
+    },
+    {
+      "phase": "worker",
+      "ordinal": 0
+    },
+    {
+      "phase": "orchestrator-final",
+      "ordinal": 0
+    },
+    {
+      "phase": "parent-completion",
+      "ordinal": null
+    }
+  ],
+  "probe_samples": [
+    {
+      "phase": "orchestrator-barrier",
+      "route": "/healthz",
+      "status": 200,
+      "latency_us": 231
+    },
+    {
+      "phase": "orchestrator-barrier",
+      "route": "/readyz",
+      "status": 200,
+      "latency_us": 8752
+    },
+    {
+      "phase": "worker-barrier",
+      "route": "/healthz",
+      "status": 200,
+      "latency_us": 328
+    },
+    {
+      "phase": "worker-barrier",
+      "route": "/readyz",
+      "status": 200,
+      "latency_us": 8725
+    }
+  ],
+  "transcript_counts": [
+    4
+  ],
+  "parent_transcript_rows": 2,
+  "event_counts": [
+    5
+  ],
+  "event_kinds": [
+    [
+      "thread_started",
+      "run_started",
+      "assistant_message",
+      "run_finished",
+      "thread_finished"
+    ]
+  ],
+  "worker_episode_counts": [
+    1
+  ],
+  "terminal_statuses": [
+    "completed"
+  ],
+  "terminal_failures": [
+    null
+  ],
+  "child_recovery_statuses": [
+    null
+  ],
+  "settlement_timeout_recovered": false,
+  "outcome": "completed",
+  "completion_inbox_count": 1,
+  "build_id": "dev-1786551cee45c34c0f1d571720e99c0e150fd4c4",
+  "source_revision": "1786551cee45c34c0f1d571720e99c0e150fd4c4",
+  "store_configuration": {
+    "engine": "sqlite",
+    "journal_mode": "wal",
+    "synchronous": 2,
+    "mmap_size": 0,
+    "schema_version": 29,
+    "page_count": 88,
+    "page_size": 4096,
+    "database_bytes": 360448,
+    "wal_bytes": 0,
+    "shm_bytes": 32768
+  },
+  "checkpoint": {
+    "busy": 0,
+    "log_frames": 0,
+    "checkpointed_frames": 0,
+    "duration_us": 1366
+  },
+  "telemetry": {
+    "store_latency_us": {
+      "checkpoint": {
+        "count": 1,
+        "min": 1366,
+        "p50": 1366,
+        "p95": 1366,
+        "max": 1366
+      },
+      "commit": {
+        "count": 15,
+        "min": 0,
+        "p50": 0,
+        "p95": 7000,
+        "max": 8000
+      },
+      "connection_acquire": {
+        "count": 2677,
+        "min": 133,
+        "p50": 266,
+        "p95": 372,
+        "max": 2774
+      },
+      "event_persistence": {
+        "count": 5,
+        "min": 5540,
+        "p50": 6196,
+        "p95": 6337,
+        "max": 11953
+      },
+      "managed_monitor_poll": {
+        "count": 200,
+        "min": 1763,
+        "p50": 2198,
+        "p95": 2813,
+        "max": 11536
+      },
+      "recovery": {
+        "count": 3,
+        "min": 2091,
+        "p50": 2110,
+        "p95": 2110,
+        "max": 2516
+      },
+      "terminal_settlement": {
+        "count": 1,
+        "min": 11872,
+        "p50": 11872,
+        "p95": 11872,
+        "max": 11872
+      },
+      "transaction": {
+        "count": 15,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      }
+    },
+    "api_latency_us": {
+      "/healthz": {
+        "count": 2,
+        "min": 65,
+        "p50": 65,
+        "p95": 65,
+        "max": 69
+      },
+      "/readyz": {
+        "count": 2,
+        "min": 8643,
+        "p50": 8643,
+        "p95": 8643,
+        "max": 8673
+      },
+      "/sessions/{session_id}/orchestrators": {
+        "count": 1,
+        "min": 78020,
+        "p50": 78020,
+        "p95": 78020,
+        "max": 78020
+      }
+    },
+    "max_connection_active": 2,
+    "max_persistence_queue_active": 2,
+    "max_orchestrators_active": 1,
+    "max_child_processes_active": 1,
+    "child_process_started": [
+      282
+    ],
+    "child_process_stopped": [
+      282
+    ],
+    "max_cpu_time_us": 103010000,
+    "max_resident_memory_bytes": 175169536,
+    "accepted": 19203,
+    "dropped": 0,
+    "exported": 19203,
+    "failures": 0
+  }
+}

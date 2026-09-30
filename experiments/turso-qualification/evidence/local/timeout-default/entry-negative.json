@@ -1,0 +1,22 @@
+[
+  {
+    "input_hex": "30",
+    "exit": 101,
+    "failed_before_fixture_startup": true
+  },
+  {
+    "input_hex": "3931",
+    "exit": 101,
+    "failed_before_fixture_startup": true
+  },
+  {
+    "input_hex": "67617262616765",
+    "exit": 101,
+    "failed_before_fixture_startup": true
+  },
+  {
+    "input_hex": "ff",
+    "exit": 101,
+    "failed_before_fixture_startup": true
+  }
+]

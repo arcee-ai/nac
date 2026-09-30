@@ -1,0 +1,36 @@
+{
+  "local_recovery_path": "/private/tmp/all114-extended-metadata.tar.gz",
+  "archive_sha256": "8c60513a31305f05a6904764859c88d32ae3d8f02bdce7bc35dd2e5ac283e3e5",
+  "files": [
+    {
+      "path": "managed-load/all-112-seed-168886546-orchestrators-1.json",
+      "bytes": 4858,
+      "sha256": "c155d371149595b6d3922719226627fdcc540b784a5a8b07e764c11f900f26ed"
+    },
+    {
+      "path": "managed-load/all-112-seed-168886546-orchestrators-2.json",
+      "bytes": 6082,
+      "sha256": "b7a159e84348989197816671e5c28b0be9b98a59793a773c883950fdf9d31033"
+    },
+    {
+      "path": "managed-load/all-112-seed-168886546-orchestrators-4.json",
+      "bytes": 8535,
+      "sha256": "8ec9771ef5dcfe5c3642fa3a0cc789c1378d892e24f240e7fe58277300ad8d78"
+    },
+    {
+      "path": "managed-load/all-112-seed-168887298-fault-slow-io.json",
+      "bytes": 4867,
+      "sha256": "70ae91e932b5b92e9f5e8d933f0ac32dea61d89e7f5239f2230b8644083579fe"
+    },
+    {
+      "path": "managed-load/all-112-seed-168935683-concurrent-settlement-probe.json",
+      "bytes": 8318,
+      "sha256": "300fc28955b87f6e6ecabe22e3df26ee38b31f0f735a03bbf70779cd4dd61b14"
+    },
+    {
+      "path": "managed-load/all-112-seed-168886546-faults.json",
+      "bytes": 10485,
+      "sha256": "b9de2acd81b699802d0fc5aeae6ab4a9a7a058ecf2fab9e870ab952984bd571a"
+    }
+  ]
+}

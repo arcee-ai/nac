@@ -3,6 +3,16 @@
   "scope": "all retained experiment evidence except this self-referential manifest",
   "files": [
     {
+      "path": "ci/d8eb0aa5-provenance.json",
+      "bytes": 758,
+      "sha256": "0c6d27e4f2f86ed9fab54b8b8a1c1a308a10916b2b9f0a9d19d6836a410a1911"
+    },
+    {
+      "path": "ci/d8eb0aa5-sqlite-control-failure.log",
+      "bytes": 6744,
+      "sha256": "5eac79f0a53c6e02076296202ed2108e20797c2e71abf2a5f9b3e70dd5c34d73"
+    },
+    {
       "path": "local/all-112-seed-168886546-faults.json",
       "bytes": 10070,
       "sha256": "15f5347a524eaefaf0cc1b488731883567db2f5dd196282c4e5e8e9416de6712"
@@ -93,6 +103,46 @@
       "sha256": "872a654b924eccb69bae15b9dc906dd63de1cbcb76406dda2e91a68318f3d5ca"
     },
     {
+      "path": "local/timeout-default/all-112-seed-168886546-faults.json",
+      "bytes": 10452,
+      "sha256": "dde0be3337335a2c489594179c920684e325404758636b82e1d8429835edf182"
+    },
+    {
+      "path": "local/timeout-default/all-112-seed-168886546-orchestrators-1.json",
+      "bytes": 4833,
+      "sha256": "65563caaa98ff6c17a22d1d0b2b3877434a6f1a736c3322d21bbed045e2edc0b"
+    },
+    {
+      "path": "local/timeout-default/all-112-seed-168886546-orchestrators-2.json",
+      "bytes": 6052,
+      "sha256": "42d8484855c7110db8b8dfb50d958179ca7d95114b7b0aa06c2f8baad19569b5"
+    },
+    {
+      "path": "local/timeout-default/all-112-seed-168886546-orchestrators-4.json",
+      "bytes": 8502,
+      "sha256": "0e693532da4b32cded7cee576deb9547019340d0308654f9f93c0d9d9f9739e1"
+    },
+    {
+      "path": "local/timeout-default/all-112-seed-168887298-fault-slow-io.json",
+      "bytes": 4831,
+      "sha256": "d777cc4c2c7867fa08eaa2a34e239865e7001419a9a13017f73cafbf86b8a8f2"
+    },
+    {
+      "path": "local/timeout-default/all-112-seed-168935683-concurrent-settlement-probe.json",
+      "bytes": 8555,
+      "sha256": "6e7a6e249567ac35a2f8ea58f4c9f0ae29128e921eb5ad9b5947fd9b1cbe5361"
+    },
+    {
+      "path": "local/timeout-default/control.log",
+      "bytes": 2877,
+      "sha256": "753c7d8ddd43aa40cbcce6a8ae2be459f9eed81bc9355e9e6258a0d20e2f7fea"
+    },
+    {
+      "path": "local/timeout-default/entry-negative.json",
+      "bytes": 381,
+      "sha256": "90428ea0b66b63f03e96955293d499e5a0add5d5388ccfac2814682d10158096"
+    },
+    {
       "path": "managed/all114-managed-fixture-tree.log",
       "bytes": 41,
       "sha256": "f54d538195d6ec13c0c8ca004f4766249413d9250a61a604b01f86b354ed854f"
@@ -126,6 +176,111 @@
       "path": "managed/cleanup.log",
       "bytes": 86,
       "sha256": "3055439f0ab2853ebc85127b4c6514d09a84a60255f430bcc0a2c3cf137271e6"
+    },
+    {
+      "path": "managed/extended/artifacts-archive.json",
+      "bytes": 1344,
+      "sha256": "a2b1861ec5fb760b6a3ad35306648607ab1da6991e652f5249eef83003f44fc7"
+    },
+    {
+      "path": "managed/extended/binary-hashes.log",
+      "bytes": 404,
+      "sha256": "f839f5f8cea9b562e9b65951441467694a3a6fac3e84f68e8d8b1cf832ad041d"
+    },
+    {
+      "path": "managed/extended/cleanup.json",
+      "bytes": 397,
+      "sha256": "48f338a59e2c4453685480e21ad9e8b93729ff7a80543eed640ece6dd87db86f"
+    },
+    {
+      "path": "managed/extended/cleanup.log",
+      "bytes": 86,
+      "sha256": "3055439f0ab2853ebc85127b4c6514d09a84a60255f430bcc0a2c3cf137271e6"
+    },
+    {
+      "path": "managed/extended/extended-control-receipt.json",
+      "bytes": 965,
+      "sha256": "0774ca3e455c766d3150a09ef90f01fac0fa23a1cbf4c6d69be54323851c1db2"
+    },
+    {
+      "path": "managed/extended/extended-control.log",
+      "bytes": 1392,
+      "sha256": "323e3921f5e64670c90a330b48c53dcbb0c68d9ddf3bd37319bb9048f455c925"
+    },
+    {
+      "path": "managed/extended/extended-resource-samples.jsonl",
+      "bytes": 107541,
+      "sha256": "9c0989879cd89b175423fd7e59b4600c2ff11147613b6321a9bc8986b3a5fd30"
+    },
+    {
+      "path": "managed/extended/final-state.log",
+      "bytes": 2059,
+      "sha256": "fe177959eb16a16a2af2c116126ef7fe0cc2270d3d91c892a513194721d0a13c"
+    },
+    {
+      "path": "managed/extended/managed-load/all-112-seed-168886546-faults.json",
+      "bytes": 10485,
+      "sha256": "b9de2acd81b699802d0fc5aeae6ab4a9a7a058ecf2fab9e870ab952984bd571a"
+    },
+    {
+      "path": "managed/extended/managed-load/all-112-seed-168886546-orchestrators-1.json",
+      "bytes": 4858,
+      "sha256": "c155d371149595b6d3922719226627fdcc540b784a5a8b07e764c11f900f26ed"
+    },
+    {
+      "path": "managed/extended/managed-load/all-112-seed-168886546-orchestrators-2.json",
+      "bytes": 6082,
+      "sha256": "b7a159e84348989197816671e5c28b0be9b98a59793a773c883950fdf9d31033"
+    },
+    {
+      "path": "managed/extended/managed-load/all-112-seed-168886546-orchestrators-4.json",
+      "bytes": 8535,
+      "sha256": "8ec9771ef5dcfe5c3642fa3a0cc789c1378d892e24f240e7fe58277300ad8d78"
+    },
+    {
+      "path": "managed/extended/managed-load/all-112-seed-168887298-fault-slow-io.json",
+      "bytes": 4867,
+      "sha256": "70ae91e932b5b92e9f5e8d933f0ac32dea61d89e7f5239f2230b8644083579fe"
+    },
+    {
+      "path": "managed/extended/managed-load/all-112-seed-168935683-concurrent-settlement-probe.json",
+      "bytes": 8318,
+      "sha256": "300fc28955b87f6e6ecabe22e3df26ee38b31f0f735a03bbf70779cd4dd61b14"
+    },
+    {
+      "path": "managed/extended/metadata-archive.json",
+      "bytes": 1329,
+      "sha256": "0d2cb77725c4a8537c6b758703e5c1e11ff771936e9224af31cf62e34522feb5"
+    },
+    {
+      "path": "managed/extended/node-receipt.log",
+      "bytes": 65,
+      "sha256": "8e277ccfed0d12cd48054be86c000e251acfdd662b73c34f92618fb1e88af41b"
+    },
+    {
+      "path": "managed/extended/preflight.json",
+      "bytes": 1134,
+      "sha256": "a5e5338e0eedaa8adaa79314fdb6209cb7513a0ff2fdbd26ab4fffc517612462"
+    },
+    {
+      "path": "managed/extended/runner.py",
+      "bytes": 4772,
+      "sha256": "6957947a42eb9f1bc0bd953f7999d7541921fa8f234154240543ec186db9a766"
+    },
+    {
+      "path": "managed/extended/runtime-provenance.json",
+      "bytes": 1609,
+      "sha256": "50690abd1d9164efe0e7b85a0c3617a3f8dc90ddb9d0d12916e6249485146000"
+    },
+    {
+      "path": "managed/extended/runtime-receipt.log",
+      "bytes": 600,
+      "sha256": "9e911bc243af1fcdb72c61b1e0dfa1023fc98ddb6c6087e566b4bc26eb9277e4"
+    },
+    {
+      "path": "managed/extended/tree.log",
+      "bytes": 84719,
+      "sha256": "23e0b6edc9215bfbe83b04c7ad7f1b0f3da6bf490810b884b738ed96cf135948"
     },
     {
       "path": "managed/offline/all114-final-container.log",

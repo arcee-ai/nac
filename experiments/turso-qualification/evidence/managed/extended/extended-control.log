@@ -1,0 +1,17 @@
+
+running 1 test
+test tests::managed_load::managed_load_scenario ... ALL-112 phase timeout: 90s (diagnostic_override=true)
+ALL-112 artifact: /home/runner/work/nac/nac/crates/nac-server/../../target/managed-load/all-112-seed-168886546-orchestrators-1.json
+ALL-112 artifact: /home/runner/work/nac/nac/crates/nac-server/../../target/managed-load/all-112-seed-168886546-orchestrators-2.json
+ALL-112 artifact: /home/runner/work/nac/nac/crates/nac-server/../../target/managed-load/all-112-seed-168886546-orchestrators-4.json
+ALL-112 artifact: /home/runner/work/nac/nac/crates/nac-server/../../target/managed-load/all-112-seed-168887298-fault-slow-io.json
+ALL-112 artifact: /home/runner/work/nac/nac/crates/nac-server/../../target/managed-load/all-112-seed-168935683-concurrent-settlement-probe.json
+nac: run failed: injected ALL-112 append failure
+nac: failed to stage typed run failure: run 'c71aede7-1000-4947-ba11-0c0f961377d5' is no longer the active durable run for session 'all112-1-0a110b8b-0'
+nac: managed orchestrator monitor failed for all112-1-0a110a65-0: injected deterministic managed orchestrator monitor failure
+nac: evicted idle session all112-1-0a110c21-0
+ALL-112 artifact: /home/runner/work/nac/nac/crates/nac-server/../../target/managed-load/all-112-seed-168886546-faults.json
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 213 filtered out; finished in 124.07s
+

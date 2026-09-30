@@ -1,0 +1,41 @@
+{
+  "local_recovery_path": "/private/tmp/all114-extended-artifacts.tar.gz",
+  "archive_sha256": "0fed22bb0001c927b97b399fcbd130454edd049551a8715fb4fbbd43b2a21843",
+  "files": [
+    {
+      "path": "extended-fixtures/168886546-2.db",
+      "bytes": 364544,
+      "sha256": "533a10a8fa38d616a2a1c24a4e0440bcde6c73a256fc7b537995c9a269c59313"
+    },
+    {
+      "path": "extended-fixtures/168886546-1.db",
+      "bytes": 360448,
+      "sha256": "8837d7cd8c0c78385c976e03d87dc57931adcc2eaf50f7385d2bdf171130dfce"
+    },
+    {
+      "path": "extended-fixtures/168887298-1.db",
+      "bytes": 360448,
+      "sha256": "c3193286a4b79851c32e725213c4cb940b21ca886c798476394ccc91c5422693"
+    },
+    {
+      "path": "extended-fixtures/168886546-4.db",
+      "bytes": 385024,
+      "sha256": "e5e17656d808d3092d36a2e35eb29b930e931d7fe5af33939f2655a00f8ad5db"
+    },
+    {
+      "path": "extended-control.log",
+      "bytes": 1392,
+      "sha256": "323e3921f5e64670c90a330b48c53dcbb0c68d9ddf3bd37319bb9048f455c925"
+    },
+    {
+      "path": "extended-control-receipt.json",
+      "bytes": 965,
+      "sha256": "0774ca3e455c766d3150a09ef90f01fac0fa23a1cbf4c6d69be54323851c1db2"
+    },
+    {
+      "path": "extended-resource-samples.jsonl",
+      "bytes": 107541,
+      "sha256": "9c0989879cd89b175423fd7e59b4600c2ff11147613b6321a9bc8986b3a5fd30"
+    }
+  ]
+}

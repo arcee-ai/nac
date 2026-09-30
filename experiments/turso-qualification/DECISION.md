@@ -198,6 +198,16 @@ binary/tree/store hashes and prior-control comparison are retained in
 boundary is input for [ALL-116](https://linear.app/arcee/issue/ALL-116) and
 [ALL-117](https://linear.app/arcee/issue/ALL-117), not an engine conclusion.
 
+Allison then authorized exactly one longer diagnostic. With a test-only 90s
+phase override (default remains 20s), a fresh gVisor/PVC run completed ordered
+1/2/4 in 21.305/22.021/24.183s and all fault assertions, with no phase reaching
+90s. The separate five-second unconstrained settlement probe reproduced an
+unsettled managed run, then cancelled three children while one completed.
+This adds eventual-completion and failure-recovery evidence, not healthy
+20-second acceptance or a Turso application result. All prior failures remain
+retained. Full diagnostic telemetry, samples, hashes and cleanup are in the
+verification addendum; the NO-GO recommendation is unchanged.
+
 ## Compatibility and rejected alternatives
 
 * Ordinary Turso loads current DDL and copied rows, and passes the bounded

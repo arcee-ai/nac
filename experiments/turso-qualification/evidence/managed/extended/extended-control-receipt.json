@@ -1,0 +1,26 @@
+{
+  "scope": "one extended native SQLite application diagnostic; not healthy acceptance",
+  "source_revision": "1786551cee45c34c0f1d571720e99c0e150fd4c4",
+  "phase_timeout_seconds": 90,
+  "default_acceptance_seconds": 20,
+  "whole_run_watchdog_seconds": 600,
+  "whole_run_watchdog_triggered": false,
+  "command": [
+    "/data/diagnostic/debug/nac-server-test",
+    "tests::managed_load::managed_load_scenario",
+    "--ignored",
+    "--exact",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "fixture_pid": 27,
+  "exit": 0,
+  "elapsed_ms": 124083,
+  "cpu_user_us": 131250000,
+  "cpu_system_us": 14630000,
+  "peak_rss_bytes": 203694080,
+  "resource_samples": 62,
+  "accounting_limit": "gVisor wait4/proc accounting is virtualized; includes whole fixture, not per-operation CPU",
+  "test_binary_sha256": "2277809ce9af0b6f9f729da0648c53e02d790b3fefbe5fa3d83ff53b75dc034f",
+  "worker_binary_sha256": "2da528bbdd4300aa18466fa6ddee8076cfd485fdcf96605cf4c576a42b131f30"
+}

@@ -1,0 +1,12 @@
+{
+  "namespace": "all114-qualification",
+  "namespace_absent": true,
+  "pvc_deleted_with_namespace": true,
+  "pv": "pvc-244a9697-0b97-4c5f-8e3c-2820dab68c4f",
+  "pv_absent": true,
+  "reclaim_policy": "Delete",
+  "retained_cloud_pvc": false,
+  "all_artifacts_and_four_consistent_store_hashes_verified_before_delete": true,
+  "one_diagnostic_run_only": true,
+  "no_phase_timeout_escalation": true
+}

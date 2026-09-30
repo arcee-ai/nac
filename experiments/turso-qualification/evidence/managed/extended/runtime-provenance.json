@@ -1,0 +1,65 @@
+{
+  "source_revision": "1786551cee45c34c0f1d571720e99c0e150fd4c4",
+  "artifact_run": 36775220795,
+  "purpose": "one 90s diagnostic; original 20s FAIL unchanged",
+  "namespace": "all114-qualification",
+  "pod_uid": "7be8e16b-0a4a-4bfe-a561-6f020d3862bf",
+  "created_at": "2026-09-30T20:58:00Z",
+  "runtime_class": "gvisor",
+  "node": "ip-10-9-157-216.us-east-2.compute.internal",
+  "security_context": {
+    "fsGroup": 10001,
+    "fsGroupChangePolicy": "OnRootMismatch",
+    "runAsGroup": 10001,
+    "runAsNonRoot": true,
+    "runAsUser": 10001,
+    "seccompProfile": {
+      "type": "RuntimeDefault"
+    }
+  },
+  "container": {
+    "image": "356660933719.dkr.ecr.us-east-2.amazonaws.com/nac@sha256:e892906bd07771950846c832758952fbfb388b299f433b5fb9c97fea8a813f0a",
+    "resources": {
+      "limits": {
+        "cpu": "4",
+        "memory": "8Gi"
+      },
+      "requests": {
+        "cpu": "1",
+        "memory": "2Gi"
+      }
+    },
+    "securityContext": {
+      "allowPrivilegeEscalation": false,
+      "capabilities": {
+        "drop": [
+          "ALL"
+        ]
+      },
+      "readOnlyRootFilesystem": true
+    }
+  },
+  "pvc_uid": "244a9697-0b97-4c5f-8e3c-2820dab68c4f",
+  "pvc_spec": {
+    "accessModes": [
+      "ReadWriteOnce"
+    ],
+    "resources": {
+      "requests": {
+        "storage": "20Gi"
+      }
+    },
+    "storageClassName": "managed-nac-gp3",
+    "volumeMode": "Filesystem",
+    "volumeName": "pvc-244a9697-0b97-4c5f-8e3c-2820dab68c4f"
+  },
+  "pvc_status": {
+    "accessModes": [
+      "ReadWriteOnce"
+    ],
+    "capacity": {
+      "storage": "20Gi"
+    },
+    "phase": "Bound"
+  }
+}

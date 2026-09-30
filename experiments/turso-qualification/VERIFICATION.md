@@ -180,4 +180,82 @@ The separate unconstrained settlement probe's five-second limit is unchanged.
 The original 20s managed FAIL remains the acceptance outcome. A longer pass
 would measure eventual settlement/latency, not a healthy managed acceptance.
 The diagnostic is one run only; any phase reaching 90s ends it without a higher
-timeout or a second review cycle. Final diagnostic receipts follow execution.
+timeout or a second review cycle.
+
+### One-run result: eventual completion, not healthy acceptance
+
+The diagnostic used source 1786551c from successful exact Linux run
+[36775220795](https://github.com/arcee-ai/nac/actions/runs/36775220795).
+Original and executed binary hashes are in [binary receipt](evidence/managed/extended/binary-hashes.log),
+and Git tree `b92abbe8224e2e5869083294d1cbaf40a41237a9` matched the fully tracked
+compiled workspace. Live infrastructure/controller refs remained
+6e2d88b5/e39a0da3, with unchanged runsc/security/storage contracts. The new
+20Gi PVC was `pvc-244a9697-0b97-4c5f-8e3c-2820dab68c4f` on node
+`ip-10-9-157-216.us-east-2.compute.internal`. This was a fresh store/device and
+a different node than the original control; it is not a controlled hardware
+comparison of timeout values.
+
+The native test ran **once** with 90s phases, an outer 600s watchdog and a
+two-second diagnostic /proc sampler. It exited 0 after 124.083s; no phase hit
+90s, and no watchdog kill occurred. [Native log](evidence/managed/extended/extended-control.log)
+and [whole-run receipt](evidence/managed/extended/extended-control-receipt.json)
+retain the exact configuration/outcome. The final process snapshot showed
+only pod sleep plus the inspecting shell/ps, with no remaining fixture/worker.
+
+| Diagnostic lane | Elapsed | Observed disposition |
+| --- | --- | --- |
+| Ordered 1 | 21.305s | completed; one completion inbox |
+| Ordered 2 | 22.021s | both completed; two completion inboxes |
+| Ordered 4 | 24.183s | all completed; four completion inboxes |
+| Slow-I/O 1 | 21.193s | completed |
+| Unconstrained 4 | 21.925s | unsettled run reproduced; then three cancelled, one completed |
+| Combined injected faults | 11.457s | all fixture assertions completed |
+
+The separate unconstrained probe retained its original five-second settlement
+limit. Its outcome is `reproduced_unsettled_managed_run_then_cancelled`, with
+`settlement_timeout_recovered=true`; cancellation/recovery is not a clean
+unconstrained acceptance pass. All four completion inboxes were ultimately
+recorded. Ordered transcript/event/episode/inbox counts, generation/recovery,
+foreign-key/integrity and checkpoint assertions passed within the diagnostic
+limit. Fault receipts include 75ms held writer/71 busy callbacks/86ms append
+wait, trigger-induced append failure with one completion, injected monitor
+failure recovered to completed, worker interruption cancelled with matched
+started/stopped PID, and manager interruption/restart recovered as interrupted.
+Those are the fixture's specified injected outcomes, not absent errors.
+
+All ordered barrier probes returned 200: healthz 236–291us, readyz
+9.205–24.253ms. Four-way event persistence p50/p95/max was
+5.314/12.209/12.999ms; monitor poll p95/max 3.185/17.093ms; terminal settlement
+6.907–11.873ms. Ordered checkpoints were not busy, all frames cleared, around
+1.2–1.4ms. Maximum active connections/queue reached 2/2, 2/2 and 4/4 at 1/2/4;
+the unconstrained probe queue reached 5. No telemetry export was dropped or
+reported failed. These are component-fixture route/probe measurements, not
+Kubernetes liveness/readiness traffic against a serving production image.
+
+The whole diagnostic's virtualized wait4 accounting reported 131.25s user plus
+14.63s system CPU and 203,694,080-byte peak RSS. There are 62 raw /proc samples.
+CPU is whole-fixture accounting, not per-operation CPU; telemetry's CPU maxima
+are cumulative across this test process, so per-lane maxima are not independent
+lane costs. gVisor /proc child lists can expose thread aliases sharing RSS;
+do not sum them or treat every listed entry as an independent worker process.
+Use the fixture's matched process start/stop telemetry for worker counts. Mock
+models, the test binary, telemetry export and sampler differ from a serving
+production NAC image. No production resource budget pass or engine CPU/memory
+ranking is inferred from this diagnostic.
+
+[Six metadata files](evidence/managed/extended/managed-load) record selected
+90,000ms limits and diagnostic flags. Four consistent synthetic store copies,
+the log/receipt and samples were copied locally; [artifact archive manifest](evidence/managed/extended/artifacts-archive.json)
+and [metadata archive manifest](evidence/managed/extended/metadata-archive.json)
+retain hashes/recovery paths. Local default20s fixture passed in 14.41s,
+full server suite passed 213 library tests plus binary/contracts, and four
+invalid real-entry environment configurations were rejected before fixture
+startup. [Default/negative receipts](evidence/local/timeout-default) retain those
+checks. No production timeouts changed and no second review was performed.
+
+After verifying metadata/log/sample hashes and all four consistent store copies
+against the local archive, the fresh diagnostic namespace/PVC was deleted.
+Namespace and exact PV `pvc-244a9697-0b97-4c5f-8e3c-2820dab68c4f` were verified
+absent. [Second cleanup receipt](evidence/managed/extended/cleanup.json) records
+this scoped removal. No cloud PVC is retained; local synthetic archives and
+the tracked diagnostics remain recoverable. The one-run limit was respected.

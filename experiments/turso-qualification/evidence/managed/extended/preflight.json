@@ -6,6 +6,12 @@
       "name": "flux-system",
       "url": "ssh://git@github.com/arcee-ai/flux-k8s-infra",
       "revision": "main@sha1:6e2d88b5c26fc5cc1757301f69d9fbbaa38f7463"
+    },
+    {
+      "namespace": "flux-system",
+      "name": "nac-managed-controller",
+      "url": "https://github.com/arcee-ai/managed-nac-controller",
+      "revision": "main@sha1:e39a0da3613e005a7eaa0846ea99d3906cef055b"
     }
   ],
   "runtime": {

@@ -1,0 +1,321 @@
+{
+  "seed": 168886546,
+  "store": "sqlite-wal",
+  "elapsed_ms": 11457,
+  "build_id": "dev-1786551cee45c34c0f1d571720e99c0e150fd4c4",
+  "source_revision": "1786551cee45c34c0f1d571720e99c0e150fd4c4",
+  "fault_schedule": [
+    {
+      "mode": "slow_io",
+      "injection": "100ms at orchestrator and worker phase barriers; dedicated artifact"
+    },
+    {
+      "mode": "write_lock_contention",
+      "injection": "BEGIN IMMEDIATE held until the contender observes SQLITE_BUSY"
+    },
+    {
+      "mode": "append_failure",
+      "injection": "SQLite trigger aborts the managed transcript append"
+    },
+    {
+      "mode": "monitor_failure",
+      "injection": "one-shot managed monitor read failpoint followed by explicit recovery"
+    },
+    {
+      "mode": "worker_interruption",
+      "injection": "cancel while the worker model request is blocked at its phase gate"
+    },
+    {
+      "mode": "host_interruption_restart",
+      "injection": "rebuild the manager around a durable active run"
+    }
+  ],
+  "busy_conflict": {
+    "metadata": {
+      "seed": 168886546,
+      "logical_plan": null,
+      "store": "sqlite-wal",
+      "elapsed_ms": 131,
+      "phase_timeout_ms": 90000,
+      "diagnostic_timeout_override": true,
+      "error_identity": "sqlite_busy_callback",
+      "store_configuration": {
+        "engine": "sqlite",
+        "journal_mode": "wal",
+        "synchronous": 2,
+        "mmap_size": 0,
+        "schema_version": 29,
+        "page_count": 86,
+        "page_size": 4096,
+        "database_bytes": 352256,
+        "wal_bytes": 12392,
+        "shm_bytes": 32768
+      },
+      "checkpoint": {
+        "busy": 0,
+        "log_frames": 3,
+        "checkpointed_frames": 3,
+        "duration_us": 5989
+      }
+    },
+    "held_ms": 75,
+    "busy_callbacks": 71,
+    "blocked_while_held": true,
+    "append_wait_ms": 86
+  },
+  "append_failure": {
+    "metadata": {
+      "seed": 168889227,
+      "logical_plan": {
+        "seed": 168889227,
+        "orchestrators": [
+          {
+            "ordinal": 0,
+            "session_id": "all112-1-0a110b8b-0",
+            "description": "ALL112_DESCRIPTION:1:0a110b8b:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "prompt": "ALL112_ORCHESTRATOR_PROMPT:1:0a110b8b:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "worker_thread": "worker-0",
+            "worker_action": "ALL112_WORKER_ACTION:1:0a110b8b:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "store": "sqlite-wal",
+      "elapsed_ms": 992,
+      "phase_timeout_ms": 90000,
+      "diagnostic_timeout_override": true,
+      "error_identity": "sqlite_trigger_abort:injected_all112_append_failure",
+      "store_configuration": {
+        "engine": "sqlite",
+        "journal_mode": "wal",
+        "synchronous": 2,
+        "mmap_size": 0,
+        "schema_version": 29,
+        "page_count": 86,
+        "page_size": 4096,
+        "database_bytes": 352256,
+        "wal_bytes": 0,
+        "shm_bytes": 32768
+      },
+      "checkpoint": {
+        "busy": 0,
+        "log_frames": 0,
+        "checkpointed_frames": 0,
+        "duration_us": 1628
+      }
+    },
+    "terminal_status": "failed",
+    "transcript_rows": 0,
+    "completion_deliveries": 1,
+    "recovery_cleared": true
+  },
+  "monitor_failure": {
+    "metadata": {
+      "seed": 168888933,
+      "logical_plan": {
+        "seed": 168888933,
+        "orchestrators": [
+          {
+            "ordinal": 0,
+            "session_id": "all112-1-0a110a65-0",
+            "description": "ALL112_DESCRIPTION:1:0a110a65:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "prompt": "ALL112_ORCHESTRATOR_PROMPT:1:0a110a65:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "worker_thread": "worker-0",
+            "worker_action": "ALL112_WORKER_ACTION:1:0a110a65:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "store": "sqlite-wal",
+      "elapsed_ms": 857,
+      "phase_timeout_ms": 90000,
+      "diagnostic_timeout_override": true,
+      "error_identity": "injected_managed_monitor_read_failure",
+      "store_configuration": {
+        "engine": "sqlite",
+        "journal_mode": "wal",
+        "synchronous": 2,
+        "mmap_size": 0,
+        "schema_version": 29,
+        "page_count": 86,
+        "page_size": 4096,
+        "database_bytes": 352256,
+        "wal_bytes": 0,
+        "shm_bytes": 32768
+      },
+      "checkpoint": {
+        "busy": 0,
+        "log_frames": 0,
+        "checkpointed_frames": 0,
+        "duration_us": 1249
+      }
+    },
+    "status_before_recovery": "running",
+    "status_after_recovery": "completed",
+    "completion_deliveries": 1
+  },
+  "worker_interruption": {
+    "metadata": {
+      "seed": 168889671,
+      "logical_plan": {
+        "seed": 168889671,
+        "orchestrators": [
+          {
+            "ordinal": 0,
+            "session_id": "all112-1-0a110d47-0",
+            "description": "ALL112_DESCRIPTION:1:0a110d47:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "prompt": "ALL112_ORCHESTRATOR_PROMPT:1:0a110d47:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "worker_thread": "worker-0",
+            "worker_action": "ALL112_WORKER_ACTION:1:0a110d47:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "store": "sqlite-wal",
+      "elapsed_ms": 8793,
+      "phase_timeout_ms": 90000,
+      "diagnostic_timeout_override": true,
+      "error_identity": "cancelled_while_worker_model_io_blocked",
+      "store_configuration": {
+        "engine": "sqlite",
+        "journal_mode": "wal",
+        "synchronous": 2,
+        "mmap_size": 0,
+        "schema_version": 29,
+        "page_count": 86,
+        "page_size": 4096,
+        "database_bytes": 352256,
+        "wal_bytes": 0,
+        "shm_bytes": 32768
+      },
+      "checkpoint": {
+        "busy": 0,
+        "log_frames": 0,
+        "checkpointed_frames": 0,
+        "duration_us": 1315
+      }
+    },
+    "terminal_status": "cancelled",
+    "telemetry": {
+      "store_latency_us": {
+        "commit": {
+          "count": 14,
+          "min": 0,
+          "p50": 0,
+          "p95": 6000,
+          "max": 6000
+        },
+        "connection_acquire": {
+          "count": 178,
+          "min": 146,
+          "p50": 297,
+          "p95": 395,
+          "max": 1209
+        },
+        "event_persistence": {
+          "count": 2,
+          "min": 5916,
+          "p50": 5916,
+          "p95": 5916,
+          "max": 6363
+        },
+        "managed_monitor_poll": {
+          "count": 81,
+          "min": 1925,
+          "p50": 2784,
+          "p95": 3275,
+          "max": 5254
+        },
+        "recovery": {
+          "count": 4,
+          "min": 1971,
+          "p50": 2119,
+          "p95": 2252,
+          "max": 4556
+        },
+        "terminal_settlement": {
+          "count": 1,
+          "min": 11264,
+          "p50": 11264,
+          "p95": 11264,
+          "max": 11264
+        },
+        "transaction": {
+          "count": 14,
+          "min": 0,
+          "p50": 0,
+          "p95": 0,
+          "max": 0
+        }
+      },
+      "api_latency_us": {
+        "/sessions/{session_id}/orchestrators": {
+          "count": 1,
+          "min": 138937,
+          "p50": 138937,
+          "p95": 138937,
+          "max": 138937
+        }
+      },
+      "max_connection_active": 2,
+      "max_persistence_queue_active": 2,
+      "max_orchestrators_active": 1,
+      "max_child_processes_active": 1,
+      "child_process_started": [
+        475
+      ],
+      "child_process_stopped": [
+        475
+      ],
+      "max_cpu_time_us": 135090000,
+      "max_resident_memory_bytes": 203653120,
+      "accepted": 1457,
+      "dropped": 0,
+      "exported": 1457,
+      "failures": 0
+    },
+    "retained_dispatch_status": "cancelled"
+  },
+  "host_interruption_restart": {
+    "metadata": {
+      "seed": 168889377,
+      "logical_plan": {
+        "seed": 168889377,
+        "orchestrators": [
+          {
+            "ordinal": 0,
+            "session_id": "all112-1-0a110c21-0",
+            "description": "ALL112_DESCRIPTION:1:0a110c21:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "prompt": "ALL112_ORCHESTRATOR_PROMPT:1:0a110c21:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "worker_thread": "worker-0",
+            "worker_action": "ALL112_WORKER_ACTION:1:0a110c21:0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "store": "sqlite-wal",
+      "elapsed_ms": 655,
+      "phase_timeout_ms": 90000,
+      "diagnostic_timeout_override": true,
+      "error_identity": "active_run_interrupted_by_manager_restart",
+      "store_configuration": {
+        "engine": "sqlite",
+        "journal_mode": "wal",
+        "synchronous": 2,
+        "mmap_size": 0,
+        "schema_version": 29,
+        "page_count": 86,
+        "page_size": 4096,
+        "database_bytes": 352256,
+        "wal_bytes": 0,
+        "shm_bytes": 32768
+      },
+      "checkpoint": {
+        "busy": 0,
+        "log_frames": 0,
+        "checkpointed_frames": 0,
+        "duration_us": 1148
+      }
+    },
+    "terminal_status": "interrupted",
+    "completion_deliveries": 1,
+    "recovery_status": "interrupted",
+    "child_has_active_operation": false
+  }
+}
