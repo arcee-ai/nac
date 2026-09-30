@@ -100,6 +100,7 @@ pub struct PermissionDecision {
 #[derive(Clone, Debug)]
 pub struct PermissionPolicy {
     rules: Vec<PermissionRule>,
+    backend_rule_count: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

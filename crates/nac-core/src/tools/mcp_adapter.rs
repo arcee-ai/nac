@@ -58,23 +58,22 @@ impl kernel::NativeTool for McpTool {
         _input: &Self::Input,
         services: kernel::ToolServices<'_>,
     ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+        let effect = match self.approval {
+            McpToolApproval::Allow => crate::permissions::PermissionEffect::Allow,
+            McpToolApproval::Ask => crate::permissions::PermissionEffect::Ask,
+        };
         let mut resource =
-            kernel::PermissionResource::new("mcp_call", self.definition.function.name.clone());
+            kernel::PermissionResource::new("mcp_call", self.definition.function.name.clone())
+                .with_policy_fallback(effect);
         if services.runtime.permission_broker.is_none() {
-            let mut rules = vec![crate::permissions::PermissionRule::new(
-                "mcp_call",
-                self.definition.function.name.clone(),
-                match self.approval {
-                    McpToolApproval::Allow => crate::permissions::PermissionEffect::Allow,
-                    McpToolApproval::Ask => crate::permissions::PermissionEffect::Ask,
-                },
-            )];
-            rules.extend(services.runtime.permission_rules.iter().cloned());
             let backend = crate::permissions::PermissionBackend::from_execution_backend(
                 services.runtime.backend.as_ref(),
             );
-            let decision = crate::permissions::PermissionPolicy::for_backend(backend, rules)
-                .evaluate(std::slice::from_ref(&resource), &[]);
+            let decision = crate::permissions::PermissionPolicy::for_backend(
+                backend,
+                services.runtime.permission_rules.iter().cloned(),
+            )
+            .evaluate(std::slice::from_ref(&resource), &[]);
             if decision.effect != crate::permissions::PermissionEffect::Allow {
                 resource = resource.with_hard_denial(match decision.effect {
                     crate::permissions::PermissionEffect::Deny => {
@@ -207,7 +206,7 @@ pub(super) async fn invoke(
         let Some(capture) = capture else {
             return ToolResult::text(format!("Error: unknown MCP tool '{name}'"), true);
         };
-        let approval = registry.tool_approval(name).unwrap_or(McpToolApproval::Ask);
+        let approval = capture.approval();
         snapshot(
             capture,
             services.client.supports_image_tool_results(),
@@ -334,6 +333,88 @@ mod tests {
         assert!(result.is_error);
         assert!(result.content.to_string().contains("permission denied"));
         assert!(!result.content.to_string().contains("unknown MCP tool"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn broker_honors_live_ask_over_backend_allow() {
+        let directory =
+            std::env::temp_dir().join(format!("nac-mcp-adapter-live-ask-{}", uuid::Uuid::new_v4()));
+        let store_path = directory.join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session-a");
+        let broker = Arc::new(crate::permissions::PermissionBroker::new(
+            store_path.clone(),
+            "session-a".to_string(),
+            crate::permissions::PermissionBackend::Local,
+            0,
+            [],
+        ));
+        let mut runtime = crate::tools::test_runtime();
+        runtime.store_path = store_path;
+        runtime.session_id = Some("session-a".to_string());
+        runtime.permission_broker = Some(broker);
+        let client = crate::model::ModelClient::new_for_test();
+
+        let result = test_imported_snapshot(McpToolApproval::Ask)
+            .invoke(
+                "mcp__fake__echo",
+                serde_json::json!({}),
+                kernel::ToolServices {
+                    runtime: &runtime,
+                    client: &client,
+                },
+                &kernel::ToolCallContext::default(),
+            )
+            .await;
+
+        assert!(result.is_error);
+        assert!(result.content.to_string().contains("permission denied"));
+        assert!(!result.content.to_string().contains("unknown MCP tool"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn configured_allow_overrides_live_ask_for_broker() {
+        let directory = std::env::temp_dir().join(format!(
+            "nac-mcp-adapter-live-allow-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let store_path = directory.join("store.db");
+        crate::store::initialize(&store_path).unwrap();
+        crate::store::insert_test_session(&store_path, "session-a");
+        let broker = Arc::new(crate::permissions::PermissionBroker::new(
+            store_path.clone(),
+            "session-a".to_string(),
+            crate::permissions::PermissionBackend::Local,
+            0,
+            [crate::permissions::PermissionRule::new(
+                "mcp_call",
+                "mcp__fake__echo",
+                crate::permissions::PermissionEffect::Allow,
+            )],
+        ));
+        let mut runtime = crate::tools::test_runtime();
+        runtime.store_path = store_path;
+        runtime.session_id = Some("session-a".to_string());
+        runtime.permission_broker = Some(broker);
+        let client = crate::model::ModelClient::new_for_test();
+
+        let result = test_imported_snapshot(McpToolApproval::Ask)
+            .invoke(
+                "mcp__fake__echo",
+                serde_json::json!({}),
+                kernel::ToolServices {
+                    runtime: &runtime,
+                    client: &client,
+                },
+                &kernel::ToolCallContext::default(),
+            )
+            .await;
+
+        assert!(result.is_error);
+        assert!(result.content.to_string().contains("unknown MCP tool"));
+        assert!(!result.content.to_string().contains("permission denied"));
         let _ = std::fs::remove_dir_all(directory);
     }
 

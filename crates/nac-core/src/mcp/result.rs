@@ -40,6 +40,10 @@ impl McpRedactor {
         }
     }
 
+    pub(super) fn safe_instructions(&self, instructions: &Option<String>) -> Option<String> {
+        instructions.as_ref().map(|value| self.safe_text(value))
+    }
+
     pub(super) fn safe_value<T: Serialize + ?Sized>(&self, value: Option<&T>) -> Option<Value> {
         self.safe_value_with_context(value, false)
     }

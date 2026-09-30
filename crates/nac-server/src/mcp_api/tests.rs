@@ -22,6 +22,21 @@ fn references_pass_through_and_literals_are_masked() {
 }
 
 #[test]
+fn create_request_allows_omitted_tool_policy_fields() {
+    let request: CreateMcpServerRequest = serde_json::from_value(serde_json::json!({
+        "name": "example",
+        "transport": MCP_TRANSPORT_STDIO,
+        "command": "example"
+    }))
+    .unwrap();
+
+    assert!(request.allowed_tools.is_none());
+    assert!(request.denied_tools.is_empty());
+    assert_eq!(request.approval, McpToolApproval::Ask);
+    assert!(request.tool_approvals.is_empty());
+}
+
+#[test]
 fn merge_map_keeps_stored_values_for_null_entries() {
     let stored = BTreeMap::from([("Authorization".to_string(), "Bearer real".to_string())]);
     let sent = BTreeMap::from([

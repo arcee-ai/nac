@@ -40,7 +40,7 @@ pub mod workset;
 pub mod write;
 
 use runtime_context::shared_workspace_gate;
-pub(crate) use runtime_context::{mcp_rules, remote_file_lock_busy, resolve_workspace_path};
+pub(crate) use runtime_context::{remote_file_lock_busy, resolve_workspace_path};
 pub use runtime_context::{shared_workspace_gate_for, ToolRuntime};
 pub use thread_lifecycle::ActiveThreadRegistry;
 pub(crate) use thread_lifecycle::ThreadCancellation;

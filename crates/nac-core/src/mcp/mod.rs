@@ -108,11 +108,15 @@ pub async fn probe_mcp_server(
     defaults: &McpDefaults,
     cwd: &Path,
 ) -> Result<McpProbeResult> {
+    let redactor = McpRedactor::new(redaction_values(config)?);
     let handler =
         NacMcpClientHandler::unbound(mcp_roots_for_policy(cwd, None, McpRootPolicy::None)?);
     let startup_timeout = config.startup_timeout(defaults)?;
     let catalog_timeout = config.catalog_timeout(defaults)?;
-    let mut service = connect_server(name, config, &handler, cwd, startup_timeout).await?;
+    let mut service = match connect_server(name, config, &handler, cwd, startup_timeout).await {
+        Ok(service) => service,
+        Err(error) => return Err(redacted_probe_error(&redactor, error)),
+    };
     let Some(peer) = service.peer_info() else {
         close_mcp_service(&mut service).await;
         bail!("MCP server did not provide initialization metadata");
@@ -121,7 +125,10 @@ pub async fn probe_mcp_server(
         Ok(Ok(tools)) => tools,
         Ok(Err(error)) => {
             close_mcp_service(&mut service).await;
-            return Err(anyhow!(error).context("failed to list tools"));
+            return Err(anyhow!(
+                "failed to list tools: {}",
+                redactor.redact(&format!("{error:#}"))
+            ));
         }
         Err(_) => {
             close_mcp_service(&mut service).await;
@@ -131,7 +138,6 @@ pub async fn probe_mcp_server(
             );
         }
     };
-    let redactor = McpRedactor::new(redaction_values(config)?);
     let probed = tools
         .into_iter()
         .map(|tool| {
@@ -201,7 +207,7 @@ pub async fn probe_mcp_server(
         protocol_version: peer.protocol_version.to_string(),
         server_name: peer.server_info.as_ref().map(|info| info.name.clone()),
         server_version: peer.server_info.as_ref().map(|info| info.version.clone()),
-        instructions: peer.instructions.clone(),
+        instructions: redactor.safe_instructions(&peer.instructions),
         capabilities,
         tools: probed,
         prompt_count,
@@ -218,6 +224,11 @@ pub fn mcp_error_requires_authorization(error: &anyhow::Error) -> bool {
 }
 
 use catalog_sync::*;
+
+fn redacted_probe_error(redactor: &McpRedactor, error: anyhow::Error) -> anyhow::Error {
+    anyhow!(redactor.redact(&format!("{error:#}")))
+}
+
 use config::*;
 use naming::*;
 use registry::*;
@@ -340,7 +351,8 @@ pub(crate) mod test_support {
                                             "prompts":{"listChanged":false},
                                             "resources":{"subscribe":false,"listChanged":false}
                                         },
-                                        "serverInfo":{"name":"partial-catalog","version":"0.1.0"}
+                                        "serverInfo":{"name":"partial-catalog","version":"0.1.0"},
+                                        "instructions":"Use Bearer partial-secret for requests"
                                     }
                                 });
                                 write_fake_http_response(
@@ -627,7 +639,7 @@ pub(crate) mod test_support {
                                     "completions": {}
                                 },
                                 "serverInfo": {"name": "capability-http-mcp", "version": "0.1.0"},
-                                "instructions": "Use the docs server only for documentation lookup."
+                                "instructions": "Use Bearer registry-secret only for documentation lookup."
                             }),
                             "prompts/list" => json!({
                                 "prompts": [{
@@ -857,6 +869,9 @@ pub(crate) mod test_support {
         let _ = stream.flush();
     }
 }
+
+#[cfg(test)]
+mod policy_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1342,9 +1357,13 @@ args = ["-c", "true"]
             startup_timeout_ms: None,
             catalog_timeout_ms: None,
             execution_timeout_ms: None,
+            allowed_tools: None,
+            denied_tools: Vec::new(),
+            approval: McpToolApproval::Ask,
+            tool_approvals: BTreeMap::new(),
             transport: McpTransportConfig::StreamableHttp {
                 url,
-                headers: BTreeMap::new(),
+                headers: BTreeMap::from([("Authorization".into(), "Bearer partial-secret".into())]),
                 env_headers: BTreeMap::new(),
                 bearer_token_env_var: None,
                 header_helper: None,
@@ -1362,6 +1381,10 @@ args = ["-c", "true"]
 
         assert_eq!(result.tools.len(), 1);
         assert_eq!(result.tools[0].name, "echo");
+        assert_eq!(
+            result.instructions.as_deref(),
+            Some("Use [REDACTED] for requests")
+        );
         assert_eq!(result.prompt_count, 0);
         assert_eq!(result.resource_count, 0);
         assert_eq!(result.resource_template_count, 0);
@@ -1395,6 +1418,10 @@ args = ["-c", "true"]
             startup_timeout_ms: Some(500),
             catalog_timeout_ms: None,
             execution_timeout_ms: None,
+            allowed_tools: None,
+            denied_tools: Vec::new(),
+            approval: McpToolApproval::Ask,
+            tool_approvals: BTreeMap::new(),
             transport: McpTransportConfig::StreamableHttp {
                 url,
                 headers: BTreeMap::new(),
@@ -1448,6 +1475,10 @@ done
             startup_timeout_ms: Some(300),
             catalog_timeout_ms: None,
             execution_timeout_ms: None,
+            allowed_tools: None,
+            denied_tools: Vec::new(),
+            approval: McpToolApproval::Ask,
+            tool_approvals: BTreeMap::new(),
             transport: McpTransportConfig::Stdio {
                 command: "/bin/sh".to_string(),
                 args: vec![script.display().to_string()],
@@ -1629,7 +1660,9 @@ approval = "allow"
         )
         .await;
         assert!(timed_out.is_error);
-        let timed_out: Value = serde_json::from_str(timed_out.content.as_text().unwrap()).unwrap();
+        let timed_out_text = timed_out.content.as_text().unwrap();
+        let timed_out: Value = serde_json::from_str(timed_out_text)
+            .unwrap_or_else(|error| panic!("invalid timeout payload {timed_out_text:?}: {error}"));
         assert_eq!(timed_out["_nac"]["status"], "timed_out");
         assert_eq!(timed_out["_nac"]["remote_outcome_uncertain"], true);
 
@@ -1670,6 +1703,7 @@ approval = "allow"
 [mcp_servers.docs]
 transport = "streamable_http"
 url = {}
+headers = {{ Authorization = "Bearer registry-secret" }}
 "#,
                 toml_string(&http_url)
             ),
@@ -1693,10 +1727,10 @@ url = {}
         let registry = outcome.registry.expect("capability server remains mounted");
         assert!(registry.tool_definitions().is_empty());
         assert_eq!(registry.model_tool_definitions().len(), 6);
-        assert!(registry
-            .instructions_message()
-            .unwrap()
-            .contains("server=\"docs\""));
+        let instructions = registry.instructions_message().unwrap();
+        assert!(instructions.contains("server=\"docs\""));
+        assert!(instructions.contains("Use [REDACTED] only"));
+        assert!(!instructions.contains("registry-secret"));
         assert_eq!(
             registry.prompt_commands()[0].command_name,
             "mcp__docs__review"
@@ -2014,25 +2048,5 @@ url = {url}
         restore_env("NAC_HOME", original_nac_home);
         restore_env("XDG_CONFIG_HOME", original_xdg);
         let _ = fs::remove_dir_all(&nac_home);
-    }
-
-    #[test]
-    fn no_roots_policy_advertises_no_file_roots_for_tilde_remote_cwd() {
-        let roots = mcp_roots_for_policy(Path::new("~"), None, McpRootPolicy::None).unwrap();
-        assert!(roots.is_empty());
-    }
-
-    #[test]
-    fn workspace_roots_preserve_existing_local_file_root_behavior() {
-        let cwd = std::env::current_dir().unwrap();
-        let roots = mcp_roots_for_policy(&cwd, None, McpRootPolicy::Workspace).unwrap();
-        assert_eq!(roots.len(), 1);
-        assert!(roots[0].uri.starts_with("file://"));
-        assert_eq!(
-            roots[0].name.as_deref(),
-            cwd.file_name()
-                .and_then(|value| value.to_str())
-                .or(Some("workspace"))
-        );
     }
 }

@@ -103,6 +103,7 @@ pub struct CreateMcpServerRequest {
     pub bearer_token_env_var: Option<String>,
     pub header_helper: Option<McpHeaderHelperConfig>,
     pub library_id: Option<String>,
+    #[serde(default)]
     pub allowed_tools: Option<Vec<String>>,
     #[serde(default)]
     pub denied_tools: Vec<String>,

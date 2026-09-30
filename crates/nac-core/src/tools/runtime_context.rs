@@ -122,17 +122,6 @@ impl ToolRuntime {
     }
 }
 
-pub(crate) fn mcp_rules(
-    mcp: Option<&Arc<McpRegistry>>,
-    configured: &[crate::permissions::PermissionRule],
-) -> Arc<Vec<crate::permissions::PermissionRule>> {
-    let mut rules = mcp
-        .map(|registry| registry.permission_rules())
-        .unwrap_or_default();
-    rules.extend_from_slice(configured);
-    Arc::new(rules)
-}
-
 pub(super) fn shared_workspace_gate(runtime: &ToolRuntime) -> Arc<SharedWorkspaceGate> {
     shared_workspace_gate_for(&runtime.store_path, &runtime.workspace_cwd)
 }

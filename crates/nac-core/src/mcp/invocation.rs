@@ -15,6 +15,10 @@ impl McpToolCapture {
         self.binding.execution_timeout
     }
 
+    pub(crate) fn approval(&self) -> McpToolApproval {
+        self.binding.approval
+    }
+
     pub(crate) async fn call(&self, args: Value, image_results: bool) -> ToolResult {
         let name = &self.binding.definition.function.name;
         let arguments = match args {

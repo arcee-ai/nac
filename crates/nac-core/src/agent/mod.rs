@@ -12,7 +12,7 @@ use crate::mcp::McpRegistry;
 use crate::model::{CoalescedDeltas, DeltaSink, ModelClient, ModelStreamDelta, TokenUsage};
 use crate::sandbox::{SandboxSession, SshConnection};
 use crate::skills::SkillRegistry;
-use crate::tools::{self, mcp_rules, ToolResult, ToolRuntime};
+use crate::tools::{self, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition};
 
 mod compaction;
@@ -419,7 +419,7 @@ impl Agent {
                 light_client: config.light_client,
                 allowed_tools: Some(allowed_tools),
                 permission_broker: None,
-                permission_rules: mcp_rules(config.mcp.as_ref(), &config.permission_rules),
+                permission_rules: Arc::new(config.permission_rules.clone()),
                 goal_runtime,
                 command_environment: None,
                 web_credential: None,

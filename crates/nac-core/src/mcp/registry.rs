@@ -443,7 +443,7 @@ impl McpRegistry {
                 redactor: redactor.clone(),
                 protocol_version,
                 capabilities,
-                instructions: peer_info.instructions.clone(),
+                instructions: redactor.safe_instructions(&peer_info.instructions),
                 sync: Arc::clone(&sync),
                 tool_catalog_refresh: McpCatalogRefreshGate::default(),
                 prompt_catalog_refresh: McpCatalogRefreshGate::default(),
@@ -649,30 +649,6 @@ impl McpRegistry {
         let binding = self.sync.snapshot().tools.get(name).cloned()?;
         let server = binding.server.upgrade()?;
         Some(McpToolCapture { binding, server })
-    }
-
-    pub(crate) fn tool_approval(&self, name: &str) -> Option<McpToolApproval> {
-        self.sync
-            .snapshot()
-            .tools
-            .get(name)
-            .map(|binding| binding.approval)
-    }
-
-    pub(crate) fn permission_rules(&self) -> Vec<crate::permissions::PermissionRule> {
-        let snapshot = self.sync.snapshot();
-        let mut bindings = snapshot.tools.iter().collect::<Vec<_>>();
-        bindings.sort_by_key(|(name, _)| *name);
-        bindings
-            .into_iter()
-            .map(|(name, binding)| {
-                let effect = match binding.approval {
-                    McpToolApproval::Allow => crate::permissions::PermissionEffect::Allow,
-                    McpToolApproval::Ask => crate::permissions::PermissionEffect::Ask,
-                };
-                crate::permissions::PermissionRule::new("mcp_call", name, effect)
-            })
-            .collect()
     }
 
     pub async fn call_tool(&self, name: &str, args: Value, image_results: bool) -> ToolResult {
