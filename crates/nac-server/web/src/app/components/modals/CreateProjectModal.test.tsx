@@ -70,6 +70,32 @@ vi.mock("@/app/components/modals/ConfigurationsPanel", () => {
   };
 });
 
+vi.mock("@/app/components/modals/PrimaryModelSection", () => ({
+  PrimaryModelSection: ({
+    onChange,
+  }: {
+    onChange: (selection: Record<string, unknown>) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onChange({
+          kind: "resolved",
+          backend: "openai-responses",
+          model: "gpt-5.3",
+          base_url: "https://api.openai.com/v1",
+          allow_insecure_http: false,
+          api_key_env: "OPENAI_API_KEY",
+          reasoning_effort: "high",
+          extra_headers: {},
+        })
+      }
+    >
+      Change primary model
+    </button>
+  ),
+}));
+
 vi.mock("@/app/components/modals/PathPickerModal", () => ({
   PathPickerModal: ({ open, onSelect }: { open: boolean; onSelect: (path: string) => void }) =>
     open ? (
@@ -243,3 +269,29 @@ it("allows a new folder after a known duplicate-project rejection without replay
     client.clear();
   }
 });
+
+it.each(["Select preset threshold 222", "Select preset with compaction disabled"])(
+  "preserves an edited context limit through primary changes from %s",
+  async (preset) => {
+    const { client, view } = renderModal();
+    try {
+      fireEvent.click(await screen.findByRole("button", { name: preset }));
+      const limit = document.querySelector<HTMLInputElement>('input[inputmode="numeric"]')!;
+      fireEvent.change(limit, { target: { value: "777" } });
+      fireEvent.click(screen.getByRole("button", { name: "Back to unified models" }));
+      fireEvent.click(screen.getByRole("button", { name: "Change primary model" }));
+      expect(document.querySelector<HTMLInputElement>('input[inputmode="numeric"]')!.value).toBe(
+        "777",
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+      await waitFor(() => expect(api.createSession).toHaveBeenCalled());
+      expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).toMatchObject({
+        model: "gpt-5.3",
+        orchestrator_compaction_threshold: 777,
+      });
+    } finally {
+      view.unmount();
+      client.clear();
+    }
+  },
+);

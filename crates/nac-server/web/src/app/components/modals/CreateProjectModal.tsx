@@ -230,28 +230,38 @@ function CreateProjectForm({
 
   // Stable, so the panel does not re-emit its selection on every render.
   const projectedSelection = useRef<LaunchModelSelection | null>(null);
-  const onSelection = useCallback((next: LaunchModelSelection | null) => {
-    setSelection(next);
-    if (!next || sameModelSelection(projectedSelection.current, next)) return;
-    projectedSelection.current = next;
-    if (next?.kind === "resolved" && next.orchestrator_compaction_threshold !== undefined) {
-      const threshold = next.orchestrator_compaction_threshold;
-      const value = threshold == null ? "" : String(threshold);
-      compactionPresetRef.current = true;
-      compactionAutoRef.current = false;
-      compactionRef.current = value;
-      setCompaction(value);
-    } else {
-      const leavingPreset = compactionPresetRef.current;
-      compactionPresetRef.current = false;
-      if (leavingPreset) {
-        compactionAutoRef.current = true;
-        compactionRef.current = "";
-        setCompaction("");
+  const onSelection = useCallback(
+    (next: LaunchModelSelection | null, source: "primary" | "preset") => {
+      setSelection(next);
+      if (!next || sameModelSelection(projectedSelection.current, next)) return;
+      const previous = projectedSelection.current;
+      projectedSelection.current = next;
+      // Primary identity changes preserve the context draft; explicit presets
+      // still project their complete numeric or disabled compaction policy.
+      if (source === "primary" && previous?.kind === "resolved") {
+        setError((current) => (current?.field === "config" ? null : current));
+        return;
       }
-    }
-    setError((current) => (current?.field === "config" ? null : current));
-  }, []);
+      if (next?.kind === "resolved" && next.orchestrator_compaction_threshold !== undefined) {
+        const threshold = next.orchestrator_compaction_threshold;
+        const value = threshold == null ? "" : String(threshold);
+        compactionPresetRef.current = true;
+        compactionAutoRef.current = false;
+        compactionRef.current = value;
+        setCompaction(value);
+      } else {
+        const leavingPreset = compactionPresetRef.current;
+        compactionPresetRef.current = false;
+        if (leavingPreset) {
+          compactionAutoRef.current = true;
+          compactionRef.current = "";
+          setCompaction("");
+        }
+      }
+      setError((current) => (current?.field === "config" ? null : current));
+    },
+    [],
+  );
 
   const onLight = useCallback((next: LightSelection) => {
     setLight(next);
