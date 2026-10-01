@@ -20,7 +20,7 @@ export function ModelSetupSection({
   inheritSavedDefault = false,
 }: {
   initial?: ConfigurationsPanelInitial;
-  onChange: (selection: LaunchModelSelection | null) => void;
+  onChange: (selection: LaunchModelSelection | null, source: "primary" | "preset") => void;
   invalid: boolean;
   errorText?: string;
   children?: ReactNode;
@@ -36,7 +36,7 @@ export function ModelSetupSection({
     (next: LaunchModelSelection | null) => {
       remembered.current = next;
       setHasDraft(next?.kind === "save");
-      onChange(next);
+      onChange(next, "preset");
     },
     [onChange],
   );
@@ -61,7 +61,7 @@ export function ModelSetupSection({
       }
       remembered.current = next;
       setHasDraft(next?.kind === "save");
-      onChange(next);
+      onChange(next, "primary");
     },
     [onChange],
   );

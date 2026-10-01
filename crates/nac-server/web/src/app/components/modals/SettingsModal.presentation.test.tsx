@@ -144,6 +144,16 @@ function renderReadySettings({
         default_limits: { context_window: 1000, max_tokens: 100, supported_efforts: [] },
         models: [
           {
+            id: "gpt-5.3",
+            display_name: "GPT-5.3",
+            context_window: 2000,
+            max_tokens: 100,
+            cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+            reasoning: true,
+            supported_efforts: [],
+            source: "baseline",
+          },
+          {
             id: "gpt-5.2",
             display_name: "GPT-5.2",
             context_window: 1000,
@@ -279,3 +289,71 @@ it("can explicitly set an automatically matched full preset as the project defau
     client.clear();
   }
 });
+
+it.each([
+  { threshold: 111, context: "444", headers: '{"X-Manual":"draft"}', orchestration: false },
+  { threshold: null, context: "444", headers: '{"X-Manual":"draft"}', orchestration: false },
+  { threshold: 111, context: "", headers: "", orchestration: true },
+])(
+  "keeps local Advanced edits when changing the primary model (%j)",
+  async ({ threshold, context, headers, orchestration }) => {
+    vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
+    vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
+    const { client, update, view } = renderReadySettings({
+      orchestration,
+      threshold,
+      headersJson: '{"X-Saved":"old"}',
+      lightModel: orchestration
+        ? {
+            model: "gpt-5.2",
+            backend: "openai-responses",
+            base_url: "https://api.openai.com/v1",
+            api_key_env: "OPENAI_API_KEY",
+            reasoning_effort: "high",
+          }
+        : null,
+    });
+    try {
+      await waitFor(() =>
+        expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
+          false,
+        ),
+      );
+      if (!orchestration) fireEvent.click(screen.getByText("Advanced execution settings"));
+      fireEvent.click(screen.getByRole("button", { name: "Advanced Configurations" }));
+      fireEvent.change(document.querySelector("textarea")!, { target: { value: headers } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Context limit" }), {
+        target: { value: context },
+      });
+      if (orchestration) {
+        fireEvent.click(screen.getByRole("button", { name: "Single" }));
+        fireEvent.click(screen.getByRole("button", { name: "Back to unified models" }));
+        expect(screen.getByRole("button", { name: "Single" }).getAttribute("aria-pressed")).toBe(
+          "true",
+        );
+      }
+      fireEvent.click(screen.getByRole("button", { name: /GPT-5.2/ }));
+      fireEvent.click(await screen.findByText("GPT-5.3"));
+      await waitFor(() => expect(screen.getByRole("button", { name: /GPT-5.3/ })).toBeTruthy());
+      expect(
+        (screen.getByRole("textbox", { name: "Context limit" }) as HTMLInputElement).value,
+      ).toBe(context);
+      expect((document.querySelector("textarea") as HTMLTextAreaElement).value).toBe(headers);
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(update).toHaveBeenCalledExactlyOnceWith(
+          "settings-session",
+          expect.objectContaining({
+            model: "gpt-5.3",
+            extra_headers: headers ? { "X-Manual": "draft" } : {},
+            orchestrator_compaction_threshold: context ? Number(context) : null,
+            ...(orchestration ? { light_model: null } : {}),
+          }),
+        ),
+      );
+    } finally {
+      view.unmount();
+      client.clear();
+    }
+  },
+);

@@ -281,42 +281,57 @@ function SettingsForm({
   );
 
   const projectedSelection = useRef<LaunchModelSelection | null>(null);
-  const onConfigurationChange = useCallback((next: LaunchModelSelection | null) => {
-    setSelection(next);
-    if (!next || sameModelSelection(projectedSelection.current, next)) return;
-    projectedSelection.current = next;
-    const values = next.kind === "resolved" ? next : next.request;
-    setBackend(values.backend);
-    setModel(values.model);
-    setBaseUrl(values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "");
-    if (next.kind === "resolved") {
-      setReasoning(next.reasoning_effort ?? "");
-      setHeaders(headersToText(next.extra_headers ?? {}));
-      if (next.orchestrator_compaction_threshold !== undefined) {
-        const threshold = next.orchestrator_compaction_threshold;
-        const value = threshold == null ? "" : String(threshold);
-        compactionPresetRef.current = true;
-        compactionAutoRef.current = false;
-        compactionRef.current = value;
-        setCompaction(value);
-      } else {
-        const leavingPreset = compactionPresetRef.current;
-        compactionPresetRef.current = false;
-        if (leavingPreset) {
-          compactionAutoRef.current = true;
-          compactionRef.current = "";
-          setCompaction("");
+  const onConfigurationChange = useCallback(
+    (next: LaunchModelSelection | null, source: "primary" | "preset") => {
+      setSelection(next);
+      if (!next || sameModelSelection(projectedSelection.current, next)) return;
+      const previous = projectedSelection.current;
+      projectedSelection.current = next;
+      const values = next.kind === "resolved" ? next : next.request;
+      setBackend(values.backend);
+      setModel(values.model);
+      setBaseUrl(values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "");
+      if (next.kind === "resolved") {
+        setReasoning(next.reasoning_effort ?? "");
+        const primaryChange = source === "primary" && previous?.kind === "resolved";
+        const sameProviderRoute =
+          primaryChange &&
+          previous.backend === next.backend &&
+          previous.base_url === next.base_url &&
+          previous.api_key_env === next.api_key_env &&
+          previous.allow_insecure_http === next.allow_insecure_http;
+        // Primary identity changes leave execution drafts with their local form
+        // owner. A provider/account transition still clears the prior headers.
+        // Explicit preset selection intentionally projects the complete tuple.
+        if (!sameProviderRoute) setHeaders(headersToText(next.extra_headers ?? {}));
+        if (primaryChange) return;
+        if (next.orchestrator_compaction_threshold !== undefined) {
+          const threshold = next.orchestrator_compaction_threshold;
+          const value = threshold == null ? "" : String(threshold);
+          compactionPresetRef.current = true;
+          compactionAutoRef.current = false;
+          compactionRef.current = value;
+          setCompaction(value);
+        } else {
+          const leavingPreset = compactionPresetRef.current;
+          compactionPresetRef.current = false;
+          if (leavingPreset) {
+            compactionAutoRef.current = true;
+            compactionRef.current = "";
+            setCompaction("");
+          }
+        }
+        if (next.light_model !== undefined) {
+          setLightSeed(next.light_model);
+          setLight({
+            mode: next.light_model ? "dual" : "single",
+            light: next.light_model,
+          });
         }
       }
-      if (next.light_model !== undefined) {
-        setLightSeed(next.light_model);
-        setLight({
-          mode: next.light_model ? "dual" : "single",
-          light: next.light_model,
-        });
-      }
-    }
-  }, []);
+    },
+    [],
+  );
 
   // Only the levels this model actually accepts: the backend rejects the rest,
   // so offering them would only produce a save that fails.
@@ -642,7 +657,7 @@ function SettingsForm({
             {policy.orchestrationEnabled ? (
               <LightModelSection
                 key={JSON.stringify(lightSeed)}
-                initial={lightSeed}
+                initial={light.light}
                 behavior={openingSummary.behavior ?? "orchestrator"}
                 onChange={setLight}
               />
