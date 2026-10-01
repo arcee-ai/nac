@@ -249,6 +249,7 @@ fn remains_available_during_maintenance(method: &axum::http::Method, path: &str)
                     | "/healthz"
                     | "/readyz"
                     | "/managed/status"
+                    | "/ui-config"
                     | "/openapi.json"
             ) || path.starts_with("/assets/")
                 || path.starts_with("/docs")))
@@ -272,6 +273,8 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
     use axum::http::Method;
 
     for (method, path) in [
+        (Method::GET, "/ui-config"),
+        (Method::HEAD, "/ui-config"),
         (Method::POST, "/sessions/s/cancel-active-run"),
         (Method::POST, "/sessions/s/children/c/cancel"),
         (Method::POST, "/sessions/s/orchestrators/o/cancel"),
@@ -289,6 +292,12 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
         );
     }
     for (method, path) in [
+        (Method::POST, "/ui-config"),
+        (Method::PUT, "/ui-config"),
+        (Method::DELETE, "/ui-config"),
+        (Method::GET, "/ui-config/extra"),
+        (Method::GET, "/sessions"),
+        (Method::POST, "/sessions"),
         (Method::GET, "/auth/arcee/login/l"),
         (Method::DELETE, "/projects/project"),
         (Method::DELETE, "/credentials/key"),
