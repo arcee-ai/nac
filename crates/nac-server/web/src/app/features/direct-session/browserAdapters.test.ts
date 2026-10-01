@@ -5,7 +5,7 @@ import { api } from "@/app/services/api";
 import type { subscribeToSessionEvents } from "@/app/services/eventStream";
 import { queryKeys } from "@/app/services/queries/keys";
 import { runtimeStore, resetRuntime } from "@/app/store/runtimeStore";
-import type { MessagesPageResponse, SessionSnapshotResponse } from "@/app/types/api";
+import type { ActiveRunSnapshot, MessagesPageResponse, SessionSnapshotResponse } from "@/app/types/api";
 import { makeObservationPorts } from "./browserAdapters";
 import { openSessionObservation } from "./browserRuntime";
 
@@ -63,5 +63,45 @@ it("binds transport and fences to the endpoint/cache and ignores released endpoi
   expect(unsubscribeNext).toHaveBeenCalledOnce();
   expect(runtimeStore.getState().sessionId).toBeNull();
   oldCache.clear();
+  nextCache.clear();
+});
+
+it("restores cached run ownership on reacquire and isolates the next endpoint", () => {
+  const cache = new QueryClient();
+  const nextCache = new QueryClient();
+  const activeRun: ActiveRunSnapshot = {
+    run_id: "cached-run",
+    prompt_preview: "ongoing work",
+    started_at_epoch_ms: 123456,
+  };
+  // Only the active run projection is read when observation acquires the cache.
+  cache.setQueryData(queryKeys.sessionSnapshot("same-id"), {
+    active_run: activeRun,
+  } as SessionSnapshotResponse);
+  const subscribe = vi.fn(() => vi.fn());
+  const ports = () =>
+    makeObservationPorts(cache, "same-id", {
+      readMessages: api.getMessages,
+      subscribe,
+    });
+  const first = openSessionObservation(ports());
+  expect(runtimeStore.getState().running).toBe(true);
+  expect(runtimeStore.getState().runStartedAt).toBe(activeRun.started_at_epoch_ms);
+  first();
+  expect(runtimeStore.getState().sessionId).toBeNull();
+  const reacquired = openSessionObservation(ports());
+  expect(runtimeStore.getState().running).toBe(true);
+  expect(runtimeStore.getState().runStartedAt).toBe(activeRun.started_at_epoch_ms);
+  reacquired();
+  const next = openSessionObservation(
+    makeObservationPorts(nextCache, "same-id", {
+      readMessages: api.getMessages,
+      subscribe,
+    }),
+  );
+  expect(runtimeStore.getState().running).toBe(false);
+  expect(runtimeStore.getState().runStartedAt).toBeNull();
+  next();
+  cache.clear();
   nextCache.clear();
 });

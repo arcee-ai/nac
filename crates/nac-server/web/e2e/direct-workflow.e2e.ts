@@ -128,9 +128,12 @@ for (const mobile of [false, true]) {
       globalThis.location.hash = `/session/${id}/files`;
     }, second);
     await expect(composer).toHaveValue("");
-    await expect.poll(() => page.evaluate(() => globalThis.__directEvidence.opened)).toBe(2);
+    await expect
+      .poll(() => page.evaluate(() => globalThis.__directEvidence.opened))
+      .toBeGreaterThan(stages.queued.opened);
     await expect.poll(() => page.evaluate(() => globalThis.__directEvidence.active)).toBe(1);
     stages.switched = await page.evaluate(() => ({ ...globalThis.__directEvidence }));
+    expect(stages.switched.closed).toBe(stages.switched.opened - 1);
     const durable = await (await request.get(`${harness.baseUrl}/sessions/${first}`)).json();
     expect(durable.active_run).toBeTruthy();
     await page.evaluate((id) => {

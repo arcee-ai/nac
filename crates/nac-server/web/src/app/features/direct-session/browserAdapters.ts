@@ -20,6 +20,7 @@ import {
   clearRuntimeThreads,
   resetRuntime,
   setStreamStatus,
+  syncRunFromSnapshot,
 } from "@/app/store/runtimeStore";
 import type { SessionSnapshotResponse } from "@/app/types/api";
 import type { ObservationPorts } from "./streamReconciliation";
@@ -41,6 +42,9 @@ export function makeObservationPorts(
       active = true;
       resetRuntime(id);
       ownsRuntime = captureRuntimeActivation(id);
+      syncRunFromSnapshot(
+        client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id))?.active_run,
+      );
     },
     detach: () => {
       active = false;
