@@ -1134,6 +1134,89 @@ args = ["-c", "true"]
         let _ = fs::remove_dir_all(&nac_home);
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn required_server_failure_closes_already_mounted_servers() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original_nac_home = env::var_os("NAC_HOME");
+        let original_xdg = env::var_os("XDG_CONFIG_HOME");
+        let nac_home = unique_temp_dir("nac-mcp-required-fail-cleanup");
+        fs::create_dir_all(&nac_home).unwrap();
+        let script = nac_home.join("mounted-mcp.sh");
+        let pid_file = nac_home.join("mounted.pid");
+        fs::write(
+            &script,
+            r#"#!/bin/sh
+printf '%s' "$$" > "$MCP_PID_FILE"
+while IFS= read -r line; do
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"cleanup-test","version":"0.1.0"}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"test","inputSchema":{"type":"object","properties":{}}}]}}\n' "$id"
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        fs::write(
+            nac_home.join("config.toml"),
+            format!(
+                r#"
+[mcp_servers.a_connected]
+transport = "stdio"
+command = "/bin/sh"
+args = [{}]
+env = {{ MCP_PID_FILE = {} }}
+
+[mcp_servers.z_required]
+required = true
+startup_timeout_ms = 500
+transport = "stdio"
+command = "/bin/sh"
+args = ["-c", "true"]
+"#,
+                toml_string(&script.display().to_string()),
+                toml_string(&pid_file.display().to_string()),
+            ),
+        )
+        .unwrap();
+        unsafe { env::set_var("NAC_HOME", &nac_home) };
+
+        let error = McpRegistry::load_reporting_skips(
+            &nac_home,
+            None,
+            &PathContext::new(&nac_home),
+            McpTransportPolicy::All,
+            McpRootPolicy::None,
+        )
+        .await
+        .err()
+        .expect("required server failure must reject admission");
+        assert!(format!("{error:#}").contains("required MCP server 'z_required'"));
+
+        let pid = fs::read_to_string(&pid_file)
+            .unwrap()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline && unsafe { libc::kill(pid, 0) } == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_ne!(
+            unsafe { libc::kill(pid, 0) },
+            0,
+            "required failure left an already mounted MCP child running"
+        );
+
+        restore_env("NAC_HOME", original_nac_home);
+        restore_env("XDG_CONFIG_HOME", original_xdg);
+        let _ = fs::remove_dir_all(&nac_home);
+    }
+
     #[tokio::test]
     async fn header_helper_forwards_env_and_parses_bounded_json() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();

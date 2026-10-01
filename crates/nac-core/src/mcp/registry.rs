@@ -54,6 +54,12 @@ pub(crate) struct McpLoadOutcome {
     pub skipped: Vec<McpSkippedServer>,
 }
 
+async fn close_mounted_services(services: &mut Vec<SharedMcpService>) {
+    while let Some(service) = services.pop() {
+        close_shared_mcp_service(service).await;
+    }
+}
+
 /// Servers defined in `config.toml`, plus a synthetic skip when the file is
 /// unreadable or invalid — a broken file disables MCP rather than failing the
 /// session, but the caller still gets a reason to surface.
@@ -149,6 +155,7 @@ impl McpRegistry {
         };
 
         let mut tools = HashMap::new();
+        let mut mounted_services = Vec::new();
         let mut skipped = Vec::new();
         let mut seen_names = HashMap::<String, usize>::new();
         let mut seen_endpoints = HashMap::<String, String>::new();
@@ -165,6 +172,7 @@ impl McpRegistry {
             if let Some(existing) = seen_endpoints.get(&endpoint) {
                 let reason = format!("same endpoint as server '{existing}'");
                 if server_config.required {
+                    close_mounted_services(&mut mounted_services).await;
                     bail!("required MCP server '{server_name}' cannot mount: {reason}");
                 }
                 eprintln!("Skipping MCP server '{server_name}': {reason}");
@@ -187,6 +195,7 @@ impl McpRegistry {
                 Err(error) => {
                     let reason = format!("invalid timeout configuration: {error:#}");
                     if server_config.required {
+                        close_mounted_services(&mut mounted_services).await;
                         bail!("required MCP server '{server_name}' {reason}");
                     }
                     skipped.push(McpSkippedServer {
@@ -204,6 +213,7 @@ impl McpRegistry {
                     Err(error) => {
                         let reason = format!("{error:#}");
                         if server_config.required {
+                            close_mounted_services(&mut mounted_services).await;
                             bail!(
                                 "required MCP server '{server_name}' failed to connect: {reason}"
                             );
@@ -225,6 +235,7 @@ impl McpRegistry {
                     let reason = format!("{error:#}");
                     close_mcp_service(&mut service).await;
                     if server_config.required {
+                        close_mounted_services(&mut mounted_services).await;
                         bail!("required MCP server '{server_name}' failed to list tools: {reason}");
                     }
                     eprintln!(
@@ -243,6 +254,7 @@ impl McpRegistry {
                     );
                     close_mcp_service(&mut service).await;
                     if server_config.required {
+                        close_mounted_services(&mut mounted_services).await;
                         bail!("required MCP server '{server_name}' {reason}");
                     }
                     eprintln!("MCP server '{server_name}' {reason} and will be skipped");
@@ -301,6 +313,8 @@ impl McpRegistry {
             }
             if tools.len() == mounted_before {
                 close_shared_mcp_service(service).await;
+            } else {
+                mounted_services.push(service);
             }
         }
 
