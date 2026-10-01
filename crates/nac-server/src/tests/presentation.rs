@@ -160,6 +160,9 @@ async fn presentation_handlers_preserve_error_shape_and_status() {
 
 #[tokio::test]
 async fn presentation_routes_serialize_summaries_and_drive_list_order() {
+    let _lock = SERVER_MODEL_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = temp_root("presentation_order");
     seed_session(&root, "a", "2026-01-01 00:00:00.000000000");
     seed_session(&root, "b", "2026-01-02 00:00:00.000000000");
