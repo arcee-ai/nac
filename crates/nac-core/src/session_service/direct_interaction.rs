@@ -5,13 +5,14 @@ impl SessionService {
     /// The operation lock linearizes with admissions already establishing
     /// durable preconditions; queued inbox items and goals remain restartable.
     pub async fn stop_run_admission(&self) -> Result<()> {
-        let service = self.clone();
-        crate::store::spawn_blocking_store_caller(move || {
+        // Raise the fail-closed gate before waiting for bounded caller
+        // capacity. An admission already holding the operation lock may
+        // finish; every later admission observes this flag under that lock.
+        self.stopping_admission
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.cancel_goal_retry_wake();
+        self.coordinate_local(|service| {
             let _operation = service.lock_active_operation();
-            service
-                .stopping_admission
-                .store(true, std::sync::atomic::Ordering::Release);
-            service.cancel_goal_retry_wake();
         })
         .await
     }

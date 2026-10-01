@@ -120,7 +120,7 @@ pub(crate) fn reserve_image_memory(
 
 fn reserve_resident_bytes(bytes: usize) -> Result<(), ToolContentError> {
     RESIDENT_IMAGE_BYTES
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             current
                 .checked_add(bytes)
                 .filter(|next| *next <= MAX_RESIDENT_IMAGE_BYTES)

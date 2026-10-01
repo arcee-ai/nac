@@ -867,6 +867,27 @@ impl SessionEventBus {
         run_id: Option<SessionRunId>,
         client_id: Option<SessionClientId>,
     ) -> anyhow::Result<SessionEventEnvelope> {
+        self.emit_with_context_async_policy(event, run_id, client_id, true)
+            .await
+    }
+
+    async fn emit_with_context_async_retryable(
+        &self,
+        event: SessionEvent,
+        run_id: Option<SessionRunId>,
+        client_id: Option<SessionClientId>,
+    ) -> anyhow::Result<SessionEventEnvelope> {
+        self.emit_with_context_async_policy(event, run_id, client_id, false)
+            .await
+    }
+
+    async fn emit_with_context_async_policy(
+        &self,
+        event: SessionEvent,
+        run_id: Option<SessionRunId>,
+        client_id: Option<SessionClientId>,
+        record_overload_gap: bool,
+    ) -> anyhow::Result<SessionEventEnvelope> {
         // A broken store path must not suppress live-only terminal events.
         // Unknown ownership takes the bounded caller path; durable checkout
         // still rejects the lookup error instead of bypassing an owner.
@@ -885,12 +906,14 @@ impl SessionEventBus {
         })
         .await
         .and_then(|result| result);
-        if result.as_ref().is_err_and(|error| {
-            matches!(
-                error.downcast_ref::<crate::store::PersistenceAdmissionError>(),
-                Some(crate::store::PersistenceAdmissionError::CallerOverloaded)
-            )
-        }) {
+        if record_overload_gap
+            && result.as_ref().is_err_and(|error| {
+                matches!(
+                    error.downcast_ref::<crate::store::PersistenceAdmissionError>(),
+                    Some(crate::store::PersistenceAdmissionError::CallerOverloaded)
+                )
+            })
+        {
             self.record_publication_failure();
         }
         result
@@ -1741,6 +1764,14 @@ impl EventSink {
 
     /// Required host publications expose their durable acknowledgement.
     pub async fn try_emit_async(&self, event: AgentEvent) -> anyhow::Result<()> {
+        self.try_emit_async_policy(event, false).await
+    }
+
+    async fn try_emit_async_policy(
+        &self,
+        event: AgentEvent,
+        retry_caller_overload: bool,
+    ) -> anyhow::Result<()> {
         if self.defer_worker_finish && matches!(event, AgentEvent::RunFinished { .. }) {
             return Ok(());
         }
@@ -1752,14 +1783,20 @@ impl EventSink {
             return Ok(());
         };
         if let Some(bus) = &self.bus {
-            bus.emit_with_context_async(
-                SessionEvent::Agent {
-                    event: event.clone(),
-                },
-                self.run_id.clone(),
-                self.client_id.clone(),
-            )
-            .await?;
+            let event = SessionEvent::Agent {
+                event: event.clone(),
+            };
+            if retry_caller_overload {
+                bus.emit_with_context_async_retryable(
+                    event,
+                    self.run_id.clone(),
+                    self.client_id.clone(),
+                )
+                .await?;
+            } else {
+                bus.emit_with_context_async(event, self.run_id.clone(), self.client_id.clone())
+                    .await?;
+            }
         }
         if self.stderr_prefixed {
             eprintln!("{STDERR_EVENT_PREFIX}{}", serde_json::to_string(&event)?);
@@ -1780,7 +1817,7 @@ impl EventSink {
     /// pre-execution caller rejection, never uncertain persistence failures.
     pub(crate) async fn emit_lifecycle_async(&self, event: AgentEvent) {
         loop {
-            match self.try_emit_async(event.clone()).await {
+            match self.try_emit_async_policy(event.clone(), true).await {
                 Err(error)
                     if matches!(
                         error.downcast_ref::<crate::store::PersistenceAdmissionError>(),

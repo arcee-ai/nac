@@ -60,6 +60,93 @@ async fn selected_manual_result_survives_cancelled_completion_wait() {
     owner.shutdown().await.unwrap();
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn committed_manual_compaction_drop_returns_success_and_cleans_up() {
+    let (parts, path) = test_active_service("owned_manual_committed_drop", "session");
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let id = Uuid::new_v4();
+    let lifecycle = CompactionLifecycle::start_async(
+        EventSink::bus(parts.service.event_bus.clone()),
+        id,
+        CompactionReason::Manual,
+    )
+    .await;
+    lifecycle
+        .commit_marker()
+        .record(CompactionResult::Compacted {
+            compaction_id: id,
+            projected_context: 256,
+        });
+    let snapshot = ActiveCompactionSnapshot {
+        compaction_id: id,
+        client_id: None,
+        started_at_epoch_ms: now_epoch_ms(),
+    };
+    *parts.service.lock_active_operation() = Some(ActiveSessionOperation::ManualCompaction(
+        ActiveCompactionState {
+            snapshot: snapshot.clone(),
+            _operation_lease: Some(
+                sessions::SessionOperationLease::try_acquire(&path, "session").unwrap(),
+            ),
+        },
+    ));
+    let (completion, waiter) = oneshot::channel();
+    drop(ManualCompactionTaskGuard {
+        service: parts.service.clone(),
+        snapshot,
+        completion: Some(completion),
+        lifecycle: Some(lifecycle),
+    });
+
+    let result = tokio::time::timeout(Duration::from_secs(1), waiter)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(result, Ok(CompactionResult::Compacted { compaction_id, .. }) if compaction_id == id)
+    );
+    assert!(!parts.service.has_active_operation());
+    assert!(sessions::SessionOperationLease::try_acquire(&path, "session").is_ok());
+    let snapshot = parts.service.session_snapshot.lock().await;
+    assert_eq!(
+        snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.unattributed_token_usage.as_ref())
+            .map(|usage| usage.orchestrator_context_tokens),
+        Some(256)
+    );
+    drop(snapshot);
+    owner.shutdown().await.unwrap();
+    drop(owner);
+    let stored = std::thread::spawn({
+        let path = path.clone();
+        move || sessions::load_session(&path, "session")
+    })
+    .join()
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        stored
+            .unattributed_token_usage
+            .as_ref()
+            .map(|usage| usage.orchestrator_context_tokens),
+        Some(256)
+    );
+    let events = parts.service.recent_events(None, 64).1;
+    assert_eq!(
+        events
+            .iter()
+            .filter(
+                |event| matches!(event.event, crate::events::SessionEvent::Agent {
+                event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
+                    | AgentEvent::OrchestratorCompactionFailed { compaction_id, .. }
+            } if compaction_id == id)
+            )
+            .count(),
+        1
+    );
+}
+
 fn persisted_response_state(
     store_path: &std::path::Path,
     session_id: &str,

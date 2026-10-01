@@ -161,6 +161,31 @@ struct ManualCompactionTaskGuard {
     lifecycle: Option<CompactionLifecycle>,
 }
 
+async fn settle_manual_compaction(
+    service: SessionService,
+    id: Uuid,
+    result: SessionCompactionCompletion,
+    mut lifecycle: Option<CompactionLifecycle>,
+    completion: Option<oneshot::Sender<SessionCompactionCompletion>>,
+) {
+    if let Ok(CompactionResult::Compacted {
+        projected_context, ..
+    }) = &result
+    {
+        if let Err(error) = service.persist_compaction_context(*projected_context).await {
+            eprintln!("nac: failed to persist compaction context: {error:#}");
+        }
+    }
+    if let Some(lifecycle) = lifecycle.as_mut() {
+        lifecycle.finish(&result).await;
+    }
+    drop(lifecycle);
+    service.clear_manual_compaction_async(id).await;
+    if let Some(completion) = completion {
+        let _ = completion.send(result);
+    }
+}
+
 impl ManualCompactionTaskGuard {
     #[expect(
         clippy::expect_used,
@@ -169,30 +194,23 @@ impl ManualCompactionTaskGuard {
     async fn complete(mut self, result: SessionCompactionCompletion) {
         // Selection transfers the exact result, waiter and lease cleanup before
         // the first await. Drop may only choose Cancelled before this transfer.
-        let mut lifecycle = self
+        let lifecycle = self
             .lifecycle
             .take()
             .expect("manual compaction lifecycle exists");
         let completion = self.completion.take();
         let service = self.service.clone();
         let id = self.snapshot.compaction_id;
-        let owned = crate::store::coordinator::owner_for(&service.metadata.store_path)
-            .map(|owner| owner.is_some())
-            .unwrap_or(true);
-        let finish = async move {
-            lifecycle.finish(&result).await;
-            drop(lifecycle);
-            service.clear_manual_compaction_async(id).await;
-            if let Some(completion) = completion {
-                let _ = completion.send(result);
-            }
-        };
-        if owned {
-            if let Err(error) = tokio::spawn(finish).await {
-                eprintln!("nac: compaction completion task failed: {error:#}");
-            }
-        } else {
-            finish.await;
+        if let Err(error) = tokio::spawn(settle_manual_compaction(
+            service,
+            id,
+            result,
+            Some(lifecycle),
+            completion,
+        ))
+        .await
+        {
+            eprintln!("nac: compaction completion task failed: {error:#}");
         }
     }
 }
@@ -202,35 +220,27 @@ impl Drop for ManualCompactionTaskGuard {
         if self.completion.is_none() {
             return;
         }
-        let result = Err(CompactionError::Failed {
-            compaction_id: self.snapshot.compaction_id,
-            failure: CompactionFailure::Cancelled,
-            source: None,
-        });
+        let result = self
+            .lifecycle
+            .as_ref()
+            .and_then(|lifecycle| lifecycle.commit_marker().result())
+            .map_or_else(
+                || {
+                    Err(CompactionError::Failed {
+                        compaction_id: self.snapshot.compaction_id,
+                        failure: CompactionFailure::Cancelled,
+                        source: None,
+                    })
+                },
+                Ok,
+            );
         let lifecycle = self.lifecycle.take();
         let service = self.service.clone();
         let id = self.snapshot.compaction_id;
         let completion = self.completion.take();
-        if crate::store::coordinator::owner_for(&service.metadata.store_path)
-            .map(|owner| owner.is_some())
-            .unwrap_or(true)
-        {
-            tokio::spawn(async move {
-                if let Some(mut lifecycle) = lifecycle {
-                    lifecycle.finish(&result).await;
-                }
-                service.clear_manual_compaction_async(id).await;
-                if let Some(completion) = completion {
-                    let _ = completion.send(result);
-                }
-            });
-        } else {
-            drop(lifecycle);
-            service.clear_manual_compaction(id);
-            if let Some(completion) = completion {
-                let _ = completion.send(result);
-            }
-        }
+        tokio::spawn(settle_manual_compaction(
+            service, id, result, lifecycle, completion,
+        ));
     }
 }
 
@@ -372,6 +382,7 @@ impl SessionService {
             snapshot.compaction_id,
             CompactionReason::Manual,
         );
+        let commit = lifecycle.commit_marker();
         let (completion_tx, completion_rx) = oneshot::channel();
         let task_guard = ManualCompactionTaskGuard {
             service: self.clone(),
@@ -380,24 +391,14 @@ impl SessionService {
             lifecycle: Some(lifecycle),
         };
         let agent = Arc::clone(&self.agent);
-        let persist_service = self.clone();
         let compaction_id = snapshot.compaction_id;
         let task = tokio::spawn(async move {
             let result = {
                 let mut agent = agent.lock().await;
-                agent.compact_for_session(compaction_id, event_sink).await
-            };
-            if let Ok(CompactionResult::Compacted {
-                projected_context, ..
-            }) = &result
-            {
-                if let Err(error) = persist_service
-                    .persist_compaction_context(*projected_context)
+                agent
+                    .compact_for_session(compaction_id, event_sink, commit)
                     .await
-                {
-                    eprintln!("nac: failed to persist compaction context: {error:#}");
-                }
-            }
+            };
             task_guard.complete(result).await;
         });
         #[cfg(test)]

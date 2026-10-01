@@ -66,6 +66,29 @@ async fn queued_inbox_and_cancellation_do_not_block_runtime_timers() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn shutdown_closes_admission_before_waiting_for_caller_capacity() {
+    let (parts, path) = test_direct_active_service(
+        "owned_shutdown_admission_saturation",
+        "session",
+        ModelClient::new_for_test(),
+    );
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let service = parts.service.clone();
+    let saturation = crate::store::reject_callers_for_test();
+    let stopping_service = service.clone();
+    let stopping = tokio::spawn(async move { stopping_service.stop_run_admission().await });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert!(!stopping.is_finished());
+    assert!(matches!(
+        service.try_submit_prompt("must not start".to_owned()),
+        Err(SessionSubmitError::Coordination { .. })
+    ));
+    drop(saturation);
+    stopping.await.unwrap().unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn compaction_lifecycle_waits_off_runtime_behind_durable_publication() {
     let (parts, path) = test_direct_active_service(
         "owned_compaction_event_gate",
@@ -114,6 +137,34 @@ async fn compaction_lifecycle_waits_off_runtime_behind_durable_publication() {
     lifecycle.await.unwrap();
     // Cleanup is an owned off-loop publication obligation.
     tokio::time::sleep(Duration::from_millis(10)).await;
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lifecycle_overload_retries_do_not_open_replay_gaps() {
+    let (parts, path) = test_direct_active_service(
+        "owned_lifecycle_retry_sequence",
+        "session",
+        ModelClient::new_for_test(),
+    );
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let first = parts.service.event_bus.emit(SessionEvent::RunCancelled);
+    let saturation = crate::store::reject_callers_for_test();
+    let sink = EventSink::bus(parts.service.event_bus.clone());
+    let publication = tokio::spawn(async move {
+        sink.emit_lifecycle_async(AgentEvent::ThreadStarted {
+            name: "worker".into(),
+            action: "work".into(),
+            source_threads: Vec::new(),
+        })
+        .await;
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(!publication.is_finished());
+    drop(saturation);
+    publication.await.unwrap();
+    let next = parts.service.event_bus.emit(SessionEvent::RunCancelled);
+    assert_eq!(next.sequence_id, first.sequence_id + 2);
     owner.shutdown().await.unwrap();
 }
 
@@ -173,6 +224,72 @@ async fn selected_compaction_terminal_survives_cancelled_publication_wait() {
             .count(),
         1
     );
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn committed_compaction_drop_cannot_publish_cancelled() {
+    let (parts, path) = test_direct_active_service(
+        "owned_committed_compaction_drop",
+        "session",
+        ModelClient::new_for_test(),
+    );
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let id = uuid::Uuid::new_v4();
+    let lifecycle = crate::agent::CompactionLifecycle::start_async(
+        EventSink::bus(parts.service.event_bus.clone()),
+        id,
+        crate::events::CompactionReason::Auto,
+    )
+    .await;
+    lifecycle
+        .commit_marker()
+        .record(crate::agent::CompactionResult::Compacted {
+            compaction_id: id,
+            projected_context: 256,
+        });
+    let task = tokio::spawn(async move {
+        let _lifecycle = lifecycle;
+        std::future::pending::<()>().await;
+    });
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let events = parts.service.recent_events(None, 64).1;
+            if events.iter().any(|event| {
+                matches!(event.event, SessionEvent::Agent {
+                    event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
+                } if compaction_id == id)
+            }) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let events = parts.service.recent_events(None, 64).1;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.event, SessionEvent::Agent {
+                event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
+                    | AgentEvent::OrchestratorCompactionFailed { compaction_id, .. }
+            } if compaction_id == id))
+            .count(),
+        1
+    );
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event.event, SessionEvent::Agent {
+        event: AgentEvent::OrchestratorCompactionFailed {
+            compaction_id,
+            failure: crate::events::CompactionFailure::Cancelled,
+            ..
+        }
+    } if compaction_id == id)));
     owner.shutdown().await.unwrap();
 }
 
