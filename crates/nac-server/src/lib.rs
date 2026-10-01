@@ -13,6 +13,8 @@ mod managed_github;
 mod managed_status;
 mod mcp;
 mod mcp_api;
+mod mcp_catalog_api;
+mod mcp_runtime_api;
 mod orchestration;
 mod revert;
 pub(crate) use managed_control::running_target as managed_running_target;
@@ -49,7 +51,7 @@ pub use delivery::projects::{
     UpdateProjectRequest,
 };
 pub use delivery::server::{
-    openapi_document, router, serve, serve_with, serve_with_policy, BindPolicy,
+    openapi_document, router, serve, serve_with, serve_with_policy, BindPolicy, ServerOptions,
 };
 pub use delivery::sessions::{
     ListSessionsQuery, ReorderSessionsRequest, ReorderSessionsResponse,
@@ -72,6 +74,7 @@ pub use mcp_api::{
     CreateMcpServerRequest, McpLibraryResponse, McpServerList, McpServerView, TestMcpServerRequest,
     TestMcpServerResponse, UpdateMcpServerRequest,
 };
+pub use mcp_runtime_api::McpRuntimeStatusList;
 pub use revert::{
     RegenerateSessionError, RegenerateSessionRequest, RevertSessionError, RevertSessionRequest,
     RevertSessionResponse,
@@ -109,7 +112,7 @@ use nac_core::store::{TraditionalChildExecutionMode, TraditionalChildRecord};
 #[cfg(test)]
 use nac_core::test_support::store::TranscriptLogWriter;
 use nac_core::{
-    commands::{slash_command_definitions, SlashCommand, SlashCommandDefinition},
+    commands::SlashCommand,
     events::{
         AssistantStreamDelta, AssistantStreamDeltaReceiver, SessionEvent, SessionEventBoundary,
         SessionEventEnvelope, SessionReplayGap,
@@ -298,14 +301,6 @@ impl Drop for CompletionSuppressionRollback {
 /// mean waiting out a long cache.
 const GIT_PROBE_ERROR_CACHE_TTL: Duration = Duration::from_secs(10);
 
-#[derive(Debug, Clone)]
-pub struct ServerOptions {
-    pub root_cwd: PathBuf,
-    pub store_path: Option<PathBuf>,
-    pub worker_executable: Option<PathBuf>,
-    pub managed_host: Option<nac_managed::ManagedHostConfig>,
-}
-
 #[derive(Clone)]
 pub struct SessionManager {
     inner: Arc<SessionManagerInner>,
@@ -313,6 +308,7 @@ pub struct SessionManager {
 
 struct SessionManagerInner {
     root_cwd: PathBuf,
+    mcp_runtime: Arc<nac_core::mcp_configurations::McpRuntimeManager>,
     store_path: PathBuf,
     _store_ownership: application::persistence::StoreOwnership,
     worker_executable: PathBuf,
@@ -561,6 +557,9 @@ impl SessionManager {
         };
         let manager = Self {
             inner: Arc::new(SessionManagerInner {
+                mcp_runtime: Arc::new(nac_core::mcp_configurations::McpRuntimeManager::new(
+                    root_cwd.clone(),
+                )),
                 root_cwd,
                 store_path: store_path.clone(),
                 _store_ownership: store_ownership,
@@ -1987,7 +1986,7 @@ fn submit_response(handle: SessionRunHandle, display_prompt: String) -> SubmitPr
 }
 
 fn frontend_command_name(command: SlashCommand) -> &'static str {
-    command.definition().name
+    command.definition().name.as_str()
 }
 
 fn canonicalize_dir(path: PathBuf) -> Result<PathBuf> {

@@ -311,6 +311,8 @@ export type UpdateSshConfigurationRequest = ApiSchema<"UpdateSshConfigurationReq
 
 export type McpTransport = ApiSchema<"McpTransportSchema">;
 
+export type McpProtocolSelection = ApiSchema<"McpProtocolSelection">;
+
 export type McpLibraryAuth = ApiSchema<"McpLibraryAuth">;
 
 /** One entry of the curated MCP library the add-server form offers. */
@@ -342,6 +344,10 @@ export type TestMcpServerRequest = ApiSchema<"TestMcpServerRequest">;
 export type McpProbedTool = ApiSchema<"McpProbedTool">;
 
 export type TestMcpServerResponse = ApiSchema<"TestMcpServerResponse">;
+
+export type McpRuntimeStatus = ApiSchema<"McpRuntimeStatus">;
+
+export type McpRuntimeStatusList = ApiSchema<"McpRuntimeStatusList">;
 
 export type ProviderModel = ApiSchema<"ProviderModel">;
 

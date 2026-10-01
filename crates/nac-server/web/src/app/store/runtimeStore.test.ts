@@ -142,6 +142,34 @@ describe("canonical refresh classification", () => {
     applyEnvelope(envelope({ type: "transcript_reverted", transcript_len: 0 }));
     expect(getRuntimeState().primaryToolEvents).toEqual([]);
   });
+
+  it("surfaces bounded MCP observations in the event and worker log views", () => {
+    resetRuntime("session-a");
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: {
+          type: "mcp_notification",
+          thread_name: "worker",
+          server_name: "docs",
+          kind: "catalog_refresh_failed",
+          message: "tool refresh failed; retaining the last-known-good catalog",
+        },
+      }),
+    );
+
+    const state = getRuntimeState();
+    expect(state.events.at(-1)).toMatchObject({
+      kind: "mcp",
+      text: "MCP docs: tool refresh failed; retaining the last-known-good catalog",
+      isError: true,
+    });
+    expect(state.threads.worker.log.at(-1)).toMatchObject({
+      name: "docs",
+      body: "tool refresh failed; retaining the last-known-good catalog",
+      isError: true,
+    });
+  });
 });
 
 describe("run cancellation", () => {

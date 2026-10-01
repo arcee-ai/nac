@@ -6,8 +6,12 @@ impl PermissionPolicy {
         configured_rules: impl IntoIterator<Item = PermissionRule>,
     ) -> Self {
         let mut rules = backend_defaults(backend);
+        let backend_rule_count = rules.len();
         rules.extend(configured_rules);
-        Self { rules }
+        Self {
+            rules,
+            backend_rule_count,
+        }
     }
 
     pub fn rules(&self) -> &[PermissionRule] {
@@ -33,8 +37,13 @@ impl PermissionPolicy {
         }
 
         if resources.iter().any(|resource| {
-            evaluate_one(&resource.action, &resource.resource, &self.rules)
-                == PermissionEffect::Deny
+            evaluate_one_with_fallback(
+                &resource.action,
+                &resource.resource,
+                &self.rules,
+                self.backend_rule_count,
+                resource.policy_fallback,
+            ) == PermissionEffect::Deny
         }) {
             return PermissionDecision {
                 effect: PermissionEffect::Deny,
@@ -49,6 +58,8 @@ impl PermissionPolicy {
                     &resource.action,
                     &resource.resource,
                     &self.rules,
+                    self.backend_rule_count,
+                    resource.policy_fallback,
                     remembered_allows,
                 )
             })
@@ -72,10 +83,15 @@ fn evaluate_one_with_grants(
     action: &str,
     resource: &str,
     rules: &[PermissionRule],
+    backend_rule_count: usize,
+    fallback: Option<PermissionEffect>,
     remembered_allows: &[PermissionRule],
 ) -> PermissionEffect {
-    rules
+    let fallback = fallback.map(|effect| PermissionRule::new(action, resource, effect));
+    rules[..backend_rule_count]
         .iter()
+        .chain(fallback.iter())
+        .chain(rules[backend_rule_count..].iter())
         .chain(remembered_allows.iter())
         .rev()
         .find(|rule| {
@@ -84,9 +100,18 @@ fn evaluate_one_with_grants(
         .map_or(PermissionEffect::Ask, |rule| rule.effect)
 }
 
-fn evaluate_one(action: &str, resource: &str, rules: &[PermissionRule]) -> PermissionEffect {
-    rules
+fn evaluate_one_with_fallback(
+    action: &str,
+    resource: &str,
+    rules: &[PermissionRule],
+    backend_rule_count: usize,
+    fallback: Option<PermissionEffect>,
+) -> PermissionEffect {
+    let fallback = fallback.map(|effect| PermissionRule::new(action, resource, effect));
+    rules[..backend_rule_count]
         .iter()
+        .chain(fallback.iter())
+        .chain(rules[backend_rule_count..].iter())
         .rev()
         .find(|rule| {
             wildcard_match(&rule.action, action) && wildcard_match(&rule.resource, resource)

@@ -122,6 +122,12 @@ export interface components {
             thread_name?: string | null;
             type: "mcp_server_skipped";
         } | {
+            kind: components["schemas"]["McpNotificationKind"];
+            message: string;
+            server_name: string;
+            thread_name?: string | null;
+            type: "mcp_notification";
+        } | {
             message: string;
             thread_name?: string | null;
             type: "model_error";
@@ -164,6 +170,7 @@ export interface components {
         LaggedEvent: {
             missed: number;
         };
+        McpNotificationKind: "catalog_refreshed" | "catalog_refresh_failed" | "resource_updated" | "log" | "progress" | "subscription_ended";
         Message: {
             content: string;
             role: "system";

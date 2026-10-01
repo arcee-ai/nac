@@ -25,7 +25,7 @@ import type {
 // network is replaced by spies on the api methods, delegating to these
 // per-test fakes. jsdom lacks matchMedia, so a desktop stub stands in.
 const fakes = {
-  listCommands: vi.fn(),
+  listSessionCommands: vi.fn(),
   listSessionSkills: vi.fn(),
   submitRun: vi.fn(),
   steerOrchestrator: vi.fn(),
@@ -42,7 +42,9 @@ const fakes = {
   getStore: vi.fn(),
 };
 
-vi.spyOn(api, "listCommands").mockImplementation((...args) => fakes.listCommands(...args));
+vi.spyOn(api, "listSessionCommands").mockImplementation((...args) =>
+  fakes.listSessionCommands(...args),
+);
 vi.spyOn(api, "listSessionSkills").mockImplementation((...args) =>
   fakes.listSessionSkills(...args),
 );
@@ -146,7 +148,7 @@ function composer(
     },
   });
   if (commandFixtures !== undefined) {
-    client.setQueryData(queryKeys.slashCommands, commandFixtures);
+    client.setQueryData(queryKeys.sessionCommands("session"), commandFixtures);
   }
   if (skillFixtures !== undefined) {
     client.setQueryData(queryKeys.sessionSkills("session"), skillFixtures);
@@ -243,7 +245,7 @@ beforeEach(() => {
   ];
   // Queries that stay pending keep their loading state, matching the previous
   // module mocks' `data: undefined`.
-  fakes.listCommands.mockReset().mockImplementation(() => pending());
+  fakes.listSessionCommands.mockReset().mockImplementation(() => pending());
   fakes.listSessionSkills.mockReset().mockImplementation(() => pending());
   fakes.submitRun.mockReset().mockResolvedValue({
     status: "accepted",
@@ -485,6 +487,28 @@ describe("slash-command suggestions", () => {
     expect(fakes.submitRun).not.toHaveBeenCalled();
   });
 
+  it("submits discovered MCP prompt commands through the ordinary prompt API", async () => {
+    commandFixtures = [
+      {
+        command: "mcp_prompt",
+        name: "mcp__docs__review",
+        description: "Review a document (MCP server: docs)",
+        accepts_arguments: true,
+        arguments: [{ name: "tone", description: "Review tone", required: true }],
+      },
+    ];
+    const textarea = composer();
+    type(textarea, '/mcp__docs__review {"tone":"strict"}');
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(fakes.submitRun).toHaveBeenCalledWith(
+        "session",
+        '/mcp__docs__review {"tone":"strict"}',
+      ),
+    );
+  });
+
   it("Send completes an active suggestion before executing it", async () => {
     const textarea = composer();
     type(textarea, "/co");
@@ -564,17 +588,17 @@ describe("slash-command suggestions", () => {
     commandFixtures = undefined;
     // A failed mount fetch leaves the query idle with no data, so the
     // component's own refetch is the call that reaches the fake.
-    fakes.listCommands.mockRejectedValue(new Error("mount skipped"));
+    fakes.listSessionCommands.mockRejectedValue(new Error("mount skipped"));
     const textarea = composer();
-    await waitFor(() => expect(fakes.listCommands).toHaveBeenCalledOnce());
-    fakes.listCommands.mockClear();
-    fakes.listCommands.mockReturnValueOnce(pending.promise);
+    await waitFor(() => expect(fakes.listSessionCommands).toHaveBeenCalledOnce());
+    fakes.listSessionCommands.mockClear();
+    fakes.listSessionCommands.mockReturnValueOnce(pending.promise);
     type(textarea, "/compact");
     fireEvent.keyDown(textarea, { key: "Escape" });
 
     fireEvent.keyDown(textarea, { key: "Enter" });
     fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(fakes.listCommands).toHaveBeenCalledOnce();
+    expect(fakes.listSessionCommands).toHaveBeenCalledOnce();
 
     pending.resolve([compactDefinition]);
     await waitFor(() => expect(fakes.compactSession).toHaveBeenCalledOnce());
@@ -584,23 +608,23 @@ describe("slash-command suggestions", () => {
     commandFixtures = undefined;
     // A failed mount fetch leaves the query idle with no data, so the
     // component's own refetch is the call that reaches the fake.
-    fakes.listCommands.mockRejectedValue(new Error("mount skipped"));
+    fakes.listSessionCommands.mockRejectedValue(new Error("mount skipped"));
     const textarea = composer();
-    await waitFor(() => expect(fakes.listCommands).toHaveBeenCalledOnce());
-    fakes.listCommands.mockClear();
-    fakes.listCommands.mockResolvedValue([compactDefinition]);
+    await waitFor(() => expect(fakes.listSessionCommands).toHaveBeenCalledOnce());
+    fakes.listSessionCommands.mockClear();
+    fakes.listSessionCommands.mockResolvedValue([compactDefinition]);
     type(textarea, "/compact");
     fireEvent.keyDown(textarea, { key: "Escape" });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
-    await waitFor(() => expect(fakes.listCommands).toHaveBeenCalledOnce());
+    await waitFor(() => expect(fakes.listSessionCommands).toHaveBeenCalledOnce());
     await waitFor(() => expect(fakes.compactSession).toHaveBeenCalledWith("session"));
 
     cleanup();
     commandFixtures = undefined;
-    fakes.listCommands.mockRejectedValue(new Error("unavailable"));
+    fakes.listSessionCommands.mockRejectedValue(new Error("unavailable"));
     const failedTextarea = composer();
-    await waitFor(() => expect(fakes.listCommands).toHaveBeenCalled());
+    await waitFor(() => expect(fakes.listSessionCommands).toHaveBeenCalled());
     type(failedTextarea, "/compact");
     fireEvent.keyDown(failedTextarea, { key: "Escape" });
     fireEvent.keyDown(failedTextarea, { key: "Enter" });

@@ -17,6 +17,7 @@ pub struct ToolRuntime {
     pub event_sink: EventSink,
     pub backend: Arc<ExecutionBackend>,
     pub mcp: Option<Arc<McpRegistry>>,
+    pub(crate) mcp_tools: Arc<HashMap<String, McpToolCapture>>,
     pub skills: Option<Arc<SkillRegistry>>,
     pub terminal_manager: TerminalManager,
     pub command_cancellation: ThreadCancellation,
@@ -36,6 +37,9 @@ pub struct ToolRuntime {
     /// service attaches. Workers and the existing orchestrator retain their
     /// established allow-through behavior.
     pub permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
+    /// Construction-time rules retained so headless imported capabilities can
+    /// fail closed on `ask` while still honoring an explicit final allow.
+    pub(crate) permission_rules: Arc<Vec<crate::permissions::PermissionRule>>,
     /// Direct-only bridge for exact mid-run durable-goal baselines.
     pub(crate) goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
     /// Optional process-environment capability, read immediately before each
@@ -50,6 +54,28 @@ pub struct ToolRuntime {
 }
 
 impl ToolRuntime {
+    pub(crate) fn model_tool_definitions(
+        &mut self,
+        base: &[ToolDefinition],
+        fallback: &[ToolDefinition],
+    ) -> Vec<ToolDefinition> {
+        match self.mcp.as_ref() {
+            Some(mcp) => {
+                let (mcp_definitions, captures) = mcp.model_tool_snapshot();
+                self.mcp_tools = Arc::new(captures);
+                base.iter().cloned().chain(mcp_definitions).collect()
+            }
+            None => {
+                self.mcp_tools = Arc::new(HashMap::new());
+                fallback.to_vec()
+            }
+        }
+    }
+
+    pub(crate) fn set_event_sink(&mut self, sink: EventSink) {
+        self.event_sink = sink;
+    }
+
     pub(crate) fn allows_tool(&self, name: &str) -> bool {
         self.allowed_tools
             .as_ref()

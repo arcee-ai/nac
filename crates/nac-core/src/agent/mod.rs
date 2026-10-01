@@ -43,11 +43,13 @@ use compaction::{CompactionPolicy, CompactionState, PreparedProviderView};
 use failed_tool_round::failed_tool_round;
 pub(crate) use preview::key_arg_preview;
 use preview::*;
+use prompt_rendering::{
+    light_model_prompt_guidance, render_orchestrator_system_prompt, render_worker_system_prompt,
+};
 pub(crate) use prompt_rendering::{
     render_direct_system_prompt, render_direct_with_orchestrator_system_prompt,
     render_general_child_system_prompt,
 };
-use prompt_rendering::{render_orchestrator_system_prompt, render_worker_system_prompt};
 use tool_exec::{execute_tools_parallel, finalize_tool_results};
 pub(crate) use transcript_state::truncate_incomplete_tool_turn;
 use transcript_state::{
@@ -132,24 +134,15 @@ pub struct AgentConfig {
     pub permission_rules: Vec<crate::permissions::PermissionRule>,
 }
 
-/// Light-model addendum to the orchestrator system prompt: names the light
-/// model so weight classification has a real signal.
-fn light_model_prompt_guidance(light: &ModelClient) -> String {
-    format!(
-        "\n\nA light worker model is configured. Every thread dispatch requires a \
-         weight classification: light routes the dispatch to the light model — {} — \
-         and heavy runs your own model. Classify by the genuine difficulty of the \
-         bounded action: light for mechanical or well-scoped work (setup, running \
-         tests, simple edits), heavy for work needing real reasoning or broad context.",
-        tools::thread::describe_light_model(light)
-    )
-}
+type McpObservation = Arc<dyn Fn(EventSink, Option<String>) + Send + Sync>;
 
 pub struct Agent {
     client: ModelClient,
     mode: AgentMode,
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
+    fallback_tool_defs: Vec<ToolDefinition>,
+    base_tool_defs: Vec<ToolDefinition>,
     admission_controlled_tools: bool,
     direct_primary: bool,
     native_web_capabilities: NativeWebCapabilities,
@@ -157,6 +150,7 @@ pub struct Agent {
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
     thread_name: Option<String>,
+    mcp_observation: Option<McpObservation>,
     steering_dispatch_id: Option<String>,
     appended_steering_ids: HashSet<i64>,
     /// Top-level transcript log sink (DB-direct transcript workset, see
@@ -198,7 +192,6 @@ pub struct Agent {
     /// flight. Deltas remain live-only during an ordinary run, but keeping a
     /// local copy lets cancellation commit the text the user already saw.
     partial_stream: StdMutex<ModelStreamDelta>,
-    permission_rules: Vec<crate::permissions::PermissionRule>,
 }
 
 /// Path-backed writer and identity needed to append to the orchestrator
@@ -314,6 +307,7 @@ impl Agent {
                 system_prompt.push_str(&light_model_prompt_guidance(light));
             }
         }
+        let base_tool_defs = tool_defs.clone();
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
             tool_defs.extend(config.extra_tool_defs);
         }
@@ -352,6 +346,9 @@ impl Agent {
         }
 
         let local_paths = crate::paths::PathContext::new(&config.config_cwd);
+        let mcp_observation = config.mcp.as_ref().map(|mcp| {
+            mcp.register_event_sink(config.event_sink.clone(), config.thread_name.clone())
+        });
         let workspace_lease_identity =
             crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
         let backend = crate::sandbox::select_execution_backend(
@@ -382,6 +379,7 @@ impl Agent {
                 .map(|definition| definition.function.name.clone())
                 .collect(),
         );
+        let fallback_tool_defs = tool_defs.clone();
         let goal_runtime = match (mode, config.session_id.as_ref(), traditional_child.as_ref()) {
             (AgentMode::Direct, Some(session_id), None) => Some(Arc::new(
                 crate::goals::GoalRuntime::new(config.store_path.clone(), session_id.clone()),
@@ -396,6 +394,8 @@ impl Agent {
             mode,
             messages,
             tool_defs,
+            fallback_tool_defs,
+            base_tool_defs,
             admission_controlled_tools: mode == AgentMode::Direct,
             direct_primary: mode == AgentMode::Direct,
             native_web_capabilities,
@@ -409,7 +409,8 @@ impl Agent {
                 event_sink: config.event_sink.clone(),
                 worker_executable: config.worker_executable,
                 backend,
-                mcp: config.mcp,
+                mcp: config.mcp.clone(),
+                mcp_tools: Arc::new(HashMap::new()),
                 skills: config.skills,
                 terminal_manager,
                 command_cancellation: crate::tools::ThreadCancellation::default(),
@@ -418,6 +419,7 @@ impl Agent {
                 light_client: config.light_client,
                 allowed_tools: Some(allowed_tools),
                 permission_broker: None,
+                permission_rules: Arc::new(config.permission_rules.clone()),
                 goal_runtime,
                 command_environment: None,
                 web_credential: None,
@@ -425,6 +427,7 @@ impl Agent {
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
+            mcp_observation,
             steering_dispatch_id: config.dispatch_id,
             appended_steering_ids: HashSet::new(),
             transcript_log,
@@ -437,7 +440,6 @@ impl Agent {
             recovered_run_failure: None,
             last_usage: None,
             partial_stream: StdMutex::new(ModelStreamDelta::default()),
-            permission_rules: config.permission_rules,
         })
     }
 
@@ -455,23 +457,20 @@ impl Agent {
             .set_worker_credential(credential);
     }
 
-    /// Build one immutable model-request capability view. The Exa credential
-    /// and the tool names are replaced together before the request and the
-    /// resulting runtime is cloned into exactly that response's tool round.
+    /// Build one immutable capability view for the next model request and tool round.
     fn refresh_model_request_capabilities(&mut self) -> Result<Vec<ToolDefinition>> {
         let credential = self.native_web_capabilities.resolve_credential()?;
-        Ok(self.install_model_request_capabilities(credential))
+        Ok(self.install_capabilities(credential))
     }
 
-    fn install_model_request_capabilities(
-        &mut self,
-        credential: Option<String>,
-    ) -> Vec<ToolDefinition> {
+    fn install_capabilities(&mut self, credential: Option<String>) -> Vec<ToolDefinition> {
         let credential = credential
             .filter(|_| self.native_web_capabilities.is_eligible())
             .map(crate::tools::web::ExaCredential::new)
             .map(Arc::new);
-        let mut definitions = self.tool_defs.clone();
+        let mut definitions = self
+            .tool_runtime
+            .model_tool_definitions(&self.base_tool_defs, &self.fallback_tool_defs);
         if credential.is_some() {
             definitions.extend(crate::tools::web::definitions());
         }
@@ -482,7 +481,23 @@ impl Agent {
                 .collect(),
         ));
         self.tool_runtime.web_credential = credential;
+        self.tool_defs.clone_from(&definitions);
         definitions
+    }
+
+    fn refresh_compaction_tool_definitions(&mut self) {
+        let web_definitions: Vec<_> = self
+            .tool_defs
+            .iter()
+            .filter(|definition| {
+                crate::tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str())
+            })
+            .cloned()
+            .collect();
+        self.tool_defs = self
+            .tool_runtime
+            .model_tool_definitions(&self.base_tool_defs, &self.fallback_tool_defs);
+        self.tool_defs.extend(web_definitions);
     }
 
     #[cfg(test)]
@@ -490,7 +505,7 @@ impl Agent {
         &mut self,
         credential: Option<&str>,
     ) -> Vec<ToolDefinition> {
-        self.install_model_request_capabilities(credential.map(str::to_string))
+        self.install_capabilities(credential.map(str::to_string))
     }
 
     #[cfg(test)]
@@ -548,6 +563,11 @@ impl Agent {
     /// launch. The clone is cheap (the registry is behind `Arc`).
     pub fn skills(&self) -> Option<Arc<SkillRegistry>> {
         self.tool_runtime.skills.clone()
+    }
+
+    /// The immutable MCP capability registry captured for this session.
+    pub fn mcp_registry(&self) -> Option<Arc<McpRegistry>> {
+        self.tool_runtime.mcp.clone()
     }
 
     pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
@@ -1005,7 +1025,10 @@ impl Agent {
 
     pub fn set_event_sink(&mut self, sink: EventSink) {
         self.event_sink = sink.clone();
-        self.tool_runtime.event_sink = sink;
+        if let Some(observation) = self.mcp_observation.as_ref() {
+            observation(sink.clone(), self.thread_name.clone());
+        }
+        self.tool_runtime.set_event_sink(sink);
     }
 
     pub(crate) fn configure_permission_broker(
@@ -1027,7 +1050,7 @@ impl Agent {
             session_id,
             backend,
             session_config_version,
-            self.permission_rules.clone(),
+            self.tool_runtime.permission_rules.as_ref().clone(),
         ));
         self.tool_runtime.permission_broker = Some(Arc::clone(&broker));
         Some(broker)

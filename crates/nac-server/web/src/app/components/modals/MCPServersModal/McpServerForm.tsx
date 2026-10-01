@@ -25,14 +25,32 @@ import { toRunError } from "@/app/lib/providerError";
 import {
   useCreateMcpServer,
   useDeleteMcpServer,
+  useMcpRuntimeAction,
+  useMcpRuntimeStatus,
   useTestMcpServer,
   useUpdateMcpServer,
 } from "@/app/services/queries";
-import type { McpLibraryEntry, McpProbedTool, McpServerView, McpTransport } from "@/app/types/api";
+import type {
+  McpLibraryEntry,
+  McpProbedTool,
+  McpProtocolSelection,
+  McpServerView,
+  McpTransport,
+} from "@/app/types/api";
 
 const TRANSPORT_ITEMS: { id: McpTransport; label: string }[] = [
   { id: "streamable_http", label: "Streamable HTTP" },
   { id: "stdio", label: "Stdio" },
+];
+
+const PROTOCOL_ITEMS: { id: McpProtocolSelection; label: string; hint: string }[] = [
+  { id: "legacy", label: "Legacy", hint: "Use the 2025-11-25 initialize handshake." },
+  {
+    id: "auto",
+    label: "Auto",
+    hint: "Try 2026-07-28 discovery, then safely fall back to legacy.",
+  },
+  { id: "current", label: "Current", hint: "Require 2026-07-28 stateless discovery." },
 ];
 
 function splitArgs(text: string): string[] {
@@ -44,6 +62,10 @@ function splitArgs(text: string): string[] {
 
 function knownTransport(value: string | null | undefined): McpTransport {
   return value === "stdio" || value === "streamable_http" ? value : "streamable_http";
+}
+
+function optionalMillis(value: string): number | null {
+  return value.trim() ? Number(value) : null;
 }
 
 export function McpServerForm({
@@ -76,15 +98,30 @@ export function McpServerForm({
   const updateServer = useUpdateMcpServer();
   const deleteServer = useDeleteMcpServer();
   const testServer = useTestMcpServer();
+  const runtimeStatus = useMcpRuntimeStatus();
+  const runtimeAction = useMcpRuntimeAction();
 
   const [name, setName] = useState(record?.name ?? template?.name ?? "");
   const [enabled, setEnabled] = useState(record?.enabled ?? true);
+  const [required, setRequired] = useState(record?.required ?? false);
+  const [protocol, setProtocol] = useState<McpProtocolSelection>(record?.protocol ?? "legacy");
   const [transport, setTransport] = useState<McpTransport>(() =>
     knownTransport(record?.transport ?? template?.transport),
   );
   const [url, setUrl] = useState(record?.url ?? template?.url ?? "");
   const [command, setCommand] = useState(record?.command ?? "");
   const [argsText, setArgsText] = useState(record?.args.join("\n") ?? "");
+  const [cwd, setCwd] = useState(record?.cwd ?? "");
+  const [envVarsText, setEnvVarsText] = useState(record?.env_vars.join("\n") ?? "");
+  const [startupTimeout, setStartupTimeout] = useState(
+    record?.startup_timeout_ms?.toString() ?? "",
+  );
+  const [catalogTimeout, setCatalogTimeout] = useState(
+    record?.catalog_timeout_ms?.toString() ?? "",
+  );
+  const [executionTimeout, setExecutionTimeout] = useState(
+    record?.execution_timeout_ms?.toString() ?? "",
+  );
   const [headers, setHeaders] = useState<KvRow[]>(() => {
     if (record) return rowsFromRecord(record.headers);
     if (template?.auth_header) {
@@ -99,13 +136,34 @@ export function McpServerForm({
     return [];
   });
   const [env, setEnv] = useState<KvRow[]>(record ? rowsFromRecord(record.env) : []);
+  const [envHeaders, setEnvHeaders] = useState<KvRow[]>(() =>
+    Object.entries(record?.env_headers ?? {}).map(([key, value]) => ({ key, value })),
+  );
+  const [bearerTokenEnvVar, setBearerTokenEnvVar] = useState(record?.bearer_token_env_var ?? "");
+  const [helperCommand, setHelperCommand] = useState(record?.header_helper?.command ?? "");
+  const [helperArgsText, setHelperArgsText] = useState(
+    record?.header_helper?.args?.join("\n") ?? "",
+  );
+  const [helperCwd, setHelperCwd] = useState(record?.header_helper?.cwd ?? "");
+  const [helperEnv, setHelperEnv] = useState<KvRow[]>(() =>
+    record?.header_helper ? rowsFromRecord(record.header_helper.env ?? {}) : [],
+  );
+  const [helperEnvVarsText, setHelperEnvVarsText] = useState(
+    record?.header_helper?.env_vars?.join("\n") ?? "",
+  );
+  const [helperTimeout, setHelperTimeout] = useState(
+    record?.header_helper?.timeout_ms?.toString() ?? "",
+  );
   const [tools, setTools] = useState<McpProbedTool[] | null>(null);
+  const runtime = runtimeStatus.data?.servers.find((status) => status.name === record?.name);
 
   const busy =
     createServer.isPending ||
     updateServer.isPending ||
     deleteServer.isPending ||
     testServer.isPending;
+  // Runtime operations are serialized server-side as well.
+  const operationBusy = busy || runtimeAction.isPending;
 
   const validate = (): string | null => {
     if (!name.trim()) return "A name is required.";
@@ -122,17 +180,41 @@ export function McpServerForm({
     }
     const headerMap = mapFromRows(headers);
     const envMap = mapFromRows(env);
+    const helper = helperCommand.trim()
+      ? {
+          command: helperCommand.trim(),
+          args: splitArgs(helperArgsText),
+          cwd: helperCwd.trim() || null,
+          env: mapFromRows(helperEnv),
+          env_vars: splitArgs(helperEnvVarsText),
+          timeout_ms: optionalMillis(helperTimeout),
+        }
+      : null;
     try {
       if (!record) {
         const created = await createServer.mutateAsync({
           name: name.trim(),
           enabled,
+          required,
+          startup_timeout_ms: optionalMillis(startupTimeout),
+          catalog_timeout_ms: optionalMillis(catalogTimeout),
+          execution_timeout_ms: optionalMillis(executionTimeout),
+          protocol,
           transport,
           command: transport === "stdio" ? command.trim() : null,
           args: transport === "stdio" ? splitArgs(argsText) : [],
           env: transport === "stdio" ? literalsOnly(envMap) : {},
+          env_vars: transport === "stdio" ? splitArgs(envVarsText) : [],
+          cwd: transport === "stdio" ? cwd.trim() || null : null,
           url: transport === "streamable_http" ? url.trim() : null,
           headers: transport === "streamable_http" ? literalsOnly(headerMap) : {},
+          env_headers: transport === "streamable_http" ? literalsOnly(mapFromRows(envHeaders)) : {},
+          bearer_token_env_var:
+            transport === "streamable_http" ? bearerTokenEnvVar.trim() || null : null,
+          header_helper:
+            transport === "streamable_http" && helper
+              ? { ...helper, env: literalsOnly(helper.env) }
+              : null,
           library_id: template?.id ?? null,
         });
         onSaved(created.name);
@@ -143,12 +225,24 @@ export function McpServerForm({
           payload: {
             name: name.trim(),
             enabled,
+            required,
+            startup_timeout_ms: optionalMillis(startupTimeout),
+            catalog_timeout_ms: optionalMillis(catalogTimeout),
+            execution_timeout_ms: optionalMillis(executionTimeout),
+            protocol,
             transport,
             command: transport === "stdio" ? command.trim() : null,
             args: transport === "stdio" ? splitArgs(argsText) : [],
             env: transport === "stdio" ? envMap : {},
+            env_vars: transport === "stdio" ? splitArgs(envVarsText) : [],
+            cwd: transport === "stdio" ? cwd.trim() || null : null,
             url: transport === "streamable_http" ? url.trim() : null,
             headers: transport === "streamable_http" ? headerMap : {},
+            env_headers:
+              transport === "streamable_http" ? literalsOnly(mapFromRows(envHeaders)) : {},
+            bearer_token_env_var:
+              transport === "streamable_http" ? bearerTokenEnvVar.trim() || null : null,
+            header_helper: transport === "streamable_http" ? helper : null,
           },
         });
         onSaved(updated.name);
@@ -167,6 +261,20 @@ export function McpServerForm({
       toast.success("MCP server deleted.");
     } catch (error) {
       toast.error(`Delete failed: ${errorMessage(toRunError(error))}`);
+    }
+  };
+
+  const operate = async (action: "connect" | "disconnect" | "reload") => {
+    if (!record) return;
+    try {
+      const status = await runtimeAction.mutateAsync({ serverName: record.name, action });
+      if (status.state === "failed") {
+        toast.error(status.error ?? "MCP runtime operation failed.");
+      } else {
+        toast.success(`MCP server is ${status.state}.`);
+      }
+    } catch (error) {
+      toast.error(`Runtime operation failed: ${errorMessage(toRunError(error))}`);
     }
   };
 
@@ -190,9 +298,33 @@ export function McpServerForm({
         command: transport === "stdio" ? command.trim() : null,
         args: transport === "stdio" ? splitArgs(argsText) : [],
         env: transport === "stdio" ? mapFromRows(env) : {},
+        env_vars: transport === "stdio" ? splitArgs(envVarsText) : [],
+        cwd: transport === "stdio" ? cwd.trim() || null : null,
         url: transport === "streamable_http" ? url.trim() : null,
         headers: transport === "streamable_http" ? mapFromRows(headers) : {},
+        env_headers: transport === "streamable_http" ? literalsOnly(mapFromRows(envHeaders)) : {},
+        bearer_token_env_var:
+          transport === "streamable_http" ? bearerTokenEnvVar.trim() || null : null,
+        header_helper:
+          transport === "streamable_http" && helperCommand.trim()
+            ? {
+                command: helperCommand.trim(),
+                args: splitArgs(helperArgsText),
+                cwd: helperCwd.trim() || null,
+                env: mapFromRows(helperEnv),
+                env_vars: splitArgs(helperEnvVarsText),
+                timeout_ms: optionalMillis(helperTimeout),
+              }
+            : null,
+        startup_timeout_ms: optionalMillis(startupTimeout),
+        catalog_timeout_ms: optionalMillis(catalogTimeout),
+        execution_timeout_ms: optionalMillis(executionTimeout),
+        protocol,
       });
+      if (!result.connected) {
+        toast.error(`Test failed: ${result.error ?? "connection failed"}`);
+        return;
+      }
       setTools(result.tools);
       toast.success(
         `Connection succeeded: ${result.tools.length} tool${
@@ -227,7 +359,7 @@ export function McpServerForm({
             variant={ButtonVariant.SecondaryDestructive}
             content={ButtonContent.Icon}
             className="mr-auto"
-            disabled={busy}
+            disabled={operationBusy}
             onClick={() => void removeRef.current()}
           >
             <Icon iconName={IconName.Trash} />
@@ -243,7 +375,7 @@ export function McpServerForm({
         <FooterButton
           isMobile={isMobile}
           variant={ButtonVariant.Primary}
-          disabled={busy}
+          disabled={operationBusy}
           onClick={() => void saveRef.current()}
         >
           Save
@@ -251,7 +383,7 @@ export function McpServerForm({
       </>,
     );
     return () => setFooter(null);
-  }, [busy, isMobile, record, setFooter]);
+  }, [isMobile, operationBusy, record, setFooter]);
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0">
@@ -301,6 +433,15 @@ export function McpServerForm({
                 size={isMobile ? SwitchSize.Large : SwitchSize.Medium}
                 onChange={setEnabled}
               />
+              <FieldLabel
+                label="Required"
+                hint="Fail session admission when this enabled server cannot start."
+              />
+              <Switch
+                checked={required}
+                size={isMobile ? SwitchSize.Large : SwitchSize.Medium}
+                onChange={setRequired}
+              />
             </div>
           </div>
         </div>
@@ -326,6 +467,27 @@ export function McpServerForm({
             </div>
           </div>
 
+          <div className="flex flex-col gap-1">
+            <FieldLabel
+              label="Protocol"
+              hint={PROTOCOL_ITEMS.find((item) => item.id === protocol)?.hint}
+            />
+            <div className="flex flex-wrap gap-2">
+              {PROTOCOL_ITEMS.map((item) => (
+                <Button
+                  key={item.id}
+                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                  variant={protocol === item.id ? ButtonVariant.Primary : ButtonVariant.Secondary}
+                  content={ButtonContent.Text}
+                  aria-pressed={protocol === item.id}
+                  onClick={() => setProtocol(item.id)}
+                >
+                  {item.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
           {transport === "streamable_http" ? (
             <>
               <div className="flex flex-col gap-1">
@@ -344,6 +506,86 @@ export function McpServerForm({
                 rows={headers}
                 onChange={setHeaders}
               />
+              <div className="flex flex-col gap-1">
+                <FieldLabel
+                  label="Bearer token environment variable"
+                  hint="The variable value is sent as a Bearer token without persisting it."
+                />
+                <Input
+                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  placeholder="MCP_TOKEN"
+                  value={bearerTokenEnvVar}
+                  onChange={(event) => setBearerTokenEnvVar(event.target.value)}
+                />
+              </div>
+              <KvEditor
+                label="Environment-backed headers"
+                hint="Map each HTTP header name to the environment variable that supplies its value."
+                keyPlaceholder="X-API-Key"
+                rows={envHeaders}
+                onChange={setEnvHeaders}
+              />
+              <div className="flex flex-col gap-1">
+                <FieldLabel
+                  label="Header helper command"
+                  hint="Optional bounded command that prints a JSON object of same-origin request headers."
+                />
+                <Input
+                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  placeholder="./refresh-mcp-headers"
+                  value={helperCommand}
+                  onChange={(event) => setHelperCommand(event.target.value)}
+                />
+              </div>
+              {helperCommand.trim() ? (
+                <>
+                  <div className="flex flex-col gap-1">
+                    <FieldLabel label="Header helper arguments" hint="One argument per line." />
+                    <TextArea
+                      textAreaClassName="min-h-[64px] font-mono"
+                      value={helperArgsText}
+                      onChange={(event) => setHelperArgsText(event.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <FieldLabel label="Header helper working directory" />
+                    <Input
+                      inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                      value={helperCwd}
+                      onChange={(event) => setHelperCwd(event.target.value)}
+                    />
+                  </div>
+                  <KvEditor
+                    label="Header helper environment"
+                    hint="Stored literals remain write-only."
+                    keyPlaceholder="TOKEN"
+                    rows={helperEnv}
+                    onChange={setHelperEnv}
+                  />
+                  <div className="flex flex-col gap-1">
+                    <FieldLabel
+                      label="Header helper forwarded environment"
+                      hint="One variable name per line."
+                    />
+                    <TextArea
+                      textAreaClassName="min-h-[64px] font-mono"
+                      value={helperEnvVarsText}
+                      onChange={(event) => setHelperEnvVarsText(event.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <FieldLabel label="Header helper timeout (ms)" />
+                    <Input
+                      inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                      type="number"
+                      min={100}
+                      max={600000}
+                      value={helperTimeout}
+                      onChange={(event) => setHelperTimeout(event.target.value)}
+                    />
+                  </div>
+                </>
+              ) : null}
             </>
           ) : (
             <>
@@ -375,14 +617,77 @@ export function McpServerForm({
                 rows={env}
                 onChange={setEnv}
               />
+              <div className="flex flex-col gap-1">
+                <FieldLabel
+                  label="Working directory"
+                  hint="Relative paths resolve from the workspace."
+                />
+                <Input
+                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  placeholder="packages/server"
+                  value={cwd}
+                  onChange={(event) => setCwd(event.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <FieldLabel
+                  label="Forward environment variables"
+                  hint="One existing host variable name per line."
+                />
+                <TextArea
+                  textAreaClassName="min-h-[64px] font-mono"
+                  value={envVarsText}
+                  onChange={(event) => setEnvVarsText(event.target.value)}
+                />
+              </div>
             </>
           )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {[
+              ["Startup timeout (ms)", startupTimeout, setStartupTimeout],
+              ["Catalog timeout (ms)", catalogTimeout, setCatalogTimeout],
+              ["Execution timeout (ms)", executionTimeout, setExecutionTimeout],
+            ].map(([label, value, setter]) => (
+              <div key={label as string} className="flex flex-col gap-1">
+                <FieldLabel label={label as string} />
+                <Input
+                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  type="number"
+                  min={100}
+                  max={600000}
+                  value={value as string}
+                  onChange={(event) => (setter as (value: string) => void)(event.target.value)}
+                />
+              </div>
+            ))}
+          </div>
+
+          {record ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-small text-basic-muted">
+                Runtime: {runtime?.state ?? "disconnected"}
+                {runtime?.error ? ` — ${runtime.error}` : ""}
+              </span>
+              {(["connect", "disconnect", "reload"] as const).map((action) => (
+                <Button
+                  key={action}
+                  size={ButtonSize.Small}
+                  variant={ButtonVariant.Secondary}
+                  disabled={operationBusy}
+                  onClick={() => void operate(action)}
+                >
+                  {action[0].toUpperCase() + action.slice(1)}
+                </Button>
+              ))}
+            </div>
+          ) : null}
 
           <div className="flex items-center gap-2 justify-end">
             <Button
               size={ButtonSize.Medium}
               variant={ButtonVariant.Secondary}
-              disabled={busy}
+              disabled={operationBusy}
               onClick={() => void test()}
               content={ButtonContent.IconLeft}
             >

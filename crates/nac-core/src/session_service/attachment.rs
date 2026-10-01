@@ -77,6 +77,7 @@ impl SessionService {
         let transcript_log = run_config.agent.transcript_log_writer();
         let has_sandbox = run_config.agent.sandbox_session().is_some();
         let skills = run_config.agent.skills();
+        let mcp = run_config.agent.mcp_registry();
         let terminal_manager = run_config.agent.terminal_manager();
         if let Some(target) = workspace_git.as_ref() {
             terminal_manager.configure_workspace_authority(
@@ -112,6 +113,7 @@ impl SessionService {
             active_operation: Arc::new(StdMutex::new(None)),
             active_threads,
             skills,
+            mcp,
             terminal_manager,
             permission_broker,
             sandbox_resource_lease: Arc::new(StdMutex::new(None)),

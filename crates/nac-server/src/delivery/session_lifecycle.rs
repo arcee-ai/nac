@@ -59,6 +59,21 @@ pub(crate) async fn session_skills_handler(
 
 #[utoipa::path(
     get,
+    path = "/sessions/{session_id}/commands",
+    operation_id = "get_sessions_session_id_commands",
+    tag = "sessions",
+    params(("session_id" = String, Path)),
+    responses((status = 200, description = "Success", body = Vec<nac_core::commands::SlashCommandDefinition>, content_type = "application/json"), (status = 400, description = "Path extraction failed", body = String, content_type = "text/plain"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+)]
+pub(crate) async fn session_commands_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(session_id): AxumPath<String>,
+) -> std::result::Result<Json<Vec<nac_core::commands::SlashCommandDefinition>>, ApiError> {
+    Ok(Json(manager.session_state().commands(&session_id).await?))
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions/{session_id}/config",
     operation_id = "get_sessions_session_id_config",
     tag = "sessions",

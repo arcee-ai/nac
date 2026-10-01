@@ -9,6 +9,7 @@ import type {
   CreateModelConfigurationRequest,
   CreateSshConfigurationRequest,
   McpLibraryResponse,
+  McpRuntimeStatusList,
   McpServerList,
   ModelCatalog,
   ModelConfigurationList,
@@ -157,6 +158,7 @@ export function useCreateMcpServer() {
     mutationFn: (payload: CreateMcpServerRequest) => api.createMcpServer(payload),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
+      void client.invalidateQueries({ queryKey: queryKeys.mcpRuntime });
     },
   });
 }
@@ -173,6 +175,7 @@ export function useUpdateMcpServer() {
     }) => api.updateMcpServer(serverName, payload),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
+      void client.invalidateQueries({ queryKey: queryKeys.mcpRuntime });
     },
   });
 }
@@ -183,6 +186,7 @@ export function useDeleteMcpServer() {
     mutationFn: (serverName: string) => api.deleteMcpServer(serverName),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.mcpServers });
+      void client.invalidateQueries({ queryKey: queryKeys.mcpRuntime });
     },
   });
 }
@@ -190,6 +194,35 @@ export function useDeleteMcpServer() {
 export function useTestMcpServer() {
   return useMutation({
     mutationFn: (payload: TestMcpServerRequest) => api.testMcpServer(payload),
+  });
+}
+
+export function useMcpRuntimeStatus() {
+  return useQuery<McpRuntimeStatusList>({
+    queryKey: queryKeys.mcpRuntime,
+    queryFn: ({ signal }) => api.listMcpRuntimeStatus(signal),
+    staleTime: 5_000,
+    retry: false,
+  });
+}
+
+export function useMcpRuntimeAction() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      serverName,
+      action,
+    }: {
+      serverName: string;
+      action: "connect" | "disconnect" | "reload";
+    }) => {
+      if (action === "connect") return api.connectMcpServer(serverName);
+      if (action === "disconnect") return api.disconnectMcpServer(serverName);
+      return api.reloadMcpServer(serverName);
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.mcpRuntime });
+    },
   });
 }
 
@@ -289,12 +322,12 @@ export async function refreshProviderAuthentication(client: QueryClient): Promis
   ]);
 }
 
-/** Static slash-command metadata served from the core command registry. */
-export function useSlashCommands() {
+/** Session-scoped slash commands, including prompts discovered from mounted MCP servers. */
+export function useSlashCommands(sessionId: string) {
   return useQuery<SlashCommandDefinition[]>({
-    queryKey: queryKeys.slashCommands,
-    queryFn: ({ signal }) => api.listCommands(signal),
-    staleTime: Infinity,
+    queryKey: queryKeys.sessionCommands(sessionId),
+    queryFn: ({ signal }) => api.listSessionCommands(sessionId, signal),
+    refetchOnMount: "always",
     retry: false,
   });
 }

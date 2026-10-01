@@ -99,35 +99,37 @@ impl<'a> SessionRunApplication<'a> {
             .attach_current_operation_service_locked(session_id, &operation_lease)
             .await?;
         let client = service.connect_client();
-        match client.prepare_user_input(&prompt) {
+        let prepared = match client.prepare_user_input(&prompt) {
             PreparedUserInput::Empty => Err(anyhow!("prompt is empty")),
             PreparedUserInput::InvalidSlashCommand { message } => Err(anyhow!(message)),
             PreparedUserInput::FrontendCommand(command) => Err(anyhow!(
                 "frontend command '{}' is not supported by the server API",
                 frontend_command_name(command)
             )),
-            PreparedUserInput::SubmitPrompt(prompt) => {
-                let display_prompt = prompt.display_prompt.clone();
-                let handle = match managed_mode {
-                    Some(execution_mode) => client
-                        .try_submit_prepared_managed_orchestrator_prompt_with_lease(
-                            prompt,
-                            operation_lease,
-                            execution_mode,
-                        ),
-                    None => client.try_submit_prepared_prompt_with_lease(prompt, operation_lease),
-                }
-                .map_err(anyhow::Error::new)?;
-                Ok(SubmittedRun {
-                    run_id: handle.run_id.to_string(),
-                    client_id: handle
-                        .client_id
-                        .as_ref()
-                        .map(std::string::ToString::to_string),
-                    display_prompt,
-                })
+            PreparedUserInput::McpPrompt(invocation) => {
+                Ok(service.resolve_mcp_prompt(invocation).await?)
             }
+            PreparedUserInput::SubmitPrompt(prompt) => Ok(prompt),
+        }?;
+        let display_prompt = prepared.display_prompt.clone();
+        let handle = match managed_mode {
+            Some(execution_mode) => client
+                .try_submit_prepared_managed_orchestrator_prompt_with_lease(
+                    prepared,
+                    operation_lease,
+                    execution_mode,
+                ),
+            None => client.try_submit_prepared_prompt_with_lease(prepared, operation_lease),
         }
+        .map_err(anyhow::Error::new)?;
+        Ok(SubmittedRun {
+            run_id: handle.run_id.to_string(),
+            client_id: handle
+                .client_id
+                .as_ref()
+                .map(std::string::ToString::to_string),
+            display_prompt,
+        })
     }
 
     pub(crate) async fn queue_thread_steering(

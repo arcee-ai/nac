@@ -19,6 +19,7 @@ import type {
 export type RuntimeEventKind =
   | "run"
   | "tool"
+  | "mcp"
   | "thread"
   | "assistant"
   | "steering"
@@ -574,6 +575,17 @@ function applyAgent(seq: number, event: AgentEvent): RefreshKind {
       // log so the missing tools are explained rather than silent.
       pushThreadLog(event.thread_name, event);
       return "none";
+    case "mcp_notification": {
+      const failed = event.kind === "catalog_refresh_failed";
+      pushThreadLog(event.thread_name, event);
+      pushEvent({
+        seq,
+        kind: "mcp",
+        text: `MCP ${event.server_name}: ${event.message}`,
+        isError: failed,
+      });
+      return "none";
+    }
     case "tool_call_finished": {
       const failed = toolCallFailed(event);
       pushThreadLog(event.thread_name, event);

@@ -1,4 +1,5 @@
 use super::*;
+use nac_core::commands::slash_command_definitions;
 
 #[tokio::test]
 async fn provider_models_route_maps_caller_url_hygiene_to_bad_request() {
@@ -713,6 +714,17 @@ async fn session_skills_route_uses_the_attached_session_registry() {
                 "compatibility": "nac"
             }
         ])
+    );
+    let response = get_response(
+        app.clone(),
+        &format!("/sessions/{populated_id}/commands"),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        serde_json::to_value(slash_command_definitions()).unwrap()
     );
     std::fs::remove_dir_all(&skills).unwrap();
     let empty = manager.create_session(request).await.unwrap();

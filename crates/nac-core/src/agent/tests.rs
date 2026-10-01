@@ -233,6 +233,22 @@ fn delegated_worker_native_search_is_credential_gated_and_model_safe() {
     let definitions = worker.refresh_model_request_capabilities().unwrap();
     let definition_json = serde_json::to_string(&definitions).unwrap();
     assert!(!definition_json.contains(credential));
+    assert_eq!(
+        serde_json::to_string(&worker.tool_defs).unwrap(),
+        definition_json
+    );
+    let refreshed = worker.refresh_model_request_capabilities().unwrap();
+    assert_eq!(
+        serde_json::to_string(&refreshed).unwrap(),
+        definition_json,
+        "refreshing a request must not feed installed capabilities back into the fallback"
+    );
+    worker.refresh_compaction_tool_definitions();
+    assert_eq!(
+        serde_json::to_string(&worker.tool_defs).unwrap(),
+        definition_json,
+        "manual compaction must preserve the installed web view while refreshing MCP"
+    );
     let names = names(definitions);
     assert_eq!(
         &names[..crate::tools::WORKER_TOOL_NAMES.len()],

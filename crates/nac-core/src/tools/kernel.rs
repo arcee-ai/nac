@@ -46,6 +46,10 @@ pub struct PermissionResource {
     /// A non-configurable denial produced by the native operation. Neither a
     /// configured allow nor a remembered grant may override it.
     pub hard_denial: Option<String>,
+    /// Tool-derived default inserted after backend defaults and before
+    /// explicit configured rules. Dynamic adapters use this to carry the
+    /// approval posture captured with the exact advertised capability.
+    pub(crate) policy_fallback: Option<crate::permissions::PermissionEffect>,
     /// Path substituted into a prepared shell command after authorization.
     /// This is internal execution metadata: policy continues to match
     /// `resource`, which is the resolved semantic target.
@@ -65,6 +69,7 @@ impl PermissionResource {
             resource,
             save_resource: None,
             hard_denial: None,
+            policy_fallback: None,
             shell_binding: None,
             preserve_final_component: false,
         }
@@ -82,6 +87,14 @@ impl PermissionResource {
 
     pub fn with_hard_denial(mut self, reason: impl Into<String>) -> Self {
         self.hard_denial = Some(reason.into());
+        self
+    }
+
+    pub(crate) fn with_policy_fallback(
+        mut self,
+        effect: crate::permissions::PermissionEffect,
+    ) -> Self {
+        self.policy_fallback = Some(effect);
         self
     }
 

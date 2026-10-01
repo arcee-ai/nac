@@ -20,19 +20,33 @@ pub const MCP_TRANSPORT_STDIO: &str = "stdio";
 pub const MCP_TRANSPORT_STREAMABLE_HTTP: &str = "streamable_http";
 
 /// A named MCP server as `config.toml` defines it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct McpServerConfigurationRecord {
     pub name: String,
     pub enabled: bool,
+    pub required: bool,
+    pub startup_timeout_ms: Option<u64>,
+    pub catalog_timeout_ms: Option<u64>,
+    pub execution_timeout_ms: Option<u64>,
+    pub protocol: McpProtocolSelection,
     /// `stdio` or `streamable_http`.
     pub transport: String,
     pub command: Option<String>,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+    pub env_vars: Vec<String>,
+    pub cwd: Option<String>,
     pub url: Option<String>,
     pub headers: BTreeMap<String, String>,
+    pub env_headers: BTreeMap<String, String>,
+    pub bearer_token_env_var: Option<String>,
+    pub header_helper: Option<McpHeaderHelperConfig>,
     /// Library catalog entry this server was created from, when it was.
     pub library_id: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+    pub denied_tools: Vec<String>,
+    pub approval: McpToolApproval,
+    pub tool_approvals: BTreeMap<String, McpToolApproval>,
 }
 
 #[derive(Debug)]
@@ -269,17 +283,44 @@ fn validated_record(
     configuration: McpServerConfigurationRecord,
 ) -> ConfigurationResult<McpServerConfigurationRecord> {
     let transport = configuration.transport.trim().to_string();
-    let (command, url) = match transport.as_str() {
+    let (command, cwd, url, bearer_token_env_var, header_helper) = match transport.as_str() {
         MCP_TRANSPORT_STDIO => (
             Some(nonblank(
                 configuration.command.as_deref().unwrap_or(""),
                 "command",
             )?),
+            configuration
+                .cwd
+                .map(|value| nonblank(&value, "cwd"))
+                .transpose()?,
+            None,
+            None,
             None,
         ),
         MCP_TRANSPORT_STREAMABLE_HTTP => (
             None,
+            None,
             Some(nonblank(configuration.url.as_deref().unwrap_or(""), "url")?),
+            configuration
+                .bearer_token_env_var
+                .map(|value| nonblank(&value, "bearer_token_env_var"))
+                .transpose()?,
+            configuration
+                .header_helper
+                .map(|mut helper| {
+                    helper.command = nonblank(&helper.command, "header_helper.command")?;
+                    helper.cwd = helper
+                        .cwd
+                        .map(|value| nonblank(&value, "header_helper.cwd"))
+                        .transpose()?;
+                    timeout_value(
+                        helper.timeout_ms,
+                        Duration::from_secs(5),
+                        "header_helper.timeout_ms",
+                    )?;
+                    Ok::<_, McpServerConfigurationStoreError>(helper)
+                })
+                .transpose()?,
         ),
         other => {
             return Err(McpServerConfigurationStoreError::InvalidInput(format!(
@@ -288,19 +329,40 @@ fn validated_record(
             )))
         }
     };
+    for (value, field) in [
+        (configuration.startup_timeout_ms, "startup_timeout_ms"),
+        (configuration.catalog_timeout_ms, "catalog_timeout_ms"),
+        (configuration.execution_timeout_ms, "execution_timeout_ms"),
+    ] {
+        timeout_value(value, Duration::from_secs(1), field)?;
+    }
     Ok(McpServerConfigurationRecord {
         name: validate_name(&configuration.name)?,
         enabled: configuration.enabled,
+        required: configuration.required,
+        startup_timeout_ms: configuration.startup_timeout_ms,
+        catalog_timeout_ms: configuration.catalog_timeout_ms,
+        execution_timeout_ms: configuration.execution_timeout_ms,
+        protocol: configuration.protocol,
         transport,
         command,
         args: configuration.args,
         env: configuration.env,
+        env_vars: configuration.env_vars,
+        cwd,
         url,
         headers: configuration.headers,
+        env_headers: configuration.env_headers,
+        bearer_token_env_var,
+        header_helper,
         library_id: configuration
             .library_id
             .map(|id| id.trim().to_string())
             .filter(|id| !id.is_empty()),
+        allowed_tools: configuration.allowed_tools,
+        denied_tools: configuration.denied_tools,
+        approval: configuration.approval,
+        tool_approvals: configuration.tool_approvals,
     })
 }
 
@@ -690,6 +752,26 @@ pub fn read_mcp_configuration_consistently(path: &Path) -> ConfigurationResult<S
     }
 }
 
+/// Reads only the global `[mcp]` defaults without requiring every server entry
+/// to deserialize. Dashboard draft probes use this so their inherited budgets
+/// match worker admission while preserving tolerant CRUD for unrelated rows.
+pub fn load_mcp_defaults(path: &Path) -> ConfigurationResult<McpDefaults> {
+    #[derive(Default, serde::Deserialize)]
+    struct DefaultsOnly {
+        #[serde(default)]
+        mcp: McpDefaults,
+    }
+
+    let raw = read_mcp_configuration_consistently(path)?;
+    toml::from_str::<DefaultsOnly>(&raw)
+        .map(|config| config.mcp)
+        .map_err(|error| {
+            McpServerConfigurationStoreError::InvalidInput(format!(
+                "failed to parse global MCP defaults: {error}"
+            ))
+        })
+}
+
 #[cfg(test)]
 thread_local! {
     static BEFORE_EXCHANGE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
@@ -864,6 +946,11 @@ fn strings_of(item: &Item) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn integer_of(item: &Item) -> Option<u64> {
+    item.as_integer()
+        .and_then(|value| u64::try_from(value).ok())
+}
+
 fn map_of(item: &Item) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
     if let Some(table) = item.as_table_like() {
@@ -874,6 +961,13 @@ fn map_of(item: &Item) -> BTreeMap<String, String> {
         }
     }
     map
+}
+
+fn approval_of(item: &Item) -> McpToolApproval {
+    match item.as_str() {
+        Some("allow") => McpToolApproval::Allow,
+        _ => McpToolApproval::Ask,
+    }
 }
 
 /// An entry as the file has it. Reads are lenient — a hand-written entry the
@@ -889,14 +983,66 @@ fn record_of(name: &str, item: &Item) -> McpServerConfigurationRecord {
     McpServerConfigurationRecord {
         name: name.to_string(),
         enabled: field("enabled").as_bool().unwrap_or(true),
+        required: field("required").as_bool().unwrap_or(false),
+        startup_timeout_ms: integer_of(field("startup_timeout_ms")),
+        catalog_timeout_ms: integer_of(field("catalog_timeout_ms")),
+        execution_timeout_ms: integer_of(field("execution_timeout_ms")),
+        protocol: match field("protocol").as_str() {
+            Some("auto") => McpProtocolSelection::Auto,
+            Some("current") => McpProtocolSelection::Current,
+            _ => McpProtocolSelection::Legacy,
+        },
         transport: string_of(field("transport")).unwrap_or_default(),
         command: string_of(field("command")),
         args: strings_of(field("args")),
         env: map_of(field("env")),
+        env_vars: strings_of(field("env_vars")),
+        cwd: string_of(field("cwd")),
         url: string_of(field("url")),
         headers: map_of(field("headers")),
+        env_headers: map_of(field("env_headers")),
+        bearer_token_env_var: string_of(field("bearer_token_env_var")),
+        header_helper: header_helper_of(field("header_helper")),
         library_id: string_of(field("library_id")),
+        allowed_tools: item
+            .as_table_like()
+            .is_some_and(|table| table.contains_key("allowed_tools"))
+            .then(|| strings_of(field("allowed_tools"))),
+        denied_tools: strings_of(field("denied_tools")),
+        approval: approval_of(field("approval")),
+        tool_approvals: approval_map_of(field("tool_approvals")),
     }
+}
+
+fn header_helper_of(item: &Item) -> Option<McpHeaderHelperConfig> {
+    let table = item.as_table_like()?;
+    let empty = Item::None;
+    let item = |key: &str| table.get(key).unwrap_or(&empty);
+    Some(McpHeaderHelperConfig {
+        command: string_of(item("command")).unwrap_or_default(),
+        args: strings_of(item("args")),
+        cwd: string_of(item("cwd")),
+        env: map_of(item("env")),
+        env_vars: strings_of(item("env_vars")),
+        timeout_ms: integer_of(item("timeout_ms")),
+    })
+}
+
+fn approval_map_of(item: &Item) -> BTreeMap<String, McpToolApproval> {
+    item.as_table_like()
+        .map(|table| {
+            table
+                .iter()
+                .filter_map(|(name, value)| {
+                    value.as_str().and_then(|value| match value {
+                        "allow" => Some((name.to_string(), McpToolApproval::Allow)),
+                        "ask" => Some((name.to_string(), McpToolApproval::Ask)),
+                        _ => None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn inline_map(values: &BTreeMap<String, String>) -> InlineTable {
@@ -911,6 +1057,26 @@ fn table_of(record: &McpServerConfigurationRecord) -> Table {
     let mut table = Table::new();
     if !record.enabled {
         table["enabled"] = toml_edit::value(false);
+    }
+    if record.required {
+        table["required"] = toml_edit::value(true);
+    }
+    if record.protocol != McpProtocolSelection::default() {
+        let value = match record.protocol {
+            McpProtocolSelection::Legacy => "legacy",
+            McpProtocolSelection::Auto => "auto",
+            McpProtocolSelection::Current => "current",
+        };
+        table["protocol"] = toml_edit::value(value);
+    }
+    for (key, value) in [
+        ("startup_timeout_ms", record.startup_timeout_ms),
+        ("catalog_timeout_ms", record.catalog_timeout_ms),
+        ("execution_timeout_ms", record.execution_timeout_ms),
+    ] {
+        if let Some(value) = value {
+            table[key] = toml_edit::value(i64::try_from(value).unwrap_or(i64::MAX));
+        }
     }
     table["transport"] = toml_edit::value(record.transport.as_str());
     match record.transport.as_str() {
@@ -928,6 +1094,12 @@ fn table_of(record: &McpServerConfigurationRecord) -> Table {
             if !record.env.is_empty() {
                 table["env"] = toml_edit::value(inline_map(&record.env));
             }
+            if !record.env_vars.is_empty() {
+                table["env_vars"] = toml_edit::value(string_array(&record.env_vars));
+            }
+            if let Some(cwd) = &record.cwd {
+                table["cwd"] = toml_edit::value(cwd.as_str());
+            }
         }
         _ => {
             if let Some(url) = &record.url {
@@ -936,10 +1108,79 @@ fn table_of(record: &McpServerConfigurationRecord) -> Table {
             if !record.headers.is_empty() {
                 table["headers"] = toml_edit::value(inline_map(&record.headers));
             }
+            if !record.env_headers.is_empty() {
+                table["env_headers"] = toml_edit::value(inline_map(&record.env_headers));
+            }
+            if let Some(variable) = &record.bearer_token_env_var {
+                table["bearer_token_env_var"] = toml_edit::value(variable.as_str());
+            }
+            if let Some(helper) = &record.header_helper {
+                table["header_helper"] = toml_edit::value(header_helper_table(helper));
+            }
         }
     }
     if let Some(library_id) = &record.library_id {
         table["library_id"] = toml_edit::value(library_id.as_str());
+    }
+    if let Some(allowed_tools) = &record.allowed_tools {
+        let mut values = toml_edit::Array::new();
+        for tool in allowed_tools {
+            values.push(tool.as_str());
+        }
+        table["allowed_tools"] = toml_edit::value(values);
+    }
+    if !record.denied_tools.is_empty() {
+        let mut values = toml_edit::Array::new();
+        for tool in &record.denied_tools {
+            values.push(tool.as_str());
+        }
+        table["denied_tools"] = toml_edit::value(values);
+    }
+    if record.approval != McpToolApproval::default() {
+        table["approval"] = toml_edit::value("allow");
+    }
+    if !record.tool_approvals.is_empty() {
+        let mut values = InlineTable::new();
+        for (name, approval) in &record.tool_approvals {
+            let value = match approval {
+                McpToolApproval::Allow => "allow",
+                McpToolApproval::Ask => "ask",
+            };
+            values.insert(name, value.into());
+        }
+        table["tool_approvals"] = toml_edit::value(values);
+    }
+    table
+}
+
+fn string_array(values: &[String]) -> toml_edit::Array {
+    let mut array = toml_edit::Array::new();
+    for value in values {
+        array.push(value.as_str());
+    }
+    array
+}
+
+fn header_helper_table(helper: &McpHeaderHelperConfig) -> InlineTable {
+    let mut table = InlineTable::new();
+    table.insert("command", helper.command.as_str().into());
+    if !helper.args.is_empty() {
+        table.insert("args", string_array(&helper.args).into());
+    }
+    if let Some(cwd) = &helper.cwd {
+        table.insert("cwd", cwd.as_str().into());
+    }
+    if !helper.env.is_empty() {
+        table.insert("env", inline_map(&helper.env).into());
+    }
+    if !helper.env_vars.is_empty() {
+        table.insert("env_vars", string_array(&helper.env_vars).into());
+    }
+    if let Some(timeout_ms) = helper.timeout_ms {
+        table.insert(
+            "timeout_ms",
+            i64::try_from(timeout_ms).unwrap_or(i64::MAX).into(),
+        );
     }
     table
 }
@@ -1088,613 +1329,7 @@ pub fn delete_mcp_server_configuration(path: &Path, name: &str) -> Configuration
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod policy_tests;
 
-    fn temp_config() -> PathBuf {
-        crate::mcp::test_support::unique_temp_dir("nac-mcp-file-config").join("config.toml")
-    }
-
-    fn http_server(name: &str) -> McpServerConfigurationRecord {
-        McpServerConfigurationRecord {
-            name: name.to_string(),
-            enabled: true,
-            transport: MCP_TRANSPORT_STREAMABLE_HTTP.to_string(),
-            command: None,
-            args: Vec::new(),
-            env: BTreeMap::new(),
-            url: Some("https://mcp.example.com/mcp".to_string()),
-            headers: BTreeMap::from([(
-                "Authorization".to_string(),
-                "Bearer secret-token".to_string(),
-            )]),
-            library_id: Some("example".to_string()),
-        }
-    }
-
-    #[test]
-    fn crud_roundtrip() {
-        let path = temp_config();
-
-        let created = insert_mcp_server_configuration(&path, http_server("example")).unwrap();
-        assert_eq!(created.name, "example");
-        assert_eq!(created.url.as_deref(), Some("https://mcp.example.com/mcp"));
-        assert!(created.enabled);
-
-        let listed = list_mcp_server_configurations(&path).unwrap();
-        assert_eq!(listed, vec![created.clone()]);
-
-        let mut edited = http_server("renamed");
-        edited.enabled = false;
-        let updated = update_mcp_server_configuration(&path, "example", edited).unwrap();
-        assert_eq!(updated.name, "renamed");
-        assert!(!updated.enabled);
-        assert_eq!(
-            load_mcp_server_configuration(&path, "renamed").unwrap(),
-            updated
-        );
-
-        assert!(delete_mcp_server_configuration(&path, "renamed").unwrap());
-        assert!(list_mcp_server_configurations(&path).unwrap().is_empty());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn hand_edit_after_read_is_never_overwritten_by_stale_publication() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "model = \"before\"\n").unwrap();
-
-        let (mut document, revision) = read_document_snapshot(&path).unwrap();
-        let servers = servers_table(&mut document).unwrap();
-        servers["example"] = Item::Table(table_of(&http_server("example")));
-
-        let hand_edit = "model = \"from-editor\"\n# must survive\n";
-        std::fs::write(&path, hand_edit).unwrap();
-        assert!(matches!(
-            write_document(&path, &document, revision).unwrap_err(),
-            McpServerConfigurationStoreError::ConcurrentModification
-        ));
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), hand_edit);
-        assert!(std::fs::read_dir(path.parent().unwrap())
-            .unwrap()
-            .filter_map(Result::ok)
-            .all(|entry| !entry.file_name().to_string_lossy().contains(".tmp")));
-
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn stale_record_patch_cannot_restore_fields_after_editor_save() {
-        let path = temp_config();
-        insert_mcp_server_configuration(&path, http_server("example")).unwrap();
-        let (mut stale, revision) =
-            load_mcp_server_configuration_snapshot(&path, "example").unwrap();
-
-        let mut editor = http_server("example");
-        editor.url = Some("https://editor.example/mcp".to_string());
-        update_mcp_server_configuration(&path, "example", editor.clone()).unwrap();
-
-        stale.enabled = false;
-        assert!(matches!(
-            update_mcp_server_configuration_at_revision(&path, "example", stale, revision)
-                .unwrap_err(),
-            McpServerConfigurationStoreError::ConcurrentModification
-        ));
-        assert_eq!(
-            load_mcp_server_configuration(&path, "example").unwrap(),
-            editor
-        );
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn conflict_never_erases_a_second_editor_save() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let (mut document, revision) = read_document_snapshot(&path).unwrap();
-        document["model"] = toml_edit::value("candidate");
-
-        let first_path = path.clone();
-        BEFORE_EXCHANGE_HOOK.with(|slot| {
-            *slot.borrow_mut() = Some(Box::new(move || {
-                std::fs::write(&first_path, "model = \"b\"\n").unwrap();
-            }));
-        });
-        let second_path = path.clone();
-        AFTER_EXCHANGE_HOOK.with(|slot| {
-            *slot.borrow_mut() = Some(Box::new(move || {
-                std::fs::write(&second_path, "model = \"d\"\n").unwrap();
-            }));
-        });
-
-        assert!(matches!(
-            write_document(&path, &document, revision).unwrap_err(),
-            McpServerConfigurationStoreError::RecoveryRequired { .. }
-        ));
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "model = \"d\"\n");
-        assert!(transaction_path(&path).exists());
-        let preserved: Vec<PathBuf> = std::fs::read_dir(path.parent().unwrap())
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|candidate| candidate.extension().is_some_and(|value| value == "tmp"))
-            .collect();
-        assert_eq!(preserved.len(), 1);
-        assert_eq!(
-            std::fs::read_to_string(&preserved[0]).unwrap(),
-            "model = \"b\"\n"
-        );
-        assert_eq!(
-            read_mcp_configuration_consistently(&path).unwrap(),
-            "model = \"d\"\n"
-        );
-        assert!(!preserved[0].exists());
-        assert!(!transaction_path(&path).exists());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    fn prepare_crash_transaction(
-        path: &Path,
-        expected_revision: [u8; 32],
-        candidate: &str,
-    ) -> (PathBuf, PublicationTransaction) {
-        let temp = path.with_extension(format!("toml.{}.tmp", uuid::Uuid::new_v4()));
-        std::fs::write(&temp, candidate).unwrap();
-        let candidate_revision = current_document_revision(&temp).unwrap();
-        let expected_identity = current_document_revision(path).unwrap().identity;
-        let transaction = PublicationTransaction {
-            version: PUBLICATION_TRANSACTION_VERSION,
-            expected_revision,
-            expected_identity,
-            candidate_revision: candidate_revision.digest.unwrap(),
-            candidate_identity: candidate_revision.identity,
-            temp_name: temp.file_name().unwrap().to_str().unwrap().to_string(),
-            phase: PublicationPhase::Prepared,
-        };
-        persist_transaction(path, &transaction).unwrap();
-        (temp, transaction)
-    }
-
-    #[test]
-    fn recovery_aborts_a_crash_after_journal_before_exchange() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let expected = current_document_revision(&path).unwrap().digest.unwrap();
-        let (temp, _) = prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
-
-        assert_eq!(
-            read_mcp_configuration_consistently(&path).unwrap(),
-            "model = \"a\"\n"
-        );
-        assert!(!temp.exists());
-        assert!(!transaction_path(&path).exists());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn recovery_commits_a_crash_after_a_valid_exchange() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let expected = current_document_revision(&path).unwrap().digest.unwrap();
-        let (temp, _) = prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
-        exchange_paths(&temp, &path).unwrap();
-
-        assert_eq!(
-            read_mcp_configuration_consistently(&path).unwrap(),
-            "model = \"candidate\"\n"
-        );
-        assert!(!temp.exists());
-        assert!(!transaction_path(&path).exists());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn legacy_identity_free_journal_is_quarantined_but_remains_recoverable() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let expected = current_document_revision(&path).unwrap().digest.unwrap();
-        let (temp, mut transaction) =
-            prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
-        transaction.expected_identity = None;
-        transaction.candidate_identity = None;
-        persist_transaction(&path, &transaction).unwrap();
-        exchange_paths(&temp, &path).unwrap();
-
-        assert!(matches!(
-            read_mcp_configuration_consistently(&path).unwrap_err(),
-            McpServerConfigurationStoreError::RecoveryRequired { .. }
-        ));
-        let replacement = path.with_extension("toml.operator-resolution");
-        std::fs::write(&replacement, "model = \"chosen\"\n").unwrap();
-        std::fs::rename(&replacement, &path).unwrap();
-        assert_eq!(
-            read_mcp_configuration_consistently(&path).unwrap(),
-            "model = \"chosen\"\n"
-        );
-        assert!(!temp.exists());
-        assert!(!transaction_path(&path).exists());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn legacy_identity_free_conflict_accepts_distinct_canonical_recovery() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let expected = current_document_revision(&path).unwrap().digest.unwrap();
-        let (temp, mut transaction) =
-            prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
-        exchange_paths(&temp, &path).unwrap();
-        let displaced_revision = current_document_revision(&temp).unwrap().digest.unwrap();
-        transaction.expected_identity = None;
-        transaction.candidate_identity = None;
-        transaction.phase = PublicationPhase::Conflict {
-            displaced_revision,
-            displaced_identity: None,
-        };
-        persist_transaction(&path, &transaction).unwrap();
-
-        assert!(matches!(
-            read_mcp_configuration_consistently(&path).unwrap_err(),
-            McpServerConfigurationStoreError::RecoveryRequired { .. }
-        ));
-        let replacement = path.with_extension("toml.operator-resolution");
-        std::fs::write(&replacement, "model = \"chosen\"\n").unwrap();
-        std::fs::rename(&replacement, &path).unwrap();
-        assert_eq!(
-            read_mcp_configuration_consistently(&path).unwrap(),
-            "model = \"chosen\"\n"
-        );
-        assert!(!temp.exists());
-        assert!(!transaction_path(&path).exists());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn legacy_identity_free_conflict_rejects_preserved_equal_canonical_content() {
-        let path = crate::mcp::test_support::unique_temp_dir("nac-mcp-file-config-preserved-equal")
-            .join("config.toml");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let expected = current_document_revision(&path).unwrap().digest.unwrap();
-        let (temp, mut transaction) =
-            prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
-        exchange_paths(&temp, &path).unwrap();
-        let displaced_revision = current_document_revision(&temp).unwrap().digest.unwrap();
-        transaction.expected_identity = None;
-        transaction.candidate_identity = None;
-        transaction.phase = PublicationPhase::Conflict {
-            displaced_revision,
-            displaced_identity: None,
-        };
-        persist_transaction(&path, &transaction).unwrap();
-
-        let replacement = path.with_extension("toml.operator-resolution");
-        std::fs::copy(&temp, &replacement).unwrap();
-        std::fs::rename(&replacement, &path).unwrap();
-        assert!(matches!(
-            read_mcp_configuration_consistently(&path).unwrap_err(),
-            McpServerConfigurationStoreError::RecoveryRequired { .. }
-        ));
-        assert!(temp.exists());
-        assert!(transaction_path(&path).exists());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn recovery_quarantines_a_crash_after_a_conflicting_exchange() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let expected = current_document_revision(&path).unwrap().digest.unwrap();
-        let (temp, _) = prepare_crash_transaction(&path, expected, "model = \"candidate\"\n");
-        std::fs::write(&path, "model = \"b\"\n").unwrap();
-        exchange_paths(&temp, &path).unwrap();
-
-        assert!(read_mcp_configuration_consistently(&path).is_err());
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "model = \"candidate\"\n"
-        );
-        assert_eq!(std::fs::read_to_string(&temp).unwrap(), "model = \"b\"\n");
-        assert!(transaction_path(&path).exists());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn check_exchange_race_preserves_both_files_and_blocks_readers() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "model = \"a\"\n").unwrap();
-        let (mut document, revision) = read_document_snapshot(&path).unwrap();
-        document["model"] = toml_edit::value("candidate");
-
-        let first_path = path.clone();
-        BEFORE_EXCHANGE_HOOK.with(|slot| {
-            *slot.borrow_mut() = Some(Box::new(move || {
-                std::fs::write(&first_path, "model = \"b\"\n").unwrap();
-            }));
-        });
-        let error = write_document(&path, &document, revision).unwrap_err();
-        assert!(matches!(
-            error,
-            McpServerConfigurationStoreError::RecoveryRequired { .. }
-        ));
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "model = \"candidate\"\n"
-        );
-        let preserved: Vec<PathBuf> = std::fs::read_dir(path.parent().unwrap())
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|candidate| candidate.extension().is_some_and(|value| value == "tmp"))
-            .collect();
-        assert_eq!(preserved.len(), 1);
-        assert_eq!(
-            std::fs::read_to_string(&preserved[0]).unwrap(),
-            "model = \"b\"\n"
-        );
-        assert!(transaction_path(&path).exists());
-        assert!(read_mcp_configuration_consistently(&path).is_err());
-        assert!(preserved[0].exists());
-        assert!(transaction_path(&path).exists());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn equal_content_atomic_replacement_is_quarantined_by_file_identity() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let original = "model = \"a\"\n";
-        std::fs::write(&path, original).unwrap();
-        let (mut document, revision) = read_document_snapshot(&path).unwrap();
-        document["model"] = toml_edit::value("candidate");
-
-        let replacement = path.with_extension("toml.editor-replacement");
-        std::fs::write(&replacement, original).unwrap();
-        let target = path.clone();
-        BEFORE_EXCHANGE_HOOK.with(|slot| {
-            *slot.borrow_mut() = Some(Box::new(move || {
-                std::fs::rename(&replacement, &target).unwrap();
-            }));
-        });
-
-        assert!(matches!(
-            write_document(&path, &document, revision).unwrap_err(),
-            McpServerConfigurationStoreError::RecoveryRequired { .. }
-        ));
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "model = \"candidate\"\n"
-        );
-        assert!(read_mcp_configuration_consistently(&path).is_err());
-        let preserved = std::fs::read_dir(path.parent().unwrap())
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .find(|candidate| candidate.extension().is_some_and(|value| value == "tmp"))
-            .expect("equal-content replacement must remain preserved");
-        assert_eq!(std::fs::read_to_string(&preserved).unwrap(), original);
-
-        let identical_save = path.with_extension("toml.identical-save");
-        std::fs::write(&identical_save, "model = \"candidate\"\n").unwrap();
-        std::fs::rename(&identical_save, &path).unwrap();
-        assert!(
-            read_mcp_configuration_consistently(&path).is_err(),
-            "a byte-identical save remains ambiguous even with a new file identity"
-        );
-
-        std::fs::remove_file(&preserved).unwrap();
-        assert_eq!(
-            read_mcp_configuration_consistently(&path).unwrap(),
-            "model = \"candidate\"\n",
-            "removing the preserved file explicitly keeps the canonical document"
-        );
-        assert!(!transaction_path(&path).exists());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn saves_create_and_repair_private_file_permissions() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        insert_mcp_server_configuration(&path, http_server("example")).unwrap();
-        assert_eq!(
-            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        update_mcp_server_configuration(&path, "example", http_server("example")).unwrap();
-        assert_eq!(
-            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        assert!(std::fs::read_dir(path.parent().unwrap())
-            .unwrap()
-            .filter_map(Result::ok)
-            .all(|entry| !entry.file_name().to_string_lossy().contains(".tmp")));
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn mcp_config_process_helper() {
-        let Some(path) = std::env::var_os("NAC_TEST_MCP_CONFIG_PATH") else {
-            return;
-        };
-        let name = std::env::var("NAC_TEST_MCP_CONFIG_NAME").unwrap();
-        let path = PathBuf::from(path);
-        let _lease = acquire_mcp_configuration_write_lease(&path).unwrap();
-        insert_mcp_server_configuration(&path, http_server(&name)).unwrap();
-    }
-
-    #[test]
-    fn cross_process_writers_preserve_both_whole_document_updates() {
-        // Spawning the test binary inherits the process environment. Keep it
-        // from racing tests that temporarily redirect NAC_HOME or MCP config.
-        let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
-        let path = temp_config();
-        let executable = std::env::current_exe().unwrap();
-        let spawn = |name: &str| {
-            std::process::Command::new(&executable)
-                .args([
-                    "--exact",
-                    "mcp::file_config::tests::mcp_config_process_helper",
-                    "--nocapture",
-                ])
-                .env("NAC_TEST_MCP_CONFIG_PATH", &path)
-                .env("NAC_TEST_MCP_CONFIG_NAME", name)
-                .spawn()
-                .unwrap()
-        };
-        let mut first = spawn("first");
-        let mut second = spawn("second");
-        assert!(first.wait().unwrap().success());
-        assert!(second.wait().unwrap().success());
-        let names = list_mcp_server_configurations(&path)
-            .unwrap()
-            .into_iter()
-            .map(|record| record.name)
-            .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(names, ["first".to_string(), "second".to_string()].into());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn saved_entries_parse_as_registry_config_and_the_rest_of_the_file_survives() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &path,
-            "# hand-written\nmodel = \"gpt\"\n\n[mcp_servers.existing]\ntransport = \"stdio\"\ncommand = \"npx\" # keep me\n",
-        )
-        .unwrap();
-
-        let stdio = McpServerConfigurationRecord {
-            name: "local".to_string(),
-            enabled: false,
-            transport: MCP_TRANSPORT_STDIO.to_string(),
-            command: Some("npx".to_string()),
-            args: vec!["-y".to_string(), "some-mcp".to_string()],
-            env: BTreeMap::from([("TOKEN".to_string(), "${TOKEN}".to_string())]),
-            url: None,
-            headers: BTreeMap::new(),
-            library_id: None,
-        };
-        insert_mcp_server_configuration(&path, stdio).unwrap();
-        insert_mcp_server_configuration(&path, http_server("example")).unwrap();
-
-        let raw = std::fs::read_to_string(&path).unwrap();
-        assert!(raw.contains("# hand-written"));
-        assert!(raw.contains("model = \"gpt\""));
-        assert!(raw.contains("# keep me"));
-
-        // The connect path parses the same file with the strict typed config.
-        let parsed: super::config::McpConfigFile = toml::from_str(&raw).unwrap();
-        assert_eq!(parsed.mcp_servers.len(), 3);
-        let local = &parsed.mcp_servers["local"];
-        assert!(!local.enabled);
-        assert!(matches!(
-            &local.transport,
-            McpTransportConfig::Stdio { command, args, env }
-                if command == "npx" && args.len() == 2 && env["TOKEN"] == "${TOKEN}"
-        ));
-        let example = &parsed.mcp_servers["example"];
-        assert!(matches!(
-            &example.transport,
-            McpTransportConfig::StreamableHttp { url, headers }
-                if url == "https://mcp.example.com/mcp"
-                    && headers["Authorization"] == "Bearer secret-token"
-        ));
-
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn an_inline_mcp_servers_table_survives_a_save() {
-        let path = temp_config();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &path,
-            "mcp_servers = { existing = { transport = \"stdio\", command = \"npx\" } }\n",
-        )
-        .unwrap();
-
-        insert_mcp_server_configuration(&path, http_server("example")).unwrap();
-
-        let names: Vec<String> = list_mcp_server_configurations(&path)
-            .unwrap()
-            .into_iter()
-            .map(|record| record.name)
-            .collect();
-        assert_eq!(names, vec!["existing".to_string(), "example".to_string()]);
-
-        std::fs::write(&path, "mcp_servers = \"not a table\"\n").unwrap();
-        assert!(matches!(
-            insert_mcp_server_configuration(&path, http_server("example")).unwrap_err(),
-            McpServerConfigurationStoreError::InvalidInput(_)
-        ));
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn duplicate_names_are_rejected() {
-        let path = temp_config();
-
-        insert_mcp_server_configuration(&path, http_server("example")).unwrap();
-        assert!(matches!(
-            insert_mcp_server_configuration(&path, http_server("example")).unwrap_err(),
-            McpServerConfigurationStoreError::DuplicateName(_)
-        ));
-
-        insert_mcp_server_configuration(&path, http_server("other")).unwrap();
-        assert!(matches!(
-            update_mcp_server_configuration(&path, "other", http_server("example")).unwrap_err(),
-            McpServerConfigurationStoreError::DuplicateName(_)
-        ));
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn transport_fields_are_validated() {
-        let path = temp_config();
-
-        let mut missing_url = http_server("bad");
-        missing_url.url = None;
-        assert!(matches!(
-            insert_mcp_server_configuration(&path, missing_url).unwrap_err(),
-            McpServerConfigurationStoreError::InvalidInput(_)
-        ));
-
-        let mut bad_transport = http_server("bad");
-        bad_transport.transport = "websocket".to_string();
-        assert!(matches!(
-            insert_mcp_server_configuration(&path, bad_transport).unwrap_err(),
-            McpServerConfigurationStoreError::InvalidInput(_)
-        ));
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn missing_entries_report_not_found() {
-        let path = temp_config();
-        assert!(matches!(
-            load_mcp_server_configuration(&path, "ghost").unwrap_err(),
-            McpServerConfigurationStoreError::NotFound(_)
-        ));
-        assert!(matches!(
-            update_mcp_server_configuration(&path, "ghost", http_server("ghost")).unwrap_err(),
-            McpServerConfigurationStoreError::NotFound(_)
-        ));
-        assert!(!delete_mcp_server_configuration(&path, "ghost").unwrap());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-}
+#[cfg(test)]
+mod tests;

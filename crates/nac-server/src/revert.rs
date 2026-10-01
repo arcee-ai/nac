@@ -301,6 +301,12 @@ impl SessionManager {
                     frontend_command_name(command)
                 )))
             }
+            PreparedUserInput::McpPrompt(invocation) => service
+                .resolve_mcp_prompt(invocation)
+                .await
+                .map_err(|error| {
+                    report_regenerate_failure(session_id, "resolve MCP prompt", &error)
+                })?,
         };
 
         service

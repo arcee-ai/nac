@@ -1,5 +1,13 @@
 use super::*;
 
+fn combine_system_guidance(primary: Option<String>, secondary: Option<String>) -> Option<String> {
+    match (primary, secondary) {
+        (Some(primary), Some(secondary)) => Some(format!("{primary}\n\n{secondary}")),
+        (Some(message), None) | (None, Some(message)) => Some(message),
+        (None, None) => None,
+    }
+}
+
 pub async fn build_run_config(
     options: RunOptions,
     config: &NacConfig,
@@ -111,6 +119,26 @@ async fn build_run_config_inner(
         let workspace_git = GitTarget::ssh(connection.clone(), remote_cwd.clone(), &config_cwd);
         let session_id = Uuid::new_v4().to_string();
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
+        let mcp = if agent_mode == AgentMode::Direct {
+            McpRegistry::load_reporting_skips(
+                &options.workspace_cwd,
+                None,
+                &config_paths,
+                McpTransportPolicy::StreamableHttpOnly,
+                McpRootPolicy::None,
+            )
+            .await?
+            .registry
+        } else {
+            None
+        };
+        let extra_tool_defs = mcp
+            .as_ref()
+            .map(|registry| registry.model_tool_definitions())
+            .unwrap_or_default();
+        let agents_md_message = mcp
+            .as_ref()
+            .and_then(|registry| registry.instructions_message());
         let agent = Agent::with_config(
             client.clone(),
             AgentConfig {
@@ -130,10 +158,10 @@ async fn build_run_config_inner(
                 worker_executable: options.worker_executable,
                 sandbox: None,
                 ssh: Some(connection.clone()),
-                mcp: None,
+                mcp,
                 skills,
-                extra_tool_defs: Vec::new(),
-                agents_md_message: None,
+                extra_tool_defs,
+                agents_md_message,
                 thread_timeout_secs: worker_thread_timeout_secs(config),
                 light_client: light_client.clone(),
                 permission_rules: config.permissions.rules.clone(),
@@ -191,6 +219,32 @@ async fn build_run_config_inner(
             .as_ref()
             .and_then(|session| session.spec().worktree.clone()),
     );
+    let mcp = if agent_mode == AgentMode::Direct {
+        match McpRegistry::load_reporting_skips(
+            &workspace_cwd,
+            sandbox.as_ref(),
+            &paths,
+            McpTransportPolicy::All,
+            McpRootPolicy::Workspace,
+        )
+        .await
+        {
+            Ok(outcome) => outcome.registry,
+            Err(error) => {
+                if let Some(sandbox) = sandbox.as_ref() {
+                    sandbox.disable_drop_cleanup();
+                    if let Err(cleanup) = sandbox.destroy().await {
+                        return Err(error.context(format!(
+                            "fresh sandbox MCP setup also failed to roll back its container: {cleanup:#}"
+                        )));
+                    }
+                }
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
     let build_result = (|| -> Result<OrchestratorRunConfig> {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
         let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
@@ -213,8 +267,16 @@ async fn build_run_config_inner(
             .as_ref()
             .map(super::super::sandbox::SandboxSession::status_text)
             .unwrap_or_else(|| "off".to_string());
-        let agents_md_message = agents_md.system_message();
+        let agents_md_message = combine_system_guidance(
+            agents_md.system_message(),
+            mcp.as_ref()
+                .and_then(|registry| registry.instructions_message()),
+        );
         let agents_md_status = agents_md.status_text();
+        let extra_tool_defs = mcp
+            .as_ref()
+            .map(|registry| registry.model_tool_definitions())
+            .unwrap_or_default();
 
         let agent = Agent::with_config(
             client.clone(),
@@ -235,9 +297,9 @@ async fn build_run_config_inner(
                 worker_executable: options.worker_executable,
                 sandbox: sandbox.clone(),
                 ssh: None,
-                mcp: None,
+                mcp: mcp.clone(),
                 skills,
-                extra_tool_defs: Vec::new(),
+                extra_tool_defs,
                 agents_md_message,
                 thread_timeout_secs: worker_thread_timeout_secs(config),
                 light_client: light_client.clone(),
@@ -378,8 +440,13 @@ pub async fn build_managed_worker_config(
         .unwrap_or_else(|| directory_display(&workspace_cwd));
     let extra_tool_defs = mcp
         .as_ref()
-        .map(|registry| registry.tool_definitions())
+        .map(|registry| registry.model_tool_definitions())
         .unwrap_or_default();
+    let agents_md_message = combine_system_guidance(
+        agents_md_message,
+        mcp.as_ref()
+            .and_then(|registry| registry.instructions_message()),
+    );
 
     let worker_context = store::load_worker_context(
         &store_path,

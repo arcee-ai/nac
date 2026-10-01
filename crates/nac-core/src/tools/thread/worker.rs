@@ -99,6 +99,7 @@ impl WorkerTimeoutTrace {
             AgentEvent::Error { .. }
             | AgentEvent::ModelError { .. }
             | AgentEvent::McpServerSkipped { .. }
+            | AgentEvent::McpNotification { .. }
             | AgentEvent::TokenUsageUpdated { .. }
             | AgentEvent::ThreadLog { .. }
             | AgentEvent::ThreadSteeringQueued { .. }

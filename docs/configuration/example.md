@@ -53,16 +53,49 @@ thread_timeout_secs = 3600
 command_output_max_bytes = 8388608           # per command/PTY; 1..=1 GiB; default 8 MiB
 command_output_session_max_bytes = 67108864  # per dispatch; >= per-command, <= 4 GiB; default 64 MiB
 
+# Global MCP budgets apply when a server does not override one. Values are
+# milliseconds and must be between 100 and 600000.
+[mcp]
+startup_timeout_ms = 15000
+catalog_timeout_ms = 15000
+execution_timeout_ms = 300000
+
 # Table key is the local server name. Transports: streamable_http (url, optional
-# headers) and stdio (command, args, env). enabled defaults to true. String
-# values (command, args, env values, url, header values) expand ${ENV_VAR};
+# headers) and stdio (command, args, env).
+# enabled defaults to true; required defaults to false. A required enabled
+# server rejects session admission when startup or catalog discovery fails.
+# protocol defaults to "legacy" (2025-11-25 initialize). "auto" attempts
+# 2026-07-28 stateless discovery with safe legacy fallback, while "current"
+# requires 2026-07-28 and never falls back.
+# String values (command, args, env values, url, header values) expand ${ENV_VAR};
 # the variable must be set. library_id is dashboard bookkeeping and is ignored
-# at connect.
+# at connect. Advertised server instructions are included as bounded, attributed,
+# untrusted guidance. Tools remain namespaced as mcp__<server>__<tool>. Resources,
+# resource templates, prompts, and prompt-argument completion use NAC's shared
+# MCP capability tools; exact resource reads still pass through permission policy.
+# Advertised prompts also appear as session slash commands and accept a JSON
+# object of string arguments, for example: /mcp__docs__review {"tone":"strict"}.
+# allowed_tools is an optional exact-name allowlist (an empty list
+# exposes no tools); denied_tools is an exact-name denylist and always wins.
+# approval defaults to "ask". tool_approvals applies exact-name "allow" or
+# "ask" overrides. Risk annotations from a server may tighten "allow" to
+# "ask", but annotations can never grant access.
 [mcp_servers.exa_web_search]
 enabled = true
+required = false
+protocol = "auto"
 transport = "streamable_http"
 url = "https://mcp.exa.ai/mcp"
+# allowed_tools = ["web_search_exa"]
+# denied_tools = []
+# approval = "ask"
+# tool_approvals = { web_search_exa = "allow" }
 # headers = { "x-api-key" = "${EXA_API_KEY}" }
+# env_headers = { "x-api-key" = "EXA_API_KEY" }
+# bearer_token_env_var = "EXA_BEARER_TOKEN"
+# A bounded helper prints one JSON object of headers. Its output is used only
+# with the configured URL and is refreshed once after an HTTP auth challenge.
+# header_helper = { command = "./refresh-headers", args = ["--json"], env_vars = ["TOKEN"], timeout_ms = 5000 }
 
 [mcp_servers.context7]
 enabled = true
@@ -80,5 +113,10 @@ url = "https://mcp.grep.app"
 # command = "npx"
 # args = ["-y", "some-mcp-server"]
 # env = { "API_TOKEN" = "${API_TOKEN}" }
+# env_vars = ["HTTPS_PROXY"]
+# cwd = "packages/mcp-server"
+# startup_timeout_ms = 10000
+# catalog_timeout_ms = 10000
+# execution_timeout_ms = 120000
 
 ```

@@ -20,6 +20,8 @@ export function shortId(id: string | null | undefined): string {
 export const INVOKED_SKILLS_OPEN = "<invoked_skills>";
 export const INVOKED_SKILLS_CLOSE = "</invoked_skills>";
 export const INVOKED_SKILLS_SEPARATOR = "\n\n<invoked_skills>\n";
+export const INVOKED_MCP_PROMPT_SEPARATOR = "\n\n<invoked_mcp_prompt>\n";
+export const INVOKED_MCP_PROMPT_CLOSE = "\n</invoked_mcp_prompt>";
 const SKILL_CONTENT_OPEN = '<skill_content name="';
 const SKILL_CONTENT_CLOSE = "</skill_content>";
 
@@ -93,6 +95,23 @@ function invokedSkillsDisplayPrompt(text: string): string | null {
   return expansion ? expansion.head : null;
 }
 
+function invokedMcpPromptDisplayPrompt(text: string): string | null {
+  if (!text.endsWith(INVOKED_MCP_PROMPT_CLOSE)) return null;
+  const tail = text.slice(0, -INVOKED_MCP_PROMPT_CLOSE.length);
+  const separator = tail.lastIndexOf(INVOKED_MCP_PROMPT_SEPARATOR);
+  if (separator === -1) return null;
+  try {
+    const payload = JSON.parse(tail.slice(separator + INVOKED_MCP_PROMPT_SEPARATOR.length)) as {
+      trust?: unknown;
+    };
+    return payload != null && payload.trust === "untrusted_remote_prompt_data"
+      ? tail.slice(0, separator)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Names of the skills expanded into a stored user message, in block order —
  * null when the message is not a well-formed `$skillname` expansion. Parsed
@@ -114,6 +133,8 @@ export function displayPromptFromMessageText(content: string | null | undefined)
   const text = String(content ?? "");
   const collapsed = invokedSkillsDisplayPrompt(text);
   if (collapsed != null) return collapsed;
+  const mcpPrompt = invokedMcpPromptDisplayPrompt(text);
+  if (mcpPrompt != null) return mcpPrompt;
   const normalized = text.replaceAll("\r\n", "\n");
   if (
     normalized.startsWith('<nac_goal_continuation goal_id="') &&

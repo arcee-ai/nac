@@ -203,6 +203,7 @@ impl super::Agent {
         compaction_id: Uuid,
         event_sink: EventSink,
     ) -> CompactionCompletion {
+        self.refresh_compaction_tool_definitions();
         let Some(compaction) = self.compaction.as_mut() else {
             return Err(CompactionError::Unavailable);
         };

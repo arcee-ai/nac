@@ -1,23 +1,23 @@
 //! HTTP surface for the MCP library and the servers in `config.toml`.
 //!
 //! Servers live in the same `config.toml` a session parses when a worker
-//! launches, keyed by name; a save is visible to the next run with no reload
-//! step. Secret handling mirrors the credential endpoints: header and env
+//! launches, keyed by name; a save is visible to the next worker launch, and
+//! the process-local operational connection can be explicitly reloaded. Secret
+//! handling mirrors the credential endpoints: header and env
 //! values are write-only. A response only ever carries a `${ENV_VAR}`
 //! reference verbatim or a masked preview of a literal, and an update request
 //! may send null for a value to keep what is stored.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 
 use axum::extract::{rejection::JsonRejection, Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::Json;
 use nac_core::mcp_configurations::{
-    self as mcp, McpProbedTool, McpServerConfig, McpServerConfigurationRecord,
-    McpServerConfigurationStoreError, McpTransportConfig, MCP_TRANSPORT_STDIO,
-    MCP_TRANSPORT_STREAMABLE_HTTP,
+    self as mcp, McpHeaderHelperConfig, McpProbeResult, McpProbedTool, McpProtocolSelection,
+    McpServerConfig, McpServerConfigurationRecord, McpServerConfigurationStoreError,
+    McpToolApproval, McpTransportConfig, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
 };
 use serde::{Deserialize, Serialize};
 
@@ -45,14 +45,28 @@ pub struct McpLibraryResponse {
 pub struct McpServerView {
     pub name: String,
     pub enabled: bool,
+    pub required: bool,
+    pub startup_timeout_ms: Option<u64>,
+    pub catalog_timeout_ms: Option<u64>,
+    pub execution_timeout_ms: Option<u64>,
+    pub protocol: McpProtocolSelection,
     #[schema(value_type = McpTransportSchema)]
     pub transport: String,
     pub command: Option<String>,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+    pub env_vars: Vec<String>,
+    pub cwd: Option<String>,
     pub url: Option<String>,
     pub headers: BTreeMap<String, String>,
+    pub env_headers: BTreeMap<String, String>,
+    pub bearer_token_env_var: Option<String>,
+    pub header_helper: Option<McpHeaderHelperConfig>,
     pub library_id: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+    pub denied_tools: Vec<String>,
+    pub approval: McpToolApproval,
+    pub tool_approvals: BTreeMap<String, McpToolApproval>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -65,6 +79,13 @@ pub struct CreateMcpServerRequest {
     pub name: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default)]
+    pub required: bool,
+    pub startup_timeout_ms: Option<u64>,
+    pub catalog_timeout_ms: Option<u64>,
+    pub execution_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub protocol: McpProtocolSelection,
     #[schema(value_type = McpTransportSchema)]
     pub transport: String,
     pub command: Option<String>,
@@ -73,11 +94,26 @@ pub struct CreateMcpServerRequest {
     #[serde(default)]
     #[schema(write_only, example = json!({"TOKEN": "fake-token"}))]
     pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub env_vars: Vec<String>,
+    pub cwd: Option<String>,
     pub url: Option<String>,
     #[serde(default)]
     #[schema(write_only, example = json!({"Authorization": "Bearer fake-token"}))]
     pub headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub env_headers: BTreeMap<String, String>,
+    pub bearer_token_env_var: Option<String>,
+    pub header_helper: Option<McpHeaderHelperConfig>,
     pub library_id: Option<String>,
+    #[serde(default)]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub denied_tools: Vec<String>,
+    #[serde(default)]
+    pub approval: McpToolApproval,
+    #[serde(default)]
+    pub tool_approvals: BTreeMap<String, McpToolApproval>,
 }
 
 fn default_enabled() -> bool {
@@ -97,6 +133,16 @@ pub struct UpdateMcpServerRequest {
     #[serde(default)]
     pub enabled: RequestField<bool>,
     #[serde(default)]
+    pub required: RequestField<bool>,
+    #[serde(default)]
+    pub startup_timeout_ms: RequestField<u64>,
+    #[serde(default)]
+    pub catalog_timeout_ms: RequestField<u64>,
+    #[serde(default)]
+    pub execution_timeout_ms: RequestField<u64>,
+    #[serde(default)]
+    pub protocol: RequestField<McpProtocolSelection>,
+    #[serde(default)]
     pub transport: RequestField<String>,
     #[serde(default)]
     pub command: RequestField<String>,
@@ -106,12 +152,44 @@ pub struct UpdateMcpServerRequest {
     #[schema(write_only, example = json!({"TOKEN": "fake-replacement-token"}))]
     pub env: RequestField<BTreeMap<String, Option<String>>>,
     #[serde(default)]
+    pub env_vars: RequestField<Vec<String>>,
+    #[serde(default)]
+    pub cwd: RequestField<String>,
+    #[serde(default)]
     pub url: RequestField<String>,
     #[serde(default)]
     #[schema(write_only, example = json!({"Authorization": "Bearer fake-replacement-token"}))]
     pub headers: RequestField<BTreeMap<String, Option<String>>>,
     #[serde(default)]
+    pub env_headers: RequestField<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub bearer_token_env_var: RequestField<String>,
+    #[serde(default)]
+    pub header_helper: RequestField<UpdateMcpHeaderHelperRequest>,
+    #[serde(default)]
     pub library_id: RequestField<String>,
+    #[serde(default)]
+    pub allowed_tools: RequestField<Vec<String>>,
+    #[serde(default)]
+    pub denied_tools: RequestField<Vec<String>>,
+    #[serde(default)]
+    pub approval: RequestField<McpToolApproval>,
+    #[serde(default)]
+    pub tool_approvals: RequestField<BTreeMap<String, McpToolApproval>>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct UpdateMcpHeaderHelperRequest {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+    #[serde(default)]
+    #[schema(write_only)]
+    pub env: BTreeMap<String, Option<String>>,
+    #[serde(default)]
+    pub env_vars: Vec<String>,
+    pub timeout_ms: Option<u64>,
 }
 
 /// Probes a server before anything is saved. Either names a saved server or
@@ -124,16 +202,29 @@ pub struct TestMcpServerRequest {
     pub transport: Option<String>,
     pub command: Option<String>,
     pub args: Option<Vec<String>>,
+    pub cwd: Option<String>,
+    pub env_vars: Option<Vec<String>>,
     #[schema(write_only, example = json!({"TOKEN": "fake-probe-token"}))]
     pub env: Option<BTreeMap<String, Option<String>>>,
     pub url: Option<String>,
     #[schema(write_only, example = json!({"Authorization": "Bearer fake-probe-token"}))]
     pub headers: Option<BTreeMap<String, Option<String>>>,
+    pub env_headers: Option<BTreeMap<String, String>>,
+    pub bearer_token_env_var: Option<String>,
+    pub header_helper: Option<UpdateMcpHeaderHelperRequest>,
+    pub startup_timeout_ms: Option<u64>,
+    pub catalog_timeout_ms: Option<u64>,
+    pub execution_timeout_ms: Option<u64>,
+    pub protocol: Option<McpProtocolSelection>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct TestMcpServerResponse {
+    pub connected: bool,
+    pub auth_required: bool,
+    pub error: Option<String>,
     pub tools: Vec<McpProbedTool>,
+    pub probe: Option<McpProbeResult>,
 }
 
 /// True when the whole value is one `${ENV_VAR}` reference and nothing else.
@@ -171,16 +262,34 @@ fn redact_map(values: &BTreeMap<String, String>) -> BTreeMap<String, String> {
 }
 
 fn view(record: McpServerConfigurationRecord) -> McpServerView {
+    let mut header_helper = record.header_helper;
+    if let Some(helper) = &mut header_helper {
+        helper.env = redact_map(&helper.env);
+    }
     McpServerView {
         env: redact_map(&record.env),
         headers: redact_map(&record.headers),
         name: record.name,
         enabled: record.enabled,
+        required: record.required,
+        startup_timeout_ms: record.startup_timeout_ms,
+        catalog_timeout_ms: record.catalog_timeout_ms,
+        execution_timeout_ms: record.execution_timeout_ms,
+        protocol: record.protocol,
         transport: record.transport,
         command: record.command,
         args: record.args,
+        env_vars: record.env_vars,
+        cwd: record.cwd,
         url: record.url,
+        env_headers: record.env_headers,
+        bearer_token_env_var: record.bearer_token_env_var,
+        header_helper,
         library_id: record.library_id,
+        allowed_tools: record.allowed_tools,
+        denied_tools: record.denied_tools,
+        approval: record.approval,
+        tool_approvals: record.tool_approvals,
     }
 }
 
@@ -196,6 +305,25 @@ fn config_path(manager: &SessionManager) -> Result<PathBuf, ApiError> {
 /// Serializes config.toml edits: each write rewrites the whole file from a
 /// fresh read, so two concurrent saves must not interleave.
 static CONFIG_WRITE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn optional_update<T>(sent: RequestField<T>, stored: Option<T>) -> Option<T> {
+    match sent {
+        RequestField::Value(value) => Some(value),
+        RequestField::Null => None,
+        RequestField::Omitted => stored,
+    }
+}
+
+fn approval_update(
+    sent: RequestField<McpToolApproval>,
+    stored: McpToolApproval,
+) -> McpToolApproval {
+    match sent {
+        RequestField::Value(approval) => approval,
+        RequestField::Null => McpToolApproval::default(),
+        RequestField::Omitted => stored,
+    }
+}
 
 /// Settles a map edit against the stored map: the sent map replaces the whole
 /// thing, but a null value borrows the stored value for that key.
@@ -224,87 +352,23 @@ fn merge_map(
     Ok(merged)
 }
 
-/// How long a registry answer keeps serving before the next request refetches
-/// it. A failed refetch keeps the previous answer and resets the clock, so an
-/// unreachable registry costs one attempt per interval, never the catalog.
-const LIBRARY_CACHE_TTL: Duration = Duration::from_secs(15 * 60);
-
-static LIBRARY_CACHE: tokio::sync::Mutex<Option<(Instant, Vec<mcp::McpLibraryEntry>)>> =
-    tokio::sync::Mutex::const_new(None);
-
-/// The embedded catalog, extended by verified servers from the Smithery
-/// registry when it answers in time.
-#[utoipa::path(
-    get,
-    path = "/mcp_library/library",
-    operation_id = "get_mcp_library_library",
-    tag = "mcp-library",
-    responses((status = 200, description = "Success", body = McpLibraryResponse, content_type = "application/json"))
-)]
-pub async fn library_handler() -> Json<McpLibraryResponse> {
-    Json(McpLibraryResponse {
-        entries: library_entries().await,
-    })
-}
-
-/// Fills the library cache ahead of the first request, so opening the picker
-/// shows the full catalog immediately instead of waiting on the registry.
-pub async fn warm_library_cache() {
-    let _ = library_entries().await;
-}
-
-/// Serializes refreshes without holding `LIBRARY_CACHE` across the fetch, so
-/// readers keep getting the cached catalog while a refresh is in flight.
-static LIBRARY_REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-async fn library_entries() -> Vec<mcp::McpLibraryEntry> {
-    if let Some((fetched_at, entries)) = LIBRARY_CACHE.lock().await.as_ref() {
-        if fetched_at.elapsed() < LIBRARY_CACHE_TTL {
-            return entries.clone();
-        }
-        // An expired catalog still answers this request; the refresh runs in
-        // the background for a later one. The task carries the guard, so a
-        // second expired read cannot schedule another.
-        if let Ok(refresh) = LIBRARY_REFRESH.try_lock() {
-            tokio::spawn(async move {
-                refresh_library_cache(refresh).await;
-            });
-        }
-        return entries.clone();
+fn require_stored_http_origin(
+    borrowed: bool,
+    stored: Option<&McpServerConfigurationRecord>,
+    url: &str,
+) -> Result<(), ApiError> {
+    if !borrowed {
+        return Ok(());
     }
-    let refresh = LIBRARY_REFRESH.lock().await;
-    refresh_library_cache(refresh).await
-}
-
-async fn refresh_library_cache(
-    _refresh: tokio::sync::MutexGuard<'static, ()>,
-) -> Vec<mcp::McpLibraryEntry> {
-    if let Some((fetched_at, entries)) = LIBRARY_CACHE.lock().await.as_ref() {
-        if fetched_at.elapsed() < LIBRARY_CACHE_TTL {
-            return entries.clone();
-        }
+    let record = stored.ok_or_else(|| {
+        ApiError::bad_request("borrowed HTTP credentials require a stored server".to_string())
+    })?;
+    if record.transport != MCP_TRANSPORT_STREAMABLE_HTTP || record.url.as_deref() != Some(url) {
+        return Err(ApiError::bad_request(
+            "stored HTTP credentials can only be tested against the stored URL".to_string(),
+        ));
     }
-    let entries = match mcp::fetch_smithery_library_entries().await {
-        Ok(remote) => mcp::merge_library_entries(remote),
-        Err(error) => {
-            eprintln!("MCP library registry fetch failed: {error:#}");
-            // The catalog is renewed in place so no reader sees it missing.
-            let mut cache = LIBRARY_CACHE.lock().await;
-            return match cache.as_mut() {
-                Some((fetched_at, stale)) => {
-                    *fetched_at = Instant::now();
-                    stale.clone()
-                }
-                None => {
-                    let embedded = mcp::embedded_library_entries();
-                    *cache = Some((Instant::now(), embedded.clone()));
-                    embedded
-                }
-            };
-        }
-    };
-    *LIBRARY_CACHE.lock().await = Some((Instant::now(), entries.clone()));
-    entries
+    Ok(())
 }
 
 #[utoipa::path(
@@ -340,13 +404,27 @@ pub async fn create_server_handler(
     let configuration = McpServerConfigurationRecord {
         name: request.name,
         enabled: request.enabled,
+        required: request.required,
+        startup_timeout_ms: request.startup_timeout_ms,
+        catalog_timeout_ms: request.catalog_timeout_ms,
+        execution_timeout_ms: request.execution_timeout_ms,
+        protocol: request.protocol,
         transport: request.transport,
         command: request.command,
         args: request.args,
         env: request.env,
+        env_vars: request.env_vars,
+        cwd: request.cwd,
         url: request.url,
         headers: request.headers,
+        env_headers: request.env_headers,
+        bearer_token_env_var: request.bearer_token_env_var,
+        header_helper: request.header_helper,
         library_id: request.library_id,
+        allowed_tools: request.allowed_tools,
+        denied_tools: request.denied_tools,
+        approval: request.approval,
+        tool_approvals: request.tool_approvals,
     };
     let _write = CONFIG_WRITE.lock().await;
     let path = config_path(&manager)?;
@@ -384,6 +462,26 @@ pub async fn update_server_handler(
             RequestField::Value(enabled) => enabled,
             RequestField::Null | RequestField::Omitted => existing.enabled,
         },
+        required: match request.required {
+            RequestField::Value(required) => required,
+            RequestField::Null | RequestField::Omitted => existing.required,
+        },
+        startup_timeout_ms: optional_update(
+            request.startup_timeout_ms,
+            existing.startup_timeout_ms,
+        ),
+        catalog_timeout_ms: optional_update(
+            request.catalog_timeout_ms,
+            existing.catalog_timeout_ms,
+        ),
+        execution_timeout_ms: optional_update(
+            request.execution_timeout_ms,
+            existing.execution_timeout_ms,
+        ),
+        protocol: match request.protocol {
+            RequestField::Value(protocol) => protocol,
+            RequestField::Null | RequestField::Omitted => existing.protocol,
+        },
         transport: match request.transport {
             RequestField::Value(transport) => transport,
             RequestField::Null | RequestField::Omitted => existing.transport.clone(),
@@ -403,6 +501,12 @@ pub async fn update_server_handler(
             RequestField::Null => BTreeMap::new(),
             RequestField::Omitted => existing.env.clone(),
         },
+        env_vars: match request.env_vars {
+            RequestField::Value(values) => values,
+            RequestField::Null => Vec::new(),
+            RequestField::Omitted => existing.env_vars.clone(),
+        },
+        cwd: optional_update(request.cwd, existing.cwd.clone()),
         url: match request.url {
             RequestField::Value(url) => Some(url),
             RequestField::Null => None,
@@ -413,10 +517,66 @@ pub async fn update_server_handler(
             RequestField::Null => BTreeMap::new(),
             RequestField::Omitted => existing.headers.clone(),
         },
+        env_headers: match request.env_headers {
+            RequestField::Value(values) => values,
+            RequestField::Null => BTreeMap::new(),
+            RequestField::Omitted => existing.env_headers.clone(),
+        },
+        bearer_token_env_var: optional_update(
+            request.bearer_token_env_var,
+            existing.bearer_token_env_var.clone(),
+        ),
+        header_helper: match request.header_helper {
+            RequestField::Value(helper) => {
+                let stored = existing.header_helper.as_ref();
+                let borrowed = helper.env.values().any(Option::is_none);
+                if borrowed
+                    && !stored.is_some_and(|stored| {
+                        stored.command == helper.command
+                            && stored.args == helper.args
+                            && stored.cwd == helper.cwd
+                    })
+                {
+                    return Err(ApiError::bad_request(
+                        "stored header-helper environment values can only be kept for the stored helper command"
+                            .to_string(),
+                    ));
+                }
+                Some(McpHeaderHelperConfig {
+                    command: helper.command,
+                    args: helper.args,
+                    cwd: helper.cwd,
+                    env: merge_map(
+                        helper.env,
+                        stored.map(|stored| &stored.env).unwrap_or(&BTreeMap::new()),
+                    )?,
+                    env_vars: helper.env_vars,
+                    timeout_ms: helper.timeout_ms,
+                })
+            }
+            RequestField::Null => None,
+            RequestField::Omitted => existing.header_helper.clone(),
+        },
         library_id: match request.library_id {
             RequestField::Value(id) => Some(id),
             RequestField::Null => None,
             RequestField::Omitted => existing.library_id,
+        },
+        allowed_tools: match request.allowed_tools {
+            RequestField::Value(tools) => Some(tools),
+            RequestField::Null => None,
+            RequestField::Omitted => existing.allowed_tools,
+        },
+        denied_tools: match request.denied_tools {
+            RequestField::Value(tools) => tools,
+            RequestField::Null => Vec::new(),
+            RequestField::Omitted => existing.denied_tools,
+        },
+        approval: approval_update(request.approval, existing.approval),
+        tool_approvals: match request.tool_approvals {
+            RequestField::Value(approvals) => approvals,
+            RequestField::Null => BTreeMap::new(),
+            RequestField::Omitted => existing.tool_approvals,
         },
     };
 
@@ -426,6 +586,7 @@ pub async fn update_server_handler(
         configuration,
         revision,
     )?;
+    manager.mcp_runtime().forget(&server_name).await;
     Ok(Json(view(record)))
 }
 
@@ -447,6 +608,7 @@ pub async fn delete_server_handler(
     if !mcp::delete_mcp_server_configuration(&path, &server_name)? {
         return Err(McpServerConfigurationStoreError::NotFound(server_name).into());
     }
+    manager.mcp_runtime().forget(&server_name).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -484,6 +646,21 @@ pub async fn test_server_handler(
     let stored_env = stored.as_ref().map(|record| &record.env);
     let stored_headers = stored.as_ref().map(|record| &record.headers);
     let empty = BTreeMap::new();
+    let startup_timeout_ms = request
+        .startup_timeout_ms
+        .or_else(|| stored.as_ref().and_then(|record| record.startup_timeout_ms));
+    let catalog_timeout_ms = request
+        .catalog_timeout_ms
+        .or_else(|| stored.as_ref().and_then(|record| record.catalog_timeout_ms));
+    let execution_timeout_ms = request.execution_timeout_ms.or_else(|| {
+        stored
+            .as_ref()
+            .and_then(|record| record.execution_timeout_ms)
+    });
+    let protocol = request
+        .protocol
+        .or_else(|| stored.as_ref().map(|record| record.protocol))
+        .unwrap_or_default();
 
     let config = match transport.as_str() {
         MCP_TRANSPORT_STDIO => {
@@ -496,6 +673,20 @@ pub async fn test_server_handler(
                 .args
                 .or_else(|| stored.as_ref().map(|record| record.args.clone()))
                 .unwrap_or_default();
+            let cwd = request
+                .cwd
+                .or_else(|| stored.as_ref().and_then(|record| record.cwd.clone()));
+            let (env_vars, borrowed_env_vars) = match request.env_vars {
+                Some(values) => (values, false),
+                None => {
+                    let values = stored
+                        .as_ref()
+                        .map(|record| record.env_vars.clone())
+                        .unwrap_or_default();
+                    let borrowed = !values.is_empty();
+                    (values, borrowed)
+                }
+            };
             let (env, borrowed) = match request.env {
                 Some(env) => {
                     let borrowed = env.values().any(Option::is_none);
@@ -509,7 +700,7 @@ pub async fn test_server_handler(
             };
             // Borrowed secrets end up in the spawned process's environment,
             // so they may only run the command they were stored for.
-            if borrowed {
+            if borrowed || borrowed_env_vars {
                 let record = stored.as_ref().ok_or_else(|| {
                     ApiError::bad_request(
                         "borrowed environment values require a stored server".to_string(),
@@ -518,16 +709,33 @@ pub async fn test_server_handler(
                 if record.transport != MCP_TRANSPORT_STDIO
                     || record.command.as_deref() != Some(command.as_str())
                     || record.args != args
+                    || record.cwd != cwd
                 {
                     return Err(ApiError::bad_request(
-                        "stored env values can only be tested with the stored command".to_string(),
+                        "stored environment credentials can only be tested with the stored command"
+                            .to_string(),
                     ));
                 }
             }
             McpServerConfig {
                 enabled: true,
                 library_id: None,
-                transport: McpTransportConfig::Stdio { command, args, env },
+                required: false,
+                startup_timeout_ms,
+                catalog_timeout_ms,
+                execution_timeout_ms,
+                protocol,
+                allowed_tools: None,
+                denied_tools: Vec::new(),
+                approval: McpToolApproval::Ask,
+                tool_approvals: BTreeMap::new(),
+                transport: McpTransportConfig::Stdio {
+                    command,
+                    args,
+                    env,
+                    env_vars,
+                    cwd,
+                },
             }
         }
         MCP_TRANSPORT_STREAMABLE_HTTP => {
@@ -536,7 +744,7 @@ pub async fn test_server_handler(
                 .or_else(|| stored.as_ref().and_then(|record| record.url.clone()))
                 .filter(|url| !url.trim().is_empty())
                 .ok_or_else(|| ApiError::bad_request("a url is required".to_string()))?;
-            let (headers, borrowed) = match request.headers {
+            let (headers, borrowed_headers) = match request.headers {
                 Some(headers) => {
                     let borrowed = headers.values().any(Option::is_none);
                     (
@@ -550,27 +758,92 @@ pub async fn test_server_handler(
                     (headers, borrowed)
                 }
             };
-            // Borrowed secrets are sent with the request, so they may only
-            // travel to the URL they were stored for.
-            if borrowed {
-                let record = stored.as_ref().ok_or_else(|| {
-                    ApiError::bad_request(
-                        "borrowed header values require a stored server".to_string(),
-                    )
-                })?;
-                if record.transport != MCP_TRANSPORT_STREAMABLE_HTTP
-                    || record.url.as_deref() != Some(url.as_str())
-                {
-                    return Err(ApiError::bad_request(
-                        "stored header values can only be tested against the stored URL"
-                            .to_string(),
-                    ));
+            let (env_headers, borrowed_env_headers) = match request.env_headers {
+                Some(values) => (values, false),
+                None => {
+                    let values = stored
+                        .as_ref()
+                        .map(|record| record.env_headers.clone())
+                        .unwrap_or_default();
+                    let borrowed = !values.is_empty();
+                    (values, borrowed)
                 }
-            }
+            };
+            let (bearer_token_env_var, borrowed_bearer) = match request.bearer_token_env_var {
+                Some(variable) => (Some(variable), false),
+                None => {
+                    let variable = stored
+                        .as_ref()
+                        .and_then(|record| record.bearer_token_env_var.clone());
+                    let borrowed = variable.is_some();
+                    (variable, borrowed)
+                }
+            };
+            let stored_helper = stored
+                .as_ref()
+                .and_then(|record| record.header_helper.as_ref());
+            let (header_helper, borrowed_helper) = match request.header_helper {
+                Some(helper) => {
+                    let borrowed = helper.env.values().any(Option::is_none);
+                    if borrowed
+                        && !stored_helper.is_some_and(|stored| {
+                            stored.command == helper.command
+                                && stored.args == helper.args
+                                && stored.cwd == helper.cwd
+                        })
+                    {
+                        return Err(ApiError::bad_request(
+                            "stored header-helper environment values can only be tested with the stored helper command"
+                                .to_string(),
+                        ));
+                    }
+                    let env = merge_map(
+                        helper.env,
+                        stored_helper
+                            .map(|stored| &stored.env)
+                            .unwrap_or(&BTreeMap::new()),
+                    )?;
+                    (
+                        Some(McpHeaderHelperConfig {
+                            command: helper.command,
+                            args: helper.args,
+                            cwd: helper.cwd,
+                            env,
+                            env_vars: helper.env_vars,
+                            timeout_ms: helper.timeout_ms,
+                        }),
+                        borrowed,
+                    )
+                }
+                None => (stored_helper.cloned(), stored_helper.is_some()),
+            };
+            // Borrowed secrets and secret-producing helpers may only be used
+            // against the exact URL they were stored for. A caller can still
+            // explicitly supply new credential references for a new draft.
+            require_stored_http_origin(
+                borrowed_headers || borrowed_env_headers || borrowed_bearer || borrowed_helper,
+                stored.as_ref(),
+                &url,
+            )?;
             McpServerConfig {
                 enabled: true,
                 library_id: None,
-                transport: McpTransportConfig::StreamableHttp { url, headers },
+                required: false,
+                startup_timeout_ms,
+                catalog_timeout_ms,
+                execution_timeout_ms,
+                protocol,
+                allowed_tools: None,
+                denied_tools: Vec::new(),
+                approval: McpToolApproval::Ask,
+                tool_approvals: BTreeMap::new(),
+                transport: McpTransportConfig::StreamableHttp {
+                    url,
+                    headers,
+                    env_headers,
+                    bearer_token_env_var,
+                    header_helper,
+                },
             }
         }
         other => {
@@ -581,10 +854,31 @@ pub async fn test_server_handler(
         }
     };
 
-    let tools = mcp::probe_mcp_server(&name, &config, manager.root_cwd())
-        .await
-        .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
-    Ok(Json(TestMcpServerResponse { tools }))
+    let defaults = mcp::load_mcp_defaults(&config_path(&manager)?)?;
+    match mcp::probe_mcp_server(&name, &config, &defaults, manager.root_cwd()).await {
+        Ok(probe) => Ok(Json(TestMcpServerResponse {
+            connected: true,
+            auth_required: false,
+            error: None,
+            tools: probe.tools.clone(),
+            probe: Some(probe),
+        })),
+        Err(error) => {
+            let auth_required = mcp::mcp_error_requires_authorization(&error);
+            let message = if auth_required {
+                "authentication required; refresh the configured credentials and retry".to_string()
+            } else {
+                format!("{error:#}")
+            };
+            Ok(Json(TestMcpServerResponse {
+                connected: false,
+                auth_required,
+                error: Some(message),
+                tools: Vec::new(),
+                probe: None,
+            }))
+        }
+    }
 }
 
 impl From<McpServerConfigurationStoreError> for ApiError {
@@ -602,42 +896,4 @@ impl From<McpServerConfigurationStoreError> for ApiError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn recoverable_publication_conflicts_remain_http_conflicts() {
-        let error: ApiError = McpServerConfigurationStoreError::RecoveryRequired {
-            config: PathBuf::from("/tmp/config.toml"),
-            preserved: PathBuf::from("/tmp/config.toml.saved.tmp"),
-        }
-        .into();
-        assert_eq!(error.status, StatusCode::CONFLICT);
-        assert!(error.message.contains("removes the preserved file"));
-        assert!(error.message.contains("byte-identical"));
-    }
-
-    #[test]
-    fn references_pass_through_and_literals_are_masked() {
-        assert_eq!(redact_value("${GITHUB_TOKEN}"), "${GITHUB_TOKEN}");
-        assert_eq!(redact_value("Bearer ${GITHUB_TOKEN}"), "****");
-        assert_eq!(redact_value("sk-secret${odd"), "****");
-        assert_eq!(redact_value("sk-1234567890abcdef"), "****cdef");
-        assert_eq!(redact_value("short"), "****");
-    }
-
-    #[test]
-    fn merge_map_keeps_stored_values_for_null_entries() {
-        let stored = BTreeMap::from([("Authorization".to_string(), "Bearer real".to_string())]);
-        let sent = BTreeMap::from([
-            ("Authorization".to_string(), None),
-            ("X-Extra".to_string(), Some("literal".to_string())),
-        ]);
-        let merged = merge_map(sent, &stored).unwrap();
-        assert_eq!(merged.get("Authorization").unwrap(), "Bearer real");
-        assert_eq!(merged.get("X-Extra").unwrap(), "literal");
-
-        let missing = BTreeMap::from([("Unknown".to_string(), None)]);
-        assert!(merge_map(missing, &stored).is_err());
-    }
-}
+mod tests;

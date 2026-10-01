@@ -8,7 +8,7 @@ use serde_json::Value;
 use tokio::sync::{Mutex, Notify, RwLock};
 
 use crate::events::EventSink;
-use crate::mcp::McpRegistry;
+use crate::mcp::{McpRegistry, McpToolCapture};
 use crate::sandbox::ExecutionBackend;
 use crate::skills::SkillRegistry;
 use crate::terminal::TerminalManager;
@@ -392,7 +392,12 @@ pub async fn execute_tool_with_context(
             true,
         );
     }
-    if name.starts_with("mcp__") {
+    if name.starts_with("mcp__")
+        || runtime
+            .mcp
+            .as_ref()
+            .is_some_and(|registry| registry.is_capability_tool(name))
+    {
         let Some(registry) = &runtime.mcp else {
             return ToolResult {
                 content: (format!("Error: MCP tool '{name}' is not available")).into(),
@@ -464,6 +469,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         event_sink: EventSink::none(),
         backend,
         mcp: None,
+        mcp_tools: Arc::new(HashMap::new()),
         skills: None,
         terminal_manager: TerminalManager::new(),
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
@@ -471,6 +477,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         light_client: None,
         allowed_tools: None,
         permission_broker: None,
+        permission_rules: Arc::new(Vec::new()),
         goal_runtime: None,
         command_environment: None,
         web_credential: None,

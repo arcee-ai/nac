@@ -114,6 +114,20 @@ export function threadLogLine(event: AgentEvent, seq: number): ThreadLogLine | n
         isError: false,
       };
     }
+    case "mcp_notification": {
+      const failed = event.kind === "catalog_refresh_failed";
+      const mark = failed ? "✕" : "↻";
+      const line = `${mark} MCP ${event.server_name}: ${event.message}`;
+      return {
+        key: `log-${seq}`,
+        text: line,
+        bare: line,
+        mark,
+        name: event.server_name,
+        body: event.message,
+        isError: failed,
+      };
+    }
     default:
       return null;
   }

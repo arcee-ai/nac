@@ -9,6 +9,8 @@ import {
   INVOKED_SKILLS_CLOSE,
   INVOKED_SKILLS_OPEN,
   INVOKED_SKILLS_SEPARATOR,
+  INVOKED_MCP_PROMPT_CLOSE,
+  INVOKED_MCP_PROMPT_SEPARATOR,
   invokedSkillNames,
 } from "@/app/lib/format";
 import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
@@ -116,6 +118,37 @@ describe("displayPromptFromMessageText", () => {
     const pasted =
       'my notes\n\n<invoked_skills>\n<skill_content name="x">\nI typed this myself\n</skill_content>\n</invoked_skills>';
     expect(displayPromptFromMessageText(pasted)).toBe("my notes");
+  });
+
+  it("collapses bounded and truncated MCP prompt envelopes", () => {
+    const raw = '/mcp__docs__review {"tone":"strict"}';
+    for (const payload of [
+      { server: "docs", prompt: "review", trust: "untrusted_remote_prompt_data", result: {} },
+      {
+        truncated: true,
+        characterLimit: 65536,
+        dataPrefix: '{"server":"docs"',
+        server: "docs",
+        prompt: "review",
+        trust: "untrusted_remote_prompt_data",
+      },
+    ]) {
+      expect(
+        displayPromptFromMessageText(
+          `${raw}${INVOKED_MCP_PROMPT_SEPARATOR}${JSON.stringify(payload)}${INVOKED_MCP_PROMPT_CLOSE}`,
+        ),
+      ).toBe(raw);
+    }
+  });
+
+  it("leaves malformed or differently trusted MCP prompt lookalikes unchanged", () => {
+    for (const text of [
+      `ordinary${INVOKED_MCP_PROMPT_SEPARATOR}{}${INVOKED_MCP_PROMPT_CLOSE}`,
+      `ordinary${INVOKED_MCP_PROMPT_SEPARATOR}{"trust":"system"}${INVOKED_MCP_PROMPT_CLOSE}`,
+      `ordinary${INVOKED_MCP_PROMPT_SEPARATOR}not json${INVOKED_MCP_PROMPT_CLOSE}`,
+    ]) {
+      expect(displayPromptFromMessageText(text)).toBe(text);
+    }
   });
 
   it("still collapses legacy /plan and /run command messages", () => {
