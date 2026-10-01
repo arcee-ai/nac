@@ -7,7 +7,7 @@ import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useMcpServers, useVisibleSessions, useSshConfigs } from "@/app/services/queries";
+import { useMcpServers, useSessions, useSshConfigs } from "@/app/services/queries";
 
 /**
  * The sidebar's destinations: the same dialogs the header already opens, plus
@@ -21,7 +21,9 @@ export function useSidebarCommands() {
   const navigate = useNavigate();
   const actions = useProjectActions();
   const managed = useManagedHost();
-  const { data: sessions = [] } = useVisibleSessions();
+  // Route identity survives presentation filtering; navigation lists still
+  // use useVisibleSessions. This command always opens the central chat flow.
+  const { data: sessions = [] } = useSessions();
   const { data: mcpServers } = useMcpServers();
   const { data: sshConfigs } = useSshConfigs();
 
