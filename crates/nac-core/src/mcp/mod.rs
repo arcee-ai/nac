@@ -176,7 +176,7 @@ pub async fn probe_mcp_server(
     } else {
         0
     };
-    let capabilities = capability_names(&peer.capabilities);
+    let capabilities = capabilities::capability_names(&peer.capabilities);
     let result = McpProbeResult {
         protocol_version: peer.protocol_version.to_string(),
         server_name: peer.server_info.as_ref().map(|info| info.name.clone()),
@@ -191,24 +191,6 @@ pub async fn probe_mcp_server(
     };
     close_mcp_service(&mut service).await;
     Ok(result)
-}
-
-fn capability_names(capabilities: &rmcp::model::ServerCapabilities) -> Vec<String> {
-    let mut names = Vec::new();
-    for (present, name) in [
-        (capabilities.tools.is_some(), "tools"),
-        (capabilities.prompts.is_some(), "prompts"),
-        (capabilities.resources.is_some(), "resources"),
-        (capabilities.logging.is_some(), "logging"),
-        (capabilities.completions.is_some(), "completions"),
-        (capabilities.experimental.is_some(), "experimental"),
-        (capabilities.extensions.is_some(), "extensions"),
-    ] {
-        if present {
-            names.push(name.to_string());
-        }
-    }
-    names
 }
 
 pub fn mcp_error_requires_authorization(error: &anyhow::Error) -> bool {

@@ -33,6 +33,24 @@ pub(super) const MAX_PROMPT_ARGUMENTS: usize = 32;
 pub(crate) const INVOKED_MCP_PROMPT_SEPARATOR: &str = "\n\n<invoked_mcp_prompt>\n";
 pub(crate) const INVOKED_MCP_PROMPT_CLOSE: &str = "\n</invoked_mcp_prompt>";
 
+pub(super) fn capability_names(capabilities: &rmcp::model::ServerCapabilities) -> Vec<String> {
+    let mut names = Vec::new();
+    for (present, name) in [
+        (capabilities.tools.is_some(), "tools"),
+        (capabilities.prompts.is_some(), "prompts"),
+        (capabilities.resources.is_some(), "resources"),
+        (capabilities.logging.is_some(), "logging"),
+        (capabilities.completions.is_some(), "completions"),
+        (capabilities.experimental.is_some(), "experimental"),
+        (capabilities.extensions.is_some(), "extensions"),
+    ] {
+        if present {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct McpPromptArgument {
