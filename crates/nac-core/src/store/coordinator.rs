@@ -36,6 +36,7 @@ pub(crate) trait PersistenceCommand: Send + 'static {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistenceAdmissionError {
     Overloaded,
+    CallerOverloaded,
     ShuttingDown,
     ExecutorStopped,
     AsyncContext,
@@ -45,6 +46,7 @@ impl fmt::Display for PersistenceAdmissionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Overloaded => "persistence queue is full; retry after outstanding work settles",
+            Self::CallerOverloaded => "persistence caller capacity is full; retry after outstanding work settles",
             Self::ShuttingDown => "persistence owner is draining; new work is rejected",
             Self::ExecutorStopped => {
                 "persistence executor stopped before acknowledgement; reload durable state"
@@ -122,6 +124,8 @@ store_failure_identity!(
 );
 
 trait QueuedCommand: Send {
+    fn correlation(&self) -> Correlation;
+    fn fail_unexecuted(self: Box<Self>, counters: &Counters);
     fn run(self: Box<Self>, path: &Path, counters: &Counters);
 }
 
@@ -132,6 +136,31 @@ struct Submission<C: PersistenceCommand> {
 }
 
 impl<C: PersistenceCommand> QueuedCommand for Submission<C> {
+    fn correlation(&self) -> Correlation {
+        self.command.correlation()
+    }
+    fn fail_unexecuted(self: Box<Self>, counters: &Counters) {
+        let correlation = self.command.correlation();
+        counters.cancelled.fetch_add(1, Ordering::SeqCst);
+        emit(
+            StoreOperation::QueueCancellation,
+            correlation.clone(),
+            self.admitted,
+            TelemetryOutcome::Dropped,
+        );
+        let ack = Instant::now();
+        let outcome = if self
+            .reply
+            .send(Err(PersistenceAdmissionError::ExecutorStopped.into()))
+            .is_ok()
+        {
+            TelemetryOutcome::Error
+        } else {
+            TelemetryOutcome::Dropped
+        };
+        emit(StoreOperation::QueueAck, correlation, ack, outcome);
+    }
+
     fn run(self: Box<Self>, path: &Path, counters: &Counters) {
         let Submission {
             command,
@@ -216,11 +245,7 @@ impl StoreCoordinator {
     pub fn acquire(path: &Path) -> Result<Arc<Self>> {
         let lease = StoreProcessLease::try_acquire(path)?;
         let path = lease.store_path().to_path_buf();
-        let owner = Arc::new(Self::start(
-            path.clone(),
-            Some(lease),
-            DEFAULT_QUEUE_CAPACITY,
-        )?);
+        let owner = Arc::new(Self::start(path, Some(lease), DEFAULT_QUEUE_CAPACITY)?);
         ownership::register_owner(&owner);
         Ok(owner)
     }
@@ -255,7 +280,33 @@ impl StoreCoordinator {
                     // Admission increments before enqueue while holding the same
                     // mutex. The executor can only observe an admitted entry.
                     execution_counters.queued.fetch_sub(1, Ordering::SeqCst);
-                    command.run(&execution_path, &execution_counters);
+                    let correlation = command.correlation();
+                    let started = Instant::now();
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        command.run(&execution_path, &execution_counters);
+                    }))
+                    .is_err()
+                    {
+                        // A panic may follow COMMIT. Stop execution, report
+                        // uncertainty to that caller, and fail remaining work
+                        // without executing it. Never retry a panicked command.
+                        execution_counters.executing.store(0, Ordering::SeqCst);
+                        execution_counters.completed.fetch_add(1, Ordering::SeqCst);
+                        execution_counters.lost_ack.fetch_add(1, Ordering::SeqCst);
+                        emit(
+                            StoreOperation::QueueExecution,
+                            correlation,
+                            started,
+                            TelemetryOutcome::Error,
+                        );
+                        receiver.close();
+                        while let Some(pending) = receiver.blocking_recv() {
+                            execution_counters.queued.fetch_sub(1, Ordering::SeqCst);
+                            pending.fail_unexecuted(&execution_counters);
+                        }
+                        execution_counters.emit(Correlation::default());
+                        return; // Closing the drain watch reports ExecutorStopped.
+                    }
                 }
                 drop(_lease);
                 let _ = drained_tx.send(true);

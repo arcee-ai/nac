@@ -257,7 +257,17 @@ impl ActiveThreadRegistry {
         let mut steering_error = None;
         if let Some((store_path, session_id)) = steering_store {
             for dispatch_id in &targets {
-                match crate::store::expire_thread_steering(store_path, session_id, dispatch_id) {
+                let expiry = match crate::store::coordinator::owner_for(store_path)? {
+                    Some(owner) => {
+                        owner
+                            .expire_thread_steering(session_id.to_owned(), dispatch_id.clone())
+                            .await
+                    }
+                    None => {
+                        crate::store::expire_thread_steering(store_path, session_id, dispatch_id)
+                    }
+                };
+                match expiry {
                     Ok(records) => expired.extend(records),
                     Err(error) if steering_error.is_none() => steering_error = Some(error),
                     Err(_) => {}

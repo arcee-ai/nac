@@ -39,6 +39,80 @@ construction and retains it across HTTP, MCP, recovery, and background
 services. Delivery handlers and `SessionManager`'s process-local maps do not
 decide store ownership.
 
+### Bounded durable command coordinator
+
+The serving store owner is a `StoreCoordinator` in `nac-core::store`, composed
+by `nac-server::application::persistence`. It retains the canonical store lease
+on one dedicated persistence thread until accepted work drains. One store has
+one executor; a second serving opener is still rejected by the operating-system
+lease. Dropping the application handle cannot release ownership ahead of work
+already accepted by that executor.
+
+Store owners define closed, typed commands beside their existing transactions.
+A command owns its arguments, mutation identity, and correlation metadata.
+The executor receives neither arbitrary SQL nor application callbacks; it
+never acquires agent, event publication, or server cache locks. Commands use the
+admitted canonical path, even if a caller's path alias changes before execution.
+The compatibility bridge routes existing path-based APIs through these same
+commands. Owned raw connection checkout outside the executor fails closed.
+Standalone CLI and offline inspection APIs retain their existing behavior.
+
+Admission is immediate and bounded. The serving queue holds at most 128 waiting
+commands, plus one executing command. Excess work returns a distinct overload
+error before executing. Accepted commands follow global FIFO order, which also
+preserves order within each session; session/run/generation checks remain in
+the original transactions. No permission, engine, or execution-backend decision
+changes at this boundary.
+
+Legacy synchronous application operations have a separate bounded caller
+adapter with 128 process-wide slots. Its tasks wait for typed commands on the
+blocking pool; they do not acquire executor authority. A dropped caller future
+retains its slot until its detached task returns. Excess caller work is rejected
+before spawning a task. Async serving callers await typed ports or this adapter;
+a synchronous command wait on a current-thread runtime is explicitly rejected.
+The multithread runtime's synchronous compatibility bridge yields its worker
+through `block_in_place` while the dedicated executor performs SQLite work.
+
+SQLite retains its finite five-second busy wait and the identified transcript
+append's existing selective retry delays. The coordinator adds no blanket
+retry of a failed transaction. Maintenance/control lease acquisition on the
+executor is non-blocking: the executor must not wait for a holder whose release
+requires another persistence command.
+
+Dropping an async acknowledgement before execution cancels queued work without
+running its transaction. Dropping it after execution begins cannot undo a
+commit. Exact append/dispatch receipts, revision checks, and generation fencing
+remain the basis for replay after uncertain acknowledgement. Queue execution
+success, transaction commit, and acknowledgement delivery are distinct facts.
+An executor panic closes admission and fails queued commands without executing
+them. The executing command has an uncertain acknowledgement and must be
+reconciled from durable state; the coordinator never retries it automatically.
+
+Event publication serializes sequence allocation, persistence, and publication
+through a publication gate. It releases the replay-cache lock while SQLite is
+waiting. Projection reads share the publication gate at their snapshot boundary,
+but execute their typed store query without taking event-cache or agent locks
+on the executor. Read-only run projections use the last published local
+operation snapshot; an admission holding its mutable state remains conservatively
+busy so the service cannot be evicted before its durable preconditions settle.
+These local snapshots do not replace durable ownership or run recovery.
+Publication rejected at caller admission retains an explicit sequence gap so a
+replay cannot silently skip an event whose durable outcome was never accepted.
+
+Shutdown stops local run admission, cancels active runs, drains delivery, and
+waits for already-finishing settlements before closing the persistence queue.
+Queued inbox items and goals remain durable for restart. Closing admission then
+drains accepted commands before releasing the lease. The server's independent
+outer watchdog bounds complete shutdown; a forced process exit relies on the
+existing crash/restart reconciliation contract rather than inventing a rollback.
+
+Bounded diagnostics distinguish caller/queue admission, queue wait, execution,
+SQLite transaction/commit profiling, acknowledgement, retry, cancellation, and
+shutdown. Queue depth/capacity and executor/caller activity are separate gauges.
+Diagnostics export bounded correlation IDs and SQLite error identity, never SQL,
+row contents, credentials, or arbitrary error text. SQL profiling observes phase
+duration; durable receipts and transaction results establish commit success.
+
 ### Session and mutation fencing
 
 The store-owner lease does not replace finer durable invariants. A session
@@ -93,8 +167,9 @@ retain their separate private socket and exact-value redaction.
 
 Workers retain existing store-backed context/steering behavior, but do not
 append completed episodes or initialize schema. This is the narrow ALL-113
-protocol, not the general ALL-116 persistence coordinator. It does not move
-top-level transcript ownership or select an engine.
+protocol. The serving persistence coordinator now executes the host's typed
+admission and completion transactions without changing that protocol or moving
+top-level transcript ownership to workers.
 
 ### Selected backend
 
@@ -142,7 +217,7 @@ ALL-106 incident cause is resolved.
 - Session/run/generation fencing stays required even under single-process store
   ownership because retries, stale in-memory services, and worker commits can
   still race logically.
-- A future engine or coordinator must pass the same ownership, fencing,
+- A future engine must pass the same ownership, fencing,
   restart, backup/restore, and failure-behavior conformance contract.
 
 ## Rejected alternatives

@@ -384,13 +384,15 @@ pub(super) async fn run_worker(
                 if matches!(event, AgentEvent::RunFinished { .. }) {
                     deferred_finish = Some(event);
                 } else {
-                    event_sink.emit(event);
+                    event_sink.emit_async(event).await;
                 }
             } else {
-                event_sink.emit(AgentEvent::ThreadLog {
-                    name: thread_name_for_logs.clone(),
-                    line: line.clone(),
-                });
+                event_sink
+                    .emit_async(AgentEvent::ThreadLog {
+                        name: thread_name_for_logs.clone(),
+                        line: line.clone(),
+                    })
+                    .await;
                 if !output.is_empty() {
                     output.push('\n');
                 }
@@ -590,7 +592,7 @@ pub(super) async fn run_worker(
         let (stdout, protocol_error) = stdout_handle.await.unwrap_or_default();
         if *commit_ack_rx.borrow() {
             if let Some(event) = deferred_finish {
-                runtime.event_sink.emit(event);
+                runtime.event_sink.emit_async(event).await;
             }
         }
         (stderr, worker_usage, protocol_error.or(model_error), stdout)
@@ -686,7 +688,7 @@ async fn commit_completion_frame(
     let mut identity = expected.clone();
     let content = frame.content;
     let commit_cancellation = cancellation.clone();
-    let episode_id = tokio::task::spawn_blocking(move || {
+    let episode_id = crate::store::spawn_blocking_store_caller(move || {
         identity.generation =
             crate::store::worker_dispatch_generation(&path, &identity.dispatch_id)?;
         commit_cancellation

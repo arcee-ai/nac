@@ -203,3 +203,65 @@ fn queue_capacity_fails_closed_before_executor_start() {
         assert!(StoreCoordinator::start(path(), None, capacity).is_err());
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn executor_panic_fails_closed_drains_pending_callers_and_preserves_uncertain_commit() {
+    struct PanicAfterCommit;
+    impl PersistenceCommand for PanicAfterCommit {
+        type Output = ();
+        fn correlation(&self) -> Correlation {
+            Correlation::session(Some("session"))
+        }
+        fn execute(self, path: &Path) -> Result<()> {
+            crate::store::insert_test_session(path, "session");
+            crate::store::create_session_inbox_item(
+                path,
+                "session",
+                crate::store::InboxDelivery::Queue,
+                "committed before executor panic",
+                None,
+                None,
+            )?;
+            panic!("injected executor failure after commit");
+        }
+    }
+    let path = path();
+    let owner = StoreCoordinator::acquire(&path).unwrap();
+    owner.initialize().await.unwrap();
+    let (gate, release, _) = block_executor(&owner);
+    let failure = owner.submit(PanicAfterCommit).unwrap();
+    let output = Arc::new(Mutex::new(Vec::new()));
+    let unexecuted = owner
+        .submit(Record {
+            ordinal: 9,
+            output: output.clone(),
+        })
+        .unwrap();
+    release.send(()).unwrap();
+    gate.acknowledge().await.unwrap();
+    for error in [
+        failure.acknowledge().await.unwrap_err(),
+        unexecuted.acknowledge().await.unwrap_err(),
+        owner.shutdown().await.unwrap_err(),
+    ] {
+        assert_eq!(
+            error.downcast_ref::<PersistenceAdmissionError>(),
+            Some(&PersistenceAdmissionError::ExecutorStopped)
+        );
+    }
+    assert!(output.lock().unwrap().is_empty());
+    assert_eq!((owner.stats().queued, owner.stats().executing), (0, 0));
+    assert_eq!(owner.stats().cancelled_before_execution, 1);
+    assert_eq!(owner.stats().acknowledgements_lost, 1);
+    let restarted = StoreCoordinator::acquire(&path).unwrap();
+    let retained = restarted
+        .list_session_inbox("session".into())
+        .await
+        .unwrap();
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0].content, "committed before executor panic");
+    restarted.shutdown().await.unwrap();
+    drop(restarted);
+    drop(owner);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}

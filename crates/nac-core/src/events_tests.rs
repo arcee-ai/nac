@@ -1409,3 +1409,25 @@ fn model_error_sink_redacts_prefixed_stderr() {
     assert!(message.contains("[REDACTED]"), "{message}");
     assert!(message.contains("no credits"), "{message}");
 }
+
+#[test]
+fn rejected_publication_remains_an_explicit_replay_gap() {
+    let bus = SessionEventBus::new(Some("session-overload".into()));
+    let first = bus.emit(SessionEvent::RunCancelled);
+    bus.record_publication_failure();
+    let next = bus.emit(SessionEvent::RunCancelled);
+    assert_eq!(next.sequence_id, first.sequence_id + 2);
+    let cursor = SessionEventBoundary {
+        epoch_id: first.epoch_id,
+        sequence_id: first.sequence_id,
+    };
+    let replay = bus.subscribe_for_client_with_replay(SessionClientId::new(), Some(&cursor), 10);
+    assert_eq!(replay.replayed_events, vec![next]);
+    assert_eq!(
+        replay.replay_gap,
+        Some(SessionReplayGap {
+            missing_from_sequence_id: first.sequence_id + 1,
+            missing_to_sequence_id: first.sequence_id + 1,
+        })
+    );
+}

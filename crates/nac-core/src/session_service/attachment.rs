@@ -111,6 +111,8 @@ impl SessionService {
             transcript_scan: Arc::new(StdMutex::new(transcript_scan)),
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
+            published_operation: Arc::new(StdMutex::new(None)),
+            stopping_admission: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_threads,
             skills,
             mcp,
@@ -214,13 +216,20 @@ impl SessionService {
     }
 
     pub fn active_operation(&self) -> Option<ActiveSessionOperationSnapshot> {
-        self.lock_active_operation()
-            .as_ref()
-            .map(ActiveSessionOperation::snapshot)
+        self.published_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn has_active_operation(&self) -> bool {
-        self.lock_active_operation().is_some()
+        match self.active_operation.try_lock() {
+            Ok(operation) => operation.is_some(),
+            // Admission may be waiting for a durable precondition. Keep the
+            // service busy and in its cache until that authority is released.
+            Err(std::sync::TryLockError::WouldBlock) => true,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner().is_some(),
+        }
     }
 
     /// True while any client holds a live subscription to this session's event
@@ -306,16 +315,16 @@ impl SessionService {
     }
 
     pub fn active_run(&self) -> Option<ActiveRunSnapshot> {
-        match self.lock_active_operation().as_ref() {
-            Some(ActiveSessionOperation::Run(active_run)) => Some(active_run.snapshot.clone()),
+        match self.active_operation() {
+            Some(ActiveSessionOperationSnapshot::Run { run }) => Some(run),
             _ => None,
         }
     }
 
     pub fn active_compaction(&self) -> Option<ActiveCompactionSnapshot> {
-        match self.lock_active_operation().as_ref() {
-            Some(ActiveSessionOperation::ManualCompaction(active_compaction)) => {
-                Some(active_compaction.snapshot.clone())
+        match self.active_operation() {
+            Some(ActiveSessionOperationSnapshot::ManualCompaction { compaction }) => {
+                Some(compaction)
             }
             _ => None,
         }

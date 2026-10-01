@@ -55,6 +55,10 @@ impl ThreadEventConnection {
     }
 }
 impl ThreadEventWriter {
+    pub(crate) fn has_owner(&self) -> Result<bool> {
+        Ok(super::coordinator::owner_for(&self.store_path)?.is_some())
+    }
+
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
             store_path: path.to_path_buf(),

@@ -378,6 +378,16 @@ impl SessionService {
             managed_orchestrator_execution_mode,
         } = admission;
         let mut guard = self.lock_active_operation();
+        if self
+            .stopping_admission
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store(
+                    "session is shutting down; new runs are rejected".to_owned(),
+                ),
+            });
+        }
         match guard.as_ref() {
             Some(ActiveSessionOperation::Run(active_run)) => {
                 return Err(SessionSubmitError::Busy {

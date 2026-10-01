@@ -71,7 +71,7 @@ command ListEffectivePermissionGrantsCommand {
 }
 call |command| (&command.session_id, &command.backend, command.session_config_version)
 correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port internal;
+port public;
 }
 
 coordinated_command! {

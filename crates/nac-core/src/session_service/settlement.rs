@@ -24,19 +24,21 @@ impl SessionService {
     pub(super) async fn finish_run_once(&self, run_id: &SessionRunId, outcome: RunOutcome) -> bool {
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
             if let Err(error) = self.terminal_manager.settle_run().await {
-                self.event_bus.emit_agent(AgentEvent::Error {
-                    thread_name: None,
-                    message: format!(
-                        "run {run_id} remains active because terminal cleanup is incomplete: {error:#}"
-                    ),
-                });
+                EventSink::bus(self.event_bus.clone())
+                    .emit_async(AgentEvent::Error {
+                        thread_name: None,
+                        message: format!(
+                            "run {run_id} remains active because terminal cleanup is incomplete: {error:#}"
+                        ),
+                    })
+                    .await;
                 return false;
             }
         }
         let Some(finishing_run) = self.mark_run_finishing(run_id) else {
             return false;
         };
-        self.expire_orchestrator_steering(run_id);
+        self.expire_orchestrator_steering(run_id).await;
         let (completed_duration_ms, completed_usage) = match &outcome {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
             RunOutcome::Failed(_, usage) => (None, usage.clone()),
@@ -104,22 +106,30 @@ impl SessionService {
                 Some(failure.diagnostic.clone()),
             ),
         };
-        self.settle_traditional_child_run(run_id, child_status, child_report, child_failure);
+        self.settle_traditional_child_run(run_id, child_status, child_report, child_failure)
+            .await;
 
         self.settle_direct_goal_run(run_id, goal_usage, goal_disposition, run_failure.as_ref())
             .await;
-        let presented_run_failure =
-            if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-                self.metadata.session_id.as_deref().and_then(|session_id| {
-                    crate::store::load_session_goal(&self.metadata.store_path, session_id)
-                        .ok()
-                        .flatten()
-                        .and_then(|goal| goal.last_failure)
-                })
+        let durable_goal_failure = if self.metadata.behavior
+            != sessions::SessionBehavior::Orchestrator
+        {
+            if let Some(session_id) = self.metadata.session_id.as_deref() {
+                let goal = match crate::store::coordinator::owner_for(&self.metadata.store_path) {
+                    Ok(Some(owner)) => owner.load_session_goal(session_id.to_owned()).await,
+                    Ok(None) => {
+                        crate::store::load_session_goal(&self.metadata.store_path, session_id)
+                    }
+                    Err(error) => Err(error),
+                };
+                goal.ok().flatten().and_then(|goal| goal.last_failure)
             } else {
                 None
             }
-            .or_else(|| run_failure.clone());
+        } else {
+            None
+        };
+        let presented_run_failure = durable_goal_failure.or_else(|| run_failure.clone());
 
         let run_id = finishing_run.snapshot.run_id.clone();
         let client_id = finishing_run.snapshot.client_id.clone();
@@ -144,8 +154,13 @@ impl SessionService {
                 failure: Some(presented_run_failure.unwrap_or(failure)),
             },
         };
-        self.event_bus
-            .emit_with_context(terminal_event, Some(run_id.clone()), client_id);
+        if let Err(error) = self
+            .event_bus
+            .emit_with_context_async(terminal_event, Some(run_id.clone()), client_id)
+            .await
+        {
+            eprintln!("nac: terminal event caller failed: {error:#}");
+        }
         self.clear_finished_run(&run_id);
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
             if let Err(error) = self.start_next_direct_inbox_item().await {
@@ -191,25 +206,60 @@ impl SessionService {
         if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
             return;
         }
-        if let Some(session_id) = self.metadata.session_id.as_deref() {
-            if let Err(error) = crate::store::settle_session_goal_run_with_failure(
-                &self.metadata.store_path,
-                session_id,
-                run_id.as_str(),
-                usage
-                    .as_ref()
-                    .map_or(0, crate::model::TokenUsage::billable_tokens),
-                now_epoch_ms(),
-                disposition,
-                failure,
-            ) {
-                eprintln!("nac: failed to settle durable goal for run {run_id}: {error:#}");
+        if let Some(session_id) = self.metadata.session_id.clone() {
+            let path = self.metadata.store_path.clone();
+            let owned_run_id = run_id.to_string();
+            let failure = failure.cloned();
+            let tokens = usage
+                .as_ref()
+                .map_or(0, crate::model::TokenUsage::billable_tokens);
+            match crate::store::spawn_blocking_store_caller(move || {
+                crate::store::settle_session_goal_run_with_failure(
+                    &path,
+                    &session_id,
+                    &owned_run_id,
+                    tokens,
+                    now_epoch_ms(),
+                    disposition,
+                    failure.as_ref(),
+                )
+            })
+            .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) | Err(error) => {
+                    eprintln!("nac: failed to settle durable goal for run {run_id}: {error:#}");
+                }
             }
         }
         self.agent.lock().await.end_goal_run(run_id);
     }
 
-    pub(super) fn settle_traditional_child_run(
+    pub(super) async fn settle_traditional_child_run(
+        &self,
+        run_id: &SessionRunId,
+        status: crate::store::TraditionalChildStatus,
+        report: Option<String>,
+        failure: Option<String>,
+    ) {
+        if crate::store::coordinator::owner_for(&self.metadata.store_path)
+            .is_ok_and(|owner| owner.is_none())
+        {
+            self.settle_traditional_child_run_sync(run_id, status, report, failure);
+            return;
+        }
+        let service = self.clone();
+        let run_id = run_id.clone();
+        if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
+            service.settle_traditional_child_run_sync(&run_id, status, report, failure);
+        })
+        .await
+        {
+            eprintln!("nac: child settlement caller failed: {error:#}");
+        }
+    }
+
+    fn settle_traditional_child_run_sync(
         &self,
         run_id: &SessionRunId,
         status: crate::store::TraditionalChildStatus,
@@ -381,7 +431,39 @@ impl SessionService {
         }
     }
 
-    pub(super) fn expire_orchestrator_steering(&self, run_id: &SessionRunId) {
+    pub(super) async fn expire_orchestrator_steering(&self, run_id: &SessionRunId) {
+        if crate::store::coordinator::owner_for(&self.metadata.store_path)
+            .is_ok_and(|owner| owner.is_none())
+        {
+            self.expire_orchestrator_steering_sync(run_id);
+            return;
+        }
+        let service = self.clone();
+        let run_id = run_id.clone();
+        if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
+            service.expire_orchestrator_steering_sync(&run_id);
+        })
+        .await
+        {
+            eprintln!("nac: steering expiry caller failed: {error:#}");
+        }
+    }
+
+    pub(super) async fn emit_steering_expired_async(
+        &self,
+        records: Vec<crate::store::ThreadSteeringRecord>,
+    ) {
+        let service = self.clone();
+        if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
+            service.emit_steering_expired(records);
+        })
+        .await
+        {
+            eprintln!("nac: steering expiry publication failed: {error:#}");
+        }
+    }
+
+    fn expire_orchestrator_steering_sync(&self, run_id: &SessionRunId) {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
             return;
         };
@@ -513,12 +595,8 @@ impl SessionService {
         }
     }
 
-    pub(super) fn lock_active_operation(
-        &self,
-    ) -> std::sync::MutexGuard<'_, Option<ActiveSessionOperation>> {
-        self.active_operation
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    pub(super) fn lock_active_operation(&self) -> super::operation_state::ActiveOperationGuard<'_> {
+        super::operation_state::ActiveOperationGuard::new(self)
     }
 
     /// Run-end persist (DB-direct transcript workset, step 4 — never-fold):
@@ -632,13 +710,15 @@ impl SessionService {
         })
         .await??;
 
-        self.event_bus.emit_with_context(
-            SessionEvent::SnapshotSaved {
-                session_id: saved_session_id,
-            },
-            Some(active_run.run_id.clone()),
-            active_run.client_id.clone(),
-        );
+        self.event_bus
+            .emit_with_context_async(
+                SessionEvent::SnapshotSaved {
+                    session_id: saved_session_id,
+                },
+                Some(active_run.run_id.clone()),
+                active_run.client_id.clone(),
+            )
+            .await?;
 
         Ok(())
     }

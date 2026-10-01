@@ -392,9 +392,15 @@ impl SessionService {
             .map_err(|error| anyhow::anyhow!("thread prune task failed: {error}"))??
         };
 
-        self.event_bus.emit(SessionEvent::TranscriptReverted {
-            transcript_len: message_idx as u64,
-        });
+        self.event_bus
+            .emit_with_context_async(
+                SessionEvent::TranscriptReverted {
+                    transcript_len: message_idx as u64,
+                },
+                None,
+                None,
+            )
+            .await?;
 
         Ok(RevertOutcome {
             transcript_len: message_idx,

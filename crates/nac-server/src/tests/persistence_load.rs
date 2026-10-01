@@ -27,6 +27,27 @@ impl LoadStoreAdapter for OwnedSqliteLoadStore {
         })
         .expect("owned persistence load manager")
     }
+    fn create_manager_async<'a>(
+        &'a self,
+        root: &'a Path,
+        worker: &'a Path,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = SessionManager> + 'a>> {
+        Box::pin(async move {
+            let options = ServerOptions {
+                root_cwd: root.to_path_buf(),
+                store_path: Some(root.join("store.db")),
+                worker_executable: Some(worker.to_path_buf()),
+                managed_host: None,
+            };
+            nac_core::store::spawn_blocking_store_caller(move || {
+                let _recorder = nac_core::telemetry::register_test_recorder_thread();
+                SessionManager::new(options)
+            })
+            .await
+            .expect("owned constructor caller")
+            .expect("owned async persistence load manager")
+        })
+    }
     fn assert_integrity(&self, path: &Path) {
         SqliteLoadStore.assert_integrity(path);
     }
@@ -68,8 +89,13 @@ async fn owned_persistence_load() -> anyhow::Result<()> {
     let worker =
         PathBuf::from(std::env::var_os("NAC_MANAGED_LOAD_WORKER").expect("managed-load worker"));
     assert!(worker.is_file());
-    let artifact_root =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/persistence-load");
+    let lane = match tokio::runtime::Handle::current().runtime_flavor() {
+        tokio::runtime::RuntimeFlavor::CurrentThread => "current-thread",
+        _ => "multi-thread",
+    };
+    let artifact_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/persistence-load")
+        .join(lane);
     std::fs::create_dir_all(&artifact_root).unwrap();
     let seed = 0xA11_0112;
     for count in [1, 2, 4] {
@@ -86,4 +112,10 @@ async fn owned_persistence_load() -> anyhow::Result<()> {
         eprintln!("ALL-116 owned persistence artifact: {}", path.display());
     }
     Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "bounded owned current-thread compatibility lane; requires managed-load worker"]
+async fn owned_persistence_current_thread_load_scenario() {
+    owned_persistence_load().await.unwrap();
 }

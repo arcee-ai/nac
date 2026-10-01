@@ -243,3 +243,7 @@ mod grant_tests;
 #[cfg(test)]
 #[path = "permission_mode_tests.rs"]
 mod mode_tests;
+
+#[cfg(test)]
+#[path = "permission_persistence_tests.rs"]
+mod persistence_tests;

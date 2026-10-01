@@ -661,6 +661,7 @@ pub struct SessionEventBus {
     sender: broadcast::Sender<SessionEventEnvelope>,
     delta_sender: broadcast::Sender<AssistantStreamDelta>,
     state: Arc<StdMutex<SessionEventBusState>>,
+    publication: Arc<StdMutex<()>>,
     recent_capacity: usize,
     recent_byte_capacity: usize,
 }
@@ -741,6 +742,7 @@ impl SessionEventBus {
                 recent: VecDeque::with_capacity(capacity),
                 recent_bytes: 0,
             })),
+            publication: Arc::new(StdMutex::new(())),
             recent_capacity: capacity,
             recent_byte_capacity: byte_capacity,
         }
@@ -859,6 +861,53 @@ impl SessionEventBus {
         self.emit_sanitized(event, run_id, client_id)
     }
 
+    pub async fn emit_with_context_async(
+        &self,
+        event: SessionEvent,
+        run_id: Option<SessionRunId>,
+        client_id: Option<SessionClientId>,
+    ) -> anyhow::Result<SessionEventEnvelope> {
+        // A broken store path must not suppress live-only terminal events.
+        // Unknown ownership takes the bounded caller path; durable checkout
+        // still rejects the lookup error instead of bypassing an owner.
+        if !self.has_owned_persistence().unwrap_or(true) {
+            return Ok(self.emit_with_context(event, run_id, client_id));
+        }
+        let bus = self.clone();
+        let result = crate::store::spawn_blocking_store_caller(move || {
+            bus.emit_with_context(event, run_id, client_id)
+        })
+        .await;
+        if result.as_ref().is_err_and(|error| {
+            matches!(
+                error.downcast_ref::<crate::store::PersistenceAdmissionError>(),
+                Some(crate::store::PersistenceAdmissionError::CallerOverloaded)
+            )
+        }) {
+            self.record_publication_failure();
+        }
+        result
+    }
+
+    fn has_owned_persistence(&self) -> anyhow::Result<bool> {
+        match &self.thread_event_persistence {
+            ThreadEventPersistence::Available(store) => store.writer.has_owner(),
+            ThreadEventPersistence::Disabled => Ok(false),
+        }
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "overflowing the durable event sequence violates event identity"
+    )]
+    pub(crate) fn record_publication_failure(&self) {
+        let mut state = self.lock_state();
+        state.next_sequence_id = state
+            .next_sequence_id
+            .checked_add(1)
+            .expect("session event sequence overflow");
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "overflowing the durable u64 event sequence would violate event identity"
@@ -870,6 +919,10 @@ impl SessionEventBus {
         client_id: Option<SessionClientId>,
     ) -> SessionEventEnvelope {
         let prepared = self.prepare_thread_event(&event);
+        let _publication = self
+            .publication
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut state = self.lock_state();
         state.next_sequence_id = state
             .next_sequence_id
@@ -883,6 +936,7 @@ impl SessionEventBus {
             run_id,
             event,
         };
+        drop(state);
         match prepared {
             Ok(Some(prepared)) => {
                 if let Err(error) = prepared.persist() {
@@ -896,6 +950,7 @@ impl SessionEventBus {
                 return envelope;
             }
         }
+        let mut state = self.lock_state();
         state.published_sequence_id = envelope.sequence_id;
         if let Some(serialized_bytes) =
             serialized_envelope_len(&envelope, self.recent_byte_capacity)
@@ -936,8 +991,12 @@ impl SessionEventBus {
         &self,
         query: impl FnOnce() -> anyhow::Result<T>,
     ) -> anyhow::Result<(SessionEventBoundary, T)> {
-        let state = self.lock_state();
+        let _publication = self
+            .publication
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let value = query()?;
+        let state = self.lock_state();
         Ok((
             SessionEventBoundary {
                 epoch_id: self.epoch_id.clone(),
@@ -992,7 +1051,7 @@ impl SessionEventBus {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Prepare persistence before taking the event state lock. Snapshot loading
+    /// Prepare persistence before taking the publication lock. Snapshot loading
     /// checks out SQLite before taking the same lock, so this order prevents a
     /// capacity/state inversion while preserving persistence-before-publication.
     fn prepare_thread_event(
@@ -1662,21 +1721,35 @@ impl EventSink {
         }
     }
 
-    /// Persist a durable thread event before publishing it without parking an
-    /// async runtime worker. Streaming and other live-only events keep their
-    /// synchronous, allocation-free publication path.
+    /// Publish sequenced bus events off the runtime, including live-only events
+    /// that must follow a pending durable publication. Streaming deltas keep
+    /// their direct publication path.
     pub async fn emit_async(&self, event: AgentEvent) {
-        let needs_persistence = self.bus.as_ref().is_some_and(|bus| {
-            matches!(
-                bus.thread_event_persistence,
-                ThreadEventPersistence::Available(_)
-            ) && persisted_thread_event_name(&event).is_some()
-        });
-        if needs_persistence {
+        let owned = match self
+            .bus
+            .as_ref()
+            .map(SessionEventBus::has_owned_persistence)
+        {
+            Some(Ok(owned)) => owned,
+            Some(Err(_)) => true,
+            None => false,
+        };
+        if owned {
+            let sequenced = sanitize_external_agent_event(event.clone()).is_some();
             let sink = self.clone();
             if let Err(error) =
                 crate::store::spawn_blocking_store_caller(move || sink.emit(event)).await
             {
+                if sequenced
+                    && matches!(
+                        error.downcast_ref::<crate::store::PersistenceAdmissionError>(),
+                        Some(crate::store::PersistenceAdmissionError::CallerOverloaded)
+                    )
+                {
+                    if let Some(bus) = &self.bus {
+                        bus.record_publication_failure();
+                    }
+                }
                 eprintln!("nac: durable event publication task failed: {error}");
             }
         } else {
@@ -1714,6 +1787,21 @@ impl EventSink {
                 self.run_id.clone(),
                 self.client_id.clone(),
             );
+        }
+    }
+
+    pub async fn emit_transcript_appended_async(&self, transcript_len: u64) {
+        if let Some(bus) = &self.bus {
+            if let Err(error) = bus
+                .emit_with_context_async(
+                    SessionEvent::TranscriptAppended { transcript_len },
+                    self.run_id.clone(),
+                    self.client_id.clone(),
+                )
+                .await
+            {
+                eprintln!("nac: transcript publication task failed: {error}");
+            }
         }
     }
 }

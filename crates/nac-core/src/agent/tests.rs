@@ -837,8 +837,8 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
-#[test]
-fn image_limit_error_is_the_only_finished_event_for_the_result() {
+#[tokio::test]
+async fn image_limit_error_is_the_only_finished_event_for_the_result() {
     use crate::tool_content::{ToolContent, ToolContentPart, ToolImage, MAX_TRANSCRIPT_IMAGES};
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
     use std::io::Cursor;
@@ -868,7 +868,8 @@ fn image_limit_error_is_the_only_finished_event_for_the_result() {
         )],
         &EventSink::channel(events_tx),
         &None,
-    );
+    )
+    .await;
 
     assert!(
         matches!(&finalized[0], Message::Tool { content, .. } if content.contains("image_limit_exceeded"))

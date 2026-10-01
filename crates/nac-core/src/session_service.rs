@@ -38,6 +38,7 @@ mod cancellation;
 mod direct_interaction;
 mod frontend_projection;
 mod manual_compaction;
+mod operation_state;
 mod recovery;
 mod settlement;
 mod transcript_projection;
@@ -589,6 +590,8 @@ pub struct SessionService {
     transcript_scan: Arc<StdMutex<TranscriptScanCache>>,
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
+    published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
+    stopping_admission: Arc<std::sync::atomic::AtomicBool>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
     /// The session's skill registry, captured from the agent at construction
     /// so `prepare_user_input` can expand top-level `$skillname` references

@@ -473,6 +473,13 @@ pub(super) trait LoadStoreAdapter {
     }
     fn identity(&self) -> &'static str;
     fn create_manager(&self, root: &Path, worker: &Path) -> SessionManager;
+    fn create_manager_async<'a>(
+        &'a self,
+        root: &'a Path,
+        worker: &'a Path,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = SessionManager> + 'a>> {
+        Box::pin(async move { self.create_manager(root, worker) })
+    }
     fn assert_integrity(&self, store_path: &Path);
     fn configuration(&self, store_path: &Path) -> StoreConfiguration;
     fn checkpoint(&self, store_path: &Path) -> CheckpointEvidence;
@@ -970,13 +977,18 @@ async fn exercise_append_failure(
         start_planned_orchestrator(router(manager.clone()), &plan.orchestrators[0]).await;
     assert_eq!(response.status(), StatusCode::CREATED);
     wait_for_relation_status(
+        None,
         &store_path,
         &plan.orchestrators[0].session_id,
         ManagedOrchestratorStatus::Failed,
     )
     .await;
     wait_for_parent_idle(&parent).await;
-    assert_eq!(requests.recv_timeout(PHASE_TIMEOUT).unwrap(), 0);
+    tokio::task::spawn_blocking(move || {
+        assert_eq!(requests.recv_timeout(PHASE_TIMEOUT).unwrap(), 0);
+    })
+    .await
+    .unwrap();
     let relation =
         nac_core::store::load_managed_orchestrator(&store_path, &plan.orchestrators[0].session_id)
             .unwrap()
@@ -1245,6 +1257,7 @@ async fn exercise_restart_recovery(
     .await
     .unwrap();
     wait_for_relation_status(
+        None,
         &store_path,
         &plan.orchestrators[0].session_id,
         ManagedOrchestratorStatus::Interrupted,
@@ -1309,17 +1322,24 @@ async fn start_planned_orchestrator(app: Router, entry: &PlannedOrchestrator) ->
 }
 
 async fn wait_for_relation_status(
+    owner: Option<&nac_core::store::StoreCoordinator>,
     store_path: &Path,
     orchestrator_session_id: &str,
     expected: ManagedOrchestratorStatus,
 ) {
     tokio::time::timeout(PHASE_TIMEOUT, async {
         loop {
-            let status =
-                nac_core::store::load_managed_orchestrator(store_path, orchestrator_session_id)
-                    .unwrap()
-                    .unwrap()
-                    .status;
+            let record = match owner {
+                Some(owner) => {
+                    owner
+                        .load_managed_orchestrator(orchestrator_session_id.to_owned())
+                        .await
+                }
+                None => {
+                    nac_core::store::load_managed_orchestrator(store_path, orchestrator_session_id)
+                }
+            };
+            let status = record.unwrap().unwrap().status;
             if status == expected {
                 break;
             }
@@ -1413,7 +1433,7 @@ pub(super) async fn run_variant_with_mode(
     };
     seed_load_parent(&root, model.base_url.clone());
     seed_planned_orchestrators(&root.join("store.db"), &plan);
-    let manager = adapter.create_manager(&root, worker);
+    let manager = adapter.create_manager_async(&root, worker).await;
     // Model the production sessions as attached for the whole burst. The
     // primary lane controls cache lifetime explicitly so it measures the
     // intended orchestration concurrency rather than cache-eviction timing.
@@ -1463,6 +1483,7 @@ pub(super) async fn run_variant_with_mode(
     if mode == LoadMode::OrderedHealthy {
         for (ordinal, entry) in plan.orchestrators.iter().enumerate() {
             wait_for_relation_status(
+                manager.inner._store_ownership.coordinator(),
                 &root.join("store.db"),
                 &entry.session_id,
                 ManagedOrchestratorStatus::Completed,
@@ -1470,11 +1491,24 @@ pub(super) async fn run_variant_with_mode(
             .await;
             tokio::time::timeout(PHASE_TIMEOUT, async {
                 loop {
-                    let rows = nac_core::store::TranscriptLogWriter::new(&root.join("store.db"))
+                    let path = root.join("store.db");
+                    let rows = if manager.inner._store_ownership.coordinator().is_some() {
+                        nac_core::store::spawn_blocking_store_caller(move || {
+                            nac_core::store::TranscriptLogWriter::new(&path)
+                                .unwrap()
+                                .read_from("all112-parent", 0)
+                                .unwrap()
+                                .len()
+                        })
+                        .await
                         .unwrap()
-                        .read_from("all112-parent", 0)
-                        .unwrap()
-                        .len();
+                    } else {
+                        nac_core::store::TranscriptLogWriter::new(&path)
+                            .unwrap()
+                            .read_from("all112-parent", 0)
+                            .unwrap()
+                            .len()
+                    };
                     if rows == (ordinal + 1) * 2 && !parent_service.has_active_operation() {
                         break;
                     }
@@ -1502,14 +1536,25 @@ pub(super) async fn run_variant_with_mode(
     };
     let settlement = tokio::time::timeout(settlement_timeout, async {
         loop {
-            let relations = nac_core::store::list_managed_orchestrators(
-                &root.join("store.db"),
-                "all112-parent",
-            )
+            let relations = match manager.inner._store_ownership.coordinator() {
+                Some(owner) => {
+                    owner
+                        .list_managed_orchestrators("all112-parent".to_owned())
+                        .await
+                }
+                None => nac_core::store::list_managed_orchestrators(
+                    &root.join("store.db"),
+                    "all112-parent",
+                ),
+            }
             .unwrap();
-            let inbox =
-                nac_core::store::list_session_inbox(&root.join("store.db"), "all112-parent")
-                    .unwrap();
+            let inbox = match manager.inner._store_ownership.coordinator() {
+                Some(owner) => owner.list_session_inbox("all112-parent".to_owned()).await,
+                None => {
+                    nac_core::store::list_session_inbox(&root.join("store.db"), "all112-parent")
+                }
+            }
+            .unwrap();
             let expected_terminal_state = relations.iter().all(|record| {
                 let expected_status = match mode {
                     LoadMode::OrderedHealthy => {
@@ -1576,6 +1621,19 @@ pub(super) async fn run_variant_with_mode(
         .expect("concurrent probe cancellation should restore terminal state");
     }
 
+    assert!(
+        orchestrator_services
+            .iter()
+            .all(|service| !service.has_active_operation()),
+        "managed child services must be idle after settlement"
+    );
+    manager.drain_persistence().await.unwrap();
+    drop(orchestrator_services);
+    drop(parent_service);
+    drop(app);
+    drop(manager);
+    // Standalone post-mortem checks run only after serving ownership drained
+    // and was released; their checkpoint never bypasses a live coordinator.
     let store_path = root.join("store.db");
     let relations =
         nac_core::store::list_managed_orchestrators(&store_path, "all112-parent").unwrap();
@@ -1720,12 +1778,6 @@ pub(super) async fn run_variant_with_mode(
         assert_eq!(worker_episode_counts, vec![1; orchestrator_count]);
     }
     assert!(
-        orchestrator_services
-            .iter()
-            .all(|service| !service.has_active_operation()),
-        "managed child services must be idle after settlement"
-    );
-    assert!(
         nac_core::store::load_run_recovery(&store_path, "all112-parent")
             .unwrap()
             .is_none(),
@@ -1825,9 +1877,6 @@ pub(super) async fn run_variant_with_mode(
         checkpoint,
         telemetry,
     };
-    drop(orchestrator_services);
-    drop(parent_service);
-    drop(manager);
     let _ = std::fs::remove_dir_all(root);
     evidence
 }

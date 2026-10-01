@@ -310,7 +310,12 @@ impl<'a> WorkspaceApplication<'a> {
         session_id: &str,
         request: SwitchBranch,
     ) -> Result<workspace::BranchList> {
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         let admission = self.idle_workspace_root(session_id).await?;
 
         Self::execute_workspace_mutation(admission, "branch switch task failed", move |target| {
@@ -337,7 +342,12 @@ impl<'a> WorkspaceApplication<'a> {
         session_id: &str,
         request: CommitWorkspace,
     ) -> Result<workspace::CommitOutcome> {
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         let admission = self.idle_workspace_root(session_id).await?;
 
         Self::execute_workspace_mutation(admission, "commit task failed", move |target| {

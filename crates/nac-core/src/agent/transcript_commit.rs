@@ -69,7 +69,8 @@ impl Agent {
                 self.committed_log_len = start_idx + batch_len;
                 self.pending_log_end = None;
                 self.event_sink
-                    .emit_transcript_appended(start_idx + batch_len);
+                    .emit_transcript_appended_async(start_idx + batch_len)
+                    .await;
                 Ok(())
             }
             Err(error) => {
@@ -110,7 +111,9 @@ impl Agent {
                 self.committed_log_len = idx + 1;
                 self.pending_log_end = None;
                 self.unacknowledged_log_message = None;
-                self.event_sink.emit_transcript_appended(idx + 1);
+                self.event_sink
+                    .emit_transcript_appended_async(idx + 1)
+                    .await;
                 Ok(())
             }
             Err(error) => {
@@ -209,7 +212,9 @@ impl Agent {
             self.steering_append_pending = false;
             self.pending_log_end = None;
             self.committed_log_len = idx + 1;
-            self.event_sink.emit_transcript_appended(idx + 1);
+            self.event_sink
+                .emit_transcript_appended_async(idx + 1)
+                .await;
         }
         self.messages.push(message);
         Ok(())
@@ -284,7 +289,8 @@ impl Agent {
                 self.committed_log_len = from_idx as u64 + batch_len;
                 self.pending_log_end = None;
                 self.event_sink
-                    .emit_transcript_appended(from_idx as u64 + batch_len);
+                    .emit_transcript_appended_async(from_idx as u64 + batch_len)
+                    .await;
                 Ok(())
             }
             Err(error) => {
@@ -336,7 +342,8 @@ impl Agent {
         self.pending_log_end = None;
         self.direct_inbox_append_start = None;
         self.event_sink
-            .emit_transcript_appended(self.messages.len() as u64);
+            .emit_transcript_appended_async(self.messages.len() as u64)
+            .await;
         Ok(records.len())
     }
 }

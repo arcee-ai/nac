@@ -234,7 +234,7 @@ pub async fn execute_parsed_dispatch(
         weight: _,
     } = params;
     let Some(cancellation) = runtime.active_threads.start(&thread_name, &dispatch_id) else {
-        close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
+        close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
         return ToolResult {
             content: (format!(
             "{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before it started."
@@ -244,11 +244,14 @@ pub async fn execute_parsed_dispatch(
         };
     };
 
-    runtime.event_sink.emit(AgentEvent::ThreadStarted {
-        name: thread_name.clone(),
-        action: action.clone(),
-        source_threads: source_threads.clone(),
-    });
+    runtime
+        .event_sink
+        .emit_async(AgentEvent::ThreadStarted {
+            name: thread_name.clone(),
+            action: action.clone(),
+            source_threads: source_threads.clone(),
+        })
+        .await;
 
     let admission = {
         let path = runtime.store_path.clone();
@@ -258,7 +261,7 @@ pub async fn execute_parsed_dispatch(
         let action = action.clone();
         let run_id = runtime.active_threads.run_id();
         let cancellation = cancellation.clone();
-        tokio::task::spawn_blocking(move || {
+        crate::store::spawn_blocking_store_caller(move || {
             cancellation
                 .run_if_active(|| {
                     store::admit_worker_dispatch(
@@ -273,28 +276,33 @@ pub async fn execute_parsed_dispatch(
                 .ok_or_else(|| anyhow::anyhow!("dispatch cancelled before host admission"))?
         })
         .await
-        .map_err(anyhow::Error::from)
         .and_then(|result| result)
     };
     let identity = match admission {
         Ok(identity) => identity,
         Err(error) => {
-            close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
+            close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
             if cancellation.is_cancelled() {
                 return ToolResult { content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before host admission.").into(), is_error: true };
             }
             let message = format!("Failed to admit worker dispatch: {error}");
-            runtime.event_sink.emit(AgentEvent::Error {
-                thread_name: Some(thread_name.clone()),
-                message: message.clone(),
-            });
-            runtime.event_sink.emit(AgentEvent::ThreadFinished {
-                name: thread_name,
-                exit_code: SPAWN_FAILURE_EXIT_CODE,
-                timed_out: false,
-                timeout_reason: None,
-                usage: None,
-            });
+            runtime
+                .event_sink
+                .emit_async(AgentEvent::Error {
+                    thread_name: Some(thread_name.clone()),
+                    message: message.clone(),
+                })
+                .await;
+            runtime
+                .event_sink
+                .emit_async(AgentEvent::ThreadFinished {
+                    name: thread_name,
+                    exit_code: SPAWN_FAILURE_EXIT_CODE,
+                    timed_out: false,
+                    timeout_reason: None,
+                    usage: None,
+                })
+                .await;
             return ToolResult {
                 content: message.into(),
                 is_error: true,
@@ -330,18 +338,24 @@ pub async fn execute_parsed_dispatch(
                 &message,
             )
             .await;
-            close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
-            runtime.event_sink.emit(AgentEvent::Error {
-                thread_name: Some(thread_name.clone()),
-                message: message.clone(),
-            });
-            runtime.event_sink.emit(AgentEvent::ThreadFinished {
-                name: thread_name,
-                exit_code: SPAWN_FAILURE_EXIT_CODE,
-                timed_out: false,
-                timeout_reason: None,
-                usage: None,
-            });
+            close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
+            runtime
+                .event_sink
+                .emit_async(AgentEvent::Error {
+                    thread_name: Some(thread_name.clone()),
+                    message: message.clone(),
+                })
+                .await;
+            runtime
+                .event_sink
+                .emit_async(AgentEvent::ThreadFinished {
+                    name: thread_name,
+                    exit_code: SPAWN_FAILURE_EXIT_CODE,
+                    timed_out: false,
+                    timeout_reason: None,
+                    usage: None,
+                })
+                .await;
             return ToolResult {
                 content: (message).into(),
                 is_error: true,
@@ -353,10 +367,11 @@ pub async fn execute_parsed_dispatch(
     let receipt = {
         let path = runtime.store_path.clone();
         let dispatch = dispatch_id.clone();
-        tokio::task::spawn_blocking(move || store::worker_dispatch_result(&path, &dispatch))
-            .await
-            .map_err(anyhow::Error::from)
-            .and_then(|result| result)
+        crate::store::spawn_blocking_store_caller(move || {
+            store::worker_dispatch_result(&path, &dispatch)
+        })
+        .await
+        .and_then(|result| result)
     };
     let committed_response = match receipt {
         Ok(response) => response,
@@ -389,7 +404,7 @@ pub async fn execute_parsed_dispatch(
             .await;
         }
     }
-    close_thread_dispatch(runtime, &session_id, &thread_name, &dispatch_id);
+    close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
 
     // Fold worker token usage into the shared runtime accumulator so the
     // orchestrator's agent loop can include it in session totals.
@@ -399,13 +414,16 @@ pub async fn execute_parsed_dispatch(
     }
 
     let Some(failure) = failure else {
-        runtime.event_sink.emit(AgentEvent::ThreadFinished {
-            name: thread_name,
-            exit_code: run.exit_code,
-            timed_out: false,
-            timeout_reason: None,
-            usage: run.usage,
-        });
+        runtime
+            .event_sink
+            .emit_async(AgentEvent::ThreadFinished {
+                name: thread_name,
+                exit_code: run.exit_code,
+                timed_out: false,
+                timeout_reason: None,
+                usage: run.usage,
+            })
+            .await;
         return ToolResult {
             content: committed_response.unwrap_or_default().into(),
             is_error: false,
@@ -423,13 +441,16 @@ pub async fn execute_parsed_dispatch(
     }
 
     let timed_out = failure.status == store::EpisodeStatus::TimedOut;
-    runtime.event_sink.emit(AgentEvent::ThreadFinished {
-        name: thread_name,
-        exit_code: run.exit_code,
-        timed_out,
-        timeout_reason: if timed_out { run.timeout_reason } else { None },
-        usage: run.usage,
-    });
+    runtime
+        .event_sink
+        .emit_async(AgentEvent::ThreadFinished {
+            name: thread_name,
+            exit_code: run.exit_code,
+            timed_out,
+            timeout_reason: if timed_out { run.timeout_reason } else { None },
+            usage: run.usage,
+        })
+        .await;
     ToolResult {
         content: (failure.message).into(),
         is_error: true,
@@ -506,7 +527,7 @@ async fn record_dispatch_failure(
     let store_path = runtime.store_path.clone();
     let identity = identity.clone();
     let content = content.to_string();
-    let write = tokio::task::spawn_blocking(move || {
+    let write = crate::store::spawn_blocking_store_caller(move || {
         if store::worker_dispatch_committed(&store_path, &identity.dispatch_id)? {
             return Ok(());
         }
@@ -519,10 +540,13 @@ async fn record_dispatch_failure(
         Ok(Err(error)) => error.to_string(),
         Err(join_error) => join_error.to_string(),
     };
-    runtime.event_sink.emit(AgentEvent::Error {
-        thread_name: Some(thread_name.to_string()),
-        message: format!("failed to record the outcome of thread '{thread_name}': {failure}"),
-    });
+    runtime
+        .event_sink
+        .emit_async(AgentEvent::Error {
+            thread_name: Some(thread_name.to_string()),
+            message: format!("failed to record the outcome of thread '{thread_name}': {failure}"),
+        })
+        .await;
 }
 
 fn worker_failure_details(model_error: Option<&str>, stderr: &str, stdout: &str) -> String {
@@ -568,7 +592,7 @@ pub async fn execute_dispatch(
     }
     let result = execute_parsed_dispatch(params, runtime, &client).await;
     if let Some(session_id) = runtime.session_id.as_deref() {
-        close_thread_dispatch(runtime, session_id, &thread_name, &dispatch_id);
+        close_thread_dispatch_async(runtime, session_id, &thread_name, &dispatch_id).await;
     }
     result
 }
@@ -581,22 +605,25 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
 
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
-    let threads =
-        match tokio::task::spawn_blocking(move || store::list_threads(&store_path, &sid)).await {
-            Ok(Ok(threads)) => threads,
-            Ok(Err(error)) => {
-                return ToolResult {
-                    content: (format!("Error listing threads: {error}")).into(),
-                    is_error: true,
-                }
+    let threads = match crate::store::spawn_blocking_store_caller(move || {
+        store::list_threads(&store_path, &sid)
+    })
+    .await
+    {
+        Ok(Ok(threads)) => threads,
+        Ok(Err(error)) => {
+            return ToolResult {
+                content: (format!("Error listing threads: {error}")).into(),
+                is_error: true,
             }
-            Err(join_error) => {
-                return ToolResult {
-                    content: (format!("Internal error listing threads: {join_error}")).into(),
-                    is_error: true,
-                }
+        }
+        Err(join_error) => {
+            return ToolResult {
+                content: (format!("Internal error listing threads: {join_error}")).into(),
+                is_error: true,
             }
-        };
+        }
+    };
 
     if threads.is_empty() {
         return ToolResult {
@@ -635,7 +662,11 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let tname = thread_name.clone();
-    match tokio::task::spawn_blocking(move || store::thread_read(&store_path, &sid, &tname)).await {
+    match crate::store::spawn_blocking_store_caller(move || {
+        store::thread_read(&store_path, &sid, &tname)
+    })
+    .await
+    {
         Ok(Ok(episodes)) => ToolResult {
             content: (store::render_thread_document(&thread_name, &episodes)).into(),
             is_error: false,
@@ -675,7 +706,10 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let tname = thread_name.clone();
-    match tokio::task::spawn_blocking(move || store::delete_thread(&store_path, &sid, &tname)).await
+    match crate::store::spawn_blocking_store_caller(move || {
+        store::delete_thread(&store_path, &sid, &tname)
+    })
+    .await
     {
         Ok(Ok(true)) => ToolResult {
             content: (format!("Deleted thread '{thread_name}' and its retained episodes.")).into(),
@@ -761,6 +795,25 @@ pub(crate) fn mark_thread_active(
     dispatch_id: &str,
 ) -> bool {
     runtime.active_threads.mark(thread_name, dispatch_id)
+}
+
+pub(crate) async fn close_thread_dispatch_async(
+    runtime: &ToolRuntime,
+    session_id: &str,
+    thread_name: &str,
+    dispatch_id: &str,
+) {
+    let runtime = runtime.clone();
+    let session_id = session_id.to_owned();
+    let thread_name = thread_name.to_owned();
+    let dispatch_id = dispatch_id.to_owned();
+    if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
+        close_thread_dispatch(&runtime, &session_id, &thread_name, &dispatch_id);
+    })
+    .await
+    {
+        eprintln!("nac: thread close caller failed: {error:#}");
+    }
 }
 
 pub(crate) fn close_thread_dispatch(

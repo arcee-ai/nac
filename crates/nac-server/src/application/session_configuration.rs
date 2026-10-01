@@ -68,7 +68,12 @@ impl<'a> SessionConfigurationApplication<'a> {
             // repair, revision increment, credential lookup, or ownership read.
             return Ok(());
         }
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
 
         let backend_selected = matches!(&request.backend, Field::Set(_));
         let base_url_omitted = matches!(&request.base_url, Field::Unchanged);
@@ -102,7 +107,12 @@ impl<'a> SessionConfigurationApplication<'a> {
             &self.manager.inner.store_path,
             session_id,
         )?;
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
 
         let behavior = sessions::load_session_behavior(&self.manager.inner.store_path, session_id)?;
         let current = sessions::load_session_config(&self.manager.inner.store_path, session_id)?;

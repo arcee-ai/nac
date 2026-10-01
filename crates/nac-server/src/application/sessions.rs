@@ -62,7 +62,12 @@ impl<'a> SessionIntentApplication<'a> {
         session_id: &str,
         command: CreateInboxItem,
     ) -> Result<SessionInboxRecord> {
-        self.manager.require_primary_direct_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Direct,
+            )
+            .await?;
         let service = self.manager.attach_session(session_id).await?;
         let prompt = match service.prepare_user_input(&command.prompt) {
             PreparedUserInput::Empty => return Err(anyhow!("prompt is empty")),
@@ -89,7 +94,12 @@ impl<'a> SessionIntentApplication<'a> {
         item_id: i64,
         command: UpdateInboxItem,
     ) -> Result<SessionInboxRecord> {
-        self.manager.require_primary_direct_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Direct,
+            )
+            .await?;
         self.manager
             .attach_session(session_id)
             .await?
@@ -103,7 +113,12 @@ impl<'a> SessionIntentApplication<'a> {
         item_id: i64,
         expected_version: i64,
     ) -> Result<SessionInboxRecord> {
-        self.manager.require_primary_direct_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Direct,
+            )
+            .await?;
         self.manager
             .attach_session(session_id)
             .await?
@@ -161,10 +176,13 @@ impl<'a> SessionIntentApplication<'a> {
         request_id: &str,
         reply: PermissionReply,
     ) -> Result<()> {
+        let service = self.manager.attach_session(session_id).await?;
+        let request_id = request_id.to_owned();
         self.manager
-            .attach_session(session_id)
+            .inner
+            ._store_ownership
+            .call_legacy(move || service.reply_permission_request(&request_id, reply))
             .await?
-            .reply_permission_request(request_id, reply)
     }
 
     pub(crate) async fn set_permission_approval_mode(
@@ -172,7 +190,12 @@ impl<'a> SessionIntentApplication<'a> {
         session_id: &str,
         mode: PermissionApprovalMode,
     ) -> Result<()> {
-        self.manager.require_primary_direct_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Direct,
+            )
+            .await?;
         self.manager
             .attach_session(session_id)
             .await?
@@ -222,6 +245,16 @@ impl<'a> SessionStateApplication<'a> {
 
     pub(crate) fn config(&self, session_id: &str) -> Result<sessions::RawSessionConfig> {
         sessions::load_session_config(&self.manager.inner.store_path, session_id)
+    }
+
+    pub(crate) async fn config_async(
+        &self,
+        session_id: &str,
+    ) -> Result<sessions::RawSessionConfig> {
+        match self.manager.inner._store_ownership.coordinator() {
+            Some(owner) => owner.load_session_config(session_id.to_owned()).await,
+            None => self.config(session_id),
+        }
     }
 
     pub(crate) async fn snapshot(&self, session_id: &str) -> Result<SessionFrontendSnapshot> {
@@ -281,7 +314,12 @@ impl<'a> SessionStateApplication<'a> {
     }
 
     pub(crate) async fn direct_inbox(&self, session_id: &str) -> Result<Vec<SessionInboxRecord>> {
-        self.manager.require_primary_direct_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Direct,
+            )
+            .await?;
         self.manager
             .attach_session(session_id)
             .await?
@@ -359,22 +397,30 @@ impl<'a> SessionCatalogApplication<'a> {
         }
 
         let store_path = self.manager.inner.store_path.clone();
-        let summaries =
-            nac_core::store::spawn_blocking_store_caller(move || view::list_sessions(&store_path))
-                .await
-                .context("session list task failed")??;
+        let manager = SessionManager::clone(self.manager);
+        let summaries = nac_core::store::spawn_blocking_store_caller(move || {
+            view::list_sessions(&store_path)?
+                .into_iter()
+                .map(|summary| {
+                    let lineage = manager.session_state().lineage(&summary.session_id)?;
+                    Ok((summary, lineage))
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .await
+        .context("session list task failed")??;
         let mut sessions = {
             let active = self.manager.inner.active_sessions.read().await;
             summaries
                 .into_iter()
-                .filter(|summary| {
+                .filter(|(summary, _)| {
                     project_id
                         .is_none_or(|project_id| summary.project_id.as_deref() == Some(project_id))
                 })
-                .map(|summary| {
+                .map(|(summary, lineage)| {
                     let active_service = active.get(&summary.session_id);
                     Ok(ManagedSessionSummary {
-                        lineage: self.manager.session_state().lineage(&summary.session_id)?,
+                        lineage,
                         active: active_service.is_some(),
                         active_run: active_service.and_then(|service| service.active_run()),
                         summary,

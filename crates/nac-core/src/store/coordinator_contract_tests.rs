@@ -285,6 +285,58 @@ async fn maintenance_lease_contention_cannot_wait_for_settlement_on_the_executor
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn async_thread_event_waits_for_commit_before_publication_without_blocking_timers() {
+    let path = path();
+    let owner = seed(&path).await;
+    let bus = crate::events::SessionEventBus::with_thread_event_store(
+        Some("session".into()),
+        path.clone(),
+    );
+    let mut receiver = bus.subscribe();
+    let sink = crate::events::EventSink::bus(bus.clone());
+    let (gate, release, _) = super::tests::block_executor(&owner);
+    let publication = tokio::spawn(async move {
+        sink.emit_async(crate::events::AgentEvent::ThreadStarted {
+            name: "worker".into(),
+            action: "test".into(),
+            source_threads: vec![],
+        })
+        .await;
+    });
+    while owner.stats().queued == 0 {
+        tokio::task::yield_now().await;
+    }
+    assert!(matches!(
+        receiver.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+    // Replay reads use only the published cache, not the lock waiting for SQL.
+    let (boundary, replay) = bus.recent_events(None, 10);
+    assert_eq!(boundary.sequence_id, 0);
+    assert!(replay.is_empty());
+    tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        tokio::time::sleep(std::time::Duration::from_millis(5)),
+    )
+    .await
+    .unwrap();
+    assert!(!publication.is_finished());
+    release.send(()).unwrap();
+    gate.acknowledge().await.unwrap();
+    publication.await.unwrap();
+    let published = receiver.recv().await.unwrap();
+    assert_eq!(published.sequence_id, 1);
+    let events = owner
+        .load_all_thread_events("session".into(), 10)
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events["worker"].len(), 1);
+    owner.shutdown().await.unwrap();
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn identified_append_faults_rollback_or_reconcile_exactly_once_through_the_executor() {
     use crate::store::transcript_append::AppendFault;
     for phase in [
@@ -536,5 +588,95 @@ async fn queued_writer_keeps_weak_run_authority_instead_of_reviving_a_cancelled_
         .unwrap()
         .is_empty());
     owner.shutdown().await.unwrap();
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn queue_diagnostics_cover_commit_and_ack_without_exporting_data_or_error_text() {
+    use crate::telemetry::{InMemoryExporter, RuntimeMetadata, TelemetryName, TelemetryRecorder};
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(
+        exporter.clone(),
+        RuntimeMetadata::sqlite("test", "test", crate::store::schema_version(), None, None),
+        crate::telemetry::MAX_EXPORT_QUEUE_CAPACITY,
+    );
+    let _recording = crate::telemetry::install_test_recorder(recorder.clone());
+    let path = path();
+    let owner = seed(&path).await;
+    owner
+        .create_session_inbox_item(
+            "session".into(),
+            InboxDelivery::Queue,
+            "PRIVATE_ROW_CONTENT".into(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    struct ErrorText;
+    impl PersistenceCommand for ErrorText {
+        type Output = ();
+        fn correlation(&self) -> Correlation {
+            Correlation::session(Some("session"))
+        }
+        fn execute(self, _: &Path) -> Result<()> {
+            anyhow::bail!("PRIVATE_ERROR_TEXT INSERT INTO private_table");
+        }
+    }
+    assert!(owner
+        .submit(ErrorText)
+        .unwrap()
+        .acknowledge()
+        .await
+        .is_err());
+    owner.shutdown().await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let stats = recorder.stats();
+            if stats.exported + stats.failures == stats.accepted {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let events = exporter.events();
+    for operation in [
+        StoreOperation::QueueAdmission,
+        StoreOperation::QueueWait,
+        StoreOperation::QueueExecution,
+        StoreOperation::Commit,
+        StoreOperation::QueueAck,
+        StoreOperation::QueueShutdown,
+    ] {
+        assert!(
+            events
+                .iter()
+                .any(|event| event.operation == Some(operation)),
+            "missing {operation:?}"
+        );
+    }
+    assert!(events
+        .iter()
+        .any(|event| event.name == TelemetryName::PersistenceQueueDepth && event.value == Some(0)));
+    assert!(events.iter().any(
+        |event| event.name == TelemetryName::PersistenceQueueCapacity && event.value == Some(128)
+    ));
+    let encoded = serde_json::to_string(&events).unwrap();
+    for private in [
+        "PRIVATE_ROW_CONTENT",
+        "PRIVATE_ERROR_TEXT",
+        "INSERT INTO",
+        "private_table",
+    ] {
+        assert!(
+            !encoded.contains(private),
+            "diagnostics leaked data or error text"
+        );
+    }
+    assert_eq!(recorder.stats().dropped, 0);
+    assert_eq!(recorder.stats().failures, 0);
+    drop(owner);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

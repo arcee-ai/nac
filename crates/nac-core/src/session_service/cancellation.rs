@@ -69,7 +69,7 @@ impl SessionService {
             .as_deref()
             .map(|session_id| (self.metadata.store_path.as_path(), session_id));
         match self.active_threads.cancel_and_drain(steering_store).await {
-            Ok(records) => self.emit_steering_expired(records),
+            Ok(records) => self.emit_steering_expired_async(records).await,
             Err(error) => eprintln!("nac: failed to expire cancelled worker steering: {error:#}"),
         }
 
@@ -96,7 +96,8 @@ impl SessionService {
             }
         }
 
-        self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id);
+        self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id)
+            .await;
 
         // A cancellation marker is itself a visible response. If the run task
         // was cancelled before capturing its baseline, record the count before
@@ -163,13 +164,20 @@ impl SessionService {
                 crate::store::TraditionalChildStatus::Cancelled,
                 None,
                 Some("parent or user cancelled the child run".to_string()),
-            );
+            )
+            .await;
         }
-        self.event_bus.emit_with_context(
-            SessionEvent::RunCancelled,
-            Some(cancelling_run.snapshot.run_id.clone()),
-            cancelling_run.snapshot.client_id.clone(),
-        );
+        if let Err(error) = self
+            .event_bus
+            .emit_with_context_async(
+                SessionEvent::RunCancelled,
+                Some(cancelling_run.snapshot.run_id.clone()),
+                cancelling_run.snapshot.client_id.clone(),
+            )
+            .await
+        {
+            eprintln!("nac: cancellation event caller failed: {error:#}");
+        }
         self.clear_finished_run(&cancelling_run.snapshot.run_id);
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
             if let Err(error) = self.start_next_direct_inbox_item().await {

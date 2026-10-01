@@ -10,7 +10,11 @@ pub async fn build_resume_picker_config(
 
     let lookup_cwd = options.lookup_cwd;
     let store_path = resolve_store_path(&lookup_cwd, options.store, config);
-    store::initialize(&store_path)?;
+    if let Some(owner) = store::coordinator::owner_for(&store_path)? {
+        owner.initialize().await?;
+    } else {
+        store::initialize(&store_path)?;
+    }
 
     Ok(ResumePickerRunConfig {
         store_path,
@@ -63,7 +67,11 @@ pub async fn build_resume_config(
     let session_id = snapshot.session_id.clone();
     let lease = sessions::SessionOperationLease::try_acquire(&resume_store_path, &session_id)?;
     lease.validate(&resume_store_path, &session_id)?;
-    let recovery = store::reconcile_active_run(&resume_store_path, &session_id)?;
+    let recovery = if let Some(owner) = store::coordinator::owner_for(&resume_store_path)? {
+        owner.reconcile_active_run(session_id.clone()).await?
+    } else {
+        store::reconcile_active_run(&resume_store_path, &session_id)?
+    };
     let snapshot =
         sessions::load_session_async(resume_store_path.clone(), session_id.clone()).await?;
 
@@ -93,7 +101,11 @@ pub async fn build_resume_config_for_session(
 ) -> Result<OrchestratorRunConfig> {
     let lease = sessions::SessionOperationLease::try_acquire(&store_path, session_id)?;
     lease.validate(&store_path, session_id)?;
-    let recovery = store::reconcile_active_run(&store_path, session_id)?;
+    let recovery = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
+        owner.reconcile_active_run(session_id.to_owned()).await?
+    } else {
+        store::reconcile_active_run(&store_path, session_id)?
+    };
     let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
     let mut run_config = build_resume_config_from_snapshot(
         snapshot,
@@ -128,7 +140,12 @@ pub async fn build_resume_config_for_session_attachment(
     let requires_migration = snapshot.reasoning_effort.is_some_and(|effort| {
         metadata.source.is_authoritative() && !metadata.thinking_level_map.is_supported(effort)
     });
-    let requires_run_recovery = store::load_run_recovery(&store_path, session_id)?.is_some();
+    let requires_run_recovery = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
+        owner.load_run_recovery(session_id.to_owned()).await?
+    } else {
+        store::load_run_recovery(&store_path, session_id)?
+    }
+    .is_some();
     if !requires_migration && !requires_run_recovery {
         let run_config = build_resume_config_from_snapshot(
             snapshot,
@@ -147,7 +164,11 @@ pub async fn build_resume_config_for_session_attachment(
     match sessions::SessionOperationLease::try_acquire(&store_path, session_id) {
         Ok(lease) => {
             lease.validate(&store_path, session_id)?;
-            let recovery = store::reconcile_active_run(&store_path, session_id)?;
+            let recovery = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
+                owner.reconcile_active_run(session_id.to_owned()).await?
+            } else {
+                store::reconcile_active_run(&store_path, session_id)?
+            };
             let snapshot =
                 sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
             let mut run_config = build_resume_config_from_snapshot(
@@ -194,7 +215,11 @@ pub async fn build_resume_config_for_session_with_lease(
     model: ResumeModelOptions,
 ) -> Result<OrchestratorRunConfig> {
     operation_lease.validate(&store_path, session_id)?;
-    let recovery = store::reconcile_active_run(&store_path, session_id)?;
+    let recovery = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
+        owner.reconcile_active_run(session_id.to_owned()).await?
+    } else {
+        store::reconcile_active_run(&store_path, session_id)?
+    };
     let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
     let mut run_config = build_resume_config_from_snapshot(
         snapshot,
@@ -292,7 +317,11 @@ pub(super) async fn build_resume_config_from_snapshot(
                 sessions::SessionOperationLease::try_acquire(&store_path, &snapshot.session_id)?;
             migration_lease.validate(&store_path, &snapshot.session_id)?;
         }
-        snapshot.config_version = sessions::update_session_config(&store_path, &snapshot)?;
+        snapshot.config_version = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
+            owner.update_session_config(snapshot.clone()).await?
+        } else {
+            sessions::update_session_config(&store_path, &snapshot)?
+        };
     }
     let client = ModelClient::from_effective_settings(snapshot_settings.clone())
         .map_err(|error| {
@@ -372,7 +401,11 @@ pub(super) async fn build_resume_config_from_snapshot(
         }
     };
 
-    store::initialize(&store_path)?;
+    if let Some(owner) = store::coordinator::owner_for(&store_path)? {
+        owner.initialize().await?;
+    } else {
+        store::initialize(&store_path)?;
+    }
 
     let (skills, agents_md_status, mut agents_md_message) = if ssh.is_some() {
         let config_paths = PathContext::new(&config_cwd);
@@ -451,9 +484,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         .map(super::super::sandbox::SandboxSession::status_text)
         .unwrap_or_else(|| "off".to_string());
 
-    let mut agent = Agent::with_config(
-        client.clone(),
-        AgentConfig {
+    let agent_config = AgentConfig {
             command_output_limits: worker_command_output_limits(config)?,
             mode: agent_mode,
             session_behavior: Some(snapshot.behavior),
@@ -470,15 +501,22 @@ pub(super) async fn build_resume_config_from_snapshot(
             worker_executable,
             sandbox,
             ssh,
-            mcp,
+        mcp,
             skills,
-            extra_tool_defs,
+        extra_tool_defs,
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
             light_client,
             permission_rules: config.permissions.rules.clone(),
-        },
-    )?;
+    };
+    let agent_client = client.clone();
+    let mut agent = if store::coordinator::owner_for(&store_path)?.is_some() {
+        store::spawn_blocking_store_caller(move || Agent::with_config(agent_client, agent_config))
+            .await
+            .context("resume agent construction task failed")??
+    } else {
+        Agent::with_config(agent_client, agent_config)?
+    };
     // Restore is blob ++ transcript log: rows the crashed previous run
     // appended after the last snapshot save are merged over the blob, and a
     // dangling tool turn is trimmed from both (crash-resume normalization).
@@ -492,7 +530,17 @@ pub(super) async fn build_resume_config_from_snapshot(
     {
         snapshot.messages = repaired_blob;
     }
-    agent.restore_compaction_checkpoint()?;
+    let agent = if store::coordinator::owner_for(&store_path)?.is_some() {
+        store::spawn_blocking_store_caller(move || {
+            agent.restore_compaction_checkpoint()?;
+            Ok::<_, anyhow::Error>(agent)
+        })
+        .await
+        .context("resume compaction checkpoint task failed")??
+    } else {
+        agent.restore_compaction_checkpoint()?;
+        agent
+    };
 
     let session_id = snapshot.session_id.clone();
     Ok(OrchestratorRunConfig {

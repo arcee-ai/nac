@@ -60,7 +60,12 @@ impl<'a> SessionRunApplication<'a> {
     }
 
     pub(crate) async fn submit(&self, session_id: &str, prompt: String) -> Result<SubmittedRun> {
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         self.submit_with_admission(session_id, prompt, None).await
     }
 
@@ -71,7 +76,11 @@ impl<'a> SessionRunApplication<'a> {
         execution_mode: ManagedOrchestratorExecutionMode,
     ) -> Result<SubmittedRun> {
         self.manager
-            .require_persisted_operation_session(session_id)?;
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Persisted,
+            )
+            .await?;
         self.submit_with_admission(session_id, prompt, Some(execution_mode))
             .await
     }
@@ -90,9 +99,18 @@ impl<'a> SessionRunApplication<'a> {
         )?;
         if managed_mode.is_some() {
             self.manager
-                .require_persisted_operation_session(session_id)?;
+                .validate_operation_session(
+                    session_id,
+                    super::persistence::OperationSessionScope::Persisted,
+                )
+                .await?;
         } else {
-            self.manager.require_primary_operation_session(session_id)?;
+            self.manager
+                .validate_operation_session(
+                    session_id,
+                    super::persistence::OperationSessionScope::Primary,
+                )
+                .await?;
         }
         let service = self
             .manager
@@ -112,16 +130,19 @@ impl<'a> SessionRunApplication<'a> {
             PreparedUserInput::SubmitPrompt(prompt) => Ok(prompt),
         }?;
         let display_prompt = prepared.display_prompt.clone();
-        let handle = match managed_mode {
-            Some(execution_mode) => client
-                .try_submit_prepared_managed_orchestrator_prompt_with_lease(
-                    prepared,
-                    operation_lease,
-                    execution_mode,
-                ),
-            None => client.try_submit_prepared_prompt_with_lease(prepared, operation_lease),
-        }
-        .map_err(anyhow::Error::new)?;
+        let handle = nac_core::store::spawn_blocking_store_caller(move || {
+            match managed_mode {
+                Some(execution_mode) => client
+                    .try_submit_prepared_managed_orchestrator_prompt_with_lease(
+                        prepared,
+                        operation_lease,
+                        execution_mode,
+                    ),
+                None => client.try_submit_prepared_prompt_with_lease(prepared, operation_lease),
+            }
+            .map_err(anyhow::Error::new)
+        })
+        .await??;
         Ok(SubmittedRun {
             run_id: handle.run_id.to_string(),
             client_id: handle
@@ -138,7 +159,12 @@ impl<'a> SessionRunApplication<'a> {
         thread_name: &str,
         instruction: String,
     ) -> Result<ThreadSteering> {
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         self.queue_thread_steering_for_run(session_id, thread_name, instruction, None)
             .await
     }
@@ -168,7 +194,12 @@ impl<'a> SessionRunApplication<'a> {
         session_id: &str,
         instruction: String,
     ) -> Result<OrchestratorSteering> {
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         self.queue_orchestrator_steering_unchecked(session_id, instruction)
             .await
     }
@@ -245,12 +276,22 @@ impl<'a> SessionRunApplication<'a> {
     }
 
     pub(crate) async fn cancel(&self, session_id: &str) -> Result<()> {
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         self.cancel_unchecked(session_id).await
     }
 
     pub(crate) async fn cancel_exact(&self, session_id: &str, expected_run_id: &str) -> Result<()> {
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         let _ = self
             .cancel_exact_unchecked(session_id, expected_run_id)
             .await?;

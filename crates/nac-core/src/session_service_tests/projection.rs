@@ -850,3 +850,53 @@ async fn frontend_snapshot_restores_persisted_thread_activity() {
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn operation_projection_does_not_wait_for_admission_and_keeps_pending_service_busy() {
+    let (parts, path) = test_active_service("admission_projection", "primary-session");
+    let service = parts.service;
+    let held = service.clone();
+    let (entered, observed) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let caller = crate::store::spawn_blocking_store_caller(move || {
+        let _admission = held.lock_active_operation();
+        entered.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+    });
+    observed.await.unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    assert!(service.has_active_operation());
+    assert!(service.active_operation().is_none());
+    assert!(service.active_run().is_none());
+    assert!(service.active_compaction().is_none());
+    release.send(()).unwrap();
+    caller.await.unwrap();
+    assert!(!service.has_active_operation());
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn shutdown_stops_run_admission_without_erasing_durable_queued_input() {
+    let (parts, path) = test_active_service("shutdown_admission", "primary-session");
+    let service = parts.service;
+    let inbox = crate::store::create_session_inbox_item(
+        &path,
+        "primary-session",
+        crate::store::InboxDelivery::Queue,
+        "restart this input",
+        None,
+        None,
+    )
+    .unwrap();
+    service.stop_run_admission().await.unwrap();
+    assert!(matches!(
+        service.try_submit_prompt("new input".to_owned()),
+        Err(SessionSubmitError::Coordination { .. })
+    ));
+    assert!(!service.has_active_operation());
+    let retained = crate::store::list_session_inbox(&path, "primary-session").unwrap();
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0].id, inbox.id);
+    assert_eq!(retained[0].status, crate::store::InboxStatus::Pending);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}

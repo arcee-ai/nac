@@ -1,5 +1,96 @@
 use super::*;
 
+#[tokio::test(flavor = "current_thread")]
+async fn owned_direct_inbox_goal_and_approval_transitions_keep_current_thread_compatible() {
+    let session_id = "owned-direct-transitions";
+    let (parts, path) = test_direct_active_service(
+        "owned_direct_transitions",
+        session_id,
+        ModelClient::new_for_test(),
+    );
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let service = parts.service.clone();
+    let run = crate::store::call_legacy_store(&path, move || {
+        service.try_begin_run(None, "hold direct input for this run")
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    let goal = parts
+        .service
+        .create_direct_goal("finish the work", None)
+        .await
+        .unwrap();
+    assert_eq!(goal.accounting_run_id.as_deref(), Some(run.run_id.as_str()));
+    let goal = parts
+        .service
+        .update_direct_goal(
+            &goal.goal_id,
+            goal.version,
+            crate::store::UserGoalUpdate {
+                status: Some(crate::store::GoalStatus::Paused),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(goal.status, crate::store::GoalStatus::Paused);
+    let input = parts
+        .service
+        .enqueue_direct_input(
+            crate::store::InboxDelivery::Steer,
+            "retain this steering input",
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(input.target_run_id.as_deref(), Some(run.run_id.as_str()));
+    let updated = parts
+        .service
+        .update_direct_inbox_item(input.id, input.version, crate::store::InboxDelivery::Steer)
+        .await
+        .unwrap();
+    assert!(updated.version > input.version);
+    parts
+        .service
+        .set_permission_approval_mode(crate::permissions::PermissionApprovalMode::AutoApprove)
+        .await
+        .unwrap();
+    assert_eq!(
+        parts.service.permission_approval_mode().await.unwrap(),
+        crate::permissions::PermissionApprovalMode::AutoApprove
+    );
+    parts.service.stop_run_admission().await.unwrap();
+    assert!(
+        parts
+            .service
+            .finish_run_once(&run.run_id, RunOutcome::Completed("done".into(), None))
+            .await
+    );
+    assert!(!parts.service.has_active_operation());
+    assert_eq!(
+        owner
+            .load_session_goal(session_id.into())
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        crate::store::GoalStatus::Paused
+    );
+    assert_eq!(
+        owner
+            .list_session_inbox(session_id.into())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    owner.shutdown().await.unwrap();
+    drop(parts);
+    drop(owner);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
 #[test]
 fn public_submission_rejects_external_process_lease() {
     let (parts, store_path) = test_active_service("external_lease", "leased-session");
@@ -1217,28 +1308,24 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
     assert!(no_run.to_string().contains("no active run"));
 
     let (prompt_commit, _prompt_commit_receiver) = watch::channel(RunPromptCommitStatus::Pending);
-    *service
-        .active_operation
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-        Some(ActiveSessionOperation::Run(ActiveRunState {
-            snapshot: ActiveRunSnapshot {
-                run_id: SessionRunId::new(),
-                client_id: None,
-                prompt_preview: "revamp the UI".to_string(),
-                submitted_user_message: None,
-                started_at_epoch_ms: 0,
-            },
-            started_at: Instant::now(),
-            finishing: false,
-            task: None,
-            prompt_commit,
-            transcript_baseline: None,
-            command_cancellation: crate::tools::ThreadCancellation::default(),
-            inbox_item_id: None,
-            _operation_lease: None,
-            _workspace_activity_lease: None,
-        }));
+    *service.lock_active_operation() = Some(ActiveSessionOperation::Run(ActiveRunState {
+        snapshot: ActiveRunSnapshot {
+            run_id: SessionRunId::new(),
+            client_id: None,
+            prompt_preview: "revamp the UI".to_string(),
+            submitted_user_message: None,
+            started_at_epoch_ms: 0,
+        },
+        started_at: Instant::now(),
+        finishing: false,
+        task: None,
+        prompt_commit,
+        transcript_baseline: None,
+        command_cancellation: crate::tools::ThreadCancellation::default(),
+        inbox_item_id: None,
+        _operation_lease: None,
+        _workspace_activity_lease: None,
+    }));
     let inactive = service
         .queue_thread_steering("impl/ui", "make the layout denser")
         .unwrap_err();

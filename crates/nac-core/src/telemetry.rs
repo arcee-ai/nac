@@ -44,6 +44,10 @@ pub enum TelemetryName {
     PersistenceQueueCapacity,
     #[serde(rename = "nac.persistence.executor.active")]
     PersistenceExecutorActive,
+    #[serde(rename = "nac.persistence.caller.active")]
+    PersistenceCallerActive,
+    #[serde(rename = "nac.persistence.caller.capacity")]
+    PersistenceCallerCapacity,
     #[serde(rename = "nac.runtime.activity.active")]
     RuntimeActivityActive,
     #[serde(rename = "nac.runtime.child_process")]
@@ -63,6 +67,8 @@ impl TelemetryName {
             Self::PersistenceQueueDepth => "nac.persistence.queue.depth",
             Self::PersistenceQueueCapacity => "nac.persistence.queue.capacity",
             Self::PersistenceExecutorActive => "nac.persistence.executor.active",
+            Self::PersistenceCallerActive => "nac.persistence.caller.active",
+            Self::PersistenceCallerCapacity => "nac.persistence.caller.capacity",
             Self::RuntimeActivityActive => "nac.runtime.activity.active",
             Self::ChildProcess => "nac.runtime.child_process",
             Self::ResourceSample => "nac.runtime.resource.sample",
@@ -92,6 +98,7 @@ pub enum StoreOperation {
     QueueAck,
     QueueCancellation,
     QueueShutdown,
+    CallerAdmission,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -554,6 +561,21 @@ pub(crate) fn emit_persistence_counts(
     ] {
         emit_active(name, None, value, correlation.clone());
     }
+}
+
+pub(crate) fn emit_persistence_caller_counts(active: usize, capacity: usize) {
+    emit_active(
+        TelemetryName::PersistenceCallerActive,
+        None,
+        active,
+        Correlation::default(),
+    );
+    emit_active(
+        TelemetryName::PersistenceCallerCapacity,
+        None,
+        capacity,
+        Correlation::default(),
+    );
 }
 
 pub fn emit_store_duration(

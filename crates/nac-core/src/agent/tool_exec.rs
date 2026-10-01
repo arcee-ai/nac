@@ -78,7 +78,7 @@ pub(super) async fn execute_tools_parallel(
     .await
 }
 
-pub(super) fn finalize_tool_results(
+pub(super) async fn finalize_tool_results(
     messages: &[Message],
     results: Vec<(String, String, ToolResult)>,
     event_sink: &EventSink,
@@ -91,37 +91,38 @@ pub(super) fn finalize_tool_results(
                 transcript_image_stats.and_then(|stats| stats.checked_add(content.image_stats()));
         }
     }
-    results
-        .into_iter()
-        .map(|(tool_call_id, tool_name, mut result)| {
-            let was_image_result = result.content.contains_images();
-            if was_image_result {
-                let next_stats = transcript_image_stats
-                    .as_ref()
-                    .map_err(Clone::clone)
-                    .and_then(|stats| stats.checked_add(result.content.image_stats()));
-                match next_stats {
-                    Ok(stats) => transcript_image_stats = Ok(stats),
-                    Err(_) => {
-                        result = ToolResult::text(
-                            "Error: image_limit_exceeded: image history limit reached",
-                            true,
-                        );
-                    }
+    let mut finalized = Vec::with_capacity(results.len());
+    for (tool_call_id, tool_name, mut result) in results {
+        let was_image_result = result.content.contains_images();
+        if was_image_result {
+            let next_stats = transcript_image_stats
+                .as_ref()
+                .map_err(Clone::clone)
+                .and_then(|stats| stats.checked_add(result.content.image_stats()));
+            match next_stats {
+                Ok(stats) => transcript_image_stats = Ok(stats),
+                Err(_) => {
+                    result = ToolResult::text(
+                        "Error: image_limit_exceeded: image history limit reached",
+                        true,
+                    );
                 }
-                event_sink.emit(AgentEvent::tool_call_finished(
+            }
+            event_sink
+                .emit_async(AgentEvent::tool_call_finished(
                     thread_name.clone(),
                     tool_call_id.clone(),
                     tool_name,
                     &result,
-                ));
-            }
-            Message::Tool {
-                tool_call_id,
-                content: result.content,
-            }
-        })
-        .collect()
+                ))
+                .await;
+        }
+        finalized.push(Message::Tool {
+            tool_call_id,
+            content: result.content,
+        });
+    }
+    finalized
 }
 
 type IndexedToolCall = (usize, String, String, String);
@@ -156,7 +157,7 @@ async fn execute_admission_controlled(
     event_sink: EventSink,
     thread_name: Option<String>,
 ) -> Vec<(String, String, ToolResult)> {
-    let mut all_results = dag::collect_parse_errors(parse_errors, &event_sink, &thread_name);
+    let mut all_results = dag::collect_parse_errors(parse_errors, &event_sink, &thread_name).await;
     // Consecutive read/discovery calls may overlap. Every exclusive call is a
     // barrier for all earlier and later calls, preserving model response order
     // while preventing shell and mutation overlap.
@@ -187,19 +188,22 @@ async fn spawn_and_collect_non_thread(
         client,
         event_sink,
         thread_name,
-    );
+    )
+    .await;
 
     let mut results = Vec::new();
     while let Some(join_result) = join_set.join_next().await {
         match join_result {
             Ok((index, _, tool_call_id, tool_name, result)) => {
                 if !result.content.contains_images() {
-                    event_sink.emit(AgentEvent::tool_call_finished(
-                        thread_name.clone(),
-                        tool_call_id.clone(),
-                        tool_name.clone(),
-                        &result,
-                    ));
+                    event_sink
+                        .emit_async(AgentEvent::tool_call_finished(
+                            thread_name.clone(),
+                            tool_call_id.clone(),
+                            tool_name.clone(),
+                            &result,
+                        ))
+                        .await;
                 }
                 results.push((index, tool_call_id, tool_name, result));
             }
@@ -233,11 +237,7 @@ async fn execute_simple(
     let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
 
     // Collect parse errors immediately (emit start + finish events for each).
-    all_results.extend(dag::collect_parse_errors(
-        parse_errors,
-        &event_sink,
-        &thread_name,
-    ));
+    all_results.extend(dag::collect_parse_errors(parse_errors, &event_sink, &thread_name).await);
 
     // Execute non-thread calls.
     let non_thread_results =
@@ -270,11 +270,7 @@ async fn execute_with_dag_error(
     let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
 
     // Collect parse errors immediately.
-    all_results.extend(dag::collect_parse_errors(
-        parse_errors,
-        &event_sink,
-        &thread_name,
-    ));
+    all_results.extend(dag::collect_parse_errors(parse_errors, &event_sink, &thread_name).await);
 
     // Produce error ToolResults for all thread dispatches.
     let error_message = match &dag_err {
@@ -291,20 +287,24 @@ async fn execute_with_dag_error(
             content: (error_message.clone()).into(),
             is_error: true,
         };
-        event_sink.emit(AgentEvent::ToolCallStarted {
-            thread_name: thread_name.clone(),
-            call_id: dispatch.tool_call_id.clone(),
-            name: "thread".to_string(),
-            args_preview: preview_tool_args("thread", &dispatch.args_str),
-            key_arg_preview: None,
-            args_detail: Some(tool_args_detail(&dispatch.args_str)),
-        });
-        event_sink.emit(AgentEvent::tool_call_finished(
-            thread_name.clone(),
-            dispatch.tool_call_id.clone(),
-            "thread".to_string(),
-            &result,
-        ));
+        event_sink
+            .emit_async(AgentEvent::ToolCallStarted {
+                thread_name: thread_name.clone(),
+                call_id: dispatch.tool_call_id.clone(),
+                name: "thread".to_string(),
+                args_preview: preview_tool_args("thread", &dispatch.args_str),
+                key_arg_preview: None,
+                args_detail: Some(tool_args_detail(&dispatch.args_str)),
+            })
+            .await;
+        event_sink
+            .emit_async(AgentEvent::tool_call_finished(
+                thread_name.clone(),
+                dispatch.tool_call_id.clone(),
+                "thread".to_string(),
+                &result,
+            ))
+            .await;
         all_results.push((
             dispatch.original_index,
             dispatch.tool_call_id.clone(),

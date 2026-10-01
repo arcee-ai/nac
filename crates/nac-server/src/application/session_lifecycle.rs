@@ -18,7 +18,12 @@ impl<'a> SessionLifecycleApplication<'a> {
     }
 
     pub(crate) async fn delete(&self, session_id: &str) -> Result<()> {
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         // Own deletion in an independent task. Dropping an HTTP/request future
         // cannot drop leases while launched container cleanup continues.
         let manager = self.manager.clone();
@@ -35,7 +40,11 @@ impl<'a> SessionLifecycleApplication<'a> {
 
     pub(crate) async fn delete_cascade(&self, session_id: &str) -> Result<()> {
         self.manager
-            .require_persisted_operation_session(session_id)?;
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Persisted,
+            )
+            .await?;
         let gate = self.manager.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
         let _relationship_lease = sessions::SessionRelationshipLease::try_acquire(
@@ -87,7 +96,11 @@ impl<'a> SessionLifecycleApplication<'a> {
             session_id,
         )?;
         self.manager
-            .require_persisted_operation_session(session_id)?;
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Persisted,
+            )
+            .await?;
         suppression_rollback.suppress_running(session_id)?;
 
         for orchestrator in

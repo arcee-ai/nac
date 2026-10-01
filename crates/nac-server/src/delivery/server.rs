@@ -1002,11 +1002,13 @@ where
                 })
                 .context("failed to start shutdown watchdog")?;
 
+            shutdown_manager.stop_local_run_admission().await;
             shutdown_manager.cancel_local_active_runs_for_shutdown().await;
             let result = (&mut server)
                 .await
                 .context("server task stopped unexpectedly")?
                 .context("server stopped unexpectedly");
+            shutdown_manager.quiesce_persistence_callers().await;
             shutdown_manager.drain_persistence().await?;
             let _ = shutdown_complete_tx.send(());
             watchdog
