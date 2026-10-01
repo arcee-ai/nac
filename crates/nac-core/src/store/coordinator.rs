@@ -1,0 +1,303 @@
+//! The serving application's bounded, single-threaded durable command executor.
+//! Commands are concrete inward application operations, not SQL or plug-ins.
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use anyhow::Result;
+use tokio::sync::{mpsc, oneshot, watch};
+
+use crate::sessions::StoreProcessLease;
+use crate::telemetry::{self, Correlation, StoreOperation, TelemetryOutcome};
+
+const DEFAULT_QUEUE_CAPACITY: usize = 128;
+const MAX_QUEUE_CAPACITY: usize = 1_024;
+
+/// Internal sealed command contract. Store owners implement it with domain
+/// arguments and an existing transaction; no application accepts arbitrary SQL.
+pub(crate) trait PersistenceCommand: Send + 'static {
+    type Output: Send + 'static;
+    fn correlation(&self) -> Correlation;
+    fn execute(self, store: &Path) -> Result<Self::Output>;
+}
+
+struct InitializeStore;
+impl PersistenceCommand for InitializeStore {
+    type Output = ();
+    fn correlation(&self) -> Correlation {
+        Correlation::default()
+    }
+    fn execute(self, store: &Path) -> Result<()> {
+        super::initialize(store)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistenceAdmissionError {
+    Overloaded,
+    ShuttingDown,
+    ExecutorStopped,
+}
+
+impl fmt::Display for PersistenceAdmissionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Overloaded => "persistence queue is full; retry after outstanding work settles",
+            Self::ShuttingDown => "persistence owner is draining; new work is rejected",
+            Self::ExecutorStopped => {
+                "persistence executor stopped before acknowledgement; reload durable state"
+            }
+        })
+    }
+}
+impl std::error::Error for PersistenceAdmissionError {}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PersistenceStats {
+    pub capacity: usize,
+    pub queued: usize,
+    pub executing: usize,
+    pub admitted: u64,
+    pub rejected: u64,
+    pub completed: u64,
+    pub cancelled_before_execution: u64,
+    pub acknowledgements_lost: u64,
+}
+
+#[derive(Default)]
+struct Counters {
+    queued: AtomicUsize,
+    executing: AtomicUsize,
+    admitted: AtomicU64,
+    rejected: AtomicU64,
+    completed: AtomicU64,
+    cancelled: AtomicU64,
+    lost_ack: AtomicU64,
+}
+
+trait QueuedCommand: Send {
+    fn run(self: Box<Self>, path: &Path, counters: &Counters);
+}
+
+struct Submission<C: PersistenceCommand> {
+    command: C,
+    reply: oneshot::Sender<Result<C::Output>>,
+    admitted: Instant,
+}
+
+impl<C: PersistenceCommand> QueuedCommand for Submission<C> {
+    fn run(self: Box<Self>, path: &Path, counters: &Counters) {
+        let Submission {
+            command,
+            reply,
+            admitted,
+        } = *self;
+        let correlation = command.correlation();
+        emit(
+            StoreOperation::QueueWait,
+            correlation.clone(),
+            admitted,
+            TelemetryOutcome::Ok,
+        );
+        if reply.is_closed() {
+            counters.cancelled.fetch_add(1, Ordering::SeqCst);
+            emit(
+                StoreOperation::QueueCancellation,
+                correlation,
+                admitted,
+                TelemetryOutcome::Dropped,
+            );
+            return;
+        }
+        counters.executing.store(1, Ordering::SeqCst);
+        let started = Instant::now();
+        let result =
+            telemetry::observe_store(StoreOperation::QueueExecution, correlation.clone(), || {
+                command.execute(path)
+            });
+        counters.executing.store(0, Ordering::SeqCst);
+        counters.completed.fetch_add(1, Ordering::SeqCst);
+        let outcome = if reply.send(result).is_ok() {
+            TelemetryOutcome::Ok
+        } else {
+            // The transaction may have committed. Caller cancellation cannot
+            // roll it back or turn lost delivery into a known non-commit.
+            counters.lost_ack.fetch_add(1, Ordering::SeqCst);
+            TelemetryOutcome::Dropped
+        };
+        emit(StoreOperation::QueueAck, correlation, started, outcome);
+    }
+}
+
+fn emit(
+    operation: StoreOperation,
+    correlation: Correlation,
+    started: Instant,
+    outcome: TelemetryOutcome,
+) {
+    telemetry::emit_store_duration(operation, correlation, started.elapsed(), outcome, None);
+}
+
+/// Admission is FIFO for one store (thus also for each session). SQLite work
+/// and its existing bounded busy policy run on one dedicated OS thread.
+/// The owner lease stays on that thread until every admitted command drains.
+pub struct StoreCoordinator {
+    path: PathBuf,
+    sender: Mutex<Option<mpsc::Sender<Box<dyn QueuedCommand>>>>,
+    drained: watch::Receiver<bool>,
+    counters: Arc<Counters>,
+    capacity: usize,
+}
+
+impl StoreCoordinator {
+    pub fn acquire(path: &Path) -> Result<Self> {
+        let lease = StoreProcessLease::try_acquire(path)?;
+        let path = lease.store_path().to_path_buf();
+        Self::start(path, Some(lease), DEFAULT_QUEUE_CAPACITY)
+    }
+
+    fn start(path: PathBuf, lease: Option<StoreProcessLease>, capacity: usize) -> Result<Self> {
+        anyhow::ensure!(
+            (1..=MAX_QUEUE_CAPACITY).contains(&capacity),
+            "invalid persistence queue capacity"
+        );
+        let (sender, mut receiver) = mpsc::channel::<Box<dyn QueuedCommand>>(capacity);
+        let (drained_tx, drained) = watch::channel(false);
+        let counters = Arc::new(Counters::default());
+        let execution_counters = counters.clone();
+        let execution_path = path.clone();
+        std::thread::Builder::new()
+            .name("nac-persistence".into())
+            .spawn(move || {
+                let _lease = lease;
+                while let Some(command) = receiver.blocking_recv() {
+                    // Admission increments before enqueue while holding the same
+                    // mutex. The executor can only observe an admitted entry.
+                    execution_counters.queued.fetch_sub(1, Ordering::SeqCst);
+                    command.run(&execution_path, &execution_counters);
+                }
+                drop(_lease);
+                let _ = drained_tx.send(true);
+            })?;
+        Ok(Self {
+            path,
+            sender: Mutex::new(Some(sender)),
+            drained,
+            counters,
+            capacity,
+        })
+    }
+
+    pub(crate) fn submit<C: PersistenceCommand>(
+        &self,
+        command: C,
+    ) -> Result<PendingPersistence<C::Output>> {
+        let admitted = Instant::now();
+        let correlation = command.correlation();
+        let (reply, response) = oneshot::channel();
+        let guard = self
+            .sender
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let result = if let Some(sender) = guard.as_ref() {
+            match sender.try_reserve() {
+                Ok(permit) => {
+                    self.counters.queued.fetch_add(1, Ordering::SeqCst);
+                    self.counters.admitted.fetch_add(1, Ordering::SeqCst);
+                    permit.send(Box::new(Submission {
+                        command,
+                        reply,
+                        admitted,
+                    }));
+                    Ok(PendingPersistence { response })
+                }
+                Err(error) => Err(match error {
+                    mpsc::error::TrySendError::Full(_) => PersistenceAdmissionError::Overloaded,
+                    mpsc::error::TrySendError::Closed(_) => {
+                        PersistenceAdmissionError::ExecutorStopped
+                    }
+                }),
+            }
+        } else {
+            Err(PersistenceAdmissionError::ShuttingDown)
+        };
+        if result.is_err() {
+            self.counters.rejected.fetch_add(1, Ordering::SeqCst);
+        }
+        emit(
+            StoreOperation::QueueAdmission,
+            correlation,
+            admitted,
+            if result.is_ok() {
+                TelemetryOutcome::Ok
+            } else {
+                TelemetryOutcome::Conflict
+            },
+        );
+        result.map_err(Into::into)
+    }
+
+    pub async fn initialize(&self) -> Result<()> {
+        self.submit(InitializeStore)?.acknowledge().await
+    }
+
+    pub fn stats(&self) -> PersistenceStats {
+        PersistenceStats {
+            capacity: self.capacity,
+            queued: self.counters.queued.load(Ordering::SeqCst),
+            executing: self.counters.executing.load(Ordering::SeqCst),
+            admitted: self.counters.admitted.load(Ordering::SeqCst),
+            rejected: self.counters.rejected.load(Ordering::SeqCst),
+            completed: self.counters.completed.load(Ordering::SeqCst),
+            cancelled_before_execution: self.counters.cancelled.load(Ordering::SeqCst),
+            acknowledgements_lost: self.counters.lost_ack.load(Ordering::SeqCst),
+        }
+    }
+
+    pub fn store_path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Linearize admission closure, then await drain without blocking a runtime.
+    /// Dropping this future does not interrupt accepted transactions or release
+    /// process ownership early; the executor continues its finite drain.
+    pub async fn shutdown(&self) -> Result<()> {
+        let started = Instant::now();
+        self.sender
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        let mut drained = self.drained.clone();
+        while !*drained.borrow_and_update() {
+            drained
+                .changed()
+                .await
+                .map_err(|_| PersistenceAdmissionError::ExecutorStopped)?;
+        }
+        emit(
+            StoreOperation::QueueShutdown,
+            Correlation::default(),
+            started,
+            TelemetryOutcome::Ok,
+        );
+        Ok(())
+    }
+}
+
+pub(crate) struct PendingPersistence<T> {
+    response: oneshot::Receiver<Result<T>>,
+}
+
+impl<T> PendingPersistence<T> {
+    pub(crate) async fn acknowledge(self) -> Result<T> {
+        self.response
+            .await
+            .map_err(|_| PersistenceAdmissionError::ExecutorStopped)?
+    }
+}
+
+#[cfg(test)]
+#[path = "coordinator_tests.rs"]
+mod tests;

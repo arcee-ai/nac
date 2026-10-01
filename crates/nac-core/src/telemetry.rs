@@ -77,6 +77,12 @@ pub enum StoreOperation {
     Recovery,
     TerminalSettlement,
     Readiness,
+    QueueAdmission,
+    QueueWait,
+    QueueExecution,
+    QueueAck,
+    QueueCancellation,
+    QueueShutdown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]

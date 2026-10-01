@@ -15,6 +15,7 @@ use super::operation_lease::{secure_lock_path_with_suffix, secure_open_lock_file
 #[derive(Debug)]
 pub struct StoreProcessLease {
     _file: File,
+    canonical_store: PathBuf,
 }
 
 impl Drop for StoreProcessLease {
@@ -60,7 +61,10 @@ impl StoreProcessLease {
             .map_err(store_error)?;
         let file = secure_open_lock_file(&lock_path).map_err(store_error)?;
         match file.try_lock_exclusive() {
-            Ok(()) => Ok(Self { _file: file }),
+            Ok(()) => Ok(Self {
+                _file: file,
+                canonical_store,
+            }),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 Err(StoreProcessLeaseError::Busy)
             }
@@ -69,6 +73,10 @@ impl StoreProcessLease {
                 lock_path.display()
             )))),
         }
+    }
+
+    pub(crate) fn store_path(&self) -> &Path {
+        &self.canonical_store
     }
 }
 

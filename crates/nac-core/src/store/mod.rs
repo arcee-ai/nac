@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+mod coordinator;
 mod managed_maintenance;
 mod managed_orchestrators;
 mod model_configurations;
@@ -34,6 +35,7 @@ pub(crate) use worker_dispatches::{
     worker_dispatch_generation, worker_dispatch_result, WorkerDispatchIdentity,
 };
 
+pub use coordinator::{PersistenceAdmissionError, PersistenceStats, StoreCoordinator};
 pub use managed_maintenance::*;
 pub use managed_orchestrators::*;
 pub use model_configurations::*;
