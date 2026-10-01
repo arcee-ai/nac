@@ -1103,7 +1103,11 @@ pub(crate) static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets");
 
 fn session_behaviour_setting() -> Option<String> {
     if let Ok(value) = std::env::var("SESSION_BEHAVIOUR") {
-        let trimmed = value.trim().trim_matches('"').trim_matches('\'').to_string();
+        let trimmed = value
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
         if !trimmed.is_empty() {
             return Some(trimmed);
         }
