@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::{Mutex as StdMutex, OnceLock, RwLock as StdRwLock, Weak};
 use std::time::Instant;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 const MAX_SUBSCRIBED_RESOURCES: usize = 256;
 const SUBSCRIPTION_CHANNEL_CAPACITY: usize = 64;
 const MIN_OBSERVATION_INTERVAL: Duration = Duration::from_millis(100);
@@ -476,6 +476,35 @@ impl McpServer {
 }
 
 async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>, generation: u64) {
+    let mut refreshes = JoinSet::new();
+    let (tool_refresh_sender, mut tool_refresh_receiver) = tokio::sync::mpsc::channel(1);
+    let tool_server = Weak::clone(&server);
+    let tool_peer = peer.clone();
+    refreshes.spawn(async move {
+        while tool_refresh_receiver.recv().await.is_some() {
+            let Some(current) = tool_server
+                .upgrade()
+                .filter(|current| current.is_current_connection_generation(generation))
+            else {
+                return;
+            };
+            current.refresh_tools(generation, &tool_peer).await;
+        }
+    });
+    let (prompt_refresh_sender, mut prompt_refresh_receiver) = tokio::sync::mpsc::channel(1);
+    let prompt_server = Weak::clone(&server);
+    let prompt_peer = peer.clone();
+    refreshes.spawn(async move {
+        while prompt_refresh_receiver.recv().await.is_some() {
+            let Some(current) = prompt_server
+                .upgrade()
+                .filter(|current| current.is_current_connection_generation(generation))
+            else {
+                return;
+            };
+            current.refresh_prompts(generation, &prompt_peer).await;
+        }
+    });
     loop {
         let Some(current) = server.upgrade() else {
             return;
@@ -517,16 +546,10 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>, gener
                     }
                     match notification {
                         ServerNotification::ToolListChangedNotification(_) => {
-                            let peer = peer.clone();
-                            tokio::spawn(async move {
-                                current.refresh_tools(generation, &peer).await;
-                            });
+                            let _ = tool_refresh_sender.try_send(());
                         }
                         ServerNotification::PromptListChangedNotification(_) => {
-                            let peer = peer.clone();
-                            tokio::spawn(async move {
-                                current.refresh_prompts(generation, &peer).await;
-                            });
+                            let _ = prompt_refresh_sender.try_send(());
                         }
                         ServerNotification::ResourceListChangedNotification(_) => {
                             let _ = subscription.cancel().await;
@@ -755,5 +778,38 @@ mod tests {
             .await
             .expect("aborted notification task drops its state")
             .expect("drop signal");
+    }
+
+    #[tokio::test]
+    async fn dropping_notification_task_aborts_tracked_refreshes() {
+        struct DropSignal(Option<tokio::sync::oneshot::Sender<()>>);
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
+        let (dropped_sender, dropped_receiver) = tokio::sync::oneshot::channel();
+        let task = McpNotificationTask::default();
+        task.replace(tokio::spawn(async move {
+            let mut refreshes = JoinSet::new();
+            refreshes.spawn(async move {
+                let _signal = DropSignal(Some(dropped_sender));
+                let _ = started_sender.send(());
+                std::future::pending::<()>().await;
+            });
+            std::future::pending::<()>().await;
+        }));
+        started_receiver.await.expect("refresh started");
+
+        drop(task);
+
+        tokio::time::timeout(Duration::from_secs(1), dropped_receiver)
+            .await
+            .expect("aborted listener drops its refresh set")
+            .expect("refresh drop signal");
     }
 }
