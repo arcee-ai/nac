@@ -412,7 +412,7 @@ function DiffPane({
     if (file.additions != null || file.deletions != null) {
       return { additions: file.additions ?? 0, deletions: file.deletions ?? 0 };
     }
-    if (!diff) return null;
+    if (!diff?.sections) return null;
     return diff.sections.reduce(
       (total, section) => ({
         additions: total.additions + section.additions,

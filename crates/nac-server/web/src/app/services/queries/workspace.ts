@@ -21,8 +21,8 @@ import type {
  * Last success for this session stays on screen while the next path or
  * revision is still loading. A different session does not reuse it.
  */
-function sessionSticky(id: string) {
-  return { stickyGroup: atomIds.session(id) };
+function sessionSticky(id: string, kind: string) {
+  return { stickyGroup: `${atomIds.session(id)}\0${kind}` };
 }
 
 export function workspaceDiffKey(
@@ -51,7 +51,7 @@ export const workspaceDiffAtom = Atom.family((key: string) => {
   return remoteAtom(
     atomIds.workspaceDiff(id, path, stage, context, revision),
     () => apiEffect.getWorkspaceDiff(id, path, { stage, context, revision }),
-    sessionSticky(id),
+    sessionSticky(id, "workspace-diff"),
   );
 });
 
@@ -86,7 +86,7 @@ export const workspaceFilesAtom = Atom.family((key: string) => {
     () => apiEffect.getWorkspaceFiles(id, revision),
     {
       staleMs: revision == null ? 10_000 : Number.POSITIVE_INFINITY,
-      ...sessionSticky(id),
+      ...sessionSticky(id, "workspace-files"),
     },
   );
 });
@@ -112,7 +112,7 @@ export const workspaceFileAtom = Atom.family((key: string) => {
     () => apiEffect.getWorkspaceFile(id, path, revision),
     {
       staleMs: revision == null ? 10_000 : Number.POSITIVE_INFINITY,
-      ...sessionSticky(id),
+      ...sessionSticky(id, "workspace-file"),
     },
   );
 });
@@ -153,7 +153,7 @@ export const workspaceRevisionChangesAtom = Atom.family((key: string) => {
     () => apiEffect.getWorkspaceRevisionChanges(id, revision),
     {
       staleMs: Number.POSITIVE_INFINITY,
-      ...sessionSticky(id),
+      ...sessionSticky(id, "workspace-revision-changes"),
     },
   );
 });
