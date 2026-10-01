@@ -51,7 +51,7 @@ pub use delivery::projects::{
     UpdateProjectRequest,
 };
 pub use delivery::server::{
-    openapi_document, router, serve, serve_with, serve_with_policy, BindPolicy,
+    openapi_document, router, serve, serve_with, serve_with_policy, BindPolicy, ServerOptions,
 };
 pub use delivery::sessions::{
     ListSessionsQuery, ReorderSessionsRequest, ReorderSessionsResponse,
@@ -300,14 +300,6 @@ impl Drop for CompletionSuppressionRollback {
 /// A target that failed is rechecked sooner, so bringing a host back does not
 /// mean waiting out a long cache.
 const GIT_PROBE_ERROR_CACHE_TTL: Duration = Duration::from_secs(10);
-
-#[derive(Debug, Clone)]
-pub struct ServerOptions {
-    pub root_cwd: PathBuf,
-    pub store_path: Option<PathBuf>,
-    pub worker_executable: Option<PathBuf>,
-    pub managed_host: Option<nac_managed::ManagedHostConfig>,
-}
 
 #[derive(Clone)]
 pub struct SessionManager {

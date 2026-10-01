@@ -7,6 +7,14 @@ pub(crate) fn response_compression_layer() -> CompressionLayer<impl Predicate> {
         .compress_when(DefaultPredicate::new().and(NotForContentType::SSE))
 }
 
+#[derive(Debug, Clone)]
+pub struct ServerOptions {
+    pub root_cwd: PathBuf,
+    pub store_path: Option<PathBuf>,
+    pub worker_executable: Option<PathBuf>,
+    pub managed_host: Option<nac_managed::ManagedHostConfig>,
+}
+
 /// Whether a server listener may be reachable beyond this machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BindPolicy {
