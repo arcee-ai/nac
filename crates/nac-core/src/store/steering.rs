@@ -37,6 +37,7 @@ const RECORD_COLUMNS: &str =
     "id, session_id, thread_name, dispatch_id, instruction, status, created_at, \
      claimed_at, delivered_at, expired_at";
 
+coordinated_command! {
 pub fn queue_thread_steering(
     path: &Path,
     session_id: &str,
@@ -46,6 +47,16 @@ pub fn queue_thread_steering(
 ) -> Result<ThreadSteeringRecord> {
     let conn = open_runtime_connection(path)?;
     queue_thread_steering_with_connection(&conn, session_id, thread_name, dispatch_id, instruction)
+}
+command QueueThreadSteeringCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    dispatch_id: String = dispatch_id.to_owned(),
+    instruction: String = instruction.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name, &command.dispatch_id, &command.instruction)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 pub(super) fn queue_thread_steering_with_connection(
@@ -96,6 +107,7 @@ pub(super) fn queue_thread_steering_with_connection(
     })
 }
 
+coordinated_command! {
 pub fn claim_thread_steering(
     path: &Path,
     session_id: &str,
@@ -105,6 +117,14 @@ pub fn claim_thread_steering(
         crate::telemetry::Correlation::session(Some(session_id)).with_run(Some(dispatch_id)),
         || claim_thread_steering_once(path, session_id, dispatch_id),
     )
+}
+command ClaimThreadSteeringCommand {
+    session_id: String = session_id.to_owned(),
+    dispatch_id: String = dispatch_id.to_owned(),
+}
+call |command| (&command.session_id, &command.dispatch_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 fn claim_thread_steering_once(
@@ -133,6 +153,7 @@ fn claim_thread_steering_once(
     Ok(records)
 }
 
+coordinated_command! {
 pub fn acknowledge_thread_steering_batch(
     path: &Path,
     ids: &[i64],
@@ -143,6 +164,15 @@ pub fn acknowledge_thread_steering_batch(
         crate::telemetry::Correlation::session(Some(session_id)).with_run(Some(dispatch_id)),
         || acknowledge_thread_steering_batch_once(path, ids, session_id, dispatch_id),
     )
+}
+command AcknowledgeThreadSteeringBatchCommand {
+    ids: Vec<i64> = ids.to_vec(),
+    session_id: String = session_id.to_owned(),
+    dispatch_id: String = dispatch_id.to_owned(),
+}
+call |command| (&command.ids, &command.session_id, &command.dispatch_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 fn acknowledge_thread_steering_batch_once(
@@ -187,6 +217,7 @@ pub(super) fn acknowledge_thread_steering_batch_with_connection(
     Ok(())
 }
 
+coordinated_command! {
 pub fn expire_thread_steering(
     path: &Path,
     session_id: &str,
@@ -197,12 +228,28 @@ pub fn expire_thread_steering(
         || expire_thread_steering_once(path, session_id, Some(dispatch_id)),
     )
 }
+command ExpireThreadSteeringCommand {
+    session_id: String = session_id.to_owned(),
+    dispatch_id: String = dispatch_id.to_owned(),
+}
+call |command| (&command.session_id, &command.dispatch_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn expire_session_steering(path: &Path, session_id: &str) -> Result<Vec<ThreadSteeringRecord>> {
     crate::store::retry_busy_correlated(
         crate::telemetry::Correlation::session(Some(session_id)),
         || expire_thread_steering_once(path, session_id, None),
     )
+}
+command ExpireSessionSteeringCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 fn expire_thread_steering_once(
@@ -254,9 +301,17 @@ fn expire_thread_steering_once(
 }
 
 #[cfg(test)]
+coordinated_command! {
 pub fn list_thread_steering(path: &Path, session_id: &str) -> Result<Vec<ThreadSteeringRecord>> {
     let conn = open_runtime_connection(path)?;
     list_thread_steering_with_connection(&conn, session_id)
+}
+command ListThreadSteeringCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 pub(crate) fn list_thread_steering_with_connection(

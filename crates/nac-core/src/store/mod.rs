@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
-mod coordinator;
+pub(crate) mod coordinator;
+#[macro_use]
+pub(crate) mod coordinated_commands;
 mod managed_maintenance;
 mod managed_orchestrators;
 mod model_configurations;

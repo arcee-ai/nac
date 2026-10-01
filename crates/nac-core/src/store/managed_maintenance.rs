@@ -171,6 +171,7 @@ pub struct ManagedWorkAdmission {
     _lease: crate::sessions::HostAdmissionLease,
 }
 
+coordinated_command! {
 /// Acquire shared host admission and check maintenance while it is held. The
 /// exclusive prepare lease cannot cross this check-to-durable-start window.
 pub fn try_admit_managed_work(path: &Path) -> Result<ManagedWorkAdmission> {
@@ -182,7 +183,14 @@ pub fn try_admit_managed_work(path: &Path) -> Result<ManagedWorkAdmission> {
     }
     Ok(ManagedWorkAdmission { _lease: lease })
 }
+command TryAdmitManagedWorkCommand {
+}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 /// Managed-server admission additionally fences the serving release and host
 /// incarnation once a forward replacement has been accepted.
 pub fn try_admit_managed_work_for_identity(
@@ -198,7 +206,15 @@ pub fn try_admit_managed_work_for_identity(
     validate_accepted_identity(&snapshot, running)?;
     Ok(ManagedWorkAdmission { _lease: lease })
 }
+command TryAdmitManagedWorkForIdentityCommand {
+    running: ManagedAcceptedIdentity = running.clone(),
+}
+call |command| (&command.running)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 /// Retain shared host authority for a maintenance-time completion request.
 /// Completion remains available while the ledger is in maintenance, but a
 /// process whose accepted release identity is stale cannot mutate the store
@@ -213,13 +229,27 @@ pub fn try_admit_managed_completion_for_identity(
     validate_accepted_identity(&snapshot, running)?;
     Ok(ManagedWorkAdmission { _lease: lease })
 }
+command TryAdmitManagedCompletionForIdentityCommand {
+    running: ManagedAcceptedIdentity = running.clone(),
+}
+call |command| (&command.running)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 /// Version-1 managed hosts have no immutable release identity, but completion
 /// requests still retain shared admission authority through their mutation.
 pub fn try_admit_managed_completion(path: &Path) -> Result<ManagedWorkAdmission> {
     let lease =
         crate::sessions::HostAdmissionLease::try_acquire(path).map_err(|error| anyhow!(error))?;
     Ok(ManagedWorkAdmission { _lease: lease })
+}
+command TryAdmitManagedCompletionCommand {
+}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 fn validate_accepted_identity(
@@ -276,13 +306,21 @@ impl From<anyhow::Error> for ManagedMaintenanceError {
     }
 }
 
+coordinated_command! {
 pub fn managed_maintenance_snapshot(path: &Path) -> Result<ManagedMaintenanceSnapshot> {
     let conn = open_runtime_connection(path)?;
     let mut snapshot = snapshot_with_connection(&conn, durable_blockers(&conn)?)?;
     append_maintenance_blocker(&mut snapshot);
     Ok(snapshot)
 }
+command ManagedMaintenanceSnapshotCommand {
+}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 /// Validate an accepted maintenance target without initializing or migrating
 /// the store. This must run before startup opens the database through the
 /// ordinary schema path, so an unaccepted replacement cannot mutate it.
@@ -472,6 +510,15 @@ pub fn preflight_managed_forward_start(
         requires_accept: true,
     })
 }
+command PreflightManagedForwardStartCommand {
+    running: ManagedUpgradeTarget = running.clone(),
+    configured_host: Option<(String, String)> = configured_host.map(|(host, incarnation)| (host.to_owned(), incarnation.to_owned())),
+    startup_supersession: Option<ManagedUpgradeSupersession> = startup_supersession.cloned(),
+}
+call |command| (&command.running, command.configured_host.as_ref().map(|(host, incarnation)| (host.as_str(), incarnation.as_str())), command.startup_supersession.as_ref())
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
 fn validate_running_identity(
     accepted: &ManagedAcceptedIdentity,
@@ -638,13 +685,16 @@ fn attempt_outcome(
     Ok(outcome)
 }
 
+coordinated_command! {
 pub fn record_managed_status(
     path: &Path,
     jti: &str,
     binding: &ManagedOperationBinding,
     expires_at: i64,
-    mut process_blockers: Vec<ManagedUpgradeBlocker>,
+    process_blockers: Vec<ManagedUpgradeBlocker>,
 ) -> std::result::Result<ManagedMaintenanceSnapshot, ManagedMaintenanceError> {
+    let mut process_blockers = process_blockers;
+
     let _attempt_lease = acquire_control_attempt_lease(path, jti)?;
     let operation_binding_json = serde_json::to_string(binding).map_err(anyhow::Error::new)?;
     let attempt_binding_json = serde_json::to_string(&ManagedControlAttemptBinding {
@@ -702,7 +752,18 @@ pub fn record_managed_status(
     transaction.commit().map_err(anyhow::Error::new)?;
     Ok(snapshot)
 }
+command RecordManagedStatusCommand {
+    jti: String = jti.to_owned(),
+    binding: ManagedOperationBinding = binding.clone(),
+    expires_at: i64 = expires_at,
+    process_blockers: Vec<ManagedUpgradeBlocker> = process_blockers,
+}
+call |command| (&command.jti, &command.binding, command.expires_at, command.process_blockers)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 pub fn prepare_managed_upgrade(
     path: &Path,
     jti: &str,
@@ -721,7 +782,19 @@ pub fn prepare_managed_upgrade(
         None,
     )
 }
+command PrepareManagedUpgradeCommand {
+    jti: String = jti.to_owned(),
+    binding: ManagedOperationBinding = binding.clone(),
+    action: ManagedControlAttemptAction = action,
+    expires_at: i64 = expires_at,
+    process_blockers: Vec<ManagedUpgradeBlocker> = process_blockers,
+}
+call |command| (&command.jti, &command.binding, command.action, command.expires_at, command.process_blockers)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 pub fn prepare_managed_upgrade_for_identity(
     path: &Path,
     jti: &str,
@@ -740,6 +813,18 @@ pub fn prepare_managed_upgrade_for_identity(
         process_blockers,
         Some(expected_identity),
     )
+}
+command PrepareManagedUpgradeForIdentityCommand {
+    jti: String = jti.to_owned(),
+    binding: ManagedOperationBinding = binding.clone(),
+    action: ManagedControlAttemptAction = action,
+    expires_at: i64 = expires_at,
+    process_blockers: Vec<ManagedUpgradeBlocker> = process_blockers,
+    expected_identity: ManagedAcceptedIdentity = expected_identity.clone(),
+}
+call |command| (&command.jti, &command.binding, command.action, command.expires_at, command.process_blockers, &command.expected_identity)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 fn prepare_managed_upgrade_inner(
@@ -876,6 +961,7 @@ fn prepare_managed_upgrade_inner(
     Ok(outcome)
 }
 
+coordinated_command! {
 /// Authenticated recovery transition from a failed accepted target to an exact
 /// corrected/newer target. This never leaves maintenance or changes the last
 /// successfully accepted serving identity.
@@ -935,6 +1021,16 @@ pub fn supersede_managed_upgrade_for_identity(
     conn.execute_batch("PRAGMA wal_checkpoint(FULL);")
         .map_err(anyhow::Error::new)?;
     Ok(outcome)
+}
+command SupersedeManagedUpgradeForIdentityCommand {
+    jti: String = jti.to_owned(),
+    supersession: ManagedUpgradeSupersession = supersession.clone(),
+    expires_at: i64 = expires_at,
+    expected_identity: ManagedAcceptedIdentity = expected_identity.clone(),
+}
+call |command| (&command.jti, &command.supersession, command.expires_at, &command.expected_identity)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 fn supersede_managed_upgrade_at_startup(
@@ -1267,6 +1363,7 @@ fn acquire_control_attempt_lease(
         .map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))
 }
 
+coordinated_command! {
 /// Clear maintenance only when the newly started binary exactly matches the
 /// accepted forward target and has opened the target schema successfully.
 pub fn accept_managed_forward_start(
@@ -1322,6 +1419,13 @@ pub fn accept_managed_forward_start(
     conn.execute_batch("PRAGMA wal_checkpoint(FULL);")
         .map_err(anyhow::Error::new)?;
     Ok(true)
+}
+command AcceptManagedForwardStartCommand {
+    accepted: ManagedAcceptedIdentity = accepted.clone(),
+}
+call |command| (&command.accepted)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 fn persist_outcome(

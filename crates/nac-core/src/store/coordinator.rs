@@ -1,9 +1,11 @@
 //! The serving application's bounded, single-threaded durable command executor.
 //! Commands are concrete inward application operations, not SQL or plug-ins.
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::Instant;
 
 use anyhow::Result;
@@ -20,18 +22,13 @@ const MAX_QUEUE_CAPACITY: usize = 1_024;
 pub(crate) trait PersistenceCommand: Send + 'static {
     type Output: Send + 'static;
     fn correlation(&self) -> Correlation;
+    fn outcome(_: &Self::Output) -> TelemetryOutcome {
+        TelemetryOutcome::Ok
+    }
+    fn error_identity(_: &Self::Output) -> Option<crate::telemetry::StoreErrorIdentity> {
+        None
+    }
     fn execute(self, store: &Path) -> Result<Self::Output>;
-}
-
-struct InitializeStore;
-impl PersistenceCommand for InitializeStore {
-    type Output = ();
-    fn correlation(&self) -> Correlation {
-        Correlation::default()
-    }
-    fn execute(self, store: &Path) -> Result<()> {
-        super::initialize(store)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +36,7 @@ pub enum PersistenceAdmissionError {
     Overloaded,
     ShuttingDown,
     ExecutorStopped,
+    AsyncContext,
 }
 
 impl fmt::Display for PersistenceAdmissionError {
@@ -49,6 +47,7 @@ impl fmt::Display for PersistenceAdmissionError {
             Self::ExecutorStopped => {
                 "persistence executor stopped before acknowledgement; reload durable state"
             }
+            Self::AsyncContext => "synchronous persistence requires a blocking caller; await the typed coordinator port on a current-thread runtime",
         })
     }
 }
@@ -75,7 +74,50 @@ struct Counters {
     completed: AtomicU64,
     cancelled: AtomicU64,
     lost_ack: AtomicU64,
+    capacity: usize,
 }
+
+impl Counters {
+    fn emit(&self, correlation: Correlation) {
+        telemetry::emit_persistence_counts(
+            self.queued.load(Ordering::SeqCst),
+            self.executing.load(Ordering::SeqCst),
+            self.capacity,
+            correlation,
+        );
+    }
+}
+
+pub(crate) trait CommandOutput {
+    fn error_identity(&self) -> Option<crate::telemetry::StoreErrorIdentity>;
+}
+impl<T> CommandOutput for Result<T> {
+    fn error_identity(&self) -> Option<crate::telemetry::StoreErrorIdentity> {
+        self.as_ref()
+            .err()
+            .and_then(|error| telemetry::store_error_identity(error.as_ref()))
+    }
+}
+macro_rules! store_failure_identity {
+    ($([$($module:ident)::+], $error:ident);* $(;)?) => { $(
+        impl<T> CommandOutput for std::result::Result<T, $($module)::+::$error> {
+            fn error_identity(&self) -> Option<crate::telemetry::StoreErrorIdentity> {
+                match self.as_ref().err() {
+                    Some($($module)::+::$error::Store(error)) => telemetry::store_error_identity(error.as_ref()),
+                    _ => None,
+                }
+            }
+        }
+    )* };
+}
+store_failure_identity!(
+    [super], ProjectStoreError;
+    [super], ModelConfigurationStoreError;
+    [super], SshConfigurationStoreError;
+    [super], ManagedMaintenanceError;
+    [crate::sessions], SessionConfigUpdateError;
+    [crate::sessions], SessionPresentationError;
+);
 
 trait QueuedCommand: Send {
     fn run(self: Box<Self>, path: &Path, counters: &Counters);
@@ -105,20 +147,35 @@ impl<C: PersistenceCommand> QueuedCommand for Submission<C> {
             counters.cancelled.fetch_add(1, Ordering::SeqCst);
             emit(
                 StoreOperation::QueueCancellation,
-                correlation,
+                correlation.clone(),
                 admitted,
                 TelemetryOutcome::Dropped,
             );
+            counters.emit(correlation);
             return;
         }
         counters.executing.store(1, Ordering::SeqCst);
+        counters.emit(correlation.clone());
         let started = Instant::now();
-        let result =
-            telemetry::observe_store(StoreOperation::QueueExecution, correlation.clone(), || {
-                command.execute(path)
-            });
+        let result = telemetry::in_store_command(correlation.clone(), || command.execute(path));
+        let outcome = result
+            .as_ref()
+            .map(C::outcome)
+            .unwrap_or(TelemetryOutcome::Error);
+        let error = match &result {
+            Ok(output) => C::error_identity(output),
+            Err(error) => telemetry::store_error_identity(error.as_ref()),
+        };
+        telemetry::emit_store_duration(
+            StoreOperation::QueueExecution,
+            correlation.clone(),
+            started.elapsed(),
+            outcome,
+            error,
+        );
         counters.executing.store(0, Ordering::SeqCst);
         counters.completed.fetch_add(1, Ordering::SeqCst);
+        let ack_started = Instant::now();
         let outcome = if reply.send(result).is_ok() {
             TelemetryOutcome::Ok
         } else {
@@ -127,7 +184,8 @@ impl<C: PersistenceCommand> QueuedCommand for Submission<C> {
             counters.lost_ack.fetch_add(1, Ordering::SeqCst);
             TelemetryOutcome::Dropped
         };
-        emit(StoreOperation::QueueAck, correlation, started, outcome);
+        emit(StoreOperation::QueueAck, correlation, ack_started, outcome);
+        counters.emit(Correlation::default());
     }
 }
 
@@ -149,13 +207,97 @@ pub struct StoreCoordinator {
     drained: watch::Receiver<bool>,
     counters: Arc<Counters>,
     capacity: usize,
+    executor_lifetime: Weak<()>,
+}
+
+struct OwnerRegistration {
+    owner: Weak<StoreCoordinator>,
+    executor: Weak<()>,
+}
+static OWNERS: LazyLock<Mutex<HashMap<PathBuf, OwnerRegistration>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+std::thread_local! {
+    static EXECUTION_STORE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// Lookup is only a compatibility bridge for existing path-based core APIs.
+/// Serving application services can await the explicit typed owner methods.
+/// The executor itself calls the unchanged transaction without re-enqueueing.
+pub(crate) fn owner_for(path: &Path) -> Result<Option<Arc<StoreCoordinator>>> {
+    if OWNERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .is_empty()
+    {
+        return Ok(None);
+    }
+    let path = match std::fs::canonicalize(path) {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let Some(name) = path.file_name() else {
+                return Ok(None);
+            };
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            match std::fs::canonicalize(parent) {
+                Ok(parent) => parent.join(name),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if EXECUTION_STORE.with(|active| active.borrow().as_ref() == Some(&path)) {
+        return Ok(None);
+    }
+    let owners = OWNERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match owners.get(&path) {
+        Some(registration) => match registration.owner.upgrade() {
+            Some(owner) => Ok(Some(owner)),
+            None if registration.executor.strong_count() > 0 => {
+                Err(PersistenceAdmissionError::ShuttingDown.into())
+            }
+            None => Ok(None),
+        },
+        None => Ok(None),
+    }
+}
+
+pub(crate) fn require_execution_owner(path: &Path) -> Result<()> {
+    anyhow::ensure!(
+        owner_for(path)?.is_none(),
+        "managed store connection bypassed its persistence owner; submit a typed command"
+    );
+    Ok(())
 }
 
 impl StoreCoordinator {
-    pub fn acquire(path: &Path) -> Result<Self> {
+    pub fn acquire(path: &Path) -> Result<Arc<Self>> {
         let lease = StoreProcessLease::try_acquire(path)?;
         let path = lease.store_path().to_path_buf();
-        Self::start(path, Some(lease), DEFAULT_QUEUE_CAPACITY)
+        let owner = Arc::new(Self::start(
+            path.clone(),
+            Some(lease),
+            DEFAULT_QUEUE_CAPACITY,
+        )?);
+        let mut owners = OWNERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        owners.retain(|_, registration| {
+            registration.owner.strong_count() > 0 || registration.executor.strong_count() > 0
+        });
+        owners.insert(
+            path,
+            OwnerRegistration {
+                owner: Arc::downgrade(&owner),
+                executor: Weak::clone(&owner.executor_lifetime),
+            },
+        );
+        Ok(owner)
     }
 
     fn start(path: PathBuf, lease: Option<StoreProcessLease>, capacity: usize) -> Result<Self> {
@@ -165,13 +307,20 @@ impl StoreCoordinator {
         );
         let (sender, mut receiver) = mpsc::channel::<Box<dyn QueuedCommand>>(capacity);
         let (drained_tx, drained) = watch::channel(false);
-        let counters = Arc::new(Counters::default());
-        let execution_counters = counters.clone();
+        let executor_alive = Arc::new(());
+        let executor_lifetime = Arc::downgrade(&executor_alive);
+        let counters = Arc::new(Counters {
+            capacity,
+            ..Counters::default()
+        });
+        let execution_counters = Arc::clone(&counters);
         let execution_path = path.clone();
         std::thread::Builder::new()
             .name("nac-persistence".into())
             .spawn(move || {
                 let _lease = lease;
+                let _executor_alive = executor_alive;
+                EXECUTION_STORE.with(|active| *active.borrow_mut() = Some(execution_path.clone()));
                 while let Some(command) = receiver.blocking_recv() {
                     // Admission increments before enqueue while holding the same
                     // mutex. The executor can only observe an admitted entry.
@@ -187,6 +336,7 @@ impl StoreCoordinator {
             drained,
             counters,
             capacity,
+            executor_lifetime,
         })
     }
 
@@ -226,6 +376,7 @@ impl StoreCoordinator {
         if result.is_err() {
             self.counters.rejected.fetch_add(1, Ordering::SeqCst);
         }
+        self.counters.emit(correlation.clone());
         emit(
             StoreOperation::QueueAdmission,
             correlation,
@@ -239,8 +390,13 @@ impl StoreCoordinator {
         result.map_err(Into::into)
     }
 
-    pub async fn initialize(&self) -> Result<()> {
-        self.submit(InitializeStore)?.acknowledge().await
+    pub(crate) fn check_blocking_context(&self) -> Result<()> {
+        if tokio::runtime::Handle::try_current().is_ok_and(|handle| {
+            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread
+        }) {
+            return Err(PersistenceAdmissionError::AsyncContext.into());
+        }
+        Ok(())
     }
 
     pub fn stats(&self) -> PersistenceStats {
@@ -291,6 +447,18 @@ pub(crate) struct PendingPersistence<T> {
 }
 
 impl<T> PendingPersistence<T> {
+    pub(crate) fn acknowledge_blocking(self) -> Result<T> {
+        let wait = || {
+            self.response
+                .blocking_recv()
+                .map_err(|_| anyhow::Error::from(PersistenceAdmissionError::ExecutorStopped))?
+        };
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(wait)
+        } else {
+            wait()
+        }
+    }
     pub(crate) async fn acknowledge(self) -> Result<T> {
         self.response
             .await
@@ -301,3 +469,7 @@ impl<T> PendingPersistence<T> {
 #[cfg(test)]
 #[path = "coordinator_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "coordinator_contract_tests.rs"]
+mod contract_tests;

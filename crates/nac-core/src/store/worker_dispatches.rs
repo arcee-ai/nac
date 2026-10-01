@@ -31,6 +31,7 @@ pub(super) fn create_worker_dispatches_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+coordinated_command! {
 pub(crate) fn admit_worker_dispatch(
     path: &Path,
     session_id: &str,
@@ -71,6 +72,17 @@ pub(crate) fn admit_worker_dispatch(
         run_id: run_id.map(str::to_owned),
     })
 }
+command AdmitWorkerDispatchCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    dispatch_id: String = dispatch_id.to_owned(),
+    run_id: Option<String> = run_id.map(str::to_owned),
+    action: String = action.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name, &command.dispatch_id, command.run_id.as_deref(), &command.action)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(command.run_id.as_deref());
+port internal;
+}
 
 fn validate_run(conn: &Connection, session_id: &str, run_id: Option<&str>) -> Result<()> {
     let current = load_run_recovery_with_connection(conn, session_id)?;
@@ -84,6 +96,7 @@ fn validate_run(conn: &Connection, session_id: &str, run_id: Option<&str>) -> Re
     Ok(())
 }
 
+coordinated_command! {
 pub(crate) fn commit_worker_episode(
     path: &Path,
     identity: &WorkerDispatchIdentity,
@@ -101,6 +114,15 @@ pub(crate) fn commit_worker_episode(
             Ok(id)
         },
     )
+}
+command CommitWorkerEpisodeCommand {
+    identity: WorkerDispatchIdentity = identity.clone(),
+    content: String = content.to_owned(),
+    status: EpisodeStatus = status,
+}
+call |command| (&command.identity, &command.content, command.status)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.identity.session_id));
+port internal;
 }
 
 fn commit_in_tx(
@@ -165,6 +187,7 @@ fn commit_in_tx(
     Ok(id)
 }
 
+coordinated_command! {
 pub(crate) fn worker_dispatch_generation(path: &Path, dispatch_id: &str) -> Result<i64> {
     let conn = open_runtime_connection(path)?;
     Ok(conn.query_row(
@@ -173,13 +196,29 @@ pub(crate) fn worker_dispatch_generation(path: &Path, dispatch_id: &str) -> Resu
         |row| row.get(0),
     )?)
 }
+command WorkerDispatchGenerationCommand {
+    dispatch_id: String = dispatch_id.to_owned(),
+}
+call |command| (&command.dispatch_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port internal;
+}
 
+coordinated_command! {
 pub(crate) fn worker_dispatch_result(path: &Path, dispatch_id: &str) -> Result<Option<String>> {
     let conn = open_runtime_connection(path)?;
     Ok(conn.query_row("SELECT e.content FROM worker_dispatches d JOIN episodes e ON e.id = d.episode_id WHERE d.dispatch_id = ?1 AND d.status = 'ok'",
         [dispatch_id], |row| row.get(0)).optional()?)
 }
+command WorkerDispatchResultCommand {
+    dispatch_id: String = dispatch_id.to_owned(),
+}
+call |command| (&command.dispatch_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port internal;
+}
 
+coordinated_command! {
 pub(crate) fn worker_dispatch_committed(path: &Path, dispatch_id: &str) -> Result<bool> {
     let conn = open_runtime_connection(path)?;
     Ok(conn.query_row(
@@ -187,6 +226,13 @@ pub(crate) fn worker_dispatch_committed(path: &Path, dispatch_id: &str) -> Resul
         [dispatch_id],
         |row| row.get(0),
     )?)
+}
+command WorkerDispatchCommittedCommand {
+    dispatch_id: String = dispatch_id.to_owned(),
+}
+call |command| (&command.dispatch_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port internal;
 }
 
 /// Called only by session recovery under the session operation lease. Preserve

@@ -5,6 +5,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::store::coordinated_commands::{coordinated_command, coordinated_port};
 use crate::workspace::GitTarget;
 use crate::{sessions, store};
 
@@ -474,9 +475,15 @@ pub(crate) fn worksets_snapshot_with_connection(
     }
 }
 
+coordinated_command! {
 fn load_workset_records(store_path: &Path, session_id: &str) -> Result<Vec<WorksetSnapshot>> {
     let conn = store::open_runtime_connection(store_path)?;
     load_workset_records_with_connection(&conn, session_id)
+}
+command ReadWorksetProjectionCommand { session_id: String = session_id.to_owned() }
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
 }
 
 fn load_workset_records_with_connection(

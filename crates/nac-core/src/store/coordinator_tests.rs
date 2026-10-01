@@ -39,7 +39,7 @@ fn path() -> PathBuf {
         .join("store.db")
 }
 
-fn block_executor(
+pub(super) fn block_executor(
     owner: &StoreCoordinator,
 ) -> (PendingPersistence<()>, Sender<()>, std::thread::ThreadId) {
     let (entered, observed) = channel();
@@ -175,6 +175,11 @@ async fn dropping_owner_drains_accepted_work_before_releasing_lease() {
     let (gate, release, _) = block_executor(&owner);
     drop(owner);
     assert!(StoreProcessLease::try_acquire(&path).is_err());
+    let error = crate::store::check_readiness(&path).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<PersistenceAdmissionError>(),
+        Some(&PersistenceAdmissionError::ShuttingDown)
+    );
     release.send(()).unwrap();
     gate.acknowledge().await.unwrap();
     // Drain publishes only after releasing the lease; ack can precede that.

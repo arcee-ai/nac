@@ -15,8 +15,9 @@ pub struct ThreadEventWriter {
     store_path: PathBuf,
 }
 
-pub(crate) struct ThreadEventConnection {
-    connection: StoreConnection,
+pub(crate) enum ThreadEventConnection {
+    Local(StoreConnection),
+    Coordinated(std::sync::Arc<StoreCoordinator>),
 }
 
 impl ThreadEventConnection {
@@ -26,11 +27,24 @@ impl ThreadEventConnection {
         thread_name: &str,
         event_json: &str,
     ) -> Result<()> {
+        let connection = match self {
+            Self::Coordinated(owner) => {
+                owner.check_blocking_context()?;
+                return owner
+                    .submit(PersistThreadEventCommand {
+                        session_id: session_id.to_owned(),
+                        thread_name: thread_name.to_owned(),
+                        event_json: event_json.to_owned(),
+                    })?
+                    .acknowledge_blocking()?;
+            }
+            Self::Local(connection) => connection,
+        };
         crate::telemetry::observe_store(
             crate::telemetry::StoreOperation::EventPersistence,
             crate::telemetry::Correlation::session(Some(session_id)),
             || {
-                self.connection.execute(
+                connection.execute(
                     "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
                      VALUES (?1, ?2, ?3, ?4)",
                     params![session_id, thread_name, event_json, now_utc()],
@@ -54,9 +68,12 @@ impl ThreadEventWriter {
     }
 
     pub(crate) fn checkout(&self) -> Result<ThreadEventConnection> {
-        Ok(ThreadEventConnection {
-            connection: open_runtime_connection(&self.store_path)?,
-        })
+        if let Some(owner) = super::coordinator::owner_for(&self.store_path)? {
+            return Ok(ThreadEventConnection::Coordinated(owner));
+        }
+        Ok(ThreadEventConnection::Local(open_runtime_connection(
+            &self.store_path,
+        )?))
     }
 
     pub fn append(&self, session_id: &str, thread_name: &str, event_json: &str) -> Result<()> {
@@ -64,7 +81,53 @@ impl ThreadEventWriter {
     }
 }
 
+struct PersistThreadEventCommand {
+    session_id: String,
+    thread_name: String,
+    event_json: String,
+}
+impl super::coordinator::PersistenceCommand for PersistThreadEventCommand {
+    type Output = Result<()>;
+    fn correlation(&self) -> crate::telemetry::Correlation {
+        crate::telemetry::Correlation::session(Some(&self.session_id))
+    }
+    fn outcome(output: &Self::Output) -> crate::telemetry::TelemetryOutcome {
+        if output.is_ok() {
+            crate::telemetry::TelemetryOutcome::Ok
+        } else {
+            crate::telemetry::TelemetryOutcome::Error
+        }
+    }
+    fn error_identity(output: &Self::Output) -> Option<crate::telemetry::StoreErrorIdentity> {
+        super::coordinator::CommandOutput::error_identity(output)
+    }
+    fn execute(self, path: &Path) -> Result<Self::Output> {
+        Ok(ThreadEventWriter::path_backed(path).append(
+            &self.session_id,
+            &self.thread_name,
+            &self.event_json,
+        ))
+    }
+}
+impl StoreCoordinator {
+    pub async fn persist_thread_event(
+        &self,
+        session_id: String,
+        thread_name: String,
+        event_json: String,
+    ) -> Result<()> {
+        self.submit(PersistThreadEventCommand {
+            session_id,
+            thread_name,
+            event_json,
+        })?
+        .acknowledge()
+        .await?
+    }
+}
+
 #[cfg(any(test, feature = "test-support"))]
+coordinated_command! {
 pub fn append_thread_event(
     path: &Path,
     session_id: &str,
@@ -72,6 +135,15 @@ pub fn append_thread_event(
     event_json: &str,
 ) -> Result<()> {
     ThreadEventWriter::new(path)?.append(session_id, thread_name, event_json)
+}
+command AppendThreadEventCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    event_json: String = event_json.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name, &command.event_json)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -85,6 +157,7 @@ pub fn thread_event_busy_observations() -> usize {
 }
 
 #[cfg(any(test, feature = "test-support"))]
+coordinated_command! {
 pub fn append_thread_event_observing_busy(
     path: &Path,
     session_id: &str,
@@ -92,13 +165,24 @@ pub fn append_thread_event_observing_busy(
     event_json: &str,
 ) -> Result<()> {
     let connection = ThreadEventWriter::new(path)?.checkout()?;
-    connection
-        .connection
-        .busy_handler(Some(observe_thread_event_busy))?;
+    let ThreadEventConnection::Local(local) = &connection else {
+        anyhow::bail!("busy observation must execute on the persistence owner");
+    };
+    local.busy_handler(Some(observe_thread_event_busy))?;
     connection.append(session_id, thread_name, event_json)
+}
+command AppendThreadEventObservingBusyCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    event_json: String = event_json.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name, &command.event_json)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 #[cfg(test)]
+coordinated_command! {
 pub fn load_all_thread_events(
     path: &Path,
     session_id: &str,
@@ -106,6 +190,14 @@ pub fn load_all_thread_events(
 ) -> Result<HashMap<String, Vec<ThreadEventRecord>>> {
     let conn = open_runtime_connection(path)?;
     load_all_thread_events_with_connection(&conn, session_id, per_thread_limit)
+}
+command LoadAllThreadEventsCommand {
+    session_id: String = session_id.to_owned(),
+    per_thread_limit: usize = per_thread_limit,
+}
+call |command| (&command.session_id, command.per_thread_limit)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 pub(crate) fn load_all_thread_events_with_connection(
@@ -157,6 +249,7 @@ pub(crate) fn load_all_thread_events_with_connection(
     Ok(grouped)
 }
 
+coordinated_command! {
 pub fn load_thread_events_page(
     path: &Path,
     session_id: &str,
@@ -169,6 +262,16 @@ pub fn load_thread_events_page(
     }
     let conn = open_runtime_connection(path)?;
     load_thread_events_page_with_connection(&conn, session_id, thread_name, before_id, limit)
+}
+command LoadThreadEventsPageCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    before_id: Option<i64> = before_id,
+    limit: usize = limit,
+}
+call |command| (&command.session_id, &command.thread_name, command.before_id, command.limit)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 pub(crate) fn load_thread_events_page_with_connection(

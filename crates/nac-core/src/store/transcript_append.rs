@@ -68,6 +68,7 @@ impl<'a> AppendPurpose<'a> {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct RunAppendFence {
     pub session_id: String,
     pub run_id: String,
@@ -113,6 +114,16 @@ impl TranscriptLogWriter {
         run_id: &str,
         lease: &Arc<SessionOperationLease>,
     ) -> Result<Self> {
+        if let Some(owner) = super::coordinator::owner_for(path)? {
+            owner.check_blocking_context()?;
+            return owner
+                .submit(BindRunWriter {
+                    session_id: session_id.to_owned(),
+                    run_id: run_id.to_owned(),
+                    lease: Arc::clone(lease),
+                })?
+                .acknowledge_blocking()?;
+        }
         lease.validate(path, session_id)?;
         let connection = open_runtime_connection(path)?;
         let relationship = relationship_generation(&connection, session_id)?;
@@ -208,6 +219,14 @@ impl TranscriptLogWriter {
         expected_start: Option<u64>,
         messages: &[Message],
     ) -> Result<TranscriptAppendReceipt> {
+        coordinate_writer!(self, Result<TranscriptAppendReceipt>, {
+            session_id: String = session_id.to_owned(),
+            operation_id: String = operation_id.to_owned(),
+            expected_start: Option<u64> = expected_start,
+            messages: Vec<Message> = messages.to_vec(),
+        }, call |command| command.writer.append_idempotent(&command.session_id, &command.operation_id, command.expected_start, &command.messages),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         self.commit_append(
             session_id,
             &format!("explicit:{operation_id}"),
@@ -368,6 +387,36 @@ impl TranscriptLogWriter {
         self.append_fence
             .as_ref()
             .and_then(|fence| fence.generation.as_ref().map(|(_, generation)| *generation))
+    }
+}
+
+struct BindRunWriter {
+    session_id: String,
+    run_id: String,
+    lease: Arc<SessionOperationLease>,
+}
+impl super::coordinator::PersistenceCommand for BindRunWriter {
+    type Output = Result<TranscriptLogWriter>;
+    fn correlation(&self) -> crate::telemetry::Correlation {
+        crate::telemetry::Correlation::session(Some(&self.session_id)).with_run(Some(&self.run_id))
+    }
+    fn outcome(output: &Self::Output) -> crate::telemetry::TelemetryOutcome {
+        if output.is_ok() {
+            crate::telemetry::TelemetryOutcome::Ok
+        } else {
+            crate::telemetry::TelemetryOutcome::Error
+        }
+    }
+    fn error_identity(output: &Self::Output) -> Option<crate::telemetry::StoreErrorIdentity> {
+        super::coordinator::CommandOutput::error_identity(output)
+    }
+    fn execute(self, path: &Path) -> Result<Self::Output> {
+        Ok(TranscriptLogWriter::for_run(
+            path,
+            &self.session_id,
+            &self.run_id,
+            &self.lease,
+        ))
     }
 }
 

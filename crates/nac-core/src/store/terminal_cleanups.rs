@@ -6,6 +6,7 @@ pub struct TerminalRemoteCleanupRecord {
     pub pidfile: String,
 }
 
+coordinated_command! {
 pub fn record_terminal_remote_cleanup(path: &Path, session_id: &str, pidfile: &str) -> Result<()> {
     if pidfile.is_empty() || pidfile.len() > 1_024 {
         return Err(anyhow!("remote terminal cleanup identity is invalid"));
@@ -18,7 +19,16 @@ pub fn record_terminal_remote_cleanup(path: &Path, session_id: &str, pidfile: &s
     )?;
     Ok(())
 }
+command RecordTerminalRemoteCleanupCommand {
+    session_id: String = session_id.to_owned(),
+    pidfile: String = pidfile.to_owned(),
+}
+call |command| (&command.session_id, &command.pidfile)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn clear_terminal_remote_cleanup(path: &Path, session_id: &str, pidfile: &str) -> Result<()> {
     let conn = open_runtime_connection(path)?;
     conn.execute(
@@ -27,7 +37,16 @@ pub fn clear_terminal_remote_cleanup(path: &Path, session_id: &str, pidfile: &st
     )?;
     Ok(())
 }
+command ClearTerminalRemoteCleanupCommand {
+    session_id: String = session_id.to_owned(),
+    pidfile: String = pidfile.to_owned(),
+}
+call |command| (&command.session_id, &command.pidfile)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn list_terminal_remote_cleanups(
     path: &Path,
     session_id: &str,
@@ -47,4 +66,11 @@ pub fn list_terminal_remote_cleanups(
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(anyhow::Error::new)?;
     Ok(rows)
+}
+command ListTerminalRemoteCleanupsCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }

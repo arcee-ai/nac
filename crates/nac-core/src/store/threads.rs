@@ -1,5 +1,6 @@
 use super::*;
 
+coordinated_command! {
 pub fn append_episode(
     path: &Path,
     session_id: &str,
@@ -16,7 +17,18 @@ pub fn append_episode(
         EpisodeStatus::Ok,
     )
 }
+command AppendEpisodeCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    action: String = action.to_owned(),
+    content: String = content.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name, &command.action, &command.content)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn append_episode_with_status(
     path: &Path,
     session_id: &str,
@@ -58,7 +70,19 @@ pub fn append_episode_with_status(
         },
     )
 }
+command AppendEpisodeWithStatusCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    action: String = action.to_owned(),
+    content: String = content.to_owned(),
+    status: EpisodeStatus = status,
+}
+call |command| (&command.session_id, &command.thread_name, &command.action, &command.content, command.status)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn load_worker_context(
     path: &Path,
     session_id: &str,
@@ -79,6 +103,15 @@ pub fn load_worker_context(
         self_episodes,
         source_episodes,
     })
+}
+command LoadWorkerContextCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    source_threads: Vec<String> = source_threads.to_vec(),
+}
+call |command| (&command.session_id, &command.thread_name, &command.source_threads)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 /// Every dispatch of every thread in one query, failures included, grouped by
@@ -140,9 +173,17 @@ fn group_episodes(
     Ok(grouped)
 }
 
+coordinated_command! {
 pub fn list_threads(path: &Path, session_id: &str) -> Result<Vec<ThreadRecord>> {
     let conn = open_runtime_connection(path)?;
     list_threads_with_connection(&conn, session_id)
+}
+command ListThreadsCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 pub(crate) fn list_threads_with_connection(
@@ -182,11 +223,21 @@ pub(crate) fn list_threads_with_connection(
     Ok(threads)
 }
 
+coordinated_command! {
 pub fn thread_read(path: &Path, session_id: &str, thread_name: &str) -> Result<Vec<EpisodeRecord>> {
     let conn = open_runtime_connection(path)?;
     load_thread_episodes(&conn, session_id, thread_name)
 }
+command ThreadReadCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Every dispatch of one thread, failures included. Only the panel wants this;
 /// model-facing reads go through [`thread_read`] so a failed dispatch never
 /// becomes context.
@@ -209,7 +260,16 @@ pub fn thread_dispatches(
     }
     Ok(episodes)
 }
+command ThreadDispatchesCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Highest episode id this thread holds, or 0 when it holds none. Taken before
 /// a dispatch runs, it marks off everything the thread already had, so what the
 /// dispatch itself wrote can be recognised afterwards.
@@ -223,7 +283,16 @@ pub fn latest_episode_id(path: &Path, session_id: &str, thread_name: &str) -> Re
     )
     .map_err(Into::into)
 }
+command LatestEpisodeIdCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Whether the thread retained a handoff past `watermark`, which is how a
 /// dispatch that answered before it was killed is told from one that never
 /// produced anything.
@@ -244,7 +313,17 @@ pub fn has_retained_episode_after(
     )
     .map_err(Into::into)
 }
+command HasRetainedEpisodeAfterCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+    watermark: i64 = watermark,
+}
+call |command| (&command.session_id, &command.thread_name, command.watermark)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn delete_thread(path: &Path, session_id: &str, thread_name: &str) -> Result<bool> {
     // The reserved orchestrator target names transcript log rows in
     // thread_events (store/transcript.rs) and orchestrator steering rows; it
@@ -277,6 +356,14 @@ pub fn delete_thread(path: &Path, session_id: &str, thread_name: &str) -> Result
     )?;
     tx.commit()?;
     Ok(deleted > 0)
+}
+command DeleteThreadCommand {
+    session_id: String = session_id.to_owned(),
+    thread_name: String = thread_name.to_owned(),
+}
+call |command| (&command.session_id, &command.thread_name)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 pub(super) fn ensure_thread_in_tx(

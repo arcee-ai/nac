@@ -1857,40 +1857,6 @@ fn injected_migration_failure_rolls_back_and_restart_completes_forward() {
 }
 
 #[test]
-fn migration_observation_retention_is_bounded_without_evicting_active_work() {
-    let status = StoreMigrationStatus {
-        supported_schema_version: STORE_SCHEMA_VERSION,
-        opened_schema_version: Some(23),
-        state: StoreMigrationState::Failed,
-        failure: Some(StoreMigrationFailure::MigrationFailed),
-    };
-    let mut observations = HashMap::new();
-    for index in 0..(MIGRATION_OBSERVATION_LIMIT + 10) {
-        observations.insert(
-            PathBuf::from(format!("failed-{index}")),
-            MigrationObservation { active: 0, status },
-        );
-    }
-    let active_path = PathBuf::from("active");
-    observations.insert(
-        active_path.clone(),
-        MigrationObservation {
-            active: 1,
-            status: StoreMigrationStatus {
-                state: StoreMigrationState::Migrating,
-                failure: None,
-                ..status
-            },
-        },
-    );
-
-    prune_inactive_observations(&mut observations, MIGRATION_OBSERVATION_LIMIT, None);
-
-    assert_eq!(observations.len(), MIGRATION_OBSERVATION_LIMIT);
-    assert_eq!(observations[&active_path].active, 1);
-}
-
-#[test]
 fn concurrent_migrations_serialize_at_the_immediate_transaction() {
     let path = temp_store_path("concurrent_migration");
     prepare_populated_v23_store(&path);

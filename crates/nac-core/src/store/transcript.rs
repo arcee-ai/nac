@@ -276,14 +276,16 @@ pub fn last_transcript_log_user_prompt(
 ///
 /// The transaction owns contiguity and replay. Standalone writes acquire a
 /// session operation lease; admitted runs use an explicitly bound writer.
+#[derive(Clone)]
 pub struct TranscriptLogWriter {
     pub(super) store_path: PathBuf,
-    pub(super) operation: Mutex<()>,
+    pub(super) operation: std::sync::Arc<Mutex<()>>,
     pub(super) append_scope: String,
     #[cfg(test)]
-    pub(super) append_fault: Mutex<Option<(super::transcript_append::AppendFault, usize)>>,
+    pub(super) append_fault:
+        std::sync::Arc<Mutex<Option<(super::transcript_append::AppendFault, usize)>>>,
     #[cfg(test)]
-    after_extent_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    after_extent_read: std::sync::Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
     pub(super) append_fence: Option<super::transcript_append::RunAppendFence>,
 }
 
@@ -431,18 +433,25 @@ impl TranscriptLogWriter {
     pub fn new(path: &Path) -> Result<Self> {
         Ok(Self {
             store_path: path.to_path_buf(),
-            operation: Mutex::new(()),
+            operation: std::sync::Arc::new(Mutex::new(())),
             append_scope: uuid::Uuid::new_v4().to_string(),
             append_fence: None,
             #[cfg(test)]
-            append_fault: Mutex::new(None),
+            append_fault: std::sync::Arc::new(Mutex::new(None)),
             #[cfg(test)]
-            after_extent_read: Mutex::new(None),
+            after_extent_read: std::sync::Arc::new(Mutex::new(None)),
         })
     }
 
     /// Append one message; the range and replay receipt share its transaction.
     pub fn append(&self, session_id: &str, idx: u64, message: &Message) -> Result<()> {
+        coordinate_writer!(self, Result<()>, {
+            session_id: String = session_id.to_owned(),
+            idx: u64 = idx,
+            message: Message = message.clone(),
+        }, call |command| command.writer.append(&command.session_id, command.idx, &command.message),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         self.append_batch(session_id, idx, std::slice::from_ref(message))
     }
 
@@ -453,6 +462,13 @@ impl TranscriptLogWriter {
         start_idx: u64,
         messages: &[Message],
     ) -> Result<()> {
+        coordinate_writer!(self, Result<()>, {
+            session_id: String = session_id.to_owned(),
+            start_idx: u64 = start_idx,
+            messages: Vec<Message> = messages.to_vec(),
+        }, call |command| command.writer.append_batch(&command.session_id, command.start_idx, &command.messages),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         if messages.is_empty() {
             return Ok(());
         }
@@ -476,6 +492,13 @@ impl TranscriptLogWriter {
         start_idx: u64,
         messages: &[Message],
     ) -> Result<()> {
+        coordinate_writer!(self, Result<()>, {
+            session_id: String = session_id.to_owned(),
+            start_idx: u64 = start_idx,
+            messages: Vec<Message> = messages.to_vec(),
+        }, call |command| command.writer.append_terminal_batch(&command.session_id, command.start_idx, &command.messages),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         if messages.is_empty() {
             return Ok(());
         }
@@ -505,6 +528,15 @@ impl TranscriptLogWriter {
         start_idx: u64,
         messages: &[Message],
     ) -> Result<()> {
+        coordinate_writer!(self, Result<()>, {
+            session_id: String = session_id.to_owned(),
+            dispatch_id: String = dispatch_id.to_owned(),
+            steering_ids: Vec<i64> = steering_ids.to_vec(),
+            start_idx: u64 = start_idx,
+            messages: Vec<Message> = messages.to_vec(),
+        }, call |command| command.writer.append_claimed_thread_steering(&command.session_id, &command.dispatch_id, &command.steering_ids, command.start_idx, &command.messages),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         if steering_ids.len() != messages.len() {
             anyhow::bail!(
                 "steering acknowledgement/message count mismatch: {} ids for {} messages",
@@ -541,6 +573,14 @@ impl TranscriptLogWriter {
         message: &Message,
         run_id: &str,
     ) -> Result<()> {
+        coordinate_writer!(self, Result<()>, {
+            session_id: String = session_id.to_owned(),
+            idx: u64 = idx,
+            message: Message = message.clone(),
+            run_id: String = run_id.to_owned(),
+        }, call |command| command.writer.append_run_prompt(&command.session_id, command.idx, &command.message, &command.run_id),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         self.append_run_prompt_inner(session_id, idx, message, run_id, None)
     }
 
@@ -552,6 +592,15 @@ impl TranscriptLogWriter {
         run_id: &str,
         inbox_item_id: i64,
     ) -> Result<()> {
+        coordinate_writer!(self, Result<()>, {
+            session_id: String = session_id.to_owned(),
+            idx: u64 = idx,
+            message: Message = message.clone(),
+            run_id: String = run_id.to_owned(),
+            inbox_item_id: i64 = inbox_item_id,
+        }, call |command| command.writer.append_inbox_run_prompt(&command.session_id, command.idx, &command.message, &command.run_id, command.inbox_item_id),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         self.append_run_prompt_inner(session_id, idx, message, run_id, Some(inbox_item_id))
     }
 
@@ -594,6 +643,13 @@ impl TranscriptLogWriter {
         run_id: &str,
         start_idx: u64,
     ) -> Result<Vec<SessionInboxRecord>> {
+        coordinate_writer!(self, Result<Vec<SessionInboxRecord>>, {
+            session_id: String = session_id.to_owned(),
+            run_id: String = run_id.to_owned(),
+            start_idx: u64 = start_idx,
+        }, call |command| command.writer.append_pending_inbox_steers(&command.session_id, &command.run_id, command.start_idx),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         let identity = format!("inbox:{run_id}:{start_idx}");
         self.commit_transaction(session_id, AppendPurpose::RunMessages(run_id), |transaction| {
         let replay: Option<String> = transaction.query_row(
@@ -653,6 +709,12 @@ impl TranscriptLogWriter {
     /// [`TranscriptLogWriter::read_tail_window`] for the atomicity and
     /// contiguity guarantees.
     pub fn read_tail_from(&self, session_id: &str, blob_len: u64) -> Result<Vec<(u64, Message)>> {
+        coordinate_writer!(self, Result<Vec<(u64, Message)>>, {
+            session_id: String = session_id.to_owned(),
+            blob_len: u64 = blob_len,
+        }, call |command| command.writer.read_tail_from(&command.session_id, command.blob_len),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         Ok(self
             .read_tail_window(session_id, blob_len, 0, usize::MAX)?
             .1)
@@ -678,6 +740,14 @@ impl TranscriptLogWriter {
         tail_start: u64,
         limit: usize,
     ) -> Result<(u64, Vec<(u64, Message)>)> {
+        coordinate_writer!(self, Result<(u64, Vec<(u64, Message)>)>, {
+            session_id: String = session_id.to_owned(),
+            blob_len: u64 = blob_len,
+            tail_start: u64 = tail_start,
+            limit: usize = limit,
+        }, call |command| command.writer.read_tail_window(&command.session_id, command.blob_len, command.tail_start, command.limit),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         let _operation = self
             .operation
             .lock()
@@ -749,6 +819,14 @@ impl TranscriptLogWriter {
         tail_start: u64,
         limit: usize,
     ) -> Result<Vec<String>> {
+        coordinate_writer!(self, Result<Vec<String>>, {
+            session_id: String = session_id.to_owned(),
+            blob_len: u64 = blob_len,
+            tail_start: u64 = tail_start,
+            limit: usize = limit,
+        }, call |command| command.writer.read_tail_window_times(&command.session_id, command.blob_len, command.tail_start, command.limit),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         let _operation = self
             .operation
             .lock()
@@ -796,6 +874,11 @@ impl TranscriptLogWriter {
 
     /// Read the snapshot prefix currently stored on the session row.
     pub(crate) fn read_snapshot_messages(&self, session_id: &str) -> Result<Vec<Message>> {
+        coordinate_writer!(self, Result<Vec<Message>>, {
+            session_id: String = session_id.to_owned(),
+        }, call |command| command.writer.read_snapshot_messages(&command.session_id),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         let _operation = self
             .operation
             .lock()
@@ -813,6 +896,12 @@ impl TranscriptLogWriter {
     /// A row under the reserved name that does not decode as a transcript
     /// entry is corruption and fails the read loudly.
     pub fn read_from(&self, session_id: &str, from_idx: u64) -> Result<Vec<(u64, Message)>> {
+        coordinate_writer!(self, Result<Vec<(u64, Message)>>, {
+            session_id: String = session_id.to_owned(),
+            from_idx: u64 = from_idx,
+        }, call |command| command.writer.read_from(&command.session_id, command.from_idx),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         let _operation = self
             .operation
             .lock()
@@ -862,6 +951,12 @@ impl TranscriptLogWriter {
         session_id: &str,
         blob_len: u64,
     ) -> Result<(Vec<(u64, Message)>, Option<TranscriptLogRecovery>)> {
+        coordinate_writer!(self, Result<(Vec<(u64, Message)>, Option<TranscriptLogRecovery>)>, {
+            session_id: String = session_id.to_owned(),
+            blob_len: u64 = blob_len,
+        }, call |command| command.writer.read_tail_repairing_gap(&command.session_id, command.blob_len),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         let _operation = self
             .operation
             .lock()
@@ -942,6 +1037,12 @@ impl TranscriptLogWriter {
     /// Infrequent path: the idx values live inside the JSON payloads, so this
     /// scans the session's transcript rows and deletes by row id.
     pub fn delete_from(&self, session_id: &str, from_idx: u64) -> Result<usize> {
+        coordinate_writer!(self, Result<usize>, {
+            session_id: String = session_id.to_owned(),
+            from_idx: u64 = from_idx,
+        }, call |command| command.writer.delete_from(&command.session_id, command.from_idx),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         let _operation = self
             .operation
             .lock()
@@ -993,6 +1094,12 @@ impl TranscriptLogWriter {
         session_id: &str,
         messages: &[Message],
     ) -> Result<usize> {
+        coordinate_writer!(self, Result<usize>, {
+            session_id: String = session_id.to_owned(),
+            messages: Vec<Message> = messages.to_vec(),
+        }, call |command| command.writer.replace_snapshot_and_delete_from(&command.session_id, &command.messages),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
         let messages_json =
             serde_json::to_string(messages).context("failed to serialize repaired transcript")?;
         let from_idx =
