@@ -18,6 +18,7 @@ export function ModelSetupSection({
   children,
   simple = true,
   inheritSavedDefault = false,
+  existingSession = false,
 }: {
   initial?: ConfigurationsPanelInitial;
   onChange: (selection: LaunchModelSelection | null, source: "primary" | "preset") => void;
@@ -26,6 +27,7 @@ export function ModelSetupSection({
   children?: ReactNode;
   simple?: boolean;
   inheritSavedDefault?: boolean;
+  existingSession?: boolean;
 }) {
   const [advanced, setAdvanced] = useState(!simple);
   const [connections, setConnections] = useState(false);
@@ -74,6 +76,7 @@ export function ModelSetupSection({
       ) : (
         <PrimaryModelSection
           inheritSavedDefault={inheritSavedDefault}
+          existingSession={existingSession}
           initial={seed}
           onChange={primaryChange}
         />

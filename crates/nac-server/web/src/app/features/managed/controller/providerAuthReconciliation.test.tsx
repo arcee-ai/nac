@@ -432,3 +432,27 @@ it("fences a late completion that ignores abort after origin disposal", async ()
   expect(invalidate).not.toHaveBeenCalled();
   expect(client.getQueryCache().getAll()).toHaveLength(0);
 });
+
+it("keeps cancellation idle when the pending login start later rejects", async () => {
+  const pending = Promise.withResolvers<Awaited<ReturnType<typeof api.startManagedLogin>>>();
+  vi.spyOn(api, "startManagedLogin").mockReturnValue(pending.promise);
+  const cancel = vi.spyOn(api, "cancelManagedLogin").mockResolvedValue(undefined);
+  vi.stubGlobal("open", vi.fn());
+  const client = new QueryClient();
+  const hook = renderHook(() => useDeviceLogin(), { wrapper: wrapper(client) });
+  let starting: Promise<void> | undefined;
+  act(() => {
+    starting = hook.result.current.start("codex");
+  });
+  await act(async () => {
+    await hook.result.current.cancel();
+  });
+  await act(async () => {
+    pending.reject(new Error("late start failure"));
+    await starting;
+  });
+  expect(hook.result.current.state.status).toBe("idle");
+  expect(cancel).not.toHaveBeenCalled();
+  hook.unmount();
+  client.clear();
+});

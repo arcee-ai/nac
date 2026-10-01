@@ -11,6 +11,7 @@ import { SettingsModal } from "@/app/components/modals/SettingsModal";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import type {
+  BackendKind,
   ManagedHostStatus,
   ManagedSessionSummary,
   ModelCatalog,
@@ -63,7 +64,9 @@ function renderReadySettings({
   lightModel = null,
   projectId = null,
   diagnostics = [],
+  providerBackend = "openai-responses",
 }: {
+  providerBackend?: BackendKind;
   diagnostics?: string[];
   projectId?: string | null;
   threshold?: number | null;
@@ -72,11 +75,11 @@ function renderReadySettings({
   lightModel?: RawSessionConfig["light_model"];
 } = {}) {
   const initial = {
-    backend: "openai-responses" as const,
+    backend: providerBackend,
     model: "gpt-5.2",
     base_url: "https://api.openai.com/v1",
     allow_insecure_http: false,
-    api_key_env: "OPENAI_API_KEY",
+    api_key_env: providerBackend === "openai-responses" ? "OPENAI_API_KEY" : null,
     reasoning_effort: "high" as const,
     extra_headers: {},
   };
@@ -134,7 +137,7 @@ function renderReadySettings({
     catalog_version: 1,
     providers: [
       {
-        id: "openai-responses",
+        id: providerBackend,
         auth: "api_key_env",
         auth_status: "no_credential",
         auth_hint: null,
@@ -351,6 +354,46 @@ it.each([
           }),
         ),
       );
+    } finally {
+      view.unmount();
+      client.clear();
+    }
+  },
+);
+
+it.each(["chatgpt-codex-responses", "arcee-auth"] as const)(
+  "saves title and context edits on an existing signed-out %s session",
+  async (providerBackend) => {
+    vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
+    vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
+    const title = vi
+      .spyOn(api, "updatePresentation")
+      .mockResolvedValue({} as Awaited<ReturnType<typeof api.updatePresentation>>);
+    const { client, update, view } = renderReadySettings({ orchestration: false, providerBackend });
+    try {
+      await waitFor(() =>
+        expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
+          false,
+        ),
+      );
+      fireEvent.change(screen.getByLabelText("Session title"), {
+        target: { value: "Signed-out edit" },
+      });
+      fireEvent.click(screen.getByText("Advanced execution settings"));
+      fireEvent.click(screen.getByRole("button", { name: "Advanced Configurations" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Context limit" }), {
+        target: { value: "444" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(update).toHaveBeenCalledExactlyOnceWith(
+          "settings-session",
+          expect.objectContaining({ orchestrator_compaction_threshold: 444 }),
+        ),
+      );
+      expect(update.mock.calls[0][1]).not.toHaveProperty("backend");
+      expect(update.mock.calls[0][1]).not.toHaveProperty("model");
+      await waitFor(() => expect(title).toHaveBeenCalled());
     } finally {
       view.unmount();
       client.clear();

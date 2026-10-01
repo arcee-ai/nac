@@ -39,10 +39,12 @@ interface PrimaryChoice {
 export function PrimaryModelSection({
   initial: suppliedInitial,
   inheritSavedDefault = false,
+  existingSession = false,
   onChange,
 }: {
   initial?: ConfigurationsPanelInitial;
   inheritSavedDefault?: boolean;
+  existingSession?: boolean;
   onChange: (selection: LaunchModelSelection | null) => void;
 }) {
   const catalog = useModelCatalog();
@@ -121,15 +123,14 @@ export function PrimaryModelSection({
   const effectiveIndex =
     isManagedPick && effective ? liveByBackend.get(effective.pick.backend) : undefined;
   const selection = useMemo<LaunchModelSelection | null>(() => {
-    if (
-      savedPending ||
-      managedModel.initializing ||
-      managedPending ||
-      !effective ||
-      !effective.pick.baseUrl
-    )
-      return null;
-    if (isManagedPick) {
+    if (savedPending || !effective || !effective.pick.baseUrl) return null;
+    // An existing exact route stays editable without provider login. Readiness
+    // still gates new choices; server validation owns actual model transitions.
+    const existingRoute = Boolean(
+      existingSession && initial && preservesInitialRoute && effective.pick.model === initial.model,
+    );
+    if (!existingRoute && (managedModel.initializing || managedPending)) return null;
+    if (!existingRoute && isManagedPick) {
       const index = effectiveIndex;
       if (
         !managedModel.credentialReady ||
@@ -138,7 +139,8 @@ export function PrimaryModelSection({
       )
         return null;
     }
-    if (!providerUsesApiKey(effective.pick.backend) && !providerReady) return null;
+    if (!existingRoute && !providerUsesApiKey(effective.pick.backend) && !providerReady)
+      return null;
     if (preservesInitialRoute && initial) {
       return {
         kind: "resolved",
@@ -171,6 +173,7 @@ export function PrimaryModelSection({
   }, [
     effective,
     initial,
+    existingSession,
     preservesInitialRoute,
     provider,
     providerReady,

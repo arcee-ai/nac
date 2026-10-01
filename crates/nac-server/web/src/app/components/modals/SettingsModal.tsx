@@ -635,6 +635,7 @@ function SettingsForm({
         />
 
         <ModelSetupSection
+          existingSession
           simple={!policy.orchestrationEnabled}
           invalid={Boolean(error)}
           errorText={error || undefined}

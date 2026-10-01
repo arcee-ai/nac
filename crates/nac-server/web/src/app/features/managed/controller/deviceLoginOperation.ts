@@ -114,7 +114,8 @@ export async function startDeviceLogin(client: QueryClient, provider: ManagedAut
     });
     return { attempt, fresh: true };
   } catch (error) {
-    publish({ status: "failed", message: errorMessage(toRunError(error)) });
+    if (!attempt.cancelled && current())
+      publish({ status: "failed", message: errorMessage(toRunError(error)) });
     return { attempt, fresh: false };
   }
 }

@@ -217,11 +217,10 @@ export function ConfigurationsPanel({
     ? configurations.find(
         (entry) =>
           (!initial.config_id || entry.config_id === initial.config_id) &&
-          (initial.orchestrator_compaction_threshold === undefined ||
-            entry.orchestrator_compaction_threshold ===
-              initial.orchestrator_compaction_threshold) &&
-          (initial.light_model === undefined ||
-            sameLightModel(entry.light_model ?? null, initial.light_model)) &&
+          initial.orchestrator_compaction_threshold !== undefined &&
+          initial.light_model !== undefined &&
+          entry.orchestrator_compaction_threshold === initial.orchestrator_compaction_threshold &&
+          sameLightModel(entry.light_model ?? null, initial.light_model) &&
           entry.backend === initial.backend &&
           entry.model === initial.model &&
           entry.base_url === initial.base_url &&

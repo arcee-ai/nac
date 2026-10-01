@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PrimaryModelSection } from "./PrimaryModelSection";
+import { queryKeys } from "@/app/services/queries/keys";
 import { api } from "@/app/services/api";
 import type { LaunchModelSelection } from "./ConfigurationsPanel";
 import type {
@@ -51,6 +52,7 @@ const catalog = {
 function mount(
   initial?: Parameters<typeof PrimaryModelSection>[0]["initial"],
   inheritSavedDefault = false,
+  existingSession = false,
 ) {
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
@@ -64,6 +66,7 @@ function mount(
       <PrimaryModelSection
         initial={initial}
         inheritSavedDefault={inheritSavedDefault}
+        existingSession={existingSession}
         onChange={onChange}
       />
     </QueryClientProvider>,
@@ -156,3 +159,67 @@ it("waits for mounted-provider entitlements and treats an empty result as author
     client.clear();
   }
 });
+
+it.each(["chatgpt-codex-responses", "arcee-auth"] as const)(
+  "retains an existing %s route while signed out without enabling a new provider pick",
+  async (backend) => {
+    vi.spyOn(api, "getManagedStatus").mockResolvedValue({ ...host, model_ready: false });
+    vi.spyOn(api, "getModelCatalog").mockResolvedValue({
+      ...catalog,
+      providers: [
+        { ...catalog.providers[0], id: backend, auth_status: "no_credential", connection: null },
+      ],
+    });
+    const initial = {
+      backend,
+      model: "saved-oauth-model",
+      base_url: "https://saved.example/v1",
+      api_key_env: null,
+      reasoning_effort: null,
+      extra_headers: {},
+      light_model: null,
+      orchestrator_compaction_threshold: null,
+    };
+    const { view, client, onChange } = mount(initial, false, true);
+    try {
+      await waitFor(() =>
+        expect(onChange).toHaveBeenLastCalledWith(
+          expect.objectContaining({ kind: "resolved", ...initial }),
+        ),
+      );
+    } finally {
+      view.unmount();
+      client.clear();
+    }
+  },
+);
+
+it.each(["chatgpt-codex-responses", "arcee-auth"] as const)(
+  "still gates a new %s launch from a saved route while signed out",
+  async (backend) => {
+    vi.spyOn(api, "getManagedStatus").mockResolvedValue({ ...host, model_ready: false });
+    vi.spyOn(api, "getModelCatalog").mockResolvedValue({
+      ...catalog,
+      providers: [
+        { ...catalog.providers[0], id: backend, auth_status: "no_credential", connection: null },
+      ],
+    });
+    const { view, client, onChange } = mount({
+      backend,
+      model: "saved-oauth-model",
+      base_url: "https://saved.example/v1",
+      api_key_env: null,
+      reasoning_effort: null,
+      extra_headers: {},
+    });
+    try {
+      await waitFor(() =>
+        expect(client.getQueryState(queryKeys.modelCatalog)?.status).toBe("success"),
+      );
+      expect(onChange.mock.calls.every(([selection]) => selection === null)).toBe(true);
+    } finally {
+      view.unmount();
+      client.clear();
+    }
+  },
+);
