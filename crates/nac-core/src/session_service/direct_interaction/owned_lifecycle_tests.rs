@@ -177,7 +177,7 @@ async fn selected_compaction_terminal_survives_cancelled_publication_wait() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn cancellation_drop_restores_local_run_after_caller_saturation_and_owner_drain() {
+async fn cancellation_drop_restores_local_run_during_caller_saturation() {
     let (parts, path) = test_direct_active_service(
         "owned_cancel_restore_saturation",
         "session",
@@ -200,18 +200,12 @@ async fn cancellation_drop_restores_local_run_after_caller_saturation_and_owner_
         .unwrap();
     let saturation = crate::store::reject_callers_for_test();
     drop(cancellation);
-    tokio::time::sleep(Duration::from_millis(10)).await;
-    assert!(
-        matches!(service.lock_active_operation().as_ref(), Some(ActiveSessionOperation::Run(active)) if active.finishing && active.task.is_none())
-    );
-    owner.shutdown().await.unwrap();
+    assert!(matches!(
+        service.lock_active_operation().as_ref(),
+        Some(ActiveSessionOperation::Run(active)) if !active.finishing && active.task.is_some()
+    ));
     drop(saturation);
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(service.lock_active_operation().as_ref(), Some(ActiveSessionOperation::Run(active)) if !active.finishing && active.task.is_some()) { break; }
-            tokio::task::yield_now().await;
-        }
-    }).await.unwrap();
+    owner.shutdown().await.unwrap();
     let mut operation = service.lock_active_operation();
     if let Some(ActiveSessionOperation::Run(active)) = operation.as_mut() {
         active.task.take().unwrap().abort();
