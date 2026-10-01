@@ -85,6 +85,7 @@ pub(super) async fn connect_server(
                 name,
                 config.protocol,
                 handler,
+                cwd,
                 &parameters,
                 startup_timeout,
             )
@@ -107,6 +108,7 @@ pub(super) async fn connect_server(
                         name,
                         config.protocol,
                         handler,
+                        cwd,
                         &parameters,
                         startup_timeout,
                     )
@@ -130,12 +132,13 @@ async fn connect_http_server_with_timeout(
     name: &str,
     protocol: McpProtocolSelection,
     handler: &NacMcpClientHandler,
+    cwd: &Path,
     parameters: &HttpConnectionParameters<'_>,
     startup_timeout: Duration,
 ) -> Result<McpService> {
     timeout(
         startup_timeout,
-        connect_http_server(name, protocol, handler, parameters),
+        connect_http_server(name, protocol, handler, cwd, parameters),
     )
     .await
     .map_err(|_| {
@@ -150,20 +153,33 @@ async fn connect_http_server(
     name: &str,
     protocol: McpProtocolSelection,
     handler: &NacMcpClientHandler,
+    cwd: &Path,
     parameters: &HttpConnectionParameters<'_>,
 ) -> Result<McpService> {
-    let transport = StreamableHttpClientTransport::from_config(build_http_transport_config(
+    let transport_config = build_http_transport_config(
         parameters.url,
         parameters.headers,
         parameters.env_headers,
         parameters.bearer_token_env_var,
         parameters.helper_headers,
-    )?);
-    handler
-        .clone()
-        .serve_with_lifecycle(transport, protocol.lifecycle())
-        .await
-        .with_context(|| format!("failed to connect HTTP MCP server '{name}'"))
+    )?;
+    if super::oauth::has_mcp_oauth_profile(cwd, name)? {
+        let manager = super::oauth::authorized_manager(cwd, name, parameters.url).await?;
+        let client = rmcp::transport::auth::AuthClient::new(reqwest::Client::new(), manager);
+        let transport = StreamableHttpClientTransport::with_client(client, transport_config);
+        handler
+            .clone()
+            .serve_with_lifecycle(transport, protocol.lifecycle())
+            .await
+            .with_context(|| format!("failed to connect authenticated HTTP MCP server '{name}'"))
+    } else {
+        let transport = StreamableHttpClientTransport::from_config(transport_config);
+        handler
+            .clone()
+            .serve_with_lifecycle(transport, protocol.lifecycle())
+            .await
+            .with_context(|| format!("failed to connect HTTP MCP server '{name}'"))
+    }
 }
 
 pub(super) fn authorization_required(error: &(dyn std::error::Error + 'static)) -> bool {
