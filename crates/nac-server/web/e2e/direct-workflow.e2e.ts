@@ -91,7 +91,9 @@ for (const mobile of [false, true]) {
     stages.open = await page.evaluate(() => ({ ...globalThis.__directEvidence }));
     expect(stages.open.commits).toBeGreaterThan(0);
     if (!baselineAssets) {
-      await expect(page.getByRole("button", { name: "Default effort", exact: true })).toBeVisible();
+      // The project fixture explicitly configures high effort; wait for the
+      // canonical snapshot rather than accepting the pre-snapshot placeholder.
+      await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
       if (!mobile) {
         await page.getByText("Run details", { exact: true }).click();
         await expect(page.getByText("Context tokens", { exact: true })).toBeVisible();
