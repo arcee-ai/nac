@@ -51,7 +51,11 @@ describe("origin-bound Stop settlement", () => {
       ["a", true],
       ["newer", true],
     ]);
-    expect(runtimeStore.getState().running).toBe(true);
+    expect(runtimeStore.getState()).toMatchObject({
+      running: true,
+      runStartedAt: active.started_at_epoch_ms,
+      lastElapsedMs: null,
+    });
     expect(
       client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot("a"))?.active_run,
     ).toEqual(active);

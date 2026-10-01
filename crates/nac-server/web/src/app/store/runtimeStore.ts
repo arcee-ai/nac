@@ -384,6 +384,7 @@ export function restoreRunCancel(previous: RuntimeState): void {
     threads: previous.threads,
     cancelArmed: previous.cancelArmed,
     lastElapsedMs: previous.lastElapsedMs,
+    runStartedAt: previous.runStartedAt,
   });
 }
 
