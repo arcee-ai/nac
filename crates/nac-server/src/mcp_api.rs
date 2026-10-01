@@ -307,6 +307,17 @@ fn optional_update<T>(sent: RequestField<T>, stored: Option<T>) -> Option<T> {
     }
 }
 
+fn approval_update(
+    sent: RequestField<McpToolApproval>,
+    stored: McpToolApproval,
+) -> McpToolApproval {
+    match sent {
+        RequestField::Value(approval) => approval,
+        RequestField::Null => McpToolApproval::default(),
+        RequestField::Omitted => stored,
+    }
+}
+
 /// Settles a map edit against the stored map: the sent map replaces the whole
 /// thing, but a null value borrows the stored value for that key.
 fn merge_map(
@@ -549,10 +560,7 @@ pub async fn update_server_handler(
             RequestField::Null => Vec::new(),
             RequestField::Omitted => existing.denied_tools,
         },
-        approval: match request.approval {
-            RequestField::Value(approval) => approval,
-            RequestField::Null | RequestField::Omitted => existing.approval,
-        },
+        approval: approval_update(request.approval, existing.approval),
         tool_approvals: match request.tool_approvals {
             RequestField::Value(approvals) => approvals,
             RequestField::Null => BTreeMap::new(),

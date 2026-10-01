@@ -37,6 +37,22 @@ fn create_request_allows_omitted_tool_policy_fields() {
 }
 
 #[test]
+fn update_approval_null_resets_to_ask_and_omission_keeps_stored_value() {
+    let cleared: UpdateMcpServerRequest =
+        serde_json::from_value(serde_json::json!({ "approval": null })).unwrap();
+    assert_eq!(
+        approval_update(cleared.approval, McpToolApproval::Allow),
+        McpToolApproval::Ask
+    );
+
+    let omitted: UpdateMcpServerRequest = serde_json::from_value(serde_json::json!({})).unwrap();
+    assert_eq!(
+        approval_update(omitted.approval, McpToolApproval::Allow),
+        McpToolApproval::Allow
+    );
+}
+
+#[test]
 fn merge_map_keeps_stored_values_for_null_entries() {
     let stored = BTreeMap::from([("Authorization".to_string(), "Bearer real".to_string())]);
     let sent = BTreeMap::from([
