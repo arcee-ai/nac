@@ -44,7 +44,7 @@ pub(crate) fn load_managed_monitor_record(
 ) -> anyhow::Result<Option<ManagedOrchestratorRecord>> {
     #[cfg(test)]
     if INJECTED_MANAGED_MONITOR_FAILURES
-        .fetch_update(
+        .try_update(
             std::sync::atomic::Ordering::SeqCst,
             std::sync::atomic::Ordering::SeqCst,
             |remaining| remaining.checked_sub(1),
