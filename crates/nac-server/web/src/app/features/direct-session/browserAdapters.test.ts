@@ -5,7 +5,11 @@ import { api } from "@/app/services/api";
 import type { subscribeToSessionEvents } from "@/app/services/eventStream";
 import { queryKeys } from "@/app/services/queries/keys";
 import { runtimeStore, resetRuntime } from "@/app/store/runtimeStore";
-import type { ActiveRunSnapshot, MessagesPageResponse, SessionSnapshotResponse } from "@/app/types/api";
+import type {
+  ActiveRunSnapshot,
+  MessagesPageResponse,
+  SessionSnapshotResponse,
+} from "@/app/types/api";
 import { makeObservationPorts } from "./browserAdapters";
 import { openSessionObservation } from "./browserRuntime";
 
