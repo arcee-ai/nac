@@ -262,7 +262,8 @@ it("sends null when one chat clears an inherited light model", async () => {
     fireEvent.click(screen.getByRole("button", { name: "Use one model" }));
     fireEvent.click(screen.getByRole("button", { name: "Create chat" }));
     await waitFor(() => expect(create).toHaveBeenCalled());
-    expect((create.mock.calls[0]?.[0] as { light_model: unknown }).light_model).toBeNull();
+    const request = create.mock.calls[0][0] as { light_model: unknown };
+    expect(request.light_model).toBeNull();
   } finally {
     view.unmount();
   }

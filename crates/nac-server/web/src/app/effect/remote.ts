@@ -100,8 +100,7 @@ export function remoteAtom<A, E = ClientRequestError>(
       remember(get, id);
       const attempts = retry === false ? 1 : retry + 1;
       let first = true;
-      let polling = true;
-      while (polling) {
+      while (true) {
         const current = get.once(state);
         const fresh =
           first &&
@@ -169,10 +168,7 @@ export function remoteAtom<A, E = ClientRequestError>(
           }
         }
         const delay = pollDelay(options.pollMs, valueOf(get.once(state)));
-        if (delay === false) {
-          polling = false;
-          break;
-        }
+        if (delay === false) break;
         do {
           yield* Effect.sleep(Duration.millis(hidden(options.pollInBackground) ? 1000 : delay));
         } while (hidden(options.pollInBackground));

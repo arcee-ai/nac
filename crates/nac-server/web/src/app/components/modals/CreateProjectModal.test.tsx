@@ -181,7 +181,8 @@ it("sends explicit null when the first chat changes a saved Dual preset to Singl
     fireEvent.click(screen.getByRole("button", { name: "Use one model" }));
     fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
     await waitFor(() => expect(createSession).toHaveBeenCalled());
-    expect((createSession.mock.calls[0]?.[0] as { light_model: unknown }).light_model).toBeNull();
+    const request = createSession.mock.calls[0][0] as { light_model: unknown };
+    expect(request.light_model).toBeNull();
   } finally {
     view.unmount();
   }
