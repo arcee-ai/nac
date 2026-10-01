@@ -78,6 +78,7 @@ pub use oauth::{
     mcp_oauth_pending_authorization_url, mcp_oauth_status, rename_mcp_oauth_profile,
     McpOAuthAuthorizationMetadata, McpOAuthAuthorizationSession, McpOAuthConfiguration,
     McpOAuthRegistration, McpOAuthStatus, MCP_OAUTH_CALLBACK_PATH, MCP_OAUTH_REDIRECT_URI,
+    MCP_OAUTH_STATE_TTL,
 };
 pub use registry::{McpRegistry, McpRootPolicy, McpToolMetadata, McpTransportPolicy};
 

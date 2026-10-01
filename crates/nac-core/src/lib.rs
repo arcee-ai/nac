@@ -62,7 +62,7 @@ pub mod mcp_configurations {
         McpRuntimeManager, McpRuntimeState, McpRuntimeStatus, McpServerConfig,
         McpServerConfigurationRecord, McpServerConfigurationStoreError, McpToolApproval,
         McpToolMetadata, McpTransportConfig, MCP_OAUTH_CALLBACK_PATH, MCP_OAUTH_REDIRECT_URI,
-        MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
+        MCP_OAUTH_STATE_TTL, MCP_TRANSPORT_STDIO, MCP_TRANSPORT_STREAMABLE_HTTP,
     };
 }
 

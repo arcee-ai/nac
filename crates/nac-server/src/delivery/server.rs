@@ -241,6 +241,11 @@ fn remains_available_during_maintenance(method: &axum::http::Method, path: &str)
     }
 
     method == axum::http::Method::OPTIONS
+        || (method == axum::http::Method::GET
+            && matches!(
+                parts.as_slice(),
+                ["mcp_library", "servers", _, "oauth", "callback"]
+            ))
         || ((method == axum::http::Method::GET || method == axum::http::Method::HEAD)
             && (matches!(
                 path,
@@ -275,6 +280,7 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
     for (method, path) in [
         (Method::GET, "/ui-config"),
         (Method::HEAD, "/ui-config"),
+        (Method::GET, "/mcp_library/servers/slack/oauth/callback"),
         (Method::POST, "/sessions/s/cancel-active-run"),
         (Method::POST, "/sessions/s/children/c/cancel"),
         (Method::POST, "/sessions/s/orchestrators/o/cancel"),
@@ -296,6 +302,11 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
         (Method::PUT, "/ui-config"),
         (Method::DELETE, "/ui-config"),
         (Method::GET, "/ui-config/extra"),
+        (Method::HEAD, "/mcp_library/servers/slack/oauth/callback"),
+        (
+            Method::GET,
+            "/mcp_library/servers/slack/oauth/callback/extra",
+        ),
         (Method::GET, "/sessions"),
         (Method::POST, "/sessions"),
         (Method::GET, "/auth/arcee/login/l"),

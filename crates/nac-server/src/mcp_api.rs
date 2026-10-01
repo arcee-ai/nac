@@ -329,7 +329,6 @@ type OAuthFlowKey = (PathBuf, String);
 static OAUTH_FLOWS: LazyLock<tokio::sync::Mutex<HashMap<OAuthFlowKey, OAuthFlowState>>> =
     LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 static OAUTH_FLOW_GENERATION: AtomicU64 = AtomicU64::new(1);
-const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 pub const MCP_OAUTH_CALLBACK_ORIGIN_ENV: &str = "NAC_MCP_OAUTH_CALLBACK_ORIGIN";
 
 enum OAuthCallbackTarget {
@@ -1123,7 +1122,7 @@ fn oauth_registration(
             scopes_supported: value.scopes_supported,
             response_types_supported: value.response_types_supported,
             code_challenge_methods_supported: value.code_challenge_methods_supported,
-            additional_fields: value.additional_fields,
+            additional_fields: value.additional_fields.into_iter().collect(),
         });
     Ok((registration, request.scopes, metadata))
 }
@@ -1310,7 +1309,7 @@ pub async fn authenticate_oauth_handler(
                 return;
             }
             drop(session);
-            tokio::time::sleep(OAUTH_CALLBACK_TIMEOUT).await;
+            tokio::time::sleep(mcp::MCP_OAUTH_STATE_TTL).await;
             let mut flows = OAUTH_FLOWS.lock().await;
             if matches!(flows.get(&completion_key), Some(OAuthFlowState::Connecting { generation: value, .. }) if *value == generation)
             {
@@ -1432,7 +1431,7 @@ async fn run_oauth_callback(
     listeners: OAuthCallbackListeners,
     session: mcp::McpOAuthAuthorizationSession,
 ) -> bool {
-    let deadline = tokio::time::Instant::now() + OAUTH_CALLBACK_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + mcp::MCP_OAUTH_STATE_TTL;
     loop {
         let Ok(Ok(mut stream)) = tokio::time::timeout_at(deadline, listeners.accept()).await else {
             return false;
