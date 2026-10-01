@@ -162,6 +162,10 @@ async fn shutdown_rejects_admission_and_retains_ownership_until_drain() {
     release.send(()).unwrap();
     gate.acknowledge().await.unwrap();
     shutdown.await.unwrap();
+    assert_eq!(owner.executor_lifetime.strong_count(), 0);
+    drop(owner);
+    assert!(super::ownership::owner_for(&path).unwrap().is_none());
+    crate::store::check_readiness(&path).unwrap();
     let replacement = StoreCoordinator::acquire(&path).unwrap();
     replacement.initialize().await.unwrap();
     replacement.shutdown().await.unwrap();

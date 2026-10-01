@@ -308,7 +308,11 @@ impl StoreCoordinator {
                         return; // Closing the drain watch reports ExecutorStopped.
                     }
                 }
+                drop(_execution_owner);
                 drop(_lease);
+                // Successful drain must also retire the compatibility lookup's
+                // executor marker before callers can reopen the unowned store.
+                drop(_executor_alive);
                 let _ = drained_tx.send(true);
             })?;
         Ok(Self {

@@ -12,9 +12,10 @@ import {
 } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
-/** The new-chat chord. The page binds it to the platform modifier. */
-function newChatChord(): string {
-  return process.platform === "darwin" ? "Meta+Shift+O" : "Control+Shift+O";
+/** Match the page's browser profile, which can differ from the test host. */
+async function newChatChord(page: Page): Promise<string> {
+  const isMac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
+  return isMac ? "Meta+Shift+O" : "Control+Shift+O";
 }
 
 /**
@@ -752,7 +753,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByText("Threads", { exact: true })).toBeVisible();
   await expect(page.getByText("Worksets", { exact: true })).toBeVisible();
 
-  await page.keyboard.press(newChatChord());
+  await page.keyboard.press(await newChatChord(page));
   await expect(behaviorChoices.filter({ hasText: "NAC orchestrator" }).first()).toHaveAttribute(
     "aria-checked",
     "true",
@@ -778,7 +779,7 @@ test("asks for immutable behavior on every first and new chat", async ({
   await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Worksets", { exact: true })).toHaveCount(0);
 
-  await page.keyboard.press(newChatChord());
+  await page.keyboard.press(await newChatChord(page));
   await expect(behaviorChoices.filter({ hasText: "NAC orchestrator" }).first()).toHaveAttribute(
     "aria-checked",
     "true",
@@ -894,7 +895,7 @@ test("shows and persists the optional light model for every chat behavior", asyn
     });
 
     if (expected.behavior !== "direct-with-orchestrator") {
-      await page.keyboard.press(newChatChord());
+      await page.keyboard.press(await newChatChord(page));
     }
   }
 });
