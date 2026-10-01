@@ -156,6 +156,13 @@ Managed authentication commands live in `features/managed/controller/` and use
 the existing facades. Authentication settlement resets entitled-model queries
 (aborting old discovery), refreshes auth/catalog/host readiness and invalidates
 resolved presets/files. A delayed start cannot open a browser tab after detach.
+Accepted device-login attempts live in a provider-keyed originating QueryClient
+entry. A feature-owned TanStack QueryObserver owns the one poll/retry/AbortSignal
+lifecycle until completion, failure, explicit Cancel or QueryClient disposal.
+Disclosure/modal detach releases only local presentation; reopening resumes the
+same provider attempt without another start. Completed observation reconciles
+the origin cache even without a form; disposal aborts observation and fences
+late reconciliation, without abandoning the server login.
 Only explicit Cancel abandons a device login; if Cancel races start, its eventual
 server login identity is cancelled once. Leaving the form only detaches local
 observation. Multiple provider accounts continue to coexist independently of

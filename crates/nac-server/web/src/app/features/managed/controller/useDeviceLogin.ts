@@ -1,120 +1,82 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { errorMessage } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
-import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
 import { useSetupLifetime } from "@/app/features/setup/lifetime";
-import type { DeviceLoginStarted, ManagedAuthProvider } from "@/app/types/api";
-import { toRunError } from "@/app/lib/providerError";
-import { authenticationCommand, runAuthentication } from "./authenticationWorkflow";
+import type { ManagedAuthProvider } from "@/app/types/api";
+import {
+  cancelDeviceLogin,
+  deviceLoginKey,
+  startDeviceLogin,
+  type DeviceLoginOperation,
+  type DeviceLoginState,
+} from "./deviceLoginOperation";
 
-export type DeviceLoginState =
-  | { status: "idle" }
-  | { status: "starting" }
-  | { status: "waiting"; prompt: DeviceLoginStarted }
-  | { status: "failed"; message: string };
+export type { DeviceLoginState } from "./deviceLoginOperation";
 
-interface Attempt {
-  provider: ManagedAuthProvider;
-  prompt?: DeviceLoginStarted;
-  cancelled: boolean;
-  current: () => boolean;
-}
-
-/** Detach aborts observation only. Explicit Cancel alone abandons the server login. */
-export function useDeviceLogin(onSuccess?: () => void) {
+/** Local presentation detaches; accepted authentication settles its origin. */
+export function useDeviceLogin(onSuccess?: () => void, provider?: ManagedAuthProvider | null) {
   const client = useQueryClient();
   const lifetime = useSetupLifetime();
-  const [state, setState] = useState<DeviceLoginState>({ status: "idle" });
-  const active = useRef<Attempt | null>(null);
+  const [selected, setSelected] = useState<ManagedAuthProvider | null>(provider ?? null);
+  const [started, setStarted] = useState<{
+    attempt: DeviceLoginOperation["attempt"];
+    current: () => boolean;
+  } | null>(null);
+  const observedProvider = provider ?? selected;
+  const visibleProvider = useRef(observedProvider);
+  useLayoutEffect(() => {
+    visibleProvider.current = observedProvider;
+  }, [observedProvider]);
+  const key = deviceLoginKey(observedProvider);
+  const operation = useQuery<DeviceLoginOperation | null>({
+    queryKey: key,
+    queryFn: () => client.getQueryData<DeviceLoginOperation>(key) ?? null,
+    enabled: false,
+    gcTime: Infinity,
+  }).data;
   const onSuccessRef = useRef(onSuccess);
+  const delivered = useRef<DeviceLoginOperation["attempt"] | null>(null);
   useEffect(() => {
     onSuccessRef.current = onSuccess;
   }, [onSuccess]);
 
   const start = useCallback(
-    async (provider: ManagedAuthProvider) => {
+    async (nextProvider: ManagedAuthProvider) => {
       const lease = lifetime.current;
-      if (!lease?.current() || active.current) return;
-      const attempt: Attempt = { provider, cancelled: false, current: lease.current };
-      active.current = attempt;
-      setState({ status: "starting" });
-      try {
-        const prompt = await runAuthentication(
-          authenticationCommand({
-            command: () => api.startManagedLogin(provider),
-          }),
-        );
-        attempt.prompt = prompt;
-        if (attempt.cancelled) {
-          await api.cancelManagedLogin(provider, prompt.login_id).catch(() => {});
-          return;
-        }
-        if (!attempt.current() || active.current !== attempt) return;
-        setState({ status: "waiting", prompt });
-        window.open(prompt.verification_uri, "_blank", "noopener,noreferrer");
-      } catch (error) {
-        if (!attempt.current() || active.current !== attempt) return;
-        active.current = null;
-        setState({ status: "failed", message: errorMessage(toRunError(error)) });
-      }
+      if (!lease?.current()) return;
+      visibleProvider.current = nextProvider;
+      setSelected(nextProvider);
+      const result = await startDeviceLogin(client, nextProvider);
+      if (
+        !lease.current() ||
+        visibleProvider.current !== nextProvider ||
+        client.getQueryData<DeviceLoginOperation>(deviceLoginKey(nextProvider))?.attempt !==
+          result.attempt
+      )
+        return;
+      setStarted({ attempt: result.attempt, current: lease.current });
+      if (result.fresh && result.attempt.prompt && !result.attempt.cancelled)
+        window.open(result.attempt.prompt.verification_uri, "_blank", "noopener,noreferrer");
     },
-    [lifetime],
+    [client, lifetime],
   );
 
   const cancel = useCallback(async () => {
-    const attempt = active.current;
-    if (!attempt) return;
-    attempt.cancelled = true;
-    active.current = null;
-    if (attempt.current()) setState({ status: "idle" });
-    if (attempt.prompt)
-      await api.cancelManagedLogin(attempt.provider, attempt.prompt.login_id).catch(() => {});
-  }, []);
-
-  const prompt = state.status === "waiting" ? state.prompt : null;
-  const outcome = useQuery({
-    queryKey: ["provider-device-login", prompt?.provider, prompt?.login_id],
-    enabled: prompt !== null,
-    queryFn: async ({ signal }) => {
-      if (!prompt) throw new Error("No provider login to observe");
-      const result = await api.pollManagedLogin(prompt.provider, prompt.login_id, signal);
-      // Reconcile the originating cache before exposing completion, even if the view detaches.
-      if (result.state === "complete") await refreshProviderAuthentication(client);
-      return result;
-    },
-    retry: false,
-    refetchInterval: (query) =>
-      !query.state.error && (!query.state.data || query.state.data.state === "pending")
-        ? 2000
-        : false,
-    refetchIntervalInBackground: true,
-    gcTime: 0,
-  });
+    if (observedProvider) await cancelDeviceLogin(client, observedProvider);
+  }, [client, observedProvider]);
 
   useEffect(() => {
-    const attempt = active.current;
     if (
-      !prompt ||
-      !attempt?.current() ||
-      attempt.prompt !== prompt ||
-      (!outcome.error && outcome.data?.state === "pending") ||
-      (!outcome.error && !outcome.data)
+      !operation?.completed ||
+      operation.attempt !== started?.attempt ||
+      !started.current() ||
+      delivered.current === operation.attempt
     )
       return;
-    active.current = null;
-    if (outcome.data?.state === "complete") onSuccessRef.current?.();
-  }, [outcome.data, outcome.error, prompt]);
+    delivered.current = operation.attempt;
+    onSuccessRef.current?.();
+  }, [operation, started]);
 
-  const visibleState: DeviceLoginState =
-    prompt && outcome.error
-      ? { status: "failed", message: errorMessage(toRunError(outcome.error)) }
-      : prompt && outcome.data?.state === "failed"
-        ? { status: "failed", message: outcome.data.error }
-        : prompt && outcome.data?.state === "complete"
-          ? { status: "idle" }
-          : state;
-
-  return { state: visibleState, start, cancel };
+  const state: DeviceLoginState = operation?.state ?? { status: "idle" };
+  return { state, start, cancel };
 }
