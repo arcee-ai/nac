@@ -364,7 +364,7 @@ fn read_opened_schema_version(path: &Path) -> Option<i64> {
         .ok()
 }
 
-/// Read the effective SQLite schema version without opening SQLite or creating
+/// Read the effective schema version without opening a SQLite pager or creating
 /// sidecars. Managed replacement admission uses this before any read-only
 /// ledger query so a future database is rejected without filesystem mutation.
 pub(super) fn preflight_schema_version(path: &Path) -> Result<Option<i64>> {

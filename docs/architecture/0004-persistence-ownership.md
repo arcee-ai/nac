@@ -239,6 +239,15 @@ emit a second terminal event; cancellation before selection keeps its existing
 Cancelled outcome. Permission grant waiters retain their distinct
 synchronous final liveness fence.
 
+Schema preflight reads the main header through the same SQLite VFS used by
+the executor and compatibility connections, without opening a pager or changing
+database or sidecar files. A plain file-handle close on that inode can release
+the process's POSIX SQLite locks; VFS ownership preserves SQLite's deferred-close
+bookkeeping. Cross-process coverage holds an exclusive SQLite transaction and
+requires a peer to remain blocked before and after preflight. This characterizes
+a specific lock defect; it does not assign a cause to ALL-106 or retained
+malformed-store incidents.
+
 ## Consequences
 
 - Local and Managed NAC cannot accidentally run two serving processes against
