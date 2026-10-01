@@ -18,8 +18,11 @@ for (const orchestration of [null, "0"] as const) {
         await page.goto(`${harness.baseUrl}/#/session/${legacy}/threads`);
         await expect(page.getByText("This chat is unavailable in direct-only mode")).toBeVisible();
         await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
-        const modifier = process.platform === "darwin" ? "Meta" : "Control";
-        await page.keyboard.press(`${modifier}+Shift+O`);
+        await page.keyboard.press(
+          await page.evaluate(() =>
+            /Mac|iPhone|iPad/.test(navigator.userAgent) ? "Meta+Shift+O" : "Control+Shift+O",
+          ),
+        );
         const shortcutDialog = page.getByRole("dialog", { name: "New Chat" });
         await expect(shortcutDialog).toBeVisible();
         await page.keyboard.press("Escape");
