@@ -423,11 +423,8 @@ impl StateStore for OAuthProfileStore {
     async fn save(
         &self,
         csrf_token: &str,
-        mut state: StoredAuthorizationState,
+        state: StoredAuthorizationState,
     ) -> std::result::Result<(), AuthError> {
-        // NAC does not use rmcp's legacy compatibility allowance here: once
-        // discovery provides an issuer, the callback must carry and match it.
-        state.require_issuer = state.expected_issuer.is_some();
         let path = self.path.clone();
         edit_store(&path, |store| {
             let profile = store
@@ -720,7 +717,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn state_is_ttl_bounded_and_requires_the_discovered_response_issuer() {
+    async fn state_is_ttl_bounded_and_preserves_metadata_issuer_policy() {
         let _lock = TEST_ENV_LOCK.lock().unwrap();
         let (_home, _restore) = test_environment("state");
         let endpoint = "https://mcp.slack.com/mcp";
@@ -732,20 +729,66 @@ mod tests {
             endpoint: normalize_endpoint(endpoint).unwrap(),
             client_id: "public-test-client".to_string(),
         };
-        let state: StoredAuthorizationState = serde_json::from_value(serde_json::json!({
-            "pkce_verifier": "fake-verifier",
-            "csrf_token": "fake-state",
-            "expected_issuer": "https://auth.example.com",
-            "require_issuer": false,
-            "created_at": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
-            "requested_scopes": ["chat:write"]
-        }))
-        .unwrap();
-        StateStore::save(&adapter, "fake-state", state)
-            .await
+        for (csrf, requirement) in [
+            ("fake-state", None),
+            ("optional-state", Some(false)),
+            ("required-state", Some(true)),
+        ] {
+            let mut value = serde_json::json!({
+                "pkce_verifier": format!("{csrf}-verifier"),
+                "csrf_token": csrf,
+                "expected_issuer": "https://auth.example.com",
+                "created_at": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                "requested_scopes": ["chat:write"]
+            });
+            if let Some(requirement) = requirement {
+                value["require_issuer"] = requirement.into();
+            }
+            StateStore::save(&adapter, csrf, serde_json::from_value(value).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                adapter.profile().unwrap().states[csrf].require_issuer,
+                requirement.unwrap_or(false)
+            );
+        }
+
+        let mut manager = AuthorizationManager::new(endpoint).await.unwrap();
+        manager.set_state_store(adapter.clone());
+        manager.set_metadata(
+            serde_json::from_value(serde_json::json!({
+                "authorization_endpoint": "https://auth.example.com/authorize",
+                "token_endpoint": "https://auth.example.com/token",
+                "issuer": "https://auth.example.com"
+            }))
+            .unwrap(),
+        );
+        manager
+            .configure_client(OAuthClientConfig::new(
+                "public-test-client",
+                MCP_OAUTH_REDIRECT_URI,
+            ))
             .unwrap();
-        let stored = adapter.profile().unwrap();
-        assert!(stored.states["fake-state"].require_issuer);
+        let mismatch = manager
+            .exchange_code_for_token_with_issuer(
+                "fake-code",
+                "optional-state",
+                Some("https://other.example.com"),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            mismatch,
+            AuthError::AuthorizationServerMismatch { .. }
+        ));
+        let missing = manager
+            .exchange_code_for_token_with_issuer("fake-code", "required-state", None)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            missing,
+            AuthError::AuthorizationServerMissingIssuer { .. }
+        ));
 
         let credentials: StoredCredentials = serde_json::from_value(serde_json::json!({
             "client_id": "public-test-client",
