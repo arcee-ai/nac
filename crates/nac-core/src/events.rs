@@ -871,13 +871,20 @@ impl SessionEventBus {
         // Unknown ownership takes the bounded caller path; durable checkout
         // still rejects the lookup error instead of bypassing an owner.
         if !self.has_owned_persistence().unwrap_or(true) {
-            return Ok(self.emit_with_context(event, run_id, client_id));
+            let event = sanitize_external_session_event(event)
+                .ok_or_else(|| anyhow::anyhow!("internal-only session event"))?;
+            let (envelope, result) = self.publish_sanitized(event, run_id, client_id);
+            return result.map(|()| envelope);
         }
         let bus = self.clone();
         let result = crate::store::spawn_blocking_store_caller(move || {
-            bus.emit_with_context(event, run_id, client_id)
+            let event = sanitize_external_session_event(event)
+                .ok_or_else(|| anyhow::anyhow!("internal-only session event"))?;
+            let (envelope, result) = bus.publish_sanitized(event, run_id, client_id);
+            result.map(|()| envelope)
         })
-        .await;
+        .await
+        .and_then(|result| result);
         if result.as_ref().is_err_and(|error| {
             matches!(
                 error.downcast_ref::<crate::store::PersistenceAdmissionError>(),
@@ -908,16 +915,29 @@ impl SessionEventBus {
             .expect("session event sequence overflow");
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "overflowing the durable u64 event sequence would violate event identity"
-    )]
     fn emit_sanitized(
         &self,
         event: SessionEvent,
         run_id: Option<SessionRunId>,
         client_id: Option<SessionClientId>,
     ) -> SessionEventEnvelope {
+        let (envelope, result) = self.publish_sanitized(event, run_id, client_id);
+        if let Err(error) = result {
+            eprintln!("nac: failed to persist thread event: {error:#}");
+        }
+        envelope
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "overflowing event sequence violates event identity"
+    )]
+    fn publish_sanitized(
+        &self,
+        event: SessionEvent,
+        run_id: Option<SessionRunId>,
+        client_id: Option<SessionClientId>,
+    ) -> (SessionEventEnvelope, anyhow::Result<()>) {
         let prepared = self.prepare_thread_event(&event);
         let _publication = self
             .publication
@@ -940,14 +960,12 @@ impl SessionEventBus {
         match prepared {
             Ok(Some(prepared)) => {
                 if let Err(error) = prepared.persist() {
-                    eprintln!("nac: failed to persist thread event: {error:#}");
-                    return envelope;
+                    return (envelope, Err(error));
                 }
             }
             Ok(None) => {}
             Err(error) => {
-                eprintln!("nac: failed to prepare thread event persistence: {error:#}");
-                return envelope;
+                return (envelope, Err(error));
             }
         }
         let mut state = self.lock_state();
@@ -970,7 +988,7 @@ impl SessionEventBus {
             });
         }
         let _ = self.sender.send(envelope.clone());
-        envelope
+        (envelope, Ok(()))
     }
 
     pub fn emit_agent(&self, event: AgentEvent) -> Option<SessionEventEnvelope> {
@@ -1721,40 +1739,79 @@ impl EventSink {
         }
     }
 
-    /// Publish sequenced bus events off the runtime, including live-only events
-    /// that must follow a pending durable publication. Streaming deltas keep
-    /// their direct publication path.
-    pub async fn emit_async(&self, event: AgentEvent) {
-        let owned = match self
-            .bus
-            .as_ref()
-            .map(SessionEventBus::has_owned_persistence)
-        {
-            Some(Ok(owned)) => owned,
-            Some(Err(_)) => true,
-            None => false,
+    /// Required host publications expose their durable acknowledgement.
+    pub async fn try_emit_async(&self, event: AgentEvent) -> anyhow::Result<()> {
+        if self.defer_worker_finish && matches!(event, AgentEvent::RunFinished { .. }) {
+            return Ok(());
+        }
+        if matches!(event, AgentEvent::ModelCallStarted { .. }) {
+            self.emit(event);
+            return Ok(());
+        }
+        let Some(event) = sanitize_external_agent_event(event) else {
+            return Ok(());
         };
-        if owned {
-            let sequenced = sanitize_external_agent_event(event.clone()).is_some();
-            let sink = self.clone();
-            if let Err(error) =
-                crate::store::spawn_blocking_store_caller(move || sink.emit(event)).await
-            {
-                if sequenced
-                    && matches!(
+        if let Some(bus) = &self.bus {
+            bus.emit_with_context_async(
+                SessionEvent::Agent {
+                    event: event.clone(),
+                },
+                self.run_id.clone(),
+                self.client_id.clone(),
+            )
+            .await?;
+        }
+        if self.stderr_prefixed {
+            eprintln!("{STDERR_EVENT_PREFIX}{}", serde_json::to_string(&event)?);
+        }
+        if let Some(channel) = &self.channel {
+            let _ = channel.send(event);
+        }
+        Ok(())
+    }
+
+    pub async fn emit_async(&self, event: AgentEvent) {
+        if let Err(error) = self.try_emit_async(event).await {
+            eprintln!("nac: durable event publication failed: {error:#}");
+        }
+    }
+
+    /// One publication obligation per accepted lifecycle; retry only definite
+    /// pre-execution caller rejection, never uncertain persistence failures.
+    pub(crate) async fn emit_lifecycle_async(&self, event: AgentEvent) {
+        loop {
+            match self.try_emit_async(event.clone()).await {
+                Err(error)
+                    if matches!(
                         error.downcast_ref::<crate::store::PersistenceAdmissionError>(),
                         Some(crate::store::PersistenceAdmissionError::CallerOverloaded)
-                    )
+                    ) =>
                 {
-                    if let Some(bus) = &self.bus {
-                        bus.record_publication_failure();
-                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                 }
-                eprintln!("nac: durable event publication task failed: {error}");
+                Err(error) => {
+                    eprintln!("nac: lifecycle publication failed: {error:#}");
+                    break;
+                }
+                Ok(()) => break,
             }
-        } else {
-            self.emit(event);
         }
+    }
+
+    pub(crate) fn emit_cleanup(&self, event: AgentEvent) {
+        if tokio::runtime::Handle::try_current().is_err()
+            || !self
+                .bus
+                .as_ref()
+                .is_some_and(|bus| bus.has_owned_persistence().unwrap_or(true))
+        {
+            self.emit(event);
+            return;
+        }
+        let sink = self.clone();
+        tokio::spawn(async move {
+            sink.emit_lifecycle_async(event).await;
+        });
     }
 
     /// Live-only transcript growth signal (DB-direct transcript workset,

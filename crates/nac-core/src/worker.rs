@@ -10,6 +10,7 @@ use crate::store::{self, WorkerContext};
 use crate::types::Message;
 use crate::worker_credentials::{ManagedWorkerCredentialReceiver, ManagedWorkerNativeCredentials};
 
+pub(crate) const MANAGED_WORKER_HISTORY_READY: &str = "__NAC_HISTORY_READY__";
 pub(crate) const MANAGED_WORKER_CANCEL_ACK: &str = "__NAC_CANCEL_ACK__";
 
 pub struct ManagedWorkerRunConfig {
@@ -161,6 +162,9 @@ async fn run_managed_worker_with_credentials(
     let response = produce_worker_response(run_config, credentials).await?;
     completion.content = response;
     use std::io::Write;
+    // Stderr is ordered: the host acknowledges all prefix events before this barrier.
+    eprintln!("{MANAGED_WORKER_HISTORY_READY}");
+    std::io::stderr().lock().flush()?;
     std::io::stdout()
         .lock()
         .write_all(completion.encode()?.as_bytes())?;

@@ -39,7 +39,7 @@ fn path() -> PathBuf {
         .join("store.db")
 }
 
-pub(super) fn block_executor(
+pub(crate) fn block_executor(
     owner: &StoreCoordinator,
 ) -> (PendingPersistence<()>, Sender<()>, std::thread::ThreadId) {
     let (entered, observed) = channel();

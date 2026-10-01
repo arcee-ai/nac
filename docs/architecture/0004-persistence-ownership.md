@@ -207,6 +207,34 @@ violations. Resource health and probe responsiveness remain separate acceptance
 signals, so lighter load or disappearance of an error is not evidence that the
 ALL-106 incident cause is resolved.
 
+## Required worker history and lifecycle cleanup
+
+For an owned serving store, worker admission records the previous thread-event
+boundary. The acknowledged `ThreadStarted` must be newer than that boundary and
+is bound to the exact dispatch, session run, and thread generation before the
+worker starts. Required stderr events report persistence failures to host
+supervision. An internal stderr barrier precedes the existing completion frame,
+so the host waits for prefix acknowledgements before committing or acknowledging
+a successful episode. The episode transaction independently checks that the
+bound start, run start, and assistant history exist in order for this generation.
+It rejects an incomplete prefix after restart as well as during live execution.
+A failed publication produces a failed episode, or leaves a pending dispatch for
+existing recovery when the failure receipt itself cannot be acknowledged. It
+never synthesizes missing events after successful completion. Schema 32 adds
+these history boundaries while retaining existing schema-31 episode receipts.
+
+Mandatory local dispatch removal and cancellation notification run before
+fallible durable steering expiry. Rejection leaves unresolved steering rows
+available to existing recovery and emits a diagnostic; it cannot leave an exited
+process in the running registry. Async cancellation, settlement, and compaction
+coordinate potentially contended local mutation gates through bounded callers.
+Accepted lifecycle cleanup retains one obligation per admitted operation and
+may await caller capacity off-loop after a definite pre-execution rejection.
+This does not retry SQL or admit new user work after overload. Compaction Drop
+cleanup retains its operation lease until terminal publication and local
+operation cleanup complete. Permission grant waiters retain their distinct
+synchronous final liveness fence.
+
 ## Consequences
 
 - Local and Managed NAC cannot accidentally run two serving processes against

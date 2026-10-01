@@ -162,6 +162,7 @@ impl WorkerTimeoutTrace {
 }
 
 pub(super) struct WorkerInvocation<'a> {
+    pub(super) require_history: bool,
     pub(super) session_id: &'a str,
     pub(super) thread_name: &'a str,
     pub(super) dispatch_id: &'a str,
@@ -334,7 +335,11 @@ pub(super) async fn run_worker(
     let stderr_credential_redactions = native_credential_redactions.clone();
     let (cancel_ack_tx, mut cancel_ack_rx) = watch::channel(false);
     let (commit_ack_tx, commit_ack_rx) = watch::channel(false);
+    let (history_tx, mut history_rx) = watch::channel(None::<std::result::Result<(), String>>);
+    let require_history = invocation.require_history;
     let reader_shutdown = ThreadCancellation::default();
+    let protocol_failure = ThreadCancellation::default();
+    let stderr_protocol_failure = protocol_failure.clone();
     let stderr_cancellation = cancellation.clone();
     let stderr_shutdown = reader_shutdown.clone();
     let stderr_handle = tokio::spawn(async move {
@@ -353,6 +358,10 @@ pub(super) async fn run_worker(
                 break;
             };
             let line = redact_worker_native_credentials(&line, &stderr_credential_redactions);
+            if line == crate::worker::MANAGED_WORKER_HISTORY_READY {
+                let _ = history_tx.send(Some(Ok(())));
+                continue;
+            }
             if line == crate::worker::MANAGED_WORKER_CANCEL_ACK {
                 let _ = cancel_ack_tx.send(true);
                 continue;
@@ -384,7 +393,14 @@ pub(super) async fn run_worker(
                 if matches!(event, AgentEvent::RunFinished { .. }) {
                     deferred_finish = Some(event);
                 } else {
-                    event_sink.emit_async(event).await;
+                    if let Err(error) = event_sink.try_emit_async(event).await {
+                        let message =
+                            format!("required worker prefix publication failed: {error:#}");
+                        let _ = history_tx.send(Some(Err(message.clone())));
+                        model_error = Some(message);
+                        stderr_protocol_failure.cancel();
+                        break;
+                    }
                 }
             } else {
                 event_sink
@@ -429,7 +445,6 @@ pub(super) async fn run_worker(
         .stdout
         .take()
         .ok_or_else(|| std::io::Error::other("supervised worker stdout pipe is unavailable"))?;
-    let protocol_failure = ThreadCancellation::default();
     let stdout_protocol_failure = protocol_failure.clone();
     let stdout_handle = tokio::spawn(async move {
         let mut reader = BufReader::new(stdout);
@@ -462,6 +477,29 @@ pub(super) async fn run_worker(
                 .trim_end()
                 .strip_prefix(crate::worker_protocol::COMPLETION_PREFIX)
             {
+                if require_history {
+                    loop {
+                        let acknowledgement = history_rx.borrow().clone();
+                        if let Some(result) = acknowledgement {
+                            if let Err(error) = result {
+                                protocol_error = Some(error);
+                            }
+                            break;
+                        }
+                        tokio::select! {
+                            _ = stdout_cancellation.cancelled() => {
+                                protocol_error = Some("worker prefix acknowledgement cancelled".into()); break;
+                            }
+                            changed = history_rx.changed() => if changed.is_err() {
+                                protocol_error = Some("worker prefix barrier missing".into()); break;
+                            }
+                        }
+                    }
+                    if protocol_error.is_some() {
+                        completion_stdin.lock().await.take();
+                        break;
+                    }
+                }
                 let result = commit_completion_frame(
                     &store_path,
                     &completion_identity,
@@ -592,7 +630,16 @@ pub(super) async fn run_worker(
         let (stdout, protocol_error) = stdout_handle.await.unwrap_or_default();
         if *commit_ack_rx.borrow() {
             if let Some(event) = deferred_finish {
-                runtime.event_sink.emit_async(event).await;
+                if let Err(error) = runtime.event_sink.try_emit_async(event).await {
+                    return (
+                        stderr,
+                        worker_usage,
+                        Some(format!(
+                            "committed worker finish publication failed: {error:#}"
+                        )),
+                        stdout,
+                    );
+                }
             }
         }
         (stderr, worker_usage, protocol_error.or(model_error), stdout)
@@ -1052,6 +1099,7 @@ mod tests {
             &runtime,
             &ModelClient::new_for_test(),
             WorkerInvocation {
+                require_history: false,
                 session_id: "session",
                 thread_name: "worker",
                 dispatch_id: "dispatch",
@@ -1182,6 +1230,7 @@ mod tests {
             &runtime,
             &ModelClient::new_for_test(),
             WorkerInvocation {
+                require_history: false,
                 session_id: "session",
                 thread_name: "worker",
                 dispatch_id: "dispatch",
@@ -1282,6 +1331,7 @@ done
             &runtime,
             &ModelClient::new_for_test(),
             WorkerInvocation {
+                require_history: false,
                 session_id: "session",
                 thread_name: "worker",
                 dispatch_id: "dispatch",
@@ -1364,6 +1414,7 @@ wait
                 &runtime,
                 &client,
                 WorkerInvocation {
+                    require_history: false,
                     session_id: "session",
                     thread_name: "a",
                     dispatch_id: "dispatch-a",
@@ -1385,6 +1436,7 @@ wait
                 &runtime,
                 &client,
                 WorkerInvocation {
+                    require_history: false,
                     session_id: "session",
                     thread_name: "b",
                     dispatch_id: "dispatch-b",
@@ -1480,6 +1532,7 @@ wait
                 &runtime,
                 &client,
                 WorkerInvocation {
+                    require_history: false,
                     session_id: "session",
                     thread_name: "worker",
                     dispatch_id: "dispatch",
@@ -1573,6 +1626,7 @@ exit 0
             &runtime,
             &client,
             WorkerInvocation {
+                require_history: false,
                 session_id: "session",
                 thread_name: "worker",
                 dispatch_id: "dispatch",
@@ -1661,6 +1715,7 @@ exit 0
             &runtime,
             &ModelClient::new_for_test(),
             WorkerInvocation {
+                require_history: false,
                 session_id: "session",
                 thread_name: "worker",
                 dispatch_id: "dispatch",
@@ -1712,6 +1767,7 @@ exit 0
             &runtime,
             &ModelClient::new_for_test(),
             WorkerInvocation {
+                require_history: false,
                 session_id: "session",
                 thread_name: "worker",
                 dispatch_id: "dispatch",

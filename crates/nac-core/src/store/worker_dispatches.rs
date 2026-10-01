@@ -22,6 +22,8 @@ pub(super) fn create_worker_dispatches_table(conn: &Connection) -> Result<()> {
             action TEXT NOT NULL,
             status TEXT NOT NULL CHECK (status IN ('pending', 'ok', 'error', 'timed_out', 'cancelled')),
             episode_id INTEGER,
+            history_start_id INTEGER,
+            history_boundary_id INTEGER NOT NULL DEFAULT 0,
             UNIQUE (session_id, thread_name, generation),
             FOREIGN KEY (thread_name, session_id) REFERENCES threads(name, session_id) ON DELETE CASCADE,
             CHECK ((status = 'pending' AND episode_id IS NULL) OR
@@ -52,8 +54,9 @@ pub(crate) fn admit_worker_dispatch(
     )?;
     tx.execute(
         "INSERT INTO worker_dispatches
-         (dispatch_id, session_id, thread_name, generation, run_id, action, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending')",
+         (dispatch_id, session_id, thread_name, generation, run_id, action, status, history_boundary_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending',
+            (SELECT COALESCE(MAX(id), 0) FROM thread_events WHERE session_id = ?2 AND thread_name = ?3))",
         params![
             dispatch_id,
             session_id,
@@ -82,6 +85,73 @@ command AdmitWorkerDispatchCommand {
 call |command| (&command.session_id, &command.thread_name, &command.dispatch_id, command.run_id.as_deref(), &command.action)
 correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(command.run_id.as_deref());
 port internal;
+}
+
+// Bind required history to this admitted generation's acknowledged start row.
+// Raw supervision/receipt fixtures retain their established optional journal.
+coordinated_command! {
+pub(crate) fn require_worker_history(path: &Path, identity: &WorkerDispatchIdentity) -> Result<()> {
+    let mut conn = open_runtime_connection(path)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    validate_run(&tx, &identity.session_id, identity.run_id.as_deref())?;
+    let (id, json): (i64, String) = tx.query_row(
+        "SELECT id, event_json FROM thread_events WHERE session_id = ?1 AND thread_name = ?2 ORDER BY id DESC LIMIT 1",
+        params![identity.session_id, identity.thread_name], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    let event: serde_json::Value = serde_json::from_str(&json)?;
+    anyhow::ensure!(event.get("type").and_then(serde_json::Value::as_str) == Some("thread_started"),
+        "required worker start history is missing");
+    let changed = tx.execute(
+        "UPDATE worker_dispatches SET history_start_id = ?6 WHERE dispatch_id = ?1 AND session_id = ?2
+         AND thread_name = ?3 AND generation = ?4 AND run_id IS ?5 AND status = 'pending'
+         AND ?6 > history_boundary_id
+         AND generation = (SELECT MAX(generation) FROM worker_dispatches WHERE session_id = ?2 AND thread_name = ?3)",
+        params![identity.dispatch_id, identity.session_id, identity.thread_name, identity.generation, identity.run_id, id])?;
+    anyhow::ensure!(changed == 1, "worker history identity is stale or unknown");
+    tx.commit()?;
+    Ok(())
+}
+command RequireWorkerHistoryCommand { identity: WorkerDispatchIdentity = identity.clone(), }
+call |command| (&command.identity)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.identity.session_id));
+port public;
+}
+
+fn validate_required_history(
+    tx: &Transaction<'_>,
+    identity: &WorkerDispatchIdentity,
+) -> Result<()> {
+    let start: Option<i64> = tx.query_row(
+        "SELECT history_start_id FROM worker_dispatches WHERE dispatch_id = ?1",
+        [&identity.dispatch_id],
+        |row| row.get(0),
+    )?;
+    let Some(start) = start else {
+        return Ok(());
+    };
+    let mut stmt = tx.prepare("SELECT id, event_json FROM thread_events WHERE session_id = ?1 AND thread_name = ?2 AND id >= ?3 ORDER BY id")?;
+    let mut rows = stmt.query(params![identity.session_id, identity.thread_name, start])?;
+    let mut thread_started = false;
+    let mut run_started = false;
+    let mut assistant = false;
+    while let Some(row) = rows.next()? {
+        let id: i64 = row.get(0)?;
+        let json: String = row.get(1)?;
+        let event: serde_json::Value = serde_json::from_str(&json)?;
+        match event.get("type").and_then(serde_json::Value::as_str) {
+            Some("thread_started") if id == start => thread_started = true,
+            Some("thread_started") => {
+                anyhow::bail!("worker history crossed another dispatch start")
+            }
+            Some("run_started") if thread_started => run_started = true,
+            Some("assistant_message") if run_started => assistant = true,
+            _ => {}
+        }
+    }
+    anyhow::ensure!(
+        thread_started && run_started && assistant,
+        "worker completion rejected because required durable prefix is incomplete"
+    );
+    Ok(())
 }
 
 fn validate_run(conn: &Connection, session_id: &str, run_id: Option<&str>) -> Result<()> {
@@ -163,6 +233,9 @@ fn commit_in_tx(
         return Ok(id);
     }
     validate_run(tx, &identity.session_id, identity.run_id.as_deref())?;
+    if status == EpisodeStatus::Ok {
+        validate_required_history(tx, identity)?;
+    }
     tx.execute(
         "INSERT INTO episodes (thread_name, session_id, action, content, status, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",

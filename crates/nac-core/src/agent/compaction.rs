@@ -126,7 +126,28 @@ impl CompactionLifecycle {
         }
     }
 
-    pub(crate) fn finish(&mut self, result: &CompactionCompletion) {
+    pub(crate) async fn start_async(
+        event_sink: EventSink,
+        compaction_id: Uuid,
+        reason: CompactionReason,
+    ) -> Self {
+        let lifecycle = Self {
+            event_sink,
+            compaction_id,
+            reason,
+            terminal_emitted: false,
+        };
+        lifecycle
+            .event_sink
+            .emit_lifecycle_async(AgentEvent::OrchestratorCompactionStarted {
+                compaction_id,
+                reason,
+            })
+            .await;
+        lifecycle
+    }
+
+    pub(crate) async fn finish(&mut self, result: &CompactionCompletion) {
         let event = match result {
             Ok(CompactionResult::Compacted { .. }) => AgentEvent::OrchestratorCompactionCompleted {
                 compaction_id: self.compaction_id,
@@ -154,8 +175,8 @@ impl CompactionLifecycle {
                 }
             }
         };
+        self.event_sink.emit_lifecycle_async(event).await;
         self.terminal_emitted = true;
-        self.event_sink.emit(event);
     }
 }
 
@@ -164,7 +185,7 @@ impl Drop for CompactionLifecycle {
         if !self.terminal_emitted {
             self.terminal_emitted = true;
             self.event_sink
-                .emit(AgentEvent::OrchestratorCompactionFailed {
+                .emit_cleanup(AgentEvent::OrchestratorCompactionFailed {
                     compaction_id: self.compaction_id,
                     reason: self.reason,
                     failure: CompactionFailure::Cancelled,
@@ -183,10 +204,14 @@ impl super::Agent {
         }
         let compaction_id = Uuid::new_v4();
         let event_sink = self.event_sink.clone();
-        let mut lifecycle =
-            CompactionLifecycle::start(event_sink.clone(), compaction_id, CompactionReason::Manual);
+        let mut lifecycle = CompactionLifecycle::start_async(
+            event_sink.clone(),
+            compaction_id,
+            CompactionReason::Manual,
+        )
+        .await;
         let result = self.compact_inner(compaction_id, event_sink).await;
-        lifecycle.finish(&result);
+        lifecycle.finish(&result).await;
         result
     }
 
@@ -236,8 +261,12 @@ impl super::Agent {
 
         let compaction_id = Uuid::new_v4();
         let event_sink = self.event_sink.clone();
-        let mut lifecycle =
-            CompactionLifecycle::start(event_sink.clone(), compaction_id, CompactionReason::Auto);
+        let mut lifecycle = CompactionLifecycle::start_async(
+            event_sink.clone(),
+            compaction_id,
+            CompactionReason::Auto,
+        )
+        .await;
         let (prepared, result) = self
             .execute_triggered_compaction(
                 compaction_id,
@@ -247,7 +276,7 @@ impl super::Agent {
                 event_sink,
             )
             .await;
-        lifecycle.finish(&result);
+        lifecycle.finish(&result).await;
         if let Err(error) = result {
             eprintln!("nac: orchestrator compaction failed softly: {error}");
         }
@@ -305,7 +334,8 @@ impl super::Agent {
                 summary_usage
                     .as_ref()
                     .map(|_| candidate.old_context_estimate),
-            );
+            )
+            .await;
             return (
                 prepared,
                 Err(CompactionError::failed(
@@ -334,7 +364,7 @@ impl super::Agent {
             .compaction
             .as_mut()
             .expect("compaction state exists for a triggered attempt")
-            .append_and_activate(
+            .append_and_activate_async(
                 &self.messages,
                 &candidate,
                 installed,
@@ -342,6 +372,7 @@ impl super::Agent {
                 summary_completion_tokens,
                 projected,
             )
+            .await
         {
             self.account_summary_usage(
                 &event_sink,
@@ -350,7 +381,8 @@ impl super::Agent {
                 summary_usage
                     .as_ref()
                     .map(|_| candidate.old_context_estimate),
-            );
+            )
+            .await;
             return (
                 prepared,
                 Err(CompactionError::failed(
@@ -369,7 +401,8 @@ impl super::Agent {
             accumulated_usage,
             summary_usage.as_ref(),
             Some(projected),
-        );
+        )
+        .await;
         let prepared = self
             .compaction
             .as_mut()
@@ -384,7 +417,7 @@ impl super::Agent {
         )
     }
 
-    fn account_summary_usage(
+    async fn account_summary_usage(
         &mut self,
         event_sink: &EventSink,
         mut accumulated_usage: Option<&mut TokenUsage>,
@@ -398,10 +431,12 @@ impl super::Agent {
 
             let mut delta = usage.clone();
             delta.replace_context(installed_context.unwrap_or_default());
-            event_sink.emit(AgentEvent::TokenUsageUpdated {
-                thread_name: self.thread_name.clone(),
-                usage: delta,
-            });
+            event_sink
+                .emit_async(AgentEvent::TokenUsageUpdated {
+                    thread_name: self.thread_name.clone(),
+                    usage: delta,
+                })
+                .await;
         }
         if let (Some(context), Some(accumulated_usage)) = (installed_context, accumulated_usage) {
             accumulated_usage.replace_context(context);

@@ -697,16 +697,37 @@ struct CancellingRun {
 
 impl Drop for CancellingRun {
     fn drop(&mut self) {
-        let mut guard = self.service.lock_active_operation();
-        let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() else {
-            return;
+        let service = self.service.clone();
+        let id = self.snapshot.run_id.clone();
+        let task = Arc::new(StdMutex::new(self.task.take()));
+        let restore = move |service: SessionService| {
+            let mut guard = service.lock_active_operation();
+            let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() else {
+                return;
+            };
+            if active_run.snapshot.run_id != id {
+                return;
+            }
+            active_run.finishing = false;
+            if active_run.task.is_none() {
+                active_run.task = task
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take();
+            }
         };
-        if active_run.snapshot.run_id != self.snapshot.run_id {
-            return;
-        }
-        active_run.finishing = false;
-        if active_run.task.is_none() {
-            active_run.task = self.task.take();
+        if crate::store::coordinator::owner_for(&service.metadata.store_path)
+            .map(|owner| owner.is_some())
+            .unwrap_or(true)
+            && tokio::runtime::Handle::try_current().is_ok()
+        {
+            tokio::spawn(async move {
+                if let Err(error) = service.coordinate_local(restore).await {
+                    eprintln!("nac: cancellation local restore failed: {error:#}");
+                }
+            });
+        } else {
+            restore(service);
         }
     }
 }
@@ -939,8 +960,10 @@ impl SessionService {
             })
         };
         let store_path = self.metadata.store_path.clone();
-        tokio::task::spawn_blocking(move || sessions::save_session_run_state(&store_path, &update))
-            .await??;
+        crate::store::spawn_blocking_store_caller(move || {
+            sessions::save_session_run_state(&store_path, &update)
+        })
+        .await??;
         Ok(())
     }
 

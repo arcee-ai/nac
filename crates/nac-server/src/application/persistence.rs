@@ -67,6 +67,54 @@ pub(crate) enum OperationSessionScope {
 }
 
 impl crate::SessionManager {
+    pub(crate) async fn managed_completion_admission_async(
+        &self,
+    ) -> Result<Option<nac_core::store::ManagedWorkAdmission>> {
+        let manager = self.clone();
+        self.inner
+            ._store_ownership
+            .call_legacy(move || manager.managed_completion_admission())
+            .await?
+    }
+
+    pub(crate) async fn managed_upgrade_blockers_async(
+        &self,
+    ) -> Result<Vec<nac_core::store::ManagedUpgradeBlocker>> {
+        let manager = self.clone();
+        self.inner
+            ._store_ownership
+            .call_legacy(move || manager.managed_upgrade_blockers())
+            .await?
+    }
+
+    pub(crate) async fn managed_work_admission_async(
+        &self,
+    ) -> Result<Option<nac_core::store::ManagedWorkAdmission>> {
+        let manager = self.clone();
+        self.inner
+            ._store_ownership
+            .call_legacy(move || manager.managed_work_admission())
+            .await?
+    }
+
+    pub(crate) async fn queue_managed_orchestrator_steering_async(
+        &self,
+        parent: &str,
+        orchestrator: &str,
+        instruction: &str,
+    ) -> Result<crate::OrchestratorSteeringResponse> {
+        let manager = self.clone();
+        let parent = parent.to_owned();
+        let orchestrator = orchestrator.to_owned();
+        let instruction = instruction.to_owned();
+        self.inner
+            ._store_ownership
+            .call_legacy(move || {
+                manager.queue_managed_orchestrator_steering(&parent, &orchestrator, &instruction)
+            })
+            .await?
+    }
+
     pub(crate) async fn stop_local_run_admission(&self) {
         let services = self
             .inner

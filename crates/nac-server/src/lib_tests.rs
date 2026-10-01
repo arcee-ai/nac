@@ -991,3 +991,6 @@ mod project_routes;
 mod recovery;
 #[path = "tests/terminals.rs"]
 mod terminals;
+
+#[path = "tests/owned_serving.rs"]
+mod owned_serving;

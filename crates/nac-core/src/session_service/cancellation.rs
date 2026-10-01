@@ -23,7 +23,15 @@ impl SessionService {
         &self,
         run_id: &SessionRunId,
     ) -> std::result::Result<(), SessionCancelError> {
-        let Some(prompt_commit) = self.run_prompt_commit(run_id) else {
+        let id = run_id.clone();
+        let prompt_commit = self
+            .coordinate_local(move |service| service.run_prompt_commit(&id))
+            .await
+            .map_err(|error| SessionCancelError::Cleanup {
+                run_id: run_id.clone(),
+                message: format!("cancellation coordination failed: {error:#}"),
+            })?;
+        let Some(prompt_commit) = prompt_commit else {
             return Err(SessionCancelError::NotActive {
                 run_id: run_id.clone(),
             });
@@ -47,14 +55,29 @@ impl SessionService {
                 }
             }
         }
-        let Some(mut cancelling_run) = self.mark_run_cancelling(run_id) else {
+        let id = run_id.clone();
+        let cancelling_run = self
+            .coordinate_local(move |service| service.mark_run_cancelling(&id))
+            .await
+            .map_err(|error| SessionCancelError::Cleanup {
+                run_id: run_id.clone(),
+                message: format!("cancellation coordination failed: {error:#}"),
+            })?;
+        let Some(mut cancelling_run) = cancelling_run else {
             return Err(SessionCancelError::NotActive {
                 run_id: run_id.clone(),
             });
         };
 
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            cancelling_run.command_cancellation.cancel();
+            if crate::store::coordinator::owner_for(&self.metadata.store_path)
+                .map(|owner| owner.is_some())
+                .unwrap_or(true)
+            {
+                cancelling_run.command_cancellation.cancel_async().await;
+            } else {
+                cancelling_run.command_cancellation.cancel();
+            }
             // Terminal handles are session-owned and can be idle while the
             // model is between tool calls. Start settlement immediately, then
             // repeat it after the run task has stopped. PTY spawn and input
@@ -178,7 +201,13 @@ impl SessionService {
         {
             eprintln!("nac: cancellation event caller failed: {error:#}");
         }
-        self.clear_finished_run(&cancelling_run.snapshot.run_id);
+        let id = cancelling_run.snapshot.run_id.clone();
+        self.coordinate_local(move |service| service.clear_finished_run(&id))
+            .await
+            .map_err(|error| SessionCancelError::Cleanup {
+                run_id: cancelling_run.snapshot.run_id.clone(),
+                message: format!("cancellation cleanup failed: {error:#}"),
+            })?;
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
             if let Err(error) = self.start_next_direct_inbox_item().await {
                 eprintln!("nac: failed to promote direct inbox after cancellation: {error:#}");

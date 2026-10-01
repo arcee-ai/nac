@@ -588,3 +588,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 }
+
+#[cfg(test)]
+pub(crate) use blocking_caller::reject_callers_for_test;

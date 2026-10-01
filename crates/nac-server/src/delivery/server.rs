@@ -358,7 +358,7 @@ async fn enforce_managed_admission(
         return next.run(request).await;
     }
     if remains_available_during_maintenance(request.method(), request.uri().path()) {
-        let _host_lease = match manager.managed_completion_admission() {
+        let _host_lease = match manager.managed_completion_admission_async().await {
             Ok(Some(lease)) => lease,
             Ok(None) => return next.run(request).await,
             Err(_) => {
@@ -376,7 +376,7 @@ async fn enforce_managed_admission(
     let _process_gate = Arc::clone(&manager.inner.maintenance_gate)
         .read_owned()
         .await;
-    let _host_lease = match manager.managed_work_admission() {
+    let _host_lease = match manager.managed_work_admission_async().await {
         Ok(Some(lease)) => lease,
         Ok(None) => return next.run(request).await,
         Err(_) => {

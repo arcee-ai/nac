@@ -176,11 +176,21 @@ impl<'a> SessionRunApplication<'a> {
         instruction: String,
         expected_run_id: Option<&str>,
     ) -> Result<ThreadSteering> {
+        let service = self.manager.attach_session(session_id).await?;
+        let thread_name = thread_name.to_owned();
+        let expected_run_id = expected_run_id.map(str::to_owned);
         let record = self
             .manager
-            .attach_session(session_id)
-            .await?
-            .queue_thread_steering_for_run(thread_name, &instruction, expected_run_id)?;
+            .inner
+            ._store_ownership
+            .call_legacy(move || {
+                service.queue_thread_steering_for_run(
+                    &thread_name,
+                    &instruction,
+                    expected_run_id.as_deref(),
+                )
+            })
+            .await??;
         Ok(ThreadSteering {
             steering_id: record.id,
             thread_name: record.thread_name,
@@ -209,11 +219,13 @@ impl<'a> SessionRunApplication<'a> {
         session_id: &str,
         instruction: String,
     ) -> Result<OrchestratorSteering> {
+        let service = self.manager.attach_session(session_id).await?;
         let record = self
             .manager
-            .attach_session(session_id)
-            .await?
-            .queue_orchestrator_steering(&instruction)?;
+            .inner
+            ._store_ownership
+            .call_legacy(move || service.queue_orchestrator_steering(&instruction))
+            .await??;
         Ok(OrchestratorSteering {
             steering_id: record.id,
             status: record.status,

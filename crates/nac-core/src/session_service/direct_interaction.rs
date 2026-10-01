@@ -585,3 +585,6 @@ impl SessionService {
         });
     }
 }
+
+#[cfg(test)]
+mod owned_lifecycle_tests;

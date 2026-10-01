@@ -6,14 +6,15 @@ impl SessionService {
             if self.finish_run_once(run_id, outcome.clone()).await {
                 return;
             }
-            let retry_cleanup = {
-                let guard = self.lock_active_operation();
-                matches!(
-                    guard.as_ref(),
-                    Some(ActiveSessionOperation::Run(active_run))
-                        if &active_run.snapshot.run_id == run_id && !active_run.finishing
-                )
-            };
+            let id = run_id.clone();
+            let retry_cleanup = self
+                .coordinate_local(move |service| {
+                    let guard = service.lock_active_operation();
+                    matches!(guard.as_ref(), Some(ActiveSessionOperation::Run(active_run))
+                    if active_run.snapshot.run_id == id && !active_run.finishing)
+                })
+                .await
+                .unwrap_or(false);
             if !retry_cleanup {
                 return;
             }
@@ -35,7 +36,11 @@ impl SessionService {
                 return false;
             }
         }
-        let Some(finishing_run) = self.mark_run_finishing(run_id) else {
+        let id = run_id.clone();
+        let finishing = self
+            .coordinate_local(move |service| service.mark_run_finishing(&id))
+            .await;
+        let Some(finishing_run) = finishing.ok().flatten() else {
             return false;
         };
         self.expire_orchestrator_steering(run_id).await;
@@ -161,7 +166,14 @@ impl SessionService {
         {
             eprintln!("nac: terminal event caller failed: {error:#}");
         }
-        self.clear_finished_run(&run_id);
+        let id = run_id.clone();
+        if let Err(error) = self
+            .coordinate_local(move |service| service.clear_finished_run(&id))
+            .await
+        {
+            eprintln!("nac: terminal local cleanup failed: {error:#}");
+            return false;
+        }
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
             if let Err(error) = self.start_next_direct_inbox_item().await {
                 eprintln!("nac: failed to promote direct inbox after run settlement: {error:#}");

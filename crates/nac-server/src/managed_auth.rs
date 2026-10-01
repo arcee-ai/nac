@@ -275,7 +275,7 @@ impl SessionManager {
             }
             _ => begin_login(provider, style).await?,
         };
-        self.register_managed_login(provider, pending)
+        self.register_managed_login(provider, pending).await
     }
 
     #[cfg(test)]
@@ -293,9 +293,10 @@ impl SessionManager {
             .begin_interactive_repair_with_auth_service_for_test(managed, auth_service_base_url)
             .await?;
         self.register_managed_login(ManagedAuthProvider::Arcee, pending)
+            .await
     }
 
-    fn register_managed_login(
+    async fn register_managed_login(
         &self,
         provider: ManagedAuthProvider,
         pending: PendingDeviceLogin,
@@ -308,7 +309,7 @@ impl SessionManager {
         // The HTTP admission lease ends with the start response, while the
         // device flow can later persist credentials. Transfer independent
         // cross-process admission authority into the background task first.
-        let background_admission = self.managed_work_admission()?;
+        let background_admission = self.managed_work_admission_async().await?;
 
         let outcome = Arc::new(StdMutex::new(LoginOutcome::Pending));
         let task = tokio::spawn({

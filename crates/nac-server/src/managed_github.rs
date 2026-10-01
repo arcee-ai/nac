@@ -306,7 +306,7 @@ impl SessionManager {
         let prompt = pending.prompt();
         // Keep host admission through token persistence and managed git
         // configuration, not merely through the HTTP start response.
-        let background_admission = self.managed_work_admission()?;
+        let background_admission = self.managed_work_admission_async().await?;
         let outcome = Arc::new(StdMutex::new(LoginOutcome::Pending));
         let task = tokio::spawn({
             let outcome = Arc::clone(&outcome);

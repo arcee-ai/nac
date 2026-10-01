@@ -253,7 +253,13 @@ impl SessionService {
                 );
             }
             let baseline = service.lock_transcript_scan().visible_response_count;
-            service.set_run_transcript_baseline(&task_run_id, baseline);
+            let id = task_run_id.clone();
+            if let Err(error) = service
+                .coordinate_local(move |service| service.set_run_transcript_baseline(&id, baseline))
+                .await
+            {
+                eprintln!("nac: baseline coordination failed: {error:#}");
+            }
             let (result, usage) = {
                 let mut agent = service.agent.lock().await;
                 agent.set_event_sink(EventSink::bus_with_context(

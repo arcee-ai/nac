@@ -166,14 +166,16 @@ impl ManualCompactionTaskGuard {
         clippy::expect_used,
         reason = "the guard owns a lifecycle until its single completion path consumes it"
     )]
-    fn complete(mut self, result: SessionCompactionCompletion) {
+    async fn complete(mut self, result: SessionCompactionCompletion) {
         self.lifecycle
             .as_mut()
             .expect("manual compaction lifecycle exists")
-            .finish(&result);
+            .finish(&result)
+            .await;
         drop(self.lifecycle.take());
         self.service
-            .clear_manual_compaction(self.snapshot.compaction_id);
+            .clear_manual_compaction_async(self.snapshot.compaction_id)
+            .await;
         if let Some(completion) = self.completion.take() {
             let _ = completion.send(result);
         }
@@ -182,7 +184,7 @@ impl ManualCompactionTaskGuard {
 
 impl Drop for ManualCompactionTaskGuard {
     fn drop(&mut self) {
-        if self.lifecycle.is_none() {
+        if self.completion.is_none() {
             return;
         }
         let result = Err(CompactionError::Failed {
@@ -190,11 +192,29 @@ impl Drop for ManualCompactionTaskGuard {
             failure: CompactionFailure::Cancelled,
             source: None,
         });
-        drop(self.lifecycle.take());
-        self.service
-            .clear_manual_compaction(self.snapshot.compaction_id);
-        if let Some(completion) = self.completion.take() {
-            let _ = completion.send(result);
+        let lifecycle = self.lifecycle.take();
+        let service = self.service.clone();
+        let id = self.snapshot.compaction_id;
+        let completion = self.completion.take();
+        if crate::store::coordinator::owner_for(&service.metadata.store_path)
+            .map(|owner| owner.is_some())
+            .unwrap_or(true)
+        {
+            tokio::spawn(async move {
+                if let Some(mut lifecycle) = lifecycle {
+                    lifecycle.finish(&result).await;
+                }
+                service.clear_manual_compaction_async(id).await;
+                if let Some(completion) = completion {
+                    let _ = completion.send(result);
+                }
+            });
+        } else {
+            drop(lifecycle);
+            service.clear_manual_compaction(id);
+            if let Some(completion) = completion {
+                let _ = completion.send(result);
+            }
         }
     }
 }
@@ -363,7 +383,7 @@ impl SessionService {
                     eprintln!("nac: failed to persist compaction context: {error:#}");
                 }
             }
-            task_guard.complete(result);
+            task_guard.complete(result).await;
         });
         #[cfg(test)]
         let abort_handle = task.abort_handle();
@@ -377,6 +397,15 @@ impl SessionService {
             #[cfg(test)]
             abort_handle,
         })
+    }
+
+    async fn clear_manual_compaction_async(&self, compaction_id: Uuid) {
+        if let Err(error) = self
+            .coordinate_local(move |service| service.clear_manual_compaction(compaction_id))
+            .await
+        {
+            eprintln!("nac: compaction local cleanup failed: {error:#}");
+        }
     }
 
     fn clear_manual_compaction(&self, compaction_id: Uuid) {

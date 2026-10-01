@@ -75,7 +75,7 @@ impl nac_core::traditional_children::TraditionalChildController
     {
         Box::pin(async move {
             let manager = self.manager()?;
-            let _host_admission = manager.managed_work_admission()?;
+            let _host_admission = manager.managed_work_admission_async().await?;
             nac_core::traditional_children::validate_general_profile(&request.profile)?;
             if request.prompt.trim().is_empty() {
                 return Err(anyhow!("traditional child prompt is empty"));
@@ -262,7 +262,7 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
     ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
         Box::pin(async move {
             let manager = self.manager()?;
-            let _host_admission = manager.managed_work_admission()?;
+            let _host_admission = manager.managed_work_admission_async().await?;
             if request.prompt.trim().is_empty() {
                 return Err(anyhow!("managed orchestrator prompt is empty"));
             }
@@ -293,11 +293,13 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             if relation.status == ManagedOrchestratorStatus::Running {
                 let service = manager.attach_session(&orchestrator_session_id).await?;
                 if service.active_run().is_some() {
-                    manager.queue_managed_orchestrator_steering(
-                        &request.parent_session_id,
-                        &orchestrator_session_id,
-                        &request.prompt,
-                    )?;
+                    manager
+                        .queue_managed_orchestrator_steering_async(
+                            &request.parent_session_id,
+                            &orchestrator_session_id,
+                            &request.prompt,
+                        )
+                        .await?;
                     return Ok(relation);
                 }
                 match sessions::SessionOperationLease::try_acquire(
@@ -305,11 +307,13 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                     &orchestrator_session_id,
                 ) {
                     Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                        manager.queue_managed_orchestrator_steering(
-                            &request.parent_session_id,
-                            &orchestrator_session_id,
-                            &request.prompt,
-                        )?;
+                        manager
+                            .queue_managed_orchestrator_steering_async(
+                                &request.parent_session_id,
+                                &orchestrator_session_id,
+                                &request.prompt,
+                            )
+                            .await?;
                         return Ok(relation);
                     }
                     Err(error) => return Err(anyhow::Error::new(error)),
@@ -394,11 +398,13 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                     )
                     .await?;
             } else {
-                manager.queue_managed_orchestrator_steering(
-                    parent_session_id,
-                    orchestrator_session_id,
-                    instruction,
-                )?;
+                manager
+                    .queue_managed_orchestrator_steering_async(
+                        parent_session_id,
+                        orchestrator_session_id,
+                        instruction,
+                    )
+                    .await?;
             }
             manager
                 .delegation()

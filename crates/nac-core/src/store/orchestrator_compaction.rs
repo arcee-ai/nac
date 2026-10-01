@@ -145,7 +145,7 @@ command AppendOrchestratorCompactionCheckpointCommand {
 }
 call |command| (&command.checkpoint)
 correlation |_command| crate::telemetry::Correlation::default();
-port internal;
+port public;
 }
 
 coordinated_command! {

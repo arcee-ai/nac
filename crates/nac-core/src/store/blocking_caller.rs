@@ -71,6 +71,10 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
+    #[cfg(test)]
+    if let Some(capacity) = TEST_CAPACITY.with(|slot| slot.borrow().clone()) {
+        return spawn_with_capacity(operation, capacity, MAX_BLOCKING_CALLERS);
+    }
     spawn_with_capacity(operation, Arc::clone(&CALLERS), MAX_BLOCKING_CALLERS)
 }
 
@@ -162,6 +166,23 @@ where
         task: Some(task),
         rejection: None,
     }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static TEST_CAPACITY: std::cell::RefCell<Option<Arc<Semaphore>>> = const { std::cell::RefCell::new(None) };
+}
+#[cfg(test)]
+pub(crate) struct TestCallerCapacity(Option<Arc<Semaphore>>);
+#[cfg(test)]
+impl Drop for TestCallerCapacity {
+    fn drop(&mut self) {
+        TEST_CAPACITY.with(|slot| *slot.borrow_mut() = self.0.take());
+    }
+}
+#[cfg(test)]
+pub(crate) fn reject_callers_for_test() -> TestCallerCapacity {
+    TestCallerCapacity(TEST_CAPACITY.with(|slot| slot.replace(Some(Arc::new(Semaphore::new(0))))))
 }
 
 #[cfg(test)]

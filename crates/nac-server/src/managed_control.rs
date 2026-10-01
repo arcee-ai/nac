@@ -56,11 +56,11 @@ async fn status(
         Ok(assertion) => assertion,
         Err(response) => return response,
     };
-    let _host_admission = match manager.managed_completion_admission() {
+    let _host_admission = match manager.managed_completion_admission_async().await {
         Ok(Some(admission)) => admission,
         _ => return internal_error(),
     };
-    let blockers = match manager.managed_upgrade_blockers() {
+    let blockers = match manager.managed_upgrade_blockers_async().await {
         Ok(blockers) => blockers,
         Err(_) => return internal_error(),
     };
@@ -154,7 +154,7 @@ async fn prepare_for_action(
     let process_gate = Arc::clone(&manager.inner.maintenance_gate)
         .try_write_owned()
         .ok();
-    let mut blockers = match manager.managed_upgrade_blockers() {
+    let mut blockers = match manager.managed_upgrade_blockers_async().await {
         Ok(blockers) => blockers,
         Err(_) => return internal_error(),
     };

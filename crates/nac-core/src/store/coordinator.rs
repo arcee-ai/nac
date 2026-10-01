@@ -462,3 +462,6 @@ mod contract_tests;
 #[cfg(test)]
 #[path = "coordinator_crash_tests.rs"]
 mod crash_tests;
+
+#[cfg(test)]
+pub(crate) use tests::block_executor;

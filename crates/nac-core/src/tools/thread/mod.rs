@@ -244,15 +244,6 @@ pub async fn execute_parsed_dispatch(
         };
     };
 
-    runtime
-        .event_sink
-        .emit_async(AgentEvent::ThreadStarted {
-            name: thread_name.clone(),
-            action: action.clone(),
-            source_threads: source_threads.clone(),
-        })
-        .await;
-
     let admission = {
         let path = runtime.store_path.clone();
         let session = session_id.clone();
@@ -310,10 +301,60 @@ pub async fn execute_parsed_dispatch(
         }
     };
 
+    if let Err(error) = runtime
+        .event_sink
+        .try_emit_async(AgentEvent::ThreadStarted {
+            name: thread_name.clone(),
+            action: action.clone(),
+            source_threads: source_threads.clone(),
+        })
+        .await
+    {
+        record_dispatch_failure(
+            runtime,
+            &thread_name,
+            &identity,
+            store::EpisodeStatus::Error,
+            &format!("Required thread start publication failed: {error:#}"),
+        )
+        .await;
+        close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
+        return ToolResult {
+            content: format!("Required thread start publication failed: {error:#}").into(),
+            is_error: true,
+        };
+    }
+
+    let require_history = store::coordinator::owner_for(&runtime.store_path)
+        .map(|owner| owner.is_some())
+        .unwrap_or(true);
+    let required = match store::coordinator::owner_for(&runtime.store_path) {
+        Ok(Some(owner)) => owner.require_worker_history(identity.clone()).await,
+        Ok(None) => Ok(()),
+        Err(error) => Err(error),
+    };
+    if let Err(error) = required {
+        let message = format!("Required worker history admission failed: {error:#}");
+        record_dispatch_failure(
+            runtime,
+            &thread_name,
+            &identity,
+            store::EpisodeStatus::Error,
+            &message,
+        )
+        .await;
+        close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
+        return ToolResult {
+            content: message.into(),
+            is_error: true,
+        };
+    }
+
     let result = run_worker(
         runtime,
         client,
         WorkerInvocation {
+            require_history,
             session_id: &session_id,
             thread_name: &thread_name,
             dispatch_id: &dispatch_id,
@@ -414,9 +455,9 @@ pub async fn execute_parsed_dispatch(
     }
 
     let Some(failure) = failure else {
-        runtime
+        let finish = runtime
             .event_sink
-            .emit_async(AgentEvent::ThreadFinished {
+            .try_emit_async(AgentEvent::ThreadFinished {
                 name: thread_name,
                 exit_code: run.exit_code,
                 timed_out: false,
@@ -425,8 +466,14 @@ pub async fn execute_parsed_dispatch(
             })
             .await;
         return ToolResult {
-            content: committed_response.unwrap_or_default().into(),
-            is_error: false,
+            content: match finish {
+                Ok(()) => committed_response.unwrap_or_default(),
+                Err(ref error) => {
+                    format!("Worker result committed, but terminal publication failed: {error:#}")
+                }
+            }
+            .into(),
+            is_error: finish.is_err(),
         };
     };
 
@@ -803,19 +850,49 @@ pub(crate) async fn close_thread_dispatch_async(
     thread_name: &str,
     dispatch_id: &str,
 ) {
-    let runtime = runtime.clone();
-    let session_id = session_id.to_owned();
-    let thread_name = thread_name.to_owned();
-    let dispatch_id = dispatch_id.to_owned();
-    if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
-        close_thread_dispatch(&runtime, &session_id, &thread_name, &dispatch_id);
-    })
-    .await
-    {
-        eprintln!("nac: thread close caller failed: {error:#}");
+    if !runtime.active_threads.close_local(thread_name, dispatch_id) {
+        return;
+    }
+    // Rejection leaves the exact unresolved steering rows durable for recovery;
+    // it must never retain a completed process in the local running registry.
+    let expiry = match store::coordinator::owner_for(&runtime.store_path) {
+        Ok(Some(owner)) => {
+            owner
+                .expire_thread_steering(session_id.to_owned(), dispatch_id.to_owned())
+                .await
+        }
+        Ok(None) => store::expire_thread_steering(&runtime.store_path, session_id, dispatch_id),
+        Err(error) => Err(error),
+    };
+    match expiry {
+        Ok(expired) => {
+            for record in expired {
+                runtime
+                    .event_sink
+                    .emit_async(AgentEvent::ThreadSteeringExpired {
+                        name: record.thread_name,
+                        steering_id: record.id,
+                        instruction_preview: record.instruction.chars().take(160).collect(),
+                    })
+                    .await;
+            }
+        }
+        Err(error) => {
+            eprintln!(
+                "nac: undelivered steering remains durable for dispatch {dispatch_id}: {error:#}"
+            );
+            runtime
+                .event_sink
+                .emit_async(AgentEvent::Error {
+                    thread_name: Some(thread_name.to_owned()),
+                    message: format!("failed to expire undelivered steering: {error}"),
+                })
+                .await;
+        }
     }
 }
 
+#[cfg(test)]
 pub(crate) fn close_thread_dispatch(
     runtime: &ToolRuntime,
     session_id: &str,
@@ -852,6 +929,33 @@ mod tests {
     use crate::tools::test_runtime;
     use serde_json::json;
     use std::sync::Arc;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn caller_saturation_cannot_skip_mandatory_local_dispatch_close() {
+        let mut runtime = test_runtime();
+        runtime.store_path = std::env::temp_dir()
+            .join(format!("nac-close-overload-{}", uuid::Uuid::new_v4()))
+            .join("store.db");
+        store::initialize(&runtime.store_path).unwrap();
+        store::insert_test_session(&runtime.store_path, "session");
+        let owner = store::StoreCoordinator::acquire(&runtime.store_path).unwrap();
+        assert!(runtime.active_threads.begin_run("run"));
+        assert!(runtime.active_threads.mark("worker", "dispatch"));
+        assert!(runtime.active_threads.start("worker", "dispatch").is_some());
+        let saturation = store::reject_callers_for_test();
+        assert!(store::spawn_blocking_store_caller(|| ()).await.is_err());
+        close_thread_dispatch_async(&runtime, "session", "worker", "dispatch").await;
+        assert!(runtime.active_threads.names().is_empty());
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            runtime.active_threads.cancel_and_drain(None),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        drop(saturation);
+        owner.shutdown().await.unwrap();
+    }
 
     #[test]
     fn cleanup_diagnostic_preserves_timeout_and_cancellation_classification() {

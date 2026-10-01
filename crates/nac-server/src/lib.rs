@@ -1078,7 +1078,7 @@ impl SessionManager {
         &self,
         request: CreateSessionRequest,
     ) -> Result<SessionFrontendSnapshot> {
-        let _host_admission = self.managed_work_admission()?;
+        let _host_admission = self.managed_work_admission_async().await?;
         self.session_creation()
             .create_session(request.into_application())
             .await
