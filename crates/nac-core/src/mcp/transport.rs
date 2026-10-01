@@ -9,6 +9,7 @@ use rmcp::transport::streamable_http_client::{
 #[derive(Clone)]
 struct NacOAuthClient {
     inner: AuthClient<reqwest::Client>,
+    step_up_manager: Arc<tokio::sync::OnceCell<rmcp::transport::auth::AuthorizationManager>>,
     cwd: PathBuf,
     server_name: String,
     endpoint: String,
@@ -23,9 +24,47 @@ impl NacOAuthClient {
             let Some(required_scope) = error.get_required_scope() else {
                 return result;
             };
-            let authorization_url = {
-                let manager = self.inner.auth_manager.lock().await;
-                manager.request_scope_upgrade(required_scope).await
+            let step_up = match super::oauth::prepare_mcp_oauth_scope_step_up(
+                &self.cwd,
+                &self.server_name,
+                &self.endpoint,
+                required_scope,
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!(
+                        "MCP server '{}': failed to persist OAuth step-up scopes: {error:#}",
+                        self.server_name
+                    );
+                    return result;
+                }
+            };
+            if step_up.authorization_in_progress {
+                return result;
+            }
+            if step_up.uses_loopback {
+                return result;
+            }
+            let manager = self
+                .step_up_manager
+                .get_or_try_init(|| async {
+                    super::oauth::authorized_manager(&self.cwd, &self.server_name, &self.endpoint)
+                        .await
+                })
+                .await;
+            let authorization_url = match manager {
+                Ok(manager) => {
+                    manager
+                        .request_scope_upgrade(&step_up.authorization_scopes.join(" "))
+                        .await
+                }
+                Err(error) => {
+                    eprintln!(
+                        "MCP server '{}': failed to initialize OAuth scope upgrade: {error:#}",
+                        self.server_name
+                    );
+                    return result;
+                }
             };
             match authorization_url {
                 Ok(url) => {
@@ -33,13 +72,25 @@ impl NacOAuthClient {
                         &self.cwd,
                         &self.server_name,
                         &self.endpoint,
-                        url,
-                        required_scope,
+                        url.clone(),
                     ) {
                         eprintln!(
                             "MCP server '{}': failed to persist OAuth scope-upgrade URL: {error:#}",
                             self.server_name
                         );
+                        if let Err(cleanup_error) =
+                            super::oauth::discard_mcp_oauth_pending_authorization(
+                                &self.cwd,
+                                &self.server_name,
+                                &self.endpoint,
+                                &url,
+                            )
+                        {
+                            eprintln!(
+                                "MCP server '{}': failed to discard unpublished OAuth scope upgrade: {cleanup_error:#}",
+                                self.server_name
+                            );
+                        }
                     }
                 }
                 Err(error) => eprintln!(
@@ -324,6 +375,7 @@ async fn connect_http_server(
         let manager = super::oauth::authorized_manager(cwd, name, parameters.url).await?;
         let client = NacOAuthClient {
             inner: AuthClient::new(reqwest::Client::new(), manager),
+            step_up_manager: Arc::new(tokio::sync::OnceCell::new()),
             cwd: cwd.to_path_buf(),
             server_name: name.to_string(),
             endpoint: parameters.url.to_string(),

@@ -1,10 +1,22 @@
+mod authorization_state;
+mod client_config;
+mod url_validation;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
+pub(crate) use authorization_state::discard_mcp_oauth_pending_authorization;
+use authorization_state::{
+    authorization_state, failed_authorization_start, merge_pending_scopes,
+    pending_authorization_is_live, publish_pending_authorization,
+};
 use base64::Engine;
+#[cfg(test)]
+use client_config::restored_client_secret;
+use client_config::{oauth_application_type, restored_client_config};
 use nac_credential_store::{
     read_auth_string_from_path, try_acquire_credential_lock, with_credential_lock,
     write_auth_string_to_path,
@@ -18,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::time::sleep;
 use url::Url;
+use url_validation::{normalize_endpoint, validate_https_url};
 
 pub const MCP_OAUTH_CALLBACK_PATH: &str = "/mcp_library/oauth/callback";
 pub const MCP_OAUTH_REDIRECT_URI: &str = "http://localhost:1456/mcp_library/oauth/callback";
@@ -245,25 +258,6 @@ fn edit_store<T>(path: &Path, edit: impl FnOnce(&mut OAuthStoreFile) -> Result<T
     })
 }
 
-fn normalize_endpoint(raw: &str) -> Result<String> {
-    let mut url = Url::parse(raw).context("MCP OAuth endpoint must be an absolute URL")?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
-    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
-        bail!("MCP OAuth endpoint must use HTTPS (HTTP is allowed only for loopback testing)");
-    }
-    if !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        bail!("MCP OAuth endpoint must not contain credentials, a query, or a fragment");
-    }
-    if url.path().is_empty() {
-        url.set_path("/");
-    }
-    Ok(url.to_string())
-}
-
 fn validate_credential_name(name: &str) -> Result<()> {
     if name.is_empty()
         || !name.as_bytes()[0].is_ascii_alphabetic() && name.as_bytes()[0] != b'_'
@@ -358,18 +352,6 @@ impl ResolvedRegistration {
     }
 }
 
-fn validate_https_url(raw: &str, label: &str, allow_loopback_http: bool) -> Result<String> {
-    let url = Url::parse(raw).with_context(|| format!("{label} must be an absolute URL"))?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
-    if url.scheme() != "https" && !(allow_loopback_http && url.scheme() == "http" && loopback) {
-        bail!("{label} must use HTTPS");
-    }
-    if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
-        bail!("{label} must not contain credentials or a fragment");
-    }
-    Ok(url.to_string())
-}
-
 fn resolve_registration(registration: &McpOAuthRegistration) -> Result<ResolvedRegistration> {
     match registration {
         McpOAuthRegistration::PreRegistered {
@@ -441,25 +423,30 @@ fn configuration_fingerprint(
     fingerprint(&(registration.binding(), metadata))
 }
 
+fn profile_configuration_matches(
+    profile: &OAuthProfile,
+    registration: &ResolvedRegistration,
+    metadata: &Option<McpOAuthAuthorizationMetadata>,
+) -> Result<bool> {
+    match profile.binding.legacy_client_fingerprint.as_deref() {
+        Some(expected) => Ok(metadata.is_none()
+            && matches!(
+                registration,
+                ResolvedRegistration::PreRegistered { client_id, .. }
+                    if client_id_fingerprint(client_id) == expected
+            )),
+        None => Ok(profile.binding.configuration_fingerprint
+            == configuration_fingerprint(registration, metadata)?),
+    }
+}
+
 fn validate_binding(
     profile: &OAuthProfile,
     endpoint: &str,
     registration: &ResolvedRegistration,
 ) -> Result<()> {
-    let configuration_matches = match profile.binding.legacy_client_fingerprint.as_deref() {
-        Some(expected) => {
-            profile.authorization_metadata.is_none()
-                && matches!(
-                    registration,
-                    ResolvedRegistration::PreRegistered { client_id, .. }
-                        if client_id_fingerprint(client_id) == expected
-                )
-        }
-        None => {
-            profile.binding.configuration_fingerprint
-                == configuration_fingerprint(registration, &profile.authorization_metadata)?
-        }
-    };
+    let configuration_matches =
+        profile_configuration_matches(profile, registration, &profile.authorization_metadata)?;
     if profile.binding.endpoint != normalize_endpoint(endpoint)?
         || !configuration_matches
         || profile.binding.owner != owner_boundary()
@@ -482,7 +469,6 @@ fn validate_binding(
     }
     Ok(())
 }
-
 fn validate_profile_binding(
     profile: &OAuthProfile,
     endpoint: &str,
@@ -520,36 +506,29 @@ pub fn configure_mcp_oauth(
     let path = oauth_store_path(cwd)?;
     let connected = edit_store(&path, |store| {
         let existing = store.profiles.get(server_name);
-        let previous_issuer = existing
-            .filter(|profile| {
+        let same_configuration = match existing {
+            Some(profile) => {
                 profile.binding.endpoint == binding.endpoint
-                    && profile.binding.configuration_fingerprint
-                        == binding.configuration_fingerprint
-            })
-            .and_then(|profile| profile.binding.issuer.clone());
-        let credentials = existing
-            .filter(|profile| {
-                profile.binding.endpoint == binding.endpoint
-                    && profile.binding.configuration_fingerprint
-                        == binding.configuration_fingerprint
-                    && profile.scopes == config.scopes
-            })
+                    && profile.binding.owner == binding.owner
+                    && profile.binding.host == binding.host
+                    && profile_configuration_matches(
+                        profile,
+                        &registration,
+                        &config.authorization_metadata,
+                    )?
+            }
+            None => false,
+        };
+        let matching = existing.filter(|_| same_configuration);
+        let previous_issuer = matching.and_then(|profile| profile.binding.issuer.clone());
+        let credentials = matching
+            .filter(|profile| profile.scopes == config.scopes)
             .and_then(|profile| profile.credentials.clone());
-        let redirect_uri = existing
-            .filter(|profile| {
-                profile.binding.endpoint == binding.endpoint
-                    && profile.binding.configuration_fingerprint
-                        == binding.configuration_fingerprint
-                    && profile.scopes == config.scopes
-            })
+        let redirect_uri = matching
+            .filter(|profile| profile.scopes == config.scopes)
             .and_then(|profile| profile.redirect_uri.clone());
-        let registered_client_secret = existing
-            .filter(|profile| {
-                profile.binding.endpoint == binding.endpoint
-                    && profile.binding.configuration_fingerprint
-                        == binding.configuration_fingerprint
-                    && profile.scopes == config.scopes
-            })
+        let registered_client_secret = matching
+            .filter(|profile| profile.scopes == config.scopes)
             .and_then(|profile| profile.registered_client_secret.clone());
         let connected = credentials
             .as_ref()
@@ -594,17 +573,21 @@ pub fn mcp_oauth_status(cwd: &Path, server_name: &str, endpoint: &str) -> Result
         return Ok(McpOAuthStatus::NeedsConfiguration);
     };
     validate_profile_binding(profile, endpoint)?;
-    Ok(if profile.pending_authorization_url.is_some() {
-        McpOAuthStatus::NeedsAuthorization
-    } else if profile
-        .credentials
-        .as_ref()
-        .is_some_and(|value| value.token_response.is_some())
-    {
-        McpOAuthStatus::Connected
-    } else {
-        McpOAuthStatus::NeedsAuthorization
-    })
+    Ok(
+        if profile
+            .credentials
+            .as_ref()
+            .is_some_and(|value| value.token_response.is_some())
+        {
+            if !profile.pending_scopes.is_empty() && !pending_authorization_is_live(profile) {
+                McpOAuthStatus::NeedsAuthorization
+            } else {
+                McpOAuthStatus::Connected
+            }
+        } else {
+            McpOAuthStatus::NeedsAuthorization
+        },
+    )
 }
 
 pub fn clear_mcp_oauth(cwd: &Path, server_name: &str) -> Result<McpOAuthStatus> {
@@ -634,17 +617,30 @@ pub fn delete_mcp_oauth_profile(cwd: &Path, server_name: &str) -> Result<()> {
         Ok(())
     })
 }
-
-pub fn rename_mcp_oauth_profile(cwd: &Path, old_name: &str, new_name: &str) -> Result<()> {
+pub fn rename_mcp_oauth_profile(
+    cwd: &Path,
+    old_name: &str,
+    new_name: &str,
+    redirect_uri: &str,
+) -> Result<()> {
     if old_name == new_name {
         return Ok(());
     }
+    let redirect_uri = validate_https_url(redirect_uri, "MCP OAuth redirect URI", true)?;
     let path = oauth_store_path(cwd)?;
     edit_store(&path, |store| {
         if store.profiles.contains_key(new_name) {
             bail!("MCP OAuth is already configured for the renamed server");
         }
-        if let Some(profile) = store.profiles.remove(old_name) {
+        if let Some(mut profile) = store.profiles.remove(old_name) {
+            profile.redirect_uri = Some(redirect_uri);
+            profile.pending_authorization_url = None;
+            profile.pending_scopes.clear();
+            profile.states.clear();
+            if matches!(profile.registration, McpOAuthRegistration::Dynamic { .. }) {
+                profile.credentials = None;
+                profile.registered_client_secret = None;
+            }
             store.profiles.insert(new_name.to_string(), profile);
         }
         Ok(())
@@ -657,6 +653,14 @@ pub(crate) struct OAuthProfileStore {
     server_name: String,
     endpoint: String,
     expected_client_id: Option<String>,
+    save_mode: CredentialSaveMode,
+}
+
+#[derive(Clone, Copy)]
+enum CredentialSaveMode {
+    Independent,
+    /// rmcp holds the credential lock across refresh load, exchange, and save.
+    RefreshGuarded,
 }
 
 impl OAuthProfileStore {
@@ -675,7 +679,6 @@ impl OAuthProfileStore {
         AuthError::CredentialStoreError(error.to_string())
     }
 }
-
 #[async_trait]
 impl CredentialStore for OAuthProfileStore {
     async fn load(&self) -> std::result::Result<Option<StoredCredentials>, AuthError> {
@@ -694,17 +697,37 @@ impl CredentialStore for OAuthProfileStore {
                 "client binding mismatch".into(),
             ));
         }
-        let mut store = read_store(&self.path).map_err(Self::auth_error)?;
-        let profile = store
-            .profiles
-            .get_mut(&self.server_name)
-            .ok_or_else(|| AuthError::CredentialStoreError("MCP OAuth is not configured".into()))?;
-        validate_profile_binding(profile, &self.endpoint).map_err(Self::auth_error)?;
-        profile.binding.issuer = credentials.issuer.clone();
-        profile.credentials = Some(credentials);
-        profile.pending_authorization_url = None;
-        profile.pending_scopes.clear();
-        write_store(&self.path, &store).map_err(Self::auth_error)
+        let update = |store: &mut OAuthStoreFile| {
+            let profile = store
+                .profiles
+                .get_mut(&self.server_name)
+                .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
+            validate_profile_binding(profile, &self.endpoint)?;
+            profile.binding.issuer = credentials.issuer.clone();
+            if matches!(self.save_mode, CredentialSaveMode::Independent) {
+                if credentials.granted_scopes.is_empty() {
+                    profile.pending_scopes.clear();
+                } else {
+                    profile
+                        .pending_scopes
+                        .retain(|scope| !credentials.granted_scopes.contains(scope));
+                }
+                if !pending_authorization_is_live(profile) {
+                    profile.pending_authorization_url = None;
+                }
+            }
+            profile.credentials = Some(credentials);
+            Ok(())
+        };
+        let result: Result<()> = match self.save_mode {
+            CredentialSaveMode::Independent => edit_store(&self.path, update),
+            CredentialSaveMode::RefreshGuarded => (|| -> Result<()> {
+                let mut store = read_store(&self.path)?;
+                update(&mut store)?;
+                write_store(&self.path, &store)
+            })(),
+        };
+        result.map_err(Self::auth_error)
     }
 
     async fn clear(&self) -> std::result::Result<(), AuthError> {
@@ -727,6 +750,9 @@ impl CredentialStore for OAuthProfileStore {
     async fn acquire_refresh_guard(
         &self,
     ) -> std::result::Result<Option<CredentialRefreshGuard>, AuthError> {
+        if matches!(self.save_mode, CredentialSaveMode::Independent) {
+            return Ok(None);
+        }
         let lock = lock_path(&self.path);
         loop {
             match try_acquire_credential_lock(&lock).map_err(Self::auth_error)? {
@@ -759,6 +785,12 @@ impl StateStore for OAuthProfileStore {
                 now.saturating_sub(value.created_at) <= MCP_OAUTH_STATE_TTL.as_secs()
             });
             profile.states.insert(csrf_token.to_string(), state);
+            if !pending_authorization_is_live(profile) {
+                let mut pending = Url::parse("urn:nac:oauth:pending")
+                    .context("internal pending authorization URI is invalid")?;
+                pending.query_pairs_mut().append_pair("state", csrf_token);
+                profile.pending_authorization_url = Some(pending.into());
+            }
             Ok(())
         })
         .map_err(Self::auth_error)
@@ -800,6 +832,7 @@ async fn manager_and_profile(
     cwd: &Path,
     server_name: &str,
     endpoint: &str,
+    save_mode: CredentialSaveMode,
 ) -> Result<(AuthorizationManager, OAuthProfile, AuthorizationMetadata)> {
     let path = oauth_store_path(cwd)?;
     let store = read_store(&path)?;
@@ -814,15 +847,23 @@ async fn manager_and_profile(
         server_name: server_name.to_string(),
         endpoint: normalize_endpoint(endpoint)?,
         expected_client_id: registration.expected_client_id().map(ToOwned::to_owned),
+        save_mode,
     };
     let mut manager = AuthorizationManager::new(endpoint)
         .await
         .context("MCP OAuth metadata client initialization failed")?;
     manager.set_credential_store(adapter.clone());
     manager.set_state_store(adapter);
-    let metadata: AuthorizationMetadata =
+    let mut metadata: AuthorizationMetadata =
         if let Some(metadata) = profile.authorization_metadata.clone() {
-            authorization_metadata(metadata)?
+            let mut metadata = authorization_metadata(metadata)?;
+            if matches!(registration, ResolvedRegistration::ClientMetadata { .. }) {
+                metadata
+                    .additional_fields
+                    .entry("client_id_metadata_document_supported".to_string())
+                    .or_insert(serde_json::Value::Bool(true));
+            }
+            metadata
         } else {
             let resolution = manager
                 .resolve_metadata()
@@ -834,15 +875,30 @@ async fn manager_and_profile(
             resolution.metadata
         };
     if let Some(bound_issuer) = profile.binding.issuer.as_deref() {
-        if metadata.issuer.as_deref() != Some(bound_issuer) {
-            bail!("protected MCP OAuth credentials do not match the discovered issuer");
+        match metadata.issuer.as_deref() {
+            Some(metadata_issuer) if metadata_issuer != bound_issuer => {
+                bail!("protected MCP OAuth credentials do not match the authorization issuer");
+            }
+            None => metadata.issuer = Some(bound_issuer.to_string()),
+            Some(_) => {}
         }
     }
     manager.set_metadata(metadata.clone());
     Ok((manager, profile, metadata))
 }
 
-fn effective_scopes(profile: &OAuthProfile) -> Vec<String> {
+fn active_scopes(profile: &OAuthProfile) -> Vec<String> {
+    let mut scopes = profile.scopes.clone();
+    if let Some(credentials) = profile.credentials.as_ref() {
+        for scope in &credentials.granted_scopes {
+            if !scopes.contains(scope) {
+                scopes.push(scope.clone());
+            }
+        }
+    }
+    scopes
+}
+fn authorization_scopes(profile: &OAuthProfile) -> Vec<String> {
     let mut scopes = profile.scopes.clone();
     for scope in &profile.pending_scopes {
         if !scopes.contains(scope) {
@@ -858,16 +914,13 @@ fn effective_scopes(profile: &OAuthProfile) -> Vec<String> {
     }
     scopes
 }
-
-fn restored_client_secret<'a>(
-    profile: &'a OAuthProfile,
-    registration: &'a ResolvedRegistration,
-) -> Option<&'a str> {
-    match registration {
-        ResolvedRegistration::PreRegistered { client_secret, .. } => client_secret.as_deref(),
-        ResolvedRegistration::Dynamic { .. } => profile.registered_client_secret.as_deref(),
-        ResolvedRegistration::ClientMetadata { .. } => None,
-    }
+fn requires_dynamic_registration(
+    profile: &OAuthProfile,
+    registration: &ResolvedRegistration,
+    redirect_uri: &str,
+) -> bool {
+    matches!(registration, ResolvedRegistration::Dynamic { .. })
+        && (profile.credentials.is_none() || profile.redirect_uri.as_deref() != Some(redirect_uri))
 }
 
 pub async fn begin_mcp_oauth_authorization(
@@ -878,7 +931,8 @@ pub async fn begin_mcp_oauth_authorization(
     additional_scopes: &[String],
 ) -> Result<McpOAuthAuthorizationSession> {
     let redirect_uri = validate_https_url(redirect_uri, "MCP OAuth redirect URI", true)?;
-    let (mut manager, profile, metadata) = manager_and_profile(cwd, server_name, endpoint).await?;
+    let (mut manager, profile, metadata) =
+        manager_and_profile(cwd, server_name, endpoint, CredentialSaveMode::Independent).await?;
     let registration = resolve_registration(&profile.registration)?;
     match &registration {
         ResolvedRegistration::ClientMetadata { .. }
@@ -895,7 +949,16 @@ pub async fn begin_mcp_oauth_authorization(
         }
         _ => {}
     }
-    let mut scopes = effective_scopes(&profile);
+    let mut scopes = authorization_scopes(&profile);
+    let mut pending_scopes = if profile
+        .credentials
+        .as_ref()
+        .is_some_and(|credentials| credentials.token_response.is_some())
+    {
+        profile.pending_scopes.clone()
+    } else {
+        scopes.clone()
+    };
     for scope in additional_scopes {
         let scope = scope.trim();
         if scope.is_empty() {
@@ -904,37 +967,37 @@ pub async fn begin_mcp_oauth_authorization(
         if !scopes.iter().any(|value| value == scope) {
             scopes.push(scope.to_string());
         }
+        if !pending_scopes.iter().any(|value| value == scope) {
+            pending_scopes.push(scope.to_string());
+        }
     }
-    let application_type = if redirect_uri.starts_with("https://") {
-        "web"
-    } else {
-        "native"
-    };
-    let dynamic_registration = if profile.credentials.is_none() {
-        if let ResolvedRegistration::Dynamic { client_name } = &registration {
-            manager
-                .configure_client(
-                    OAuthClientConfig::new("pending-dynamic-registration", &redirect_uri)
-                        .with_application_type(application_type),
-                )
-                .context("MCP OAuth dynamic client registration could not start")?;
-            let scope_refs: Vec<&str> = scopes.iter().map(String::as_str).collect();
-            Some(
+    let application_type = oauth_application_type(&redirect_uri);
+    let dynamic_registration =
+        if requires_dynamic_registration(&profile, &registration, &redirect_uri) {
+            if let ResolvedRegistration::Dynamic { client_name } = &registration {
                 manager
-                    .register_client(
-                        client_name.as_deref().unwrap_or("NAC MCP Client"),
-                        &redirect_uri,
-                        &scope_refs,
+                    .configure_client(
+                        OAuthClientConfig::new("pending-dynamic-registration", &redirect_uri)
+                            .with_application_type(application_type),
                     )
-                    .await
-                    .context("MCP OAuth dynamic client registration failed")?,
-            )
+                    .context("MCP OAuth dynamic client registration could not start")?;
+                let scope_refs: Vec<&str> = scopes.iter().map(String::as_str).collect();
+                Some(
+                    manager
+                        .register_client(
+                            client_name.as_deref().unwrap_or("NAC MCP Client"),
+                            &redirect_uri,
+                            &scope_refs,
+                        )
+                        .await
+                        .context("MCP OAuth dynamic client registration failed")?,
+                )
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
-    };
+        };
     let mut request = AuthorizationRequest::new(&redirect_uri).with_scopes(scopes.clone());
     request = match registration {
         ResolvedRegistration::PreRegistered {
@@ -949,21 +1012,20 @@ pub async fn begin_mcp_oauth_authorization(
         }
         ResolvedRegistration::ClientMetadata { url } => request.with_client_metadata_url(url),
         ResolvedRegistration::Dynamic { .. } => {
-            if let Some(credentials) = profile.credentials.as_ref() {
+            if let Some(config) = dynamic_registration.as_ref() {
+                let request = request.with_preregistered_client(config.client_id.clone());
+                match config.client_secret.as_ref() {
+                    Some(secret) => request.with_client_secret(secret.clone()),
+                    None => request,
+                }
+            } else if let Some(credentials) = profile.credentials.as_ref() {
                 let request = request.with_preregistered_client(credentials.client_id.clone());
                 match profile.registered_client_secret.as_ref() {
                     Some(secret) => request.with_client_secret(secret.clone()),
                     None => request,
                 }
             } else {
-                let config = dynamic_registration
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("MCP OAuth dynamic registration was not prepared"))?;
-                let request = request.with_preregistered_client(config.client_id.clone());
-                match config.client_secret.as_ref() {
-                    Some(secret) => request.with_client_secret(secret.clone()),
-                    None => request,
-                }
+                bail!("MCP OAuth dynamic registration was not prepared");
             }
         }
     };
@@ -972,38 +1034,57 @@ pub async fn begin_mcp_oauth_authorization(
         .await
         .map_err(|(_, error)| anyhow!(error).context("MCP OAuth authorization could not start"))?;
     let authorization_url = session.get_authorization_url().to_string();
-    let (client_id, _) = session
-        .get_credentials()
-        .await
-        .context("MCP OAuth client registration could not be stored")?;
+    let (client_id, _) = match session.get_credentials().await {
+        Ok(credentials) => credentials,
+        Err(error) => {
+            return Err(failed_authorization_start(
+                cwd,
+                server_name,
+                endpoint,
+                &authorization_url,
+                anyhow!(error).context("MCP OAuth client registration could not be stored"),
+            ));
+        }
+    };
     let path = oauth_store_path(cwd)?;
-    edit_store(&path, |store| {
+    let publication = edit_store(&path, |store| {
         let profile = store
             .profiles
             .get_mut(server_name)
             .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
         validate_profile_binding(profile, endpoint)?;
         profile.redirect_uri = Some(redirect_uri.clone());
-        profile.pending_authorization_url = Some(authorization_url.clone());
-        profile.pending_scopes = scopes.clone();
+        publish_pending_authorization(profile, authorization_url.clone())?;
+        merge_pending_scopes(&mut profile.pending_scopes, &pending_scopes);
         profile.registered_client_secret = match &profile.registration {
-            McpOAuthRegistration::Dynamic { .. } => dynamic_registration
-                .as_ref()
-                .and_then(|config| config.client_secret.clone())
-                .or_else(|| profile.registered_client_secret.clone()),
+            McpOAuthRegistration::Dynamic { .. } => dynamic_registration.as_ref().map_or_else(
+                || profile.registered_client_secret.clone(),
+                |config| config.client_secret.clone(),
+            ),
             _ => None,
         };
-        if profile.credentials.is_none() {
-            profile.credentials = Some(StoredCredentials::new(client_id, None, Vec::new(), None));
+        if dynamic_registration.is_some() || profile.credentials.is_none() {
+            profile.credentials = Some(
+                StoredCredentials::new(client_id, None, Vec::new(), None)
+                    .with_issuer(profile.binding.issuer.clone()),
+            );
         }
         Ok(())
-    })?;
+    });
+    if let Err(error) = publication {
+        return Err(failed_authorization_start(
+            cwd,
+            server_name,
+            endpoint,
+            &authorization_url,
+            error.context("MCP OAuth authorization could not be published"),
+        ));
+    }
     Ok(McpOAuthAuthorizationSession {
         authorization_url,
         session,
     })
 }
-
 pub fn mcp_oauth_pending_authorization_url(
     cwd: &Path,
     server_name: &str,
@@ -1014,15 +1095,47 @@ pub fn mcp_oauth_pending_authorization_url(
         return Ok(None);
     };
     validate_profile_binding(profile, endpoint)?;
-    Ok(profile.pending_authorization_url.clone())
+    Ok(pending_authorization_is_live(profile)
+        .then(|| profile.pending_authorization_url.clone())
+        .flatten()
+        .filter(|url| Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))))
 }
-
+pub fn mcp_oauth_callback_is_retryable(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+    callback_url: &str,
+) -> Result<bool> {
+    let callback_url = Url::parse(callback_url).context("MCP OAuth callback URL is invalid")?;
+    let mut states = callback_url
+        .query_pairs()
+        .filter(|(name, _)| name == "state")
+        .map(|(_, value)| value.into_owned());
+    let Some(state) = states.next() else {
+        return Ok(false);
+    };
+    if states.next().is_some() {
+        return Ok(false);
+    }
+    let store = read_store(&oauth_store_path(cwd)?)?;
+    let Some(profile) = store.profiles.get(server_name) else {
+        return Ok(false);
+    };
+    validate_profile_binding(profile, endpoint)?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    Ok(profile
+        .states
+        .get(&state)
+        .is_some_and(|value| now.saturating_sub(value.created_at) <= MCP_OAUTH_STATE_TTL.as_secs()))
+}
 pub(crate) fn record_mcp_oauth_pending_authorization_url(
     cwd: &Path,
     server_name: &str,
     endpoint: &str,
     authorization_url: String,
-    required_scope: &str,
 ) -> Result<()> {
     edit_store(&oauth_store_path(cwd)?, |store| {
         let profile = store
@@ -1030,13 +1143,110 @@ pub(crate) fn record_mcp_oauth_pending_authorization_url(
             .get_mut(server_name)
             .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
         validate_profile_binding(profile, endpoint)?;
-        profile.pending_authorization_url = Some(authorization_url);
+        let state = authorization_state(&authorization_url)
+            .ok_or_else(|| anyhow!("authorization URL has invalid state"))?;
+        if pending_authorization_is_live(profile)
+            && profile.pending_authorization_url.as_deref() != Some(&authorization_url)
+            && profile
+                .pending_authorization_url
+                .as_deref()
+                .and_then(authorization_state)
+                .as_deref()
+                != Some(&state)
+        {
+            profile.states.remove(&state);
+            return Ok(());
+        }
+        publish_pending_authorization(profile, authorization_url)
+    })
+}
+pub fn fail_mcp_oauth_authorization(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+    expected_authorization_url: Option<&str>,
+) -> Result<bool> {
+    edit_store(&oauth_store_path(cwd)?, |store| {
+        let profile = store
+            .profiles
+            .get_mut(server_name)
+            .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
+        validate_profile_binding(profile, endpoint)?;
+        if expected_authorization_url
+            .is_some_and(|expected| profile.pending_authorization_url.as_deref() != Some(expected))
+        {
+            return Ok(false);
+        }
+        profile.pending_authorization_url = None;
+        profile.pending_scopes.clear();
+        profile.states.clear();
+        Ok(true)
+    })
+}
+pub fn set_mcp_oauth_redirect_uri(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+    redirect_uri: &str,
+) -> Result<bool> {
+    let redirect_uri = validate_https_url(redirect_uri, "MCP OAuth redirect URI", true)?;
+    edit_store(&oauth_store_path(cwd)?, |store| {
+        let profile = store
+            .profiles
+            .get_mut(server_name)
+            .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
+        validate_profile_binding(profile, endpoint)?;
+        if profile.redirect_uri.as_deref() == Some(redirect_uri.as_str()) {
+            return Ok(false);
+        }
+        profile.redirect_uri = Some(redirect_uri);
+        profile.pending_authorization_url = None;
+        profile.pending_scopes.clear();
+        profile.states.clear();
+        if matches!(profile.registration, McpOAuthRegistration::Dynamic { .. }) {
+            profile.credentials = None;
+            profile.registered_client_secret = None;
+        }
+        Ok(true)
+    })
+}
+
+pub(crate) struct McpOAuthScopeStepUp {
+    pub(crate) uses_loopback: bool,
+    pub(crate) authorization_in_progress: bool,
+    pub(crate) authorization_scopes: Vec<String>,
+}
+pub(crate) fn prepare_mcp_oauth_scope_step_up(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+    required_scope: &str,
+) -> Result<McpOAuthScopeStepUp> {
+    edit_store(&oauth_store_path(cwd)?, |store| {
+        let profile = store
+            .profiles
+            .get_mut(server_name)
+            .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
+        validate_profile_binding(profile, endpoint)?;
         for scope in required_scope.split_whitespace() {
             if !profile.pending_scopes.iter().any(|value| value == scope) {
                 profile.pending_scopes.push(scope.to_string());
             }
         }
-        Ok(())
+        let authorization_in_progress = pending_authorization_is_live(profile);
+        if !authorization_in_progress {
+            profile.pending_authorization_url = None;
+            profile.states.clear();
+        }
+        Ok(McpOAuthScopeStepUp {
+            uses_loopback: profile
+                .redirect_uri
+                .as_deref()
+                .unwrap_or(MCP_OAUTH_REDIRECT_URI)
+                == MCP_OAUTH_REDIRECT_URI,
+            authorization_in_progress,
+            authorization_scopes: authorization_scopes(profile),
+        })
     })
 }
 
@@ -1048,22 +1258,19 @@ pub async fn complete_mcp_oauth_authorization(
 ) -> Result<()> {
     let callback = rmcp::transport::auth::AuthorizationCallback::from_redirect_url(callback_url)
         .context("MCP OAuth callback was rejected")?;
-    let (mut manager, profile, _) = manager_and_profile(cwd, server_name, endpoint).await?;
+    let (mut manager, profile, _) =
+        manager_and_profile(cwd, server_name, endpoint, CredentialSaveMode::Independent).await?;
     let redirect_uri = profile
         .redirect_uri
         .as_deref()
         .ok_or_else(|| anyhow!("MCP OAuth authorization has no pending redirect URI"))?;
-    let stored_client_id = profile
-        .credentials
-        .as_ref()
-        .map(|credentials| credentials.client_id.clone())
-        .ok_or_else(|| anyhow!("MCP OAuth authorization has no registered client"))?;
     let registration = resolve_registration(&profile.registration)?;
-    let mut client = OAuthClientConfig::new(stored_client_id, redirect_uri)
-        .with_scopes(effective_scopes(&profile));
-    if let Some(secret) = restored_client_secret(&profile, &registration) {
-        client = client.with_client_secret(secret);
-    }
+    let client = restored_client_config(
+        &profile,
+        &registration,
+        redirect_uri,
+        authorization_scopes(&profile),
+    )?;
     manager
         .configure_client(client)
         .context("MCP OAuth client could not be restored")?;
@@ -1102,27 +1309,10 @@ impl McpOAuthAuthorizationSession {
 }
 
 fn callback_state_matches(authorization_url: &str, callback_url: &str) -> bool {
-    let Ok(authorization_url) = url::Url::parse(authorization_url) else {
-        return false;
-    };
-    let Ok(callback_url) = url::Url::parse(callback_url) else {
-        return false;
-    };
-    let mut expected_values = authorization_url
-        .query_pairs()
-        .filter(|(name, _)| name == "state")
-        .map(|(_, value)| value.into_owned());
-    let Some(expected) = expected_values.next() else {
-        return false;
-    };
-    if expected_values.next().is_some() {
-        return false;
-    }
-    let mut actual = callback_url
-        .query_pairs()
-        .filter(|(name, _)| name == "state")
-        .map(|(_, value)| value.into_owned());
-    matches!(actual.next(), Some(actual) if actual == expected) && actual.next().is_none()
+    matches!(
+        (authorization_state(authorization_url), authorization_state(callback_url)),
+        (Some(expected), Some(actual)) if actual == expected
+    )
 }
 
 pub(crate) async fn authorized_manager(
@@ -1130,7 +1320,13 @@ pub(crate) async fn authorized_manager(
     server_name: &str,
     endpoint: &str,
 ) -> Result<AuthorizationManager> {
-    let (mut manager, profile, _) = manager_and_profile(cwd, server_name, endpoint).await?;
+    let (mut manager, profile, _) = manager_and_profile(
+        cwd,
+        server_name,
+        endpoint,
+        CredentialSaveMode::RefreshGuarded,
+    )
+    .await?;
     if !profile
         .credentials
         .as_ref()
@@ -1146,20 +1342,16 @@ pub(crate) async fn authorized_manager(
         bail!("MCP OAuth authorization is required");
     }
     let registration = resolve_registration(&profile.registration)?;
-    let client_id = profile
-        .credentials
-        .as_ref()
-        .map(|credentials| credentials.client_id.clone())
-        .ok_or_else(|| anyhow!("MCP OAuth authorization is required"))?;
     let redirect_uri = profile
         .redirect_uri
         .as_deref()
         .unwrap_or(MCP_OAUTH_REDIRECT_URI);
-    let mut client =
-        OAuthClientConfig::new(client_id, redirect_uri).with_scopes(effective_scopes(&profile));
-    if let Some(secret) = restored_client_secret(&profile, &registration) {
-        client = client.with_client_secret(secret);
-    }
+    let client = restored_client_config(
+        &profile,
+        &registration,
+        redirect_uri,
+        active_scopes(&profile),
+    )?;
     manager
         .configure_client(client)
         .context("MCP OAuth client could not be initialized")?;
@@ -1215,6 +1407,27 @@ mod tests {
         }
     }
 
+    mod live_tests;
+
+    #[test]
+    fn ipv6_loopback_http_is_accepted_only_where_loopback_is_allowed() {
+        assert_eq!(
+            normalize_endpoint("http://[::1]:8080/mcp").unwrap(),
+            "http://[::1]:8080/mcp"
+        );
+        assert_eq!(
+            validate_https_url("http://[::1]:1456/callback", "redirect URI", true).unwrap(),
+            "http://[::1]:1456/callback"
+        );
+        assert!(validate_https_url(
+            "http://[::1]:1456/client.json",
+            "client metadata URL",
+            false
+        )
+        .is_err());
+        assert!(normalize_endpoint("http://[2001:db8::1]/mcp").is_err());
+    }
+
     #[test]
     fn protected_profile_is_private_and_contains_no_configured_secret() {
         let _lock = TEST_ENV_LOCK.lock().unwrap();
@@ -1226,7 +1439,6 @@ mod tests {
             configuration(),
         )
         .unwrap();
-
         let path = home.join(OAUTH_STORE_FILE);
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(!raw.contains("secret-test-canary"));
@@ -1264,7 +1476,6 @@ mod tests {
         let error = mcp_oauth_status(Path::new("/workspace"), "slack", "https://example.com/mcp")
             .unwrap_err();
         assert!(error.to_string().contains("do not match"));
-
         unsafe { std::env::set_var("TEST_MCP_CLIENT_ID", "different-client") };
         let error = mcp_oauth_status(
             Path::new("/workspace"),
@@ -1287,6 +1498,7 @@ mod tests {
             server_name: "slack".to_string(),
             endpoint: normalize_endpoint(endpoint).unwrap(),
             expected_client_id: Some("public-test-client".to_string()),
+            save_mode: CredentialSaveMode::Independent,
         };
         for (csrf, requirement) in [
             ("fake-state", None),
@@ -1311,7 +1523,6 @@ mod tests {
                 requirement.unwrap_or(false)
             );
         }
-
         let mut manager = AuthorizationManager::new(endpoint).await.unwrap();
         manager.set_state_store(adapter.clone());
         manager.set_metadata(
@@ -1348,7 +1559,6 @@ mod tests {
             missing,
             AuthError::AuthorizationServerMissingIssuer { .. }
         ));
-
         let credentials: StoredCredentials = serde_json::from_value(serde_json::json!({
             "client_id": "public-test-client",
             "token_response": null,
@@ -1367,7 +1577,6 @@ mod tests {
             .await
             .unwrap()
             .is_none());
-
         let expired: StoredAuthorizationState = serde_json::from_value(serde_json::json!({
             "pkce_verifier": "expired-verifier",
             "csrf_token": "expired-state",
@@ -1503,7 +1712,6 @@ mod tests {
             &serde_json::to_string(&legacy).unwrap(),
         )
         .unwrap();
-
         assert_eq!(
             mcp_oauth_status(Path::new("/workspace"), "slack", endpoint).unwrap(),
             McpOAuthStatus::NeedsAuthorization
@@ -1522,7 +1730,59 @@ mod tests {
     }
 
     #[test]
-    fn metadata_fingerprint_is_stable_and_effective_state_is_restored() {
+    fn version_one_reconfigure_preserves_matching_authorization() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let (home, _restore) = test_environment("version-one-reconfigure");
+        let endpoint = "https://mcp.slack.com/mcp";
+        let legacy = serde_json::json!({
+            "version": 1,
+            "profiles": {
+                "slack": {
+                    "binding": {
+                        "endpoint": endpoint,
+                        "client_fingerprint": client_id_fingerprint("public-test-client"),
+                        "owner": owner_boundary(),
+                        "host": host_boundary().unwrap(),
+                        "issuer": null
+                    },
+                    "client_id_credential": "TEST_MCP_CLIENT_ID",
+                    "client_secret_credential": "TEST_MCP_CLIENT_SECRET",
+                    "scopes": ["channels:history", "chat:write"],
+                    "credentials": {
+                        "client_id": "public-test-client",
+                        "token_response": {
+                            "access_token": "legacy-access-token-canary",
+                            "token_type": "bearer"
+                        },
+                        "granted_scopes": ["channels:history", "chat:write"],
+                        "token_received_at": 1,
+                        "issuer": null
+                    },
+                    "states": {}
+                }
+            }
+        });
+        write_auth_string_to_path(
+            &home.join(OAUTH_STORE_FILE),
+            &serde_json::to_string(&legacy).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration())
+                .unwrap(),
+            McpOAuthStatus::Connected
+        );
+        assert_eq!(
+            mcp_oauth_status(Path::new("/workspace"), "slack", endpoint).unwrap(),
+            McpOAuthStatus::Connected
+        );
+        let migrated = std::fs::read_to_string(home.join(OAUTH_STORE_FILE)).unwrap();
+        assert!(migrated.contains("legacy-access-token-canary"));
+        assert!(!migrated.contains("legacy_client_fingerprint"));
+    }
+
+    #[test]
+    fn metadata_fingerprint_is_stable_and_scope_state_is_restored() {
         let _lock = TEST_ENV_LOCK.lock().unwrap();
         let (_home, _restore) = test_environment("stable-fingerprint");
         let first: McpOAuthAuthorizationMetadata = serde_json::from_value(serde_json::json!({
@@ -1543,7 +1803,6 @@ mod tests {
             configuration_fingerprint(&registration, &Some(first)).unwrap(),
             configuration_fingerprint(&registration, &Some(second)).unwrap()
         );
-
         let mut profile = OAuthProfile {
             binding: OAuthBinding {
                 endpoint: "https://mcp.example.test/mcp".into(),
@@ -1571,58 +1830,64 @@ mod tests {
             states: BTreeMap::new(),
         };
         assert_eq!(
-            effective_scopes(&profile),
+            authorization_scopes(&profile),
             vec!["mcp:read", "mcp:write", "mcp:admin"]
         );
+        assert_eq!(active_scopes(&profile), vec!["mcp:read", "mcp:admin"]);
         assert_eq!(
             restored_client_secret(&profile, &registration),
             Some("registered-secret")
         );
         profile.pending_scopes.push("mcp:read".into());
         assert_eq!(
-            effective_scopes(&profile),
+            authorization_scopes(&profile),
             vec!["mcp:read", "mcp:write", "mcp:admin"]
         );
+        assert_eq!(active_scopes(&profile), vec!["mcp:read", "mcp:admin"]);
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn credential_clear_removes_pending_and_dynamic_registration_state() {
+    async fn explicit_metadata_override_asserts_cimd_support() {
         let _lock = TEST_ENV_LOCK.lock().unwrap();
-        let (_home, _restore) = test_environment("credential-clear");
+        let (_home, _restore) = test_environment("cimd-override");
         let endpoint = "https://mcp.example.test/mcp";
         configure_mcp_oauth(
             Path::new("/workspace"),
-            "dynamic",
+            "cimd",
             endpoint,
             McpOAuthConfiguration {
-                registration: McpOAuthRegistration::Dynamic {
-                    client_name: Some("NAC Test".into()),
+                registration: McpOAuthRegistration::ClientMetadata {
+                    url: "https://nac.example.test/oauth-client.json".into(),
                 },
                 scopes: vec!["mcp:read".into()],
-                authorization_metadata: None,
+                authorization_metadata: Some(McpOAuthAuthorizationMetadata {
+                    authorization_endpoint: "https://auth.example.test/authorize".into(),
+                    token_endpoint: "https://auth.example.test/token".into(),
+                    registration_endpoint: None,
+                    issuer: None,
+                    jwks_uri: None,
+                    scopes_supported: None,
+                    response_types_supported: None,
+                    code_challenge_methods_supported: None,
+                    additional_fields: BTreeMap::new(),
+                }),
             },
         )
         .unwrap();
-        let path = oauth_store_path(Path::new("/workspace")).unwrap();
-        edit_store(&path, |store| {
-            let profile = store.profiles.get_mut("dynamic").unwrap();
-            profile.pending_authorization_url = Some("https://auth.example.test/authorize".into());
-            profile.pending_scopes = vec!["mcp:write".into()];
-            profile.registered_client_secret = Some("registered-secret".into());
-            Ok(())
-        })
+        let (_, _, metadata) = manager_and_profile(
+            Path::new("/workspace"),
+            "cimd",
+            endpoint,
+            CredentialSaveMode::Independent,
+        )
+        .await
         .unwrap();
-        let adapter = OAuthProfileStore {
-            path,
-            server_name: "dynamic".into(),
-            endpoint: normalize_endpoint(endpoint).unwrap(),
-            expected_client_id: None,
-        };
-        CredentialStore::clear(&adapter).await.unwrap();
-        let profile = adapter.profile().unwrap();
-        assert!(profile.pending_authorization_url.is_none());
-        assert!(profile.pending_scopes.is_empty());
-        assert!(profile.registered_client_secret.is_none());
+        assert_eq!(
+            metadata
+                .additional_fields
+                .get("client_id_metadata_document_supported"),
+            Some(&serde_json::Value::Bool(true))
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1653,11 +1918,67 @@ mod tests {
             },
         )
         .unwrap();
-
         let error = match authorized_manager(Path::new("/workspace"), "slack", endpoint).await {
             Ok(_) => panic!("placeholder credentials unexpectedly authorized the MCP client"),
             Err(error) => error,
         };
         assert!(error.to_string().contains("authorization is required"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn issuer_optional_override_reuses_the_stored_issuer_binding() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let (_home, _restore) = test_environment("optional-override-issuer");
+        let endpoint = "https://mcp.example.test/mcp";
+        let mut config = configuration();
+        config.authorization_metadata = Some(McpOAuthAuthorizationMetadata {
+            authorization_endpoint: "https://auth.example.test/authorize".into(),
+            token_endpoint: "https://auth.example.test/token".into(),
+            registration_endpoint: None,
+            issuer: None,
+            jwks_uri: None,
+            scopes_supported: None,
+            response_types_supported: None,
+            code_challenge_methods_supported: None,
+            additional_fields: BTreeMap::new(),
+        });
+        configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, config).unwrap();
+        edit_store(
+            &oauth_store_path(Path::new("/workspace")).unwrap(),
+            |store| {
+                let profile = store.profiles.get_mut("slack").unwrap();
+                profile.binding.issuer = Some("https://issuer.example.test/".into());
+                profile.credentials = Some(
+                    serde_json::from_value(serde_json::json!({
+                        "client_id": "public-test-client",
+                        "token_response": {
+                            "access_token": "access-token-canary",
+                            "token_type": "bearer"
+                        },
+                        "granted_scopes": ["chat:write"],
+                        "token_received_at": 1,
+                        "issuer": "https://issuer.example.test/"
+                    }))
+                    .unwrap(),
+                );
+                Ok(())
+            },
+        )
+        .unwrap();
+        let (_, _, metadata) = manager_and_profile(
+            Path::new("/workspace"),
+            "slack",
+            endpoint,
+            CredentialSaveMode::Independent,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            metadata.issuer.as_deref(),
+            Some("https://issuer.example.test/")
+        );
+        authorized_manager(Path::new("/workspace"), "slack", endpoint)
+            .await
+            .unwrap();
     }
 }

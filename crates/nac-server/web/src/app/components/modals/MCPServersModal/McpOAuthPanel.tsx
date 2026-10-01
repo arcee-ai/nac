@@ -103,7 +103,7 @@ export function McpOAuthPanel({ serverName }: { serverName: string }) {
   }, [refresh]);
 
   useEffect(() => {
-    if (status !== "connecting") return;
+    if (status !== "connecting" && status !== "connected") return;
     let cancelled = false;
     let timer: number | undefined;
     const poll = async () => {
@@ -157,6 +157,7 @@ export function McpOAuthPanel({ serverName }: { serverName: string }) {
         authorization_metadata: authorizationMetadata,
       });
       setStatus(response.status);
+      setAuthorizationUrl(response.authorization_url ?? null);
       setEditing(false);
       setClientIdCredential("");
       setClientSecretCredential("");
@@ -291,7 +292,11 @@ export function McpOAuthPanel({ serverName }: { serverName: string }) {
             <TextArea
               textAreaClassName="min-h-[72px] font-mono text-small"
               value={metadataOverride}
-              placeholder={'{"authorization_endpoint":"https://…","token_endpoint":"https://…"}'}
+              placeholder={
+                registrationType === "client_metadata"
+                  ? '{"authorization_endpoint":"https://…","token_endpoint":"https://…","client_id_metadata_document_supported":true}'
+                  : '{"authorization_endpoint":"https://…","token_endpoint":"https://…"}'
+              }
               onChange={(event) => setMetadataOverride(event.target.value)}
             />
           </div>

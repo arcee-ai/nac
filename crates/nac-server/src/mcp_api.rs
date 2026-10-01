@@ -273,11 +273,17 @@ pub enum McpOAuthRegistrationRequest {
 pub struct McpOAuthAuthorizationMetadataRequest {
     pub authorization_endpoint: String,
     pub token_endpoint: String,
+    #[serde(default)]
     pub registration_endpoint: Option<String>,
+    #[serde(default)]
     pub issuer: Option<String>,
+    #[serde(default)]
     pub jwks_uri: Option<String>,
+    #[serde(default)]
     pub scopes_supported: Option<Vec<String>>,
+    #[serde(default)]
     pub response_types_supported: Option<Vec<String>>,
+    #[serde(default)]
     pub code_challenge_methods_supported: Option<Vec<String>>,
     #[serde(flatten)]
     #[schema(additional_properties = true)]
@@ -340,10 +346,112 @@ fn oauth_flow_key(manager: &SessionManager, server_name: &str) -> OAuthFlowKey {
     (manager.root_cwd().to_path_buf(), server_name.to_string())
 }
 
+async fn remove_oauth_flow(flow_key: &OAuthFlowKey) {
+    let flow = OAUTH_FLOWS.lock().await.remove(flow_key);
+    if let Some(OAuthFlowState::Connecting {
+        task: Some(task), ..
+    }) = flow
+    {
+        task.abort();
+        let _ = task.await;
+    }
+}
+
+async fn fail_oauth_flow_if_current(flow_key: OAuthFlowKey, generation: u64, endpoint: &str) {
+    let mut flows = OAUTH_FLOWS.lock().await;
+    let authorization_url = match flows.get(&flow_key) {
+        Some(OAuthFlowState::Connecting {
+            generation: value,
+            authorization_url,
+            ..
+        }) if *value == generation => authorization_url.clone(),
+        _ => return,
+    };
+    match mcp::fail_mcp_oauth_authorization(
+        &flow_key.0,
+        &flow_key.1,
+        endpoint,
+        Some(&authorization_url),
+    ) {
+        Ok(true) => {
+            flows.insert(flow_key, OAuthFlowState::Failed);
+        }
+        Ok(false) => {
+            flows.remove(&flow_key);
+        }
+        Err(error) => {
+            eprintln!(
+                "MCP server '{}': failed to clear abandoned OAuth authorization: {error:#}",
+                flow_key.1
+            );
+            flows.insert(flow_key, OAuthFlowState::Failed);
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) async fn fail_current_oauth_flow_for_test(manager: &SessionManager, server_name: &str) {
+    let flow_key = oauth_flow_key(manager, server_name);
+    let generation = {
+        let flows = OAUTH_FLOWS.lock().await;
+        match flows.get(&flow_key) {
+            Some(OAuthFlowState::Connecting { generation, .. }) => *generation,
+            _ => panic!("expected a current OAuth flow"),
+        }
+    };
+    let endpoint = oauth_endpoint(manager, server_name).expect("expected an OAuth endpoint");
+    fail_oauth_flow_if_current(flow_key, generation, &endpoint).await;
+}
+
+fn callback_matches_authorization_state(authorization_url: &str, callback_url: &str) -> bool {
+    let Ok(authorization_url) = url::Url::parse(authorization_url) else {
+        return false;
+    };
+    let Ok(callback_url) = url::Url::parse(callback_url) else {
+        return false;
+    };
+    let mut expected_values = authorization_url
+        .query_pairs()
+        .filter(|(name, _)| name == "state")
+        .map(|(_, value)| value.into_owned());
+    let Some(expected) = expected_values.next() else {
+        return false;
+    };
+    if expected_values.next().is_some() {
+        return false;
+    }
+    let mut actual_values = callback_url
+        .query_pairs()
+        .filter(|(name, _)| name == "state")
+        .map(|(_, value)| value.into_owned());
+    matches!(actual_values.next(), Some(actual) if actual == expected)
+        && actual_values.next().is_none()
+}
+
+fn callback_matches_pending_authorization(
+    pending_authorization_url: Option<&str>,
+    callback_url: &str,
+) -> bool {
+    pending_authorization_url
+        .is_some_and(|url| callback_matches_authorization_state(url, callback_url))
+}
+
+fn callback_reports_oauth_error(callback_url: &str) -> bool {
+    url::Url::parse(callback_url).is_ok_and(|url| {
+        url.query_pairs()
+            .any(|(name, value)| name == "error" && !value.is_empty())
+    })
+}
+
 fn remote_callback_uri(origin: &str, server_name: &str) -> Result<String, ApiError> {
     let mut url = url::Url::parse(origin)
         .map_err(|_| ApiError::bad_request("the OAuth callback origin is invalid".to_string()))?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
+    let loopback = match url.host() {
+        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    };
     if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
         return Err(ApiError::bad_request(
             "the OAuth callback origin must use HTTPS".to_string(),
@@ -381,6 +489,67 @@ fn oauth_callback_target(
         Ok(origin) if !origin.trim().is_empty() => remote_callback_uri(&origin, server_name)
             .map(|redirect_uri| OAuthCallbackTarget::Remote { redirect_uri }),
         _ => Ok(OAuthCallbackTarget::Loopback),
+    }
+}
+
+fn oauth_redirect_uri(manager: &SessionManager, server_name: &str) -> Result<String, ApiError> {
+    Ok(match oauth_callback_target(manager, server_name)? {
+        OAuthCallbackTarget::Loopback => mcp::MCP_OAUTH_REDIRECT_URI.to_string(),
+        OAuthCallbackTarget::Remote { redirect_uri } => redirect_uri,
+    })
+}
+
+pub(crate) fn synchronize_mcp_oauth_redirect_uris(manager: &SessionManager) -> Result<(), String> {
+    let Some(config_path) = mcp::mcp_config_path(manager.root_cwd()) else {
+        return Ok(());
+    };
+    let servers = mcp::list_mcp_server_configurations(&config_path)
+        .map_err(|error| format!("MCP server configuration could not be read: {error}"))?;
+    let mut errors = Vec::new();
+    for server in servers {
+        if server.transport != MCP_TRANSPORT_STREAMABLE_HTTP {
+            continue;
+        }
+        match mcp::has_mcp_oauth_profile(manager.root_cwd(), &server.name) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                errors.push(format!(
+                    "MCP OAuth profile for '{}' could not be read: {error:#}",
+                    server.name
+                ));
+                continue;
+            }
+        }
+        let Some(endpoint) = server.url.as_deref() else {
+            continue;
+        };
+        let redirect_uri = match oauth_redirect_uri(manager, &server.name) {
+            Ok(redirect_uri) => redirect_uri,
+            Err(_) => {
+                errors.push(format!(
+                    "MCP OAuth callback origin for '{}' is invalid",
+                    server.name
+                ));
+                continue;
+            }
+        };
+        if let Err(error) = mcp::set_mcp_oauth_redirect_uri(
+            manager.root_cwd(),
+            &server.name,
+            endpoint,
+            &redirect_uri,
+        ) {
+            errors.push(format!(
+                "MCP OAuth redirect URI for '{}' could not be synchronized: {error:#}",
+                server.name
+            ));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
     }
 }
 
@@ -743,14 +912,23 @@ pub async fn update_server_handler(
         configuration,
         revision,
     )?;
-    mcp::rename_mcp_oauth_profile(manager.root_cwd(), &server_name, &record.name).map_err(
-        |_| {
+    if server_name != record.name {
+        remove_oauth_flow(&oauth_flow_key(&manager, &server_name)).await;
+        remove_oauth_flow(&oauth_flow_key(&manager, &record.name)).await;
+        let redirect_uri = oauth_redirect_uri(&manager, &record.name)?;
+        mcp::rename_mcp_oauth_profile(
+            manager.root_cwd(),
+            &server_name,
+            &record.name,
+            &redirect_uri,
+        )
+        .map_err(|_| {
             oauth_error(
                 StatusCode::CONFLICT,
                 "MCP OAuth configuration could not be renamed",
             )
-        },
-    )?;
+        })?;
+    }
     manager.mcp_runtime().forget(&server_name).await;
     Ok(Json(view(record)))
 }
@@ -773,6 +951,7 @@ pub async fn delete_server_handler(
     if !mcp::delete_mcp_server_configuration(&path, &server_name)? {
         return Err(McpServerConfigurationStoreError::NotFound(server_name).into());
     }
+    remove_oauth_flow(&oauth_flow_key(&manager, &server_name)).await;
     mcp::delete_mcp_oauth_profile(manager.root_cwd(), &server_name).map_err(|_| {
         oauth_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1144,7 +1323,8 @@ pub async fn configure_oauth_handler(
     let Json(request) = payload.map_err(ApiError::from)?;
     let endpoint = oauth_endpoint(&manager, &server_name)?;
     let (registration, scopes, authorization_metadata) = oauth_registration(request)?;
-    let status = mcp::configure_mcp_oauth(
+    let redirect_uri = oauth_redirect_uri(&manager, &server_name)?;
+    mcp::configure_mcp_oauth(
         manager.root_cwd(),
         &server_name,
         &endpoint,
@@ -1160,6 +1340,16 @@ pub async fn configure_oauth_handler(
             "MCP OAuth configuration was rejected",
         )
     })?;
+    mcp::set_mcp_oauth_redirect_uri(manager.root_cwd(), &server_name, &endpoint, &redirect_uri)
+        .map_err(|_| {
+            oauth_error(
+                StatusCode::BAD_REQUEST,
+                "MCP OAuth callback could not be configured",
+            )
+        })?;
+    let status = mcp::mcp_oauth_status(manager.root_cwd(), &server_name, &endpoint)
+        .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?;
+    remove_oauth_flow(&oauth_flow_key(&manager, &server_name)).await;
     Ok(Json(McpOAuthStatusResponse {
         status: public_oauth_status(status),
         message: None,
@@ -1181,40 +1371,47 @@ pub async fn oauth_status_handler(
 ) -> Result<Json<McpOAuthStatusResponse>, ApiError> {
     let endpoint = oauth_endpoint(&manager, &server_name)?;
     let flow_key = oauth_flow_key(&manager, &server_name);
-    let flows = OAUTH_FLOWS.lock().await;
-    if let Some(flow) = flows.get(&flow_key) {
-        let (status, message, authorization_url) = match flow {
-            OAuthFlowState::Connecting {
+    let (active_authorization_url, flow_failed) = {
+        let flows = OAUTH_FLOWS.lock().await;
+        match flows.get(&flow_key) {
+            Some(OAuthFlowState::Connecting {
                 authorization_url, ..
-            } => (
-                McpOAuthPublicStatus::Connecting,
-                None,
-                Some(authorization_url.clone()),
-            ),
-            OAuthFlowState::Failed => (
-                McpOAuthPublicStatus::Failed,
-                Some(
-                    "OAuth authorization did not complete; start authentication again".to_string(),
-                ),
-                None,
-            ),
-        };
+            }) => (Some(authorization_url.clone()), false),
+            Some(OAuthFlowState::Failed) => (None, true),
+            None => (None, false),
+        }
+    };
+    let (active_authorization_url, pending_authorization_url) = reconcile_oauth_status_urls(
+        active_authorization_url,
+        mcp::mcp_oauth_pending_authorization_url(manager.root_cwd(), &server_name, &endpoint),
+    )
+    .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?;
+    if let Some(active_authorization_url) = active_authorization_url {
         return Ok(Json(McpOAuthStatusResponse {
-            status,
-            message,
-            authorization_url,
+            status: McpOAuthPublicStatus::Connecting,
+            message: None,
+            authorization_url: Some(active_authorization_url),
         }));
     }
-    drop(flows);
     let status = mcp::mcp_oauth_status(manager.root_cwd(), &server_name, &endpoint)
         .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?;
-    let authorization_url = if status == mcp::McpOAuthStatus::NeedsAuthorization
-        && matches!(
-            oauth_callback_target(&manager, &server_name)?,
-            OAuthCallbackTarget::Remote { .. }
-        ) {
-        mcp::mcp_oauth_pending_authorization_url(manager.root_cwd(), &server_name, &endpoint)
-            .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?
+    if flow_failed
+        && pending_authorization_url.is_none()
+        && !matches!(status, mcp::McpOAuthStatus::Connected)
+    {
+        return Ok(Json(McpOAuthStatusResponse {
+            status: McpOAuthPublicStatus::Failed,
+            message: Some(
+                "OAuth authorization did not complete; start authentication again".to_string(),
+            ),
+            authorization_url: None,
+        }));
+    }
+    let authorization_url = if matches!(
+        oauth_callback_target(&manager, &server_name)?,
+        OAuthCallbackTarget::Remote { .. }
+    ) {
+        pending_authorization_url
     } else {
         None
     };
@@ -1223,6 +1420,16 @@ pub async fn oauth_status_handler(
         message: None,
         authorization_url,
     }))
+}
+
+fn reconcile_oauth_status_urls(
+    active_authorization_url: Option<String>,
+    pending_authorization_url: anyhow::Result<Option<String>>,
+) -> anyhow::Result<(Option<String>, Option<String>)> {
+    let pending_authorization_url = pending_authorization_url?;
+    let active_authorization_url = active_authorization_url
+        .filter(|active| pending_authorization_url.as_deref() == Some(active.as_str()));
+    Ok((active_authorization_url, pending_authorization_url))
 }
 
 #[utoipa::path(
@@ -1244,17 +1451,7 @@ pub async fn authenticate_oauth_handler(
     let request = payload.map(|Json(value)| value).unwrap_or_default();
     let callback = oauth_callback_target(&manager, &server_name)?;
 
-    let old_task = {
-        let mut flows = OAUTH_FLOWS.lock().await;
-        flows.remove(&flow_key).and_then(|flow| match flow {
-            OAuthFlowState::Connecting { task, .. } => task,
-            OAuthFlowState::Failed => None,
-        })
-    };
-    if let Some(task) = old_task {
-        task.abort();
-        let _ = task.await;
-    }
+    remove_oauth_flow(&flow_key).await;
 
     let (listeners, redirect_uri) = match callback {
         OAuthCallbackTarget::Loopback => {
@@ -1285,6 +1482,7 @@ pub async fn authenticate_oauth_handler(
     let authorization_url = session.authorization_url().to_string();
     let generation = OAUTH_FLOW_GENERATION.fetch_add(1, Ordering::Relaxed);
     let completion_key = flow_key.clone();
+    let completion_endpoint = endpoint.clone();
     let (start_sender, start_receiver) = tokio::sync::oneshot::channel();
     let task = match listeners {
         Some(listeners) => Some(tokio::spawn(async move {
@@ -1292,16 +1490,14 @@ pub async fn authenticate_oauth_handler(
                 return;
             }
             let success = run_oauth_callback(listeners, session).await;
-            let mut flows = OAUTH_FLOWS.lock().await;
-            let current = flows.get(&completion_key);
-            if !matches!(current, Some(OAuthFlowState::Connecting { generation: value, .. }) if *value == generation)
-            {
-                return;
-            }
             if success {
-                flows.remove(&completion_key);
+                let mut flows = OAUTH_FLOWS.lock().await;
+                if matches!(flows.get(&completion_key), Some(OAuthFlowState::Connecting { generation: value, .. }) if *value == generation)
+                {
+                    flows.remove(&completion_key);
+                }
             } else {
-                flows.insert(completion_key, OAuthFlowState::Failed);
+                fail_oauth_flow_if_current(completion_key, generation, &completion_endpoint).await;
             }
         })),
         None => Some(tokio::spawn(async move {
@@ -1310,11 +1506,7 @@ pub async fn authenticate_oauth_handler(
             }
             drop(session);
             tokio::time::sleep(mcp::MCP_OAUTH_STATE_TTL).await;
-            let mut flows = OAUTH_FLOWS.lock().await;
-            if matches!(flows.get(&completion_key), Some(OAuthFlowState::Connecting { generation: value, .. }) if *value == generation)
-            {
-                flows.insert(completion_key, OAuthFlowState::Failed);
-            }
+            fail_oauth_flow_if_current(completion_key, generation, &completion_endpoint).await;
         })),
     };
     OAUTH_FLOWS.lock().await.insert(
@@ -1383,6 +1575,7 @@ pub async fn oauth_callback_handler(
 ) -> Response {
     let result = async {
         let endpoint = oauth_endpoint(&manager, &server_name)?;
+        let flow_key = oauth_flow_key(&manager, &server_name);
         let OAuthCallbackTarget::Remote { redirect_uri } =
             oauth_callback_target(&manager, &server_name)?
         else {
@@ -1394,19 +1587,60 @@ pub async fn oauth_callback_handler(
             Some(query) => format!("{redirect_uri}?{query}"),
             None => redirect_uri,
         };
-        mcp::complete_mcp_oauth_authorization(
+        let completion = mcp::complete_mcp_oauth_authorization(
             manager.root_cwd(),
             &server_name,
             &endpoint,
             &callback_url,
         )
-        .await
-        .map_err(|_| ApiError::bad_request("MCP OAuth callback was rejected".to_string()))?;
-        OAUTH_FLOWS
-            .lock()
-            .await
-            .remove(&oauth_flow_key(&manager, &server_name));
-        Ok::<_, ApiError>(())
+        .await;
+        let mut flows = OAUTH_FLOWS.lock().await;
+        match completion {
+            Ok(()) => {
+                flows.remove(&flow_key);
+                Ok::<_, ApiError>(())
+            }
+            Err(_) => {
+                let pending_authorization_url = mcp::mcp_oauth_pending_authorization_url(
+                    manager.root_cwd(),
+                    &server_name,
+                    &endpoint,
+                )
+                .map_err(|_| {
+                    oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth callback was rejected")
+                })?;
+                let matches_current = callback_matches_pending_authorization(
+                    pending_authorization_url.as_deref(),
+                    &callback_url,
+                );
+                let retryable = mcp::mcp_oauth_callback_is_retryable(
+                    manager.root_cwd(),
+                    &server_name,
+                    &endpoint,
+                    &callback_url,
+                )
+                .unwrap_or(false);
+                if (callback_reports_oauth_error(&callback_url) || !retryable)
+                    && matches_current
+                {
+                    match mcp::fail_mcp_oauth_authorization(
+                        manager.root_cwd(),
+                        &server_name,
+                        &endpoint,
+                        pending_authorization_url.as_deref(),
+                    ) {
+                        Ok(true) => { flows.insert(flow_key, OAuthFlowState::Failed); }
+                        Ok(false) => { flows.remove(&flow_key); }
+                        Err(error) => eprintln!(
+                            "MCP server '{server_name}': failed to clear rejected OAuth authorization: {error:#}"
+                        ),
+                    }
+                }
+                Err(ApiError::bad_request(
+                    "MCP OAuth callback was rejected".to_string(),
+                ))
+            }
+        }
     }
     .await;
 
@@ -1520,17 +1754,7 @@ pub async fn logout_oauth_handler(
     AxumPath(server_name): AxumPath<String>,
 ) -> Result<Json<McpOAuthStatusResponse>, ApiError> {
     let _ = oauth_endpoint(&manager, &server_name)?;
-    let flow = OAUTH_FLOWS
-        .lock()
-        .await
-        .remove(&oauth_flow_key(&manager, &server_name));
-    if let Some(OAuthFlowState::Connecting {
-        task: Some(task), ..
-    }) = flow
-    {
-        task.abort();
-        let _ = task.await;
-    }
+    remove_oauth_flow(&oauth_flow_key(&manager, &server_name)).await;
     let status = mcp::clear_mcp_oauth(manager.root_cwd(), &server_name).map_err(|_| {
         oauth_error(
             StatusCode::BAD_REQUEST,

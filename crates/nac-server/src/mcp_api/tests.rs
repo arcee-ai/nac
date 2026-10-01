@@ -18,6 +18,35 @@ async fn oauth_callback_listener_accepts_localhost_on_both_ip_families() {
     }
 }
 
+#[tokio::test]
+async fn removing_deleted_server_oauth_flow_aborts_its_watchdog() {
+    let key = (
+        PathBuf::from("/deleted-oauth-flow-test"),
+        "deleted".to_string(),
+    );
+    let completion_key = key.clone();
+    let task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        OAUTH_FLOWS
+            .lock()
+            .await
+            .insert(completion_key, OAuthFlowState::Failed);
+    });
+    OAUTH_FLOWS.lock().await.insert(
+        key.clone(),
+        OAuthFlowState::Connecting {
+            generation: u64::MAX,
+            authorization_url: "https://auth.example.test/authorize".into(),
+            task: Some(task),
+        },
+    );
+
+    remove_oauth_flow(&key).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    assert!(!OAUTH_FLOWS.lock().await.contains_key(&key));
+}
+
 #[test]
 fn oauth_callback_target_rejects_unrelated_and_malformed_requests() {
     assert_eq!(
@@ -35,6 +64,39 @@ fn oauth_callback_target_rejects_unrelated_and_malformed_requests() {
         None
     );
     assert_eq!(oauth_callback_request_target(b"not http"), None);
+}
+
+#[test]
+fn callback_failure_requires_a_live_durable_authorization() {
+    let callback_url = "https://nac.example.test/oauth/callback?code=replay&state=done";
+    assert!(!callback_matches_pending_authorization(None, callback_url));
+    assert!(callback_matches_pending_authorization(
+        Some("https://auth.example.test/authorize?state=done"),
+        callback_url
+    ));
+}
+
+#[test]
+fn oauth_status_never_masks_a_pending_store_error_with_an_active_flow() {
+    let error = reconcile_oauth_status_urls(
+        Some("https://auth.example.test/authorize?state=stale".into()),
+        Err(anyhow::anyhow!("durable binding mismatch")),
+    )
+    .unwrap_err();
+    assert_eq!(error.to_string(), "durable binding mismatch");
+
+    let (active, pending) = reconcile_oauth_status_urls(
+        Some("https://auth.example.test/authorize?state=stale".into()),
+        Ok(Some(
+            "https://auth.example.test/authorize?state=current".into(),
+        )),
+    )
+    .unwrap();
+    assert!(active.is_none());
+    assert_eq!(
+        pending.as_deref(),
+        Some("https://auth.example.test/authorize?state=current")
+    );
 }
 
 #[test]
@@ -72,6 +134,28 @@ fn create_request_allows_omitted_tool_policy_fields() {
     assert_eq!(request.approval, McpToolApproval::Ask);
     assert!(request.tool_approvals.is_empty());
     assert_eq!(request.protocol, McpProtocolSelection::Legacy);
+}
+
+#[test]
+fn oauth_metadata_request_allows_every_optional_field_to_be_omitted() {
+    let request: ConfigureMcpOAuthRequest = serde_json::from_value(serde_json::json!({
+        "registration": {
+            "type": "dynamic"
+        },
+        "authorization_metadata": {
+            "authorization_endpoint": "https://auth.example.test/authorize",
+            "token_endpoint": "https://auth.example.test/token"
+        }
+    }))
+    .unwrap();
+
+    let metadata = request.authorization_metadata.unwrap();
+    assert!(metadata.registration_endpoint.is_none());
+    assert!(metadata.issuer.is_none());
+    assert!(metadata.jwks_uri.is_none());
+    assert!(metadata.scopes_supported.is_none());
+    assert!(metadata.response_types_supported.is_none());
+    assert!(metadata.code_challenge_methods_supported.is_none());
 }
 
 #[test]
@@ -169,6 +253,10 @@ fn remote_oauth_callback_uses_only_the_configured_origin() {
     assert_eq!(
         remote_callback_uri("https://nac.example.test", "team/slack").unwrap(),
         "https://nac.example.test/mcp_library/servers/team%2Fslack/oauth/callback"
+    );
+    assert_eq!(
+        remote_callback_uri("http://[::1]:8080", "slack").unwrap(),
+        "http://[::1]:8080/mcp_library/servers/slack/oauth/callback"
     );
     for rejected in [
         "http://nac.example.test",
