@@ -39,6 +39,7 @@ pub(super) struct McpServer {
     pub(super) refresh: tokio::sync::Mutex<()>,
     pub(super) config: McpServerConfig,
     pub(super) handler: NacMcpClientHandler,
+    pub(super) connection_generation: std::sync::atomic::AtomicU64,
     pub(super) cwd: PathBuf,
     pub(super) startup_timeout: Duration,
     pub(super) catalog_timeout: Duration,
@@ -57,6 +58,24 @@ pub(super) struct McpServer {
 impl McpServer {
     pub(super) async fn current_service(&self) -> SharedMcpService {
         self.service.read().await.clone()
+    }
+
+    pub(super) fn current_connection_generation(&self) -> u64 {
+        self.connection_generation
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub(super) fn is_current_connection_generation(&self, generation: u64) -> bool {
+        self.current_connection_generation() == generation
+    }
+
+    pub(super) fn next_connection_generation(&self) -> u64 {
+        self.current_connection_generation().saturating_add(1)
+    }
+
+    pub(super) fn activate_connection_generation(&self, generation: u64) {
+        self.connection_generation
+            .store(generation, std::sync::atomic::Ordering::Release);
     }
 
     pub(super) fn should_seed_resources(&self) -> bool {
@@ -80,6 +99,7 @@ impl McpServer {
 pub(super) struct NacMcpClientHandler {
     pub(super) roots: Vec<Root>,
     pub(super) binding: Arc<McpHandlerBinding>,
+    pub(super) connection_generation: u64,
 }
 
 /// A configured MCP server that could not be loaded for a worker, and why.
@@ -391,6 +411,7 @@ impl McpRegistry {
                 refresh: tokio::sync::Mutex::new(()),
                 config: server_config.clone(),
                 handler: handler.clone(),
+                connection_generation: std::sync::atomic::AtomicU64::new(0),
                 cwd: cwd.to_path_buf(),
                 startup_timeout,
                 catalog_timeout,

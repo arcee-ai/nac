@@ -1,5 +1,18 @@
 use super::*;
 
+pub(super) async fn close_mcp_service(service: &mut McpService) {
+    let _ = service.close_with_timeout(MCP_SERVICE_CLOSE_TIMEOUT).await;
+}
+
+pub(super) async fn close_shared_mcp_service(service: SharedMcpService) {
+    {
+        let service = service.read().await;
+        service.cancellation_token().cancel();
+    }
+    let mut service = service.write().await;
+    close_mcp_service(&mut service).await;
+}
+
 pub(super) async fn connect_server(
     name: &str,
     config: &McpServerConfig,

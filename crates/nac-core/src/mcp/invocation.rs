@@ -42,10 +42,12 @@ impl McpToolCapture {
                 let refreshed_service = {
                     let current = self.server.service.read().await.clone();
                     if Arc::ptr_eq(&current, &service) {
+                        let generation = self.server.next_connection_generation();
+                        let handler = self.server.handler.with_connection_generation(generation);
                         match connect_server(
                             &self.server.name,
                             &self.server.config,
-                            &self.server.handler,
+                            &handler,
                             &self.server.cwd,
                             self.server.startup_timeout,
                         )
@@ -53,6 +55,7 @@ impl McpToolCapture {
                         {
                             Ok(refreshed) => {
                                 let refreshed = Arc::new(tokio::sync::RwLock::new(refreshed));
+                                self.server.activate_connection_generation(generation);
                                 let replaced = {
                                     let mut current = self.server.service.write().await;
                                     std::mem::replace(&mut *current, Arc::clone(&refreshed))

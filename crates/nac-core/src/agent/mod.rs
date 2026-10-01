@@ -139,6 +139,7 @@ pub struct Agent {
     mode: AgentMode,
     pub messages: Vec<Message>,
     tool_defs: Vec<ToolDefinition>,
+    fallback_tool_defs: Vec<ToolDefinition>,
     base_tool_defs: Vec<ToolDefinition>,
     admission_controlled_tools: bool,
     direct_primary: bool,
@@ -376,6 +377,7 @@ impl Agent {
                 .map(|definition| definition.function.name.clone())
                 .collect(),
         );
+        let fallback_tool_defs = tool_defs.clone();
         let goal_runtime = match (mode, config.session_id.as_ref(), traditional_child.as_ref()) {
             (AgentMode::Direct, Some(session_id), None) => Some(Arc::new(
                 crate::goals::GoalRuntime::new(config.store_path.clone(), session_id.clone()),
@@ -390,6 +392,7 @@ impl Agent {
             mode,
             messages,
             tool_defs,
+            fallback_tool_defs,
             base_tool_defs,
             admission_controlled_tools: mode == AgentMode::Direct,
             direct_primary: mode == AgentMode::Direct,
@@ -464,7 +467,7 @@ impl Agent {
             .map(Arc::new);
         let mut definitions = self
             .tool_runtime
-            .model_tool_definitions(&self.base_tool_defs, &self.tool_defs);
+            .model_tool_definitions(&self.base_tool_defs, &self.fallback_tool_defs);
         if credential.is_some() {
             definitions.extend(crate::tools::web::definitions());
         }
@@ -475,7 +478,23 @@ impl Agent {
                 .collect(),
         ));
         self.tool_runtime.web_credential = credential;
+        self.tool_defs.clone_from(&definitions);
         definitions
+    }
+
+    fn refresh_compaction_tool_definitions(&mut self) {
+        let web_definitions: Vec<_> = self
+            .tool_defs
+            .iter()
+            .filter(|definition| {
+                crate::tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str())
+            })
+            .cloned()
+            .collect();
+        self.tool_defs = self
+            .tool_runtime
+            .model_tool_definitions(&self.base_tool_defs, &self.fallback_tool_defs);
+        self.tool_defs.extend(web_definitions);
     }
 
     #[cfg(test)]

@@ -13,6 +13,7 @@ const MIN_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 struct CatalogRefreshState {
     running: bool,
     pending: bool,
+    generation: u64,
     completed: u64,
     last_started: Option<Instant>,
 }
@@ -26,6 +27,7 @@ pub(super) struct McpCatalogRefreshGate {
 struct CatalogRefreshProgress {
     completed: u64,
     running: bool,
+    generation: u64,
 }
 
 struct McpCatalogRefreshPermit<'a> {
@@ -36,6 +38,7 @@ struct McpCatalogRefreshPermit<'a> {
 struct McpCatalogRefreshWaiter {
     progress: tokio::sync::watch::Receiver<CatalogRefreshProgress>,
     target: u64,
+    generation: u64,
 }
 
 enum McpCatalogRefreshRequest<'a> {
@@ -54,23 +57,31 @@ impl Default for McpCatalogRefreshGate {
 }
 
 impl McpCatalogRefreshGate {
-    fn begin(&self) -> McpCatalogRefreshRequest<'_> {
+    fn begin(&self, generation: u64) -> McpCatalogRefreshRequest<'_> {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.running {
-            state.pending = true;
+            let same_generation = state.generation == generation;
+            if same_generation {
+                state.pending = true;
+            }
             return McpCatalogRefreshRequest::Wait(McpCatalogRefreshWaiter {
                 progress: self.progress.subscribe(),
-                target: state.completed.saturating_add(2),
+                target: state
+                    .completed
+                    .saturating_add(if same_generation { 2 } else { 1 }),
+                generation,
             });
         }
         state.running = true;
         state.pending = false;
+        state.generation = generation;
         self.progress.send_replace(CatalogRefreshProgress {
             completed: state.completed,
             running: true,
+            generation,
         });
         McpCatalogRefreshRequest::Drive(McpCatalogRefreshPermit {
             gate: self,
@@ -114,6 +125,7 @@ impl McpCatalogRefreshPermit<'_> {
         self.gate.progress.send_replace(CatalogRefreshProgress {
             completed: state.completed,
             running: state.running,
+            generation: state.generation,
         });
         again
     }
@@ -124,7 +136,7 @@ impl McpCatalogRefreshWaiter {
         loop {
             let progress = *self.progress.borrow_and_update();
             if progress.completed >= self.target {
-                return true;
+                return progress.generation == self.generation;
             }
             if !progress.running {
                 return false;
@@ -149,6 +161,7 @@ impl Drop for McpCatalogRefreshPermit<'_> {
             self.gate.progress.send_replace(CatalogRefreshProgress {
                 completed: state.completed,
                 running: false,
+                generation: state.generation,
             });
         }
     }
@@ -255,10 +268,13 @@ impl McpServer {
         gate.mark_started();
     }
 
-    pub(super) async fn refresh_tools(self: &Arc<Self>, peer: &Peer<RoleClient>) {
+    pub(super) async fn refresh_tools(self: &Arc<Self>, generation: u64, peer: &Peer<RoleClient>) {
         let gate = &self.tool_catalog_refresh;
         let mut permit = loop {
-            match gate.begin() {
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
+            match gate.begin(generation) {
                 McpCatalogRefreshRequest::Drive(permit) => break permit,
                 McpCatalogRefreshRequest::Wait(waiter) => {
                     if waiter.wait().await {
@@ -268,8 +284,15 @@ impl McpServer {
             }
         };
         loop {
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
             Self::wait_for_refresh_turn(gate).await;
-            match timeout(self.catalog_timeout, peer.list_all_tools()).await {
+            let result = timeout(self.catalog_timeout, peer.list_all_tools()).await;
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
+            match result {
                 Ok(Ok(tools)) => {
                     self.sync.replace_tools(self, tools);
                     self.sync.emit(
@@ -287,10 +310,17 @@ impl McpServer {
         }
     }
 
-    pub(super) async fn refresh_prompts(self: &Arc<Self>, peer: &Peer<RoleClient>) {
+    pub(super) async fn refresh_prompts(
+        self: &Arc<Self>,
+        generation: u64,
+        peer: &Peer<RoleClient>,
+    ) {
         let gate = &self.prompt_catalog_refresh;
         let mut permit = loop {
-            match gate.begin() {
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
+            match gate.begin(generation) {
                 McpCatalogRefreshRequest::Drive(permit) => break permit,
                 McpCatalogRefreshRequest::Wait(waiter) => {
                     if waiter.wait().await {
@@ -300,8 +330,15 @@ impl McpServer {
             }
         };
         loop {
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
             Self::wait_for_refresh_turn(gate).await;
-            match timeout(self.catalog_timeout, list_bounded_prompts_peer(peer)).await {
+            let result = timeout(self.catalog_timeout, list_bounded_prompts_peer(peer)).await;
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
+            match result {
                 Ok(Ok(prompts)) => {
                     self.sync.replace_prompts(self, prompts);
                     self.sync.emit(
@@ -319,10 +356,17 @@ impl McpServer {
         }
     }
 
-    pub(super) async fn refresh_resources(self: &Arc<Self>, peer: &Peer<RoleClient>) {
+    pub(super) async fn refresh_resources(
+        self: &Arc<Self>,
+        generation: u64,
+        peer: &Peer<RoleClient>,
+    ) {
         let gate = &self.resource_catalog_refresh;
         let mut permit = loop {
-            match gate.begin() {
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
+            match gate.begin(generation) {
                 McpCatalogRefreshRequest::Drive(permit) => break permit,
                 McpCatalogRefreshRequest::Wait(waiter) => {
                     if waiter.wait().await {
@@ -332,8 +376,15 @@ impl McpServer {
             }
         };
         loop {
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
             Self::wait_for_refresh_turn(gate).await;
-            match timeout(self.catalog_timeout, peer.list_all_resources()).await {
+            let result = timeout(self.catalog_timeout, peer.list_all_resources()).await;
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
+            match result {
                 Ok(Ok(resources)) => {
                     self.sync
                         .set_resources(&self.name, bounded_resource_uris(resources));
@@ -391,13 +442,13 @@ mod tests {
     #[tokio::test]
     async fn refresh_gate_coalesces_and_waits_for_one_trailing_turn() {
         let gate = McpCatalogRefreshGate::default();
-        let McpCatalogRefreshRequest::Drive(mut permit) = gate.begin() else {
+        let McpCatalogRefreshRequest::Drive(mut permit) = gate.begin(1) else {
             panic!("first request must drive refresh");
         };
-        let McpCatalogRefreshRequest::Wait(waiter) = gate.begin() else {
+        let McpCatalogRefreshRequest::Wait(waiter) = gate.begin(1) else {
             panic!("concurrent request must wait");
         };
-        assert!(matches!(gate.begin(), McpCatalogRefreshRequest::Wait(_)));
+        assert!(matches!(gate.begin(1), McpCatalogRefreshRequest::Wait(_)));
         let mut waiting = Box::pin(waiter.wait());
 
         assert!(permit.finish_iteration());
@@ -406,21 +457,36 @@ mod tests {
             .is_err());
         assert!(!permit.finish_iteration());
         assert!(waiting.await);
-        assert!(matches!(gate.begin(), McpCatalogRefreshRequest::Drive(_)));
+        assert!(matches!(gate.begin(1), McpCatalogRefreshRequest::Drive(_)));
     }
 
     #[tokio::test]
     async fn dropping_refresh_driver_wakes_a_successor() {
         let gate = McpCatalogRefreshGate::default();
-        let McpCatalogRefreshRequest::Drive(permit) = gate.begin() else {
+        let McpCatalogRefreshRequest::Drive(permit) = gate.begin(1) else {
             panic!("first request must drive refresh");
         };
-        let McpCatalogRefreshRequest::Wait(waiter) = gate.begin() else {
+        let McpCatalogRefreshRequest::Wait(waiter) = gate.begin(1) else {
             panic!("concurrent request must wait");
         };
 
         drop(permit);
         assert!(!waiter.wait().await);
-        assert!(matches!(gate.begin(), McpCatalogRefreshRequest::Drive(_)));
+        assert!(matches!(gate.begin(1), McpCatalogRefreshRequest::Drive(_)));
+    }
+
+    #[tokio::test]
+    async fn newer_connection_waits_then_drives_its_own_refresh() {
+        let gate = McpCatalogRefreshGate::default();
+        let McpCatalogRefreshRequest::Drive(mut old) = gate.begin(1) else {
+            panic!("old connection must drive its refresh");
+        };
+        let McpCatalogRefreshRequest::Wait(new) = gate.begin(2) else {
+            panic!("new connection must wait for the old driver");
+        };
+
+        assert!(!old.finish_iteration());
+        assert!(!new.wait().await);
+        assert!(matches!(gate.begin(2), McpCatalogRefreshRequest::Drive(_)));
     }
 }

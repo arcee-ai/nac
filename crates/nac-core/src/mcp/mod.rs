@@ -217,19 +217,6 @@ const MCP_SERVICE_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 const MIN_TIMEOUT_MS: u64 = 100;
 const MAX_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 
-async fn close_mcp_service(service: &mut McpService) {
-    let _ = service.close_with_timeout(MCP_SERVICE_CLOSE_TIMEOUT).await;
-}
-
-async fn close_shared_mcp_service(service: SharedMcpService) {
-    {
-        let service = service.read().await;
-        service.cancellation_token().cancel();
-    }
-    let mut service = service.write().await;
-    close_mcp_service(&mut service).await;
-}
-
 #[cfg(test)]
 pub(crate) mod test_support {
     use rmcp::model::ProtocolVersion;

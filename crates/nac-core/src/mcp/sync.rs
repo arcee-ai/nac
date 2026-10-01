@@ -243,42 +243,69 @@ impl NacMcpClientHandler {
         Self {
             roots,
             binding: Arc::new(McpHandlerBinding::default()),
+            connection_generation: 0,
+        }
+    }
+
+    pub(super) fn with_connection_generation(&self, connection_generation: u64) -> Self {
+        Self {
+            roots: self.roots.clone(),
+            binding: Arc::clone(&self.binding),
+            connection_generation,
         }
     }
 
     pub(super) fn observe_progress(&self, params: ProgressNotificationParam) {
-        if let Some(server) = self.binding.server() {
+        if let Some(server) = self
+            .binding
+            .server()
+            .filter(|server| server.is_current_connection_generation(self.connection_generation))
+        {
             server.observe_progress(params);
         }
     }
 
     pub(super) fn observe_log(&self, params: LoggingMessageNotificationParam) {
-        if let Some(server) = self.binding.server() {
+        if let Some(server) = self
+            .binding
+            .server()
+            .filter(|server| server.is_current_connection_generation(self.connection_generation))
+        {
             server.observe_log(params);
         }
     }
 
     pub(super) fn observe_resource_update(&self, params: ResourceUpdatedNotificationParam) {
-        if let Some(server) = self.binding.server() {
+        if let Some(server) = self
+            .binding
+            .server()
+            .filter(|server| server.is_current_connection_generation(self.connection_generation))
+        {
             server.sync.emit_resource_update(&server.name, &params.uri);
         }
     }
 
     pub(super) async fn refresh_resources(&self, context: NotificationContext<RoleClient>) {
         if let Some(server) = self.binding.server() {
-            server.refresh_resources(&context.peer).await;
+            server
+                .refresh_resources(self.connection_generation, &context.peer)
+                .await;
         }
     }
 
     pub(super) async fn refresh_tools(&self, context: NotificationContext<RoleClient>) {
         if let Some(server) = self.binding.server() {
-            server.refresh_tools(&context.peer).await;
+            server
+                .refresh_tools(self.connection_generation, &context.peer)
+                .await;
         }
     }
 
     pub(super) async fn refresh_prompts(&self, context: NotificationContext<RoleClient>) {
         if let Some(server) = self.binding.server() {
-            server.refresh_prompts(&context.peer).await;
+            server
+                .refresh_prompts(self.connection_generation, &context.peer)
+                .await;
         }
     }
 }
@@ -329,16 +356,22 @@ impl McpServer {
 
     async fn process_notification(
         self: &Arc<Self>,
+        generation: u64,
         notification: ServerNotification,
         peer: &Peer<RoleClient>,
     ) -> bool {
+        if !self.is_current_connection_generation(generation) {
+            return false;
+        }
         match notification {
-            ServerNotification::ToolListChangedNotification(_) => self.refresh_tools(peer).await,
+            ServerNotification::ToolListChangedNotification(_) => {
+                self.refresh_tools(generation, peer).await;
+            }
             ServerNotification::PromptListChangedNotification(_) => {
-                self.refresh_prompts(peer).await;
+                self.refresh_prompts(generation, peer).await;
             }
             ServerNotification::ResourceListChangedNotification(_) => {
-                self.refresh_resources(peer).await;
+                self.refresh_resources(generation, peer).await;
                 return self.protocol_version >= ProtocolVersion::V_2026_07_28;
             }
             ServerNotification::ResourceUpdatedNotification(notification) => self
@@ -387,17 +420,18 @@ impl McpServer {
         self.reset_legacy_subscriptions();
         let service = self.current_service().await;
         let peer = service.read().await.peer().clone();
+        let generation = self.current_connection_generation();
         let weak = Arc::downgrade(self);
         let task = tokio::spawn(async move {
             let Some(server) = weak.upgrade() else {
                 return;
             };
             if server.should_seed_resources() {
-                server.refresh_resources(&peer).await;
+                server.refresh_resources(generation, &peer).await;
             }
             if server.protocol_version >= ProtocolVersion::V_2026_07_28 {
                 drop(server);
-                run_subscription(weak, peer).await;
+                run_subscription(weak, peer, generation).await;
             }
         });
         self.notification_task.replace(task);
@@ -413,11 +447,14 @@ impl McpServer {
     }
 }
 
-async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>) {
+async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>, generation: u64) {
     loop {
         let Some(current) = server.upgrade() else {
             return;
         };
+        if !current.is_current_connection_generation(generation) {
+            return;
+        }
         let filter = current.subscription_filter();
         drop(current);
         let capacity =
@@ -425,7 +462,10 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>) {
         let mut subscription = match peer.listen_with_capacity(filter, capacity).await {
             Ok(subscription) => subscription,
             Err(error) => {
-                if let Some(current) = server.upgrade() {
+                if let Some(current) = server
+                    .upgrade()
+                    .filter(|current| current.is_current_connection_generation(generation))
+                {
                     current.sync.emit(
                         &current.name,
                         McpNotificationKind::SubscriptionEnded,
@@ -443,7 +483,13 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>) {
                         let _ = subscription.cancel().await;
                         return;
                     };
-                    restart = current.process_notification(notification, &peer).await;
+                    restart = current
+                        .process_notification(generation, notification, &peer)
+                        .await;
+                    if !current.is_current_connection_generation(generation) {
+                        let _ = subscription.cancel().await;
+                        return;
+                    }
                     if restart {
                         let _ = subscription.cancel().await;
                         break;
@@ -451,7 +497,10 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>) {
                 }
                 Ok(None) => break,
                 Err(error) => {
-                    if let Some(current) = server.upgrade() {
+                    if let Some(current) = server
+                        .upgrade()
+                        .filter(|current| current.is_current_connection_generation(generation))
+                    {
                         current.sync.emit(
                             &current.name,
                             McpNotificationKind::SubscriptionEnded,
@@ -463,7 +512,10 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>) {
             }
         }
         if !restart {
-            if let Some(current) = server.upgrade() {
+            if let Some(current) = server
+                .upgrade()
+                .filter(|current| current.is_current_connection_generation(generation))
+            {
                 current.sync.emit(
                     &current.name,
                     McpNotificationKind::SubscriptionEnded,
