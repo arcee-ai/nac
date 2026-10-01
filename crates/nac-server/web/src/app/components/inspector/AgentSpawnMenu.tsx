@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 
 import {
@@ -12,7 +13,8 @@ import {
   TabButton,
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
-import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import { managedOrchestrators, traditionalChildren } from "@/app/services/queries";
 import type { SessionBehavior } from "@/app/types/api";
 
 const SUBAGENT_HINT = {
@@ -46,8 +48,8 @@ export function AgentSpawnButton({
   onCreateOrchestrator,
 }: AgentSpawnButtonProps) {
   const orchestrator = behavior === "direct-with-orchestrator";
-  const children = useTraditionalChildren(sessionId, true);
-  const orchestrators = useManagedOrchestrators(sessionId, orchestrator);
+  const children = readAsync(useAtomValue(traditionalChildren(sessionId, true)));
+  const orchestrators = readAsync(useAtomValue(managedOrchestrators(sessionId, orchestrator)));
   const [open, setOpen] = useState(false);
   const running =
     (children.data ?? []).some((child) => child.status === "running") ||

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
 
 import {
   Button,
@@ -18,7 +19,9 @@ import {
   type CatalogPick,
   resolveCatalogModel,
 } from "@/app/lib/catalog";
-import { useModelCatalog, useReadyProviderModels } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import { readyProviderModelsAtom } from "@/app/features/managed/queries";
+import { modelCatalogAtom } from "@/app/services/queries";
 import type {
   LightModelSettings,
   ModelCatalog,
@@ -102,8 +105,8 @@ export function LightModelSection({
   /** Adjusts the promise without changing the stored optional field. */
   behavior?: SessionBehavior;
 }) {
-  const catalog = useModelCatalog();
-  const liveByBackend = useReadyProviderModels(catalog.data);
+  const catalog = readAsync(useAtomValue(modelCatalogAtom()));
+  const liveByBackend = useAtomValue(readyProviderModelsAtom(catalog.data));
   const [mode, setMode] = useState<LightMode>(initial ? "dual" : "single");
   const [light, setLight] = useState<LightState>(() => lightStateFrom(initial, catalog.data));
 

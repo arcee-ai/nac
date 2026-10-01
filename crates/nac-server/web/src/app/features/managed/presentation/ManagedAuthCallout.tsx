@@ -1,3 +1,5 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
+
 import {
   Button,
   ButtonContent,
@@ -8,12 +10,14 @@ import {
   Loader,
   LoaderSize,
 } from "@/app/atoms";
+import { readAsync } from "@/app/effect/remote";
 import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
 import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
+import { managedProviderModelsFor } from "@/app/features/managed/queries";
 import { cn } from "@/app/lib/cn";
-import { humanErrorText } from "@/app/lib/providerError";
+import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { managedAuthLabel } from "@/app/lib/providers";
-import { useManagedLogout, useManagedProviderModels } from "@/app/services/queries";
+import { managedLogoutAtom } from "@/app/services/queries";
 import type { BackendKind, ManagedAuthProvider } from "@/app/types/api";
 
 const PROVIDER_ICONS = {
@@ -40,11 +44,14 @@ export function ManagedAuthCallout({
 }) {
   const { provider, signedIn } = useManagedSignIn(backend);
   const { state, start, cancel } = useDeviceLogin();
-  const logout = useManagedLogout();
+  const logout = useAtomSet(managedLogoutAtom, { mode: "promise" });
+  const logoutPending = useAtomValue(managedLogoutAtom).waiting;
   // Being signed in only says the credential is on file. Whether it still works
   // is answered by the one request that spends it, so this asks for the model
   // index rather than reporting success on the strength of a file existing.
-  const reach = useManagedProviderModels(backend, Boolean(provider) && signedIn);
+  const reach = readAsync(
+    useAtomValue(managedProviderModelsFor(backend, Boolean(provider) && signedIn)),
+  );
 
   if (!provider) return null;
 
@@ -87,8 +94,8 @@ export function ManagedAuthCallout({
         variant={ButtonVariant.Ghost}
         size={ButtonSize.Medium}
         content={ButtonContent.Text}
-        loading={logout.isPending}
-        onClick={() => void logout.mutateAsync(provider).catch(() => {})}
+        loading={logoutPending}
+        onClick={() => void logout(provider).catch(() => {})}
       >
         Sign out
       </Button>
@@ -138,7 +145,7 @@ export function ManagedAuthCallout({
         {control}
         {invalid ? (
           <p className="label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] md:text-right pt-1 opacity-70">
-            {humanErrorText(failed ? state.message : reach.error, backend)}
+            {humanErrorText(failed ? state.message : toRunError(reach.error), backend)}
           </p>
         ) : null}
       </div>

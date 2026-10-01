@@ -1,17 +1,20 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 import { act, fireEvent, render, type RenderResult, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { describe, expect, it, vi } from "vitest";
 
-import { api, type ListSessionsOptions } from "@/app/services/api";
+import { isolatedRegistry, readAsync } from "@/app/effect/remote";
+import { apiEffect, type ListSessionsOptions } from "@/app/services/api";
+import { sessionSkillsAtom } from "@/app/services/queries/configuration";
 import {
-  queryKeys,
-  useLoadOlderMessages,
-  useSessionsWithWorkspaceStats,
-  useSessionSkills,
-  useThreadEventPages,
-} from "@/app/services/queries";
+  olderMessagesAtom,
+  sessionSnapshotAtom,
+  sessionsWithStatsAtom,
+  threadEventsFor,
+} from "@/app/services/queries/session";
 import { fenceSessionSnapshot } from "@/app/services/sessionRefresh";
 import type {
   ManagedSessionSummary,
@@ -21,9 +24,8 @@ import type {
   ThreadEventPage,
 } from "@/app/types/api";
 
-// The real api object is the seam: spies on its methods delegate to the
-// per-test fakes below, so no module mocking is involved. The real perfDebug
-// module is inert unless explicitly enabled.
+// Atoms call apiEffect, so the spies sit on that object and delegate to the
+// per-test fakes. The real perfDebug module is inert unless explicitly enabled.
 const requests = {
   listSessions: vi.fn(),
   listSessionSkills: vi.fn(),
@@ -31,12 +33,18 @@ const requests = {
   getThreadEvents: vi.fn(),
 };
 
-vi.spyOn(api, "listSessions").mockImplementation((...args) => requests.listSessions(...args));
-vi.spyOn(api, "listSessionSkills").mockImplementation((...args) =>
-  requests.listSessionSkills(...args),
+vi.spyOn(apiEffect, "listSessions").mockImplementation((...args) =>
+  Effect.promise(() => requests.listSessions(...args)),
 );
-vi.spyOn(api, "getMessages").mockImplementation((...args) => requests.getMessages(...args));
-vi.spyOn(api, "getThreadEvents").mockImplementation((...args) => requests.getThreadEvents(...args));
+vi.spyOn(apiEffect, "listSessionSkills").mockImplementation((...args) =>
+  Effect.promise(() => requests.listSessionSkills(...args)),
+);
+vi.spyOn(apiEffect, "getMessages").mockImplementation((...args) =>
+  Effect.promise(() => requests.getMessages(...args)),
+);
+vi.spyOn(apiEffect, "getThreadEvents").mockImplementation((...args) =>
+  Effect.promise(() => requests.getThreadEvents(...args)),
+);
 
 function deferred<T>() {
   return Promise.withResolvers<T>();
@@ -57,7 +65,7 @@ function session(id: string, title: string, changed?: number): ManagedSessionSum
 }
 
 function Harness() {
-  const result = useSessionsWithWorkspaceStats({ baseMs: 5, statsMs: 30 });
+  const result = readAsync(useAtomValue(sessionsWithStatsAtom("5:30")));
   return (
     <output data-testid="sessions">
       {JSON.stringify(
@@ -69,14 +77,14 @@ function Harness() {
     </output>
   );
 }
-async function mount(client: QueryClient): Promise<RenderResult> {
-  const renderer = render(
-    <QueryClientProvider client={client}>
+
+function mount(): RenderResult {
+  const registry = isolatedRegistry();
+  return render(
+    <RegistryContext.Provider value={registry}>
       <Harness />
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
-  await act(async () => undefined);
-  return renderer;
 }
 
 function renderedData(renderer: RenderResult) {
@@ -109,20 +117,24 @@ function OlderMessagesHarness({
   id: string;
   onResult: (accepted: boolean) => void;
 }) {
-  const loadOlder = useLoadOlderMessages(id);
-  return <button onClick={() => void loadOlder.mutateAsync().then(onResult)}>Load</button>;
+  const run = useAtomSet(olderMessagesAtom, { mode: "promise" });
+  return <button onClick={() => void run(id).then(onResult)}>Load</button>;
 }
 
 function ThreadPageHarness({ id, threadName }: { id: string; threadName: string }) {
-  const result = useThreadEventPages(id, threadName);
+  const result = readAsync(useAtomValue(threadEventsFor(id, threadName)));
   return (
     <output data-testid="thread-page">{result.data?.pages[0]?.events[0]?.id ?? "loading"}</output>
   );
 }
 
 function SkillHarness({ id }: { id: string }) {
-  const result = useSessionSkills(id);
+  const result = readAsync(useAtomValue(sessionSkillsAtom(id)));
   return <output data-testid="skills">{result.data?.[0]?.name ?? "loading"}</output>;
+}
+
+function successValue<A>(result: AsyncResult.AsyncResult<A, unknown>): A | undefined {
+  return AsyncResult.isSuccess(result) ? result.value : undefined;
 }
 
 describe("session-list polling split", () => {
@@ -144,10 +156,8 @@ describe("session-list polling split", () => {
       if (!allowEmptyBase) return Promise.resolve([session("kept", "new")]);
       return Promise.resolve([]);
     });
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    const renderer = await mount(client);
+    const renderer = mount();
+    await act(async () => undefined);
 
     await waitFor(() => {
       expect(renderedData(renderer)).toEqual([{ title: "old" }]);
@@ -194,23 +204,18 @@ describe("paged read fencing", () => {
     const id = "session-race";
     const stalePage = deferred<MessagesPageResponse>();
     requests.getMessages.mockReturnValue(stalePage.promise);
-    const client = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
-    client.setQueryData(queryKeys.sessionSnapshot(id), snapshotWindow());
+    const registry = isolatedRegistry();
+    registry.set(sessionSnapshotAtom(id), AsyncResult.success(snapshotWindow()));
     let accepted: boolean | undefined;
     const renderer = render(
-      <QueryClientProvider client={client}>
+      <RegistryContext.Provider value={registry}>
         <OlderMessagesHarness
           id={id}
           onResult={(result) => {
             accepted = result;
           }}
         />
-      </QueryClientProvider>,
+      </RegistryContext.Provider>,
     );
 
     fireEvent.click(renderer.getByRole("button", { name: "Load" }));
@@ -229,9 +234,9 @@ describe("paged read fencing", () => {
 
     await waitFor(() => expect(accepted).toBe(false));
     expect(
-      client
-        .getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id))
-        ?.messages.map((message) => message.content),
+      successValue(registry.get(sessionSnapshotAtom(id)))?.messages.map(
+        (message) => message.content,
+      ),
     ).toEqual(["kept-old", "kept-new"]);
     renderer.unmount();
   });
@@ -242,19 +247,17 @@ describe("paged read fencing", () => {
     requests.getThreadEvents.mockImplementation((_id: string, threadName: string) =>
       threadName === "A" ? pageA.promise : pageB.promise,
     );
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const registry = isolatedRegistry();
     const renderer = render(
-      <QueryClientProvider client={client}>
+      <RegistryContext.Provider value={registry}>
         <ThreadPageHarness id="session" threadName="A" />
-      </QueryClientProvider>,
+      </RegistryContext.Provider>,
     );
     await waitFor(() => expect(requests.getThreadEvents).toHaveBeenCalledOnce());
     renderer.rerender(
-      <QueryClientProvider client={client}>
+      <RegistryContext.Provider value={registry}>
         <ThreadPageHarness id="session" threadName="B" />
-      </QueryClientProvider>,
+      </RegistryContext.Provider>,
     );
     await waitFor(() => expect(requests.getThreadEvents).toHaveBeenCalledTimes(2));
 
@@ -316,27 +319,27 @@ describe("session skill catalog", () => {
         } satisfies SkillCatalogEntry,
       ]);
     });
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    const renderer = render(
-      <QueryClientProvider client={client}>
+    const registry = isolatedRegistry();
+    let renderer = render(
+      <RegistryContext.Provider value={registry}>
         <SkillHarness id="A" />
-      </QueryClientProvider>,
+      </RegistryContext.Provider>,
     );
     await waitFor(() => expect(renderer.getByTestId("skills").textContent).toBe("A-1"));
 
-    renderer.rerender(
-      <QueryClientProvider client={client}>
+    renderer.unmount();
+    renderer = render(
+      <RegistryContext.Provider value={registry}>
         <SkillHarness id="B" />
-      </QueryClientProvider>,
+      </RegistryContext.Provider>,
     );
     await waitFor(() => expect(renderer.getByTestId("skills").textContent).toBe("B-1"));
 
-    renderer.rerender(
-      <QueryClientProvider client={client}>
+    renderer.unmount();
+    renderer = render(
+      <RegistryContext.Provider value={registry}>
         <SkillHarness id="A" />
-      </QueryClientProvider>,
+      </RegistryContext.Provider>,
     );
     await waitFor(() => expect(renderer.getByTestId("skills").textContent).toBe("A-2"));
     expect(requests.listSessionSkills.mock.calls.map(([id]) => id)).toEqual(["A", "B", "A"]);

@@ -1,13 +1,19 @@
 import { useState, type ReactNode } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "react-router-dom";
 
 import { Icon, IconName, Popover, PopoverPlacement, PopoverSize, TabButton } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import { useToast } from "@/app/providers/ToastProvider";
-import { useCreateSession } from "@/app/services/queries";
+import { createSessionAtom } from "@/app/services/queries";
 import type { SessionBehavior } from "@/app/types/api";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 
 const OPTIONS: readonly {
   behavior: SessionBehavior;
@@ -54,7 +60,8 @@ export function NewSessionPopover({
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const toast = useToast();
-  const createSession = useCreateSession();
+  const createSession = useAtomSet(createSessionAtom, { mode: "promise" });
+  const creatingSession = useAtomValue(createSessionAtom).waiting;
 
   const openMenu = () => {
     if (!projectId) {
@@ -65,14 +72,14 @@ export function NewSessionPopover({
   };
 
   const start = async (behavior: SessionBehavior) => {
-    if (!projectId || createSession.isPending) return;
+    if (!projectId || creatingSession) return;
     try {
-      const snapshot = await createSession.mutateAsync({ project_id: projectId, behavior });
+      const snapshot = await createSession({ project_id: projectId, behavior });
       const sessionId = snapshot.metadata.session_id;
       setOpen(false);
       if (sessionId) navigate(routes.session(sessionId));
     } catch (error) {
-      toast.error(`Failed to start a chat: ${humanErrorText(toRunError(error))}`);
+      toast.error(`Failed to start a chat: ${humanErrorText(toRunError(commandError(error)))}`);
     }
   };
 
@@ -92,7 +99,7 @@ export function NewSessionPopover({
             return (
               <TabButton
                 key={option.behavior}
-                disabled={createSession.isPending}
+                disabled={creatingSession}
                 hoverHint={{
                   title: presentation.label,
                   description: behaviorDescription(option.behavior),

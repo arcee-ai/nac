@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -11,11 +12,14 @@ import {
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
+import { readyProviderModelsAtom } from "@/app/features/managed/queries";
 import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
-import { useModelCatalog, useReadyProviderModels, useUpdateConfig } from "@/app/services/queries";
+import { modelCatalogAtom, updateSessionConfigAtom } from "@/app/services/queries";
 import type { BackendKind, ReasoningEffort, SessionMetadata } from "@/app/types/api";
 
 const EFFORT_ROW_HINTS: Record<string, { title: string; description: string }> = {
@@ -86,10 +90,11 @@ export function ModelPicker({
   disabled: boolean;
 }) {
   const toast = useToast();
-  const catalog = useModelCatalog();
+  const catalog = readAsync(useAtomValue(modelCatalogAtom()));
   const managedModel = useManagedModelProfile();
-  const liveByBackend = useReadyProviderModels(catalog.data);
-  const updateConfig = useUpdateConfig();
+  const liveByBackend = useAtomValue(readyProviderModelsAtom(catalog.data));
+  const updateConfig = useAtomSet(updateSessionConfigAtom, { mode: "promise" });
+  const updatingConfig = useAtomValue(updateSessionConfigAtom).waiting;
   const currentModel = metadata?.model ?? label;
   const currentEffort = metadata?.reasoning_effort ?? "";
   const currentPick: CatalogPick | null = metadata
@@ -142,24 +147,26 @@ export function ModelPicker({
           extra_headers: null,
         };
     try {
-      await updateConfig.mutateAsync({ id: sessionId, patch });
+      await updateConfig({ id: sessionId, patch });
       toast.success(`Model switched to ${pick.model}`);
     } catch (error) {
-      toast.error(`The model was not switched: ${humanErrorText(toRunError(error), pick.backend)}`);
+      const cause = error instanceof ClientRequestError ? error.error : error;
+      toast.error(`The model was not switched: ${humanErrorText(toRunError(cause), pick.backend)}`);
     }
   };
 
   const chooseEffort = async (effort: string) => {
     if (!metadata || effort === currentEffort) return;
     try {
-      await updateConfig.mutateAsync({
+      await updateConfig({
         id: sessionId,
         patch: { reasoning_effort: effort || null },
       });
       toast.success(`Reasoning set to ${effort || "the model default"}`);
     } catch (error) {
+      const cause = error instanceof ClientRequestError ? error.error : error;
       toast.error(
-        `Reasoning was not changed: ${humanErrorText(toRunError(error), metadata.backend)}`,
+        `Reasoning was not changed: ${humanErrorText(toRunError(cause), metadata.backend)}`,
       );
     }
   };
@@ -171,7 +178,7 @@ export function ModelPicker({
         loading={catalog.isLoading}
         failed={catalog.isError}
         compact
-        disabled={disabled || !metadata || updateConfig.isPending}
+        disabled={disabled || !metadata || updatingConfig}
         liveByBackend={liveByBackend}
         value={currentPick}
         onSelect={(pick) => void chooseModel(pick)}
@@ -188,7 +195,7 @@ export function ModelPicker({
           items={effortItems}
           value={currentEffort}
           placeholder="Default effort"
-          disabled={disabled || !metadata || updateConfig.isPending}
+          disabled={disabled || !metadata || updatingConfig}
           size={ButtonSize.Small}
           trailingIcon={IconName.Right}
           triggerClassName="!gap-1.5 !pl-3"

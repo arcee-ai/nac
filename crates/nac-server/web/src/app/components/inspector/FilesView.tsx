@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import { useContext, useEffect, useMemo, useState } from "react";
 
 import {
   Button,
@@ -31,13 +31,15 @@ import {
   type FileTreeDir,
 } from "@/app/lib/fileTree";
 import { highlightCode, highlightDiff, tokenStyle, type CodeToken } from "@/app/lib/highlight";
+import { atomRefresh, readAsync } from "@/app/effect/remote";
+import { toRunError } from "@/app/lib/providerError";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import {
-  queryKeys,
-  useWorkspaceDiff,
-  useWorkspaceFile,
-  useWorkspaceFiles,
-  useWorkspaceRevisionChanges,
+  sessionSnapshotAtom,
+  workspaceDiff,
+  workspaceFile,
+  workspaceFiles,
+  workspaceRevisionChanges,
 } from "@/app/services/queries";
 import {
   selectFile,
@@ -402,7 +404,7 @@ function DiffPane({
     data: diff,
     isFetching,
     error,
-  } = useWorkspaceDiff(sessionId, file.path, "all", 3, revision);
+  } = useAtomValue(workspaceDiff(sessionId, file.path, "all", 3, revision), readAsync);
 
   // `git diff --numstat` covers only tracked files, so an untracked one arrives
   // without counts and the diff itself is the only place they exist.
@@ -439,7 +441,7 @@ function DiffPane({
             <Loader size={LoaderSize.Small} /> Loading diff…
           </div>
         ) : null}
-        {error ? <Notice tone="error">{errorMessage(error)}</Notice> : null}
+        {error ? <Notice tone="error">{errorMessage(toRunError(error))}</Notice> : null}
         {diff ? <DiffSections diff={diff} /> : null}
       </Scroller>
     </>
@@ -487,7 +489,10 @@ function FilePane({
   path: string;
   revision: number | null;
 }) {
-  const { data, isFetching, error } = useWorkspaceFile(sessionId, path, revision);
+  const { data, isFetching, error } = useAtomValue(
+    workspaceFile(sessionId, path, revision),
+    readAsync,
+  );
   // Kept next to the text it describes, so a refetch that changes the file
   // cannot pair the new lines with the old colours.
   const [highlighted, setHighlighted] = useState<{
@@ -524,7 +529,7 @@ function FilePane({
             <Loader size={LoaderSize.Small} /> Loading file…
           </div>
         ) : null}
-        {error ? <Notice tone="error">{errorMessage(error)}</Notice> : null}
+        {error ? <Notice tone="error">{errorMessage(toRunError(error))}</Notice> : null}
         {data?.binary ? <Notice>Binary file; nothing to show inline.</Notice> : null}
         {data?.too_large ? (
           <Notice>File is too large to display ({formatBytes(data.size)}).</Notice>
@@ -558,25 +563,23 @@ export function FilesView({
   revision?: number | null;
   readOnly?: boolean;
 }) {
-  const client = useQueryClient();
+  const registry = useContext(RegistryContext);
   // Shared rather than local: the same panel also renders inside the
   // full-screen dialog, and it has to open on the file you were reading.
   const selected = useSelectedFile();
   const toggled = useToggledFolders();
   const fileListing = useFileListing();
 
-  const { data: listing, error } = useWorkspaceFiles(sessionId, revision);
-  const revisionChanges = useWorkspaceRevisionChanges(sessionId, revision);
+  const { data: listing, error } = readAsync(useAtomValue(workspaceFiles(sessionId, revision)));
+  const revisionChanges = readAsync(useAtomValue(workspaceRevisionChanges(sessionId, revision)));
 
   // Workspace stats are computed when the snapshot is built, so entering the
   // panel has to refetch it to show changes made since the last event. A
   // revision is frozen, so it never needs this.
   useEffect(() => {
     if (revision != null) return;
-    void client.invalidateQueries({
-      queryKey: queryKeys.sessionSnapshot(sessionId),
-    });
-  }, [client, sessionId, revision]);
+    void atomRefresh.run(registry, sessionSnapshotAtom(sessionId));
+  }, [registry, sessionId, revision]);
   useLiveWorkspace(sessionId, revision);
 
   const workspace = snapshot?.workspace ?? null;
@@ -622,7 +625,9 @@ export function FilesView({
     return <div className="p-6 label-small text-error-primary">{workspace.error}</div>;
   }
   if (failure) {
-    return <div className="p-6 label-small text-error-primary">{errorMessage(failure)}</div>;
+    return (
+      <div className="p-6 label-small text-error-primary">{errorMessage(toRunError(failure))}</div>
+    );
   }
   // Only when there is nothing to show at all. A listing already on screen —
   // this revision's, or the one before it while the switch is fetched — stays

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
 
 import {
   Button,
@@ -15,8 +16,9 @@ import {
   TabButtonSize,
 } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { readAsync } from "@/app/effect/remote";
 import { cn } from "@/app/lib/cn";
-import { useStoreInfo } from "@/app/services/queries";
+import { storeInfoAtom } from "@/app/services/queries";
 
 const REPO_URL = "https://github.com/arcee-ai/nac";
 const DOCS_URL = "https://github.com/arcee-ai/nac#readme";
@@ -37,7 +39,7 @@ export function HeaderMenu({
 }) {
   const [open, setOpen] = useState(false);
   const isMobile = useIsMobile();
-  const { data: storeInfo } = useStoreInfo();
+  const { data: storeInfo } = readAsync(useAtomValue(storeInfoAtom));
   const storePath = storeInfo?.store_path ?? "store path pending";
   // The sheet is a touch surface, so its rows follow the design's 48px item.
   // The size class also scales the glyphs from 20px to 24px.

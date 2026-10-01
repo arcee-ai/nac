@@ -1,6 +1,10 @@
+import { Cause, Exit } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/app/services/api";
+import { ClientRequestError } from "@/app/effect/errors";
+import { appRuntime } from "@/app/effect/runtime";
+import { runEffect } from "@/app/effect/run";
+import { apiEffect } from "@/app/services/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -21,7 +25,7 @@ describe("managed upgrade transport", () => {
     );
     vi.stubGlobal("fetch", fetch);
 
-    await api.startManagedUpgrade("browser-upgrade-request-0001");
+    await runEffect(apiEffect.startManagedUpgrade("browser-upgrade-request-0001"));
 
     expect(fetch).toHaveBeenCalledExactlyOnceWith(
       "/__managed/control/v0/upgrade",
@@ -34,7 +38,7 @@ describe("managed upgrade transport", () => {
           "x-nac-request-id": expect.any(String),
         }),
         body: "{}",
-        signal: undefined,
+        signal: expect.any(AbortSignal),
       }),
     );
   });
@@ -42,18 +46,29 @@ describe("managed upgrade transport", () => {
   it("reads facade problem titles without exposing the raw response object", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ type: "about:blank", title: "Request denied", status: 403 }),
-          {
-            status: 403,
-            headers: { "Content-Type": "application/problem+json" },
-          },
-        ),
+      vi.fn().mockImplementation(
+        () =>
+          new Response(
+            JSON.stringify({ type: "about:blank", title: "Request denied", status: 403 }),
+            {
+              status: 403,
+              headers: { "Content-Type": "application/problem+json" },
+            },
+          ),
       ),
     );
 
-    await expect(api.getManagedUpgrade()).rejects.toEqual(
+    const exit = await appRuntime.runPromiseExit(apiEffect.getManagedUpgrade());
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const failure = Cause.squash(exit.cause);
+      expect(failure).toBeInstanceOf(ClientRequestError);
+      expect(failure instanceof ClientRequestError ? failure.error : failure).toEqual(
+        expect.objectContaining({ status: 403, message: "Request denied (HTTP 403)" }),
+      );
+    }
+
+    await expect(runEffect(apiEffect.getManagedUpgrade())).rejects.toEqual(
       expect.objectContaining({ status: 403, message: "Request denied (HTTP 403)" }),
     );
   });
@@ -62,7 +77,7 @@ describe("managed upgrade transport", () => {
     const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetch);
 
-    await api.terminateTerminal("session:one", "shell:one");
+    await runEffect(apiEffect.terminateTerminal("session:one", "shell:one"));
 
     expect(fetch).toHaveBeenCalledExactlyOnceWith(
       "/sessions/session%3Aone/terminals/shell%3Aone",
@@ -74,7 +89,7 @@ describe("managed upgrade transport", () => {
     const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetch);
 
-    await api.cancelExactRun("session:one", "run:one");
+    await runEffect(apiEffect.cancelExactRun("session:one", "run:one"));
 
     expect(fetch).toHaveBeenCalledExactlyOnceWith(
       "/sessions/session%3Aone/runs/run%3Aone/cancel",

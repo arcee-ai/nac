@@ -1,13 +1,20 @@
-import { useLocation, useNavigate } from "react-router-dom";
 import { flushSync } from "react-dom";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { parseStoreTime, shortId } from "@/app/lib/format";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { toRunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useDeleteSession, useSessions } from "@/app/services/queries";
+import { deleteSessionAtom, SESSIONS_POLL_MS, sessionsAtom } from "@/app/services/queries";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
 interface DeleteModalProps {
@@ -39,11 +46,12 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
   const sessionTitle = useSessionTitle();
   const navigate = useNavigate();
   const location = useLocation();
-  const remove = useDeleteSession();
-  const { data: sessions = [] } = useSessions();
+  const remove = useAtomSet(deleteSessionAtom, { mode: "promise" });
+  const removing = useAtomValue(deleteSessionAtom).waiting;
+  const { data: sessions = [] } = readAsync(useAtomValue(sessionsAtom(SESSIONS_POLL_MS)));
 
   const submit = async () => {
-    if (!summary || remove.isPending) return;
+    if (!summary || removing) return;
     const id = summary.session_id;
     const openPath = location.pathname;
     const leaveOpenSession =
@@ -56,14 +64,14 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
           navigate(leaveOpenSession, { replace: true });
         });
       }
-      await remove.mutateAsync(id);
+      await remove(id);
       toast.success("Session deleted");
       onClose();
     } catch (error) {
       if (leaveOpenSession) {
         navigate(openPath, { replace: true });
       }
-      toast.error(`Failed to delete: ${errorMessage(toRunError(error))}`);
+      toast.error(`Failed to delete: ${errorMessage(toRunError(commandError(error)))}`);
     }
   };
 
@@ -79,7 +87,7 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
             variant={ButtonVariant.Tertiary}
             content={ButtonContent.Text}
             onClick={onClose}
-            disabled={remove.isPending}
+            disabled={removing}
           >
             Cancel
           </Button>
@@ -87,7 +95,7 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
             variant={ButtonVariant.SecondaryDestructive}
             content={ButtonContent.Text}
             onClick={submit}
-            loading={remove.isPending}
+            loading={removing}
           >
             Delete session
           </Button>

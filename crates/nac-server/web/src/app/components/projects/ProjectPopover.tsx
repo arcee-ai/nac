@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -21,7 +22,8 @@ import { projectListItems, type ProjectListItem } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
-import { useProjects, useSessions } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import { projectsAtom, SESSIONS_POLL_MS, sessionsAtom } from "@/app/services/queries";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 
 /** One control of a row, at the size the popover's rows are built to. */
@@ -86,8 +88,8 @@ export function ProjectPopover({
   const sessionTitle = useSessionTitle();
   const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
-  const { data: projectList } = useProjects();
-  const { data: sessions = [] } = useSessions();
+  const { data: projectList } = readAsync(useAtomValue(projectsAtom));
+  const { data: sessions = [] } = readAsync(useAtomValue(sessionsAtom(SESSIONS_POLL_MS)));
 
   const items = useMemo(
     () => projectListItems(projectList?.projects ?? [], sessions),

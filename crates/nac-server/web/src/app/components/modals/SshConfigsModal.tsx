@@ -1,4 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 
 import {
   Button,
@@ -15,17 +16,23 @@ import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { cn } from "@/app/lib/cn";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
-  useCreateSshConfig,
-  useDeleteSshConfig,
-  useSshConfigs,
-  useSshConnect,
-  useUpdateSshConfig,
+  createSshConfigAtom,
+  deleteSshConfigAtom,
+  sshConfigsAtom,
+  sshConnectAtom,
+  updateSshConfigAtom,
 } from "@/app/services/queries";
 import type { SshConfigurationRecord } from "@/app/types/api";
 import { toRunError } from "@/app/lib/providerError";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 
 const DRAFT = "__new__";
 
@@ -44,7 +51,7 @@ export function SshConfigsModal({ open, onClose }: { open: boolean; onClose: () 
 
 function SshConfigsManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const isMobile = useIsMobile();
-  const { data, isLoading } = useSshConfigs();
+  const { data, isLoading } = readAsync(useAtomValue(sshConfigsAtom));
   const configurations = useMemo(() => data?.configurations ?? [], [data]);
   const [picked, setPicked] = useState<string | null>(null);
   const [footer, setFooter] = useState<ReactNode>(null);
@@ -109,18 +116,21 @@ function SshConfigForm({
   isMobile: boolean;
 }) {
   const toast = useToast();
-  const createConfig = useCreateSshConfig();
-  const updateConfig = useUpdateSshConfig();
-  const deleteConfig = useDeleteSshConfig();
-  const connect = useSshConnect();
+  const createConfig = useAtomSet(createSshConfigAtom, { mode: "promise" });
+  const creatingConfig = useAtomValue(createSshConfigAtom).waiting;
+  const updateConfig = useAtomSet(updateSshConfigAtom, { mode: "promise" });
+  const updatingConfig = useAtomValue(updateSshConfigAtom).waiting;
+  const deleteConfig = useAtomSet(deleteSshConfigAtom, { mode: "promise" });
+  const deletingConfig = useAtomValue(deleteSshConfigAtom).waiting;
+  const connect = useAtomSet(sshConnectAtom, { mode: "promise" });
+  const connecting = useAtomValue(sshConnectAtom).waiting;
 
   const [name, setName] = useState(record?.name ?? defaultName);
   const [host, setHost] = useState(record?.ssh_host ?? "");
   const [port, setPort] = useState(record?.ssh_port ? String(record.ssh_port) : "");
   const [identityFile, setIdentityFile] = useState(record?.ssh_identity_file ?? "");
 
-  const busy =
-    createConfig.isPending || updateConfig.isPending || deleteConfig.isPending || connect.isPending;
+  const busy = creatingConfig || updatingConfig || deletingConfig || connecting;
 
   const save = async () => {
     const trimmedName = name.trim();
@@ -139,7 +149,7 @@ function SshConfigForm({
     }
     try {
       if (!record) {
-        const created = await createConfig.mutateAsync({
+        const created = await createConfig({
           name: trimmedName,
           ssh_host: trimmedHost,
           ssh_port: portValue,
@@ -148,7 +158,7 @@ function SshConfigForm({
         onSaved(created.config_id);
         toast.success("SSH config saved.");
       } else {
-        await updateConfig.mutateAsync({
+        await updateConfig({
           configId: record.config_id,
           payload: {
             name: trimmedName,
@@ -160,18 +170,18 @@ function SshConfigForm({
         toast.success("SSH config updated.");
       }
     } catch (error) {
-      toast.error(`Save failed: ${errorMessage(toRunError(error))}`);
+      toast.error(`Save failed: ${errorMessage(toRunError(commandError(error)))}`);
     }
   };
 
   const remove = async () => {
     if (!record) return;
     try {
-      await deleteConfig.mutateAsync(record.config_id);
+      await deleteConfig(record.config_id);
       onDeleted();
       toast.success("SSH config deleted.");
     } catch (error) {
-      toast.error(`Delete failed: ${errorMessage(toRunError(error))}`);
+      toast.error(`Delete failed: ${errorMessage(toRunError(commandError(error)))}`);
     }
   };
 
@@ -182,7 +192,7 @@ function SshConfigForm({
       return;
     }
     const portValue = port.trim() ? Number(port.trim()) : null;
-    await connect.mutateAsync({
+    await connect({
       ssh_host: trimmedHost,
       ssh_port: portValue,
       ssh_identity_file: identityFile.trim() || null,
@@ -278,7 +288,7 @@ function SshConfigForm({
           identityFile={identityFile}
           onIdentityFileChange={setIdentityFile}
           onTest={test}
-          testing={connect.isPending}
+          testing={connecting}
           className="bg-elevation-level-2"
         />
       </div>

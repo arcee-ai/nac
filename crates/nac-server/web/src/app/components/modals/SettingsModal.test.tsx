@@ -1,13 +1,15 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { SettingsModal } from "@/app/components/modals/SettingsModal";
+import { isolatedRegistry } from "@/app/effect/remote";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+import { apiEffect } from "@/app/services/api";
 import type {
   ManagedHostStatus,
   ManagedSessionSummary,
@@ -15,6 +17,13 @@ import type {
   RawSessionConfig,
   SessionSnapshotResponse,
 } from "@/app/types/api";
+
+function spyResolved(method: string, value: unknown) {
+  const target = apiEffect as unknown as Record<string, (...args: unknown[]) => unknown>;
+  return vi
+    .spyOn(target, method)
+    .mockImplementation(() => Effect.promise(() => Promise.resolve(value)));
+}
 
 vi.mock("@/app/components/modals/ConfigurationsPanel", () => ({
   ConfigurationsPanel: ({
@@ -98,10 +107,10 @@ function renderReadySettings({
     reasoning_effort: "high",
     extra_headers: {},
   };
-  vi.spyOn(api, "getManagedStatus").mockResolvedValue({
+  spyResolved("getManagedStatus", {
     model_ready: false,
   } as ManagedHostStatus);
-  vi.spyOn(api, "getSession").mockResolvedValue({
+  spyResolved("getSession", {
     metadata: {
       ...initial,
       agents_md_status: "loaded",
@@ -113,7 +122,7 @@ function renderReadySettings({
     message_created_at: [],
     message_page: { start: 0, end: 0, total: 0, has_older: false },
   } as unknown as SessionSnapshotResponse);
-  vi.spyOn(api, "listSessions").mockResolvedValue([
+  spyResolved("listSessions", [
     {
       summary: {
         session_id: "settings-session",
@@ -132,7 +141,7 @@ function renderReadySettings({
       },
     } as ManagedSessionSummary,
   ]);
-  vi.spyOn(api, "getConfig").mockResolvedValue({
+  spyResolved("getConfig", {
     session_id: "settings-session",
     config_version: 1,
     ...initial,
@@ -141,7 +150,7 @@ function renderReadySettings({
     orchestrator_compaction_threshold: threshold,
     diagnostics: [],
   } as RawSessionConfig);
-  vi.spyOn(api, "getModelCatalog").mockResolvedValue({
+  spyResolved("getModelCatalog", {
     catalog_version: 1,
     providers: [
       {
@@ -168,18 +177,18 @@ function renderReadySettings({
       },
     ],
   } as ModelCatalog);
-  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const update = spyResolved("updateConfig", undefined);
+  const registry = isolatedRegistry();
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <ToastProvider>
         <MemoryRouter>
           <SettingsModal open id="settings-session" onClose={vi.fn()} />
         </MemoryRouter>
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
-  return { client, update, view };
+  return { update, view };
 }
 
 it("holds a fast settings submit until managed status authorizes the mounted model", async () => {
@@ -193,8 +202,8 @@ it("holds a fast settings submit until managed status authorizes the mounted mod
     reasoning_effort: null,
     extra_headers: {},
   };
-  vi.spyOn(api, "getManagedStatus").mockReturnValue(status.promise);
-  vi.spyOn(api, "getSession").mockResolvedValue({
+  spyResolved("getManagedStatus", status.promise);
+  spyResolved("getSession", {
     metadata: {
       ...initial,
       agents_md_status: "loaded",
@@ -206,7 +215,7 @@ it("holds a fast settings submit until managed status authorizes the mounted mod
     message_created_at: [],
     message_page: { start: 0, end: 0, total: 0, has_older: false },
   } as unknown as SessionSnapshotResponse);
-  vi.spyOn(api, "listSessions").mockResolvedValue([
+  spyResolved("listSessions", [
     {
       summary: {
         session_id: "managed-session",
@@ -225,7 +234,7 @@ it("holds a fast settings submit until managed status authorizes the mounted mod
       },
     } as ManagedSessionSummary,
   ]);
-  vi.spyOn(api, "getConfig").mockResolvedValue({
+  spyResolved("getConfig", {
     session_id: "managed-session",
     config_version: 1,
     ...initial,
@@ -234,21 +243,20 @@ it("holds a fast settings submit until managed status authorizes the mounted mod
     orchestrator_compaction_threshold: null,
     diagnostics: [],
   } as RawSessionConfig);
-  vi.spyOn(api, "getModelCatalog").mockResolvedValue({
+  spyResolved("getModelCatalog", {
     catalog_version: 1,
     providers: [],
   } as ModelCatalog);
-  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const update = spyResolved("updateConfig", undefined);
   const onClose = vi.fn();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={isolatedRegistry()}>
       <ToastProvider>
         <MemoryRouter>
           <SettingsModal open id="managed-session" onClose={onClose} />
         </MemoryRouter>
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
 
   try {
@@ -282,7 +290,6 @@ it("holds a fast settings submit until managed status authorizes the mounted mod
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   } finally {
     view.unmount();
-    client.clear();
   }
 });
 
@@ -292,7 +299,7 @@ it.each([
 ] as const)(
   "applies an explicitly selected preset's %s compaction policy",
   async (_, label, expected) => {
-    const { client, update, view } = renderReadySettings();
+    const { update, view } = renderReadySettings();
     try {
       fireEvent.click(await screen.findByRole("button", { name: label }));
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -303,13 +310,12 @@ it.each([
       );
     } finally {
       view.unmount();
-      client.clear();
     }
   },
 );
 
 it("repairs malformed stored extra headers to an explicit empty object", async () => {
-  const { client, update, view } = renderReadySettings({ headersJson: "{not-json}" });
+  const { update, view } = renderReadySettings({ headersJson: "{not-json}" });
   try {
     fireEvent.click(await screen.findByRole("button", { name: "Keep current configuration" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -320,6 +326,5 @@ it("repairs malformed stored extra headers to an explicit empty object", async (
     );
   } finally {
     view.unmount();
-    client.clear();
   }
 });

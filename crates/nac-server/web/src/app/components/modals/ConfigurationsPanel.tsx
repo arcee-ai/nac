@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 
 import {
   Button,
@@ -23,6 +24,8 @@ import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { ResolvedRows } from "@/app/components/modals/ResolvedRows";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { type Source, SourceMenu } from "@/app/components/modals/SourceMenu";
+import { ClientRequestError } from "@/app/effect/errors";
+import { atomRefresh, readAsync } from "@/app/effect/remote";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
@@ -34,15 +37,18 @@ import { cn } from "@/app/lib/cn";
 import { PROVIDER_KINDS, providerLabel, providerUsesApiKey } from "@/app/lib/providers";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
+import { managedProviderModelsFor, readyProviderModelsAtom } from "@/app/features/managed/queries";
 import {
-  useDeleteModelConfig,
-  useManagedProviderModels,
-  useModelCatalog,
-  useModelConfigs,
-  useProviderModels,
-  useReadyProviderModels,
-  useResolvedModelConfig,
+  deleteModelConfigAtom,
+  modelCatalogAtom,
+  modelConfigsAtom,
+  providerModelsAtom,
+  resolvedModelConfigAtom,
 } from "@/app/services/queries";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 import type {
   BackendKind,
   CreateModelConfigurationRequest,
@@ -139,10 +145,11 @@ export function ConfigurationsPanel({
 }) {
   const toast = useToast();
   const managedModel = useManagedModelProfile();
-  const { data: saved, isPending: savedInitializing } = useModelConfigs();
-  const catalog = useModelCatalog();
-  const liveByBackend = useReadyProviderModels(catalog.data);
-  const deleteConfig = useDeleteModelConfig();
+  const registry = useContext(RegistryContext);
+  const { data: saved, isPending: savedInitializing } = useAtomValue(modelConfigsAtom, readAsync);
+  const catalog = useAtomValue(modelCatalogAtom(), readAsync);
+  const liveByBackend = useAtomValue(readyProviderModelsAtom(catalog.data));
+  const deleteConfig = useAtomSet(deleteModelConfigAtom, { mode: "promise" });
   const configurations = useMemo(() => saved?.configurations ?? [], [saved]);
 
   // Null until the user picks a source themselves, so the default below can
@@ -310,21 +317,31 @@ export function ConfigurationsPanel({
     !catalogCredential;
 
   const validates = (source.kind === "new" && discovers) || catalogNeedsKey;
-  const keyQuery = useProviderModels(backend, debouncedKey, null, validates);
+  const keyQuery = useAtomValue(
+    providerModelsAtom(backend, debouncedKey, null, validates),
+    readAsync,
+  );
   // A login reaches a model index the same way a key does; it just cannot be
   // read before the sign-in exists.
-  const loginQuery = useManagedProviderModels(
-    backend,
-    source.kind === "new" && provider !== CUSTOM && !needsKey && signedIn,
+  const loginQuery = useAtomValue(
+    managedProviderModelsFor(
+      backend,
+      source.kind === "new" && provider !== CUSTOM && !needsKey && signedIn,
+    ),
+    readAsync,
   );
-  const configQuery = useResolvedModelConfig(configId, configFile);
+  const resolvedAtom = resolvedModelConfigAtom(configId, configFile);
+  const configQuery = useAtomValue(resolvedAtom, readAsync);
+  const refetchConfig = () => {
+    void atomRefresh.run(registry, resolvedAtom);
+  };
 
   const validation: Validation = !(validates && debouncedKey)
     ? { status: "idle" }
     : keyQuery.isFetching
       ? { status: "validating" }
       : keyQuery.error
-        ? { status: "error", message: humanErrorText(keyQuery.error, backend) }
+        ? { status: "error", message: humanErrorText(toRunError(keyQuery.error), backend) }
         : keyQuery.data
           ? {
               status: "ready",
@@ -340,7 +357,9 @@ export function ConfigurationsPanel({
   const resolving = resolvedTarget && configQuery.isFetching;
   const resolved = resolvedTarget && !configQuery.error ? (configQuery.data ?? null) : null;
   const resolveError =
-    resolvedTarget && configQuery.error ? humanErrorText(configQuery.error, backend) : "";
+    resolvedTarget && configQuery.error
+      ? humanErrorText(toRunError(configQuery.error), backend)
+      : "";
 
   // A saved setup is a starting point rather than a lock: these follow what the
   // server resolved until the user changes them for the session being created.
@@ -555,13 +574,15 @@ export function ConfigurationsPanel({
 
   const onDelete = async (id: string, label: string) => {
     try {
-      await deleteConfig.mutateAsync(id);
+      await deleteConfig(id);
       // Fall back to the default rather than to "Create New", so removing one
       // of several setups lands on the next most recent.
       if (configId === id) switchSource(null);
       toast.success(`Configuration ${label} removed`);
     } catch (error) {
-      toast.error(`Failed to remove the configuration: ${humanErrorText(toRunError(error))}`);
+      toast.error(
+        `Failed to remove the configuration: ${humanErrorText(toRunError(commandError(error)))}`,
+      );
     }
   };
 
@@ -589,7 +610,7 @@ export function ConfigurationsPanel({
   // A login that cannot read the model index leaves the same empty list as a
   // provider with nothing to offer, so saying which one it is has to be explicit.
   const modelListError = loginQuery.isError
-    ? humanErrorText(loginQuery.error, backend)
+    ? humanErrorText(toRunError(loginQuery.error), backend)
     : (resolved?.models_error ?? "");
   const boxInvalid = invalid || keyInvalid || Boolean(resolveError) || Boolean(modelListError);
   // The sign-in callout already shows the failure (and offers signing in again)
@@ -604,9 +625,9 @@ export function ConfigurationsPanel({
   // Resolve failures are always worth asking again. A saved setup whose model
   // index failed is too — unless the sign-in callout already offers a retry.
   const retry = resolveError
-    ? configQuery.refetch
+    ? refetchConfig
     : resolved?.models_error && providerUsesApiKey(resolved.backend)
-      ? configQuery.refetch
+      ? refetchConfig
       : null;
 
   /**

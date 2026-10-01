@@ -1,14 +1,17 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
+import { isolatedRegistry } from "@/app/effect/remote";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries";
+import { apiEffect } from "@/app/services/api";
+import { sessionPermissionsAtom } from "@/app/services/queries/direct";
 import type { PermissionStateResponse } from "@/app/types/api";
 
 const SESSION_ID = "direct-session";
@@ -20,13 +23,17 @@ const fakes = {
   deletePermissionGrant: vi.fn(),
 };
 
-vi.spyOn(api, "getPermissions").mockImplementation((...args) => fakes.getPermissions(...args));
-vi.spyOn(api, "replyPermission").mockImplementation((...args) => fakes.replyPermission(...args));
-vi.spyOn(api, "setPermissionApprovalMode").mockImplementation((...args) =>
-  fakes.setPermissionApprovalMode(...args),
+vi.spyOn(apiEffect, "getPermissions").mockImplementation((...args) =>
+  Effect.promise(() => fakes.getPermissions(...args)),
 );
-vi.spyOn(api, "deletePermissionGrant").mockImplementation((...args) =>
-  fakes.deletePermissionGrant(...args),
+vi.spyOn(apiEffect, "replyPermission").mockImplementation((...args) =>
+  Effect.promise(() => fakes.replyPermission(...args)),
+);
+vi.spyOn(apiEffect, "setPermissionApprovalMode").mockImplementation((...args) =>
+  Effect.promise(() => fakes.setPermissionApprovalMode(...args)),
+);
+vi.spyOn(apiEffect, "deletePermissionGrant").mockImplementation((...args) =>
+  Effect.promise(() => fakes.deletePermissionGrant(...args)),
 );
 
 function pendingState(): PermissionStateResponse {
@@ -54,12 +61,10 @@ function pendingState(): PermissionStateResponse {
 }
 
 function mount(state: PermissionStateResponse, requesterLabel?: string) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  client.setQueryData(queryKeys.sessionPermissions(SESSION_ID), state);
+  const registry = isolatedRegistry();
+  registry.set(sessionPermissionsAtom(SESSION_ID), AsyncResult.success(state));
   return render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <MemoryRouter>
         <ToastProvider>
           <PermissionControls
@@ -69,7 +74,7 @@ function mount(state: PermissionStateResponse, requesterLabel?: string) {
           />
         </ToastProvider>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
 }
 
@@ -197,15 +202,13 @@ describe("direct permission controls", () => {
   });
 
   it("identifies each child control and explains inherited automatic approval", () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
+    const registry = isolatedRegistry();
     const automatic = { ...pendingState(), approval_mode: "auto_approve" as const, requests: [] };
-    client.setQueryData(queryKeys.sessionPermissions("child-review"), automatic);
-    client.setQueryData(queryKeys.sessionPermissions("child-tests"), automatic);
+    registry.set(sessionPermissionsAtom("child-review"), AsyncResult.success(automatic));
+    registry.set(sessionPermissionsAtom("child-tests"), AsyncResult.success(automatic));
 
     render(
-      <QueryClientProvider client={client}>
+      <RegistryContext.Provider value={registry}>
         <MemoryRouter>
           <ToastProvider>
             <PermissionControls
@@ -224,7 +227,7 @@ describe("direct permission controls", () => {
             />
           </ToastProvider>
         </MemoryRouter>
-      </QueryClientProvider>,
+      </RegistryContext.Provider>,
     );
 
     const reviewControl = screen.getByRole("button", {
@@ -297,17 +300,15 @@ describe("direct permission controls", () => {
   });
 
   it("does not fetch or render controls for orchestrator sessions", () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const registry = isolatedRegistry();
     render(
-      <QueryClientProvider client={client}>
+      <RegistryContext.Provider value={registry}>
         <MemoryRouter>
           <ToastProvider>
             <PermissionControls sessionId={SESSION_ID} behavior="orchestrator" />
           </ToastProvider>
         </MemoryRouter>
-      </QueryClientProvider>,
+      </RegistryContext.Provider>,
     );
 
     expect(screen.queryByRole("button", { name: /^Permissions/ })).toBeNull();

@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -27,7 +28,13 @@ import {
   sessionEnvLabel,
   tokenUsage,
 } from "@/app/lib/format";
-import { useModelCatalog, useSessions, useWorkspaceRevisionChanges } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import {
+  modelCatalogAtom,
+  SESSIONS_POLL_MS,
+  sessionsAtom,
+  workspaceRevisionChanges,
+} from "@/app/services/queries";
 import { selectRevision, useSelectedRevision } from "@/app/store/sessionLayoutStore";
 import {
   liftSessionSpend,
@@ -108,7 +115,7 @@ export function TopSingleSessionHeader({
 }) {
   const navigate = useNavigate();
   const sessionTitle = useSessionTitle();
-  const { data: sessions = [] } = useSessions();
+  const { data: sessions = [] } = readAsync(useAtomValue(sessionsAtom(SESSIONS_POLL_MS)));
   const running = useRunning(sessionId);
   const stopping = useCancelArmed(sessionId);
   const runUsage = useRunUsage();
@@ -117,7 +124,7 @@ export function TopSingleSessionHeader({
     liftSessionSpend(tokenUsage(snapshot));
   }, [snapshot]);
   const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
-  const catalog = useModelCatalog();
+  const catalog = readAsync(useAtomValue(modelCatalogAtom()));
   const persistedUsage = tokenUsage(snapshot);
   const contextTokens = metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
   const context = contextTitle(
@@ -131,7 +138,7 @@ export function TopSingleSessionHeader({
   const elapsedMs = liveElapsed ?? lastElapsedMs ?? metrics.lastResponseMs;
 
   const selectedRevision = useSelectedRevision();
-  const changes = useWorkspaceRevisionChanges(sessionId, selectedRevision);
+  const changes = readAsync(useAtomValue(workspaceRevisionChanges(sessionId, selectedRevision)));
   const workspace = snapshot?.workspace ?? null;
   const totals =
     selectedRevision == null

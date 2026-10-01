@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 
 import {
   Icon,
@@ -13,7 +14,8 @@ import {
 import { LibraryPicker } from "@/app/components/modals/MCPServersModal/McpLibraryPicker";
 import { McpServerForm } from "@/app/components/modals/MCPServersModal/McpServerForm";
 import { McpServersLoadError } from "@/app/components/modals/MCPServersModal/McpServersLoadError";
-import { useMcpLibrary, useMcpServers } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import { mcpLibraryAtom, mcpServersAtom } from "@/app/services/queries";
 import type { McpLibraryEntry } from "@/app/types/api";
 
 /** A draft's origin: a catalog template, or nothing for a hand-written server. */
@@ -25,8 +27,9 @@ type Draft = { template: McpLibraryEntry | null };
  * panel on top of it: list → catalog → form, each with its own way back.
  */
 export function McpServersMobile({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { data: library } = useMcpLibrary();
-  const { data, error, isError, isFetching, isLoading, refetch } = useMcpServers();
+  const { data: library } = readAsync(useAtomValue(mcpLibraryAtom));
+  const { data, error, isError, isFetching, isLoading } = readAsync(useAtomValue(mcpServersAtom));
+  const refetch = useAtomRefresh(mcpServersAtom);
   const servers = data?.servers ?? [];
   const [picking, setPicking] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);

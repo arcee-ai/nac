@@ -1,8 +1,10 @@
-import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useContext, useEffect, useRef } from "react";
+import { RegistryContext } from "@effect/atom-react";
 
+import { atomRefresh, refreshPrefixed } from "@/app/effect/remote";
 import { perfMark } from "@/app/lib/perfDebug";
-import { queryKeys } from "@/app/services/queries";
+import { atomIds } from "@/app/services/queries/keys";
+import { sessionSnapshotAtom } from "@/app/services/queries/session";
 import { useWorkspaceEpoch } from "@/app/store/runtimeStore";
 
 /**
@@ -12,18 +14,26 @@ import { useWorkspaceEpoch } from "@/app/store/runtimeStore";
  */
 const REREAD_INTERVAL_MS = 3000;
 
+/** Every cached read of one workspace view for this session. */
+function workspacePrefix(
+  sessionId: string,
+  segment: "workspace-files" | "workspace-diff" | "workspace-file",
+): string {
+  return `${atomIds.session(sessionId)}\u0000${segment}`;
+}
+
 /**
  * Keep the workspace views following a run that is still in progress.
  *
- * The diff endpoint reads the live working tree, but nothing invalidated it
+ * The diff endpoint reads the live working tree, but nothing refreshed it
  * between runs, so an hour-long run showed the checkout as it stood when the
- * panel was opened. Only the queries something is actually watching refetch,
+ * panel was opened. Only the atoms something is actually watching refetch,
  * which is why this can be driven straight off the event stream.
  *
  * A revision is a frozen commit and never needs any of this.
  */
 export function useLiveWorkspace(sessionId: string, revision: number | null): void {
-  const client = useQueryClient();
+  const registry = useContext(RegistryContext);
   const epoch = useWorkspaceEpoch();
   const timer = useRef<number | null>(null);
   const lastReread = useRef(0);
@@ -40,21 +50,12 @@ export function useLiveWorkspace(sessionId: string, revision: number | null): vo
       perfMark("query:invalidate.workspace", { throttleMs: 0 });
       // The changed-file list and its totals are computed while the snapshot is
       // built, so they only move when the snapshot does.
-      void client.invalidateQueries({
-        queryKey: queryKeys.sessionSnapshot(sessionId),
-        exact: true,
-      });
-      void client.invalidateQueries({
-        queryKey: queryKeys.workspaceFilesRoot(sessionId),
-      });
-      void client.invalidateQueries({
-        queryKey: queryKeys.workspaceDiffRoot(sessionId),
-      });
-      void client.invalidateQueries({
-        queryKey: queryKeys.workspaceFileRoot(sessionId),
-      });
+      void atomRefresh.run(registry, sessionSnapshotAtom(sessionId));
+      void refreshPrefixed(registry, workspacePrefix(sessionId, "workspace-files"));
+      void refreshPrefixed(registry, workspacePrefix(sessionId, "workspace-diff"));
+      void refreshPrefixed(registry, workspacePrefix(sessionId, "workspace-file"));
     }, wait);
-  }, [client, epoch, revision, sessionId]);
+  }, [registry, epoch, revision, sessionId]);
 
   useEffect(
     () => () => {

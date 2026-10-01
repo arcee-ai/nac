@@ -1,10 +1,18 @@
-import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useContext, useEffect } from "react";
+import { RegistryContext } from "@effect/atom-react";
 
+import { atomRefresh, patchRemote, refreshPrefixed, resetPrefixed } from "@/app/effect/remote";
 import { SNAPSHOT_MESSAGE_LIMIT, mergeMessageTail } from "@/app/lib/messageWindow";
 import { perfMark } from "@/app/lib/perfDebug";
 import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries";
+import { atomIds } from "@/app/services/queries/keys";
+import { sessionSkillsAtom } from "@/app/services/queries/configuration";
+import { sessionPermissionsAtom } from "@/app/services/queries/direct";
+import {
+  sessionSnapshotAtom,
+  threadEventsAtom,
+  threadEventsKey,
+} from "@/app/services/queries/session";
 import {
   beginTailFetch,
   disposeSessionRefresh,
@@ -21,18 +29,23 @@ import {
   setStreamStatus,
   syncRunFromSnapshot,
 } from "@/app/store/runtimeStore";
-import type { ActiveRunSnapshot, SessionSnapshotResponse } from "@/app/types/api";
+import type { ActiveRunSnapshot } from "@/app/types/api";
 
 // Events arrive far faster than a snapshot can be fetched, so reloads are
 // coalesced into one request per window.
 const RELOAD_DEBOUNCE_MS = 250;
 
+/** Paged thread logs for one session: `session\0${id}\0thread-events\0${name}`. */
+function threadEventsPrefix(id: string): string {
+  return `${atomIds.session(id)}\u0000thread-events`;
+}
+
 /**
  * Keep the runtime store fed by the session event stream and refresh the
- * snapshot query whenever an event changes canonical state.
+ * snapshot atom whenever an event changes canonical state.
  */
 export function useSessionStream(sessionId: string | null): void {
-  const client = useQueryClient();
+  const registry = useContext(RegistryContext);
 
   useEffect(() => {
     if (!sessionId) {
@@ -56,15 +69,8 @@ export function useSessionStream(sessionId: string | null): void {
       if (replace) {
         highestTranscriptLength = 0;
         clearRuntimeThreads();
-        void client.cancelQueries({
-          queryKey: queryKeys.threadEventsRoot(id),
-        });
-        client.removeQueries({ queryKey: queryKeys.threadEventsRoot(id) });
+        resetPrefixed(registry, threadEventsPrefix(id));
       }
-      void client.cancelQueries({
-        queryKey: queryKeys.sessionSnapshot(id),
-        exact: true,
-      });
       fenceSessionSnapshot(id, replace);
       clearTimeout(tailTimer ?? undefined);
       tailTimer = null;
@@ -75,16 +81,11 @@ export function useSessionStream(sessionId: string | null): void {
         const requestId = ++snapshotRequest;
         snapshotRunning = true;
         perfMark("query:invalidate.session", { throttleMs: 0 });
-        void client
-          .invalidateQueries({
-            queryKey: queryKeys.sessionSnapshot(id),
-            exact: true,
-          })
-          .finally(() => {
-            if (requestId !== snapshotRequest) return;
-            snapshotRunning = false;
-            if (tailDirty && snapshotTimer === null) void drainTail();
-          });
+        void atomRefresh.run(registry, sessionSnapshotAtom(id)).finally(() => {
+          if (requestId !== snapshotRequest) return;
+          snapshotRunning = false;
+          if (tailDirty && snapshotTimer === null) void drainTail();
+        });
       }, RELOAD_DEBOUNCE_MS);
     }
 
@@ -109,21 +110,18 @@ export function useSessionStream(sessionId: string | null): void {
             }
 
             let snapshotRequired = false;
-            client.setQueryData<SessionSnapshotResponse>(
-              queryKeys.sessionSnapshot(id),
-              (current) => {
-                if (!current) {
-                  snapshotRequired = true;
-                  return current;
-                }
-                const merged = mergeMessageTail(current, page);
-                if (merged.kind === "snapshot-required") {
-                  snapshotRequired = true;
-                  return current;
-                }
-                return merged.snapshot;
-              },
-            );
+            patchRemote(registry, sessionSnapshotAtom(id), (current) => {
+              if (!current) {
+                snapshotRequired = true;
+                return undefined;
+              }
+              const merged = mergeMessageTail(current, page);
+              if (merged.kind === "snapshot-required") {
+                snapshotRequired = true;
+                return undefined;
+              }
+              return merged.snapshot;
+            });
             if (snapshotRequired) {
               scheduleSnapshot(true);
               return;
@@ -166,11 +164,8 @@ export function useSessionStream(sessionId: string | null): void {
     const refreshPermissions = () => {
       // Permission state is intentionally infinitely fresh and normally
       // follows its exact SSE events. Whenever replay continuity is lost, the
-      // only safe substitute is a canonical refetch of the active query.
-      void client.invalidateQueries({
-        queryKey: queryKeys.sessionPermissions(id),
-        exact: true,
-      });
+      // only safe substitute is a canonical refetch of the active atom.
+      void atomRefresh.run(registry, sessionPermissionsAtom(id));
     };
 
     const replaceAfterReplayLoss = () => {
@@ -185,10 +180,10 @@ export function useSessionStream(sessionId: string | null): void {
           // SSE events extend it. Once the worker exits, refetch its newest
           // page so a final tool result cannot remain live-only (or missing
           // after runtime state is cleared during snapshot replacement).
-          void client.invalidateQueries({
-            queryKey: queryKeys.threadEvents(id, envelope.event.event.name),
-            exact: true,
-          });
+          void atomRefresh.run(
+            registry,
+            threadEventsAtom(threadEventsKey(id, envelope.event.event.name)),
+          );
         }
         const refresh = applyEnvelope(envelope);
         if (refresh === "messages") {
@@ -201,9 +196,7 @@ export function useSessionStream(sessionId: string | null): void {
           scheduleSnapshot(true);
         }
         if (envelope.event.type === "run_completed") {
-          void client.invalidateQueries({
-            queryKey: queryKeys.workspaceRevisions(id),
-          });
+          void refreshPrefixed(registry, atomIds.workspaceRevisions(id));
         }
         if (
           envelope.event.type === "permission_asked" ||
@@ -219,10 +212,7 @@ export function useSessionStream(sessionId: string | null): void {
       onReplayBoundary: (boundary) => {
         if (epochId !== null && boundary.epoch_id !== epochId) {
           scheduleSnapshot(true);
-          void client.invalidateQueries({
-            queryKey: queryKeys.sessionSkills(id),
-            exact: true,
-          });
+          void atomRefresh.run(registry, sessionSkillsAtom(id));
           refreshPermissions();
         }
         epochId = boundary.epoch_id;
@@ -240,10 +230,9 @@ export function useSessionStream(sessionId: string | null): void {
       clearTimeout(tailTimer ?? undefined);
       clearTimeout(snapshotTimer ?? undefined);
       disposeSessionRefresh(id);
-      void client.cancelQueries({ queryKey: queryKeys.threadEventsRoot(id) });
-      client.removeQueries({ queryKey: queryKeys.threadEventsRoot(id) });
+      resetPrefixed(registry, threadEventsPrefix(id));
     };
-  }, [sessionId, client]);
+  }, [sessionId, registry]);
 }
 
 /**
@@ -251,15 +240,12 @@ export function useSessionStream(sessionId: string | null): void {
  * applying that child's runtime events to the parent's transcript store.
  */
 export function useDelegatedPermissionStream(sessionId: string, enabled: boolean): void {
-  const client = useQueryClient();
+  const registry = useContext(RegistryContext);
 
   useEffect(() => {
     if (!enabled) return;
     const refresh = () => {
-      void client.invalidateQueries({
-        queryKey: queryKeys.sessionPermissions(sessionId),
-        exact: true,
-      });
+      void atomRefresh.run(registry, sessionPermissionsAtom(sessionId));
     };
     const dispose = subscribeToSessionEvents(sessionId, {
       onEnvelope: (envelope) => {
@@ -282,7 +268,7 @@ export function useDelegatedPermissionStream(sessionId: string, enabled: boolean
       onBackpressure: refresh,
     });
     return dispose;
-  }, [client, enabled, sessionId]);
+  }, [registry, enabled, sessionId]);
 }
 
 /**

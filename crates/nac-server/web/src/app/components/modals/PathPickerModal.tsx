@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
 
 import {
   Button,
@@ -16,9 +17,11 @@ import {
   StickyButton,
 } from "@/app/atoms";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
+import { readAsync } from "@/app/effect/remote";
 import { cn } from "@/app/lib/cn";
+import { toRunError } from "@/app/lib/providerError";
 import { errorMessage } from "@/app/providers/ToastProvider";
-import { useBrowsePath, useSshBrowsePath, type BrowseKind } from "@/app/services/queries";
+import { browsePathAtom, sshBrowsePathAtom, type BrowseKind } from "@/app/services/queries";
 import type { SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -75,8 +78,10 @@ function PathPicker({
   const [hidden, setHidden] = useState(showHidden);
   // Both hooks are called every render, as hooks must be; the one that is not
   // the source of this listing is disabled and never fetches.
-  const local = useBrowsePath(directory || null, kind, hidden, !ssh);
-  const remote = useSshBrowsePath(ssh ?? null, directory || null, hidden, Boolean(ssh));
+  const local = readAsync(useAtomValue(browsePathAtom(directory || null, kind, hidden, !ssh)));
+  const remote = readAsync(
+    useAtomValue(sshBrowsePathAtom(ssh ?? null, directory || null, hidden, Boolean(ssh))),
+  );
   const { data, error, isFetching } = ssh ? remote : local;
 
   const goTo = (path: string) => {
@@ -219,7 +224,9 @@ function PathPicker({
         </div>
 
         {error ? (
-          <p className="label-micro text-error-primary shrink-0">{errorMessage(error)}</p>
+          <p className="label-micro text-error-primary shrink-0">
+            {errorMessage(toRunError(error))}
+          </p>
         ) : null}
 
         <div className="flex-1 min-h-0 overflow-auto rounded-[4px] bg-input shadow-concave p-1 flex flex-col [&>*]:shrink-0">

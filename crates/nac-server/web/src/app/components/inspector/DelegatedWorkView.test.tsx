@@ -1,14 +1,17 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
+import { isolatedRegistry } from "@/app/effect/remote";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries";
+import { apiEffect } from "@/app/services/api";
+import { managedOrchestratorsAtom, traditionalChildrenAtom } from "@/app/services/queries/direct";
 import type { ManagedOrchestratorRecord, TraditionalChildRecord } from "@/app/types/api";
 
 function Location() {
@@ -53,12 +56,30 @@ const orchestrator: ManagedOrchestratorRecord = {
   version: 2,
 };
 
-const listChildren = vi.spyOn(api, "listTraditionalChildren");
-const listOrchestrators = vi.spyOn(api, "listManagedOrchestrators");
-const startChild = vi.spyOn(api, "startTraditionalChild");
-const cancelChild = vi.spyOn(api, "cancelTraditionalChild");
-const startOrchestrator = vi.spyOn(api, "startManagedOrchestrator");
-const cancelOrchestrator = vi.spyOn(api, "cancelManagedOrchestrator");
+const listChildren = vi.fn();
+const listOrchestrators = vi.fn();
+const startChild = vi.fn();
+const cancelChild = vi.fn();
+const startOrchestrator = vi.fn();
+const cancelOrchestrator = vi.fn();
+vi.spyOn(apiEffect, "listTraditionalChildren").mockImplementation((...args) =>
+  Effect.promise(() => listChildren(...args)),
+);
+vi.spyOn(apiEffect, "listManagedOrchestrators").mockImplementation((...args) =>
+  Effect.promise(() => listOrchestrators(...args)),
+);
+vi.spyOn(apiEffect, "startTraditionalChild").mockImplementation((...args) =>
+  Effect.promise(() => startChild(...args)),
+);
+vi.spyOn(apiEffect, "cancelTraditionalChild").mockImplementation((...args) =>
+  Effect.promise(() => cancelChild(...args)),
+);
+vi.spyOn(apiEffect, "startManagedOrchestrator").mockImplementation((...args) =>
+  Effect.promise(() => startOrchestrator(...args)),
+);
+vi.spyOn(apiEffect, "cancelManagedOrchestrator").mockImplementation((...args) =>
+  Effect.promise(() => cancelOrchestrator(...args)),
+);
 
 function mount(behavior: "direct" | "direct-with-orchestrator", seed = true) {
   window.matchMedia = () =>
@@ -72,15 +93,13 @@ function mount(behavior: "direct" | "direct-with-orchestrator", seed = true) {
       removeListener: () => {},
       dispatchEvent: () => false,
     }) as MediaQueryList;
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
-  });
+  const registry = isolatedRegistry();
   if (seed) {
-    client.setQueryData(queryKeys.traditionalChildren("parent"), [child]);
-    client.setQueryData(queryKeys.managedOrchestrators("parent"), [orchestrator]);
+    registry.set(traditionalChildrenAtom("parent"), AsyncResult.success([child]));
+    registry.set(managedOrchestratorsAtom("parent"), AsyncResult.success([orchestrator]));
   }
   render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <MemoryRouter initialEntries={["/sessions/parent"]}>
         <Routes>
           <Route
@@ -94,9 +113,9 @@ function mount(behavior: "direct" | "direct-with-orchestrator", seed = true) {
           />
         </Routes>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
-  return client;
+  return registry;
 }
 
 beforeEach(() => {
@@ -184,18 +203,21 @@ describe("delegated work", () => {
   });
 
   it("renders cache-driven polling transitions without a page refresh", async () => {
-    const client = mount("direct");
+    const registry = mount("direct");
     expect(screen.getAllByText("Running in the background").length).toBeGreaterThan(0);
 
     act(() => {
-      client.setQueryData(queryKeys.traditionalChildren("parent"), [
-        {
-          ...child,
-          status: "completed",
-          report: "The permissions audit passed.",
-          completion_inbox_id: 12,
-        },
-      ]);
+      registry.set(
+        traditionalChildrenAtom("parent"),
+        AsyncResult.success([
+          {
+            ...child,
+            status: "completed",
+            report: "The permissions audit passed.",
+            completion_inbox_id: 12,
+          },
+        ]),
+      );
     });
 
     await waitFor(() => expect(screen.getByText("Completed")).toBeTruthy());

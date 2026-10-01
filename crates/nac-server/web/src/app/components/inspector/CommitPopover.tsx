@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 
 import {
@@ -12,8 +13,10 @@ import {
   TextAreaSize,
 } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { ClientRequestError } from "@/app/effect/errors";
+import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useCommitWorkspace } from "@/app/services/queries";
+import { commitWorkspaceAtom } from "@/app/services/queries";
 import { useRunning } from "@/app/store/runtimeStore";
 import type { ChangedFileStat } from "@/app/types/api";
 
@@ -50,11 +53,13 @@ export function CommitPopover({
 }) {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
+  const [failure, setFailure] = useState<unknown>(null);
 
   const isMobile = useIsMobile();
   const running = useRunning(sessionId);
   const toast = useToast();
-  const commit = useCommitWorkspace(sessionId);
+  const commit = useAtomSet(commitWorkspaceAtom, { mode: "promise" });
+  const committing = useAtomValue(commitWorkspaceAtom).waiting;
 
   const reason = blockedReason(running, revision, changed.length);
   const additions = changed.reduce((sum, file) => sum + (file.additions ?? 0), 0);
@@ -62,24 +67,24 @@ export function CommitPopover({
 
   const close = () => {
     setOpen(false);
-    commit.reset();
+    setFailure(null);
   };
 
   const submit = () => {
     const text = message.trim();
-    if (!text || reason || commit.isPending) return;
-    commit.mutate(
-      { message: text },
-      {
-        onSuccess: (outcome) => {
-          toast.success(
-            `Committed ${plural(outcome.files_changed, "file")} as ${outcome.sha.slice(0, 7)}.`,
-          );
-          setMessage("");
-          close();
-        },
-      },
-    );
+    if (!text || reason || committing) return;
+    setFailure(null);
+    void commit({ id: sessionId, payload: { message: text } })
+      .then((outcome) => {
+        toast.success(
+          `Committed ${plural(outcome.files_changed, "file")} as ${outcome.sha.slice(0, 7)}.`,
+        );
+        setMessage("");
+        close();
+      })
+      .catch((error: unknown) => {
+        setFailure(error instanceof ClientRequestError ? error.error : error);
+      });
   };
 
   return (
@@ -118,15 +123,17 @@ export function CommitPopover({
             <span className="code code-small text-error-primary">-{deletions}</span>
           </div>
 
-          {commit.error ? (
-            <div className="p-1 label-micro text-error-primary">{errorMessage(commit.error)}</div>
+          {failure ? (
+            <div className="p-1 label-micro text-error-primary">
+              {errorMessage(toRunError(failure))}
+            </div>
           ) : null}
 
           <Button
             size={ButtonSize.Medium}
             variant={ButtonVariant.Secondary}
             disabled={!message.trim()}
-            loading={commit.isPending}
+            loading={committing}
             onClick={submit}
           >
             Commit

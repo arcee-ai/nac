@@ -1,4 +1,5 @@
 import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { useAtomValue } from "@effect/atom-react";
 
 import {
   Badge,
@@ -17,9 +18,10 @@ import {
 } from "@/app/atoms";
 import { EntryThumbnail } from "@/app/components/modals/MCPServersModal/McpEntryDetails";
 import { FooterButton } from "@/app/components/modals/ModalFooterButton";
+import { readAsync } from "@/app/effect/remote";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
-import { useMcpLibrary, useMcpServers } from "@/app/services/queries";
+import { mcpLibraryAtom, mcpServersAtom } from "@/app/services/queries";
 import type { McpLibraryEntry } from "@/app/types/api";
 
 /**
@@ -43,8 +45,8 @@ export function LibraryPicker({
   setFooter?: (footer: ReactNode) => void;
 }) {
   const isMobile = useIsMobile();
-  const { data } = useMcpLibrary();
-  const { data: serverData } = useMcpServers();
+  const { data } = readAsync(useAtomValue(mcpLibraryAtom));
+  const { data: serverData } = readAsync(useAtomValue(mcpServersAtom));
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const categories = useMemo(() => {

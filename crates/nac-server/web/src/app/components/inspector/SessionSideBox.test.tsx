@@ -14,12 +14,17 @@ vi.mock("@/app/hooks/useMediaQuery", () => ({
   useIsTablet: () => viewport.tablet,
 }));
 vi.mock("@/app/hooks/useSessionFetching", () => ({ useSessionFetching: () => false }));
-vi.mock("@/app/services/queries", () => ({
-  useWorkspaceRevisionChanges: () => ({ data: null }),
-  useWorkspaceRevisions: () => ({ data: [], isLoading: false, error: null }),
-  useTraditionalChildren: () => ({ data: [] }),
-  useManagedOrchestrators: () => ({ data: [] }),
-}));
+vi.mock("@/app/services/queries", async () => {
+  const { idleAtom } = await import("@/app/effect/remote");
+  return {
+    useWorkspaceRevisionChanges: () => ({ data: null }),
+    useWorkspaceRevisions: () => ({ data: [], isLoading: false, error: null }),
+    useTraditionalChildren: () => ({ data: [] }),
+    useManagedOrchestrators: () => ({ data: [] }),
+    traditionalChildren: () => idleAtom(),
+    managedOrchestrators: () => idleAtom(),
+  };
+});
 vi.mock("@/app/components/inspector/FilesView", () => ({ FilesView: () => <div>files</div> }));
 vi.mock("@/app/components/inspector/DelegatedWorkView", () => ({
   DelegatedWorkView: () => <div>delegated</div>,

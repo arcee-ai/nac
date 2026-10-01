@@ -1,12 +1,18 @@
 import { useState } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 
 import { Button, ButtonContent, ButtonVariant, Input, Modal, ModalSize } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { ApiError } from "@/app/services/api";
-import { useUpdateProject } from "@/app/services/queries";
+import { updateProjectAtom } from "@/app/services/queries";
 import type { ProjectRecord } from "@/app/types/api";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 
 /** Mounted only while open, so the fields start from the current record. */
 export function RenameProjectModal({
@@ -33,19 +39,20 @@ function RenameForm({
   onClose: () => void;
 }) {
   const toast = useToast();
-  const update = useUpdateProject();
+  const update = useAtomSet(updateProjectAtom, { mode: "promise" });
+  const updating = useAtomValue(updateProjectAtom).waiting;
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description ?? "");
 
   const submit = async () => {
-    if (update.isPending) return;
+    if (updating) return;
     const trimmed = name.trim();
     if (!trimmed) {
       toast.error("A project needs a name");
       return;
     }
     try {
-      await update.mutateAsync({
+      await update({
         projectId: project.project_id,
         payload: {
           name: trimmed,
@@ -55,7 +62,8 @@ function RenameForm({
       });
       toast.success("Project saved");
       onClose();
-    } catch (error) {
+    } catch (caught) {
+      const error = commandError(caught);
       const conflict = error instanceof ApiError && error.status === 409;
       toast.error(
         conflict
@@ -77,7 +85,7 @@ function RenameForm({
             variant={ButtonVariant.Tertiary}
             content={ButtonContent.Text}
             onClick={onClose}
-            disabled={update.isPending}
+            disabled={updating}
           >
             Cancel
           </Button>
@@ -85,7 +93,7 @@ function RenameForm({
             variant={ButtonVariant.Primary}
             content={ButtonContent.Text}
             onClick={submit}
-            loading={update.isPending}
+            loading={updating}
           >
             Save
           </Button>

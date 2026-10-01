@@ -1,7 +1,17 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Atom } from "effect/reactivity";
+import { Effect } from "effect";
+import type { AtomRegistry } from "effect/reactivity";
 
-import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries/keys";
+import {
+  idleAtom,
+  nacAtoms,
+  patchRemote,
+  refreshPrefixed,
+  remoteAtom,
+  type Remote,
+} from "@/app/effect/remote";
+import { apiEffect } from "@/app/services/api";
+import { atomIds } from "@/app/services/queries/keys";
 import type {
   CreateGoalRequest,
   InboxDelivery,
@@ -17,293 +27,275 @@ import type {
   UpdateGoalRequest,
 } from "@/app/types/api";
 
-export function useSessionPermissions(sessionId: string, enabled: boolean) {
-  return useQuery<PermissionStateResponse>({
-    queryKey: queryKeys.sessionPermissions(sessionId),
-    queryFn: ({ signal }) => api.getPermissions(sessionId, signal),
-    enabled,
-    refetchInterval: enabled ? 1_000 : false,
-    staleTime: 0,
+const DETAIL_POLL_MS = 1_000;
+
+function refreshed(registry: AtomRegistry.AtomRegistry, prefix: string) {
+  return Effect.promise(() => refreshPrefixed(registry, prefix));
+}
+
+function mapItems<T>(update: (items: T[]) => T[]) {
+  return (current: T[] | undefined) => update(current ?? []);
+}
+
+export const sessionPermissionsAtom = Atom.family((sessionId: string) =>
+  remoteAtom(atomIds.permissions(sessionId), () => apiEffect.getPermissions(sessionId), {
+    pollMs: DETAIL_POLL_MS,
+    staleMs: 0,
     retry: false,
-  });
+  }),
+);
+
+export function sessionPermissions(sessionId: string, enabled: boolean) {
+  return enabled ? sessionPermissionsAtom(sessionId) : idleAtom<PermissionStateResponse>();
 }
 
-export function useReplyPermission() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      sessionId,
-      requestId,
-      reply,
-    }: {
-      sessionId: string;
-      requestId: string;
-      reply: PermissionReply;
-    }) => api.replyPermission(sessionId, requestId, reply),
-    onSuccess: (_data, variables) =>
-      client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
-  });
-}
+export const replyPermissionAtom = nacAtoms.fn(
+  (input: { sessionId: string; requestId: string; reply: PermissionReply }, get) =>
+    apiEffect
+      .replyPermission(input.sessionId, input.requestId, input.reply)
+      .pipe(Effect.tap(() => refreshed(get.registry, atomIds.permissions(input.sessionId)))),
+);
 
-export function useSetPermissionApprovalMode() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ sessionId, mode }: { sessionId: string; mode: PermissionApprovalMode }) =>
-      api.setPermissionApprovalMode(sessionId, mode),
-    onSuccess: (_data, variables) => {
-      client.setQueryData<PermissionStateResponse>(
-        queryKeys.sessionPermissions(variables.sessionId),
-        (current) =>
-          current
-            ? {
-                ...current,
-                approval_mode: variables.mode,
-                requests: variables.mode === "auto_approve" ? [] : current.requests,
-              }
-            : current,
-      );
-    },
-  });
-}
-
-export function useDeletePermissionGrant() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ sessionId, grantId }: { sessionId: string; grantId: string }) =>
-      api.deletePermissionGrant(sessionId, grantId),
-    onSuccess: (_data, variables) =>
-      client.invalidateQueries({ queryKey: queryKeys.sessionPermissions(variables.sessionId) }),
-  });
-}
-
-export function useSessionGoal(sessionId: string, enabled: boolean) {
-  return useQuery<SessionGoalRecord | null>({
-    queryKey: queryKeys.sessionGoal(sessionId),
-    queryFn: ({ signal }) => api.getGoal(sessionId, signal),
-    enabled,
-    refetchInterval: enabled ? 1_000 : false,
-    retry: false,
-  });
-}
-
-export function useCreateGoal() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ sessionId, payload }: { sessionId: string; payload: CreateGoalRequest }) =>
-      api.createGoal(sessionId, payload),
-    onSuccess: (goal, variables) =>
-      client.setQueryData(queryKeys.sessionGoal(variables.sessionId), goal),
-  });
-}
-
-export function useUpdateGoal() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      sessionId,
-      goalId,
-      payload,
-    }: {
-      sessionId: string;
-      goalId: string;
-      payload: UpdateGoalRequest;
-    }) => api.updateGoal(sessionId, goalId, payload),
-    onSuccess: (goal, variables) =>
-      client.setQueryData(queryKeys.sessionGoal(variables.sessionId), goal),
-  });
-}
-
-export function useClearGoal() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      sessionId,
-      goalId,
-      expectedVersion,
-    }: {
-      sessionId: string;
-      goalId: string;
-      expectedVersion: number;
-    }) => api.clearGoal(sessionId, goalId, expectedVersion),
-    onSuccess: (_data, variables) =>
-      client.setQueryData(queryKeys.sessionGoal(variables.sessionId), null),
-  });
-}
-
-export function useTraditionalChildren(sessionId: string, enabled: boolean) {
-  return useQuery<TraditionalChildRecord[]>({
-    queryKey: queryKeys.traditionalChildren(sessionId),
-    queryFn: ({ signal }) => api.listTraditionalChildren(sessionId, signal),
-    enabled,
-    refetchInterval: enabled ? 1_000 : false,
-    retry: false,
-  });
-}
-
-export function useStartTraditionalChild() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      sessionId,
-      payload,
-    }: {
-      sessionId: string;
-      payload: StartTraditionalChildRequest;
-    }) => api.startTraditionalChild(sessionId, payload),
-    onSuccess: (child, variables) => {
-      client.setQueryData<TraditionalChildRecord[]>(
-        queryKeys.traditionalChildren(variables.sessionId),
-        (children = []) => {
-          const without = children.filter(
-            (candidate) => candidate.child_session_id !== child.child_session_id,
+export const setPermissionApprovalModeAtom = nacAtoms.fn(
+  (input: { sessionId: string; mode: PermissionApprovalMode }, get) =>
+    apiEffect.setPermissionApprovalMode(input.sessionId, input.mode).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          patchRemote(get.registry, sessionPermissionsAtom(input.sessionId), (current) =>
+            current
+              ? {
+                  ...current,
+                  approval_mode: input.mode,
+                  requests: input.mode === "auto_approve" ? [] : current.requests,
+                }
+              : undefined,
           );
-          return [...without, child];
-        },
-      );
-    },
-  });
-}
+        }),
+      ),
+    ),
+);
 
-export function useCancelTraditionalChild() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ sessionId, childId }: { sessionId: string; childId: string }) =>
-      api.cancelTraditionalChild(sessionId, childId),
-    onSuccess: (child, variables) => {
-      client.setQueryData<TraditionalChildRecord[]>(
-        queryKeys.traditionalChildren(variables.sessionId),
-        (children = []) =>
-          children.map((candidate) =>
-            candidate.child_session_id === child.child_session_id ? child : candidate,
-          ),
-      );
-    },
-  });
-}
+export const deletePermissionGrantAtom = nacAtoms.fn(
+  (input: { sessionId: string; grantId: string }, get) =>
+    apiEffect
+      .deletePermissionGrant(input.sessionId, input.grantId)
+      .pipe(Effect.tap(() => refreshed(get.registry, atomIds.permissions(input.sessionId)))),
+);
 
-export function useManagedOrchestrators(sessionId: string, enabled: boolean) {
-  return useQuery<ManagedOrchestratorRecord[]>({
-    queryKey: queryKeys.managedOrchestrators(sessionId),
-    queryFn: ({ signal }) => api.listManagedOrchestrators(sessionId, signal),
-    enabled,
-    refetchInterval: enabled ? 1_000 : false,
+export const sessionGoalAtom = Atom.family((sessionId: string): Remote<SessionGoalRecord | null> =>
+  remoteAtom(atomIds.goal(sessionId), () => apiEffect.getGoal(sessionId), {
+    pollMs: DETAIL_POLL_MS,
     retry: false,
-  });
+  }),
+);
+
+export function sessionGoal(sessionId: string, enabled: boolean) {
+  return enabled ? sessionGoalAtom(sessionId) : idleAtom<SessionGoalRecord | null>();
 }
 
-export function useStartManagedOrchestrator() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      sessionId,
-      payload,
-    }: {
-      sessionId: string;
-      payload: StartManagedOrchestratorRequest;
-    }) => api.startManagedOrchestrator(sessionId, payload),
-    onSuccess: (orchestrator, variables) => {
-      client.setQueryData<ManagedOrchestratorRecord[]>(
-        queryKeys.managedOrchestrators(variables.sessionId),
-        (orchestrators = []) => {
-          const without = orchestrators.filter(
-            (candidate) =>
-              candidate.orchestrator_session_id !== orchestrator.orchestrator_session_id,
+export const createGoalAtom = nacAtoms.fn(
+  (input: { sessionId: string; payload: CreateGoalRequest }, get) =>
+    apiEffect.createGoal(input.sessionId, input.payload).pipe(
+      Effect.tap((goal) =>
+        Effect.sync(() => {
+          patchRemote(get.registry, sessionGoalAtom(input.sessionId), () => goal);
+        }),
+      ),
+    ),
+);
+
+export const updateGoalAtom = nacAtoms.fn(
+  (input: { sessionId: string; goalId: string; payload: UpdateGoalRequest }, get) =>
+    apiEffect.updateGoal(input.sessionId, input.goalId, input.payload).pipe(
+      Effect.tap((goal) =>
+        Effect.sync(() => {
+          patchRemote(get.registry, sessionGoalAtom(input.sessionId), () => goal);
+        }),
+      ),
+    ),
+);
+
+export const clearGoalAtom = nacAtoms.fn(
+  (input: { sessionId: string; goalId: string; expectedVersion: number }, get) =>
+    apiEffect.clearGoal(input.sessionId, input.goalId, input.expectedVersion).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          patchRemote(get.registry, sessionGoalAtom(input.sessionId), () => null);
+        }),
+      ),
+    ),
+);
+
+export const traditionalChildrenAtom = Atom.family((sessionId: string) =>
+  remoteAtom(atomIds.children(sessionId), () => apiEffect.listTraditionalChildren(sessionId), {
+    pollMs: DETAIL_POLL_MS,
+    retry: false,
+  }),
+);
+
+export function traditionalChildren(sessionId: string, enabled: boolean) {
+  return enabled ? traditionalChildrenAtom(sessionId) : idleAtom<TraditionalChildRecord[]>();
+}
+
+export const startTraditionalChildAtom = nacAtoms.fn(
+  (input: { sessionId: string; payload: StartTraditionalChildRequest }, get) =>
+    apiEffect.startTraditionalChild(input.sessionId, input.payload).pipe(
+      Effect.tap((child) =>
+        Effect.sync(() => {
+          patchRemote(
+            get.registry,
+            traditionalChildrenAtom(input.sessionId),
+            mapItems((children) => {
+              const without = children.filter(
+                (candidate) => candidate.child_session_id !== child.child_session_id,
+              );
+              return [...without, child];
+            }),
           );
-          return [...without, orchestrator];
-        },
-      );
-    },
-  });
+        }),
+      ),
+    ),
+);
+
+export const cancelTraditionalChildAtom = nacAtoms.fn(
+  (input: { sessionId: string; childId: string }, get) =>
+    apiEffect.cancelTraditionalChild(input.sessionId, input.childId).pipe(
+      Effect.tap((child) =>
+        Effect.sync(() => {
+          patchRemote(
+            get.registry,
+            traditionalChildrenAtom(input.sessionId),
+            mapItems((children) =>
+              children.map((candidate) =>
+                candidate.child_session_id === child.child_session_id ? child : candidate,
+              ),
+            ),
+          );
+        }),
+      ),
+    ),
+);
+
+export const managedOrchestratorsAtom = Atom.family((sessionId: string) =>
+  remoteAtom(
+    atomIds.orchestrators(sessionId),
+    () => apiEffect.listManagedOrchestrators(sessionId),
+    { pollMs: DETAIL_POLL_MS, retry: false },
+  ),
+);
+
+export function managedOrchestrators(sessionId: string, enabled: boolean) {
+  return enabled ? managedOrchestratorsAtom(sessionId) : idleAtom<ManagedOrchestratorRecord[]>();
 }
 
-export function useCancelManagedOrchestrator() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ sessionId, orchestratorId }: { sessionId: string; orchestratorId: string }) =>
-      api.cancelManagedOrchestrator(sessionId, orchestratorId),
-    onSuccess: (orchestrator, variables) => {
-      client.setQueryData<ManagedOrchestratorRecord[]>(
-        queryKeys.managedOrchestrators(variables.sessionId),
-        (orchestrators = []) =>
-          orchestrators.map((candidate) =>
-            candidate.orchestrator_session_id === orchestrator.orchestrator_session_id
-              ? orchestrator
-              : candidate,
-          ),
-      );
-    },
-  });
-}
+export const startManagedOrchestratorAtom = nacAtoms.fn(
+  (input: { sessionId: string; payload: StartManagedOrchestratorRequest }, get) =>
+    apiEffect.startManagedOrchestrator(input.sessionId, input.payload).pipe(
+      Effect.tap((orchestrator) =>
+        Effect.sync(() => {
+          patchRemote(
+            get.registry,
+            managedOrchestratorsAtom(input.sessionId),
+            mapItems((orchestrators) => {
+              const without = orchestrators.filter(
+                (candidate) =>
+                  candidate.orchestrator_session_id !== orchestrator.orchestrator_session_id,
+              );
+              return [...without, orchestrator];
+            }),
+          );
+        }),
+      ),
+    ),
+);
 
-export function useSessionInbox(sessionId: string, enabled: boolean) {
-  return useQuery<InboxItem[]>({
-    queryKey: queryKeys.sessionInbox(sessionId),
-    queryFn: ({ signal }) => api.listInbox(sessionId, signal),
-    enabled,
-    refetchInterval: enabled ? 1000 : false,
+export const cancelManagedOrchestratorAtom = nacAtoms.fn(
+  (input: { sessionId: string; orchestratorId: string }, get) =>
+    apiEffect.cancelManagedOrchestrator(input.sessionId, input.orchestratorId).pipe(
+      Effect.tap((orchestrator) =>
+        Effect.sync(() => {
+          patchRemote(
+            get.registry,
+            managedOrchestratorsAtom(input.sessionId),
+            mapItems((orchestrators) =>
+              orchestrators.map((candidate) =>
+                candidate.orchestrator_session_id === orchestrator.orchestrator_session_id
+                  ? orchestrator
+                  : candidate,
+              ),
+            ),
+          );
+        }),
+      ),
+    ),
+);
+
+export const sessionInboxAtom = Atom.family((sessionId: string) =>
+  remoteAtom(atomIds.inbox(sessionId), () => apiEffect.listInbox(sessionId), {
+    pollMs: DETAIL_POLL_MS,
     retry: false,
-  });
+  }),
+);
+
+export function sessionInbox(sessionId: string, enabled: boolean) {
+  return enabled ? sessionInboxAtom(sessionId) : idleAtom<InboxItem[]>();
 }
 
-export function useCreateInboxItem() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      sessionId,
-      delivery,
-      prompt,
-    }: {
-      sessionId: string;
-      delivery: InboxDelivery;
-      prompt: string;
-    }) => api.createInboxItem(sessionId, delivery, prompt),
-    onSuccess: (item, { sessionId }) => {
-      client.setQueryData<InboxItem[]>(queryKeys.sessionInbox(sessionId), (items = []) => [
-        ...items.filter((candidate) => candidate.id !== item.id),
-        item,
-      ]);
-    },
-  });
-}
+export const createInboxItemAtom = nacAtoms.fn(
+  (input: { sessionId: string; delivery: InboxDelivery; prompt: string }, get) =>
+    apiEffect.createInboxItem(input.sessionId, input.delivery, input.prompt).pipe(
+      Effect.tap((item) =>
+        Effect.sync(() => {
+          patchRemote(
+            get.registry,
+            sessionInboxAtom(input.sessionId),
+            mapItems((items) => [...items.filter((candidate) => candidate.id !== item.id), item]),
+          );
+        }),
+      ),
+    ),
+);
 
-export function useUpdateInboxItem() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      sessionId,
-      itemId,
-      expectedVersion,
-      delivery,
-    }: {
+export const updateInboxItemAtom = nacAtoms.fn(
+  (
+    input: {
       sessionId: string;
       itemId: number;
       expectedVersion: number;
       delivery: InboxDelivery;
-    }) => api.updateInboxItem(sessionId, itemId, expectedVersion, delivery),
-    onSuccess: (item, { sessionId }) => {
-      client.setQueryData<InboxItem[]>(queryKeys.sessionInbox(sessionId), (items = []) =>
-        items.map((candidate) => (candidate.id === item.id ? item : candidate)),
-      );
     },
-  });
-}
+    get,
+  ) =>
+    apiEffect
+      .updateInboxItem(input.sessionId, input.itemId, input.expectedVersion, input.delivery)
+      .pipe(
+        Effect.tap((item) =>
+          Effect.sync(() => {
+            patchRemote(
+              get.registry,
+              sessionInboxAtom(input.sessionId),
+              mapItems((items) =>
+                items.map((candidate) => (candidate.id === item.id ? item : candidate)),
+              ),
+            );
+          }),
+        ),
+      ),
+);
 
-export function useCancelInboxItem() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      sessionId,
-      itemId,
-      expectedVersion,
-    }: {
-      sessionId: string;
-      itemId: number;
-      expectedVersion: number;
-    }) => api.cancelInboxItem(sessionId, itemId, expectedVersion),
-    onSuccess: (item, { sessionId }) => {
-      client.setQueryData<InboxItem[]>(queryKeys.sessionInbox(sessionId), (items = []) =>
-        items.map((candidate) => (candidate.id === item.id ? item : candidate)),
-      );
-    },
-  });
-}
+export const cancelInboxItemAtom = nacAtoms.fn(
+  (input: { sessionId: string; itemId: number; expectedVersion: number }, get) =>
+    apiEffect.cancelInboxItem(input.sessionId, input.itemId, input.expectedVersion).pipe(
+      Effect.tap((item) =>
+        Effect.sync(() => {
+          patchRemote(
+            get.registry,
+            sessionInboxAtom(input.sessionId),
+            mapItems((items) =>
+              items.map((candidate) => (candidate.id === item.id ? item : candidate)),
+            ),
+          );
+        }),
+      ),
+    ),
+);

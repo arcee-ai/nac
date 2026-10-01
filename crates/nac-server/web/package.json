@@ -21,8 +21,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.101.4",
+    "@effect/atom-react": "^4.0.0-rc.118",
     "clsx": "^2.1.1",
+    "effect": "^4.0.0-rc.118",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
@@ -40,7 +41,6 @@
     "@locator/runtime": "^0.5.1",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
-    "@tanstack/react-query-devtools": "^5.101.4",
     "@testing-library/react": "^16.3.2",
     "@types/babel__core": "^7.20.5",
     "@types/node": "^26.1.2",

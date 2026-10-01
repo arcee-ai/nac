@@ -1,5 +1,8 @@
+import { useAtomValue } from "@effect/atom-react";
+
 import { Loader, LoaderSize } from "@/app/atoms";
-import { useManagedHostStatus } from "@/app/features/managed/queries";
+import { readAsync } from "@/app/effect/remote";
+import { managedHostStatusAtom } from "@/app/features/managed/queries";
 import { ManagedUpgradePanel } from "@/app/features/managed/presentation/ManagedUpgradePanel";
 
 export function StatusDot({ ready }: { ready: boolean }) {
@@ -12,7 +15,7 @@ export function StatusDot({ ready }: { ready: boolean }) {
 }
 
 export function ManagedStatusPanel() {
-  const status = useManagedHostStatus();
+  const status = readAsync(useAtomValue(managedHostStatusAtom));
   if (status.isLoading) return <Loader size={LoaderSize.Medium} />;
   if (!status.data) {
     return <p className="text-error-primary">Managed host status is unavailable.</p>;

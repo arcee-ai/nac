@@ -1,37 +1,35 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Atom } from "effect/reactivity";
+import { Effect } from "effect";
 
-import { api } from "@/app/services/api";
+import { idleAtom, nacAtoms, refreshPrefixed, remoteAtom, type Remote } from "@/app/effect/remote";
+import { apiEffect } from "@/app/services/api";
 import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
-import { queryKeys } from "@/app/services/queries/keys";
+import { atomIds } from "@/app/services/queries/keys";
 import type {
   ManagedAuthProvider,
   SandboxActivity,
   SandboxAvailability,
   StoredCredentialList,
-  StoreInfo,
 } from "@/app/types/api";
 
-export function useStoreInfo() {
-  return useQuery<StoreInfo>({
-    queryKey: queryKeys.storeInfo,
-    queryFn: ({ signal }) => api.getStore(signal),
-    staleTime: Infinity,
-  });
-}
+export const storeInfoAtom = remoteAtom(atomIds.store, () => apiEffect.getStore(), {
+  staleMs: Number.POSITIVE_INFINITY,
+  retry: false,
+});
 
 /**
  * Whether this host can run sandboxed sessions. Probing spawns podman
  * subprocesses, so it runs only while a caller asks for it — today that is
  * the launch form with sandbox mode selected.
  */
-export function useSandboxAvailability(enabled: boolean) {
-  return useQuery<SandboxAvailability>({
-    queryKey: queryKeys.sandboxAvailability,
-    queryFn: ({ signal }) => api.getSandboxAvailability(signal),
-    enabled,
-    staleTime: 30_000,
-    retry: false,
-  });
+const sandboxAvailabilityRemote = remoteAtom(
+  atomIds.sandboxAvailability,
+  () => apiEffect.getSandboxAvailability(),
+  { retry: false },
+);
+
+export function sandboxAvailabilityAtom(enabled: boolean): Remote<SandboxAvailability> {
+  return enabled ? sandboxAvailabilityRemote : idleAtom();
 }
 
 /**
@@ -40,15 +38,20 @@ export function useSandboxAvailability(enabled: boolean) {
  * shows movement instead of a frozen button. Keyed by the launch id sent
  * with the create request, so concurrent launches stay independent.
  */
-export function useSandboxActivity(enabled: boolean, key: string | null) {
-  return useQuery<SandboxActivity | null>({
-    queryKey: [...queryKeys.sandboxActivity, key],
-    queryFn: ({ signal }) => api.getSandboxActivity(key as string, signal),
-    enabled: enabled && key !== null,
-    staleTime: 0,
-    refetchInterval: 1000,
+const sandboxActivityFamily = Atom.family((key: string) =>
+  remoteAtom(atomIds.sandboxActivity(key), () => apiEffect.getSandboxActivity(key), {
+    staleMs: 0,
+    pollMs: 1_000,
     retry: false,
-  });
+  }),
+);
+
+export function sandboxActivityAtom(
+  enabled: boolean,
+  key: string | null,
+): Remote<SandboxActivity | null> {
+  if (!enabled || key === null) return idleAtom();
+  return sandboxActivityFamily(key);
 }
 
 /**
@@ -56,59 +59,54 @@ export function useSandboxActivity(enabled: boolean, key: string | null) {
  * whether a session can authenticate without the environment variable being
  * set; failures are non-fatal because the environment may well supply the key.
  */
-export function useStoredCredentials(enabled = true) {
-  return useQuery<StoredCredentialList>({
-    queryKey: queryKeys.credentials,
-    queryFn: ({ signal }) => api.listCredentials(signal),
-    enabled,
-    staleTime: 30_000,
-    retry: false,
-  });
+const storedCredentialsRemote = remoteAtom(atomIds.credentials, () => apiEffect.listCredentials(), {
+  retry: false,
+});
+
+export function storedCredentialsAtom(enabled = true): Remote<StoredCredentialList> {
+  return enabled ? storedCredentialsRemote : idleAtom();
 }
 
-export function useStoreCredential() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ name, value }: { name: string; value: string }) =>
-      api.storeCredential(name, value),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.credentials }),
-  });
-}
+export const storeCredentialAtom = nacAtoms.fn((input: { name: string; value: string }, get) =>
+  apiEffect
+    .storeCredential(input.name, input.value)
+    .pipe(
+      Effect.tap(() => Effect.promise(() => refreshPrefixed(get.registry, atomIds.credentials))),
+    ),
+);
 
 /**
  * Files a key away and reports the name it was given. Used where the key is the
  * thing the user supplies and the selector is an implementation detail.
  */
-export function useStoreGeneratedCredential() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (value: string) => api.storeGeneratedCredential(value),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.credentials }),
-  });
-}
+export const storeGeneratedCredentialAtom = nacAtoms.fn((value: string, get) =>
+  apiEffect
+    .storeGeneratedCredential(value)
+    .pipe(
+      Effect.tap(() => Effect.promise(() => refreshPrefixed(get.registry, atomIds.credentials))),
+    ),
+);
 
-export function useDeleteCredential() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (name: string) => api.deleteCredential(name),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.credentials }),
-  });
-}
+export const deleteCredentialAtom = nacAtoms.fn((name: string, get) =>
+  apiEffect
+    .deleteCredential(name)
+    .pipe(
+      Effect.tap(() => Effect.promise(() => refreshPrefixed(get.registry, atomIds.credentials))),
+    ),
+);
 
 /**
  * Whether the providers that sign in through a browser are signed in. Reported
  * per provider rather than per configuration, because the credential is one
  * file in NAC home that every session using that backend shares.
  */
-export function useManagedLogout() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (provider: ManagedAuthProvider) => api.managedLogout(provider),
-    onSuccess: async () => {
+export const managedLogoutAtom = nacAtoms.fn((provider: ManagedAuthProvider, get) =>
+  apiEffect.managedLogout(provider).pipe(
+    Effect.tap(() =>
       // The model index was only readable through the login that just went
       // away, so what is cached from it is no longer true — including the copy a
       // resolved configuration carries.
-      await refreshProviderAuthentication(client);
-    },
-  });
-}
+      Effect.promise(() => refreshProviderAuthentication(get.registry)),
+    ),
+  ),
+);

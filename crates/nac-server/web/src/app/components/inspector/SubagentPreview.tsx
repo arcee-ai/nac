@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -25,7 +26,8 @@ import {
   withStreamedOutput,
   type TranscriptTurn,
 } from "@/app/lib/transcript";
-import { useLoadOlderMessages, useSessionSnapshot } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import { olderMessagesAtom, snapshotAtom } from "@/app/services/queries";
 
 function ignoreThread(): void {}
 function ignoreWorkset(): void {}
@@ -57,9 +59,9 @@ export function SubagentPreview({
   icon: IconName;
 }) {
   const navigate = useNavigate();
-  const snapshot = useSessionSnapshot(sessionId, { retry: false });
+  const snapshot = readAsync(useAtomValue(snapshotAtom(sessionId)));
   const live = useDelegatedPreviewStream(sessionId);
-  const older = useLoadOlderMessages(sessionId);
+  const loadOlderMessages = useAtomSet(olderMessagesAtom, { mode: "promise" });
   const data = snapshot.data;
   const hasOlder = Boolean(data?.message_page?.has_older);
   const windowStart = data?.message_page?.start ?? 0;
@@ -88,7 +90,6 @@ export function SubagentPreview({
     prependAnchor.current = null;
   }, [scrollRef, windowStart]);
 
-  const loadOlder = older.mutateAsync;
   useEffect(() => {
     loadingOlder.current = false;
   }, [sessionId]);
@@ -100,7 +101,7 @@ export function SubagentPreview({
     }
     loadingOlder.current = true;
     let cancelled = false;
-    void loadOlder()
+    void loadOlderMessages(sessionId)
       .then((accepted) => {
         // `false` is a settled no-op (generation moved or the page could not
         // merge), not a throw. Treat it as a failure so the shimmer cannot
@@ -116,7 +117,7 @@ export function SubagentPreview({
     return () => {
       cancelled = true;
     };
-  }, [hasOlder, loadOlder, olderFailed, scrollRef, windowStart]);
+  }, [hasOlder, loadOlderMessages, olderFailed, scrollRef, sessionId, windowStart]);
 
   const snapshotTurns = useMemo(() => buildTranscript(data ?? null, {}, {}, []), [data]);
   const submitted = running ? data?.active_run?.submitted_user_message : undefined;

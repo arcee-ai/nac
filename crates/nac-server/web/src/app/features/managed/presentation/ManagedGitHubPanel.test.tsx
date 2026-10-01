@@ -1,14 +1,22 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as remote from "@/app/effect/remote";
 import { ManagedGitHubPanel } from "@/app/features/managed/presentation/ManagedGitHubPanel";
-import { managedQueryKeys } from "@/app/features/managed/queries";
+import { managedGitHubAtom } from "@/app/features/managed/queries";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
-import type { ManagedGitHubLoginState, ManagedGitHubStatus } from "@/app/types/api";
+import { api, apiEffect } from "@/app/services/api";
+import { atomIds } from "@/app/services/queries/keys";
+import type {
+  ManagedGitHubLoginState,
+  ManagedGitHubStatus,
+  ManagedHostStatus,
+} from "@/app/types/api";
 
 const connected: ManagedGitHubStatus = {
   configured: true,
@@ -32,7 +40,19 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-let client: QueryClient;
+const getGitHub = vi.fn();
+
+beforeEach(() => {
+  getGitHub.mockReset();
+  vi.spyOn(apiEffect, "getManagedGitHub").mockImplementation(() =>
+    Effect.promise(() => getGitHub()),
+  );
+  vi.spyOn(apiEffect, "getManagedStatus").mockImplementation(() =>
+    Effect.promise(async () => ({ model_ready: false }) as ManagedHostStatus),
+  );
+});
+
+let registry: ReturnType<typeof remote.isolatedRegistry>;
 
 function mount(onConnected?: () => void) {
   vi.stubGlobal("matchMedia", () => ({
@@ -40,19 +60,18 @@ function mount(onConnected?: () => void) {
     addEventListener: () => {},
     removeEventListener: () => {},
   }));
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  registry = remote.isolatedRegistry();
   return render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <ToastProvider>
         <ManagedGitHubPanel onConnected={onConnected} />
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
 }
 
 afterEach(() => {
   cleanup();
-  client?.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -68,7 +87,7 @@ function expectConnected() {
 
 describe("ManagedGitHubPanel", () => {
   it("shows persistent connected status on reopening and preserves reconnect/disconnect", async () => {
-    vi.spyOn(api, "getManagedGitHub").mockResolvedValue(connected);
+    getGitHub.mockResolvedValue(connected);
     const start = vi.spyOn(api, "startManagedGitHubLogin").mockResolvedValue({
       login_id: "reconnect",
       user_code: "ABCD-EFGH",
@@ -89,7 +108,7 @@ describe("ManagedGitHubPanel", () => {
     expect(cancel).toHaveBeenCalledWith("reconnect");
     expectConnected();
 
-    vi.mocked(api.getManagedGitHub).mockResolvedValue(disconnected);
+    getGitHub.mockResolvedValue(disconnected);
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     await screen.findByRole("button", { name: "Connect GitHub" });
     expect(disconnect).toHaveBeenCalledOnce();
@@ -99,10 +118,7 @@ describe("ManagedGitHubPanel", () => {
   it("goes straight from the device prompt to Connected while normalization is pending", async () => {
     const poll = deferred<ManagedGitHubLoginState>();
     const refetch = deferred<ManagedGitHubStatus>();
-    const get = vi
-      .spyOn(api, "getManagedGitHub")
-      .mockResolvedValueOnce(disconnected)
-      .mockReturnValue(refetch.promise);
+    const get = getGitHub.mockResolvedValueOnce(disconnected).mockReturnValue(refetch.promise);
     vi.spyOn(api, "startManagedGitHubLogin").mockResolvedValue({
       login_id: "device-login",
       user_code: "ABCD-EFGH",
@@ -112,7 +128,7 @@ describe("ManagedGitHubPanel", () => {
     vi.spyOn(api, "pollManagedGitHubLogin").mockReturnValue(poll.promise);
     const onConnected = vi.fn();
     mount(onConnected);
-    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const invalidate = vi.spyOn(remote, "refreshPrefixed");
 
     fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
     await screen.findByTestId("github-device-code");
@@ -127,11 +143,12 @@ describe("ManagedGitHubPanel", () => {
       await act(async () => poll.resolve({ state: "complete", auth: connected }));
       await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
       expectConnected();
-      expect(client.isFetching({ queryKey: managedQueryKeys.github })).toBe(1);
+      const github = registry.get(managedGitHubAtom());
+      expect(AsyncResult.isSuccess(github) && github.waiting).toBe(true);
       expect(screen.getByText("GitHub connected")).toBeTruthy();
       expect(onConnected).toHaveBeenCalledOnce();
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: managedQueryKeys.github });
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: managedQueryKeys.hostStatus });
+      expect(invalidate).toHaveBeenCalledWith(registry, atomIds.managedGitHub);
+      expect(invalidate).toHaveBeenCalledWith(registry, atomIds.managedHostStatus);
 
       await act(async () => refetch.resolve({ ...connected, name: "Normalized profile" }));
       await screen.findByText("Normalized profile");

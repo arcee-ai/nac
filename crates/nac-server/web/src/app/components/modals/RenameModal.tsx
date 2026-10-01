@@ -1,13 +1,19 @@
 import { useState } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 
 import { Button, ButtonContent, ButtonVariant, Input, Modal, ModalSize } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useUpdatePresentation } from "@/app/services/queries";
+import { updatePresentationAtom } from "@/app/services/queries";
 import { ApiError } from "@/app/services/api";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 import { toRunError } from "@/app/lib/providerError";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 
 interface RenameModalProps {
   open: boolean;
@@ -33,15 +39,16 @@ function RenameForm({
 }) {
   const toast = useToast();
   const sessionTitle = useSessionTitle();
-  const update = useUpdatePresentation();
+  const update = useAtomSet(updatePresentationAtom, { mode: "promise" });
+  const updating = useAtomValue(updatePresentationAtom).waiting;
   const [title, setTitle] = useState(summary.title ?? "");
   const [pinned, setPinned] = useState(Boolean(summary.pinned));
   const canPin = Boolean(summary.project_id);
 
   const submit = async () => {
-    if (update.isPending) return;
+    if (updating) return;
     try {
-      await update.mutateAsync({
+      await update({
         id: summary.session_id,
         title: title.trim(),
         pinned: canPin ? pinned : false,
@@ -49,7 +56,8 @@ function RenameForm({
       });
       toast.success("Session presentation saved");
       onClose();
-    } catch (error) {
+    } catch (caught) {
+      const error = commandError(caught);
       const conflict = error instanceof ApiError && error.status === 409;
       toast.error(
         conflict
@@ -71,7 +79,7 @@ function RenameForm({
             variant={ButtonVariant.Tertiary}
             content={ButtonContent.Text}
             onClick={onClose}
-            disabled={update.isPending}
+            disabled={updating}
           >
             Cancel
           </Button>
@@ -79,7 +87,7 @@ function RenameForm({
             variant={ButtonVariant.Primary}
             content={ButtonContent.Text}
             onClick={submit}
-            loading={update.isPending}
+            loading={updating}
           >
             Save
           </Button>

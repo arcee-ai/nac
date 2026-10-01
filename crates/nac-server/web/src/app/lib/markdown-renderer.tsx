@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import {
   Suspense,
   isValidElement,
@@ -6,12 +7,12 @@ import {
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import { useLocation, useNavigate } from "react-router-dom";
 import remarkGfm from "remark-gfm";
 
 import CodeBlock, { CodeBlockSize } from "@/app/atoms/code-block";
+import { readAsync } from "@/app/effect/remote";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { splitMarkdownBlocks } from "@/app/lib/markdown-blocks";
@@ -23,14 +24,13 @@ import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { classifyMarkdownHref, markdownUrlTransform } from "@/app/lib/workspaceLink";
 import { useToast } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries";
+import { snapshotAtom } from "@/app/services/queries/session";
 import {
   revealSidePanel,
   selectFile,
   selectFileListing,
   selectRevision,
 } from "@/app/store/sessionLayoutStore";
-import type { SessionSnapshotResponse } from "@/app/types/api";
 
 const remarkPlugins = [remarkGfm];
 
@@ -132,11 +132,8 @@ function MarkdownLink({ href, children, ...props }: ComponentPropsWithoutRef<"a"
   const location = useLocation();
   const isMobile = useIsMobile();
   const toast = useToast();
-  const client = useQueryClient();
   const sessionId = sessionIdFromPath(location.pathname);
-  const snapshot = sessionId
-    ? client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(sessionId))
-    : undefined;
+  const snapshot = readAsync(useAtomValue(snapshotAtom(sessionId))).data;
   const kind = classifyMarkdownHref(href, [
     snapshot?.workspace?.host_root,
     snapshot?.metadata.workspace_host_path,

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   Button,
@@ -15,19 +16,47 @@ import {
   Modal,
   ModalSize,
 } from "@/app/atoms";
+import { idleAtom, readAsync, refreshPrefixed, remoteAtom, type Remote } from "@/app/effect/remote";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { cloneIsRunning, repositoryIdentity } from "@/app/features/managed/model";
 import { ManagedBranchPicker } from "@/app/features/managed/presentation/ManagedBranchPicker";
-import {
-  managedQueryKeys,
-  useManagedGitHub,
-  useManagedHostStatus,
-} from "@/app/features/managed/queries";
+import { managedGitHubAtom, managedHostStatusAtom } from "@/app/features/managed/queries";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries";
-import type { ManagedCloneOperation, ManagedGitHubRepository } from "@/app/types/api";
+import { api, apiEffect } from "@/app/services/api";
+import { atomIds } from "@/app/services/queries/keys";
+import type {
+  ManagedCloneOperation,
+  ManagedGitHubBranchList,
+  ManagedGitHubRepository,
+  ManagedGitHubRepositoryList,
+} from "@/app/types/api";
+
+const githubRepositoriesRemote = remoteAtom(
+  "managed-github-repositories",
+  () => apiEffect.listManagedGitHubRepositories(),
+  { retry: false },
+);
+
+function githubRepositoriesAtom(enabled: boolean): Remote<ManagedGitHubRepositoryList> {
+  return enabled ? githubRepositoriesRemote : idleAtom();
+}
+
+const githubBranchesFamily = Atom.family((fullName: string) => {
+  const identity = repositoryIdentity(fullName);
+  const owner = identity?.[0] ?? "";
+  const repository = identity?.[1] ?? "";
+  return remoteAtom(
+    `managed-github-branches\0${fullName}`,
+    () => apiEffect.listManagedGitHubBranches(owner, repository),
+    { retry: false },
+  );
+});
+
+function githubBranchesAtom(fullName: string | null): Remote<ManagedGitHubBranchList> {
+  if (!fullName) return idleAtom();
+  return githubBranchesFamily(fullName);
+}
 
 export function ManagedRepositoryModal({
   open,
@@ -40,9 +69,9 @@ export function ManagedRepositoryModal({
 }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const queryClient = useQueryClient();
-  const host = useManagedHostStatus();
-  const github = useManagedGitHub(open);
+  const registry = useContext(RegistryContext);
+  const host = readAsync(useAtomValue(managedHostStatusAtom));
+  const github = readAsync(useAtomValue(managedGitHubAtom(open)));
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<ManagedGitHubRepository | null>(null);
   const [branch, setBranch] = useState("");
@@ -52,19 +81,15 @@ export function ManagedRepositoryModal({
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
 
-  const repositories = useQuery({
-    queryKey: ["managed-github-repositories"],
-    queryFn: ({ signal }) => api.listManagedGitHubRepositories(signal),
-    enabled: open && github.data?.connected === true,
-    retry: false,
-  });
+  const repositories = readAsync(
+    useAtomValue(githubRepositoriesAtom(open && github.data?.connected === true)),
+  );
   const identity = repositoryIdentity(selected?.full_name);
-  const branches = useQuery({
-    queryKey: ["managed-github-branches", selected?.full_name],
-    queryFn: ({ signal }) => api.listManagedGitHubBranches(identity![0], identity![1], signal),
-    enabled: open && identity !== null,
-    retry: false,
-  });
+  const branches = readAsync(
+    useAtomValue(
+      githubBranchesAtom(open && identity !== null ? (selected?.full_name ?? null) : null),
+    ),
+  );
 
   useEffect(() => {
     if (!operation || !cloneIsRunning(operation)) return undefined;
@@ -79,8 +104,8 @@ export function ManagedRepositoryModal({
           if (next.status !== "running") {
             if (next.status === "completed") {
               await Promise.all([
-                queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
-                queryClient.invalidateQueries({ queryKey: managedQueryKeys.hostStatus }),
+                refreshPrefixed(registry, atomIds.projects),
+                refreshPrefixed(registry, atomIds.managedHostStatus),
               ]);
               toast.success(`${next.project_name} is ready`);
               onClose();
@@ -99,7 +124,7 @@ export function ManagedRepositoryModal({
       stopped = true;
       controller.abort();
     };
-  }, [operation, navigate, onClose, queryClient, toast]);
+  }, [operation, navigate, onClose, registry, toast]);
 
   const visibleRepositories = useMemo(() => {
     const needle = search.trim().toLowerCase();

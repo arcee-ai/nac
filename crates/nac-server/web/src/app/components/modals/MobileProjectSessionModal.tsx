@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -28,17 +29,24 @@ import {
   projectLocationPayload,
   type ProjectListItem,
 } from "@/app/lib/projects";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useToast } from "@/app/providers/ToastProvider";
 import {
-  useAssignSessionToProject,
-  useCreateProject,
-  useProjects,
-  useSessions,
+  assignSessionToProjectAtom,
+  createProjectAtom,
+  projectsAtom,
+  SESSIONS_POLL_MS,
+  sessionsAtom,
 } from "@/app/services/queries";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 import type { ManagedSessionSummary, SessionSummarySnapshot } from "@/app/types/api";
 
 type Tab = "assign" | "chats" | "projects";
@@ -82,8 +90,8 @@ export function MobileProjectSessionModal({
   const actions = useProjectActions();
   const sessionActions = useSessionActions();
   const sessionTitle = useSessionTitle();
-  const { data: projectList } = useProjects();
-  const { data: allSessions = [] } = useSessions();
+  const { data: projectList } = readAsync(useAtomValue(projectsAtom));
+  const { data: allSessions = [] } = readAsync(useAtomValue(sessionsAtom(SESSIONS_POLL_MS)));
   const orphan = summary != null && !projectId;
   const project = findProject(projectList?.projects ?? [], projectId);
 
@@ -367,16 +375,18 @@ function AssignPanel({
   onAssigned: () => void;
 }) {
   const toast = useToast();
-  const { data: projectList } = useProjects();
-  const assign = useAssignSessionToProject();
-  const createProject = useCreateProject();
+  const { data: projectList } = readAsync(useAtomValue(projectsAtom));
+  const assign = useAtomSet(assignSessionToProjectAtom, { mode: "promise" });
+  const assigning = useAtomValue(assignSessionToProjectAtom).waiting;
+  const createProject = useAtomSet(createProjectAtom, { mode: "promise" });
+  const creatingProject = useAtomValue(createProjectAtom).waiting;
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const existing = useMemo(
     () => projectForSessionLocation(projectList?.projects ?? [], summary),
     [projectList, summary],
   );
-  const busy = assign.isPending || createProject.isPending;
+  const busy = assigning || creatingProject;
 
   const submit = async () => {
     if (busy) return;
@@ -384,18 +394,18 @@ function AssignPanel({
     try {
       const project =
         existing ??
-        (await createProject.mutateAsync({
+        (await createProject({
           name: name.trim() || null,
           ...projectLocationPayload(summary),
         }));
-      await assign.mutateAsync({
+      await assign({
         projectId: project.project_id,
         sessionId: summary.session_id,
       });
       toast.success(`Assigned to ${project.name}`);
       onAssigned();
     } catch (assignError) {
-      setError(humanErrorText(toRunError(assignError)));
+      setError(humanErrorText(toRunError(commandError(assignError))));
     }
   };
 

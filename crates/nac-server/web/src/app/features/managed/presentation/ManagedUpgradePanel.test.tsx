@@ -1,19 +1,22 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { atomRefresh, isolatedRegistry } from "@/app/effect/remote";
 import { ManagedUpgradePanel } from "@/app/features/managed/presentation/ManagedUpgradePanel";
-import { managedQueryKeys } from "@/app/features/managed/queries";
+import { managedUpgradeSnapshotAtom } from "@/app/features/managed/queries";
 import type {
   ManagedUpgradeBlocker,
   ManagedUpgradeOperation,
   ManagedUpgradeReleaseIdentity,
   ManagedUpgradeSnapshot,
 } from "@/app/features/managed/upgrade";
-import { api } from "@/app/services/api";
+import { api, apiEffect } from "@/app/services/api";
 
 const current: ManagedUpgradeReleaseIdentity = {
   release_id: "0-1-4",
@@ -74,8 +77,12 @@ const fakes = {
   cancelClone: vi.fn(),
 };
 
-vi.spyOn(api, "getManagedUpgrade").mockImplementation((...args) => fakes.snapshot(...args));
-vi.spyOn(api, "startManagedUpgrade").mockImplementation((...args) => fakes.start(...args));
+vi.spyOn(apiEffect, "getManagedUpgrade").mockImplementation((...args) =>
+  Effect.promise(() => fakes.snapshot(...args)),
+);
+vi.spyOn(apiEffect, "startManagedUpgrade").mockImplementation((...args) =>
+  Effect.promise(() => fakes.start(...args)),
+);
 vi.spyOn(api, "cancelExactRun").mockImplementation((...args) => fakes.cancelExactRun(...args));
 vi.spyOn(api, "cancelTraditionalChild").mockImplementation((...args) => fakes.cancelChild(...args));
 vi.spyOn(api, "cancelManagedOrchestrator").mockImplementation((...args) =>
@@ -86,18 +93,16 @@ vi.spyOn(api, "terminateTerminal").mockImplementation((...args) =>
 );
 vi.spyOn(api, "cancelManagedClone").mockImplementation((...args) => fakes.cancelClone(...args));
 
-let client: QueryClient | null = null;
+let registry: ReturnType<typeof isolatedRegistry>;
 
 function mount() {
-  client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
+  registry = isolatedRegistry();
   return render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <MemoryRouter>
         <ManagedUpgradePanel />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
 }
 
@@ -124,8 +129,6 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  client?.clear();
-  client = null;
   vi.unstubAllGlobals();
 });
 
@@ -213,17 +216,19 @@ describe("ManagedUpgradePanel", () => {
       build_id: "build-next",
       product_version: "0.2.0-beta.3",
     };
-    if (!client) throw new Error("query client was not created");
     act(() => {
-      client?.setQueryData<ManagedUpgradeSnapshot>(managedQueryKeys.upgrade, {
-        preview: {
-          current: latest,
-          latest_beta: nextLatest,
-          upgrade_available: true,
-          distance: { accepted_releases: 1 },
-        },
-        operation: null,
-      });
+      registry.set(
+        managedUpgradeSnapshotAtom(),
+        AsyncResult.success({
+          preview: {
+            current: latest,
+            latest_beta: nextLatest,
+            upgrade_available: true,
+            distance: { accepted_releases: 1 },
+          },
+          operation: null,
+        }),
+      );
     });
     fireEvent.click(await screen.findByRole("button", { name: "Upgrade to latest beta" }));
     fireEvent.click(screen.getByRole("button", { name: "Start upgrade" }));
@@ -257,9 +262,8 @@ describe("ManagedUpgradePanel", () => {
       mount();
 
       expect(await screen.findByRole("button", { name: "Upgrade to latest beta" })).toBeTruthy();
-      if (!client) throw new Error("query client was not created");
       await act(async () => {
-        await client?.refetchQueries({ queryKey: managedQueryKeys.upgrade });
+        await atomRefresh.run(registry, managedUpgradeSnapshotAtom());
       });
 
       expect(await screen.findByTestId("managed-upgrade-unavailable")).toBeTruthy();
@@ -280,9 +284,8 @@ describe("ManagedUpgradePanel", () => {
     mount();
 
     expect(await screen.findByText("Replacing NAC")).toBeTruthy();
-    if (!client) throw new Error("query client was not created");
     await act(async () => {
-      await client?.refetchQueries({ queryKey: managedQueryKeys.upgrade });
+      await atomRefresh.run(registry, managedUpgradeSnapshotAtom());
     });
 
     expect(screen.getByText("Replacing NAC")).toBeTruthy();
@@ -401,8 +404,7 @@ describe("ManagedUpgradePanel", () => {
     expect(await screen.findByText("Upgrade complete")).toBeTruthy();
     expect(screen.getByText("Up to date")).toBeTruthy();
 
-    if (!client) throw new Error("query client was not created");
-    client.setQueryData(managedQueryKeys.upgrade, snapshot(operation("failed")));
+    registry.set(managedUpgradeSnapshotAtom(), AsyncResult.success(snapshot(operation("failed"))));
     expect(await screen.findByText("Upgrade failed")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry upgrade to latest beta" })).toBeTruthy();
   });

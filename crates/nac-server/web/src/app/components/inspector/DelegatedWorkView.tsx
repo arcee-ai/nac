@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import { useContext, useMemo, useState } from "react";
 
 import {
   Button,
@@ -22,7 +23,8 @@ import {
   showSidePanelList,
   useSubagentLaunch,
 } from "@/app/store/sessionLayoutStore";
-import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
+import { atomRefresh, readAsync } from "@/app/effect/remote";
+import { managedOrchestrators, traditionalChildren } from "@/app/services/queries";
 import type {
   ManagedOrchestratorRecord,
   SessionBehavior,
@@ -119,8 +121,11 @@ export function DelegatedWorkView({
   behavior: SessionBehavior;
 }) {
   const supportsOrchestrators = behavior === "direct-with-orchestrator";
-  const children = useTraditionalChildren(sessionId, true);
-  const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
+  const registry = useContext(RegistryContext);
+  const children = readAsync(useAtomValue(traditionalChildren(sessionId, true)));
+  const orchestrators = readAsync(
+    useAtomValue(managedOrchestrators(sessionId, supportsOrchestrators)),
+  );
   const launch = useSubagentLaunch();
   const launchRequest = useSubagentLaunchRequest();
   const now = useNow(60_000);
@@ -196,8 +201,10 @@ export function DelegatedWorkView({
         size={ButtonSize.Small}
         variant={ButtonVariant.Ghost}
         onClick={() => {
-          void children.refetch();
-          if (supportsOrchestrators) void orchestrators.refetch();
+          void atomRefresh.run(registry, traditionalChildren(sessionId, true));
+          if (supportsOrchestrators) {
+            void atomRefresh.run(registry, managedOrchestrators(sessionId, supportsOrchestrators));
+          }
         }}
       >
         Try again

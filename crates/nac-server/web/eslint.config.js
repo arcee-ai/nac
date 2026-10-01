@@ -23,9 +23,9 @@ export default tseslint.config([
     },
   },
   {
-    // Design-system atoms and providers deliberately export their variant enums
-    // and hooks next to the component, which costs those files Fast Refresh.
-    files: ["src/app/atoms/**", "src/app/providers/**"],
+    // Design-system atoms, providers, and the Effect cache deliberately export
+    // hooks next to their provider, which costs those files Fast Refresh.
+    files: ["src/app/atoms/**", "src/app/providers/**", "src/app/effect/**"],
     rules: { "react-refresh/only-export-components": "off" },
   },
   {

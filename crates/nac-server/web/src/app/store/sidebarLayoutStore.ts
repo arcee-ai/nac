@@ -1,16 +1,13 @@
-import { createStore } from "@/app/lib/store";
+import { Atom } from "effect/reactivity";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 
-interface SidebarLayoutState {
-  /** Pixels the session sidebar reserves. Zero when that sidebar is not mounted. */
-  offset: number;
-}
-
-const sidebarLayoutStore = createStore<SidebarLayoutState>({ offset: 0 }, "sidebar-layout");
-
-export function setSidebarOffset(offset: number): void {
-  sidebarLayoutStore.setState({ offset });
-}
+/** Pixels the session sidebar reserves. Zero when that sidebar is not mounted. */
+export const sidebarOffsetAtom = Atom.keepAlive(Atom.make(0));
 
 export function useSidebarOffset(): number {
-  return sidebarLayoutStore.useStore((state) => state.offset);
+  return useAtomValue(sidebarOffsetAtom);
+}
+
+export function useSetSidebarOffset(): (offset: number) => void {
+  return useAtomSet(sidebarOffsetAtom);
 }

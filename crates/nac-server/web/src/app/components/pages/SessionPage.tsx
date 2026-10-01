@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -21,6 +22,8 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
+import { readAsync } from "@/app/effect/remote";
+import { toRunError } from "@/app/lib/providerError";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import type { SessionBehavior } from "@/app/types/api";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -32,10 +35,12 @@ import {
   type SessionPanel,
 } from "@/app/lib/routes";
 import {
-  useSessionSnapshot,
-  useSessionSummary,
-  useSshConnect,
-  useWorkspaceRevisionChanges,
+  selectSession,
+  SESSIONS_POLL_MS,
+  sessionsAtom,
+  snapshotAtom,
+  sshConnectAtom,
+  workspaceRevisionChanges,
 } from "@/app/services/queries";
 import { clearAttention } from "@/app/store/attentionStore";
 import {
@@ -83,7 +88,8 @@ function useAutoSshConnect(
 ) {
   const target = useMemo(() => sshTargetFromSummary(summary), [summary]);
   const status = useSshConnectionStatus(target);
-  const connect = useSshConnect();
+  const connect = useAtomSet(sshConnectAtom, { mode: "promise" });
+  const connecting = useAtomValue(sshConnectAtom).waiting;
   const attemptedKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -97,13 +103,12 @@ function useAutoSshConnect(
       attemptedKey.current = key;
       return;
     }
-    if (attemptedKey.current === key || connect.isPending) return;
+    if (attemptedKey.current === key || connecting) return;
     attemptedKey.current = key;
-    void connect
-      .mutateAsync(target)
+    void connect(target)
       .then(() => markSshConnected(target))
       .catch(() => markSshDisconnected(target));
-  }, [target, status, connect]);
+  }, [target, status, connect, connecting]);
 }
 
 /** Session screen: the Files/Worksets/Threads box beside a permanent chat. */
@@ -117,8 +122,10 @@ export default function SessionPage() {
 
   perfRender("SessionPage");
 
-  const { data: snapshot = null, error, refetch: refetchSnapshot } = useSessionSnapshot(id);
-  const { data: entry = null } = useSessionSummary(id);
+  const snapshotQuery = readAsync(useAtomValue(snapshotAtom(id)));
+  const snapshot = snapshotQuery.data ?? null;
+  const refetchSnapshot = useAtomRefresh(snapshotAtom(id));
+  const entry = selectSession(useAtomValue(sessionsAtom(SESSIONS_POLL_MS)), id) ?? null;
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
   const animateSidePanel = useSidePanelAnimate();
@@ -156,9 +163,13 @@ export default function SessionPage() {
   }, [effectivePanel, id, navigate, panel, snapshot]);
   // The phone dialog header shows the selected file's +/- badge; a revision
   // reports its own totals rather than the live workspace ones.
-  const revisionChanges = useWorkspaceRevisionChanges(
-    id,
-    isMobile && effectivePanel === "files" ? selectedRevision : null,
+  const revisionChanges = readAsync(
+    useAtomValue(
+      workspaceRevisionChanges(
+        id,
+        isMobile && effectivePanel === "files" ? selectedRevision : null,
+      ),
+    ),
   );
 
   useEffect(() => {
@@ -189,7 +200,8 @@ export default function SessionPage() {
   const configError = entry?.summary.model_config_error;
   // The repair notice already explains a broken config, and that is exactly why
   // the snapshot request fails, so only report an unexplained fetch failure.
-  const failure = configError ?? (!snapshot && error ? error : null);
+  const failure =
+    configError ?? (!snapshot && snapshotQuery.error ? toRunError(snapshotQuery.error) : null);
   const errorNotice = failure ? toNotice(failure, () => void refetchSnapshot()) : null;
 
   const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));

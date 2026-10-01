@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 
 import {
   Button,
@@ -18,17 +19,19 @@ import { EntryDetails } from "@/app/components/modals/MCPServersModal/McpEntryDe
 import { KvEditor } from "@/app/components/modals/MCPServersModal/McpKvEditor";
 import { FooterButton } from "@/app/components/modals/ModalFooterButton";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { cn } from "@/app/lib/cn";
 import { literalsOnly, mapFromRows, rowsFromRecord, type KvRow } from "@/app/lib/mcpKvRows";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { toRunError } from "@/app/lib/providerError";
 import {
-  useCreateMcpServer,
-  useDeleteMcpServer,
-  useMcpRuntimeAction,
-  useMcpRuntimeStatus,
-  useTestMcpServer,
-  useUpdateMcpServer,
+  createMcpServerAtom,
+  deleteMcpServerAtom,
+  mcpRuntimeActionAtom,
+  mcpRuntimeAtom,
+  testMcpServerAtom,
+  updateMcpServerAtom,
 } from "@/app/services/queries";
 import type {
   McpLibraryEntry,
@@ -37,6 +40,10 @@ import type {
   McpServerView,
   McpTransport,
 } from "@/app/types/api";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 
 const TRANSPORT_ITEMS: { id: McpTransport; label: string }[] = [
   { id: "streamable_http", label: "Streamable HTTP" },
@@ -94,12 +101,17 @@ export function McpServerForm({
 }) {
   const isMobile = useIsMobile();
   const toast = useToast();
-  const createServer = useCreateMcpServer();
-  const updateServer = useUpdateMcpServer();
-  const deleteServer = useDeleteMcpServer();
-  const testServer = useTestMcpServer();
-  const runtimeStatus = useMcpRuntimeStatus();
-  const runtimeAction = useMcpRuntimeAction();
+  const createServer = useAtomSet(createMcpServerAtom, { mode: "promise" });
+  const creatingServer = useAtomValue(createMcpServerAtom).waiting;
+  const updateServer = useAtomSet(updateMcpServerAtom, { mode: "promise" });
+  const updatingServer = useAtomValue(updateMcpServerAtom).waiting;
+  const deleteServer = useAtomSet(deleteMcpServerAtom, { mode: "promise" });
+  const deletingServer = useAtomValue(deleteMcpServerAtom).waiting;
+  const testServer = useAtomSet(testMcpServerAtom, { mode: "promise" });
+  const testingServer = useAtomValue(testMcpServerAtom).waiting;
+  const runtimeStatus = readAsync(useAtomValue(mcpRuntimeAtom));
+  const runtimeAction = useAtomSet(mcpRuntimeActionAtom, { mode: "promise" });
+  const runtimeActionWaiting = useAtomValue(mcpRuntimeActionAtom).waiting;
 
   const [name, setName] = useState(record?.name ?? template?.name ?? "");
   const [enabled, setEnabled] = useState(record?.enabled ?? true);
@@ -157,13 +169,9 @@ export function McpServerForm({
   const [tools, setTools] = useState<McpProbedTool[] | null>(null);
   const runtime = runtimeStatus.data?.servers.find((status) => status.name === record?.name);
 
-  const busy =
-    createServer.isPending ||
-    updateServer.isPending ||
-    deleteServer.isPending ||
-    testServer.isPending;
+  const busy = creatingServer || updatingServer || deletingServer || testingServer;
   // Runtime operations are serialized server-side as well.
-  const operationBusy = busy || runtimeAction.isPending;
+  const operationBusy = busy || runtimeActionWaiting;
 
   const validate = (): string | null => {
     if (!name.trim()) return "A name is required.";
@@ -192,7 +200,7 @@ export function McpServerForm({
       : null;
     try {
       if (!record) {
-        const created = await createServer.mutateAsync({
+        const created = await createServer({
           name: name.trim(),
           enabled,
           required,
@@ -220,7 +228,7 @@ export function McpServerForm({
         onSaved(created.name);
         toast.success("MCP server saved.");
       } else {
-        const updated = await updateServer.mutateAsync({
+        const updated = await updateServer({
           serverName: record.name,
           payload: {
             name: name.trim(),
@@ -249,25 +257,25 @@ export function McpServerForm({
         toast.success("MCP server updated.");
       }
     } catch (error) {
-      toast.error(`Save failed: ${errorMessage(toRunError(error))}`);
+      toast.error(`Save failed: ${errorMessage(toRunError(commandError(error)))}`);
     }
   };
 
   const remove = async () => {
     if (!record) return;
     try {
-      await deleteServer.mutateAsync(record.name);
+      await deleteServer(record.name);
       onDeleted();
       toast.success("MCP server deleted.");
     } catch (error) {
-      toast.error(`Delete failed: ${errorMessage(toRunError(error))}`);
+      toast.error(`Delete failed: ${errorMessage(toRunError(commandError(error)))}`);
     }
   };
 
   const operate = async (action: "connect" | "disconnect" | "reload") => {
     if (!record) return;
     try {
-      const status = await runtimeAction.mutateAsync({ serverName: record.name, action });
+      const status = await runtimeAction({ serverName: record.name, action });
       if (status.state === "failed") {
         toast.error(status.error ?? "MCP runtime operation failed.");
       } else {
@@ -291,7 +299,7 @@ export function McpServerForm({
     }
     setTools(null);
     try {
-      const result = await testServer.mutateAsync({
+      const result = await testServer({
         stored_name: record?.name ?? null,
         name: name.trim() || null,
         transport,
@@ -332,7 +340,7 @@ export function McpServerForm({
         } found.`,
       );
     } catch (error) {
-      toast.error(`Test failed: ${errorMessage(toRunError(error))}`);
+      toast.error(`Test failed: ${errorMessage(toRunError(commandError(error)))}`);
     }
   };
 
@@ -692,7 +700,7 @@ export function McpServerForm({
               content={ButtonContent.IconLeft}
             >
               <Icon iconName={IconName.Bolt} />
-              {testServer.isPending ? "Testing…" : "Test connection"}
+              {testingServer ? "Testing…" : "Test connection"}
             </Button>
             {tools ? (
               <span className="text-small text-basic-muted">

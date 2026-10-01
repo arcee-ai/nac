@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
@@ -24,8 +25,9 @@ import { isActiveRun, parseStoreTime } from "@/app/lib/format";
 import { findProject, primarySessions } from "@/app/lib/projects";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
+import { readAsync } from "@/app/effect/remote";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useProjects, useSessions } from "@/app/services/queries";
+import { projectsAtom, SESSIONS_POLL_MS, sessionsAtom } from "@/app/services/queries";
 
 /**
  * The trail is project-first: `All Projects > [identicon] Project ⌄ ⊕`.
@@ -42,8 +44,8 @@ export function Breadcrumbs() {
   const actions = useProjectActions();
   const isMobile = useIsMobile();
   const sessionTitle = useSessionTitle();
-  const { data: projectList } = useProjects();
-  const { data: sessions = [] } = useSessions();
+  const { data: projectList } = readAsync(useAtomValue(projectsAtom));
+  const { data: sessions = [] } = readAsync(useAtomValue(sessionsAtom(SESSIONS_POLL_MS)));
   const [open, setOpen] = useState(false);
 
   const currentEntry = sessionId

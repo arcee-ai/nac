@@ -1,7 +1,14 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
+
 import { Button, ButtonContent, ButtonSize, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useRevertSession } from "@/app/services/queries";
+import { revertSessionAtom } from "@/app/services/queries";
 import { toRunError } from "@/app/lib/providerError";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 
 interface RevertModalProps {
   open: boolean;
@@ -20,12 +27,13 @@ interface RevertModalProps {
  */
 export function RevertModal({ open, onClose, sessionId, messageIdx, prompt }: RevertModalProps) {
   const toast = useToast();
-  const revert = useRevertSession();
+  const revert = useAtomSet(revertSessionAtom, { mode: "promise" });
+  const reverting = useAtomValue(revertSessionAtom).waiting;
 
   const submit = async () => {
-    if (messageIdx == null || revert.isPending) return;
+    if (messageIdx == null || reverting) return;
     try {
-      const outcome = await revert.mutateAsync({ id: sessionId, messageIdx });
+      const outcome = await revert({ id: sessionId, messageIdx });
       toast.success(
         outcome.workspace_restored
           ? "Reverted to this snapshot"
@@ -33,7 +41,7 @@ export function RevertModal({ open, onClose, sessionId, messageIdx, prompt }: Re
       );
       onClose();
     } catch (error) {
-      toast.error(`Failed to revert: ${errorMessage(toRunError(error))}`);
+      toast.error(`Failed to revert: ${errorMessage(toRunError(commandError(error)))}`);
     }
   };
 
@@ -50,7 +58,7 @@ export function RevertModal({ open, onClose, sessionId, messageIdx, prompt }: Re
             size={ButtonSize.Large}
             content={ButtonContent.Text}
             onClick={onClose}
-            disabled={revert.isPending}
+            disabled={reverting}
           >
             Cancel
           </Button>
@@ -59,7 +67,7 @@ export function RevertModal({ open, onClose, sessionId, messageIdx, prompt }: Re
             size={ButtonSize.Large}
             content={ButtonContent.Text}
             onClick={submit}
-            loading={revert.isPending}
+            loading={reverting}
           >
             Revert
           </Button>

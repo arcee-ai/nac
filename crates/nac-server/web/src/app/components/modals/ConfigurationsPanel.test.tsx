@@ -1,21 +1,47 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import {
   ConfigurationsPanel,
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
+import { isolatedRegistry } from "@/app/effect/remote";
+import {
+  managedHostStatusAtom,
+  managedProviderModelsAtom,
+  managedProviderModelsKey,
+} from "@/app/features/managed/queries";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+import { apiEffect } from "@/app/services/api";
 import type {
   ManagedHostStatus,
   ModelCatalog,
   ModelConfigurationList,
   ResolvedModelConfiguration,
 } from "@/app/types/api";
+
+function spyResolved(method: string, value: unknown) {
+  const target = apiEffect as unknown as Record<string, (...args: unknown[]) => unknown>;
+  return vi
+    .spyOn(target, method)
+    .mockImplementation(() => Effect.promise(() => Promise.resolve(value)));
+}
+
+function spyRejected(method: string, error: unknown) {
+  const target = apiEffect as unknown as Record<string, (...args: unknown[]) => unknown>;
+  return vi
+    .spyOn(target, method)
+    .mockImplementation(() => Effect.promise(() => Promise.reject(error)));
+}
+
+function successValue(result: AsyncResult.AsyncResult<unknown, unknown>): unknown {
+  return AsyncResult.isSuccess(result) ? result.value : undefined;
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -82,26 +108,36 @@ beforeEach(() => {
 });
 
 it("treats a successful empty entitlement index as authoritative for rows and defaults", async () => {
-  vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
-  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
-  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
-  vi.spyOn(api, "listProviderModels").mockResolvedValue({
+  spyResolved("getManagedStatus", hostStatus);
+  spyResolved("listModelConfigs", { configurations: [] });
+  spyResolved("getModelCatalog", catalog);
+  spyResolved("listProviderModels", {
     base_url: hostStatus.model.endpoint,
     models: [],
   });
   const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const registry = isolatedRegistry();
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <ToastProvider>
         <ConfigurationsPanel invalid={false} onChange={onChange} />
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
   try {
     await waitFor(() =>
       expect(
-        client.getQueryData(["managed-provider-models", "arcee-api", hostStatus.model.endpoint]),
+        successValue(
+          registry.get(
+            managedProviderModelsAtom(
+              managedProviderModelsKey({
+                backend: "arcee-api",
+                base_url: hostStatus.model.endpoint,
+                api_key_env: "ARCEE_API_KEY",
+              }),
+            ),
+          ),
+        ),
       ).toEqual({ base_url: hostStatus.model.endpoint, models: [] }),
     );
     await waitFor(() =>
@@ -114,23 +150,22 @@ it("treats a successful empty entitlement index as authoritative for rows and de
     expect(screen.queryByText("Trinity")).toBeNull();
   } finally {
     view.unmount();
-    client.clear();
   }
 });
 
 it("uses the configured managed default only when live discovery is unavailable", async () => {
-  vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
-  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
-  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
-  vi.spyOn(api, "listProviderModels").mockRejectedValue(new Error("offline"));
+  spyResolved("getManagedStatus", hostStatus);
+  spyResolved("listModelConfigs", { configurations: [] });
+  spyResolved("getModelCatalog", catalog);
+  spyRejected("listProviderModels", new Error("offline"));
   const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const registry = isolatedRegistry();
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <ToastProvider>
         <ConfigurationsPanel invalid={false} onChange={onChange} />
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
   try {
     await waitFor(() =>
@@ -144,7 +179,6 @@ it("uses the configured managed default only when live discovery is unavailable"
     );
   } finally {
     view.unmount();
-    client.clear();
   }
 });
 
@@ -155,25 +189,27 @@ it("never emits a managed default between status, catalog, and entitlement hydra
     base_url: string;
     models: Array<{ id: string; display_name: string | null }>;
   }>();
-  vi.spyOn(api, "getManagedStatus").mockReturnValue(host.promise);
-  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
-  vi.spyOn(api, "getModelCatalog").mockReturnValue(catalogRequest.promise);
-  const discovery = vi.spyOn(api, "listProviderModels").mockReturnValue(entitlement.promise);
+  spyResolved("getManagedStatus", host.promise);
+  spyResolved("listModelConfigs", { configurations: [] });
+  spyResolved("getModelCatalog", catalogRequest.promise);
+  const discovery = spyResolved("listProviderModels", entitlement.promise);
   const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const registry = isolatedRegistry();
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <ToastProvider>
         <ConfigurationsPanel invalid={false} onChange={onChange} />
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
   const onlyNullSelections = () =>
     onChange.mock.calls.length > 0 &&
     onChange.mock.calls.every(([selection]) => selection === null);
   try {
     host.resolve(hostStatus);
-    await waitFor(() => expect(client.getQueryData(["managed-host-status"])).toEqual(hostStatus));
+    await waitFor(() =>
+      expect(successValue(registry.get(managedHostStatusAtom))).toEqual(hostStatus),
+    );
     expect(onlyNullSelections()).toBe(true);
     expect(discovery).not.toHaveBeenCalled();
 
@@ -196,7 +232,6 @@ it("never emits a managed default between status, catalog, and entitlement hydra
     );
   } finally {
     view.unmount();
-    client.clear();
   }
 });
 
@@ -208,10 +243,10 @@ afterEach(() => {
 it("waits for persisted configurations and managed status before emitting an implicit default", async () => {
   const host = deferred<ManagedHostStatus>();
   const configs = deferred<ModelConfigurationList>();
-  vi.spyOn(api, "getManagedStatus").mockReturnValue(host.promise);
-  vi.spyOn(api, "listModelConfigs").mockReturnValue(configs.promise);
-  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
-  vi.spyOn(api, "resolveModelConfig").mockResolvedValue({
+  spyResolved("getManagedStatus", host.promise);
+  spyResolved("listModelConfigs", configs.promise);
+  spyResolved("getModelCatalog", catalog);
+  spyResolved("resolveModelConfig", {
     backend: "openai-responses",
     model: "gpt-5.6-sol",
     base_url: "https://api.openai.com/v1",
@@ -222,20 +257,22 @@ it("waits for persisted configurations and managed status before emitting an imp
     models_error: null,
   } satisfies ResolvedModelConfiguration);
   const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const registry = isolatedRegistry();
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <ToastProvider>
         <ConfigurationsPanel invalid={false} onChange={onChange} />
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
   try {
     await waitFor(() => expect(onChange).toHaveBeenCalled());
     expect(onChange.mock.calls.every(([selection]) => selection === null)).toBe(true);
 
     host.resolve(hostStatus);
-    await waitFor(() => expect(client.getQueryData(["managed-host-status"])).toEqual(hostStatus));
+    await waitFor(() =>
+      expect(successValue(registry.get(managedHostStatusAtom))).toEqual(hostStatus),
+    );
     expect(onChange.mock.calls.every(([selection]) => selection === null)).toBe(true);
 
     configs.resolve({
@@ -273,14 +310,13 @@ it("waits for persisted configurations and managed status before emitting an imp
     ).toBe(false);
   } finally {
     view.unmount();
-    client.clear();
   }
 });
 
 it("preserves exact inherited advanced settings when duplicate presets share basic identity", async () => {
-  vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
-  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
-  vi.spyOn(api, "listModelConfigs").mockResolvedValue({
+  spyResolved("getManagedStatus", hostStatus);
+  spyResolved("getModelCatalog", catalog);
+  spyResolved("listModelConfigs", {
     configurations: ["first", "second"].map((suffix, index) => ({
       config_id: `saved-config-${suffix}`,
       name: `Saved provider ${suffix}`,
@@ -301,7 +337,7 @@ it("preserves exact inherited advanced settings when duplicate presets share bas
       updated_at: "2026-09-08T00:00:00Z",
     })),
   });
-  vi.spyOn(api, "resolveModelConfig").mockResolvedValue({
+  spyResolved("resolveModelConfig", {
     backend: "openai-responses",
     model: "gpt-5.6-sol",
     base_url: "https://api.openai.com/v1",
@@ -312,9 +348,9 @@ it("preserves exact inherited advanced settings when duplicate presets share bas
     models_error: null,
   });
   const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const registry = isolatedRegistry();
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <ToastProvider>
         <ConfigurationsPanel
           invalid={false}
@@ -329,7 +365,7 @@ it("preserves exact inherited advanced settings when duplicate presets share bas
           onChange={onChange}
         />
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
   try {
     await waitFor(() =>
@@ -355,23 +391,22 @@ it("preserves exact inherited advanced settings when duplicate presets share bas
     );
   } finally {
     view.unmount();
-    client.clear();
   }
 });
 
 it("emits a custom public HTTPS endpoint without a separate trust repair", async () => {
-  vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
-  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
-  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
-  const discovery = vi.spyOn(api, "listProviderModels");
+  spyResolved("getManagedStatus", hostStatus);
+  spyResolved("listModelConfigs", { configurations: [] });
+  spyResolved("getModelCatalog", catalog);
+  const discovery = spyResolved("listProviderModels", { base_url: "", models: [] });
   const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const registry = isolatedRegistry();
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <ToastProvider>
         <ConfigurationsPanel invalid={false} onChange={onChange} />
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
   try {
     fireEvent.click(await screen.findByRole("button", { name: "Browse Models" }));
@@ -412,22 +447,21 @@ it("emits a custom public HTTPS endpoint without a separate trust repair", async
     );
   } finally {
     view.unmount();
-    client.clear();
   }
 });
 
 it("requires an explicit warning-backed switch before emitting public HTTP opt-in", async () => {
-  vi.spyOn(api, "getManagedStatus").mockResolvedValue(hostStatus);
-  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
-  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
+  spyResolved("getManagedStatus", hostStatus);
+  spyResolved("listModelConfigs", { configurations: [] });
+  spyResolved("getModelCatalog", catalog);
   const onChange = vi.fn<(selection: LaunchModelSelection | null) => void>();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const registry = isolatedRegistry();
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <ToastProvider>
         <ConfigurationsPanel invalid={false} onChange={onChange} />
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
   try {
     fireEvent.click(await screen.findByRole("button", { name: "Browse Models" }));
@@ -471,6 +505,5 @@ it("requires an explicit warning-backed switch before emitting public HTTP opt-i
     );
   } finally {
     view.unmount();
-    client.clear();
   }
 });

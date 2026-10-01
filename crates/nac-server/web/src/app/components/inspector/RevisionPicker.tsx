@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 
 import {
@@ -11,9 +12,11 @@ import {
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { formatStoreTime } from "@/app/lib/format";
+import { readAsync } from "@/app/effect/remote";
+import { toRunError } from "@/app/lib/providerError";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { revisionOrdinal, revisionTitle } from "@/app/lib/revisions";
-import { useWorkspaceRevisions } from "@/app/services/queries";
+import { workspaceRevisions } from "@/app/services/queries";
 import type { WorkspaceRevision } from "@/app/types/api";
 
 function Row({
@@ -76,7 +79,7 @@ export function RevisionPicker({
 }) {
   const [open, setOpen] = useState(false);
 
-  const { data, isLoading, error } = useWorkspaceRevisions(sessionId);
+  const { data, isLoading, error } = readAsync(useAtomValue(workspaceRevisions(sessionId)));
 
   const revisions = data ?? [];
   const ordinalOf = (index: number) => revisionOrdinal(index, revisions.length);
@@ -111,7 +114,9 @@ export function RevisionPicker({
           ) : null}
 
           {error ? (
-            <div className="p-1 label-micro text-error-primary">{errorMessage(error)}</div>
+            <div className="p-1 label-micro text-error-primary">
+              {errorMessage(toRunError(error))}
+            </div>
           ) : null}
 
           {!isLoading && !error ? (

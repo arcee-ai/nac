@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { ReactNode } from "react";
 
 import { Button, ButtonContent, ButtonVariant, Icon, IconName, Tooltip } from "@/app/atoms";
@@ -5,7 +6,8 @@ import { TooltipPosition } from "@/app/atoms/tooltip";
 import { PanelCountBadge } from "@/app/components/inspector/PanelCountBadge";
 import { panelBadgeCount, PANEL_ICON } from "@/app/components/inspector/sessionPanelIcons";
 import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
-import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import { managedOrchestrators, traditionalChildren } from "@/app/services/queries";
 import type { SessionBehavior, SessionSnapshotResponse } from "@/app/types/api";
 
 /** Icon column left behind once the right panel has slid away. Matches the left rail. */
@@ -31,10 +33,11 @@ export function RightSidebarRail({
   onSelect: (panel: SessionPanel) => void;
 }) {
   const subagents = panels.includes("delegated");
-  const children = useTraditionalChildren(sessionId, subagents);
-  const orchestrators = useManagedOrchestrators(
-    sessionId,
-    subagents && behavior === "direct-with-orchestrator",
+  const children = readAsync(useAtomValue(traditionalChildren(sessionId, subagents)));
+  const orchestrators = readAsync(
+    useAtomValue(
+      managedOrchestrators(sessionId, subagents && behavior === "direct-with-orchestrator"),
+    ),
   );
   const subagentCount = (children.data?.length ?? 0) + (orchestrators.data?.length ?? 0);
   const worksetCount = snapshot?.worksets?.items.length ?? 0;

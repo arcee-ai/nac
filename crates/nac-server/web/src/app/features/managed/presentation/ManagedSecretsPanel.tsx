@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -13,19 +14,27 @@ import {
   LoaderSize,
   Separator,
 } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { managedSecretNameError } from "@/app/features/managed/model";
 import {
-  useDeleteManagedSecret,
-  useManagedSecrets,
-  usePutManagedSecret,
+  deleteManagedSecretAtom,
+  managedSecretsAtom,
+  putManagedSecretAtom,
 } from "@/app/features/managed/queries";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 
+function commandFailure(error: unknown): unknown {
+  return error instanceof ClientRequestError ? error.error : error;
+}
+
 export function ManagedSecretsPanel() {
-  const secrets = useManagedSecrets();
-  const put = usePutManagedSecret();
-  const remove = useDeleteManagedSecret();
+  const secrets = readAsync(useAtomValue(managedSecretsAtom()));
+  const putSecret = useAtomSet(putManagedSecretAtom, { mode: "promise" });
+  const putPending = useAtomValue(putManagedSecretAtom).waiting;
+  const deleteSecret = useAtomSet(deleteManagedSecretAtom, { mode: "promise" });
+  const deletePending = useAtomValue(deleteManagedSecretAtom).waiting;
   const toast = useToast();
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
@@ -40,13 +49,13 @@ export function ManagedSecretsPanel() {
     const invalid = managedSecretNameError(name);
     if (invalid || value.length === 0) return;
     try {
-      await put.mutateAsync({ name, value });
+      await putSecret({ name, value });
       setName("");
       setValue("");
       setAttempted(false);
       toast.success("Secret saved for future command spawns");
     } catch (error) {
-      toast.error(`Secret was not saved: ${errorMessage(toRunError(error))}`);
+      toast.error(`Secret was not saved: ${errorMessage(toRunError(commandFailure(error)))}`);
     }
   };
 
@@ -97,7 +106,7 @@ export function ManagedSecretsPanel() {
           variant={ButtonVariant.Primary}
           content={ButtonContent.Text}
           onClick={() => void save()}
-          loading={put.isPending}
+          loading={putPending}
         >
           Save secret
         </Button>
@@ -124,13 +133,15 @@ export function ManagedSecretsPanel() {
               aria-label={`Delete ${secret.name}`}
               onClick={async () => {
                 try {
-                  await remove.mutateAsync(secret.name);
+                  await deleteSecret(secret.name);
                   toast.success(`${secret.name} removed from future command spawns`);
                 } catch (error) {
-                  toast.error(`Secret was not removed: ${errorMessage(toRunError(error))}`);
+                  toast.error(
+                    `Secret was not removed: ${errorMessage(toRunError(commandFailure(error)))}`,
+                  );
                 }
               }}
-              loading={remove.isPending}
+              loading={deletePending}
             >
               <Icon iconName={IconName.Trash} />
             </Button>

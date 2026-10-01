@@ -1,3 +1,5 @@
+import { useAtomValue } from "@effect/atom-react";
+
 import {
   Button,
   ButtonContent,
@@ -21,7 +23,8 @@ import { useSessionFetching } from "@/app/hooks/useSessionFetching";
 import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
-import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import { managedOrchestrators, traditionalChildren } from "@/app/services/queries";
 import {
   selectRevision,
   selectThread,
@@ -91,10 +94,11 @@ export function SessionSideBox({
   const delegatedTranscript = panelPolicy?.readOnly ?? false;
   const widePanels = panelPolicy?.widePanels ?? [];
   const subagents = widePanels.includes("delegated");
-  const children = useTraditionalChildren(sessionId, subagents);
-  const orchestrators = useManagedOrchestrators(
-    sessionId,
-    subagents && behavior === "direct-with-orchestrator",
+  const children = readAsync(useAtomValue(traditionalChildren(sessionId, subagents)));
+  const orchestrators = readAsync(
+    useAtomValue(
+      managedOrchestrators(sessionId, subagents && behavior === "direct-with-orchestrator"),
+    ),
   );
   const subagentCount = (children.data?.length ?? 0) + (orchestrators.data?.length ?? 0);
 

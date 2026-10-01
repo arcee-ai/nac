@@ -1,3 +1,5 @@
+import { useAtomValue } from "@effect/atom-react";
+
 import {
   Button,
   ButtonContent,
@@ -7,8 +9,9 @@ import {
   IconName,
   StickyButton,
 } from "@/app/atoms";
+import { readAsync } from "@/app/effect/remote";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-import { useMcpServers } from "@/app/services/queries";
+import { mcpServersAtom } from "@/app/services/queries";
 
 /**
  * The tools a session can reach for are worth one tap from anywhere, so they
@@ -21,7 +24,7 @@ import { useMcpServers } from "@/app/services/queries";
  */
 export function McpServersButton({ onOpen }: { onOpen: () => void }) {
   const isMobile = useIsMobile();
-  const { data } = useMcpServers();
+  const { data } = readAsync(useAtomValue(mcpServersAtom));
   const active = data?.servers.filter((server) => server.enabled).length ?? 0;
   // The badge itself is decorative, so the count rides on the button's name.
   const label = active ? `MCP servers, ${active} active` : "MCP servers";

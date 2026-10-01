@@ -8,9 +8,9 @@ server remains the source of business truth and wire schemas.
 
 - `src/app/features/<feature>/` owns feature model helpers, queries, controller
   hooks/context, and presentation when a workflow spans those concerns.
-- `src/app/services/api.ts` is the HTTP transport adapter. TanStack query keys,
-  caching, cancellation, invalidation, and polling belong to query owners, not
-  presentational components.
+- `src/app/services/api.ts` is the HTTP transport adapter. Effect atom query
+  keys, caching, cancellation, invalidation, and polling belong to query
+  owners, not presentational components.
 - `packages/nac-client/` owns the runtime-free ALL-121 typed HTTP/SSE boundary.
   The standalone service modules are compatibility facades; do not fork its
   transport, replay, reconnect, or command-admission logic back into the app.

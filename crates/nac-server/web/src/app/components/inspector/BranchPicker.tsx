@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 
 import {
@@ -15,8 +16,11 @@ import {
   TabButton,
   TabButtonSize,
 } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
+import { toRunError } from "@/app/lib/providerError";
 import { errorMessage } from "@/app/providers/ToastProvider";
-import { useBranches, useSwitchBranch } from "@/app/services/queries";
+import { branches as loadBranches, switchBranchAtom } from "@/app/services/queries";
 import { useRunning } from "@/app/store/runtimeStore";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -94,15 +98,17 @@ export function BranchPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [switchError, setSwitchError] = useState<unknown>(null);
 
   const running = useRunning(sessionId);
-  const { data, isLoading, error } = useBranches(sessionId, open);
-  const switchBranch = useSwitchBranch(sessionId);
+  const { data, isLoading, error } = readAsync(useAtomValue(loadBranches(sessionId, open)));
+  const switchBranch = useAtomSet(switchBranchAtom, { mode: "promise" });
+  const switching = useAtomValue(switchBranchAtom).waiting;
 
   const close = () => {
     setOpen(false);
     setQuery("");
-    switchBranch.reset();
+    setSwitchError(null);
   };
 
   const needle = query.trim();
@@ -118,13 +124,18 @@ export function BranchPicker({
   const switchReason = blockedReason(running, dirty, false);
   const isMobile = useIsMobile();
   const act = (name: string, create: boolean) => {
-    switchBranch.mutate({ name, create }, { onSuccess: close });
+    setSwitchError(null);
+    void switchBranch({ id: sessionId, payload: { name, create } })
+      .then(() => close())
+      .catch((cause: unknown) => {
+        setSwitchError(cause instanceof ClientRequestError ? cause.error : cause);
+      });
   };
 
   const failure = error
-    ? errorMessage(error)
-    : switchBranch.error
-      ? errorMessage(switchBranch.error)
+    ? errorMessage(toRunError(error))
+    : switchError
+      ? errorMessage(toRunError(switchError))
       : null;
 
   return (
@@ -189,7 +200,7 @@ export function BranchPicker({
             </div>
           ) : null}
 
-          {switchBranch.isPending ? (
+          {switching ? (
             <div className="shrink-0">
               <Status busy>Working…</Status>
             </div>

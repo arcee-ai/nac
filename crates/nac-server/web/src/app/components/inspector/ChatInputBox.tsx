@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -49,24 +59,27 @@ import {
   skillReferenceSegments,
   type SkillReferenceSegment,
 } from "@/app/lib/skillReferences";
+import { ClientRequestError } from "@/app/effect/errors";
+import { atomRefresh, readAsync } from "@/app/effect/remote";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
-  useCompactSession,
-  useCancelInboxItem,
-  useClearGoal,
-  useCreateGoal,
-  useCreateInboxItem,
-  useModelCatalog,
-  useSessionGoal,
-  useSessionInbox,
-  useSshConnect,
-  useSteerOrchestrator,
-  useSessionSkills,
-  useSubmitRun,
-  useSlashCommands,
-  useUpdateGoal,
-  useUpdateInboxItem,
+  cancelInboxItemAtom,
+  clearGoalAtom,
+  compactSessionAtom,
+  createGoalAtom,
+  createInboxItemAtom,
+  modelCatalogAtom,
+  sessionGoal,
+  sessionGoalAtom,
+  sessionInbox,
+  sessionCommandsAtom,
+  sessionSkillsAtom,
+  sshConnectAtom,
+  steerOrchestratorAtom,
+  submitRunAtom,
+  updateGoalAtom,
+  updateInboxItemAtom,
 } from "@/app/services/queries";
 import { consumePromptRequests } from "@/app/store/composerStore";
 import { openSubagentLaunch, revealSidePanel } from "@/app/store/sessionLayoutStore";
@@ -258,6 +271,10 @@ function contextGauge(used: number | null, resolved: ResolvedCatalogModel) {
   };
 }
 
+function commandCause(error: unknown): unknown {
+  return error instanceof ClientRequestError ? error.error : error;
+}
+
 /**
  * Message field plus the run status bar that replaced the old metrics grid:
  * model, environment, cumulative token usage and the run timer.
@@ -291,24 +308,34 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const maxHeightPx = isMobile ? MAX_HEIGHT_PX.mobile : MAX_HEIGHT_PX.wide;
   const running = useRunning(sessionId);
   const stopping = useCancelArmed(sessionId);
+  const registry = useContext(RegistryContext);
   const toast = useToast();
   const actions = useSessionActions();
-  const submitRun = useSubmitRun();
-  const steerOrchestrator = useSteerOrchestrator();
-  const compactSession = useCompactSession();
-  const createInboxItem = useCreateInboxItem();
-  const updateInboxItem = useUpdateInboxItem();
-  const cancelInboxItem = useCancelInboxItem();
+  const submitRun = useAtomSet(submitRunAtom, { mode: "promise" });
+  const submitting = useAtomValue(submitRunAtom).waiting;
+  const steerOrchestrator = useAtomSet(steerOrchestratorAtom, { mode: "promise" });
+  const steering = useAtomValue(steerOrchestratorAtom).waiting;
+  const compactSession = useAtomSet(compactSessionAtom, { mode: "promise" });
+  const compacting = useAtomValue(compactSessionAtom).waiting;
+  const createInboxItem = useAtomSet(createInboxItemAtom, { mode: "promise" });
+  const creatingInbox = useAtomValue(createInboxItemAtom).waiting;
+  const updateInboxItem = useAtomSet(updateInboxItemAtom, { mode: "promise" });
+  const updatingInbox = useAtomValue(updateInboxItemAtom).waiting;
+  const cancelInboxItem = useAtomSet(cancelInboxItemAtom, { mode: "promise" });
+  const cancellingInbox = useAtomValue(cancelInboxItemAtom).waiting;
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const lineage = entry?.lineage ?? snapshot?.lineage ?? null;
   const readOnly = lineage != null;
   const ownershipKnown = entry !== null || snapshot !== null;
-  const inboxQuery = useSessionInbox(sessionId, direct && !readOnly);
-  const goalQuery = useSessionGoal(sessionId, direct && !readOnly);
-  const createGoal = useCreateGoal();
-  const updateGoal = useUpdateGoal();
-  const clearGoal = useClearGoal();
+  const inboxQuery = readAsync(useAtomValue(sessionInbox(sessionId, direct && !readOnly)));
+  const goalQuery = readAsync(useAtomValue(sessionGoal(sessionId, direct && !readOnly)));
+  const createGoal = useAtomSet(createGoalAtom, { mode: "promise" });
+  const creatingGoal = useAtomValue(createGoalAtom).waiting;
+  const updateGoal = useAtomSet(updateGoalAtom, { mode: "promise" });
+  const updatingGoal = useAtomValue(updateGoalAtom).waiting;
+  const clearGoal = useAtomSet(clearGoalAtom, { mode: "promise" });
+  const clearingGoal = useAtomValue(clearGoalAtom).waiting;
   const [goalOpenRequest, setGoalOpenRequest] = useState(0);
   const [goalEditing, setGoalEditing] = useState(false);
   const [goalSessionId, setGoalSessionId] = useState(sessionId);
@@ -316,12 +343,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     setGoalSessionId(sessionId);
     setGoalEditing(false);
   }
-  const {
-    data: commandDefinitions,
-    isError: commandsFailed,
-    refetch: refetchCommands,
-  } = useSlashCommands(sessionId);
-  const { data: skillDefinitions, isError: skillsFailed } = useSessionSkills(sessionId);
+  const commands = readAsync(useAtomValue(sessionCommandsAtom(sessionId)));
+  const commandDefinitions = commands.data;
+  const commandsFailed = commands.isError;
+  const skills = readAsync(useAtomValue(sessionSkillsAtom(sessionId)));
+  const skillDefinitions = skills.data;
+  const skillsFailed = skills.isError;
   const ref = useRef<HTMLTextAreaElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const completionCaretRef = useRef<number | null>(null);
@@ -341,7 +368,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   }, [snapshot]);
   const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
-  const catalog = useModelCatalog();
+  const catalog = readAsync(useAtomValue(modelCatalogAtom()));
   const persistedUsage = tokenUsage(snapshot);
   // A fork inherits context but not spend, so the gauge must not depend on
   // billed usage being present.
@@ -359,22 +386,23 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   const sshTarget = sshTargetFromSummary(entry?.summary);
   const sshStatus = useSshConnectionStatus(sshTarget);
-  const connectSsh = useSshConnect();
+  const connectSsh = useAtomSet(sshConnectAtom, { mode: "promise" });
+  const connectingSsh = useAtomValue(sshConnectAtom).waiting;
   const isSsh = sessionEnvLabel(entry?.summary) === ENV_SSH;
 
   const runningDirect = running && direct && !readOnly;
   const runningClassic = running && behavior === "orchestrator" && !readOnly;
   const runningInteractive = runningDirect || runningClassic;
   const mutationPending =
-    submitRun.isPending ||
-    steerOrchestrator.isPending ||
-    compactSession.isPending ||
-    createInboxItem.isPending ||
-    updateInboxItem.isPending ||
-    cancelInboxItem.isPending ||
-    createGoal.isPending ||
-    updateGoal.isPending ||
-    clearGoal.isPending;
+    submitting ||
+    steering ||
+    compacting ||
+    creatingInbox ||
+    updatingInbox ||
+    cancellingInbox ||
+    creatingGoal ||
+    updatingGoal ||
+    clearingGoal;
   const busy = mutationPending || stopping || (running && !runningInteractive);
   const canSend = Boolean(value.trim()) && !busy;
   const pendingInbox = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
@@ -384,16 +412,20 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     delivery: InboxDelivery,
   ) => {
     try {
-      await updateInboxItem.mutateAsync({ sessionId, itemId, expectedVersion, delivery });
+      await updateInboxItem({ sessionId, itemId, expectedVersion, delivery });
     } catch (error) {
-      toast.error(`Unable to change pending message: ${errorMessage(toRunError(error))}`);
+      toast.error(
+        `Unable to change pending message: ${errorMessage(toRunError(commandCause(error)))}`,
+      );
     }
   };
   const cancelPendingInbox = async (itemId: number, expectedVersion: number) => {
     try {
-      await cancelInboxItem.mutateAsync({ sessionId, itemId, expectedVersion });
+      await cancelInboxItem({ sessionId, itemId, expectedVersion });
     } catch (error) {
-      toast.error(`Unable to cancel pending message: ${errorMessage(toRunError(error))}`);
+      toast.error(
+        `Unable to cancel pending message: ${errorMessage(toRunError(commandCause(error)))}`,
+      );
     }
   };
 
@@ -622,24 +654,25 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   }, []);
 
   const reconnectSsh = useCallback(async () => {
-    if (!sshTarget || connectSsh.isPending) return;
+    if (!sshTarget || connectingSsh) return;
     try {
-      await connectSsh.mutateAsync(sshTarget);
+      await connectSsh(sshTarget);
       markSshConnected(sshTarget);
     } catch (error) {
       markSshDisconnected(sshTarget);
-      toast.error(`SSH reconnect failed: ${errorMessage(toRunError(error))}`);
+      toast.error(`SSH reconnect failed: ${errorMessage(toRunError(commandCause(error)))}`);
     }
-  }, [sshTarget, connectSsh, toast]);
+  }, [connectingSsh, connectSsh, sshTarget, toast]);
 
   const runGoalCommand = useCallback(
     async (text: string) => {
       if (!direct) throw new Error("Durable goals are available only in direct chats");
       let goal = goalQuery.data;
       if (goal === undefined) {
-        const result = await goalQuery.refetch();
-        if (result.error) throw result.error;
-        goal = result.data;
+        await atomRefresh.run(registry, sessionGoalAtom(sessionId));
+        const loaded = readAsync(registry.get(sessionGoalAtom(sessionId)));
+        if (loaded.error) throw loaded.error;
+        goal = loaded.data;
       }
 
       const argument = text.trim().slice("/goal".length).trim();
@@ -650,7 +683,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       }
       if (argument === "clear") {
         if (!goal) throw new Error("There is no durable goal to clear");
-        await clearGoal.mutateAsync({
+        await clearGoal({
           sessionId,
           goalId: goal.goal_id,
           expectedVersion: goal.version,
@@ -659,7 +692,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       }
       if (argument === "pause" || argument === "resume") {
         if (!goal) throw new Error(`There is no durable goal to ${argument}`);
-        await updateGoal.mutateAsync({
+        await updateGoal({
           sessionId,
           goalId: goal.goal_id,
           payload: {
@@ -674,9 +707,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           "An unfinished durable goal already exists; use /goal edit or /goal clear first",
         );
       }
-      await createGoal.mutateAsync({ sessionId, payload: { objective: argument } });
+      await createGoal({ sessionId, payload: { objective: argument } });
     },
-    [clearGoal, createGoal, direct, goalQuery, isMobile, sessionId, updateGoal],
+    [clearGoal, createGoal, direct, goalQuery.data, isMobile, registry, sessionId, updateGoal],
   );
 
   /**
@@ -702,8 +735,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       try {
         let definitions = commandDefinitions;
         if (text.trimStart().startsWith("/") && definitions === undefined) {
-          const result = await refetchCommands();
-          definitions = result.data;
+          await atomRefresh.run(registry, sessionCommandsAtom(sessionId));
+          definitions = readAsync(registry.get(sessionCommandsAtom(sessionId))).data;
           if (definitions === undefined) {
             toast.error("Unable to load slash commands");
             return;
@@ -713,12 +746,13 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         const command = definitions ? submittedSlashCommand(text, definitions) : null;
         if (command?.command === "compact") {
           try {
-            await compactSession.mutateAsync(sessionId);
+            await compactSession(sessionId);
             pushLocalEvent("compaction", "▶ compacting context…");
             clearField();
           } catch (error) {
-            pushLocalEvent("error", `compact failed: ${errorMessage(toRunError(error))}`, true);
-            toast.error(`Failed to compact: ${humanErrorText(toRunError(error), backend)}`);
+            const cause = commandCause(error);
+            pushLocalEvent("error", `compact failed: ${errorMessage(toRunError(cause))}`, true);
+            toast.error(`Failed to compact: ${humanErrorText(toRunError(cause), backend)}`);
           }
           return;
         }
@@ -727,7 +761,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             await runGoalCommand(prompt);
             clearField();
           } catch (error) {
-            toast.error(`Goal command failed: ${humanErrorText(toRunError(error))}`);
+            toast.error(`Goal command failed: ${humanErrorText(toRunError(commandCause(error)))}`);
           }
           return;
         }
@@ -738,18 +772,19 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         try {
           if (runningDirect || requestedDelivery) {
             const delivery = requestedDelivery ?? "steer";
-            await createInboxItem.mutateAsync({ sessionId, delivery, prompt });
+            await createInboxItem({ sessionId, delivery, prompt });
             pushLocalEvent("steering", `▶ ${delivery}: ${prompt.slice(0, 80)}`);
           } else if (runningClassic) {
-            await steerOrchestrator.mutateAsync({ id: sessionId, instruction: prompt });
+            await steerOrchestrator({ id: sessionId, instruction: prompt });
           } else {
-            await submitRun.mutateAsync({ id: sessionId, prompt });
+            await submitRun({ id: sessionId, prompt });
             pushLocalEvent("run", `▶ submitted: ${prompt.slice(0, 80)}`);
           }
           clearField();
         } catch (error) {
-          pushLocalEvent("error", `submit failed: ${errorMessage(toRunError(error))}`, true);
-          toast.error(`Failed to send: ${humanErrorText(toRunError(error), backend)}`);
+          const cause = commandCause(error);
+          pushLocalEvent("error", `submit failed: ${errorMessage(toRunError(cause))}`, true);
+          toast.error(`Failed to send: ${humanErrorText(toRunError(cause), backend)}`);
         }
       } finally {
         submitInFlight.current = false;
@@ -760,7 +795,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       backend,
       busy,
       commandDefinitions,
-      refetchCommands,
+      registry,
       sessionId,
       submitRun,
       compactSession,

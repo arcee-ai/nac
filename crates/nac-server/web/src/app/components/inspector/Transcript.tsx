@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "react-router-dom";
 import {
   Fragment,
@@ -44,18 +45,20 @@ import {
   STREAMING_TURN_KEY,
   type TranscriptTurn,
 } from "@/app/lib/transcript";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
-  useDismissSessionFork,
-  useForkSession,
-  useLoadOlderMessages,
-  useRegenerateRun,
-  useSessionGoal,
-  useSessionPermissions,
-  useSubmitRun,
-  useUpdateGoal,
-  useWorkspaceRevisions,
+  dismissSessionForkAtom,
+  forkSessionAtom,
+  olderMessagesAtom,
+  regenerateRunAtom,
+  sessionGoal,
+  sessionPermissions,
+  submitRunAtom,
+  updateGoalAtom,
+  workspaceRevisions,
 } from "@/app/services/queries";
 import {
   selectFile,
@@ -98,6 +101,10 @@ interface TranscriptProps {
    * paired with whatever can be done about it.
    */
   errorNotice?: ErrorNotice | null;
+}
+
+function commandCause(error: unknown): unknown {
+  return error instanceof ClientRequestError ? error.error : error;
 }
 
 export function TranscriptRecoveryNotice({ warning }: { warning?: string | null }) {
@@ -244,18 +251,22 @@ export function Transcript({
   // Read before the notice is built, since hook order cannot depend on whether
   // this run failed.
   const authErrorSuppressed = useAuthErrorSuppressed(backend, error);
-  const submitRun = useSubmitRun();
-  const regenerateRun = useRegenerateRun();
-  const forkSession = useForkSession();
-  const dismissFork = useDismissSessionFork();
-  const olderMessages = useLoadOlderMessages(sessionId);
-  const { data: revisions } = useWorkspaceRevisions(sessionId);
+  const submitting = useAtomValue(submitRunAtom).waiting;
+  const regenerateRun = useAtomSet(regenerateRunAtom, { mode: "promise" });
+  const regenerating = useAtomValue(regenerateRunAtom).waiting;
+  const forkSession = useAtomSet(forkSessionAtom, { mode: "promise" });
+  const forking = useAtomValue(forkSessionAtom).waiting;
+  const dismissFork = useAtomSet(dismissSessionForkAtom, { mode: "promise" });
+  const olderState = useAtomValue(olderMessagesAtom);
+  const loadOlder = useAtomSet(olderMessagesAtom, { mode: "promise" });
+  const olderMessages = readAsync(olderState);
+  const { data: revisions } = readAsync(useAtomValue(workspaceRevisions(sessionId)));
   const direct =
     snapshot?.metadata.behavior === "direct" ||
     snapshot?.metadata.behavior === "direct-with-orchestrator";
-  const goalQuery = useSessionGoal(sessionId, direct);
-  const updateGoal = useUpdateGoal();
-  const { data: permissions } = useSessionPermissions(sessionId, direct);
+  const goalQuery = readAsync(useAtomValue(sessionGoal(sessionId, direct)));
+  const updateGoal = useAtomSet(updateGoalAtom, { mode: "promise" });
+  const { data: permissions } = readAsync(useAtomValue(sessionPermissions(sessionId, direct)));
   const pendingPermissionCallIds = useMemo(
     () =>
       new Set(
@@ -292,15 +303,14 @@ export function Transcript({
         top: scroller.scrollTop,
       };
     }
-    void olderMessages
-      .mutateAsync()
+    void loadOlder(sessionId)
       .then((accepted) => {
         if (!accepted) prependAnchor.current = null;
       })
       .catch(() => {
         prependAnchor.current = null;
       });
-  }, [olderMessages, scrollRef]);
+  }, [loadOlder, scrollRef, sessionId]);
 
   perfRender("Transcript");
 
@@ -368,8 +378,7 @@ export function Transcript({
   });
 
   const refreshIndex = useMemo(() => resendTargetIndex(turns), [turns]);
-  const actionsBusy =
-    running || stopping || submitRun.isPending || regenerateRun.isPending || forkSession.isPending;
+  const actionsBusy = running || stopping || submitting || regenerating || forking;
   const [revertTarget, setRevertTarget] = useState<{
     messageIdx: number;
     prompt: string;
@@ -381,10 +390,9 @@ export function Transcript({
    * starts the new run under one lease — the prompt itself comes from the
    * transcript, so nothing here has to reconstruct it.
    */
-  // The mutation object is rebuilt on every render, but its `mutateAsync` is
-  // not — depending on the object would hand the bubble a new handler per delta
-  // and undo its memoization.
-  const regenerate = regenerateRun.mutateAsync;
+  // The setter is stable. Depending on a fresh wrapper would hand the bubble a
+  // new handler per delta and undo its memoization.
+  const regenerate = regenerateRun;
   const resend = useCallback(
     (messageIdx: number) => {
       if (actionsBusy) return;
@@ -396,15 +404,16 @@ export function Transcript({
           });
           pushLocalEvent("run", `▶ regenerated: ${response.display_prompt.slice(0, 80)}`);
         } catch (err) {
-          pushLocalEvent("error", `regeneration failed: ${errorMessage(toRunError(err))}`, true);
-          toast.error(`Failed to regenerate: ${humanErrorText(toRunError(err), backend)}`);
+          const cause = commandCause(err);
+          pushLocalEvent("error", `regeneration failed: ${errorMessage(toRunError(cause))}`, true);
+          toast.error(`Failed to regenerate: ${humanErrorText(toRunError(cause), backend)}`);
         }
       })();
     },
     [actionsBusy, backend, regenerate, sessionId, toast],
   );
 
-  const fork = forkSession.mutateAsync;
+  const fork = forkSession;
   const createFork = useCallback(
     (messageIdx: number) => {
       if (actionsBusy) return;
@@ -413,7 +422,9 @@ export function Transcript({
           const response = await fork({ id: sessionId, messageIdx });
           navigate(routes.session(response.session_id));
         } catch (err) {
-          toast.error(`Failed to create fork: ${humanErrorText(toRunError(err), backend)}`);
+          toast.error(
+            `Failed to create fork: ${humanErrorText(toRunError(commandCause(err)), backend)}`,
+          );
         }
       })();
     },
@@ -427,24 +438,23 @@ export function Transcript({
     [navigate],
   );
 
-  const removeForkMarker = dismissFork.mutate;
   const dismissForkMarker = useCallback(
     (forkId: string) => {
-      removeForkMarker(
-        { id: sessionId, forkId },
-        {
-          onError: (err) => {
-            toast.error(`Failed to dismiss fork: ${humanErrorText(toRunError(err), backend)}`);
-          },
-        },
-      );
+      void dismissFork({ id: sessionId, forkId }).catch((err: unknown) => {
+        toast.error(
+          `Failed to dismiss fork: ${humanErrorText(toRunError(commandCause(err)), backend)}`,
+        );
+      });
     },
-    [backend, removeForkMarker, sessionId, toast],
+    [backend, dismissFork, sessionId, toast],
   );
 
-  const openRevert = useCallback((messageIdx: number, prompt: string) => {
-    setRevertTarget({ messageIdx, prompt });
-  }, []);
+  const openRevert = useCallback(
+    (messageIdx: number, prompt: string) => {
+      setRevertTarget({ messageIdx, prompt });
+    },
+    [setRevertTarget],
+  );
 
   const isMobile = useIsMobile();
 
@@ -541,15 +551,15 @@ export function Transcript({
           onClick: () => {
             const goal = goalQuery.data;
             if (!goal) return;
-            void updateGoal
-              .mutateAsync({
-                sessionId,
-                goalId: goal.goal_id,
-                payload: { expected_version: goal.version, status: "active" },
-              })
-              .catch((err) =>
-                toast.error(`Failed to resume goal: ${humanErrorText(toRunError(err), backend)}`),
-              );
+            void updateGoal({
+              sessionId,
+              goalId: goal.goal_id,
+              payload: { expected_version: goal.version, status: "active" },
+            }).catch((err: unknown) =>
+              toast.error(
+                `Failed to resume goal: ${humanErrorText(toRunError(commandCause(err)), backend)}`,
+              ),
+            );
           },
         }
       : recoveryAffordance === "settings"
@@ -636,10 +646,10 @@ export function Transcript({
                 variant={ButtonVariant.Ghost}
                 size={ButtonSize.Small}
                 content={ButtonContent.Text}
-                disabled={olderMessages.isPending}
+                disabled={olderState.waiting}
                 onClick={loadOlderMessages}
               >
-                {olderMessages.isPending ? "Loading…" : "Load older"}
+                {olderState.waiting ? "Loading…" : "Load older"}
               </Button>
               {olderMessages.isError ? (
                 <div role="alert" className="flex items-center gap-2 text-basic-muted label-small">

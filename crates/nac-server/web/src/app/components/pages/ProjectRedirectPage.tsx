@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { Navigate, useParams } from "react-router-dom";
 
 import { Loader, LoaderSize } from "@/app/atoms";
+import { atomRefresh, readAsync } from "@/app/effect/remote";
 import { newestPrimarySessionForProject } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useProjects, useSessions } from "@/app/services/queries";
+import { projectsAtom, SESSIONS_POLL_MS, sessionsAtom } from "@/app/services/queries";
 
 /**
  * One in-flight create per project, so React StrictMode replaying the mount
@@ -23,17 +26,24 @@ const firstChatByProject = new Map<string, Promise<void>>();
 export default function ProjectRedirectPage() {
   const { projectId = "" } = useParams();
   const actions = useProjectActions();
-  const projectsQuery = useProjects();
-  const sessionsQuery = useSessions();
+  const registry = useContext(RegistryContext);
+  const projectsQuery = readAsync(useAtomValue(projectsAtom));
+  const sessionsQuery = readAsync(useAtomValue(sessionsAtom(SESSIONS_POLL_MS)));
   const [confirmedProjectId, setConfirmedProjectId] = useState<string | null>(null);
 
-  const refetchProjects = projectsQuery.refetch;
-  const refetchSessions = sessionsQuery.refetch;
   useEffect(() => {
     let current = true;
-    void Promise.all([refetchProjects(), refetchSessions()])
-      .then(([projects, sessions]) => {
-        if (current && projects.isSuccess && sessions.isSuccess) {
+    const projectsRead = projectsAtom;
+    const sessionsRead = sessionsAtom(SESSIONS_POLL_MS);
+    void Promise.all([
+      atomRefresh.run(registry, projectsRead),
+      atomRefresh.run(registry, sessionsRead),
+    ])
+      .then(() => {
+        if (!current) return;
+        const projects = registry.get(projectsRead);
+        const sessions = registry.get(sessionsRead);
+        if (AsyncResult.isSuccess(projects) && AsyncResult.isSuccess(sessions)) {
           setConfirmedProjectId(projectId);
         }
       })
@@ -41,7 +51,7 @@ export default function ProjectRedirectPage() {
     return () => {
       current = false;
     };
-  }, [projectId, refetchProjects, refetchSessions]);
+  }, [projectId, registry]);
 
   const project = useMemo(
     () => projectsQuery.data?.projects.find((entry) => entry.project_id === projectId) ?? null,

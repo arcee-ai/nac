@@ -1,13 +1,15 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { Effect } from "effect";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadsView } from "@/app/components/inspector/ThreadsView";
+import { isolatedRegistry } from "@/app/effect/remote";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+import { apiEffect } from "@/app/services/api";
 import { resetRuntime, runtimeStore } from "@/app/store/runtimeStore";
 import { sessionLayoutStore } from "@/app/store/sessionLayoutStore";
 import type { SessionSnapshotResponse } from "@/app/types/api";
@@ -19,8 +21,14 @@ vi.mock("@/app/hooks/useMediaQuery", () => ({
   useIsTablet: () => viewport.tablet,
 }));
 
-const getThreadEvents = vi.spyOn(api, "getThreadEvents");
-const steerThread = vi.spyOn(api, "steerThread");
+const getThreadEvents = vi.fn();
+const steerThread = vi.fn();
+vi.spyOn(apiEffect, "getThreadEvents").mockImplementation((...args) =>
+  Effect.promise(() => getThreadEvents(...args)),
+);
+vi.spyOn(apiEffect, "steerThread").mockImplementation((...args) =>
+  Effect.promise(() => steerThread(...args)),
+);
 
 function NavigateAway() {
   const navigate = useNavigate();
@@ -73,11 +81,9 @@ function mount({
           }
         : {},
   });
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
+  const registry = isolatedRegistry();
   render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <MemoryRouter>
         <ToastProvider>
           <NavigateAway />
@@ -89,7 +95,7 @@ function mount({
           />
         </ToastProvider>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
 }
 

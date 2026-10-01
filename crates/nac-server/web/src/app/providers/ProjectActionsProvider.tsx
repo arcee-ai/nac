@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -6,20 +7,22 @@ import { CreateProjectModal } from "@/app/components/modals/CreateProjectModal";
 import { NewChatModal } from "@/app/components/modals/NewChatModal";
 import { DeleteProjectModal } from "@/app/components/modals/DeleteProjectModal";
 import { RenameProjectModal } from "@/app/components/modals/RenameProjectModal";
+import { readAsync } from "@/app/effect/remote";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { primarySessions, projectForSessionLocation } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_CHAT_KEYS, NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import {
+  assignSessionToProjectAtom,
+  projectsAtom,
+  toggleProjectPinAtom,
+} from "@/app/services/queries/projects";
+import { sessionsAtom } from "@/app/services/queries/session";
+import { SESSIONS_POLL_MS } from "@/app/services/queries/keys";
 import { pruneChatTabs } from "@/app/store/chatTabsStore";
 import { pruneSessionNavigation } from "@/app/store/sessionNavigationStore";
-import {
-  useAssignSessionToProject,
-  useProjects,
-  useSessions,
-  useToggleProjectPin,
-} from "@/app/services/queries";
 import type { ProjectRecord, SessionSummarySnapshot } from "@/app/types/api";
 
 interface ProjectActions {
@@ -49,18 +52,17 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   const toast = useToast();
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { data: sessions = [], isSuccess: sessionsLoaded } = useSessions();
-  const { data: projectList } = useProjects();
-  const pin = useToggleProjectPin();
-  const assignSession = useAssignSessionToProject();
+  const sessionsView = readAsync(useAtomValue(sessionsAtom(SESSIONS_POLL_MS)));
+  const sessions = useMemo(() => sessionsView.data ?? [], [sessionsView.data]);
+  const sessionsLoaded = sessionsView.isSuccess;
+  const projectList = readAsync(useAtomValue(projectsAtom)).data;
+  const togglePin = useAtomSet(toggleProjectPinAtom, { mode: "promise" });
+  const adoptSession = useAtomSet(assignSessionToProjectAtom, { mode: "promise" });
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [session, setSession] = useState<SessionSummarySnapshot | null>(null);
   const [newChatProjectId, setNewChatProjectId] = useState<string | null>(null);
   const [requiredFirstChat, setRequiredFirstChat] = useState(false);
-
-  const togglePin = pin.toggle;
-  const adoptSession = assignSession.mutateAsync;
 
   const adopt = useCallback(
     async (target: ProjectRecord, summary: SessionSummarySnapshot) => {

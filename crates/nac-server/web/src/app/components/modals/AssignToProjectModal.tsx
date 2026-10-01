@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 
 import {
   Button,
@@ -12,10 +13,20 @@ import {
 } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { projectForSessionLocation, projectLocationPayload } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
-import { useAssignSessionToProject, useCreateProject, useProjects } from "@/app/services/queries";
+import {
+  assignSessionToProjectAtom,
+  createProjectAtom,
+  projectsAtom,
+} from "@/app/services/queries";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 import type { SessionSummarySnapshot } from "@/app/types/api";
 
 /**
@@ -37,9 +48,11 @@ export function AssignToProjectModal({
   const toast = useToast();
   const isMobile = useIsMobile();
   const sessionTitle = useSessionTitle();
-  const { data: projectList } = useProjects();
-  const assign = useAssignSessionToProject();
-  const createProject = useCreateProject();
+  const { data: projectList } = readAsync(useAtomValue(projectsAtom));
+  const assign = useAtomSet(assignSessionToProjectAtom, { mode: "promise" });
+  const assigning = useAtomValue(assignSessionToProjectAtom).waiting;
+  const createProject = useAtomSet(createProjectAtom, { mode: "promise" });
+  const creatingProject = useAtomValue(createProjectAtom).waiting;
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -48,7 +61,7 @@ export function AssignToProjectModal({
     [projectList, summary],
   );
 
-  const busy = assign.isPending || createProject.isPending;
+  const busy = assigning || creatingProject;
 
   const submit = async () => {
     if (!summary || busy) return;
@@ -56,18 +69,18 @@ export function AssignToProjectModal({
     try {
       const project =
         existing ??
-        (await createProject.mutateAsync({
+        (await createProject({
           name: name.trim() || null,
           ...projectLocationPayload(summary),
         }));
-      await assign.mutateAsync({
+      await assign({
         projectId: project.project_id,
         sessionId: summary.session_id,
       });
       toast.success(`Assigned to ${project.name}`);
       onClose();
     } catch (assignError) {
-      setError(humanErrorText(toRunError(assignError)));
+      setError(humanErrorText(toRunError(commandError(assignError))));
     }
   };
 

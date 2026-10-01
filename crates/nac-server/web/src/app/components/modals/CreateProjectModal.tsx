@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -47,16 +48,22 @@ import {
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { ApiError } from "@/app/services/api";
 import {
-  useCreateModelConfig,
-  useCreateProject,
-  useCreateSession,
-  useModelCatalog,
-  useSandboxActivity,
-  useSandboxAvailability,
-  useStoreInfo,
+  createModelConfigAtom,
+  createProjectAtom,
+  createSessionAtom,
+  modelCatalogAtom,
+  sandboxActivityAtom,
+  sandboxAvailabilityAtom,
+  storeInfoAtom,
 } from "@/app/services/queries";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 import type {
   BackendKind,
   CreateSessionRequest,
@@ -119,7 +126,7 @@ interface FormError {
 
 /** Remounted on every open so the form always starts from the configured defaults. */
 export function CreateProjectModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { data: storeInfo } = useStoreInfo();
+  const { data: storeInfo } = readAsync(useAtomValue(storeInfoAtom));
   const mounted = useExitTransition(open);
   if (!mounted) return null;
   return (
@@ -150,9 +157,12 @@ function CreateProjectForm({
 }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const createProject = useCreateProject();
-  const createSession = useCreateSession();
-  const createModelConfig = useCreateModelConfig();
+  const createProject = useAtomSet(createProjectAtom, { mode: "promise" });
+  const creatingProject = useAtomValue(createProjectAtom).waiting;
+  const createSession = useAtomSet(createSessionAtom, { mode: "promise" });
+  const creatingSession = useAtomValue(createSessionAtom).waiting;
+  const createModelConfig = useAtomSet(createModelConfigAtom, { mode: "promise" });
+  const creatingModelConfig = useAtomValue(createModelConfigAtom).waiting;
 
   const [mode, setMode] = useState<Mode>("local");
   const [behavior, setBehavior] = useState<SessionBehavior>("orchestrator");
@@ -180,7 +190,7 @@ function CreateProjectForm({
 
   // The override only makes sense for the model the selection settles on, so
   // the catalog narrows it to the efforts that model accepts.
-  const catalog = useModelCatalog();
+  const catalog = useAtomValue(modelCatalogAtom(), readAsync);
   const chosen = selection?.kind === "save" ? selection.request : (selection ?? null);
   const reasoningItems = reasoningOptionsFor(
     resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model).supportedEfforts,
@@ -192,11 +202,13 @@ function CreateProjectForm({
   const isSsh = mode === "ssh";
   // Probed only while sandbox mode is selected, so a missing or stopped
   // podman runtime is flagged here instead of failing the launch.
-  const sandboxAvailability = useSandboxAvailability(mode === "sandbox").data;
+  const sandboxAvailability = readAsync(
+    useAtomValue(sandboxAvailabilityAtom(mode === "sandbox")),
+  ).data;
   const connected = isSsh ? connection : null;
   // A local or sandboxed session has nothing to connect to, so it is ready at once.
   const ready = !isSsh || connected !== null;
-  const busy = createProject.isPending || createSession.isPending || createModelConfig.isPending;
+  const busy = creatingProject || creatingSession || creatingModelConfig;
 
   // A sandboxed launch can spend minutes pulling the image on first run;
   // the polled phase plus an elapsed timer is the difference between
@@ -204,8 +216,10 @@ function CreateProjectForm({
   // the create request, so the poll only ever sees this launch's phase even
   // when another launch is in flight.
   const [launchKey, setLaunchKey] = useState<string | null>(null);
-  const sandboxLaunching = createSession.isPending && mode === "sandbox";
-  const sandboxActivity = useSandboxActivity(sandboxLaunching, launchKey).data;
+  const sandboxLaunching = creatingSession && mode === "sandbox";
+  const sandboxActivity = readAsync(
+    useAtomValue(sandboxActivityAtom(sandboxLaunching, launchKey)),
+  ).data;
   const activitySince = sandboxActivity?.since_epoch_ms;
   const [launchElapsed, setLaunchElapsed] = useState(0);
   useEffect(() => {
@@ -371,7 +385,7 @@ function CreateProjectForm({
           light.mode === "dual" && light.light
             ? { ...selection.request, light_model: light.light }
             : selection.request;
-        const record = await createModelConfig.mutateAsync(request);
+        const record = await createModelConfig(request);
         // SAFETY: the server echoes the BackendKind wire value it stored.
         backend = record.backend as BackendKind;
         model = record.model;
@@ -393,14 +407,14 @@ function CreateProjectForm({
     } catch (saveError) {
       setError({
         field: "config",
-        message: `The configuration could not be saved: ${humanErrorText(toRunError(saveError))}`,
+        message: `The configuration could not be saved: ${humanErrorText(toRunError(commandError(saveError)))}`,
       });
       return;
     }
 
     let projectId: string;
     try {
-      const project = await createProject.mutateAsync({
+      const project = await createProject({
         name: nullable(name),
         cwd,
         ssh_host: connected?.ssh_host ?? null,
@@ -409,7 +423,8 @@ function CreateProjectForm({
         default_model_config_id: defaultModelConfigId,
       });
       projectId = project.project_id;
-    } catch (projectError) {
+    } catch (caught) {
+      const projectError = commandError(caught);
       const duplicate = projectError instanceof ApiError && projectError.status === 409;
       setError({
         field: "cwd",
@@ -469,7 +484,7 @@ function CreateProjectForm({
     }
 
     try {
-      const snapshot = await createSession.mutateAsync(body);
+      const snapshot = await createSession(body);
       const newId = snapshot.metadata.session_id;
       storeLastLight(launchLight && withoutInheritedCredential(launchLight, apiKeyEnv));
       toast.success("Project created");
@@ -479,7 +494,7 @@ function CreateProjectForm({
       // The project itself is saved, so the user is sent to it rather than
       // being left with an error over a form whose work is already done.
       toast.error(
-        `Project created, but the first chat failed: ${humanErrorText(toRunError(createError), backend)}`,
+        `Project created, but the first chat failed: ${humanErrorText(toRunError(commandError(createError)), backend)}`,
       );
       navigate(routes.project(projectId));
       onClose();

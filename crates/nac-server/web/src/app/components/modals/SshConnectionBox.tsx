@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 
 import {
   Badge,
@@ -20,13 +21,19 @@ import {
 } from "@/app/atoms";
 import { FieldLabel } from "@/app/components/modals/ConfigRow";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { cn } from "@/app/lib/cn";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useCreateSshConfig, useSshConfigs, useSshConnect } from "@/app/services/queries";
+import { createSshConfigAtom, sshConfigsAtom, sshConnectAtom } from "@/app/services/queries";
 import { markSshConnected, markSshDisconnected } from "@/app/store/sshConnectionStore";
 import type { SshConfigurationRecord, SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { toRunError } from "@/app/lib/providerError";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 
 const CREATE_NEW = "__new__";
 
@@ -142,10 +149,12 @@ export function SshConnectionBox({
   className,
 }: SshConnectionBoxProps) {
   const toast = useToast();
-  const { data } = useSshConfigs();
+  const { data } = readAsync(useAtomValue(sshConfigsAtom));
   const configurations = useMemo(() => data?.configurations ?? [], [data]);
-  const createConfig = useCreateSshConfig();
-  const connect = useSshConnect();
+  const createConfig = useAtomSet(createSshConfigAtom, { mode: "promise" });
+  const creatingConfig = useAtomValue(createSshConfigAtom).waiting;
+  const connect = useAtomSet(sshConnectAtom, { mode: "promise" });
+  const connecting = useAtomValue(sshConnectAtom).waiting;
 
   const isManage = mode === "manage";
   const matchedSeedId = useMemo(() => {
@@ -168,7 +177,7 @@ export function SshConnectionBox({
 
   const isMobile = useIsMobile();
   const connected = Boolean(connection);
-  const busy = connect.isPending || createConfig.isPending || testing;
+  const busy = connecting || creatingConfig || testing;
   const fieldsLocked = locked || connected || busy;
 
   const selectedConfig =
@@ -246,10 +255,10 @@ export function SshConnectionBox({
       return;
     }
     try {
-      const listing = await connect.mutateAsync(parsed);
+      const listing = await connect(parsed);
       markSshConnected(parsed);
       if (selectedId === CREATE_NEW) {
-        const created = await createConfig.mutateAsync({
+        const created = await createConfig({
           name: name.trim(),
           ssh_host: parsed.ssh_host,
           ssh_port: parsed.ssh_port ?? null,
@@ -260,7 +269,7 @@ export function SshConnectionBox({
       onConnectionChange(parsed, listing.path);
     } catch (connectError) {
       markSshDisconnected(parsed);
-      const message = errorMessage(toRunError(connectError));
+      const message = errorMessage(toRunError(commandError(connectError)));
       setError(message);
       toast.error(`SSH connect failed: ${message}`);
     }
@@ -278,7 +287,7 @@ export function SshConnectionBox({
     try {
       await onTest();
     } catch (testError) {
-      const message = errorMessage(toRunError(testError));
+      const message = errorMessage(toRunError(commandError(testError)));
       setError(message);
     }
   };

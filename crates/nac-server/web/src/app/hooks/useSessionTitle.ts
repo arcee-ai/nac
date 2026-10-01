@@ -1,5 +1,9 @@
+import { useAtomValue } from "@effect/atom-react";
+
+import { readAsync } from "@/app/effect/remote";
 import { numberUntitledSessions, sessionTitle } from "@/app/lib/format";
-import { useSessions } from "@/app/services/queries";
+import { sessionsAtom } from "@/app/services/queries/session";
+import { SESSIONS_POLL_MS } from "@/app/services/queries/keys";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 
 /**
@@ -12,7 +16,7 @@ import type { SessionSummarySnapshot } from "@/app/types/api";
  * number them differently from the popover listing all of them.
  */
 export function useSessionTitle(): (summary: SessionSummarySnapshot | null | undefined) => string {
-  const { data: sessions = [] } = useSessions();
+  const sessions = readAsync(useAtomValue(sessionsAtom(SESSIONS_POLL_MS))).data ?? [];
   const numbered = numberUntitledSessions(sessions);
   return (summary) => sessionTitle(summary, numbered);
 }

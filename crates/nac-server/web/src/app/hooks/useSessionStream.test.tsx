@@ -1,12 +1,21 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { act, render, type RenderResult } from "@testing-library/react";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { atomRefresh, isolatedRegistry } from "@/app/effect/remote";
 import { useDelegatedPermissionStream, useSessionStream } from "@/app/hooks/useSessionStream";
-import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries";
+import { api, apiEffect } from "@/app/services/api";
+import { sessionSkillsAtom } from "@/app/services/queries/configuration";
+import { sessionPermissionsAtom } from "@/app/services/queries/direct";
+import {
+  sessionSnapshotAtom,
+  threadEventsAtom,
+  threadEventsKey,
+} from "@/app/services/queries/session";
 import { resetRuntime } from "@/app/store/runtimeStore";
 import type {
   Message,
@@ -17,9 +26,8 @@ import type {
   SessionSnapshotResponse,
 } from "@/app/types/api";
 
-// The hook runs against the real event stream and api modules; the only fakes
-// are the EventSource global, which jsdom does not implement, and the page
-// fetch, which a spy on the real api object delegates to.
+// The hook runs against the real event stream. The tail page still goes through
+// `api.getMessages`; snapshot and permission reloads go through `atomRefresh`.
 class FakeEventSource {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -68,6 +76,9 @@ const stream = {
 };
 
 vi.spyOn(api, "getMessages").mockImplementation((...args) => stream.getPage(...args));
+vi.spyOn(apiEffect, "getThreadEvents").mockImplementation(() =>
+  Effect.promise(() => new Promise(() => {})),
+);
 
 const SESSION_ID = "stream-test";
 
@@ -142,15 +153,22 @@ function DelegatedPermissionHarness() {
   return null;
 }
 
-async function mount(client: QueryClient): Promise<RenderResult> {
+function successValue<A>(result: AsyncResult.AsyncResult<A, unknown>): A | undefined {
+  return AsyncResult.isSuccess(result) ? result.value : undefined;
+}
+
+async function mount(
+  registry = isolatedRegistry(),
+): Promise<{ renderer: RenderResult; registry: ReturnType<typeof isolatedRegistry> }> {
   const renderer = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <Harness />
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
   await act(async () => undefined);
-  return renderer;
+  return { renderer, registry };
 }
+
 beforeEach(() => {
   vi.useFakeTimers();
   FakeEventSource.instances = [];
@@ -162,41 +180,35 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  if (vi.isMockFunction(atomRefresh.run)) atomRefresh.run.mockRestore();
 });
 
 describe("session stream request coordination", () => {
   it("keeps a child permission stream live without mounting the child transcript", async () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const registry = isolatedRegistry();
+    const refresh = vi.spyOn(atomRefresh, "run").mockResolvedValue(undefined);
     const renderer = render(
-      <QueryClientProvider client={client}>
+      <RegistryContext.Provider value={registry}>
         <DelegatedPermissionHarness />
-      </QueryClientProvider>,
+      </RegistryContext.Provider>,
     );
     await act(async () => undefined);
     const stream_source = source();
     expect(stream_source.url).toContain("/sessions/child-session/events/stream");
 
     await act(async () => stream_source.onopen?.());
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: queryKeys.sessionPermissions("child-session"),
-      exact: true,
-    });
+    expect(refresh).toHaveBeenCalledWith(registry, sessionPermissionsAtom("child-session"));
     await act(async () => renderer.unmount());
     expect(stream_source.readyState).toBe(FakeEventSource.CLOSED);
   });
 
   it("coalesces a 100-commit burst into one in-flight tail and one follow-up", async () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    client.setQueryData(queryKeys.sessionSnapshot(SESSION_ID), snapshot([user("old")]));
+    const registry = isolatedRegistry();
+    registry.set(sessionSnapshotAtom(SESSION_ID), AsyncResult.success(snapshot([user("old")])));
     const first = deferred<MessagesPageResponse>();
     const firstReturned = deferred<void>();
     const second = deferred<MessagesPageResponse>();
-    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const refresh = vi.spyOn(atomRefresh, "run").mockResolvedValue(undefined);
     let inFlight = 0;
     let maxInFlight = 0;
     stream.getPage
@@ -215,7 +227,7 @@ describe("session stream request coordination", () => {
         inFlight -= 1;
         return value;
       });
-    const renderer = await mount(client);
+    const { renderer } = await mount(registry);
     const stream_source = source();
 
     await act(async () => {
@@ -247,7 +259,7 @@ describe("session stream request coordination", () => {
         (call) => call[1]?.limit === 24 && call[1]?.includeSystem === true,
       ),
     ).toBe(true);
-    expect(invalidate).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
 
     renderer.unmount();
     stream_source.emit("session_event", transcriptEnvelope(101));
@@ -256,23 +268,19 @@ describe("session stream request coordination", () => {
   });
 
   it("keeps a superseding snapshot active before draining a queued tail", async () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    client.setQueryData(queryKeys.sessionSnapshot(SESSION_ID), snapshot([user("old")]));
+    const registry = isolatedRegistry();
+    registry.set(sessionSnapshotAtom(SESSION_ID), AsyncResult.success(snapshot([user("old")])));
     const firstSnapshot = deferred<void>();
     const secondSnapshot = deferred<void>();
     let snapshotInvalidations = 0;
-    const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation(async (filters) => {
-      if (filters?.queryKey?.toString() !== queryKeys.sessionSnapshot(SESSION_ID).toString()) {
-        return;
-      }
+    const refresh = vi.spyOn(atomRefresh, "run").mockImplementation(async (_registry, atom) => {
+      if (atom !== sessionSnapshotAtom(SESSION_ID)) return;
       const pending = snapshotInvalidations === 0 ? firstSnapshot : secondSnapshot;
       snapshotInvalidations += 1;
       await pending.promise;
     });
     stream.getPage.mockResolvedValue(page([user("old"), user("new")], 4));
-    const renderer = await mount(client);
+    const { renderer } = await mount(registry);
     const stream_source = source();
 
     await act(async () => {
@@ -281,14 +289,8 @@ describe("session stream request coordination", () => {
       await vi.advanceTimersByTimeAsync(250);
     });
     expect(snapshotInvalidations).toBe(1);
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: queryKeys.sessionSkills(SESSION_ID),
-      exact: true,
-    });
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: queryKeys.sessionPermissions(SESSION_ID),
-      exact: true,
-    });
+    expect(refresh).toHaveBeenCalledWith(registry, sessionSkillsAtom(SESSION_ID));
+    expect(refresh).toHaveBeenCalledWith(registry, sessionPermissionsAtom(SESSION_ID));
 
     await act(async () => {
       stream_source.emit("replay_boundary", { epoch_id: "three" });
@@ -316,12 +318,10 @@ describe("session stream request coordination", () => {
   });
 
   it("refreshes permission state when replay loss makes exact events unknowable", async () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    client.setQueryData(queryKeys.sessionSnapshot(SESSION_ID), snapshot([user("old")]));
-    const invalidate = vi.spyOn(client, "invalidateQueries");
-    const renderer = await mount(client);
+    const registry = isolatedRegistry();
+    registry.set(sessionSnapshotAtom(SESSION_ID), AsyncResult.success(snapshot([user("old")])));
+    const refresh = vi.spyOn(atomRefresh, "run").mockResolvedValue(undefined);
+    const { renderer } = await mount(registry);
     const stream_source = source();
 
     await act(async () => {
@@ -329,32 +329,27 @@ describe("session stream request coordination", () => {
       stream_source.emit("lagged", { skipped: 3 });
     });
 
-    expect(invalidate).toHaveBeenCalledTimes(2);
-    expect(invalidate).toHaveBeenNthCalledWith(1, {
-      queryKey: queryKeys.sessionPermissions(SESSION_ID),
-      exact: true,
-    });
-    expect(invalidate).toHaveBeenNthCalledWith(2, {
-      queryKey: queryKeys.sessionPermissions(SESSION_ID),
-      exact: true,
-    });
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenNthCalledWith(1, registry, sessionPermissionsAtom(SESSION_ID));
+    expect(refresh).toHaveBeenNthCalledWith(2, registry, sessionPermissionsAtom(SESSION_ID));
 
     await act(async () => renderer.unmount());
   });
 
   it("rejects a late tail after a destructive replay fence", async () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const registry = isolatedRegistry();
     const accepted = snapshot([user("accepted")]);
-    client.setQueryData(queryKeys.sessionSnapshot(SESSION_ID), accepted);
-    client.setQueryData(queryKeys.threadEvents(SESSION_ID, "worker"), {
-      pages: [{ events: [{ id: 1 }], has_older: false }],
-      pageParams: [null],
-    });
+    registry.set(sessionSnapshotAtom(SESSION_ID), AsyncResult.success(accepted));
+    registry.set(
+      threadEventsAtom(threadEventsKey(SESSION_ID, "worker")),
+      AsyncResult.success({
+        pages: [{ events: [{ id: 1 }], has_older: false, next_before_id: null }],
+        pageParams: [null],
+      } as never),
+    );
     const late = deferred<MessagesPageResponse>();
     stream.getPage.mockImplementation(() => late.promise);
-    const renderer = await mount(client);
+    const { renderer } = await mount(registry);
     const stream_source = source();
 
     await act(async () => {
@@ -368,13 +363,15 @@ describe("session stream request coordination", () => {
     await act(async () => {
       stream_source.emit("replay_gap", { missing_from_sequence_id: 1 });
     });
-    expect(client.getQueryData(queryKeys.threadEvents(SESSION_ID, "worker"))).toBeUndefined();
+    expect(
+      successValue(registry.get(threadEventsAtom(threadEventsKey(SESSION_ID, "worker")))),
+    ).toBeUndefined();
 
     await act(async () => {
       late.resolve(page([user("stale")], 1));
       await late.promise;
     });
-    expect(client.getQueryData(queryKeys.sessionSnapshot(SESSION_ID))).toBe(accepted);
+    expect(successValue(registry.get(sessionSnapshotAtom(SESSION_ID)))).toBe(accepted);
 
     await act(async () => renderer.unmount());
   });

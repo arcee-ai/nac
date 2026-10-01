@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
@@ -30,7 +30,7 @@ export type DeviceLoginState =
  * gives up on it.
  */
 export function useDeviceLogin(onSuccess?: () => void) {
-  const client = useQueryClient();
+  const registry = useContext(RegistryContext);
   const [state, setState] = useState<DeviceLoginState>({ status: "idle" });
   const active = useRef<{
     provider: ManagedAuthProvider;
@@ -88,7 +88,7 @@ export function useDeviceLogin(onSuccess?: () => void) {
           setState({ status: "idle" });
           // Readiness and the entitled model index both change atomically with
           // the stored login, so rebuild their catalog-derived caches.
-          void refreshProviderAuthentication(client);
+          void refreshProviderAuthentication(registry);
           onSuccessRef.current?.();
           return;
         }
@@ -111,7 +111,7 @@ export function useDeviceLogin(onSuccess?: () => void) {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [state, client]);
+  }, [state, registry]);
 
   return { state, start, cancel };
 }

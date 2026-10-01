@@ -4,7 +4,7 @@ import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { cn } from "@/app/lib/cn";
 import { MOD } from "@/app/lib/shortcuts";
-import { setSidebarOffset } from "@/app/store/sidebarLayoutStore";
+import { useSetSidebarOffset } from "@/app/store/sidebarLayoutStore";
 
 import { LeftSidebarPanel } from "./LeftSidebarPanel";
 import { LeftSidebarRail } from "./LeftSidebarRail";
@@ -53,15 +53,13 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
       return next;
     });
   }, [isDesktop]);
+  const setSidebarOffset = useSetSidebarOffset();
   const commands = useSidebarCommands();
 
   useLayoutEffect(() => {
     setSidebarOffset(isMobile ? 0 : isOpen ? SIDEBAR_PANEL_WIDTH : SIDEBAR_RAIL_WIDTH);
-  }, [isMobile, isOpen]);
-
-  useLayoutEffect(() => {
     return () => setSidebarOffset(0);
-  }, []);
+  }, [isMobile, isOpen, setSidebarOffset]);
 
   useKeyboardShortcuts([{ keys: TOGGLE_KEYS, onTrigger: toggle, enabled: !isMobile }]);
 

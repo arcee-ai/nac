@@ -1,4 +1,4 @@
-// Compatibility barrel for feature-owned TanStack Query bindings.
+// Compatibility barrel for feature-owned server-cache bindings.
 
 export * from "@/app/services/queries/keys";
 export * from "@/app/services/queries/host";
@@ -9,12 +9,13 @@ export * from "@/app/services/queries/workspace";
 export * from "@/app/services/queries/projects";
 
 export {
-  useDeleteManagedSecret,
-  useManagedAuth,
-  useManagedGitHub,
-  useManagedHostStatus,
-  useManagedProviderModels,
-  useManagedSecrets,
-  usePutManagedSecret,
-  useReadyProviderModels,
+  deleteManagedSecretAtom,
+  managedAuthAtom,
+  managedGitHubAtom,
+  managedHostStatusAtom,
+  managedProviderModelsAtom,
+  managedProviderModelsFor,
+  managedSecretsAtom,
+  putManagedSecretAtom,
+  readyProviderModelsAtom,
 } from "@/app/features/managed/queries";

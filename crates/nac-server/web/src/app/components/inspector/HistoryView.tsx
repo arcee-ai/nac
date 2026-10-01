@@ -1,10 +1,14 @@
+import { useAtomValue } from "@effect/atom-react";
+
 import { Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
 import { PanelEmpty } from "@/app/components/inspector/PanelSplit";
+import { readAsync } from "@/app/effect/remote";
 import { cn } from "@/app/lib/cn";
 import { revisionOrdinal, revisionTitle } from "@/app/lib/revisions";
 import { formatStoreTime } from "@/app/lib/format";
+import { toRunError } from "@/app/lib/providerError";
 import { errorMessage } from "@/app/providers/ToastProvider";
-import { useWorkspaceRevisions } from "@/app/services/queries";
+import { workspaceRevisions } from "@/app/services/queries";
 
 function Row({
   title,
@@ -63,11 +67,11 @@ export function HistoryView({
   selected: number | null;
   onSelect: (revision: number | null) => void;
 }) {
-  const { data, isLoading, error } = useWorkspaceRevisions(sessionId);
+  const { data, isLoading, error } = readAsync(useAtomValue(workspaceRevisions(sessionId)));
   const revisions = data ?? [];
 
   if (error) {
-    return <PanelEmpty>{errorMessage(error)}</PanelEmpty>;
+    return <PanelEmpty>{errorMessage(toRunError(error))}</PanelEmpty>;
   }
 
   return (

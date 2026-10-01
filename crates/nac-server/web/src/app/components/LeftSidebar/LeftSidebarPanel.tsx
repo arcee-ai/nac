@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
 
 import {
   Badge,
@@ -20,7 +21,13 @@ import {
 } from "@/app/atoms";
 import { TooltipPosition } from "@/app/atoms/tooltip";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
-import { useProjects, useSessions, useStoreInfo } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import {
+  projectsAtom,
+  SESSIONS_POLL_MS,
+  sessionsAtom,
+  storeInfoAtom,
+} from "@/app/services/queries";
 import { setQuery as setProjectQuery, useFilterQuery } from "@/app/store/sessionFiltersStore";
 
 import { NewSessionPopover } from "./NewSessionPopover";
@@ -45,9 +52,9 @@ export function LeftSidebarPanel({
   const projectsPage = variant === "projects";
   const [query, setQuery] = useState("");
   const projectQuery = useFilterQuery();
-  const { data: sessions = [] } = useSessions();
-  const { data: projectList } = useProjects();
-  const { data: storeInfo } = useStoreInfo();
+  const { data: sessions = [] } = readAsync(useAtomValue(sessionsAtom(SESSIONS_POLL_MS)));
+  const { data: projectList } = readAsync(useAtomValue(projectsAtom));
+  const { data: storeInfo } = readAsync(useAtomValue(storeInfoAtom));
   const storePath = storeInfo?.store_path ?? "";
   const projects = projectList?.projects ?? [];
 

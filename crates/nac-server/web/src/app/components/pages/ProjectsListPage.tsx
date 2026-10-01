@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -24,6 +25,8 @@ import { ProjectsEmptyState } from "@/app/components/projects/ProjectsEmptyState
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
+import { ClientRequestError } from "@/app/effect/errors";
+import { atomRefresh, readAsync } from "@/app/effect/remote";
 import { toRunError } from "@/app/lib/providerError";
 import {
   orphanSessions,
@@ -39,11 +42,20 @@ import { useManagedHost } from "@/app/features/managed/controller/useManagedHost
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
-  useMoveProjectOrder,
-  useMoveSessionOrder,
-  useProjects,
-  useSessionsWithWorkspaceStats,
+  moveProjectOrderAtom,
+  moveSessionOrderAtom,
+  projectsAtom,
+  SESSIONS_POLL_MS,
+  sessionStatsAtom,
+  sessionsAtom,
+  sessionsWithStatsAtom,
+  sessionsWithStatsKey,
+  WORKSPACE_STATS_POLL_MS,
 } from "@/app/services/queries";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 import { clearAttentionAll, trackAttention, useAnyAttention } from "@/app/store/attentionStore";
 import {
   setQuery,
@@ -225,8 +237,9 @@ export default function ProjectsListPage() {
   const toast = useToast();
   const query = useFilterQuery();
   const isDefaultSort = useIsDefaultSort();
-  const moveOrder = useMoveProjectOrder();
-  const moveSessionOrder = useMoveSessionOrder();
+  const registry = useContext(RegistryContext);
+  const moveOrder = useAtomSet(moveProjectOrderAtom, { mode: "promise" });
+  const moveSessionOrder = useAtomSet(moveSessionOrderAtom, { mode: "promise" });
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -235,8 +248,15 @@ export default function ProjectsListPage() {
   const dropTargetRef = useRef<DropTarget | null>(null);
   const pinZoneRef = useRef(false);
 
-  const { data, isLoading, error, refetch } = useSessionsWithWorkspaceStats();
-  const projectsQuery = useProjects();
+  const { data, isLoading, error } = useAtomValue(
+    sessionsWithStatsAtom(sessionsWithStatsKey()),
+    readAsync,
+  );
+  const refetch = () => {
+    void atomRefresh.run(registry, sessionsAtom(SESSIONS_POLL_MS));
+    void atomRefresh.run(registry, sessionStatsAtom(WORKSPACE_STATS_POLL_MS));
+  };
+  const projectsQuery = useAtomValue(projectsAtom, readAsync);
   const allSessions = useMemo(() => data ?? [], [data]);
   const projects = useMemo(() => projectsQuery.data?.projects ?? [], [projectsQuery.data]);
   const all = useMemo(() => projectListItems(projects, allSessions), [projects, allSessions]);
@@ -279,14 +299,14 @@ export default function ProjectsListPage() {
         return;
       }
       try {
-        await moveOrder.mutateAsync({
+        await moveOrder({
           projects,
           projectId,
           targetPinned,
           targetIndex,
         });
       } catch (err) {
-        toast.error(`Failed to reorder projects: ${errorMessage(toRunError(err))}`);
+        toast.error(`Failed to reorder projects: ${errorMessage(toRunError(commandError(err)))}`);
       } finally {
         clearDrag();
       }
@@ -297,14 +317,14 @@ export default function ProjectsListPage() {
   const moveOrphanTo = useCallback(
     async (sessionId: string, targetIndex: number) => {
       try {
-        await moveSessionOrder.mutateAsync({
+        await moveSessionOrder({
           sessions: allSessions,
           sessionId,
           targetPinned: false,
           targetIndex,
         });
       } catch (err) {
-        toast.error(`Failed to reorder chats: ${errorMessage(toRunError(err))}`);
+        toast.error(`Failed to reorder chats: ${errorMessage(toRunError(commandError(err)))}`);
       } finally {
         clearDrag();
       }
@@ -620,7 +640,7 @@ export default function ProjectsListPage() {
         <div className={cn("flex flex-col gap-6 [&>*]:shrink-0", isMobile ? "pt-36 pb-8" : "py-4")}>
           {error ? (
             <div className="flex items-center gap-2 label-small text-error-primary">
-              <span>{errorMessage(error)}</span>
+              <span>{errorMessage(toRunError(error))}</span>
               <Button
                 variant={ButtonVariant.Ghost}
                 size={ButtonSize.Small}

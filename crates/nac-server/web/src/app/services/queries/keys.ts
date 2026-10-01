@@ -80,3 +80,69 @@ export const queryKeys = {
   workspaceRevisionChanges: (id: string, revision: number) =>
     ["session", id, "revisions", revision, "changes"] as const,
 };
+
+const SEP = "\u0000";
+
+/** Stable atom ids. A prefix matches an id that continues after a null separator. */
+export const atomIds = {
+  projects: "projects",
+  store: "store",
+  managedHostStatus: "managed-host-status",
+  managedUpgrade: "managed-upgrade",
+  managedGitHub: "managed-github",
+  managedSecrets: "managed-secrets",
+  sandboxAvailability: "sandbox-availability",
+  sandboxActivity: (key: string) => `sandbox-activity${SEP}${key}`,
+  credentials: "credentials",
+  managedAuth: "managed-auth",
+  modelConfigs: "model-configs",
+  sshConfigs: "ssh-configs",
+  mcpLibrary: "mcp-library",
+  mcpServers: "mcp-servers",
+  mcpRuntime: "mcp-runtime",
+  modelCatalog: "model-catalog",
+  slashCommands: "slash-commands",
+  sessionCommands: (id: string) => `session${SEP}${id}${SEP}commands`,
+  browse: (path: string, kind: BrowseKind, hidden: boolean) =>
+    `fs-browse${SEP}${kind}${SEP}${hidden ? "1" : "0"}${SEP}${path}`,
+  sshBrowse: (
+    host: string,
+    port: number | null,
+    identity: string | null,
+    path: string,
+    hidden: boolean,
+  ) =>
+    `ssh-browse${SEP}${host}${SEP}${port ?? ""}${SEP}${identity ?? ""}${SEP}${hidden ? "1" : "0"}${SEP}${path}`,
+  providerModels: (backend: string, baseUrl: string) =>
+    `provider-models${SEP}${backend}${SEP}${baseUrl}`,
+  managedProviderModels: (backend: string) => `managed-provider-models${SEP}${backend}`,
+  managedProviderModelsAll: "managed-provider-models",
+  resolvedModelConfig: (configId: string) => `model-config-resolved${SEP}${configId}`,
+  resolvedConfigFile: (path: string) => `config-file-resolved${SEP}${path}`,
+  session: (id: string) => `session${SEP}${id}`,
+  snapshot: (id: string) => `session${SEP}${id}${SEP}snapshot`,
+  skills: (id: string) => `session${SEP}${id}${SEP}skills`,
+  threadEvents: (id: string, name: string) => `session${SEP}${id}${SEP}thread-events${SEP}${name}`,
+  config: (id: string) => `session${SEP}${id}${SEP}config`,
+  permissions: (id: string) => `session${SEP}${id}${SEP}permissions`,
+  goal: (id: string) => `session${SEP}${id}${SEP}goal`,
+  inbox: (id: string) => `session${SEP}${id}${SEP}inbox`,
+  children: (id: string) => `session${SEP}${id}${SEP}children`,
+  orchestrators: (id: string) => `session${SEP}${id}${SEP}orchestrators`,
+  workspaceDiff: (
+    id: string,
+    path: string,
+    stage: WorkspaceDiffStage | "all",
+    context: number,
+    revision: number | null,
+  ) =>
+    `session${SEP}${id}${SEP}workspace-diff${SEP}${path}${SEP}${stage}${SEP}${context}${SEP}${revision ?? ""}`,
+  branches: (id: string) => `session${SEP}${id}${SEP}branches`,
+  workspaceFiles: (id: string, revision: number | null) =>
+    `session${SEP}${id}${SEP}workspace-files${SEP}${revision ?? "live"}`,
+  workspaceFile: (id: string, path: string, revision: number | null) =>
+    `session${SEP}${id}${SEP}workspace-file${SEP}${revision ?? "live"}${SEP}${path}`,
+  workspaceRevisions: (id: string) => `session${SEP}${id}${SEP}revisions`,
+  workspaceRevisionChanges: (id: string, revision: number) =>
+    `session${SEP}${id}${SEP}revisions${SEP}${revision}${SEP}changes`,
+};

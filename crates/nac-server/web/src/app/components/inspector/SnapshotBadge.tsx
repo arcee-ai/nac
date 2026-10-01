@@ -1,8 +1,10 @@
+import { useAtomValue } from "@effect/atom-react";
 import { useMemo } from "react";
 
 import { ChatBadge, CodeChangesBadge } from "@/app/components/inspector/ChatBadge";
 import { SnapshotFiles } from "@/app/components/inspector/SnapshotFiles";
-import { useWorkspaceRevisionChanges } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import { workspaceRevisionChanges } from "@/app/services/queries";
 import type { WorkspaceRevision } from "@/app/types/api";
 
 /**
@@ -30,7 +32,7 @@ export function SnapshotBadge({
   revision: WorkspaceRevision;
   panel: FilesPanelLink;
 }) {
-  const { data } = useWorkspaceRevisionChanges(panel.sessionId, revision.id);
+  const { data } = readAsync(useAtomValue(workspaceRevisionChanges(panel.sessionId, revision.id)));
   // Git reports an untracked directory as one entry; the panel spreads it over
   // the files inside, so the directory itself has no row to open.
   const files = useMemo(

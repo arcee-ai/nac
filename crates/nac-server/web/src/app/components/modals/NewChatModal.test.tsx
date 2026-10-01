@@ -1,19 +1,28 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { NewChatModal } from "@/app/components/modals/NewChatModal";
+import { isolatedRegistry } from "@/app/effect/remote";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+import { apiEffect } from "@/app/services/api";
 import type {
   LightModelSettings,
   ModelConfigurationRecord,
   ProjectRecord,
   SessionSnapshotResponse,
 } from "@/app/types/api";
+
+function spyResolved(method: string, value: unknown) {
+  const target = apiEffect as unknown as Record<string, (...args: unknown[]) => unknown>;
+  return vi
+    .spyOn(target, method)
+    .mockImplementation(() => Effect.promise(() => Promise.resolve(value)));
+}
 
 vi.mock("@/app/components/modals/ConfigurationsPanel", async () => {
   const React = await import("react");
@@ -182,9 +191,9 @@ beforeEach(() => {
       disconnect() {}
     },
   );
-  vi.spyOn(api, "listProjects").mockResolvedValue({ projects: [project] });
-  vi.spyOn(api, "listSessions").mockResolvedValue([]);
-  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [configuration] });
+  spyResolved("listProjects", { projects: [project] });
+  spyResolved("listSessions", []);
+  spyResolved("listModelConfigs", { configurations: [configuration] });
 });
 
 afterEach(() => {
@@ -193,26 +202,25 @@ afterEach(() => {
 });
 
 function renderModal() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={isolatedRegistry()}>
       <ToastProvider>
         <MemoryRouter>
           <NewChatModal projectId="project" onClose={vi.fn()} />
         </MemoryRouter>
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
-  return { client, view };
+  return { view };
 }
 
 it("shows and preserves the inherited primary and light models for a direct chat", async () => {
-  const create = vi.spyOn(api, "createSession").mockResolvedValue({
+  const create = spyResolved("createSession", {
     metadata: { session_id: "direct-chat" },
     messages: [],
     message_created_at: [],
   } as unknown as SessionSnapshotResponse);
-  const { client, view } = renderModal();
+  const { view } = renderModal();
 
   try {
     expect(await screen.findByText("Primary model: gpt-5.6-sol")).toBeTruthy();
@@ -238,37 +246,35 @@ it("shows and preserves the inherited primary and light models for a direct chat
     );
   } finally {
     view.unmount();
-    client.clear();
   }
 });
 
 it("sends null when one chat clears an inherited light model", async () => {
-  const create = vi.spyOn(api, "createSession").mockResolvedValue({
+  const create = spyResolved("createSession", {
     metadata: { session_id: "single-chat" },
     messages: [],
     message_created_at: [],
   } as unknown as SessionSnapshotResponse);
-  const { client, view } = renderModal();
+  const { view } = renderModal();
 
   try {
     await screen.findByText("Light model for orchestrator: gpt-5-mini");
     fireEvent.click(screen.getByRole("button", { name: "Use one model" }));
     fireEvent.click(screen.getByRole("button", { name: "Create chat" }));
     await waitFor(() => expect(create).toHaveBeenCalled());
-    expect(create.mock.calls[0]?.[0].light_model).toBeNull();
+    expect((create.mock.calls[0]?.[0] as { light_model: unknown }).light_model).toBeNull();
   } finally {
     view.unmount();
-    client.clear();
   }
 });
 
 it("sends an explicitly selected preset's compaction threshold instead of inheriting", async () => {
-  const create = vi.spyOn(api, "createSession").mockResolvedValue({
+  const create = spyResolved("createSession", {
     metadata: { session_id: "preset-chat" },
     messages: [],
     message_created_at: [],
   } as unknown as SessionSnapshotResponse);
-  const { client, view } = renderModal();
+  const { view } = renderModal();
 
   try {
     await screen.findByText("Primary model: gpt-5.6-sol");
@@ -286,6 +292,5 @@ it("sends an explicitly selected preset's compaction threshold instead of inheri
     );
   } finally {
     view.unmount();
-    client.clear();
   }
 });

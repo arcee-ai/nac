@@ -1,5 +1,7 @@
+import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 import {
   memo,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -55,7 +57,8 @@ import {
   dispatchThreadName,
   partitionThreadCalls,
 } from "@/app/lib/transcript";
-import { useThreadEventPages } from "@/app/services/queries";
+import { atomRefresh, readAsync } from "@/app/effect/remote";
+import { olderThreadEventsAtom, threadEventsFor, threadEventsKey } from "@/app/services/queries";
 import { useLiveThreads, useStreamStatus, type RuntimeThread } from "@/app/store/runtimeStore";
 import { setSelectedThreadRunning } from "@/app/store/sessionLayoutStore";
 import type {
@@ -909,11 +912,18 @@ export function ThreadsView({
   // `thread_started` state so a pending or just-finished worker never gains an
   // actionable control during that approximation window.
   const canSteerCurrent = canSteerWorkers && live?.status === "running";
-  const eventPages = useThreadEventPages(snapshot ? sessionId : null, currentName);
+  const registry = useContext(RegistryContext);
+  const eventsAtom = threadEventsFor(snapshot ? sessionId : null, currentName);
+  const eventPages = readAsync(useAtomValue(eventsAtom));
+  const olderEvents = useAtomValue(olderThreadEventsAtom);
+  const loadOlderEvents = useAtomSet(olderThreadEventsAtom, { mode: "promise" });
+  const olderFailure = readAsync(olderEvents).error;
   const pagedEvents = useMemo(
-    () => (eventPages.data ? mergeThreadEventPages(eventPages.data.pages) : undefined),
+    () => (eventPages.data ? mergeThreadEventPages([...eventPages.data.pages]) : undefined),
     [eventPages.data],
   );
+  const hasOlderEvents = Boolean(eventPages.data?.pages.at(-1)?.has_older);
+  const historyErrorSource = eventPages.error ?? olderFailure;
   useEffect(() => {
     if (!currentName) return;
     if (selected === currentName) return;
@@ -1062,16 +1072,16 @@ export function ThreadsView({
             events={pagedEvents ?? snapshot.thread_events?.[current.name]}
             liveLog={live?.log ?? []}
             running={runningNames.has(current.name)}
-            hasOlder={Boolean(eventPages.hasNextPage)}
-            loadingOlder={eventPages.isFetchingNextPage}
+            hasOlder={hasOlderEvents}
+            loadingOlder={olderEvents.waiting}
             loadingInitial={eventPages.isPending}
-            historyError={eventPages.error instanceof Error ? eventPages.error.message : null}
+            historyError={historyErrorSource instanceof Error ? historyErrorSource.message : null}
             onLoadOlder={async () => {
-              await eventPages.fetchNextPage();
+              await loadOlderEvents(threadEventsKey(sessionId, current.name));
             }}
             onRetry={async () => {
-              if (eventPages.data) await eventPages.fetchNextPage();
-              else await eventPages.refetch();
+              if (eventPages.data) await loadOlderEvents(threadEventsKey(sessionId, current.name));
+              else await atomRefresh.run(registry, eventsAtom);
             }}
             view={view}
             canSteer={canSteerCurrent}

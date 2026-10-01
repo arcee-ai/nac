@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { ConfigurationsModal } from "@/app/components/modals/ConfigurationsModal";
@@ -7,7 +8,13 @@ import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useMcpServers, useSessions, useSshConfigs } from "@/app/services/queries";
+import { readAsync } from "@/app/effect/remote";
+import {
+  mcpServersAtom,
+  SESSIONS_POLL_MS,
+  sessionsAtom,
+  sshConfigsAtom,
+} from "@/app/services/queries";
 
 /**
  * The sidebar's destinations: the same dialogs the header already opens, plus
@@ -21,9 +28,9 @@ export function useSidebarCommands() {
   const navigate = useNavigate();
   const actions = useProjectActions();
   const managed = useManagedHost();
-  const { data: sessions = [] } = useSessions();
-  const { data: mcpServers } = useMcpServers();
-  const { data: sshConfigs } = useSshConfigs();
+  const { data: sessions = [] } = readAsync(useAtomValue(sessionsAtom(SESSIONS_POLL_MS)));
+  const { data: mcpServers } = readAsync(useAtomValue(mcpServersAtom));
+  const { data: sshConfigs } = readAsync(useAtomValue(sshConfigsAtom));
 
   const sessionId = sessionIdFromPath(pathname);
   const sessionKnown =

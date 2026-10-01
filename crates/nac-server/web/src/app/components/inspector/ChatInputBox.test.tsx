@@ -1,15 +1,24 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
+import { isolatedRegistry } from "@/app/effect/remote";
 import { SessionActionsProvider } from "@/app/providers/SessionActionsProvider";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries";
+import { apiEffect } from "@/app/services/api";
+import { sessionCommandsAtom, sessionSkillsAtom } from "@/app/services/queries/configuration";
+import {
+  sessionGoalAtom,
+  sessionInboxAtom,
+  sessionPermissionsAtom,
+  traditionalChildrenAtom,
+} from "@/app/services/queries/direct";
 import { resetRuntime, syncRunFromSnapshot } from "@/app/store/runtimeStore";
 import type {
   InboxItem,
@@ -42,27 +51,51 @@ const fakes = {
   getStore: vi.fn(),
 };
 
-vi.spyOn(api, "listSessionCommands").mockImplementation((...args) =>
-  fakes.listSessionCommands(...args),
+vi.spyOn(apiEffect, "listSessionCommands").mockImplementation((...args) =>
+  Effect.promise(() => fakes.listSessionCommands(...args)),
 );
-vi.spyOn(api, "listSessionSkills").mockImplementation((...args) =>
-  fakes.listSessionSkills(...args),
+vi.spyOn(apiEffect, "listSessionSkills").mockImplementation((...args) =>
+  Effect.promise(() => fakes.listSessionSkills(...args)),
 );
-vi.spyOn(api, "submitRun").mockImplementation((...args) => fakes.submitRun(...args));
-vi.spyOn(api, "steerOrchestrator").mockImplementation((...args) =>
-  fakes.steerOrchestrator(...args),
+vi.spyOn(apiEffect, "submitRun").mockImplementation((...args) =>
+  Effect.promise(() => fakes.submitRun(...args)),
 );
-vi.spyOn(api, "compactSession").mockImplementation((...args) => fakes.compactSession(...args));
-vi.spyOn(api, "createInboxItem").mockImplementation((...args) => fakes.createInboxItem(...args));
-vi.spyOn(api, "updateInboxItem").mockImplementation((...args) => fakes.updateInboxItem(...args));
-vi.spyOn(api, "cancelInboxItem").mockImplementation((...args) => fakes.cancelInboxItem(...args));
-vi.spyOn(api, "createGoal").mockImplementation((...args) => fakes.createGoal(...args));
-vi.spyOn(api, "updateGoal").mockImplementation((...args) => fakes.updateGoal(...args));
-vi.spyOn(api, "clearGoal").mockImplementation((...args) => fakes.clearGoal(...args));
-vi.spyOn(api, "getGoal").mockImplementation((...args) => fakes.getGoal(...args));
-vi.spyOn(api, "cancelActiveRun").mockImplementation((...args) => fakes.cancelActiveRun(...args));
-vi.spyOn(api, "getModelCatalog").mockImplementation((...args) => fakes.getModelCatalog(...args));
-vi.spyOn(api, "getStore").mockImplementation((...args) => fakes.getStore(...args));
+vi.spyOn(apiEffect, "steerOrchestrator").mockImplementation((...args) =>
+  Effect.promise(() => fakes.steerOrchestrator(...args)),
+);
+vi.spyOn(apiEffect, "compactSession").mockImplementation((...args) =>
+  Effect.promise(() => fakes.compactSession(...args)),
+);
+vi.spyOn(apiEffect, "createInboxItem").mockImplementation((...args) =>
+  Effect.promise(() => fakes.createInboxItem(...args)),
+);
+vi.spyOn(apiEffect, "updateInboxItem").mockImplementation((...args) =>
+  Effect.promise(() => fakes.updateInboxItem(...args)),
+);
+vi.spyOn(apiEffect, "cancelInboxItem").mockImplementation((...args) =>
+  Effect.promise(() => fakes.cancelInboxItem(...args)),
+);
+vi.spyOn(apiEffect, "createGoal").mockImplementation((...args) =>
+  Effect.promise(() => fakes.createGoal(...args)),
+);
+vi.spyOn(apiEffect, "updateGoal").mockImplementation((...args) =>
+  Effect.promise(() => fakes.updateGoal(...args)),
+);
+vi.spyOn(apiEffect, "clearGoal").mockImplementation((...args) =>
+  Effect.promise(() => fakes.clearGoal(...args)),
+);
+vi.spyOn(apiEffect, "getGoal").mockImplementation((...args) =>
+  Effect.promise(() => fakes.getGoal(...args)),
+);
+vi.spyOn(apiEffect, "cancelActiveRun").mockImplementation((...args) =>
+  Effect.promise(() => fakes.cancelActiveRun(...args)),
+);
+vi.spyOn(apiEffect, "getModelCatalog").mockImplementation((...args) =>
+  Effect.promise(() => fakes.getModelCatalog(...args)),
+);
+vi.spyOn(apiEffect, "getStore").mockImplementation((...args) =>
+  Effect.promise(() => fakes.getStore(...args)),
+);
 
 const compactDefinition: SlashCommandDefinition = {
   command: "compact",
@@ -141,24 +174,22 @@ function composer(
   } = {},
   expectInput = true,
 ) {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, staleTime: Infinity },
-      mutations: { retry: false },
-    },
-  });
+  const registry = isolatedRegistry();
   if (commandFixtures !== undefined) {
-    client.setQueryData(queryKeys.sessionCommands("session"), commandFixtures);
+    registry.set(sessionCommandsAtom("session"), AsyncResult.success(commandFixtures));
   }
   if (skillFixtures !== undefined) {
-    client.setQueryData(queryKeys.sessionSkills("session"), skillFixtures);
+    registry.set(sessionSkillsAtom("session"), AsyncResult.success(skillFixtures));
   }
   if (behavior) {
-    client.setQueryData(queryKeys.sessionPermissions("session"), { requests: [], grants: [] });
-    client.setQueryData(queryKeys.sessionGoal("session"), goalState);
+    registry.set(
+      sessionPermissionsAtom("session"),
+      AsyncResult.success({ approval_mode: "manual", requests: [], grants: [] }),
+    );
+    registry.set(sessionGoalAtom("session"), AsyncResult.success(goalState));
     fakes.getGoal.mockResolvedValue(goalState);
-    client.setQueryData(queryKeys.sessionInbox("session"), inboxItems);
-    client.setQueryData(queryKeys.traditionalChildren("session"), []);
+    registry.set(sessionInboxAtom("session"), AsyncResult.success(inboxItems));
+    registry.set(traditionalChildrenAtom("session"), AsyncResult.success([]));
   }
   const knownEntry: ManagedSessionSummary = {
     active: false,
@@ -202,7 +233,7 @@ function composer(
       } as unknown as SessionSnapshotResponse)
     : null;
   render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <MemoryRouter>
         <ToastProvider>
           <SessionActionsProvider>
@@ -210,7 +241,7 @@ function composer(
           </SessionActionsProvider>
         </ToastProvider>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
   if (!expectInput) return null as never;
   const textarea = screen.getByRole("combobox", { name: "Message" });

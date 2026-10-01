@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 
-import { useManagedUpgradeSnapshot, useStartManagedUpgrade } from "@/app/features/managed/queries";
+import { ClientRequestError } from "@/app/effect/errors";
+import { atomRefresh, readAsync } from "@/app/effect/remote";
+import {
+  managedUpgradeSnapshotAtom,
+  startManagedUpgradeAtom,
+} from "@/app/features/managed/queries";
 import {
   managedUpgradeAuthorityChanged,
   managedUpgradeRecovery,
@@ -71,15 +77,28 @@ function rediscoveredAcceptedStart(
   );
 }
 
+function commandFailure(error: unknown): unknown {
+  return error instanceof ClientRequestError ? error.error : error;
+}
+
 /**
  * Browser controller for the externally-owned durable upgrade. It never
  * invents a host, incarnation, channel, or target: the only start payload is
  * the controller contract's exact empty object, and blocker controls invoke
  * the ordinary NAC operations named by the sanitized facade projection.
  */
+
 export function useManagedUpgrade() {
-  const snapshot = useManagedUpgradeSnapshot();
-  const startMutation = useStartManagedUpgrade();
+  const registry = useContext(RegistryContext);
+  const upgradeAtom = managedUpgradeSnapshotAtom();
+  const view = readAsync(useAtomValue(upgradeAtom));
+  const startUpgrade = useAtomSet(startManagedUpgradeAtom, { mode: "promise" });
+  const startPending = useAtomValue(startManagedUpgradeAtom).waiting;
+  const refetch = useCallback(async () => {
+    await atomRefresh.run(registry, upgradeAtom);
+    return readAsync(registry.get(upgradeAtom));
+  }, [registry, upgradeAtom]);
+  const snapshot = { ...view, refetch };
   const retryKey = useRef<string | null>(null);
   const operationId = snapshot.data?.operation?.operation_id ?? null;
   const [confirmationOpen, setConfirmationOpen] = useState(false);
@@ -110,31 +129,32 @@ export function useManagedUpgrade() {
   }, []);
 
   const cancelStart = useCallback(() => {
-    if (startMutation.isPending) return;
+    if (startPending) return;
     setConfirmationOpen(false);
     setStartError("");
-  }, [startMutation.isPending]);
+  }, [startPending]);
 
   const confirmStart = useCallback(async () => {
-    if (startMutation.isPending) return;
+    if (startPending) return;
     const key = retryKey.current ?? idempotencyKey();
-    const priorOperation = snapshot.data?.operation ?? null;
-    const expectedTarget = snapshot.data?.preview.latest_beta;
+    const priorOperation = view.data?.operation ?? null;
+    const expectedTarget = view.data?.preview.latest_beta;
     retryKey.current = key;
     setStartError("");
     try {
-      await startMutation.mutateAsync(key);
+      await startUpgrade(key);
       retryKey.current = null;
       setConfirmationOpen(false);
     } catch (error) {
-      setStartError(managedUpgradeRecovery(error).message);
-      if (managedUpgradeAuthorityChanged(error)) {
+      const cause = commandFailure(error);
+      setStartError(managedUpgradeRecovery(cause).message);
+      if (managedUpgradeAuthorityChanged(cause)) {
         retryKey.current = null;
         setConfirmationOpen(false);
       }
-      const refreshed = await snapshot.refetch();
+      const refreshed = await refetch();
       if (
-        !managedUpgradeAuthorityChanged(error) &&
+        !managedUpgradeAuthorityChanged(cause) &&
         !refreshed.error &&
         expectedTarget &&
         rediscoveredAcceptedStart(priorOperation, refreshed.data?.operation, expectedTarget)
@@ -144,7 +164,7 @@ export function useManagedUpgrade() {
         setConfirmationOpen(false);
       }
     }
-  }, [snapshot, startMutation]);
+  }, [refetch, startPending, startUpgrade, view.data]);
 
   const requestSettlement = useCallback(
     async (blocker: ManagedUpgradeBlocker) => {
@@ -152,19 +172,19 @@ export function useManagedUpgrade() {
       try {
         await settleBlocker(blocker);
         setSettlements((current) => ({ ...current, [blocker.selection_key]: "settling" }));
-        await snapshot.refetch();
+        await refetch();
       } catch {
         setSettlements((current) => ({ ...current, [blocker.selection_key]: "failed" }));
       }
     },
-    [snapshot],
+    [refetch],
   );
 
   return {
     snapshot,
     confirmationOpen,
     startError,
-    startPending: startMutation.isPending,
+    startPending,
     settlements,
     requestStart,
     cancelStart,

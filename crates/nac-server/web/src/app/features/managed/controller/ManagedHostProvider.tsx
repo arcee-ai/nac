@@ -1,6 +1,8 @@
+import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useMemo, useState } from "react";
 
-import { useManagedHostStatus } from "@/app/features/managed/queries";
+import { readAsync } from "@/app/effect/remote";
+import { managedHostStatusAtom } from "@/app/features/managed/queries";
 import {
   ManagedHostContext,
   type ManagedHostActions,
@@ -10,7 +12,7 @@ import { ManagedHostModal } from "@/app/features/managed/presentation/ManagedHos
 import { ManagedRepositoryModal } from "@/app/features/managed/presentation/ManagedRepositoryModal";
 
 export function ManagedHostProvider({ children }: { children: React.ReactNode }) {
-  const statusQuery = useManagedHostStatus();
+  const statusQuery = readAsync(useAtomValue(managedHostStatusAtom));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<ManagedTab>("status");
   const [repositoryOpen, setRepositoryOpen] = useState(false);

@@ -1,10 +1,16 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
 import { toRunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useDeleteProject } from "@/app/services/queries";
+import { deleteProjectAtom } from "@/app/services/queries";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 import type { DeleteProjectSessions, ProjectRecord } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -22,12 +28,13 @@ export function DeleteProjectModal({
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const remove = useDeleteProject();
+  const remove = useAtomSet(deleteProjectAtom, { mode: "promise" });
+  const removing = useAtomValue(deleteProjectAtom).waiting;
   const isMobile = useIsMobile();
   const submit = async (sessions: DeleteProjectSessions) => {
-    if (!project || remove.isPending) return;
+    if (!project || removing) return;
     try {
-      const result = await remove.mutateAsync({
+      const result = await remove({
         projectId: project.project_id,
         sessions,
       });
@@ -53,7 +60,7 @@ export function DeleteProjectModal({
       );
       onClose();
     } catch (error) {
-      toast.error(`Failed to delete: ${errorMessage(toRunError(error))}`);
+      toast.error(`Failed to delete: ${errorMessage(toRunError(commandError(error)))}`);
     }
   };
 
@@ -70,7 +77,7 @@ export function DeleteProjectModal({
               variant={ButtonVariant.Tertiary}
               content={ButtonContent.Text}
               onClick={onClose}
-              disabled={remove.isPending}
+              disabled={removing}
             >
               Cancel
             </Button>
@@ -79,7 +86,7 @@ export function DeleteProjectModal({
             variant={ButtonVariant.Secondary}
             content={ButtonContent.Text}
             onClick={() => void submit("keep")}
-            disabled={remove.isPending}
+            disabled={removing}
           >
             Keep Sessions
           </Button>
@@ -87,7 +94,7 @@ export function DeleteProjectModal({
             variant={ButtonVariant.SecondaryDestructive}
             content={ButtonContent.Text}
             onClick={() => void submit("delete")}
-            loading={remove.isPending}
+            loading={removing}
           >
             Remove Project and Sessions
           </Button>

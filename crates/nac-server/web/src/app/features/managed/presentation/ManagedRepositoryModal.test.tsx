@@ -1,13 +1,15 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { isolatedRegistry } from "@/app/effect/remote";
 import { ManagedRepositoryModal } from "@/app/features/managed/presentation/ManagedRepositoryModal";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+import { apiEffect } from "@/app/services/api";
 import type { ManagedGitHubRepository } from "@/app/types/api";
 
 const repositories: ManagedGitHubRepository[] = [
@@ -50,25 +52,28 @@ const fakes = {
   branches: vi.fn(),
 };
 
-vi.spyOn(api, "getManagedStatus").mockImplementation((...args) => fakes.status(...args));
-vi.spyOn(api, "getManagedGitHub").mockImplementation((...args) => fakes.github(...args));
-vi.spyOn(api, "listManagedGitHubRepositories").mockImplementation((...args) =>
-  fakes.repositories(...args),
+vi.spyOn(apiEffect, "getManagedStatus").mockImplementation((...args) =>
+  Effect.promise(() => fakes.status(...args)),
 );
-vi.spyOn(api, "listManagedGitHubBranches").mockImplementation((...args) => fakes.branches(...args));
+vi.spyOn(apiEffect, "getManagedGitHub").mockImplementation((...args) =>
+  Effect.promise(() => fakes.github(...args)),
+);
+vi.spyOn(apiEffect, "listManagedGitHubRepositories").mockImplementation((...args) =>
+  Effect.promise(() => fakes.repositories(...args)),
+);
+vi.spyOn(apiEffect, "listManagedGitHubBranches").mockImplementation((...args) =>
+  Effect.promise(() => fakes.branches(...args)),
+);
 
 function mount() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
   return render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={isolatedRegistry()}>
       <MemoryRouter>
         <ToastProvider>
           <ManagedRepositoryModal open onClose={() => {}} onConnect={() => {}} />
         </ToastProvider>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
 }
 

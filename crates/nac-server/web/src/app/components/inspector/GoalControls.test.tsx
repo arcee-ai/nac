@@ -1,14 +1,17 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GoalControls } from "@/app/components/inspector/GoalControls";
+import { isolatedRegistry } from "@/app/effect/remote";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries";
+import { apiEffect } from "@/app/services/api";
+import { sessionGoalAtom } from "@/app/services/queries/direct";
 import type { SessionGoalRecord } from "@/app/types/api";
 
 const SESSION_ID = "direct-session";
@@ -20,10 +23,18 @@ const fakes = {
   clearGoal: vi.fn(),
 };
 
-vi.spyOn(api, "getGoal").mockImplementation((...args) => fakes.getGoal(...args));
-vi.spyOn(api, "createGoal").mockImplementation((...args) => fakes.createGoal(...args));
-vi.spyOn(api, "updateGoal").mockImplementation((...args) => fakes.updateGoal(...args));
-vi.spyOn(api, "clearGoal").mockImplementation((...args) => fakes.clearGoal(...args));
+vi.spyOn(apiEffect, "getGoal").mockImplementation((...args) =>
+  Effect.promise(() => fakes.getGoal(...args)),
+);
+vi.spyOn(apiEffect, "createGoal").mockImplementation((...args) =>
+  Effect.promise(() => fakes.createGoal(...args)),
+);
+vi.spyOn(apiEffect, "updateGoal").mockImplementation((...args) =>
+  Effect.promise(() => fakes.updateGoal(...args)),
+);
+vi.spyOn(apiEffect, "clearGoal").mockImplementation((...args) =>
+  Effect.promise(() => fakes.clearGoal(...args)),
+);
 
 function goal(status: SessionGoalRecord["status"] = "active"): SessionGoalRecord {
   return {
@@ -48,18 +59,16 @@ function goal(status: SessionGoalRecord["status"] = "active"): SessionGoalRecord
 }
 
 function mount(value: SessionGoalRecord | null, behavior: "direct" | "orchestrator" = "direct") {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  client.setQueryData(queryKeys.sessionGoal(SESSION_ID), value);
+  const registry = isolatedRegistry();
+  registry.set(sessionGoalAtom(SESSION_ID), AsyncResult.success(value));
   return render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <MemoryRouter>
         <ToastProvider>
           <GoalControls sessionId={SESSION_ID} behavior={behavior} />
         </ToastProvider>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
 }
 

@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -17,9 +18,11 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useManagedOrchestrators, useStartManagedOrchestrator } from "@/app/services/queries";
+import { managedOrchestrators, startManagedOrchestratorAtom } from "@/app/services/queries";
 import type { SessionBehavior } from "@/app/types/api";
 
 interface OrchestratorControlsProps {
@@ -39,8 +42,9 @@ export function OrchestratorControls({
   openRequest = 0,
 }: OrchestratorControlsProps) {
   const enabled = behavior === "direct-with-orchestrator";
-  const query = useManagedOrchestrators(sessionId, enabled);
-  const start = useStartManagedOrchestrator();
+  const query = readAsync(useAtomValue(managedOrchestrators(sessionId, enabled)));
+  const start = useAtomSet(startManagedOrchestratorAtom, { mode: "promise" });
+  const starting = useAtomValue(startManagedOrchestratorAtom).waiting;
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
@@ -56,7 +60,7 @@ export function OrchestratorControls({
 
   if (!enabled) return null;
   const orchestrators = query.data ?? [];
-  const busy = start.isPending;
+  const busy = starting;
   const reset = () => {
     setDescription("");
     setPrompt("");
@@ -67,7 +71,7 @@ export function OrchestratorControls({
       return;
     }
     try {
-      await start.mutateAsync({
+      await start({
         sessionId,
         payload: {
           description: description.trim(),
@@ -78,7 +82,8 @@ export function OrchestratorControls({
       reset();
       setOpen(false);
     } catch (error) {
-      toast.error(`Unable to start orchestrator: ${errorMessage(toRunError(error))}`);
+      const cause = error instanceof ClientRequestError ? error.error : error;
+      toast.error(`Unable to start orchestrator: ${errorMessage(toRunError(cause))}`);
     }
   };
   return (
@@ -135,7 +140,7 @@ export function OrchestratorControls({
               </label>
               <Button
                 variant={ButtonVariant.Primary}
-                loading={start.isPending}
+                loading={starting}
                 disabled={busy}
                 onClick={() => void submit()}
               >

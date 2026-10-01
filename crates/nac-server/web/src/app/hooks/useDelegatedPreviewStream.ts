@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useContext, useEffect, useState } from "react";
+import { RegistryContext } from "@effect/atom-react";
 
-import { queryKeys } from "@/app/services/queries";
+import { atomRefresh } from "@/app/effect/remote";
+import { sessionSnapshotAtom } from "@/app/services/queries/session";
 import { subscribeToSessionEvents } from "@/app/services/eventStream";
 import type { AssistantStreamDelta, SessionEventEnvelope } from "@/app/types/api";
 
@@ -25,7 +26,7 @@ const EMPTY: DelegatedPreviewStream = { text: "", reasoning: "", running: false 
  * preview can paint as it is produced without rewriting the parent transcript.
  */
 export function useDelegatedPreviewStream(sessionId: string | null): DelegatedPreviewStream {
-  const client = useQueryClient();
+  const registry = useContext(RegistryContext);
   const [stream, setStream] = useState<DelegatedPreviewStream>(EMPTY);
   const [seenSession, setSeenSession] = useState(sessionId);
   if (seenSession !== sessionId) {
@@ -45,10 +46,7 @@ export function useDelegatedPreviewStream(sessionId: string | null): DelegatedPr
       reloadTimer = window.setTimeout(() => {
         reloadTimer = null;
         if (disposed) return;
-        void client.invalidateQueries({
-          queryKey: queryKeys.sessionSnapshot(sessionId),
-          exact: true,
-        });
+        void atomRefresh.run(registry, sessionSnapshotAtom(sessionId));
       }, RELOAD_DEBOUNCE_MS);
     };
 
@@ -120,7 +118,7 @@ export function useDelegatedPreviewStream(sessionId: string | null): DelegatedPr
       dispose();
       clearTimeout(reloadTimer ?? undefined);
     };
-  }, [client, sessionId]);
+  }, [registry, sessionId]);
 
   return stream;
 }

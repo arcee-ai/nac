@@ -1,9 +1,11 @@
-import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useContext, useEffect } from "react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 
+import { readAsync, refreshPrefixed } from "@/app/effect/remote";
+import { managedAuthAtom, managedProviderModelsFor } from "@/app/features/managed/queries";
 import { managedAuthProvider } from "@/app/lib/providers";
 import { humanError, type RunError } from "@/app/lib/providerError";
-import { queryKeys, useManagedAuth, useManagedProviderModels } from "@/app/services/queries";
+import { atomIds } from "@/app/services/queries/keys";
 
 /**
  * Whether a run failure asking for a login should be kept off screen, because
@@ -26,22 +28,22 @@ import { queryKeys, useManagedAuth, useManagedProviderModels } from "@/app/servi
 export function useAuthErrorSuppressed(backend: string | null, error: RunError): boolean {
   const asksForLogin = error != null && humanError(error, backend).fix?.kind === "login";
   const provider = backend ? managedAuthProvider(backend) : null;
-  const auth = useManagedAuth(asksForLogin && provider !== null);
+  const auth = readAsync(useAtomValue(managedAuthAtom(asksForLogin && provider !== null)));
   const entry = auth.data?.providers.find((status) => status.provider === provider);
   const probeBackend = entry?.backend ?? null;
   const signedIn = Boolean(entry?.signed_in);
-  const reach = useManagedProviderModels(probeBackend, asksForLogin && signedIn);
+  const reach = readAsync(
+    useAtomValue(managedProviderModelsFor(probeBackend, asksForLogin && signedIn)),
+  );
 
-  const client = useQueryClient();
+  const registry = useContext(RegistryContext);
   useEffect(() => {
     if (!asksForLogin || probeBackend === null) return;
     // The run spent this credential and had it refused, so a success cached for
     // it beforehand is no longer evidence of anything — without this, a model
     // index read minutes earlier would answer for a login that has since died.
-    void client.invalidateQueries({
-      queryKey: queryKeys.managedProviderModels(probeBackend),
-    });
-  }, [asksForLogin, probeBackend, client]);
+    void refreshPrefixed(registry, atomIds.managedProviderModels(probeBackend));
+  }, [asksForLogin, probeBackend, registry]);
 
   // Anything that leaves the credential unusable, or leaves this unable to tell:
   // a backend that signs in some other way and cannot be probed at all, an

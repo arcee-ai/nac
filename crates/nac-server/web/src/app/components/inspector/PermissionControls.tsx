@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 
 import {
@@ -13,13 +14,15 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { toRunError } from "@/app/lib/providerError";
 import {
-  useDeletePermissionGrant,
-  useReplyPermission,
-  useSetPermissionApprovalMode,
-  useSessionPermissions,
+  deletePermissionGrantAtom,
+  replyPermissionAtom,
+  sessionPermissions,
+  setPermissionApprovalModeAtom,
 } from "@/app/services/queries";
 import type {
   PermissionGrantRecord,
@@ -81,10 +84,11 @@ export function PermissionControls({
   requesterLabel,
 }: PermissionControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const permissions = useSessionPermissions(sessionId, direct);
-  const replyPermission = useReplyPermission();
-  const setApprovalMode = useSetPermissionApprovalMode();
-  const deleteGrant = useDeletePermissionGrant();
+  const permissions = readAsync(useAtomValue(sessionPermissions(sessionId, direct)));
+  const replyPermission = useAtomSet(replyPermissionAtom, { mode: "promise" });
+  const setApprovalMode = useAtomSet(setPermissionApprovalModeAtom, { mode: "promise" });
+  const changingMode = useAtomValue(setPermissionApprovalModeAtom).waiting;
+  const deleteGrant = useAtomSet(deletePermissionGrantAtom, { mode: "promise" });
   const toast = useToast();
   const requests = permissions.data?.requests ?? [];
   const grants = permissions.data?.grants ?? [];
@@ -92,7 +96,10 @@ export function PermissionControls({
   const inheritedAutoApproval = autoApprove && !autoApprovalAvailable;
   const [manuallyOpen, setManuallyOpen] = useState(false);
   const [dismissedRequests, setDismissedRequests] = useState("");
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<{
+    id: string;
+    reply: PermissionReply;
+  } | null>(null);
   const [deletingGrant, setDeletingGrant] = useState<string | null>(null);
   const identity = requestIdentity(requests);
   // Each newly observed ask gets one automatic presentation. Closing the
@@ -111,16 +118,17 @@ export function PermissionControls({
 
   const reply = async (choice: PermissionReply) => {
     if (!active || replyingTo) return;
-    setReplyingTo(active.id);
+    setReplyingTo({ id: active.id, reply: choice });
     try {
-      await replyPermission.mutateAsync({
+      await replyPermission({
         sessionId,
         requestId: active.id,
         reply: choice,
       });
       if (requests.length === 1) close();
     } catch (error) {
-      toast.error(`Unable to answer permission request: ${errorMessage(toRunError(error))}`);
+      const cause = error instanceof ClientRequestError ? error.error : error;
+      toast.error(`Unable to answer permission request: ${errorMessage(toRunError(cause))}`);
     } finally {
       setReplyingTo(null);
     }
@@ -130,9 +138,10 @@ export function PermissionControls({
     if (deletingGrant) return;
     setDeletingGrant(grant.id);
     try {
-      await deleteGrant.mutateAsync({ sessionId, grantId: grant.id });
+      await deleteGrant({ sessionId, grantId: grant.id });
     } catch (error) {
-      toast.error(`Unable to forget permission: ${errorMessage(toRunError(error))}`);
+      const cause = error instanceof ClientRequestError ? error.error : error;
+      toast.error(`Unable to forget permission: ${errorMessage(toRunError(cause))}`);
     } finally {
       setDeletingGrant(null);
     }
@@ -141,12 +150,13 @@ export function PermissionControls({
   const changeApprovalMode = async (enabled: boolean) => {
     setManuallyOpen(true);
     try {
-      await setApprovalMode.mutateAsync({
+      await setApprovalMode({
         sessionId,
         mode: enabled ? "auto_approve" : "manual",
       });
     } catch (error) {
-      toast.error(`Unable to change approval mode: ${errorMessage(toRunError(error))}`);
+      const cause = error instanceof ClientRequestError ? error.error : error;
+      toast.error(`Unable to change approval mode: ${errorMessage(toRunError(cause))}`);
     }
   };
 
@@ -208,7 +218,7 @@ export function PermissionControls({
             <div className="flex w-full flex-wrap justify-end gap-2">
               <Button
                 variant={ButtonVariant.SecondaryDestructive}
-                loading={replyingTo === active.id && replyPermission.variables?.reply === "reject"}
+                loading={replyingTo?.id === active.id && replyingTo.reply === "reject"}
                 disabled={replyingTo !== null}
                 onClick={() => void reply("reject")}
               >
@@ -216,7 +226,7 @@ export function PermissionControls({
               </Button>
               <Button
                 variant={ButtonVariant.Secondary}
-                loading={replyingTo === active.id && replyPermission.variables?.reply === "once"}
+                loading={replyingTo?.id === active.id && replyingTo.reply === "once"}
                 disabled={replyingTo !== null}
                 onClick={() => void reply("once")}
               >
@@ -224,7 +234,7 @@ export function PermissionControls({
               </Button>
               <Button
                 variant={ButtonVariant.Primary}
-                loading={replyingTo === active.id && replyPermission.variables?.reply === "always"}
+                loading={replyingTo?.id === active.id && replyingTo.reply === "always"}
                 disabled={replyingTo !== null || !rememberable}
                 title={
                   rememberable
@@ -272,7 +282,7 @@ export function PermissionControls({
                   <Switch
                     aria-label="Approve all automatically"
                     checked={autoApprove}
-                    disabled={setApprovalMode.isPending}
+                    disabled={changingMode}
                     onChange={(enabled) => void changeApprovalMode(enabled)}
                   />
                 </div>

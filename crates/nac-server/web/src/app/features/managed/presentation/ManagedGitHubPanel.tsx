@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import { useContext, useEffect, useState } from "react";
 
 import {
   Button,
@@ -11,16 +11,19 @@ import {
   Loader,
   LoaderSize,
 } from "@/app/atoms";
-import { managedQueryKeys, useManagedGitHub } from "@/app/features/managed/queries";
+import { patchRemote, readAsync, refreshPrefixed } from "@/app/effect/remote";
+import { managedGitHubAtom } from "@/app/features/managed/queries";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
+import { atomIds } from "@/app/services/queries/keys";
 import type { ManagedGitHubLoginStarted } from "@/app/types/api";
 
 export function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }) {
   const toast = useToast();
-  const client = useQueryClient();
-  const github = useManagedGitHub();
+  const registry = useContext(RegistryContext);
+  const githubAtom = managedGitHubAtom();
+  const github = readAsync(useAtomValue(githubAtom));
   const [login, setLogin] = useState<ManagedGitHubLoginStarted | null>(null);
   const [loginError, setLoginError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -36,12 +39,12 @@ export function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }
           if (state.state === "complete") {
             // Publish the authoritative profile before removing the device prompt.
             // Background normalization must not briefly offer Connect GitHub again.
-            client.setQueryData(managedQueryKeys.github, state.auth);
+            patchRemote(registry, githubAtom, () => state.auth);
             setLogin(null);
             setLoginError("");
             void Promise.all([
-              client.invalidateQueries({ queryKey: managedQueryKeys.github }),
-              client.invalidateQueries({ queryKey: managedQueryKeys.hostStatus }),
+              refreshPrefixed(registry, atomIds.managedGitHub),
+              refreshPrefixed(registry, atomIds.managedHostStatus),
             ]);
             toast.success("GitHub connected");
             onConnected?.();
@@ -64,7 +67,7 @@ export function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }
       stopped = true;
       controller.abort();
     };
-  }, [login, client, onConnected, toast]);
+  }, [login, registry, githubAtom, onConnected, toast]);
 
   const connect = async () => {
     setBusy(true);
@@ -83,8 +86,8 @@ export function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }
     try {
       await api.disconnectManagedGitHub();
       await Promise.all([
-        client.invalidateQueries({ queryKey: managedQueryKeys.github }),
-        client.invalidateQueries({ queryKey: managedQueryKeys.hostStatus }),
+        refreshPrefixed(registry, atomIds.managedGitHub),
+        refreshPrefixed(registry, atomIds.managedHostStatus),
       ]);
       toast.success("GitHub disconnected");
     } catch (error) {

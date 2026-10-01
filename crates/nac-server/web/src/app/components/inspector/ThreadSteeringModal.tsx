@@ -1,9 +1,11 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 
 import { SteeringPromptModal } from "@/app/components/inspector/SteeringPromptModal";
+import { ClientRequestError } from "@/app/effect/errors";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useSteerThread } from "@/app/services/queries";
+import { steerThreadAtom } from "@/app/services/queries";
 
 export function ThreadSteeringModal({
   sessionId,
@@ -15,7 +17,8 @@ export function ThreadSteeringModal({
   onClose: () => void;
 }) {
   const [instruction, setInstruction] = useState("");
-  const steerThread = useSteerThread();
+  const steerThread = useAtomSet(steerThreadAtom, { mode: "promise" });
+  const steering = useAtomValue(steerThreadAtom).waiting;
   const toast = useToast();
 
   const submit = async () => {
@@ -25,11 +28,12 @@ export function ThreadSteeringModal({
       return;
     }
     try {
-      await steerThread.mutateAsync({ id: sessionId, threadName, instruction: prompt });
+      await steerThread({ id: sessionId, threadName, instruction: prompt });
       setInstruction("");
       onClose();
     } catch (error) {
-      toast.error(`Unable to steer ${threadName}: ${errorMessage(toRunError(error))}`);
+      const cause = error instanceof ClientRequestError ? error.error : error;
+      toast.error(`Unable to steer ${threadName}: ${errorMessage(toRunError(cause))}`);
     }
   };
 
@@ -38,7 +42,7 @@ export function ThreadSteeringModal({
       open
       title={`Steer ${threadName}`}
       value={instruction}
-      submitting={steerThread.isPending}
+      submitting={steering}
       onChange={setInstruction}
       onClose={onClose}
       onSubmit={() => void submit()}

@@ -1,15 +1,19 @@
-import { useCallback, useMemo } from "react";
+import { Atom } from "effect/reactivity";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
+import { Effect } from "effect";
+import type { AtomRegistry } from "effect/reactivity";
 import {
-  keepPreviousData,
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  type InfiniteData,
-  type QueryClient,
-  useQueryClient,
-  type UseQueryOptions,
-} from "@tanstack/react-query";
-
+  idleAtom,
+  nacAtoms,
+  patchRemote,
+  peekById,
+  prefixedIds,
+  refreshPrefixed,
+  remoteAtom,
+  resetPrefixed,
+  valueOf,
+  type Remote,
+} from "@/app/effect/remote";
 import {
   SNAPSHOT_MESSAGE_LIMIT,
   SNAPSHOT_THREAD_EVENT_LIMIT,
@@ -25,10 +29,9 @@ import {
   sameOrder,
   withUpdatedSummary,
 } from "@/app/lib/sessionOrder";
-import { api } from "@/app/services/api";
+import { apiEffect } from "@/app/services/api";
 import { UncertainCommandAdmissionError } from "@/app/services/nacClient";
-import { useQueryInvalidators } from "@/app/services/queries/invalidation";
-import { queryKeys, SESSIONS_POLL_MS, WORKSPACE_STATS_POLL_MS } from "@/app/services/queries/keys";
+import { SESSIONS_POLL_MS, WORKSPACE_STATS_POLL_MS } from "@/app/services/queries/keys";
 import {
   beginSnapshotFetch,
   currentSessionGeneration,
@@ -52,14 +55,8 @@ import type {
   UpdateConfigRequest,
 } from "@/app/types/api";
 
-export function useSessions(pollMs = SESSIONS_POLL_MS) {
-  return useQuery<ManagedSessionSummary[]>({
-    queryKey: queryKeys.sessions(false),
-    queryFn: ({ signal }) => api.listSessions({}, signal),
-    refetchInterval: pollMs,
-    staleTime: 0,
-    placeholderData: keepPreviousData,
-  });
+export function sessionRoot(id: string): string {
+  return `session\0${id}`;
 }
 
 export function mergeWorkspaceStats(
@@ -77,382 +74,342 @@ export function mergeWorkspaceStats(
   });
 }
 
-export function useSessionsWithWorkspaceStats(
-  cadence: {
-    baseMs: number;
-    statsMs: number;
-  } = {
-    baseMs: SESSIONS_POLL_MS,
-    statsMs: WORKSPACE_STATS_POLL_MS,
-  },
-) {
-  const base = useSessions(cadence.baseMs);
-  const stats = useQuery<ManagedSessionSummary[]>({
-    queryKey: queryKeys.sessions(true),
-    queryFn: ({ signal }) => api.listSessions({ workspaceStats: true }, signal),
-    refetchInterval: cadence.statsMs,
-    staleTime: cadence.statsMs,
+export const sessionsAtom = Atom.family((pollMs: number): Remote<ManagedSessionSummary[]> =>
+  remoteAtom(`sessions\u0000${pollMs}\u00000`, () => apiEffect.listSessions({}), {
+    pollMs,
+    staleMs: 0,
+    retry: false,
+  }),
+);
+
+export const sessionStatsAtom = Atom.family((pollMs: number): Remote<ManagedSessionSummary[]> =>
+  remoteAtom(
+    `sessions\u0000${pollMs}\u00001`,
+    () => apiEffect.listSessions({ workspaceStats: true }),
+    { pollMs, staleMs: pollMs, retry: false },
+  ),
+);
+
+export function sessionsWithStatsKey(
+  baseMs = SESSIONS_POLL_MS,
+  statsMs = WORKSPACE_STATS_POLL_MS,
+): string {
+  return `${baseMs}:${statsMs}`;
+}
+
+export const sessionsWithStatsAtom = Atom.family((key: string) => {
+  const [baseMs, statsMs] = key.split(":").map(Number);
+  return Atom.make((get) => {
+    const base = get(sessionsAtom(baseMs));
+    const stats = get(sessionStatsAtom(statsMs));
+    if (!AsyncResult.isSuccess(base)) return base;
+    return AsyncResult.success(mergeWorkspaceStats(base.value, valueOf(stats) ?? []), {
+      waiting: base.waiting || stats.waiting,
+      timestamp: base.timestamp,
+    });
   });
-  const data = useMemo(
-    () => (base.data ? mergeWorkspaceStats(base.data, stats.data ?? []) : base.data),
-    [base.data, stats.data],
-  );
-  return { ...base, data };
-}
+});
 
-/**
- * The single summary a session screen needs, picked out of the polled list.
- *
- * Subscribing to the whole list would re-render the chat every five seconds
- * over changes to unrelated sessions; the selected entry keeps its identity
- * across a refetch that did not touch it, so the transcript stays put.
- */
-export function useSessionSummary(id: string | null) {
-  const select = useCallback(
-    (sessions: ManagedSessionSummary[]) =>
-      sessions.find((item) => item.summary.session_id === id) ?? null,
-    [id],
-  );
-  return useQuery<ManagedSessionSummary[], Error, ManagedSessionSummary | null>({
-    queryKey: queryKeys.sessions(false),
-    queryFn: ({ signal }) => api.listSessions({}, signal),
-    refetchInterval: SESSIONS_POLL_MS,
-    staleTime: 0,
-    placeholderData: keepPreviousData,
-    select,
-  });
-}
-
-function previousDataFrom(sessionId: string) {
-  return <T>(previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) =>
-    previousQuery?.queryKey[1] === sessionId ? previous : undefined;
-}
-
-export function useSessionSnapshot(
+export function selectSession(
+  list: AsyncResult.AsyncResult<ManagedSessionSummary[], unknown>,
   id: string | null,
-  options?: Partial<UseQueryOptions<SessionSnapshotResponse>>,
-) {
-  const client = useQueryClient();
-  return useQuery<SessionSnapshotResponse>({
-    queryKey: queryKeys.sessionSnapshot(id ?? ""),
-    queryFn: async ({ signal }) => {
-      const token = beginSnapshotFetch(id!);
-      const incoming = await api.getSession(id!, {
-        messageLimit: SNAPSHOT_MESSAGE_LIMIT,
-        threadEventLimit: SNAPSHOT_THREAD_EVENT_LIMIT,
-        includeSessions: false,
-        includeSystem: true,
-        signal,
+): ManagedSessionSummary | null | undefined {
+  if (!id || !AsyncResult.isSuccess(list)) return undefined;
+  return list.value.find((item) => item.summary.session_id === id) ?? null;
+}
+
+export const sessionSnapshotAtom = Atom.family((id: string) =>
+  remoteAtom(
+    `${sessionRoot(id)}\0snapshot`,
+    (_get, current: SessionSnapshotResponse | undefined) => {
+      const program = Effect.gen(function* () {
+        const token = beginSnapshotFetch(id);
+        const incoming = yield* apiEffect.getSession(id, {
+          messageLimit: SNAPSHOT_MESSAGE_LIMIT,
+          threadEventLimit: SNAPSHOT_THREAD_EVENT_LIMIT,
+          includeSessions: false,
+          includeSystem: true,
+        });
+        if (!validSnapshotWindow(incoming)) {
+          return yield* Effect.fail(
+            new Error("The server returned an invalid snapshot message page."),
+          );
+        }
+        if (!isCurrentSessionGeneration(id, token.generation)) {
+          return yield* Effect.fail(new DOMException("Snapshot superseded", "AbortError"));
+        }
+        finishSnapshotFetch(id, token);
+        return mergeFocusedSnapshot(current, incoming, token.replace);
       });
-      if (!validSnapshotWindow(incoming)) {
-        throw new Error("The server returned an invalid snapshot message page.");
-      }
-      if (signal.aborted || !isCurrentSessionGeneration(id!, token.generation)) {
-        throw new DOMException("Snapshot superseded", "AbortError");
-      }
-      finishSnapshotFetch(id!, token);
-      return mergeFocusedSnapshot(
-        client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id!)),
-        incoming,
-        token.replace,
-      );
+      return program;
     },
-    enabled: Boolean(id),
-    // The stream invalidates this query, so a stale time only guards bursts.
-    staleTime: 1000,
-    // Same session: keep the open snapshot on screen while a refetch runs.
-    // A different session must not inherit this one's files and transcript.
-    placeholderData: previousDataFrom(id ?? ""),
-    ...options,
-  });
-}
-export function useLoadOlderMessages(id: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async (): Promise<boolean> => {
-      const current = client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id));
-      const start = current?.message_page?.start;
-      if (start === undefined || start <= 0) {
-        throw new Error("No older messages are available.");
-      }
-      const generation = currentSessionGeneration(id);
-      const page = await api.getMessages(id, {
-        before: start,
-        limit: SNAPSHOT_MESSAGE_LIMIT,
-        includeSystem: true,
-      });
-      if (!validMessagesPage(page)) {
-        throw new Error("The server returned an invalid message page.");
-      }
-      if (!isCurrentSessionGeneration(id, generation)) return false;
+    { staleMs: 1_000, retry: false },
+  ),
+);
 
-      let accepted = false;
-      client.setQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id), (latest) => {
-        if (!latest) return latest;
-        const merged = prependMessagePage(latest, page, start);
-        if (!merged) return latest;
-        accepted = true;
-        return merged;
-      });
-      return accepted;
-    },
-  });
-}
-export function useThreadEventPages(id: string | null, threadName: string | null) {
-  return useInfiniteQuery<
-    ThreadEventPage,
-    Error,
-    InfiniteData<ThreadEventPage, number | null>,
-    ReturnType<typeof queryKeys.threadEvents>,
-    number | null
-  >({
-    queryKey: queryKeys.threadEvents(id ?? "", threadName ?? ""),
-    queryFn: ({ pageParam, signal }) =>
-      api.getThreadEvents(id!, threadName!, {
-        beforeId: pageParam ?? undefined,
-        limit: SNAPSHOT_THREAD_EVENT_LIMIT,
-        signal,
-      }),
-    initialPageParam: null,
-    getNextPageParam: (lastPage) => (lastPage.has_older ? lastPage.next_before_id : undefined),
-    enabled: Boolean(id && threadName),
-    staleTime: Number.POSITIVE_INFINITY,
-  });
+export function snapshotAtom(id: string | null) {
+  return id ? sessionSnapshotAtom(id) : idleAtom<SessionSnapshotResponse>();
 }
 
-export function useSessionConfig(id: string | null) {
-  return useQuery<RawSessionConfig>({
-    queryKey: queryKeys.sessionConfig(id ?? ""),
-    queryFn: ({ signal }) => api.getConfig(id!, signal),
-    enabled: Boolean(id),
-  });
-}
-
-export function useCreateSession() {
-  const invalidate = useQueryInvalidators();
-  return useMutation({
-    mutationFn: (payload: CreateSessionRequest) => api.createSession(payload),
-    onSuccess: () => invalidate.sessions(),
-  });
-}
-
-/**
- * Session ids whose cached snapshot still shows `forkId` as a conversation
- * fork. The open transcript is usually one of these; a background source tab
- * has the same marker and would otherwise stay clickable after the fork is
- * gone.
- */
-function sessionIdsShowingFork(client: QueryClient, forkId: string): string[] {
-  const ids: string[] = [];
-  for (const query of client.getQueryCache().findAll({ queryKey: ["session"] })) {
-    const key = query.queryKey;
-    if (key[0] !== "session" || key[2] !== "snapshot" || typeof key[1] !== "string") {
-      continue;
+/** True when the older page still joined the cursor that requested it. */
+export const olderMessagesAtom = nacAtoms.fn((id: string, get) =>
+  Effect.gen(function* () {
+    const current = valueOf(get(sessionSnapshotAtom(id)));
+    const start = current?.message_page?.start;
+    if (start === undefined || start <= 0) {
+      return yield* Effect.fail(new Error("No older messages are available."));
     }
-    const sessionId = key[1];
-    if (sessionId === forkId) continue;
-    const snapshot = query.state.data as SessionSnapshotResponse | undefined;
-    if (!snapshot?.forks?.some((fork) => fork.session_id === forkId)) continue;
+    const generation = currentSessionGeneration(id);
+    const page = yield* apiEffect.getMessages(id, {
+      before: start,
+      limit: SNAPSHOT_MESSAGE_LIMIT,
+      includeSystem: true,
+    });
+    if (!validMessagesPage(page)) {
+      return yield* Effect.fail(new Error("The server returned an invalid message page."));
+    }
+    if (!isCurrentSessionGeneration(id, generation)) return false;
+    const latest = valueOf(get(sessionSnapshotAtom(id)));
+    if (!latest) return false;
+    const merged = prependMessagePage(latest, page, start);
+    if (!merged) return false;
+    get.set(sessionSnapshotAtom(id), AsyncResult.success(merged));
+    return true;
+  }),
+);
+
+export interface ThreadHistory {
+  readonly pages: readonly ThreadEventPage[];
+  readonly pageParams: readonly (number | null)[];
+}
+
+export function threadEventsKey(id: string, name: string): string {
+  return `${id}\0${name}`;
+}
+
+export const threadEventsAtom = Atom.family((key: string) => {
+  const separator = key.indexOf("\0");
+  const id = key.slice(0, separator);
+  const name = key.slice(separator + 1);
+  return remoteAtom<ThreadHistory>(
+    `${sessionRoot(id)}\0thread-events\0${name}`,
+    () =>
+      apiEffect
+        .getThreadEvents(id, name, { limit: SNAPSHOT_THREAD_EVENT_LIMIT })
+        .pipe(Effect.map((page) => ({ pages: [page], pageParams: [null] }))),
+    { staleMs: Number.POSITIVE_INFINITY, retry: false, refreshOnMount: false },
+  );
+});
+
+export function threadEventsFor(id: string | null, name: string | null) {
+  return id && name ? threadEventsAtom(threadEventsKey(id, name)) : idleAtom<ThreadHistory>();
+}
+
+export const olderThreadEventsAtom = nacAtoms.fn((key: string, get) =>
+  Effect.gen(function* () {
+    const separator = key.indexOf("\0");
+    const id = key.slice(0, separator);
+    const name = key.slice(separator + 1);
+    const current = valueOf(get(threadEventsAtom(key)));
+    const last = current?.pages.at(-1);
+    const beforeId = last?.has_older ? last.next_before_id : null;
+    if (beforeId == null || !current) return current ?? null;
+    const page = yield* apiEffect.getThreadEvents(id, name, {
+      limit: SNAPSHOT_THREAD_EVENT_LIMIT,
+      beforeId,
+    });
+    const latest = valueOf(get(threadEventsAtom(key)));
+    if (!latest || latest.pages.at(-1)?.next_before_id !== beforeId) return latest;
+    const next = {
+      pages: [...latest.pages, page],
+      pageParams: [...latest.pageParams, beforeId],
+    };
+    get.set(threadEventsAtom(key), AsyncResult.success(next));
+    return next;
+  }),
+);
+
+export const sessionConfigAtom = Atom.family((id: string): Remote<RawSessionConfig> =>
+  remoteAtom(`${sessionRoot(id)}\0config`, () => apiEffect.getConfig(id), { retry: false }),
+);
+
+export function configAtom(id: string | null) {
+  return id ? sessionConfigAtom(id) : idleAtom<RawSessionConfig>();
+}
+
+function refreshSessions(registry: AtomRegistry.AtomRegistry) {
+  return refreshPrefixed(registry, "sessions");
+}
+
+function refreshSession(registry: AtomRegistry.AtomRegistry, id: string) {
+  return refreshPrefixed(registry, sessionRoot(id));
+}
+
+export const createSessionAtom = nacAtoms.fn((payload: CreateSessionRequest, get) =>
+  apiEffect
+    .createSession(payload)
+    .pipe(Effect.tap(() => Effect.promise(() => refreshSessions(get.registry)))),
+);
+
+function sourcesShowingFork(registry: AtomRegistry.AtomRegistry, forkId: string): string[] {
+  const ids: string[] = [];
+  for (const cacheId of prefixedIds(registry, "session")) {
+    if (!cacheId.endsWith("\0snapshot")) continue;
+    const sessionId = cacheId.split("\0")[1];
+    if (!sessionId || sessionId === forkId) continue;
+    const snapshot = valueOf(peekById(registry, cacheId) ?? AsyncResult.initial(false));
+    const forks = (snapshot as SessionSnapshotResponse | undefined)?.forks;
+    if (!forks?.some((fork) => fork.session_id === forkId)) continue;
     ids.push(sessionId);
   }
   return ids;
 }
 
-export function useDeleteSession() {
-  const invalidate = useQueryInvalidators();
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api.deleteSession(id),
-    onSuccess: (_data, id) => {
-      void invalidate.sessions();
-      client.removeQueries({ queryKey: queryKeys.sessionRoot(id) });
-      for (const sourceId of sessionIdsShowingFork(client, id)) {
-        void invalidate.sessionRoot(sourceId);
-      }
-    },
-  });
-}
+export const deleteSessionAtom = nacAtoms.fn((id: string, get) =>
+  apiEffect.deleteSession(id).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        const sources = sourcesShowingFork(get.registry, id);
+        resetPrefixed(get.registry, sessionRoot(id));
+        for (const sourceId of sources) void refreshSession(get.registry, sourceId);
+      }),
+    ),
+    Effect.tap(() => Effect.promise(() => refreshSessions(get.registry))),
+  ),
+);
 
 export interface RenameSessionVariables {
   id: string;
-  /** Empty string restores the automatic title (the last prompt). */
   title: string;
   pinned: boolean;
   expectedVersion: number;
 }
 
-export function useUpdatePresentation() {
-  const invalidate = useQueryInvalidators();
-  return useMutation({
-    mutationFn: ({ id, title, pinned, expectedVersion }: RenameSessionVariables) =>
-      api.updatePresentation(id, {
-        title,
-        pinned,
-        expected_version: expectedVersion,
-      }),
-    onSuccess: () => invalidate.sessions(),
-  });
-}
+export const updatePresentationAtom = nacAtoms.fn((input: RenameSessionVariables, get) =>
+  apiEffect
+    .updatePresentation(input.id, {
+      title: input.title,
+      pinned: input.pinned,
+      expected_version: input.expectedVersion,
+    })
+    .pipe(Effect.tap(() => Effect.promise(() => refreshSessions(get.registry)))),
+);
 
-/** Pin toggle is a presentation update that keeps the current title. */
-export function useTogglePin() {
-  const update = useUpdatePresentation();
-  return {
-    ...update,
-    toggle: (summary: SessionSummarySnapshot) =>
-      update.mutateAsync({
-        id: summary.session_id,
-        title: summary.title ?? "",
-        pinned: !summary.pinned,
-        expectedVersion: summary.presentation_version ?? 0,
-      }),
-  };
-}
+export const togglePinAtom = nacAtoms.fn((summary: SessionSummarySnapshot, get) =>
+  apiEffect
+    .updatePresentation(summary.session_id, {
+      title: summary.title ?? "",
+      pinned: !summary.pinned,
+      expected_version: summary.presentation_version ?? 0,
+    })
+    .pipe(Effect.tap(() => Effect.promise(() => refreshSessions(get.registry)))),
+);
 
 export interface MoveSessionOrderVariables {
-  /** Full unfiltered list — `/sessions/order` requires entire pin-group membership. */
   sessions: ManagedSessionSummary[];
   sessionId: string;
   targetPinned: boolean;
-  /** Index within the destination pin group after the move. */
   targetIndex: number;
 }
 
-/**
- * Reorder within a pin group, optionally pinning/unpinning first when the
- * destination group differs. One invalidation at the end.
- */
-export function useMoveSessionOrder() {
-  const invalidate = useQueryInvalidators();
-  return useMutation({
-    mutationFn: async ({
-      sessions,
-      sessionId,
-      targetPinned,
-      targetIndex,
-    }: MoveSessionOrderVariables) => {
-      let entries = sessions;
-      const entry = entries.find((e) => e.summary.session_id === sessionId);
-      if (!entry) {
-        throw new Error(`Session '${sessionId}' was not found`);
-      }
+export const moveSessionOrderAtom = nacAtoms.fn((input: MoveSessionOrderVariables, get) =>
+  Effect.gen(function* () {
+    let entries = input.sessions;
+    const entry = entries.find((item) => item.summary.session_id === input.sessionId);
+    if (!entry) return yield* Effect.fail(new Error(`Session '${input.sessionId}' was not found`));
+    if (Boolean(entry.summary.pinned) !== input.targetPinned) {
+      const summary = yield* apiEffect.updatePresentation(input.sessionId, {
+        title: entry.summary.title ?? "",
+        pinned: input.targetPinned,
+        expected_version: entry.summary.presentation_version ?? 0,
+      });
+      entries = withUpdatedSummary(entries, summary);
+    }
+    const group = pinGroup(entries, input.targetPinned);
+    const currentIds = group.map((item) => item.summary.session_id);
+    const nextIds = placeIdAt(currentIds, input.sessionId, input.targetIndex);
+    if (sameOrder(currentIds, nextIds)) {
+      yield* Effect.promise(() => refreshSessions(get.registry));
+      return null;
+    }
+    const response = yield* apiEffect.reorderSessions(
+      reorderRequest(input.targetPinned, nextIds, group),
+    );
+    yield* Effect.promise(() => refreshSessions(get.registry));
+    return response;
+  }),
+);
 
-      if (Boolean(entry.summary.pinned) !== targetPinned) {
-        const summary = await api.updatePresentation(sessionId, {
-          title: entry.summary.title ?? "",
-          pinned: targetPinned,
-          expected_version: entry.summary.presentation_version ?? 0,
-        });
-        entries = withUpdatedSummary(entries, summary);
-      }
+export const updateSessionConfigAtom = nacAtoms.fn(
+  (input: { id: string; patch: UpdateConfigRequest }, get) =>
+    apiEffect.updateConfig(input.id, input.patch).pipe(
+      Effect.tap(() =>
+        Effect.promise(() => refreshPrefixed(get.registry, `${sessionRoot(input.id)}\0config`)),
+      ),
+      Effect.tap(() => Effect.promise(() => refreshSession(get.registry, input.id))),
+      Effect.tap(() => Effect.promise(() => refreshSessions(get.registry))),
+    ),
+);
 
-      const group = pinGroup(entries, targetPinned);
-      const currentIds = group.map((e) => e.summary.session_id);
-      const nextIds = placeIdAt(currentIds, sessionId, targetIndex);
-      if (sameOrder(currentIds, nextIds)) return null;
-
-      return api.reorderSessions(reorderRequest(targetPinned, nextIds, group));
-    },
-    onSuccess: () => invalidate.sessions(),
-  });
-}
-
-export function useUpdateConfig() {
-  const invalidate = useQueryInvalidators();
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: UpdateConfigRequest }) =>
-      api.updateConfig(id, patch),
-    onSuccess: (_data, { id }) => {
-      void client.invalidateQueries({ queryKey: queryKeys.sessionConfig(id) });
-      void invalidate.session(id);
-      void invalidate.sessions();
-    },
-  });
-}
-
-export function useSubmitRun() {
-  const invalidate = useQueryInvalidators();
-  return useMutation({
-    mutationFn: async ({ id, prompt }: { id: string; prompt: string }) => {
-      const admission = await api.submitRun(id, prompt);
-      if (admission.status === "accepted") return admission.response;
-      if (admission.status === "not-sent") {
-        throw new DOMException("Prompt submission was cancelled before it was sent.", "AbortError");
-      }
-      throw new UncertainCommandAdmissionError(admission.requestId, admission.error);
-    },
-    onMutate: ({ prompt }) => {
-      setOptimisticUserPrompt(prompt);
-    },
-    onError: (error, { id }) => {
-      if (error instanceof UncertainCommandAdmissionError) {
-        fenceSessionSnapshot(id, true);
-        void invalidate.sessionRoot(id);
-      } else {
-        setOptimisticUserPrompt(null);
-      }
-    },
-    onSuccess: (_data, { id }) => invalidate.session(id),
-  });
-}
-
-export function useSteerOrchestrator() {
-  return useMutation({
-    mutationFn: ({ id, instruction }: { id: string; instruction: string }) =>
-      api.steerOrchestrator(id, instruction),
-  });
-}
-
-export function useSteerThread() {
-  return useMutation({
-    mutationFn: ({
-      id,
-      threadName,
-      instruction,
-    }: {
-      id: string;
-      threadName: string;
-      instruction: string;
-    }) => api.steerThread(id, threadName, instruction),
-  });
-}
-
-export function useCancelRun() {
-  const invalidate = useQueryInvalidators();
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api.cancelActiveRun(id),
-    onMutate: (id) => {
-      const runtime = requestRunCancel();
-      const snapshot = client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id));
-      const sessions = client.getQueryData<ManagedSessionSummary[]>(queryKeys.sessions(false));
-      const sessionsWithStats = client.getQueryData<ManagedSessionSummary[]>(
-        queryKeys.sessions(true),
+export const submitRunAtom = nacAtoms.fn((input: { id: string; prompt: string }, get) =>
+  Effect.gen(function* () {
+    yield* Effect.sync(() => setOptimisticUserPrompt(input.prompt));
+    const admission = yield* apiEffect.submitRun(input.id, input.prompt);
+    if (admission.status === "accepted") {
+      yield* Effect.promise(() => refreshSession(get.registry, input.id));
+      return admission.response;
+    }
+    if (admission.status === "not-sent") {
+      yield* Effect.sync(() => setOptimisticUserPrompt(null));
+      return yield* Effect.fail(
+        new DOMException("Prompt submission was cancelled before it was sent.", "AbortError"),
       );
-      clearCachedActiveRun(client, id);
-      return { runtime, snapshot, sessions, sessionsWithStats };
-    },
-    onError: (_error, id, previous) => {
-      if (!previous) return;
-      restoreRunCancel(previous.runtime);
-      if (previous.snapshot !== undefined) {
-        client.setQueryData(queryKeys.sessionSnapshot(id), previous.snapshot);
+    }
+    fenceSessionSnapshot(input.id, true);
+    yield* Effect.promise(() => refreshSession(get.registry, input.id));
+    return yield* Effect.fail(
+      new UncertainCommandAdmissionError(admission.requestId, admission.error),
+    );
+  }).pipe(
+    Effect.tapError((error) =>
+      Effect.sync(() => {
+        if (!(error instanceof UncertainCommandAdmissionError)) setOptimisticUserPrompt(null);
+      }),
+    ),
+  ),
+);
+
+export const steerOrchestratorAtom = nacAtoms.fn((input: { id: string; instruction: string }) =>
+  apiEffect.steerOrchestrator(input.id, input.instruction),
+);
+
+export const steerThreadAtom = nacAtoms.fn(
+  (input: { id: string; threadName: string; instruction: string }) =>
+    apiEffect.steerThread(input.id, input.threadName, input.instruction),
+);
+
+export const cancelRunAtom = nacAtoms.fn((id: string, get) =>
+  Effect.gen(function* () {
+    const runtime = requestRunCancel();
+    const snapshot = valueOf(get(sessionSnapshotAtom(id)));
+    const sessions = valueOf(get(sessionsAtom(SESSIONS_POLL_MS)));
+    const sessionsWithStats = valueOf(get(sessionStatsAtom(WORKSPACE_STATS_POLL_MS)));
+    clearCachedActiveRun(get.registry, id);
+    const exit = yield* Effect.exit(apiEffect.cancelActiveRun(id));
+    if (exit._tag === "Failure") {
+      restoreRunCancel(runtime);
+      if (snapshot) get.set(sessionSnapshotAtom(id), AsyncResult.success(snapshot));
+      if (sessions) get.set(sessionsAtom(SESSIONS_POLL_MS), AsyncResult.success(sessions));
+      if (sessionsWithStats) {
+        get.set(sessionStatsAtom(WORKSPACE_STATS_POLL_MS), AsyncResult.success(sessionsWithStats));
       }
-      if (previous.sessions !== undefined) {
-        client.setQueryData(queryKeys.sessions(false), previous.sessions);
-      }
-      if (previous.sessionsWithStats !== undefined) {
-        client.setQueryData(queryKeys.sessions(true), previous.sessionsWithStats);
-      }
-    },
-    onSuccess: (_data, id) => {
-      finishRunCancel();
-      void invalidate.session(id);
-      void invalidate.sessions();
-    },
-  });
-}
+      return yield* Effect.failCause(exit.cause);
+    }
+    finishRunCancel();
+    yield* Effect.promise(() => refreshSession(get.registry, id));
+    yield* Effect.promise(() => refreshSessions(get.registry));
+  }),
+);
 
 function idleSessionEntry(entry: ManagedSessionSummary, sessionId: string): ManagedSessionSummary {
   if (entry.summary.session_id !== sessionId) return entry;
@@ -460,88 +417,54 @@ function idleSessionEntry(entry: ManagedSessionSummary, sessionId: string): Mana
   return { ...entry, active: false, active_run: undefined };
 }
 
-/** Drop a live run from every cache the tab strip and breadcrumbs read. */
-function clearCachedActiveRun(client: QueryClient, sessionId: string): void {
-  client.setQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(sessionId), (current) =>
-    current?.active_run ? { ...current, active_run: undefined } : current,
+function clearCachedActiveRun(registry: AtomRegistry.AtomRegistry, sessionId: string): void {
+  patchRemote(
+    registry,
+    sessionSnapshotAtom(sessionId) as Remote<SessionSnapshotResponse, unknown>,
+    (current) => (current?.active_run ? { ...current, active_run: undefined } : current),
   );
-  for (const workspaceStats of [false, true] as const) {
-    client.setQueryData<ManagedSessionSummary[]>(queryKeys.sessions(workspaceStats), (list) =>
-      list?.map((entry) => idleSessionEntry(entry, sessionId)),
-    );
-  }
+  patchRemote(registry, sessionsAtom(SESSIONS_POLL_MS), (current) =>
+    current?.map((entry) => idleSessionEntry(entry, sessionId)),
+  );
+  patchRemote(registry, sessionStatsAtom(WORKSPACE_STATS_POLL_MS), (current) =>
+    current?.map((entry) => idleSessionEntry(entry, sessionId)),
+  );
 }
 
-export function useCompactSession() {
-  const invalidate = useQueryInvalidators();
-  return useMutation({
-    mutationFn: (id: string) => api.compactSession(id),
-    onSuccess: (_data, id) => {
-      fenceSessionSnapshot(id, true);
-      return invalidate.sessionRoot(id);
-    },
-  });
+function rewriteSession(id: string, registry: AtomRegistry.AtomRegistry) {
+  fenceSessionSnapshot(id, true);
+  return refreshSession(registry, id);
 }
 
-/**
- * A revert rewrites the transcript and the checkout at once. Invalidating the
- * session root drops the snapshot, thread history, file data, and revision
- * views that the reverted state invalidated.
- */
-export function useRevertSession() {
-  const invalidate = useQueryInvalidators();
-  return useMutation({
-    mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
-      api.revertSession(id, messageIdx),
-    onSuccess: (_data, { id }) => {
-      fenceSessionSnapshot(id, true);
-      void invalidate.sessionRoot(id);
-      void invalidate.sessions();
-    },
-  });
-}
+export const compactSessionAtom = nacAtoms.fn((id: string, get) =>
+  apiEffect
+    .compactSession(id)
+    .pipe(Effect.tap(() => Effect.promise(() => rewriteSession(id, get.registry)))),
+);
 
-/**
- * Answering a prompt again is a revert plus a run, so it drops the same views a
- * revert does before the new run starts filling them back in.
- */
-export function useRegenerateRun() {
-  const invalidate = useQueryInvalidators();
-  return useMutation({
-    mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
-      api.regenerateRun(id, messageIdx),
-    onSuccess: (_data, { id }) => {
-      fenceSessionSnapshot(id, true);
-      void invalidate.sessionRoot(id);
-      void invalidate.sessions();
-    },
-  });
-}
+export const revertSessionAtom = nacAtoms.fn((input: { id: string; messageIdx: number }, get) =>
+  apiEffect.revertSession(input.id, input.messageIdx).pipe(
+    Effect.tap(() => Effect.promise(() => rewriteSession(input.id, get.registry))),
+    Effect.tap(() => Effect.promise(() => refreshSessions(get.registry))),
+  ),
+);
 
-/**
- * Clone the transcript through a finished model turn into a new session, then
- * open that chat. The source snapshot has to refetch so the fork marker lands
- * under the turn that was copied.
- */
-export function useForkSession() {
-  const invalidate = useQueryInvalidators();
-  return useMutation({
-    mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
-      api.forkSession(id, messageIdx),
-    onSuccess: (_data, { id }) => {
-      void invalidate.sessionRoot(id);
-      void invalidate.sessions();
-    },
-  });
-}
+export const regenerateRunAtom = nacAtoms.fn((input: { id: string; messageIdx: number }, get) =>
+  apiEffect.regenerateRun(input.id, input.messageIdx).pipe(
+    Effect.tap(() => Effect.promise(() => rewriteSession(input.id, get.registry))),
+    Effect.tap(() => Effect.promise(() => refreshSessions(get.registry))),
+  ),
+);
 
-export function useDismissSessionFork() {
-  const invalidate = useQueryInvalidators();
-  return useMutation({
-    mutationFn: ({ id, forkId }: { id: string; forkId: string }) =>
-      api.dismissSessionFork(id, forkId),
-    onSuccess: (_data, { id }) => {
-      void invalidate.sessionRoot(id);
-    },
-  });
-}
+export const forkSessionAtom = nacAtoms.fn((input: { id: string; messageIdx: number }, get) =>
+  apiEffect.forkSession(input.id, input.messageIdx).pipe(
+    Effect.tap(() => Effect.promise(() => refreshSession(get.registry, input.id))),
+    Effect.tap(() => Effect.promise(() => refreshSessions(get.registry))),
+  ),
+);
+
+export const dismissSessionForkAtom = nacAtoms.fn((input: { id: string; forkId: string }, get) =>
+  apiEffect
+    .dismissSessionFork(input.id, input.forkId)
+    .pipe(Effect.tap(() => Effect.promise(() => refreshSession(get.registry, input.id)))),
+);

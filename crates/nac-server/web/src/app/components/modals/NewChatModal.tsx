@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "react-router-dom";
 
 import { Button, ButtonVariant, Loader, LoaderSize, Modal, ModalSize } from "@/app/atoms";
@@ -11,6 +12,8 @@ import { LightModelSection, type LightSelection } from "@/app/components/modals/
 import { PrimaryModelSection } from "@/app/components/modals/PrimaryModelSection";
 import { SessionBehaviorPicker } from "@/app/components/modals/SessionBehaviorPicker";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { inheritPrimaryCredential } from "@/app/lib/modelConfig";
 import {
   newestCreatedPrimarySessionForProject,
@@ -21,12 +24,13 @@ import { routes } from "@/app/lib/routes";
 import { useToast } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import {
-  useCreateModelConfig,
-  useCreateSession,
-  useModelConfigs,
-  useProjects,
-  useSessionConfig,
-  useSessions,
+  configAtom,
+  createModelConfigAtom,
+  createSessionAtom,
+  modelConfigsAtom,
+  projectsAtom,
+  SESSIONS_POLL_MS,
+  sessionsAtom,
 } from "@/app/services/queries";
 import type {
   BackendKind,
@@ -36,6 +40,10 @@ import type {
   RawSessionConfig,
   SessionBehavior,
 } from "@/app/types/api";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 
 interface InheritedModelSelection {
   initial: ConfigurationsPanelInitial;
@@ -115,11 +123,13 @@ function NewChatForm({
 }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const createSession = useCreateSession();
-  const createModelConfig = useCreateModelConfig();
-  const projects = useProjects();
-  const sessions = useSessions();
-  const modelConfigs = useModelConfigs();
+  const createSession = useAtomSet(createSessionAtom, { mode: "promise" });
+  const creatingSession = useAtomValue(createSessionAtom).waiting;
+  const createModelConfig = useAtomSet(createModelConfigAtom, { mode: "promise" });
+  const creatingModelConfig = useAtomValue(createModelConfigAtom).waiting;
+  const projects = useAtomValue(projectsAtom, readAsync);
+  const sessions = useAtomValue(sessionsAtom(SESSIONS_POLL_MS), readAsync);
+  const modelConfigs = useAtomValue(modelConfigsAtom, readAsync);
   const [behavior, setBehavior] = useState<SessionBehavior>("orchestrator");
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [light, setLight] = useState<LightSelection>({ mode: "single", light: null });
@@ -133,8 +143,9 @@ function NewChatForm({
         (record) => record.config_id === project.default_model_config_id,
       ) ?? null)
     : null;
-  const siblingConfig = useSessionConfig(
-    project?.default_model_config_id ? null : (sibling?.summary.session_id ?? null),
+  const siblingConfig = useAtomValue(
+    configAtom(project?.default_model_config_id ? null : (sibling?.summary.session_id ?? null)),
+    readAsync,
   );
   const inherited = useMemo<InheritedModelSelection | null>(() => {
     if (defaultConfig) return fromSavedConfiguration(defaultConfig);
@@ -148,7 +159,7 @@ function NewChatForm({
     sessions.isPending ||
     modelConfigs.isPending ||
     (Boolean(sibling) && !project?.default_model_config_id && siblingConfig.isPending);
-  const busy = createSession.isPending || createModelConfig.isPending;
+  const busy = creatingSession || creatingModelConfig;
 
   const onSelection = useCallback((next: LaunchModelSelection | null) => {
     setSelection(next);
@@ -209,7 +220,7 @@ function NewChatForm({
         orchestrator_compaction_threshold?: number | null;
       };
       if (selection.kind === "save") {
-        const record = await createModelConfig.mutateAsync({
+        const record = await createModelConfig({
           ...selection.request,
           light_model: light.mode === "dual" ? light.light : null,
         });
@@ -250,12 +261,12 @@ function NewChatForm({
       if (selected.orchestrator_compaction_threshold !== undefined) {
         request.orchestrator_compaction_threshold = selected.orchestrator_compaction_threshold;
       }
-      const snapshot = await createSession.mutateAsync(request);
+      const snapshot = await createSession(request);
       const sessionId = snapshot.metadata.session_id;
       onClose();
       if (sessionId) navigate(routes.session(sessionId));
     } catch (error) {
-      toast.error(`Failed to start a chat: ${humanErrorText(toRunError(error))}`);
+      toast.error(`Failed to start a chat: ${humanErrorText(toRunError(commandError(error)))}`);
     }
   };
 

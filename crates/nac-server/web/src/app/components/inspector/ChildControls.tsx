@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -18,9 +19,11 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { useDelegatedPermissionStream } from "@/app/hooks/useSessionStream";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useStartTraditionalChild, useTraditionalChildren } from "@/app/services/queries";
+import { startTraditionalChildAtom, traditionalChildren } from "@/app/services/queries";
 import type { SessionBehavior, TraditionalChildRecord } from "@/app/types/api";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 
@@ -56,8 +59,9 @@ export function ChildControls({
   openRequest = 0,
 }: ChildControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const childrenQuery = useTraditionalChildren(sessionId, direct);
-  const startChild = useStartTraditionalChild();
+  const childrenQuery = readAsync(useAtomValue(traditionalChildren(sessionId, direct)));
+  const startChild = useAtomSet(startTraditionalChildAtom, { mode: "promise" });
+  const startingChild = useAtomValue(startTraditionalChildAtom).waiting;
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
@@ -76,7 +80,7 @@ export function ChildControls({
   if (!direct) return null;
 
   const children = childrenQuery.data ?? [];
-  const busy = startChild.isPending;
+  const busy = startingChild;
   const reset = () => {
     setDescription("");
     setPrompt("");
@@ -87,7 +91,7 @@ export function ChildControls({
       return;
     }
     try {
-      await startChild.mutateAsync({
+      await startChild({
         sessionId,
         payload: {
           profile: "general",
@@ -99,7 +103,8 @@ export function ChildControls({
       reset();
       setOpen(false);
     } catch (error) {
-      toast.error(`Unable to start child: ${errorMessage(toRunError(error))}`);
+      const cause = error instanceof ClientRequestError ? error.error : error;
+      toast.error(`Unable to start child: ${errorMessage(toRunError(cause))}`);
     }
   };
   return (
@@ -165,7 +170,7 @@ export function ChildControls({
               </label>
               <Button
                 variant={ButtonVariant.Primary}
-                loading={startChild.isPending}
+                loading={startingChild}
                 disabled={busy}
                 onClick={() => void submit()}
               >

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 
 import {
   Button,
@@ -25,6 +26,8 @@ import { LightModelSection, type LightSelection } from "@/app/components/modals/
 import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -35,16 +38,20 @@ import { CLEAR_EFFORT, serializeExtraHeaders } from "@/app/lib/modelConfig";
 import { PROVIDER_KINDS, providerLabel, providerUsesApiKey } from "@/app/lib/providers";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { managedProviderModelsFor } from "@/app/features/managed/queries";
 import {
-  useCreateModelConfig,
-  useDeleteModelConfig,
-  useManagedProviderModels,
-  useModelCatalog,
-  useModelConfigs,
-  useProviderModels,
-  useResolvedModelConfig,
-  useUpdateModelConfig,
+  createModelConfigAtom,
+  deleteModelConfigAtom,
+  modelCatalogAtom,
+  modelConfigsAtom,
+  providerModelsAtom,
+  resolvedModelConfigAtom,
+  updateModelConfigAtom,
 } from "@/app/services/queries";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 import type {
   BackendKind,
   ModelConfigurationRecord,
@@ -82,7 +89,7 @@ export function ConfigurationsModal({ open, onClose }: { open: boolean; onClose:
 
 function ConfigurationsManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const isMobile = useIsMobile();
-  const { data, isLoading } = useModelConfigs();
+  const { data, isLoading } = readAsync(useAtomValue(modelConfigsAtom));
   const configurations = useMemo(() => data?.configurations ?? [], [data]);
   const [footer, setFooter] = useState<ReactNode>(null);
 
@@ -160,9 +167,12 @@ function ConfigurationForm({
   isMobile: boolean;
 }) {
   const toast = useToast();
-  const createConfig = useCreateModelConfig();
-  const updateConfig = useUpdateModelConfig();
-  const deleteConfig = useDeleteModelConfig();
+  const createConfig = useAtomSet(createModelConfigAtom, { mode: "promise" });
+  const creatingConfig = useAtomValue(createModelConfigAtom).waiting;
+  const updateConfig = useAtomSet(updateModelConfigAtom, { mode: "promise" });
+  const updatingConfig = useAtomValue(updateModelConfigAtom).waiting;
+  const deleteConfig = useAtomSet(deleteModelConfigAtom, { mode: "promise" });
+  const deletingConfig = useAtomValue(deleteModelConfigAtom).waiting;
 
   // SAFETY: the record's backend is one of the BackendKind wire values; an
   // unknown value simply falls back to the default below.
@@ -200,7 +210,7 @@ function ConfigurationForm({
   const needsKey = providerUsesApiKey(backend);
   // The catalog knows which efforts this model takes; the rest would only be
   // saved for the backend to reject at launch.
-  const catalog = useModelCatalog();
+  const catalog = readAsync(useAtomValue(modelCatalogAtom()));
   const reasoningItems = reasoningOptionsFor(
     resolveCatalogModel(catalog.data, backend, model).supportedEfforts,
     reasoning,
@@ -231,18 +241,18 @@ function ConfigurationForm({
   const debouncedKey = useDebouncedValue(apiKey.trim(), KEY_DEBOUNCE_MS);
   // A saved setup keeps its key on the server; only a key typed here is ours
   // to check, and checking it is also how the model list refreshes.
-  const keyQuery = useProviderModels(
-    backend,
-    debouncedKey,
-    null,
-    needsKey && Boolean(debouncedKey),
+  const keyQuery = readAsync(
+    useAtomValue(
+      providerModelsAtom(backend, debouncedKey, null, needsKey && Boolean(debouncedKey)),
+    ),
   );
-  const loginQuery = useManagedProviderModels(backend, !needsKey && signedIn);
-  // Only the stored provider's models describe the stored setup; switching
-  // provider retires them until a key or login answers for the new one.
-  const savedQuery = useResolvedModelConfig(
-    record && backend === stored ? record.config_id : null,
-    "",
+  const loginQuery = readAsync(
+    useAtomValue(managedProviderModelsFor(backend, !needsKey && signedIn)),
+  );
+  const savedQuery = readAsync(
+    useAtomValue(
+      resolvedModelConfigAtom(record && backend === stored ? record.config_id : null, ""),
+    ),
   );
 
   const validation: Validation = !(needsKey && debouncedKey)
@@ -250,7 +260,7 @@ function ConfigurationForm({
     : keyQuery.isFetching
       ? { status: "validating" }
       : keyQuery.error
-        ? { status: "error", message: humanErrorText(keyQuery.error, backend) }
+        ? { status: "error", message: humanErrorText(toRunError(keyQuery.error), backend) }
         : keyQuery.data
           ? {
               status: "ready",
@@ -267,7 +277,7 @@ function ConfigurationForm({
   const keyStatus: Validation["status"] =
     validation.status !== "idle" ? validation.status : record?.api_key_env ? "ready" : "idle";
 
-  const busy = createConfig.isPending || updateConfig.isPending || deleteConfig.isPending;
+  const busy = creatingConfig || updatingConfig || deletingConfig;
 
   const edit =
     <T,>(setter: (value: T) => void) =>
@@ -327,14 +337,14 @@ function ConfigurationForm({
         // credential or a hand-written gateway URL alone.
         if (apiKey.trim()) patch.api_key = apiKey.trim();
         if (baseUrl.trim()) patch.base_url = baseUrl.trim();
-        const saved = await updateConfig.mutateAsync({
+        const saved = await updateConfig({
           configId: record.config_id,
           payload: patch,
         });
         onSaved(saved.config_id);
         toast.success(`Configuration ${saved.name} saved`);
       } else {
-        const saved = await createConfig.mutateAsync({
+        const saved = await createConfig({
           name: name.trim(),
           backend,
           model: chosenModel.trim(),
@@ -351,18 +361,18 @@ function ConfigurationForm({
         toast.success(`Configuration ${saved.name} created`);
       }
     } catch (saveError) {
-      setError(humanErrorText(toRunError(saveError), backend));
+      setError(humanErrorText(toRunError(commandError(saveError)), backend));
     }
   };
 
   const remove = async () => {
     if (!record || busy) return;
     try {
-      await deleteConfig.mutateAsync(record.config_id);
+      await deleteConfig(record.config_id);
       onDeleted();
       toast.success(`Configuration ${record.name} removed`);
     } catch (deleteError) {
-      setError(humanErrorText(toRunError(deleteError)));
+      setError(humanErrorText(toRunError(commandError(deleteError))));
     }
   };
 
@@ -375,7 +385,7 @@ function ConfigurationForm({
   });
 
   useLayoutEffect(() => {
-    const saving = createConfig.isPending || updateConfig.isPending;
+    const saving = creatingConfig || updatingConfig;
     setFooter(
       <>
         {record ? (
@@ -385,7 +395,7 @@ function ConfigurationForm({
               content={ButtonContent.Icon}
               className="mr-auto"
               disabled={busy}
-              loading={deleteConfig.isPending}
+              loading={deletingConfig}
               onClick={() => void removeRef.current()}
             >
               <Icon iconName={IconName.Trash} />
@@ -397,7 +407,7 @@ function ConfigurationForm({
               content={ButtonContent.Icon}
               className="mr-auto"
               disabled={busy}
-              loading={deleteConfig.isPending}
+              loading={deletingConfig}
               onClick={() => void removeRef.current()}
             >
               <Icon iconName={IconName.Trash} />
@@ -447,16 +457,7 @@ function ConfigurationForm({
       </>,
     );
     return () => setFooter(null);
-  }, [
-    busy,
-    createConfig.isPending,
-    deleteConfig.isPending,
-    isMobile,
-    onClose,
-    record,
-    setFooter,
-    updateConfig.isPending,
-  ]);
+  }, [busy, creatingConfig, deletingConfig, isMobile, onClose, record, setFooter, updatingConfig]);
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0">

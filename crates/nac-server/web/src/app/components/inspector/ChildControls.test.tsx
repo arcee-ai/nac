@@ -1,14 +1,17 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChildControls } from "@/app/components/inspector/ChildControls";
+import { isolatedRegistry } from "@/app/effect/remote";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
-import { queryKeys } from "@/app/services/queries";
+import { apiEffect } from "@/app/services/api";
+import { sessionPermissionsAtom, traditionalChildrenAtom } from "@/app/services/queries/direct";
 import type { TraditionalChildRecord } from "@/app/types/api";
 
 const SESSION_ID = "direct-session";
@@ -25,9 +28,18 @@ class SilentEventSource {
   close() {}
 }
 
-vi.spyOn(api, "listTraditionalChildren").mockImplementation((...args) => fakes.list(...args));
-vi.spyOn(api, "startTraditionalChild").mockImplementation((...args) => fakes.start(...args));
-vi.spyOn(api, "cancelTraditionalChild").mockImplementation((...args) => fakes.cancel(...args));
+vi.spyOn(apiEffect, "listTraditionalChildren").mockImplementation((...args) =>
+  Effect.promise(() => fakes.list(...args)),
+);
+vi.spyOn(apiEffect, "startTraditionalChild").mockImplementation((...args) =>
+  Effect.promise(() => fakes.start(...args)),
+);
+vi.spyOn(apiEffect, "cancelTraditionalChild").mockImplementation((...args) =>
+  Effect.promise(() => fakes.cancel(...args)),
+);
+vi.spyOn(apiEffect, "getPermissions").mockImplementation(() =>
+  Effect.promise(() => Promise.resolve({ approval_mode: "manual", requests: [], grants: [] })),
+);
 
 function child(status: TraditionalChildRecord["status"] = "running"): TraditionalChildRecord {
   return {
@@ -53,24 +65,22 @@ function child(status: TraditionalChildRecord["status"] = "running"): Traditiona
 }
 
 function mount(children: TraditionalChildRecord[] = []) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  client.setQueryData(queryKeys.traditionalChildren(SESSION_ID), children);
+  const registry = isolatedRegistry();
+  registry.set(traditionalChildrenAtom(SESSION_ID), AsyncResult.success(children));
   for (const record of children) {
-    client.setQueryData(queryKeys.sessionPermissions(record.child_session_id), {
-      requests: [],
-      grants: [],
-    });
+    registry.set(
+      sessionPermissionsAtom(record.child_session_id),
+      AsyncResult.success({ approval_mode: "manual", requests: [], grants: [] }),
+    );
   }
   return render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <MemoryRouter>
         <ToastProvider>
           <ChildControls sessionId={SESSION_ID} behavior="direct" />
         </ToastProvider>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
 }
 

@@ -1,49 +1,64 @@
 /** @vitest-environment jsdom */
 
+import { RegistryContext } from "@effect/atom-react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+import { isolatedRegistry } from "@/app/effect/remote";
 import { LightModelSection, type LightSelection } from "./LightModelSection";
 import type { ModelCatalog } from "@/app/types/api";
 
-const catalog = {
-  catalog_version: 1,
-  providers: [
-    {
-      id: "arcee-api",
-      auth: "api_key_env",
-      auth_status: "ready",
-      auth_hint: null,
-      connection: {
-        base_url: "https://api.arcee.ai/api/v1",
-        api_key_env: "ARCEE_API_KEY",
-      },
-      default_base_url: "https://api.arcee.ai/api/v1",
-      managed_base_url: null,
-      default_limits: { context_window: 128000, max_tokens: 4096, supported_efforts: [] },
-      models: [],
-    },
-    {
-      id: "fireworks-chat",
-      auth: "api_key_env",
-      auth_status: "ready",
-      auth_hint: null,
-      connection: {
-        base_url: "https://saved.example/v1",
-        api_key_env: "NAC_CONFIG_saved_fireworks",
-      },
-      default_base_url: "https://api.fireworks.ai/inference/v1",
-      managed_base_url: null,
-      default_limits: { context_window: 128000, max_tokens: 4096, supported_efforts: [] },
-      models: [],
-    },
-  ],
-} as ModelCatalog;
+const catalog = vi.hoisted(
+  () =>
+    ({
+      catalog_version: 1,
+      providers: [
+        {
+          id: "arcee-api",
+          auth: "api_key_env",
+          auth_status: "ready",
+          auth_hint: null,
+          connection: {
+            base_url: "https://api.arcee.ai/api/v1",
+            api_key_env: "ARCEE_API_KEY",
+          },
+          default_base_url: "https://api.arcee.ai/api/v1",
+          managed_base_url: null,
+          default_limits: { context_window: 128000, max_tokens: 4096, supported_efforts: [] },
+          models: [],
+        },
+        {
+          id: "fireworks-chat",
+          auth: "api_key_env",
+          auth_status: "ready",
+          auth_hint: null,
+          connection: {
+            base_url: "https://saved.example/v1",
+            api_key_env: "NAC_CONFIG_saved_fireworks",
+          },
+          default_base_url: "https://api.fireworks.ai/inference/v1",
+          managed_base_url: null,
+          default_limits: { context_window: 128000, max_tokens: 4096, supported_efforts: [] },
+          models: [],
+        },
+      ],
+    }) as ModelCatalog,
+);
 
-vi.mock("@/app/services/queries", () => ({
-  useModelCatalog: () => ({ data: catalog, isLoading: false, isError: false }),
-  useReadyProviderModels: () => new Map(),
-}));
+vi.mock("@/app/services/queries", async () => {
+  const { Atom } = await import("effect/reactivity");
+  const AsyncResult = await import("effect/reactivity/AsyncResult");
+  return {
+    modelCatalogAtom: () => Atom.make(AsyncResult.success(catalog)),
+  };
+});
+
+vi.mock("@/app/features/managed/queries", async () => {
+  const { Atom } = await import("effect/reactivity");
+  return {
+    readyProviderModelsAtom: () => Atom.make(new Map()),
+  };
+});
 
 vi.mock("@/app/components/modals/CatalogModelPicker", () => ({
   CatalogModelPicker: ({
@@ -81,17 +96,20 @@ afterEach(() => {
 
 it("carries the selected provider account selector in a cross-provider light route", async () => {
   const onChange = vi.fn<(selection: LightSelection) => void>();
+  const registry = isolatedRegistry();
   render(
-    <LightModelSection
-      initial={{
-        backend: "arcee-api",
-        model: "trinity-large-thinking",
-        base_url: "https://api.arcee.ai/api/v1",
-        api_key_env: "ARCEE_API_KEY",
-        reasoning_effort: null,
-      }}
-      onChange={onChange}
-    />,
+    <RegistryContext.Provider value={registry}>
+      <LightModelSection
+        initial={{
+          backend: "arcee-api",
+          model: "trinity-large-thinking",
+          base_url: "https://api.arcee.ai/api/v1",
+          api_key_env: "ARCEE_API_KEY",
+          reasoning_effort: null,
+        }}
+        onChange={onChange}
+      />
+    </RegistryContext.Provider>,
   );
 
   fireEvent.click(screen.getByRole("button", { name: "Choose saved Fireworks light model" }));

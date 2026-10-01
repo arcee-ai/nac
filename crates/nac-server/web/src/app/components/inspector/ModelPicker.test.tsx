@@ -1,12 +1,14 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext } from "@effect/atom-react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
+import { isolatedRegistry } from "@/app/effect/remote";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+import { apiEffect } from "@/app/services/api";
 import type { ManagedHostStatus, ModelCatalog, SessionMetadata } from "@/app/types/api";
 
 const cost = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
@@ -79,8 +81,22 @@ beforeEach(() => {
       disconnect() {}
     },
   );
-  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
-  vi.spyOn(api, "getManagedStatus").mockRejectedValue(new Error("unmanaged host"));
+  requests.catalog.mockReset().mockResolvedValue(catalog);
+  requests.status.mockReset().mockRejectedValue(new Error("unmanaged host"));
+  requests.models.mockReset();
+  requests.update.mockReset().mockResolvedValue(undefined);
+  vi.spyOn(apiEffect, "getModelCatalog").mockImplementation(() =>
+    Effect.promise(() => requests.catalog()),
+  );
+  vi.spyOn(apiEffect, "getManagedStatus").mockImplementation(() =>
+    Effect.promise(() => requests.status()),
+  );
+  vi.spyOn(apiEffect, "listProviderModels").mockImplementation((...args) =>
+    Effect.promise(() => requests.models(...args)),
+  );
+  vi.spyOn(apiEffect, "updateConfig").mockImplementation((...args) =>
+    Effect.promise(() => requests.update(...args)),
+  );
 });
 
 afterEach(() => {
@@ -88,10 +104,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const requests = {
+  catalog: vi.fn(),
+  status: vi.fn(),
+  models: vi.fn(),
+  update: vi.fn(),
+};
+
 function renderPicker(metadata: SessionMetadata) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const registry = isolatedRegistry();
   const view = render(
-    <QueryClientProvider client={client}>
+    <RegistryContext.Provider value={registry}>
       <ToastProvider>
         <ModelPicker
           sessionId="session"
@@ -100,14 +123,14 @@ function renderPicker(metadata: SessionMetadata) {
           disabled={false}
         />
       </ToastProvider>
-    </QueryClientProvider>,
+    </RegistryContext.Provider>,
   );
-  return { client, view };
+  return { registry, view };
 }
 
 it("switches from an Arcee account to Codex through one catalog mutation", async () => {
-  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
-  const { client, view } = renderPicker({
+  const update = requests.update;
+  const { view } = renderPicker({
     backend: "arcee-auth",
     model: "trinity-large-thinking",
     base_url: "https://api.arcee.ai/api/v1",
@@ -134,12 +157,11 @@ it("switches from an Arcee account to Codex through one catalog mutation", async
     );
   } finally {
     view.unmount();
-    client.clear();
   }
 });
 
 it("keeps managed mounted credentials server-side while selecting another entitled model", async () => {
-  vi.mocked(api.getManagedStatus).mockResolvedValue({
+  requests.status.mockResolvedValue({
     model_ready: true,
     model: {
       backend: "arcee-api",
@@ -148,7 +170,7 @@ it("keeps managed mounted credentials server-side while selecting another entitl
       display_name: "Managed Arcee",
     },
   } as ManagedHostStatus);
-  vi.mocked(api.getModelCatalog).mockResolvedValue({
+  requests.catalog.mockResolvedValue({
     ...catalog,
     providers: [
       {
@@ -160,15 +182,15 @@ it("keeps managed mounted credentials server-side while selecting another entitl
       },
     ],
   } as ModelCatalog);
-  const discovery = vi.spyOn(api, "listProviderModels").mockResolvedValue({
+  const discovery = requests.models.mockResolvedValue({
     base_url: "https://api.arcee.ai/api/v1",
     models: [
       { id: "trinity-large-thinking", display_name: "Trinity" },
       { id: "moonshotai/kimi-k3", display_name: "Kimi" },
     ],
   });
-  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
-  const { client, view } = renderPicker({
+  const update = requests.update;
+  const { view } = renderPicker({
     backend: "arcee-api",
     model: "trinity-large-thinking",
     base_url: "https://api.arcee.ai/api/v1",
@@ -194,6 +216,5 @@ it("keeps managed mounted credentials server-side while selecting another entitl
     expect(discovery.mock.calls[0]?.[0]).not.toHaveProperty("api_key_env");
   } finally {
     view.unmount();
-    client.clear();
   }
 });

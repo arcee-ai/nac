@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -16,9 +17,11 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useClearGoal, useCreateGoal, useSessionGoal, useUpdateGoal } from "@/app/services/queries";
+import { clearGoalAtom, createGoalAtom, sessionGoal, updateGoalAtom } from "@/app/services/queries";
 import type { GoalStatus, SessionBehavior, SessionGoalRecord } from "@/app/types/api";
 
 interface GoalControlsProps {
@@ -47,10 +50,13 @@ function parsedBudget(value: string): number | null | undefined {
 /** Direct-only durable goal state and user controls. */
 export function GoalControls({ sessionId, behavior, openRequest = 0 }: GoalControlsProps) {
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
-  const goalQuery = useSessionGoal(sessionId, direct);
-  const createGoal = useCreateGoal();
-  const updateGoal = useUpdateGoal();
-  const clearGoal = useClearGoal();
+  const goalQuery = readAsync(useAtomValue(sessionGoal(sessionId, direct)));
+  const createGoal = useAtomSet(createGoalAtom, { mode: "promise" });
+  const creatingGoal = useAtomValue(createGoalAtom).waiting;
+  const updateGoal = useAtomSet(updateGoalAtom, { mode: "promise" });
+  const updatingGoal = useAtomValue(updateGoalAtom).waiting;
+  const clearGoal = useAtomSet(clearGoalAtom, { mode: "promise" });
+  const clearingGoal = useAtomValue(clearGoalAtom).waiting;
   const toast = useToast();
   const goal = goalQuery.data ?? null;
   const [open, setOpen] = useState(false);
@@ -68,14 +74,15 @@ export function GoalControls({ sessionId, behavior, openRequest = 0 }: GoalContr
 
   if (!direct) return null;
 
-  const busy = createGoal.isPending || updateGoal.isPending || clearGoal.isPending;
+  const busy = creatingGoal || updatingGoal || clearingGoal;
   const show = () => {
     setObjective(goal?.objective ?? "");
     setBudget(budgetValue(goal));
     setOpen(true);
   };
   const fail = (prefix: string, error: unknown) => {
-    toast.error(`${prefix}: ${errorMessage(toRunError(error))}`);
+    const cause = error instanceof ClientRequestError ? error.error : error;
+    toast.error(`${prefix}: ${errorMessage(toRunError(cause))}`);
   };
   const save = async () => {
     const tokenBudget = parsedBudget(budget);
@@ -89,7 +96,7 @@ export function GoalControls({ sessionId, behavior, openRequest = 0 }: GoalContr
     }
     try {
       if (goal && goal.status !== "complete") {
-        await updateGoal.mutateAsync({
+        await updateGoal({
           sessionId,
           goalId: goal.goal_id,
           payload: {
@@ -99,7 +106,7 @@ export function GoalControls({ sessionId, behavior, openRequest = 0 }: GoalContr
           },
         });
       } else {
-        await createGoal.mutateAsync({
+        await createGoal({
           sessionId,
           payload: {
             objective: objective.trim(),
@@ -117,7 +124,7 @@ export function GoalControls({ sessionId, behavior, openRequest = 0 }: GoalContr
   const setStatus = async (status: GoalStatus) => {
     if (!goal) return;
     try {
-      await updateGoal.mutateAsync({
+      await updateGoal({
         sessionId,
         goalId: goal.goal_id,
         payload: { expected_version: goal.version, status },
@@ -129,7 +136,7 @@ export function GoalControls({ sessionId, behavior, openRequest = 0 }: GoalContr
   const clear = async () => {
     if (!goal) return;
     try {
-      await clearGoal.mutateAsync({
+      await clearGoal({
         sessionId,
         goalId: goal.goal_id,
         expectedVersion: goal.version,

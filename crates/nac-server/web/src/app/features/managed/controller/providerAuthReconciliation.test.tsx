@@ -1,13 +1,17 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
 import type { PropsWithChildren } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 
+import { isolatedRegistry, readAsync } from "@/app/effect/remote";
 import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
-import { api } from "@/app/services/api";
-import { queryKeys, useManagedLogout, useModelCatalog } from "@/app/services/queries";
+import { api, apiEffect } from "@/app/services/api";
+import { managedLogoutAtom } from "@/app/services/queries/host";
+import { modelCatalogAtom } from "@/app/services/queries/configuration";
 import type { ModelCatalog } from "@/app/types/api";
 
 function catalog(ready: boolean): ModelCatalog {
@@ -31,9 +35,9 @@ function catalog(ready: boolean): ModelCatalog {
   };
 }
 
-function wrapper(client: QueryClient) {
+function wrapper(registry: ReturnType<typeof isolatedRegistry>) {
   return ({ children }: PropsWithChildren) => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    <RegistryContext.Provider value={registry}>{children}</RegistryContext.Provider>
   );
 }
 
@@ -46,10 +50,14 @@ afterEach(() => {
 it("refetches the unified catalog when device login becomes ready", async () => {
   vi.useFakeTimers();
   vi.stubGlobal("open", vi.fn());
-  const getCatalog = vi
-    .spyOn(api, "getModelCatalog")
-    .mockResolvedValueOnce(catalog(false))
-    .mockResolvedValue(catalog(true));
+  const getCatalog = vi.fn();
+  getCatalog.mockResolvedValueOnce(catalog(false)).mockResolvedValue(catalog(true));
+  vi.spyOn(apiEffect, "getModelCatalog").mockImplementation(() =>
+    Effect.promise(() => getCatalog()),
+  );
+  vi.spyOn(apiEffect, "listManagedAuth").mockImplementation(() =>
+    Effect.promise(() => Promise.resolve({ providers: [] })),
+  );
   vi.spyOn(api, "startManagedLogin").mockResolvedValue({
     provider: "codex",
     login_id: "login-1",
@@ -70,11 +78,14 @@ it("refetches the unified catalog when device login becomes ready", async () => 
       path: "/server-owned/auth.json",
     },
   });
-  vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const hook = renderHook(() => ({ catalog: useModelCatalog(), login: useDeviceLogin() }), {
-    wrapper: wrapper(client),
-  });
+  const registry = isolatedRegistry();
+  const hook = renderHook(
+    () => ({
+      catalog: readAsync(useAtomValue(modelCatalogAtom())),
+      login: useDeviceLogin(),
+    }),
+    { wrapper: wrapper(registry) },
+  );
 
   try {
     await vi.waitFor(() => expect(hook.result.current.catalog.data).toEqual(catalog(false)));
@@ -86,42 +97,52 @@ it("refetches the unified catalog when device login becomes ready", async () => 
     });
   } finally {
     hook.unmount();
-    client.clear();
   }
 });
 
 it("refetches the unified catalog when logout removes readiness", async () => {
-  const getCatalog = vi
-    .spyOn(api, "getModelCatalog")
-    .mockResolvedValueOnce(catalog(true))
-    .mockResolvedValue(catalog(false));
-  vi.spyOn(api, "managedLogout").mockResolvedValue({
-    provider: "codex",
-    backend: "chatgpt-codex-responses",
-    base_url: null,
-    signed_in: false,
-    account: null,
-    organization: null,
-    expires_at_ms: null,
-    path: "/server-owned/auth.json",
-  });
-  vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const hook = renderHook(() => ({ catalog: useModelCatalog(), logout: useManagedLogout() }), {
-    wrapper: wrapper(client),
-  });
+  const getCatalog = vi.fn();
+  getCatalog.mockResolvedValueOnce(catalog(true)).mockResolvedValue(catalog(false));
+  vi.spyOn(apiEffect, "getModelCatalog").mockImplementation(() =>
+    Effect.promise(() => getCatalog()),
+  );
+  vi.spyOn(apiEffect, "managedLogout").mockImplementation(() =>
+    Effect.promise(() =>
+      Promise.resolve({
+        provider: "codex",
+        backend: "chatgpt-codex-responses",
+        base_url: null,
+        signed_in: false,
+        account: null,
+        organization: null,
+        expires_at_ms: null,
+        path: "/server-owned/auth.json",
+      }),
+    ),
+  );
+  vi.spyOn(apiEffect, "listManagedAuth").mockImplementation(() =>
+    Effect.promise(() => Promise.resolve({ providers: [] })),
+  );
+  const registry = isolatedRegistry();
+  const hook = renderHook(
+    () => ({
+      catalog: readAsync(useAtomValue(modelCatalogAtom())),
+      logout: useAtomSet(managedLogoutAtom, { mode: "promise" }),
+    }),
+    { wrapper: wrapper(registry) },
+  );
 
   try {
     await waitFor(() => expect(hook.result.current.catalog.data).toEqual(catalog(true)));
     await act(async () => {
-      await hook.result.current.logout.mutateAsync("codex");
+      await hook.result.current.logout("codex");
     });
     await waitFor(() => {
-      expect(client.getQueryData(queryKeys.modelCatalog)).toEqual(catalog(false));
+      const cached = registry.get(modelCatalogAtom());
+      expect(AsyncResult.isSuccess(cached) ? cached.value : undefined).toEqual(catalog(false));
       expect(getCatalog).toHaveBeenCalledTimes(2);
     });
   } finally {
     hook.unmount();
-    client.clear();
   }
 });

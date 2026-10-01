@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useIsFetching } from "@tanstack/react-query";
+import { useAtomValue } from "@effect/atom-react";
 
-import { queryKeys } from "@/app/services/queries";
+import { inFlight } from "@/app/effect/remote";
+import { atomIds } from "@/app/services/queries/keys";
 
 /**
  * Below this a fetch is over before the eye could follow it, and a bar that
@@ -16,15 +17,15 @@ const MIN_VISIBLE_MS = 500;
 /**
  * Whether anything belonging to this session is being fetched right now — the
  * snapshot, the file listing, a diff, the revisions — reported as something
- * worth showing rather than as raw query state.
+ * worth showing rather than as raw atom state.
  *
- * Every session-scoped key starts `["session", id]`, so one filter covers the
- * whole panel however its parts are split up. The event stream can invalidate
- * several of those at once, hence the smoothing: the point is to say "this is
- * refreshing", not to strobe once per request.
+ * Every session-scoped atom id starts `session\0${id}`, so one in-flight count
+ * covers the whole panel however its parts are split up. The event stream can
+ * refresh several of those at once, hence the smoothing: the point is to say
+ * "this is refreshing", not to strobe once per request.
  */
 export function useSessionFetching(sessionId: string): boolean {
-  const fetching = useIsFetching({ queryKey: queryKeys.sessionRoot(sessionId) }) > 0;
+  const fetching = useAtomValue(inFlight(atomIds.session(sessionId))) > 0;
   const [visible, setVisible] = useState(false);
   const shownAt = useRef(0);
 

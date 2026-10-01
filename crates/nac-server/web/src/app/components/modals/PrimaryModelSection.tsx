@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
 
 import { type SelectItem } from "@/app/atoms";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
@@ -12,7 +13,9 @@ import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { type CatalogPick, defaultCatalogPick, resolveCatalogModel } from "@/app/lib/catalog";
 import { providerLabel } from "@/app/lib/providers";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
-import { useModelCatalog, useReadyProviderModels } from "@/app/services/queries";
+import { readyProviderModelsAtom } from "@/app/features/managed/queries";
+import { readAsync } from "@/app/effect/remote";
+import { modelCatalogAtom } from "@/app/services/queries";
 import type { ReasoningEffort } from "@/app/types/api";
 
 const PRIMARY_EFFORT_OPTIONS: SelectItem[] = [
@@ -37,9 +40,9 @@ export function PrimaryModelSection({
   initial?: ConfigurationsPanelInitial;
   onChange: (selection: LaunchModelSelection | null) => void;
 }) {
-  const catalog = useModelCatalog();
+  const catalog = readAsync(useAtomValue(modelCatalogAtom()));
   const managedModel = useManagedModelProfile();
-  const liveByBackend = useReadyProviderModels(catalog.data);
+  const liveByBackend = useAtomValue(readyProviderModelsAtom(catalog.data));
   const [chosen, setChosen] = useState<PrimaryChoice | null>(null);
 
   const initialChoice = useMemo<PrimaryChoice | null>(

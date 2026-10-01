@@ -1,5 +1,8 @@
+import { useAtomValue } from "@effect/atom-react";
+
+import { readAsync } from "@/app/effect/remote";
+import { managedAuthAtom } from "@/app/features/managed/queries";
 import { managedAuthProvider } from "@/app/lib/providers";
-import { useManagedAuth } from "@/app/features/managed/queries";
 import type { BackendKind } from "@/app/types/api";
 
 /**
@@ -12,7 +15,7 @@ import type { BackendKind } from "@/app/types/api";
  */
 export function useManagedSignIn(backend: BackendKind) {
   const provider = managedAuthProvider(backend);
-  const { data } = useManagedAuth(Boolean(provider));
+  const { data } = readAsync(useAtomValue(managedAuthAtom(Boolean(provider))));
   const signedIn = Boolean(
     provider && data?.providers.find((entry) => entry.provider === provider)?.signed_in,
   );

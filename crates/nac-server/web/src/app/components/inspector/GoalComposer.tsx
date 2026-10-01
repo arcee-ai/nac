@@ -1,3 +1,4 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -14,9 +15,11 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useClearGoal, useCreateGoal, useSessionGoal, useUpdateGoal } from "@/app/services/queries";
+import { clearGoalAtom, createGoalAtom, sessionGoal, updateGoalAtom } from "@/app/services/queries";
 import type { GoalStatus, SessionGoalRecord } from "@/app/types/api";
 
 const GOAL_HINT =
@@ -51,7 +54,7 @@ interface GoalFlagProps {
 
 /** Flag inside the message field. Opens the inline goal editor. */
 export function GoalFlag({ sessionId, className, onOpen }: GoalFlagProps) {
-  const goalQuery = useSessionGoal(sessionId, true);
+  const goalQuery = readAsync(useAtomValue(sessionGoal(sessionId, true)));
   const goal = goalQuery.data ?? null;
   const active = goal?.status === "active";
 
@@ -88,10 +91,13 @@ interface GoalEditorProps {
  * switch off means no limit; on means the slider value.
  */
 export function GoalEditor({ sessionId, onClose }: GoalEditorProps) {
-  const goalQuery = useSessionGoal(sessionId, true);
-  const createGoal = useCreateGoal();
-  const updateGoal = useUpdateGoal();
-  const clearGoal = useClearGoal();
+  const goalQuery = readAsync(useAtomValue(sessionGoal(sessionId, true)));
+  const createGoal = useAtomSet(createGoalAtom, { mode: "promise" });
+  const creatingGoal = useAtomValue(createGoalAtom).waiting;
+  const updateGoal = useAtomSet(updateGoalAtom, { mode: "promise" });
+  const updatingGoal = useAtomValue(updateGoalAtom).waiting;
+  const clearGoal = useAtomSet(clearGoalAtom, { mode: "promise" });
+  const clearingGoal = useAtomValue(clearGoalAtom).waiting;
   const toast = useToast();
   const goal = goalQuery.data ?? null;
   const [objective, setObjective] = useState(goal?.objective ?? "");
@@ -110,10 +116,11 @@ export function GoalEditor({ sessionId, onClose }: GoalEditorProps) {
     setBudgetAmount(clampBudget(loaded?.token_budget ?? BUDGET_DEFAULT));
   }, [goalQuery.data, goalQuery.isPending]);
 
-  const busy = createGoal.isPending || updateGoal.isPending || clearGoal.isPending;
+  const busy = creatingGoal || updatingGoal || clearingGoal;
   const editingExisting = goal != null && goal.status !== "complete";
   const fail = (prefix: string, error: unknown) => {
-    toast.error(`${prefix}: ${errorMessage(toRunError(error))}`);
+    const cause = error instanceof ClientRequestError ? error.error : error;
+    toast.error(`${prefix}: ${errorMessage(toRunError(cause))}`);
   };
 
   const save = async (closeAfter: boolean) => {
@@ -124,7 +131,7 @@ export function GoalEditor({ sessionId, onClose }: GoalEditorProps) {
     }
     try {
       if (editingExisting && goal) {
-        await updateGoal.mutateAsync({
+        await updateGoal({
           sessionId,
           goalId: goal.goal_id,
           payload: {
@@ -134,7 +141,7 @@ export function GoalEditor({ sessionId, onClose }: GoalEditorProps) {
           },
         });
       } else {
-        await createGoal.mutateAsync({
+        await createGoal({
           sessionId,
           payload: {
             objective: objective.trim(),
@@ -151,7 +158,7 @@ export function GoalEditor({ sessionId, onClose }: GoalEditorProps) {
   const setStatus = async (status: GoalStatus) => {
     if (!goal) return;
     try {
-      await updateGoal.mutateAsync({
+      await updateGoal({
         sessionId,
         goalId: goal.goal_id,
         payload: { expected_version: goal.version, status },
@@ -164,7 +171,7 @@ export function GoalEditor({ sessionId, onClose }: GoalEditorProps) {
   const clear = async () => {
     if (!goal) return;
     try {
-      await clearGoal.mutateAsync({
+      await clearGoal({
         sessionId,
         goalId: goal.goal_id,
         expectedVersion: goal.version,

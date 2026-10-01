@@ -1,10 +1,13 @@
 import { useSyncExternalStore } from "react";
 
+import { appAtomRegistry } from "@/app/effect/registry";
 import { perfMark } from "@/app/lib/perfDebug";
+import { Atom } from "effect/reactivity";
 
-// Minimal external store. Server data lives in TanStack Query; this is only for
-// client state that several unrelated components read, such as the current
-// selection or the live run status derived from the event stream.
+// Client view state shared by unrelated components. Server data stays in
+// the Effect server atoms. Each store is one keep-alive atom on the page registry:
+// idle cleanup must not drop a preference while nothing is mounted, and a
+// reader outside React has to see the same value as `useStore`.
 
 type Listener = () => void;
 type Patch<S> = Partial<S> | ((state: S) => Partial<S> | null | undefined);
@@ -16,43 +19,37 @@ export interface Store<S> {
   useStore: <T = S>(selector?: (state: S) => T) => T;
 }
 
+const identity = <S>(state: S): S => state;
+
 export function createStore<S extends object>(
   initial: S,
   /** Names the store in the dev perf report; has no effect otherwise. */
   name = "store",
 ): Store<S> {
-  let state = initial;
-  const listeners = new Set<Listener>();
+  const atom: Atom.Writable<S> = Atom.keepAlive(Atom.make(initial));
 
-  const getState = () => state;
+  const getState = () => appAtomRegistry.get(atom);
 
   const setState = (patch: Patch<S>) => {
+    const state = getState();
     const next = patch instanceof Function ? patch(state) : patch;
     if (!next || next === state) return;
-    state = { ...state, ...next };
+    appAtomRegistry.set(atom, { ...state, ...next });
     perfMark(`store:${name}.notify`, {
-      fields: { keys: Object.keys(next).join("+"), listeners: listeners.size },
+      fields: { keys: Object.keys(next).join("+") },
       throttleMs: 1000,
     });
-    listeners.forEach((listener) => listener());
   };
 
-  const subscribe = (listener: Listener) => {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  };
-
-  const identity = (s: S): S => s;
+  const subscribe = (listener: Listener) => appAtomRegistry.subscribe(atom, () => listener());
 
   const useStore = <T = S>(selector?: (state: S) => T): T => {
-    // SAFETY: when no selector is given, T defaults to S and identity returns
-    // the state itself, so the cast only widens the no-selector branch.
+    // Selectors are inline at the call site, and unit tests render without the
+    // page provider. Subscribing to this registry directly keeps both on the
+    // atom `getState` writes. `useAtomValue` would read a different registry
+    // whenever that provider is absent.
     const select = (selector ?? identity) as (state: S) => T;
-    // Both snapshots read the same live state, so the server snapshot used
-    // during hydration cannot diverge from the client one.
-    const snapshot = () => select(state);
+    const snapshot = () => select(getState());
     return useSyncExternalStore(subscribe, snapshot, snapshot);
   };
 

@@ -1,16 +1,19 @@
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { SubagentChatInputBox } from "@/app/components/inspector/SubagentChatInputBox";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import {
-  useCancelManagedOrchestrator,
-  useCancelTraditionalChild,
-  useManagedOrchestrators,
-  useStartManagedOrchestrator,
-  useStartTraditionalChild,
-  useTraditionalChildren,
+  cancelManagedOrchestratorAtom,
+  cancelTraditionalChildAtom,
+  managedOrchestrators,
+  startManagedOrchestratorAtom,
+  startTraditionalChildAtom,
+  traditionalChildren,
 } from "@/app/services/queries";
 import type { SessionBehavior, SessionLineage, TraditionalChildStatus } from "@/app/types/api";
 
@@ -60,21 +63,21 @@ export function SubagentComposer({
   showPermissions?: boolean;
 }) {
   const toast = useToast();
-  const startChild = useStartTraditionalChild();
-  const startOrchestrator = useStartManagedOrchestrator();
-  const cancelChild = useCancelTraditionalChild();
-  const cancelOrchestrator = useCancelManagedOrchestrator();
+  const startChild = useAtomSet(startTraditionalChildAtom, { mode: "promise" });
+  const startingChild = useAtomValue(startTraditionalChildAtom).waiting;
+  const startOrchestrator = useAtomSet(startManagedOrchestratorAtom, { mode: "promise" });
+  const startingOrchestrator = useAtomValue(startManagedOrchestratorAtom).waiting;
+  const cancelChild = useAtomSet(cancelTraditionalChildAtom, { mode: "promise" });
+  const cancellingChild = useAtomValue(cancelTraditionalChildAtom).waiting;
+  const cancelOrchestrator = useAtomSet(cancelManagedOrchestratorAtom, { mode: "promise" });
+  const cancellingOrchestrator = useAtomValue(cancelManagedOrchestratorAtom).waiting;
   const [value, setValue] = useState("");
   const [background, setBackground] = useState(
     target.mode === "child" || target.mode === "orchestrator" ? target.background : true,
   );
   const running =
     (target.mode === "child" || target.mode === "orchestrator") && target.status === "running";
-  const busy =
-    startChild.isPending ||
-    startOrchestrator.isPending ||
-    cancelChild.isPending ||
-    cancelOrchestrator.isPending;
+  const busy = startingChild || startingOrchestrator || cancellingChild || cancellingOrchestrator;
   const existing = target.mode === "child" || target.mode === "orchestrator" ? target : null;
 
   const submit = async () => {
@@ -87,7 +90,7 @@ export function SubagentComposer({
     }
     try {
       if (target.mode === "new-orchestrator" || target.mode === "orchestrator") {
-        const started = await startOrchestrator.mutateAsync({
+        const started = await startOrchestrator({
           sessionId: parentSessionId,
           payload: {
             description,
@@ -98,7 +101,7 @@ export function SubagentComposer({
         });
         onStarted?.(started.orchestrator_session_id);
       } else {
-        const started = await startChild.mutateAsync({
+        const started = await startChild({
           sessionId: parentSessionId,
           payload: {
             profile: "general",
@@ -112,7 +115,8 @@ export function SubagentComposer({
       }
       setValue("");
     } catch (error) {
-      toast.error(`Unable to update the subagent: ${errorMessage(toRunError(error))}`);
+      const cause = error instanceof ClientRequestError ? error.error : error;
+      toast.error(`Unable to update the subagent: ${errorMessage(toRunError(cause))}`);
     }
   };
 
@@ -120,18 +124,19 @@ export function SubagentComposer({
     if (!existing) return;
     try {
       if (existing.mode === "child") {
-        await cancelChild.mutateAsync({
+        await cancelChild({
           sessionId: parentSessionId,
           childId: existing.id,
         });
       } else {
-        await cancelOrchestrator.mutateAsync({
+        await cancelOrchestrator({
           sessionId: parentSessionId,
           orchestratorId: existing.id,
         });
       }
     } catch (error) {
-      toast.error(`Unable to stop the subagent: ${errorMessage(toRunError(error))}`);
+      const cause = error instanceof ClientRequestError ? error.error : error;
+      toast.error(`Unable to stop the subagent: ${errorMessage(toRunError(cause))}`);
     }
   };
 
@@ -177,8 +182,10 @@ export function SubagentSessionComposer({
   behavior: SessionBehavior | null;
 }) {
   const orchestrator = kind === "managed-orchestrator";
-  const children = useTraditionalChildren(parentSessionId, !orchestrator);
-  const orchestrators = useManagedOrchestrators(parentSessionId, orchestrator);
+  const children = readAsync(useAtomValue(traditionalChildren(parentSessionId, !orchestrator)));
+  const orchestrators = readAsync(
+    useAtomValue(managedOrchestrators(parentSessionId, orchestrator)),
+  );
   const record = orchestrator
     ? orchestrators.data?.find((item) => item.orchestrator_session_id === sessionId)
     : children.data?.find((item) => item.child_session_id === sessionId);

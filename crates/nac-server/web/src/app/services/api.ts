@@ -1,8 +1,12 @@
-// Compatibility facade over the endpoint-aware NAC client. New session
-// transport behavior belongs in nacClient.ts; existing feature owners keep
-// their stable method names while the bounded surface migrates.
+// Lazy Effect programs over the endpoint-aware NAC client. `apiEffect` asks
+// the shared runtime for NacTransport; `api` runs those programs for React
+// Query. New session transport behavior belongs in nacClient.ts.
 
-import { ApiError, nacClient } from "@/app/services/nacClient";
+import { Effect } from "effect";
+
+import { NacTransport } from "@/app/effect/runtime";
+import { commitPrograms, fromPromise, linkSignals } from "@/app/effect/run";
+import { ApiError, type NacClient } from "@/app/services/nacClient";
 import type {
   AssignSessionRequest,
   BranchList,
@@ -114,12 +118,18 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
-async function request<T>(
-  method: Method,
-  path: string,
-  { body, headers, signal }: RequestOptions = {},
-): Promise<T> {
-  return nacClient.transport.request<T>(method, path, { body, headers, signal });
+function withTransport<A>(use: (client: NacClient, signal: AbortSignal) => Promise<A>) {
+  return Effect.flatMap(NacTransport, (client) => fromPromise((signal) => use(client, signal)));
+}
+
+function request<T>(method: Method, path: string, options: RequestOptions = {}) {
+  return withTransport((client, signal) =>
+    client.transport.request<T>(method, path, {
+      body: options.body,
+      headers: options.headers,
+      signal: linkSignals(options.signal, signal),
+    }),
+  );
 }
 
 const sessionPath = (id: string) => `/sessions/${encodeURIComponent(id)}`;
@@ -158,7 +168,7 @@ export interface ThreadEventsOptions {
   signal?: AbortSignal;
 }
 
-export const api = {
+export const apiEffect = {
   health: (signal?: AbortSignal) => request<{ status: string }>("GET", "/health", { signal }),
 
   getStore: (signal?: AbortSignal) => request<StoreInfo>("GET", "/store", { signal }),
@@ -462,7 +472,9 @@ export const api = {
   },
 
   getSession: (id: string, options: SessionSnapshotOptions = {}) =>
-    nacClient.getSession(id, options),
+    withTransport((client, signal) =>
+      client.getSession(id, { ...options, signal: linkSignals(options.signal, signal) }),
+    ),
 
   createSession: (payload: CreateSessionRequest) =>
     request<SessionSnapshotResponse>("POST", "/sessions", { body: payload }),
@@ -679,7 +691,8 @@ export const api = {
   generateOverview: (id: string) =>
     request<{ session_id: string; summary: string }>("POST", `${sessionPath(id)}/overview`),
 
-  submitRun: (id: string, prompt: string) => nacClient.submitPrompt(id, prompt),
+  submitRun: (id: string, prompt: string) =>
+    withTransport((client, signal) => client.submitPrompt(id, prompt, signal)),
 
   cancelActiveRun: (id: string) => request<void>("POST", `${sessionPath(id)}/cancel-active-run`),
 
@@ -726,5 +739,10 @@ export const api = {
       limit?: number;
       signal?: AbortSignal;
     } = {},
-  ) => nacClient.getRecentEvents(id, options),
+  ) =>
+    withTransport((client, signal) =>
+      client.getRecentEvents(id, { ...options, signal: linkSignals(options.signal, signal) }),
+    ),
 };
+
+export const api = commitPrograms(apiEffect);

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useIsFetching } from "@tanstack/react-query";
+import { useAtomValue } from "@effect/atom-react";
 
+import { inFlight } from "@/app/effect/remote";
 import { useMarkdownReady } from "@/app/hooks/useMarkdownReady";
-import { queryKeys } from "@/app/services/queries";
+import { atomIds } from "@/app/services/queries/keys";
 
 /**
  * How long a transcript may stay hidden. A session with a run streaming into it
@@ -35,10 +36,10 @@ export function useTranscriptReveal(
   hasContent: boolean,
 ): boolean {
   const markdownReady = useMarkdownReady();
-  // Everything a session reads is keyed under its root, the per-turn snapshot
+  // Everything a session reads lives under its atom id, the per-turn snapshot
   // changes included, so this covers the reads that only start once the
   // messages are in the tree without having to name them one by one.
-  const fetching = useIsFetching({ queryKey: queryKeys.sessionRoot(sessionId) });
+  const fetching = useAtomValue(inFlight(atomIds.session(sessionId)));
   // Held as the session it belongs to, so switching sessions closes the gate in
   // the same render as the switch rather than a paint later.
   const [shown, setShown] = useState<string | null>(null);

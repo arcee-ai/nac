@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 
 import { Modal, ModalSize } from "@/app/atoms";
 import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
@@ -6,9 +7,10 @@ import { LibraryPicker } from "@/app/components/modals/MCPServersModal/McpLibrar
 import { McpServerForm } from "@/app/components/modals/MCPServersModal/McpServerForm";
 import { McpServersLoadError } from "@/app/components/modals/MCPServersModal/McpServersLoadError";
 import { McpServersMobile } from "@/app/components/modals/MCPServersModal/McpServersMobile";
+import { readAsync } from "@/app/effect/remote";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-import { useMcpLibrary, useMcpServers } from "@/app/services/queries";
+import { mcpLibraryAtom, mcpServersAtom } from "@/app/services/queries";
 import type { McpLibraryEntry } from "@/app/types/api";
 
 const DRAFT = "__new__";
@@ -26,8 +28,9 @@ export function McpServersModal({ open, onClose }: { open: boolean; onClose: () 
 function McpServersManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   // Warms the catalog as soon as the modal opens, so the picker's grouped
   // sections are already there when "Add server" is selected.
-  const { data: library } = useMcpLibrary();
-  const { data, error, isError, isFetching, isLoading, refetch } = useMcpServers();
+  const { data: library } = readAsync(useAtomValue(mcpLibraryAtom));
+  const { data, error, isError, isFetching, isLoading } = readAsync(useAtomValue(mcpServersAtom));
+  const refetch = useAtomRefresh(mcpServersAtom);
   const servers = useMemo(() => data?.servers ?? [], [data]);
   const [picked, setPicked] = useState<string | null>(null);
   const [template, setTemplate] = useState<McpLibraryEntry | null>(null);

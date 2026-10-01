@@ -1,10 +1,11 @@
+import { useAtomSet } from "@effect/atom-react";
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 import { DeleteModal } from "@/app/components/modals/DeleteModal";
 import { RenameModal } from "@/app/components/modals/RenameModal";
 import { SettingsModal } from "@/app/components/modals/SettingsModal";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useCancelRun, useTogglePin } from "@/app/services/queries";
+import { cancelRunAtom, togglePinAtom } from "@/app/services/queries/session";
 import { pushLocalEvent } from "@/app/store/runtimeStore";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 import { toRunError } from "@/app/lib/providerError";
@@ -31,8 +32,8 @@ type ModalKind = "rename" | "delete" | "settings";
  */
 export function SessionActionsProvider({ children }: { children: React.ReactNode }) {
   const toast = useToast();
-  const pin = useTogglePin();
-  const cancelRun = useCancelRun();
+  const togglePin = useAtomSet(togglePinAtom, { mode: "promise" });
+  const cancelRun = useAtomSet(cancelRunAtom, { mode: "promise" });
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [target, setTarget] = useState<SessionSummarySnapshot | null>(null);
   const [settingsId, setSettingsId] = useState<string | null>(null);
@@ -45,7 +46,6 @@ export function SessionActionsProvider({ children }: { children: React.ReactNode
     [],
   );
 
-  const togglePin = pin.toggle;
   const value = useMemo<SessionActions>(
     () => ({
       rename: openModal("rename"),
@@ -63,7 +63,7 @@ export function SessionActionsProvider({ children }: { children: React.ReactNode
       },
       stopRun: async (sessionId) => {
         try {
-          await cancelRun.mutateAsync(sessionId);
+          await cancelRun(sessionId);
           pushLocalEvent("run", "■ run cancellation requested");
           toast.success("Run cancellation requested");
         } catch (error) {

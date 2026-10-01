@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 
 import {
   Button,
@@ -35,11 +36,13 @@ import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { matchesManagedModelPick } from "@/app/features/managed/model";
-import { useManagedHostStatus } from "@/app/features/managed/queries";
+import { managedHostStatusAtom, managedProviderModelsFor } from "@/app/features/managed/queries";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
+import { ClientRequestError } from "@/app/effect/errors";
+import { readAsync } from "@/app/effect/remote";
 import { isGeneratedCredentialName, MASKED_KEY, type Validation } from "@/app/lib/apiKey";
 import {
   inheritPrimaryCredential,
@@ -54,16 +57,21 @@ import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { ApiError } from "@/app/services/api";
 import {
-  useManagedLogout,
-  useManagedProviderModels,
-  useCreateModelConfig,
-  useModelCatalog,
-  useSessionConfig,
-  useSessionSnapshot,
-  useSessionSummary,
-  useUpdateConfig,
-  useUpdatePresentation,
+  configAtom,
+  createModelConfigAtom,
+  managedLogoutAtom,
+  modelCatalogAtom,
+  selectSession,
+  SESSIONS_POLL_MS,
+  sessionsAtom,
+  snapshotAtom,
+  updatePresentationAtom,
+  updateSessionConfigAtom,
 } from "@/app/services/queries";
+
+function commandError(cause: unknown): unknown {
+  return cause instanceof ClientRequestError ? cause.error : cause;
+}
 import { sshTargetFromSummary, useSshConnectionStatus } from "@/app/store/sshConnectionStore";
 import type {
   BackendKind,
@@ -181,11 +189,13 @@ export function SettingsModal({
   // Keyed on `mounted` rather than `open`: dropping the queries the moment the
   // dialog starts closing would blank the form out mid-slide.
   const mounted = useExitTransition(open);
-  const { data: snapshot } = useSessionSnapshot(mounted ? id : null);
-  const { data: entry, isLoading: isSummaryLoading } = useSessionSummary(mounted ? id : null);
+  const { data: snapshot } = readAsync(useAtomValue(snapshotAtom(mounted ? id : null)));
+  const sessionsState = useAtomValue(sessionsAtom(SESSIONS_POLL_MS));
+  const entry = selectSession(sessionsState, mounted ? id : null) ?? null;
+  const isSummaryLoading = readAsync(sessionsState).isLoading;
   // Fetched for diagnostics ("repair required") and as a fallback source when
   // the live snapshot is unavailable.
-  const { data: config, isLoading } = useSessionConfig(mounted ? id : null);
+  const { data: config, isLoading } = readAsync(useAtomValue(configAtom(mounted ? id : null)));
 
   if (!mounted || !id) return null;
 
@@ -254,12 +264,15 @@ function SettingsForm({
   const isMobile = useIsMobile();
   const toast = useToast();
   const sessionTitle = useSessionTitle();
-  const updateConfig = useUpdateConfig();
-  const managedHostQuery = useManagedHostStatus();
+  const updateConfig = useAtomSet(updateSessionConfigAtom, { mode: "promise" });
+  const updatingConfig = useAtomValue(updateSessionConfigAtom).waiting;
+  const managedHostQuery = readAsync(useAtomValue(managedHostStatusAtom));
   const managedHost = managedHostQuery.data ?? null;
-  const createModelConfig = useCreateModelConfig();
+  const createModelConfig = useAtomSet(createModelConfigAtom, { mode: "promise" });
+  const creatingModelConfig = useAtomValue(createModelConfigAtom).waiting;
   const [openingSummary] = useState(summary);
-  const updatePresentation = useUpdatePresentation();
+  const updatePresentation = useAtomSet(updatePresentationAtom, { mode: "promise" });
+  const updatingPresentation = useAtomValue(updatePresentationAtom).waiting;
 
   const initialTitle = openingSummary.title ?? "";
   const [title, setTitle] = useState(initialTitle);
@@ -340,7 +353,7 @@ function SettingsForm({
 
   // Only the levels this model actually accepts: the backend rejects the rest,
   // so offering them would only produce a save that fails.
-  const catalog = useModelCatalog();
+  const catalog = readAsync(useAtomValue(modelCatalogAtom()));
   const reasoningItems = reasoningOptionsFor(
     resolveCatalogModel(catalog.data, backend, model).supportedEfforts,
     reasoning,
@@ -370,10 +383,7 @@ function SettingsForm({
 
   const blocked = !selection;
   const busy =
-    managedHostQuery.isPending ||
-    updateConfig.isPending ||
-    updatePresentation.isPending ||
-    createModelConfig.isPending;
+    managedHostQuery.isPending || updatingConfig || updatingPresentation || creatingModelConfig;
 
   const seedTarget = sshTargetFromSummary(openingSummary);
   const sshStatus = useSshConnectionStatus(seedTarget);
@@ -390,13 +400,14 @@ function SettingsForm({
   const saveTitle = async () => {
     if (title.trim() === initialTitle.trim()) return;
     try {
-      await updatePresentation.mutateAsync({
+      await updatePresentation({
         id,
         title: title.trim(),
         pinned: Boolean(openingSummary.pinned),
         expectedVersion: openingSummary.presentation_version ?? 0,
       });
-    } catch (saveError) {
+    } catch (caught) {
+      const saveError = commandError(caught);
       const conflict = saveError instanceof ApiError && saveError.status === 409;
       toast.error(
         conflict
@@ -423,7 +434,7 @@ function SettingsForm({
     let selected: SelectedModelConfig;
     try {
       if (selection.kind === "save") {
-        const record = await createModelConfig.mutateAsync({
+        const record = await createModelConfig({
           ...selection.request,
           light_model: light.mode === "dual" ? light.light : null,
         });
@@ -439,7 +450,9 @@ function SettingsForm({
         selected = selection;
       }
     } catch (saveError) {
-      setError(`The configuration could not be saved: ${humanErrorText(toRunError(saveError))}`);
+      setError(
+        `The configuration could not be saved: ${humanErrorText(toRunError(commandError(saveError)))}`,
+      );
       return;
     }
 
@@ -501,10 +514,11 @@ function SettingsForm({
     }
 
     try {
-      await updateConfig.mutateAsync({ id, patch });
+      await updateConfig({ id, patch });
       toast.success("Session settings saved");
       onClose();
-    } catch (saveError) {
+    } catch (caught) {
+      const saveError = commandError(caught);
       const busyRun = saveError instanceof ApiError && saveError.status === 409;
       toast.error(
         busyRun
@@ -798,10 +812,13 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
   const buttonSize = isMobile ? ButtonSize.Large : ButtonSize.Medium;
   const { provider, signedIn } = useManagedSignIn(backend);
   const { state, start, cancel } = useDeviceLogin();
-  const logout = useManagedLogout();
+  const logout = useAtomSet(managedLogoutAtom, { mode: "promise" });
+  const loggingOut = useAtomValue(managedLogoutAtom).waiting;
   // A credential on file is not the same as a working one, so the row leans on
   // the request that actually spends it rather than on the file being there.
-  const reach = useManagedProviderModels(backend, Boolean(provider) && signedIn);
+  const reach = readAsync(
+    useAtomValue(managedProviderModelsFor(backend, Boolean(provider) && signedIn)),
+  );
 
   if (!provider) return null;
 
@@ -858,8 +875,8 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
           variant={ButtonVariant.Ghost}
           size={buttonSize}
           content={ButtonContent.Text}
-          loading={logout.isPending}
-          onClick={() => void logout.mutateAsync(provider).catch(() => {})}
+          loading={loggingOut}
+          onClick={() => void logout(provider).catch(() => {})}
         >
           Sign out
         </Button>
@@ -883,7 +900,7 @@ function AuthenticationField({ backend }: { backend: BackendKind }) {
       validation={failed || expired}
       validationText={
         failed || expired
-          ? humanErrorText(failed ? state.message : reach.error, backend)
+          ? humanErrorText(failed ? state.message : toRunError(reach.error), backend)
           : undefined
       }
       hintText={
