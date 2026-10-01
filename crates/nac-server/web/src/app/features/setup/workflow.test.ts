@@ -6,6 +6,7 @@ import {
   runSetup,
   saveSettings,
   SetupFailure,
+  requiresSetupReview,
 } from "./workflow";
 import { classifySetupFailure } from "./browserAdapters";
 import { ApiError } from "@/app/services/api";
@@ -164,4 +165,46 @@ it("does not report pure model projection or a no-op configuration as durable pa
     ),
   ).rejects.toMatchObject({ phase: "title", completed: [] });
   expect(origin.reconcile.mock.calls.map(([phase]) => phase)).toEqual(["title"]);
+});
+
+it.each([false, true])(
+  "classifies duplicate project rejection while retaining durable partial fences (preset saved: %s)",
+  async (persistsModel) => {
+    const project = vi.fn(async () => {
+      throw new ApiError(409, "POST", "/projects", "Folder already used", "duplicate");
+    });
+    const chat = vi.fn(async () => "chat");
+    const failure = await runSetup(
+      createProjectChat({ ...ports(), persistsModel, model: async () => "preset", project, chat }),
+    ).catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      phase: "project",
+      kind: "rejected",
+      completed: persistsModel ? ["preset"] : [],
+    });
+    expect(requiresSetupReview(failure)).toBe(persistsModel);
+    expect(project).toHaveBeenCalledTimes(1);
+    expect(chat).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  new TypeError("Connection lost"),
+  new ApiError(500, "POST", "/projects", "Response lost", "unknown"),
+])("keeps unknown project admission fenced", async (cause) => {
+  const project = vi.fn(async () => {
+    throw cause;
+  });
+  const failure = await runSetup(
+    createProjectChat({
+      ...ports(),
+      persistsModel: false,
+      model: async () => "preset",
+      project,
+      chat: async () => "chat",
+    }),
+  ).catch((error: unknown) => error);
+  expect(failure).toMatchObject({ phase: "project", kind: "unknown", completed: [] });
+  expect(requiresSetupReview(failure)).toBe(true);
+  expect(project).toHaveBeenCalledTimes(1);
 });

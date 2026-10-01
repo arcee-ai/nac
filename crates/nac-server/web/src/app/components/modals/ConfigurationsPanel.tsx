@@ -534,7 +534,10 @@ export function ConfigurationsPanel({
           : savedRecord
             ? (savedRecord.light_model ?? null)
             : undefined,
-      config_id: initial && picked === null ? initial.config_id : (savedRecord?.config_id ?? null),
+      config_id:
+        initial && picked === null
+          ? (initial.config_id ?? savedRecord?.config_id ?? null)
+          : (savedRecord?.config_id ?? null),
     };
   }, [
     source.kind,

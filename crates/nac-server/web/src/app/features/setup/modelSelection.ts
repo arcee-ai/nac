@@ -42,7 +42,11 @@ function sameOptionalLight(
   return sameLightModel(left ?? null, right ?? null);
 }
 
-/** Compare the complete value, never object insertion order. Undefined still means inheritance. */
+/**
+ * Compare effective values, never insertion order. Undefined means inheritance.
+ * Callers store selection metadata separately; a discovered preset ID must not
+ * reseed local edits when the effective tuple is unchanged.
+ */
 export function sameModelSelection(
   left: LaunchModelSelection | null,
   right: LaunchModelSelection | null,
@@ -59,8 +63,7 @@ export function sameModelSelection(
       left.reasoning_effort === right.reasoning_effort &&
       sameHeaders(left.extra_headers, right.extra_headers) &&
       left.orchestrator_compaction_threshold === right.orchestrator_compaction_threshold &&
-      sameOptionalLight(left.light_model, right.light_model) &&
-      (left.config_id ?? null) === (right.config_id ?? null)
+      sameOptionalLight(left.light_model, right.light_model)
     );
   }
   if (left.kind !== "save" || right.kind !== "save") return false;

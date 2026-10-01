@@ -15,9 +15,26 @@ import type {
   ManagedSessionSummary,
   ModelCatalog,
   ModelConfigurationRecord,
+  ProjectRecord,
   RawSessionConfig,
   SessionSnapshotResponse,
 } from "@/app/types/api";
+
+const openingPreset = {
+  config_id: "matching-preset",
+  name: "Opening preset",
+  backend: "openai-responses" as const,
+  model: "gpt-5.2",
+  base_url: "https://api.openai.com/v1",
+  allow_insecure_http: false,
+  api_key_env: "OPENAI_API_KEY",
+  reasoning_effort: "high" as const,
+  extra_headers: {},
+  orchestrator_compaction_threshold: 111,
+  light_model: null,
+  created_at: "2026-09-30T00:00:00Z",
+  updated_at: "2026-09-30T00:00:00Z",
+} satisfies ModelConfigurationRecord;
 
 beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({
@@ -159,21 +176,7 @@ function renderReadySettings({
 it.each([false, true])(
   "retains edited headers/context across picker presentations (matching preset: %s)",
   async (matchingPreset) => {
-    const record = {
-      config_id: "matching-preset",
-      name: "Opening preset",
-      backend: "openai-responses" as const,
-      model: "gpt-5.2",
-      base_url: "https://api.openai.com/v1",
-      allow_insecure_http: false,
-      api_key_env: "OPENAI_API_KEY",
-      reasoning_effort: "high" as const,
-      extra_headers: {},
-      orchestrator_compaction_threshold: 111,
-      light_model: null,
-      created_at: "2026-09-30T00:00:00Z",
-      updated_at: "2026-09-30T00:00:00Z",
-    } satisfies ModelConfigurationRecord;
+    const record = openingPreset;
     vi.spyOn(api, "listModelConfigs").mockResolvedValue({
       configurations: matchingPreset ? [record] : [],
     });
@@ -240,3 +243,39 @@ it.each([false, true])(
     }
   },
 );
+
+it("can explicitly set an automatically matched full preset as the project default", async () => {
+  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [openingPreset] });
+  vi.spyOn(api, "resolveModelConfig").mockResolvedValue({
+    ...openingPreset,
+    models: [{ id: openingPreset.model, display_name: "GPT-5.2" }],
+    models_error: null,
+  });
+  vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
+  const updateProject = vi.spyOn(api, "updateProject").mockResolvedValue({
+    project_id: "project-1",
+    default_model_config_id: "matching-preset",
+  } as ProjectRecord);
+  const { client, view } = renderReadySettings({ orchestration: false, projectId: "project-1" });
+  try {
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Advanced presets and provider setup" }));
+    await screen.findByText("Opening preset");
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: /Use selected preset as the project default/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(updateProject).toHaveBeenCalledExactlyOnceWith("project-1", {
+        default_model_config_id: "matching-preset",
+      }),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});

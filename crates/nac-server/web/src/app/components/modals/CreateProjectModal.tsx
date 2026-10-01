@@ -441,7 +441,15 @@ function CreateProjectForm({
       } else {
         const message = setupFailureMessage(createError);
         if (requiresSetupReview(createError)) setReviewError(message);
-        setError({ field: "config", message });
+        setError({
+          field:
+            createError instanceof SetupFailure &&
+            createError.phase === "project" &&
+            createError.kind === "rejected"
+              ? "cwd"
+              : "config",
+          message,
+        });
       }
     }
   };

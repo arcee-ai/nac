@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { CreateProjectModal } from "@/app/components/modals/CreateProjectModal";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+import { api, ApiError } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries/keys";
 import type {
   LightModelSettings,
@@ -69,6 +69,13 @@ vi.mock("@/app/components/modals/ConfigurationsPanel", () => {
     ),
   };
 });
+
+vi.mock("@/app/components/modals/PathPickerModal", () => ({
+  PathPickerModal: ({ open, onSelect }: { open: boolean; onSelect: (path: string) => void }) =>
+    open ? (
+      <button onClick={() => onSelect("/workspace/new")}>Choose different folder</button>
+    ) : null,
+}));
 
 vi.mock("@/app/components/modals/LightModelSection", async () => {
   const React = await import("react");
@@ -198,6 +205,39 @@ it("default project creation requests direct without clearing a hidden dual pres
         light_model: expect.objectContaining({ model: "gpt-5-mini" }),
       }),
     );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("allows a new folder after a known duplicate-project rejection without replaying admission", async () => {
+  vi.mocked(api.createProject).mockRejectedValueOnce(
+    new ApiError(409, "POST", "/projects", "A project already uses this folder", "duplicate"),
+  );
+  const { client, view } = renderModal(false);
+  try {
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await screen.findByText(/A project already uses this folder/);
+    expect(api.createProject).toHaveBeenCalledTimes(1);
+    expect(api.createSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("/workspace"));
+    fireEvent.click(screen.getByRole("button", { name: "Choose different folder" }));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Create Project" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledTimes(1));
+    expect(api.createProject).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.createProject).mock.calls[1]?.[0]).toMatchObject({
+      cwd: "/workspace/new",
+    });
   } finally {
     view.unmount();
     client.clear();

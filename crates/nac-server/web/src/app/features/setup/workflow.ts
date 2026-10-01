@@ -27,7 +27,7 @@ export function requiresSetupReview(error: unknown): error is SetupFailure {
 
 export interface SetupPorts {
   current: () => boolean;
-  classify: (cause: unknown) => FailureKind;
+  classify: (cause: unknown, phase: SetupPhase) => FailureKind;
   /** Reconcile the origin even if the initiating presentation has gone away. */
   reconcile: (phase: SetupPhase) => Promise<unknown>;
 }
@@ -55,7 +55,7 @@ export function setupSequence<T>(
         const result = yield* Effect.tryPromise({
           try: operation,
           catch: (cause) => {
-            const kind = ports.classify(cause);
+            const kind = ports.classify(cause, phase);
             return new SetupFailure({
               phase,
               kind: phase === "read" && kind === "unknown" ? "rejected" : kind,

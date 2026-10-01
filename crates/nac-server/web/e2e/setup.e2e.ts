@@ -297,6 +297,31 @@ test("explicitly updates a saved project default while existing children keep cr
     projects.projects.find((project: { project_id: string }) => project.project_id === projectId)
       .default_model_config_id,
   ).toBe(preset.config_id);
+  // Opening the exact saved tuple auto-selects its preset. The explicit default
+  // action must retain that identity without requiring a redundant re-selection.
+  await page.getByRole("button", { name: "Session settings", exact: true }).click();
+  await settings
+    .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
+    .click();
+  await expect(settings.getByText("Explicit future default", { exact: true })).toBeVisible();
+  await settings
+    .getByRole("checkbox", { name: /Use selected preset as the project default/ })
+    .check();
+  const repeatedDefault = page.waitForResponse(
+    (response) =>
+      response.url() === `${harness.baseUrl}/projects/${projectId}` &&
+      response.request().method() === "PATCH",
+  );
+  await settings.getByRole("button", { name: "Save", exact: true }).click();
+  const defaultResponse = await repeatedDefault;
+  expect(defaultResponse.ok()).toBe(true);
+  expect(defaultResponse.request().postDataJSON()).toMatchObject({
+    default_model_config_id: preset.config_id,
+  });
+  await expect(settings).toHaveCount(0);
+  expect(
+    await (await request.get(`${harness.baseUrl}/sessions/${parentId}/config`)).json(),
+  ).toEqual(current);
   expect(
     await (await request.get(`${harness.baseUrl}/sessions/${existingChild}/config`)).json(),
   ).toEqual(existingBefore);

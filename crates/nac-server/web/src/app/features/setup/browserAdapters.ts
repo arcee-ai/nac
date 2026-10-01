@@ -15,11 +15,15 @@ export class ConfigurationChanged extends Error {
   }
 }
 
-export function classifySetupFailure(cause: unknown): FailureKind {
+export function classifySetupFailure(cause: unknown, phase?: SetupPhase): FailureKind {
   if (cause instanceof SetupValidation) return "rejected";
   if (cause instanceof ConfigurationChanged) return "conflict";
-  if (cause instanceof ApiError)
+  if (cause instanceof ApiError) {
+    // Project creation has no revision update: a duplicate folder is a known
+    // rejection. An edited folder is a new intent, never an automatic retry.
+    if (phase === "project" && cause.status === 409) return "rejected";
     return cause.status === 409 ? "conflict" : cause.status >= 500 ? "unknown" : "rejected";
+  }
   return "unknown";
 }
 

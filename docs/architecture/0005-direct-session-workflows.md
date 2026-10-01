@@ -132,6 +132,18 @@ write; it is a preflight, not an atomic browser concurrency guarantee. The
 existing server lifecycle/resource leases, inactive-primary check and durable
 revision-checked mutation remain authoritative. No wire contract changed.
 
+The adapter classifies failures with their workflow phase. A definite project-
+creation duplicate-folder rejection permits an explicit edited-folder attempt;
+it does not authorize automatic replay. Unknown outcomes and any already-saved
+preset/project still require canonical review. Revision conflicts in settings
+and project-default updates retain their existing fences.
+
+An automatic complete-preset match retains its known saved ID for the explicit
+project-default action. Effective-value comparison treats that ID as source
+metadata, so discovering it does not reseed local header/context edits. The form
+still stores the full selection and requires a known saved ID before changing
+the project default; no matching or presentation transition writes a default.
+
 The synchronous scoped lifetime follows the ALL-135 Scope acquisition/disposal
 pattern. Closing, changing identity or reopening a form aborts its reads and
 suppresses local navigation/toasts, while already-dispatched commands settle
