@@ -25,7 +25,7 @@ import { findProject, primarySessions } from "@/app/lib/projects";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useProjects, useSessions } from "@/app/services/queries";
+import { useProjects, useVisibleSessions } from "@/app/services/queries";
 
 /**
  * The trail is project-first: `All Projects > [identicon] Project ⌄ ⊕`.
@@ -43,7 +43,7 @@ export function Breadcrumbs() {
   const isMobile = useIsMobile();
   const sessionTitle = useSessionTitle();
   const { data: projectList } = useProjects();
-  const { data: sessions = [] } = useSessions();
+  const { data: sessions = [] } = useVisibleSessions();
   const [open, setOpen] = useState(false);
 
   const currentEntry = sessionId

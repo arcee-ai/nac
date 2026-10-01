@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 
+import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
+import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -7,7 +9,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { CreateProjectModal } from "@/app/components/modals/CreateProjectModal";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+import { api, ApiError } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries/keys";
 import type {
   LightModelSettings,
@@ -68,6 +70,39 @@ vi.mock("@/app/components/modals/ConfigurationsPanel", () => {
   };
 });
 
+vi.mock("@/app/components/modals/PrimaryModelSection", () => ({
+  PrimaryModelSection: ({
+    onChange,
+  }: {
+    onChange: (selection: Record<string, unknown>) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onChange({
+          kind: "resolved",
+          backend: "openai-responses",
+          model: "gpt-5.3",
+          base_url: "https://api.openai.com/v1",
+          allow_insecure_http: false,
+          api_key_env: "OPENAI_API_KEY",
+          reasoning_effort: "high",
+          extra_headers: {},
+        })
+      }
+    >
+      Change primary model
+    </button>
+  ),
+}));
+
+vi.mock("@/app/components/modals/PathPickerModal", () => ({
+  PathPickerModal: ({ open, onSelect }: { open: boolean; onSelect: (path: string) => void }) =>
+    open ? (
+      <button onClick={() => onSelect("/workspace/new")}>Choose different folder</button>
+    ) : null,
+}));
+
 vi.mock("@/app/components/modals/LightModelSection", async () => {
   const React = await import("react");
   return {
@@ -123,16 +158,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderModal() {
+function renderModal(orchestration = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(queryKeys.storeInfo, { root_cwd: "/workspace" } as StoreInfo);
   const view = render(
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MemoryRouter>
-          <CreateProjectModal open onClose={vi.fn()} />
-        </MemoryRouter>
-      </ToastProvider>
+      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+        <ToastProvider>
+          <MemoryRouter>
+            <CreateProjectModal open onClose={vi.fn()} />
+          </MemoryRouter>
+        </ToastProvider>
+      </UiPolicyContext.Provider>
     </QueryClientProvider>,
   );
   return { client, view };
@@ -174,3 +211,87 @@ it("sends explicit null when the first chat changes a saved Dual preset to Singl
     client.clear();
   }
 });
+
+it("default project creation requests direct without clearing a hidden dual preset", async () => {
+  const { client, view } = renderModal(false);
+  try {
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Select dual preset" }));
+    expect(screen.queryByRole("button", { name: "Use one model" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() => expect(api.createSession).toHaveBeenCalled());
+    expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        behavior: "direct",
+        first_chat: true,
+        first_chat_same_behavior: true,
+        light_model: expect.objectContaining({ model: "gpt-5-mini" }),
+      }),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("allows a new folder after a known duplicate-project rejection without replaying admission", async () => {
+  vi.mocked(api.createProject).mockRejectedValueOnce(
+    new ApiError(409, "POST", "/projects", "A project already uses this folder", "duplicate"),
+  );
+  const { client, view } = renderModal(false);
+  try {
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await screen.findByText(/A project already uses this folder/);
+    expect(api.createProject).toHaveBeenCalledTimes(1);
+    expect(api.createSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("/workspace"));
+    fireEvent.click(screen.getByRole("button", { name: "Choose different folder" }));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Create Project" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledTimes(1));
+    expect(api.createProject).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.createProject).mock.calls[1]?.[0]).toMatchObject({
+      cwd: "/workspace/new",
+    });
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it.each(["Select preset threshold 222", "Select preset with compaction disabled"])(
+  "preserves an edited context limit through primary changes from %s",
+  async (preset) => {
+    const { client, view } = renderModal();
+    try {
+      fireEvent.click(await screen.findByRole("button", { name: preset }));
+      const limit = document.querySelector<HTMLInputElement>('input[inputmode="numeric"]')!;
+      fireEvent.change(limit, { target: { value: "777" } });
+      fireEvent.click(screen.getByRole("button", { name: "Back to unified models" }));
+      fireEvent.click(screen.getByRole("button", { name: "Change primary model" }));
+      expect(document.querySelector<HTMLInputElement>('input[inputmode="numeric"]')!.value).toBe(
+        "777",
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+      await waitFor(() => expect(api.createSession).toHaveBeenCalled());
+      expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).toMatchObject({
+        model: "gpt-5.3",
+        orchestrator_compaction_threshold: 777,
+      });
+    } finally {
+      view.unmount();
+      client.clear();
+    }
+  },
+);

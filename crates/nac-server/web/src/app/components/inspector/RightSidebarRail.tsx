@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import type { ReactNode } from "react";
 
 import { Button, ButtonContent, ButtonVariant, Icon, IconName, Tooltip } from "@/app/atoms";
@@ -30,13 +31,16 @@ export function RightSidebarRail({
   onOpen: () => void;
   onSelect: (panel: SessionPanel) => void;
 }) {
+  const policy = useUiPolicy();
   const subagents = panels.includes("delegated");
   const children = useTraditionalChildren(sessionId, subagents);
   const orchestrators = useManagedOrchestrators(
     sessionId,
     subagents && behavior === "direct-with-orchestrator",
   );
-  const subagentCount = (children.data?.length ?? 0) + (orchestrators.data?.length ?? 0);
+  const subagentCount =
+    (children.data?.length ?? 0) +
+    (policy.orchestrationEnabled ? (orchestrators.data?.length ?? 0) : 0);
   const worksetCount = snapshot?.worksets?.items.length ?? 0;
 
   return (

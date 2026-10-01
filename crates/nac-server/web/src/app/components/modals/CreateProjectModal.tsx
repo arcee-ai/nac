@@ -1,4 +1,6 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -22,10 +24,7 @@ import {
   TextArea,
 } from "@/app/atoms";
 import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
-import {
-  ConfigurationsPanel,
-  type LaunchModelSelection,
-} from "@/app/components/modals/ConfigurationsPanel";
+import { type LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
 import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
@@ -36,18 +35,22 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { loadLastLight, storeLastLight } from "@/app/lib/lastLight";
-import {
-  inheritPrimaryCredential,
-  withoutInheritedCredential,
-  CLEAR_EFFORT,
-  csv,
-  nullable,
-  serializeExtraHeaders,
-} from "@/app/lib/modelConfig";
-import { humanErrorText, toRunError } from "@/app/lib/providerError";
+import { withoutInheritedCredential, nullable, serializeExtraHeaders } from "@/app/lib/modelConfig";
+import { toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { ApiError } from "@/app/services/api";
+import { ModelSetupSection } from "@/app/features/setup/ModelSetupSection";
+import {
+  createProjectChat,
+  SetupFailure,
+  requiresSetupReview,
+} from "@/app/features/setup/workflow";
+import { useSetupAction } from "@/app/features/setup/useSetupAction";
+import {
+  classifySetupFailure,
+  setupFailureMessage,
+  setupReconciliation,
+} from "@/app/features/setup/browserAdapters";
 import {
   useCreateModelConfig,
   useCreateProject,
@@ -57,12 +60,10 @@ import {
   useSandboxAvailability,
   useStoreInfo,
 } from "@/app/services/queries";
-import type {
-  BackendKind,
-  CreateSessionRequest,
-  SessionBehavior,
-  SshTarget,
-} from "@/app/types/api";
+import type { SessionBehavior, SshTarget } from "@/app/types/api";
+
+import { savedModelSelection, sameModelSelection } from "@/app/features/setup/modelSelection";
+import { projectChatRequest, type SandboxOptions } from "@/app/features/setup/projectLaunch";
 
 type Mode = "local" | "ssh" | "sandbox";
 
@@ -93,16 +94,7 @@ const ADVANCED_REASONING: SelectItem[] = REASONING_OPTIONS.map((item) =>
 // the path up with the neighbouring input has to be inline too.
 const CWD_BUTTON_PADDING = { paddingInline: "8px" };
 
-interface SandboxState {
-  noMount: boolean;
-  image: string;
-  gpu: string;
-  workdir: string;
-  shm: string;
-  mounts: string;
-}
-
-const EMPTY_SANDBOX: SandboxState = {
+const EMPTY_SANDBOX: SandboxOptions = {
   noMount: false,
   image: "",
   gpu: "",
@@ -150,24 +142,30 @@ function CreateProjectForm({
 }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const action = useSetupAction(open);
+  const client = useQueryClient();
   const createProject = useCreateProject();
   const createSession = useCreateSession();
   const createModelConfig = useCreateModelConfig();
 
   const [mode, setMode] = useState<Mode>("local");
-  const [behavior, setBehavior] = useState<SessionBehavior>("orchestrator");
+  const policy = useUiPolicy();
+  const [behavior, setBehavior] = useState<SessionBehavior>(
+    policy.orchestrationEnabled ? "orchestrator" : "direct",
+  );
   const [cwd, setCwd] = useState(defaultCwd);
   const [name, setName] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [compaction, setCompaction] = useState("");
   const [extraHeaders, setExtraHeaders] = useState("");
-  const [sandbox, setSandbox] = useState<SandboxState>(EMPTY_SANDBOX);
+  const [sandbox, setSandbox] = useState<SandboxOptions>(EMPTY_SANDBOX);
   const [headersOpen, setHeadersOpen] = useState(false);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [light, setLight] = useState<LightSelection>({ mode: "single", light: null });
   const [error, setError] = useState<FormError | null>(null);
+  const [reviewError, setReviewError] = useState("");
   // The host this form has actually reached. Everything remote — the working
   // directory above all — is meaningless until one connection has answered, so
   // the rest of the form waits for it.
@@ -196,7 +194,7 @@ function CreateProjectForm({
   const connected = isSsh ? connection : null;
   // A local or sandboxed session has nothing to connect to, so it is ready at once.
   const ready = !isSsh || connected !== null;
-  const busy = createProject.isPending || createSession.isPending || createModelConfig.isPending;
+  const busy = action.busy;
 
   // A sandboxed launch can spend minutes pulling the image on first run;
   // the polled phase plus an elapsed timer is the difference between
@@ -225,32 +223,45 @@ function CreateProjectForm({
       setError(null);
       setter(value);
     };
-  const setSb = (patch: Partial<SandboxState>) => {
+  const setSb = (patch: Partial<SandboxOptions>) => {
     setError(null);
     setSandbox((current) => ({ ...current, ...patch }));
   };
 
   // Stable, so the panel does not re-emit its selection on every render.
-  const onSelection = useCallback((next: LaunchModelSelection | null) => {
-    setSelection(next);
-    if (next?.kind === "resolved" && next.orchestrator_compaction_threshold !== undefined) {
-      const threshold = next.orchestrator_compaction_threshold;
-      const value = threshold == null ? "" : String(threshold);
-      compactionPresetRef.current = true;
-      compactionAutoRef.current = false;
-      compactionRef.current = value;
-      setCompaction(value);
-    } else {
-      const leavingPreset = compactionPresetRef.current;
-      compactionPresetRef.current = false;
-      if (leavingPreset) {
-        compactionAutoRef.current = true;
-        compactionRef.current = "";
-        setCompaction("");
+  const projectedSelection = useRef<LaunchModelSelection | null>(null);
+  const onSelection = useCallback(
+    (next: LaunchModelSelection | null, source: "primary" | "preset") => {
+      setSelection(next);
+      if (!next || sameModelSelection(projectedSelection.current, next)) return;
+      const previous = projectedSelection.current;
+      projectedSelection.current = next;
+      // Primary identity changes preserve the context draft; explicit presets
+      // still project their complete numeric or disabled compaction policy.
+      if (source === "primary" && previous?.kind === "resolved") {
+        setError((current) => (current?.field === "config" ? null : current));
+        return;
       }
-    }
-    setError((current) => (current?.field === "config" ? null : current));
-  }, []);
+      if (next?.kind === "resolved" && next.orchestrator_compaction_threshold !== undefined) {
+        const threshold = next.orchestrator_compaction_threshold;
+        const value = threshold == null ? "" : String(threshold);
+        compactionPresetRef.current = true;
+        compactionAutoRef.current = false;
+        compactionRef.current = value;
+        setCompaction(value);
+      } else {
+        const leavingPreset = compactionPresetRef.current;
+        compactionPresetRef.current = false;
+        if (leavingPreset) {
+          compactionAutoRef.current = true;
+          compactionRef.current = "";
+          setCompaction("");
+        }
+      }
+      setError((current) => (current?.field === "config" ? null : current));
+    },
+    [],
+  );
 
   const onLight = useCallback((next: LightSelection) => {
     setLight(next);
@@ -321,7 +332,7 @@ function CreateProjectForm({
   };
 
   const submit = async () => {
-    if (busy) return;
+    if (action.needsReview || busy) return;
     if (isSsh && !connected) {
       setError({
         field: "ssh",
@@ -340,7 +351,7 @@ function CreateProjectForm({
       });
       return;
     }
-    if (light.mode === "dual" && !light.light) {
+    if (policy.orchestrationEnabled && light.mode === "dual" && !light.light) {
       setError({
         field: "config",
         message: "Pick the light model before creating a project.",
@@ -356,133 +367,100 @@ function CreateProjectForm({
       return;
     }
 
-    let backend: BackendKind;
-    let model: string;
-    let baseUrl: string;
-    let allowInsecureHttp: boolean;
-    let apiKeyEnv: string | null;
-    let configuredEffort: string | null;
-    // Only a saved setup can become the project's default; a one-off catalog
-    // or file pick has no id to point at, so it stays on the first chat alone.
-    let defaultModelConfigId: string | null = null;
+    let createdProjectId: string | null = null;
     try {
-      if (selection.kind === "save") {
-        const request =
-          light.mode === "dual" && light.light
-            ? { ...selection.request, light_model: light.light }
-            : selection.request;
-        const record = await createModelConfig.mutateAsync(request);
-        // SAFETY: the server echoes the BackendKind wire value it stored.
-        backend = record.backend as BackendKind;
-        model = record.model;
-        baseUrl = record.base_url;
-        allowInsecureHttp = record.allow_insecure_http ?? false;
-        apiKeyEnv = record.api_key_env ?? null;
-        configuredEffort = record.reasoning_effort ?? null;
-        defaultModelConfigId = record.config_id;
-      } else {
-        backend = selection.backend;
-        model = selection.model;
-        baseUrl = selection.base_url;
-        allowInsecureHttp = selection.allow_insecure_http;
-        apiKeyEnv = selection.api_key_env;
-        configuredEffort = selection.reasoning_effort;
-        headers = headers ?? selection.extra_headers ?? undefined;
-        if (selection.kind === "resolved") defaultModelConfigId = selection.config_id ?? null;
-      }
-    } catch (saveError) {
-      setError({
-        field: "config",
-        message: `The configuration could not be saved: ${humanErrorText(toRunError(saveError))}`,
-      });
-      return;
-    }
-
-    let projectId: string;
-    try {
-      const project = await createProject.mutateAsync({
-        name: nullable(name),
-        cwd,
-        ssh_host: connected?.ssh_host ?? null,
-        ssh_port: connected?.ssh_port ?? null,
-        ssh_identity_file: connected?.ssh_identity_file ?? null,
-        default_model_config_id: defaultModelConfigId,
-      });
-      projectId = project.project_id;
-    } catch (projectError) {
-      const duplicate = projectError instanceof ApiError && projectError.status === 409;
-      setError({
-        field: "cwd",
-        message: duplicate
-          ? "A project already uses this folder. Open it from the project list instead."
-          : humanErrorText(toRunError(projectError)),
-      });
-      return;
-    }
-
-    const launchLight =
-      light.mode === "dual" && light.light
-        ? inheritPrimaryCredential(light.light, backend, apiKeyEnv)
-        : null;
-
-    // The location is the project's, so the request must not restate it: the
-    // server rejects a project-selected create that also carries a cwd.
-    const body: CreateSessionRequest = {
-      behavior,
-      first_chat: true,
-      project_id: projectId,
-      model,
-      base_url: baseUrl,
-      allow_insecure_http: allowInsecureHttp,
-      backend,
-      api_key_env: apiKeyEnv,
-      reasoning_effort: reasoning === CLEAR_EFFORT ? null : reasoning || configuredEffort || null,
-    };
-    if (headers !== undefined) body.extra_headers = headers;
-    // Explicit Single must override a saved project default that is Dual.
-    body.light_model = launchLight;
-
-    if (
-      compactionPresetRef.current &&
-      selection.kind === "resolved" &&
-      selection.orchestrator_compaction_threshold !== undefined
-    ) {
-      body.orchestrator_compaction_threshold = selection.orchestrator_compaction_threshold;
-    } else {
-      const threshold = nullable(compaction);
-      if (threshold !== null) body.orchestrator_compaction_threshold = Number(threshold);
-    }
-    if (!connected) {
-      const activityKey = mode === "sandbox" ? crypto.randomUUID() : null;
-      setLaunchKey(activityKey);
-      body.sandbox = {
-        enabled: mode === "sandbox",
-        no_mount_cwd: sandbox.noMount,
-        image: nullable(sandbox.image),
-        gpus: csv(sandbox.gpu),
-        workdir: nullable(sandbox.workdir),
-        shm_size: nullable(sandbox.shm),
-        mounts: csv(sandbox.mounts),
-        mounts_ro: [],
-        activity_key: activityKey,
-      };
-    }
-
-    try {
-      const snapshot = await createSession.mutateAsync(body);
-      const newId = snapshot.metadata.session_id;
+      const result = await action.run((current) =>
+        createProjectChat({
+          current: current.current,
+          classify: classifySetupFailure,
+          reconcile: setupReconciliation(client),
+          persistsModel: selection.kind === "save",
+          model: async () => {
+            if (selection.kind === "save") {
+              const request =
+                light.mode === "dual" && light.light
+                  ? { ...selection.request, light_model: light.light }
+                  : selection.request;
+              const record = await createModelConfig.mutateAsync(request);
+              const selected = savedModelSelection(record);
+              if (current.current()) setSelection(selected);
+              return selected;
+            }
+            return selection;
+          },
+          project: async (selected) => {
+            const project = await createProject.mutateAsync({
+              name: nullable(name),
+              cwd,
+              ssh_host: connected?.ssh_host ?? null,
+              ssh_port: connected?.ssh_port ?? null,
+              ssh_identity_file: connected?.ssh_identity_file ?? null,
+              default_model_config_id: selected.config_id ?? null,
+            });
+            createdProjectId = project.project_id;
+            return project;
+          },
+          chat: async (selected, project) => {
+            const activityKey = mode === "sandbox" ? crypto.randomUUID() : null;
+            if (current.current()) setLaunchKey(activityKey);
+            const body = projectChatRequest({
+              selected,
+              projectId: project.project_id,
+              policy,
+              behavior,
+              reasoning,
+              headers,
+              compaction,
+              presetCompaction: compactionPresetRef.current,
+              savedLight,
+              light,
+              execution: connected ? "ssh" : mode,
+              sandbox,
+              activityKey,
+            });
+            const snapshot = await createSession.mutateAsync(body);
+            return {
+              snapshot,
+              launchLight: body.light_model ?? null,
+              apiKeyEnv: selected.api_key_env,
+            };
+          },
+        }),
+      );
+      if (!result) return;
+      const { snapshot, launchLight, apiKeyEnv } = result.chat;
       storeLastLight(launchLight && withoutInheritedCredential(launchLight, apiKeyEnv));
       toast.success("Project created");
-      navigate(newId ? routes.session(newId) : routes.project(projectId));
+      navigate(
+        snapshot.metadata.session_id
+          ? routes.session(snapshot.metadata.session_id)
+          : routes.project(result.project.project_id),
+      );
       onClose();
     } catch (createError) {
-      // The project itself is saved, so the user is sent to it rather than
-      // being left with an error over a form whose work is already done.
-      toast.error(
-        `Project created, but the first chat failed: ${humanErrorText(toRunError(createError), backend)}`,
-      );
-      navigate(routes.project(projectId));
-      onClose();
+      if (
+        createdProjectId &&
+        createError instanceof SetupFailure &&
+        createError.kind !== "unknown"
+      ) {
+        toast.error(
+          `Project created, but the first chat failed: ${setupFailureMessage(createError)}`,
+        );
+        navigate(routes.project(createdProjectId));
+        onClose();
+      } else {
+        const message = setupFailureMessage(createError);
+        if (requiresSetupReview(createError)) setReviewError(message);
+        setError({
+          field:
+            createError instanceof SetupFailure &&
+            createError.phase === "project" &&
+            createError.kind === "rejected"
+              ? "cwd"
+              : "config",
+          message,
+        });
+      }
     }
   };
 
@@ -523,7 +501,7 @@ function CreateProjectForm({
             content={ButtonContent.Text}
             onClick={submit}
             loading={busy}
-            disabled={Boolean(error) || !selection || !ready}
+            disabled={busy || action.needsReview || Boolean(error) || !selection || !ready}
           >
             Create Project
           </StickyButton>
@@ -534,7 +512,7 @@ function CreateProjectForm({
             content={ButtonContent.Text}
             onClick={submit}
             loading={busy}
-            disabled={Boolean(error) || !selection || !ready}
+            disabled={busy || action.needsReview || Boolean(error) || !selection || !ready}
           >
             Create Project
           </Button>
@@ -542,7 +520,9 @@ function CreateProjectForm({
       }
     >
       <div className="flex flex-col gap-8 md:gap-6 [&>*]:shrink-0">
-        <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+        {policy.orchestrationEnabled ? (
+          <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+        ) : null}
 
         <div className="flex flex-col gap-1">
           <FieldLabel label="Environment" hint="Where NAC runs commands and accesses files." />
@@ -639,18 +619,22 @@ function CreateProjectForm({
         ) : null}
 
         {ready ? (
-          <ConfigurationsPanel
+          <ModelSetupSection
+            simple={!policy.orchestrationEnabled}
+            inheritSavedDefault
             invalid={invalid("config")}
-            errorText={invalid("config") ? error?.message : undefined}
+            errorText={reviewError || (invalid("config") ? error?.message : undefined)}
             onChange={onSelection}
           >
             <div className="flex flex-col gap-2">
-              <LightModelSection
-                key={savedLightKey}
-                initial={savedLight}
-                behavior={behavior}
-                onChange={onLight}
-              />
+              {policy.orchestrationEnabled ? (
+                <LightModelSection
+                  key={savedLightKey}
+                  initial={savedLight}
+                  behavior={behavior}
+                  onChange={onLight}
+                />
+              ) : null}
               <Separator />
               <ConfigRow
                 label="Reasoning Effort"
@@ -806,7 +790,7 @@ function CreateProjectForm({
                 </>
               ) : null}
             </div>
-          </ConfigurationsPanel>
+          </ModelSetupSection>
         ) : null}
 
         {sandboxLaunching ? (

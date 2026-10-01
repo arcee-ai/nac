@@ -1663,6 +1663,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
         .create_session(CreateSessionRequest {
             behavior: sessions::SessionBehavior::Orchestrator,
             first_chat: false,
+            first_chat_same_behavior: false,
             project_id: None,
             cwd: None,
             model: RequestField::Omitted,
@@ -1792,6 +1793,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
         .create_session(CreateSessionRequest {
             behavior: sessions::SessionBehavior::Orchestrator,
             first_chat: false,
+            first_chat_same_behavior: false,
             project_id: None,
             cwd: None,
             model: RequestField::Value("test-model".to_string()),

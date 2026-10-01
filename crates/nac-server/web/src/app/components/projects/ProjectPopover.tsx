@@ -21,7 +21,7 @@ import { projectListItems, type ProjectListItem } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
-import { useProjects, useSessions } from "@/app/services/queries";
+import { useProjects, useVisibleSessions } from "@/app/services/queries";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 
 /** One control of a row, at the size the popover's rows are built to. */
@@ -87,7 +87,7 @@ export function ProjectPopover({
   const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
   const { data: projectList } = useProjects();
-  const { data: sessions = [] } = useSessions();
+  const { data: sessions = [] } = useVisibleSessions();
 
   const items = useMemo(
     () => projectListItems(projectList?.projects ?? [], sessions),

@@ -136,3 +136,20 @@ describe("project redirect", () => {
     await waitFor(() => expect(fakes.newChat).toHaveBeenCalledWith("project-1", true));
   });
 });
+
+it("opens normal new-chat for a legacy-only project instead of first-chat redirecting to hidden history", async () => {
+  fakes.sessions.mockReturnValue({
+    data: [
+      {
+        summary: { project_id: "project-1", session_id: "legacy", behavior: "orchestrator" },
+        lineage: null,
+      },
+    ],
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    isSuccess: true,
+  });
+  mount();
+  await waitFor(() => expect(fakes.newChat).toHaveBeenCalledWith("project-1", false));
+});

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Button,
@@ -118,10 +119,12 @@ export function DelegatedWorkView({
   sessionId: string;
   behavior: SessionBehavior;
 }) {
-  const supportsOrchestrators = behavior === "direct-with-orchestrator";
+  const supportsOrchestrators =
+    useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
   const children = useTraditionalChildren(sessionId, true);
   const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
-  const launch = useSubagentLaunch();
+  const storedLaunch = useSubagentLaunch();
+  const launch = !supportsOrchestrators && storedLaunch === "orchestrator" ? null : storedLaunch;
   const launchRequest = useSubagentLaunchRequest();
   const now = useNow(60_000);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -144,7 +147,13 @@ export function DelegatedWorkView({
   // Keep a just-launched key even before the children list refetches. Falling
   // back to `newestKey` the moment the id is missing would snap back to the
   // previous row and stay there once the list catches up.
-  const resolvedKey = launch ? null : (selectedKey ?? newestKey);
+  const allowedSelectedKey =
+    !supportsOrchestrators && selectedKey?.startsWith("orchestrator:") ? null : selectedKey;
+  const resolvedKey = launch ? null : (allowedSelectedKey ?? newestKey);
+  useEffect(() => {
+    if (!supportsOrchestrators && storedLaunch === "orchestrator") clearSubagentLaunch();
+  }, [supportsOrchestrators, storedLaunch]);
+  if (!supportsOrchestrators && selectedKey?.startsWith("orchestrator:")) setSelectedKey(null);
   if (!launch && selectedKey == null && newestKey != null) setSelectedKey(newestKey);
 
   const selected = rows.find((row) => row.key === resolvedKey) ?? null;

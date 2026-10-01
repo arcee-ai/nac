@@ -61,3 +61,29 @@ it("emits the insecure HTTP acknowledgement only when it changes", () => {
   };
   expect(buildSettingsPatch(values, initial)).toEqual({ allow_insecure_http: true });
 });
+
+it("preserves the exact accepted OAuth route and explicit headers instead of resetting the account endpoint", () => {
+  const initial: SettingsInitialValues = {
+    backend: "chatgpt-codex-responses",
+    model: "gpt-5.6-sol",
+    base_url: "https://chatgpt.com/backend-api/codex",
+    allow_insecure_http: false,
+    api_key_env: null,
+    reasoning_effort: "high",
+    extra_headers: { "X-Account": "chosen-account" },
+    orchestrator_compaction_threshold: null,
+  };
+  expect(
+    buildSettingsPatch(
+      {
+        ...initial,
+        reasoning_effort: "high",
+        credential_mode: "none",
+        api_key_env: "",
+        extra_headers: '{"X-Account":"chosen-account"}',
+        orchestrator_compaction_threshold: "",
+      },
+      initial,
+    ),
+  ).toEqual({});
+});

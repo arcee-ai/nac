@@ -1,8 +1,11 @@
 /** @vitest-environment jsdom */
 
+import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
+import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { NewChatModal } from "@/app/components/modals/NewChatModal";
@@ -192,15 +195,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderModal() {
+function renderModal(orchestration = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MemoryRouter>
-          <NewChatModal projectId="project" onClose={vi.fn()} />
-        </MemoryRouter>
-      </ToastProvider>
+      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+        <ToastProvider>
+          <MemoryRouter>
+            <NewChatModal projectId="project" onClose={vi.fn()} />
+          </MemoryRouter>
+        </ToastProvider>
+      </UiPolicyContext.Provider>
     </QueryClientProvider>,
   );
   return { client, view };
@@ -226,12 +231,14 @@ it("shows and preserves the inherited primary and light models for a direct chat
         project_id: "project",
         behavior: "direct",
         first_chat: false,
+        first_chat_same_behavior: false,
         backend: "openai-responses",
         model: "gpt-5.6-sol",
         base_url: "https://api.openai.com/v1",
         allow_insecure_http: false,
         api_key_env: "OPENAI_API_KEY",
         reasoning_effort: "high",
+        orchestrator_compaction_threshold: null,
         extra_headers: { "X-Test": "yes" },
         light_model: light,
       }),
@@ -288,4 +295,77 @@ it("sends an explicitly selected preset's compaction threshold instead of inheri
     view.unmount();
     client.clear();
   }
+});
+
+it("default presentation explicitly creates direct and preserves the hidden inherited light tuple", async () => {
+  const create = vi.spyOn(api, "createSession").mockResolvedValue({
+    metadata: { session_id: "direct-chat" },
+    messages: [],
+    message_created_at: [],
+  } as unknown as SessionSnapshotResponse);
+  const { client, view } = renderModal(false);
+  try {
+    await screen.findByText("Primary model: gpt-5.6-sol");
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByText(/Light model for/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create chat" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          behavior: "direct",
+          light_model: light,
+          first_chat: false,
+          first_chat_same_behavior: true,
+        }),
+      ),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+function DismissibleLauncher() {
+  const [open, setOpen] = useState(true);
+  const location = useLocation();
+  return (
+    <>
+      <button onClick={() => setOpen(false)}>Dismiss launcher</button>
+      <output aria-label="Current route">{location.pathname}</output>
+      <NewChatModal projectId={open ? "project" : null} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
+it("accepts late creation in its cache without navigating a dismissed launcher", async () => {
+  const pending = Promise.withResolvers<SessionSnapshotResponse>();
+  const create = vi.spyOn(api, "createSession").mockReturnValue(pending.promise);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <UiPolicyContext.Provider value={DIRECT_UI_POLICY}>
+        <ToastProvider>
+          <MemoryRouter>
+            <DismissibleLauncher />
+          </MemoryRouter>
+        </ToastProvider>
+      </UiPolicyContext.Provider>
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Primary model: gpt-5.6-sol");
+  fireEvent.click(screen.getByRole("button", { name: "Create chat" }));
+  await waitFor(() => expect(create).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss launcher" }));
+  // SAFETY: creation adapter reads the identity and caches the response opaquely.
+  const snapshot = { metadata: { session_id: "late-chat" } } as unknown as SessionSnapshotResponse;
+  await act(async () => {
+    pending.resolve(snapshot);
+    await pending.promise;
+  });
+  await waitFor(() =>
+    expect(client.getQueryData(["session", "late-chat", "snapshot"])).toEqual(snapshot),
+  );
+  expect(screen.getByLabelText("Current route").textContent).toBe("/");
+  view.unmount();
+  client.clear();
 });

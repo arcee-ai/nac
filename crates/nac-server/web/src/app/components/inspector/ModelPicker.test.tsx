@@ -186,10 +186,13 @@ it("keeps managed mounted credentials server-side while selecting another entitl
         reasoning_effort: null,
       }),
     );
-    expect(discovery).toHaveBeenCalledWith({
-      backend: "arcee-api",
-      base_url: "https://api.arcee.ai/api/v1",
-    });
+    expect(discovery).toHaveBeenCalledWith(
+      {
+        backend: "arcee-api",
+        base_url: "https://api.arcee.ai/api/v1",
+      },
+      expect.any(AbortSignal),
+    );
     expect(discovery.mock.calls[0]?.[0]).not.toHaveProperty("api_key");
     expect(discovery.mock.calls[0]?.[0]).not.toHaveProperty("api_key_env");
   } finally {

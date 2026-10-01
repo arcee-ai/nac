@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import {
   Button,
   ButtonContent,
@@ -90,13 +91,16 @@ export function SessionSideBox({
     behavior == null ? null : sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
   const delegatedTranscript = panelPolicy?.readOnly ?? false;
   const widePanels = panelPolicy?.widePanels ?? [];
+  const policy = useUiPolicy();
   const subagents = widePanels.includes("delegated");
   const children = useTraditionalChildren(sessionId, subagents);
   const orchestrators = useManagedOrchestrators(
     sessionId,
     subagents && behavior === "direct-with-orchestrator",
   );
-  const subagentCount = (children.data?.length ?? 0) + (orchestrators.data?.length ?? 0);
+  const subagentCount =
+    (children.data?.length ?? 0) +
+    (policy.orchestrationEnabled ? (orchestrators.data?.length ?? 0) : 0);
 
   // History belongs to the phone's bottom bar. On a wide screen the header
   // chip switches revisions, so a link to that panel lands on the default one.

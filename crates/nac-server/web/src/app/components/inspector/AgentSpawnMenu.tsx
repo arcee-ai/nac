@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useState } from "react";
 
 import {
@@ -45,13 +46,14 @@ export function AgentSpawnButton({
   onCreateSubagent,
   onCreateOrchestrator,
 }: AgentSpawnButtonProps) {
-  const orchestrator = behavior === "direct-with-orchestrator";
+  const orchestrator =
+    useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
   const children = useTraditionalChildren(sessionId, true);
   const orchestrators = useManagedOrchestrators(sessionId, orchestrator);
   const [open, setOpen] = useState(false);
   const running =
     (children.data ?? []).some((child) => child.status === "running") ||
-    (orchestrators.data ?? []).some((item) => item.status === "running");
+    (orchestrator && (orchestrators.data ?? []).some((item) => item.status === "running"));
 
   return (
     <Popover

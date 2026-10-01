@@ -1,3 +1,5 @@
+import { RunDetails } from "@/app/features/direct-session/RunDetails";
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -27,7 +29,11 @@ import {
   sessionEnvLabel,
   tokenUsage,
 } from "@/app/lib/format";
-import { useModelCatalog, useSessions, useWorkspaceRevisionChanges } from "@/app/services/queries";
+import {
+  useModelCatalog,
+  useVisibleSessions,
+  useWorkspaceRevisionChanges,
+} from "@/app/services/queries";
 import { selectRevision, useSelectedRevision } from "@/app/store/sessionLayoutStore";
 import {
   liftSessionSpend,
@@ -108,7 +114,7 @@ export function TopSingleSessionHeader({
 }) {
   const navigate = useNavigate();
   const sessionTitle = useSessionTitle();
-  const { data: sessions = [] } = useSessions();
+  const { data: sessions = [] } = useVisibleSessions();
   const running = useRunning(sessionId);
   const stopping = useCancelArmed(sessionId);
   const runUsage = useRunUsage();
@@ -156,6 +162,7 @@ export function TopSingleSessionHeader({
   const openParent = () => {
     if (lineage) navigate(routes.session(lineage.parent_session_id, "delegated"));
   };
+  const policy = useUiPolicy();
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
   const title = sessionTitle(entry?.summary);
 
@@ -199,58 +206,70 @@ export function TopSingleSessionHeader({
               <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-1 py-[2px] text-basic-tertiary">
                 {relationship}
               </span>
-            ) : behavior ? (
+            ) : behavior && policy.orchestrationEnabled ? (
               <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-1 py-[2px] text-basic-tertiary">
                 {BEHAVIOR_BADGE[behavior]}
               </span>
             ) : null}
           </div>
-          {metrics.usage || contextTokens ? (
-            <div className="shrink-0 items-center gap-0.5 hidden xl:flex">
-              <Metric
-                iconName={IconName.Timelaps}
-                value={formatTokensCompact(contextTokens)}
-                title={context}
-                className="text-info-primary"
-                labelClassName="label-micro"
-              />
-              {metrics.usage ? (
-                <>
+          {behavior === "direct" || behavior === "direct-with-orchestrator" ? (
+            <RunDetails
+              context={formatTokensCompact(contextTokens)}
+              input={formatTokensCompact(metrics.usage?.input_tokens)}
+              output={formatTokensCompact(metrics.usage?.output_tokens)}
+              cost={formatCostMicros(metrics.usage?.cost?.total)}
+              elapsed={formatClock(elapsedMs)}
+            />
+          ) : (
+            <>
+              {metrics.usage || contextTokens ? (
+                <div className="shrink-0 items-center gap-0.5 hidden xl:flex">
                   <Metric
-                    iconName={IconName.ArrowTop}
-                    value={formatTokensCompact(metrics.usage.input_tokens)}
-                    title="Input tokens"
-                    className="text-info-secondary opacity-75"
-                    labelClassName="text-micro"
+                    iconName={IconName.Timelaps}
+                    value={formatTokensCompact(contextTokens)}
+                    title={context}
+                    className="text-info-primary"
+                    labelClassName="label-micro"
                   />
-                  <Metric
-                    iconName={IconName.ArrowDown}
-                    value={formatTokensCompact(metrics.usage.output_tokens)}
-                    title="Output tokens"
-                    className="text-info-secondary opacity-75"
-                    labelClassName="text-micro"
-                  />
-                </>
+                  {metrics.usage ? (
+                    <>
+                      <Metric
+                        iconName={IconName.ArrowTop}
+                        value={formatTokensCompact(metrics.usage.input_tokens)}
+                        title="Input tokens"
+                        className="text-info-secondary opacity-75"
+                        labelClassName="text-micro"
+                      />
+                      <Metric
+                        iconName={IconName.ArrowDown}
+                        value={formatTokensCompact(metrics.usage.output_tokens)}
+                        title="Output tokens"
+                        className="text-info-secondary opacity-75"
+                        labelClassName="text-micro"
+                      />
+                    </>
+                  ) : null}
+                </div>
               ) : null}
-            </div>
-          ) : null}
-          <div className="flex shrink-0 items-center">
-            {metrics.usage ? (
-              <Tooltip title="Session cost" position={TooltipPosition.BottomCenter}>
-                <span className="text-micro whitespace-nowrap text-basic-primary">
-                  {formatCostMicros(metrics.usage.cost?.total)}
-                </span>
-              </Tooltip>
-            ) : null}
-            <Tooltip
-              title={running ? "Run elapsed" : "Last response time"}
-              position={TooltipPosition.BottomRight}
-            >
-              <span className="label-micro flex h-6 w-14 items-center justify-end text-basic-tertiary">
-                {formatClock(elapsedMs)}
-              </span>
-            </Tooltip>
-          </div>
+              <div className="flex shrink-0 items-center">
+                {metrics.usage ? (
+                  <Tooltip title="Session cost" position={TooltipPosition.BottomCenter}>
+                    <span className="text-micro whitespace-nowrap text-basic-primary">
+                      {formatCostMicros(metrics.usage.cost?.total)}
+                    </span>
+                  </Tooltip>
+                ) : null}
+                <Tooltip
+                  title={running ? "Run elapsed" : "Last response time"}
+                  position={TooltipPosition.BottomRight}
+                >
+                  <span className="label-micro flex h-6 w-14 items-center justify-end text-basic-tertiary">
+                    {formatClock(elapsedMs)}
+                  </span>
+                </Tooltip>
+              </div>
+            </>
+          )}
           {onShowPanel ? (
             <Tooltip title="Show panel" position={TooltipPosition.BottomLeft}>
               <Button

@@ -1534,3 +1534,92 @@ async fn the_model_index_refuses_an_unresolvable_name_and_a_login_backend() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[tokio::test]
+async fn maintenance_keeps_captured_ui_bootstrap_readable_without_admitting_new_work() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("maintenance_ui_bootstrap");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), None);
+    let manager = test_managed_manager(&root);
+    nac_core::store::initialize(&manager.inner.store_path).unwrap();
+    let app = router(manager.clone());
+    let before = get_response(app.clone(), "/ui-config", None).await;
+    assert_eq!(before.status(), StatusCode::OK);
+    let captured = response_body(before).await;
+    let binding = nac_core::store::ManagedOperationBinding {
+        managed_host_id: "test-host".into(),
+        host_incarnation_id: "test-incarnation".into(),
+        issuer: "https://control.example.test".into(),
+        audience: "urn:nac:managed-control:test-host:test-incarnation".into(),
+        authority_origin: "https://control.example.test".into(),
+        operation_id: "maintenance-ui-bootstrap".into(),
+        target: nac_core::store::ManagedUpgradeTarget {
+            release_id: "test-release".into(),
+            source_sha: "a".repeat(40),
+            product_version: "test-version".into(),
+            schema_version: nac_core::store::schema_version(),
+            minimum_schema_version: 0,
+        },
+        actor: "user:owner".into(),
+        beneficiary: "tenant:owner".into(),
+    };
+    nac_core::store::prepare_managed_upgrade(
+        &manager.inner.store_path,
+        "maintenance-ui-bootstrap-prepare",
+        &binding,
+        nac_core::store::ManagedControlAttemptAction::Prepare,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 60,
+        Vec::new(),
+    )
+    .unwrap();
+    for method in [axum::http::Method::GET, axum::http::Method::HEAD] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method.clone())
+                    .uri("/ui-config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{method}");
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let body = response_body(response).await;
+        if method == axum::http::Method::GET {
+            assert_eq!(body, captured);
+        } else {
+            assert!(body.is_empty());
+        }
+    }
+    for (method, path) in [
+        (axum::http::Method::GET, "/sessions"),
+        (axum::http::Method::POST, "/sessions"),
+        (axum::http::Method::POST, "/ui-config"),
+        (axum::http::Method::GET, "/ui-config/extra"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method.clone())
+                    .uri(path)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{method} {path}"
+        );
+    }
+    drop((app, manager));
+    let _ = std::fs::remove_dir_all(root);
+}

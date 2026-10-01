@@ -7534,6 +7534,23 @@
           }
         }
       }
+    },
+    "/ui-config": {
+      "get": {
+        "operationId": "get_ui_configuration",
+        "responses": {
+          "200": {
+            "description": "Runtime browser presentation policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiConfiguration"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -9087,6 +9104,10 @@
           "first_chat": {
             "type": "boolean",
             "description": "Marks the required first chat for an empty project. The server\nserializes this admission and returns the already-created primary chat\nto concurrent callers instead of creating a duplicate. Ordinary New\nChat requests leave this false."
+          },
+          "first_chat_same_behavior": {
+            "type": "boolean",
+            "description": "Opt-in first-chat admission restricted to the requested immutable behavior.\nOmission preserves newest-primary admission across all behaviors."
           },
           "light_model": {
             "$ref": "#/components/schemas/RequestField_LightModelSettings_LightModelSettings",
@@ -15136,6 +15157,23 @@
           "cancelled",
           "interrupted"
         ]
+      },
+      "UiConfiguration": {
+        "type": "object",
+        "required": [
+          "orchestration_enabled"
+        ],
+        "properties": {
+          "diagnostic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "orchestration_enabled": {
+            "type": "boolean"
+          }
+        }
       },
       "UpdateConfigRequest": {
         "type": "object",

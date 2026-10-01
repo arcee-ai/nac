@@ -1,5 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import {
+  authenticationCommand,
+  runAuthentication,
+} from "@/app/features/managed/controller/authenticationWorkflow";
 import { api } from "@/app/services/api";
 import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
 import { queryKeys } from "@/app/services/queries/keys";
@@ -103,12 +107,13 @@ export function useDeleteCredential() {
 export function useManagedLogout() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (provider: ManagedAuthProvider) => api.managedLogout(provider),
-    onSuccess: async () => {
-      // The model index was only readable through the login that just went
-      // away, so what is cached from it is no longer true — including the copy a
-      // resolved configuration carries.
-      await refreshProviderAuthentication(client);
-    },
+    retry: false,
+    mutationFn: (provider: ManagedAuthProvider) =>
+      runAuthentication(
+        authenticationCommand({
+          command: () => api.managedLogout(provider),
+          reconcile: () => refreshProviderAuthentication(client),
+        }),
+      ),
   });
 }

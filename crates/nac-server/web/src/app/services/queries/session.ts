@@ -1,3 +1,12 @@
+import {
+  createChat,
+  runCommand,
+  submitPrompt,
+  stopRun,
+} from "@/app/features/direct-session/commandWorkflow";
+import { makeStopPorts } from "@/app/features/direct-session/commandAdapters";
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { useCallback, useMemo } from "react";
 import {
   keepPreviousData,
@@ -31,17 +40,14 @@ import { useQueryInvalidators } from "@/app/services/queries/invalidation";
 import { queryKeys, SESSIONS_POLL_MS, WORKSPACE_STATS_POLL_MS } from "@/app/services/queries/keys";
 import {
   beginSnapshotFetch,
-  currentSessionGeneration,
+  beginHistoryFetch,
+  finishHistoryFetch,
   fenceSessionSnapshot,
   finishSnapshotFetch,
   isCurrentSessionGeneration,
+  sessionRefreshKey,
 } from "@/app/services/sessionRefresh";
-import {
-  finishRunCancel,
-  requestRunCancel,
-  restoreRunCancel,
-  setOptimisticUserPrompt,
-} from "@/app/store/runtimeStore";
+import { captureRuntimeActivation, setOptimisticUserPrompt } from "@/app/store/runtimeStore";
 import type {
   CreateSessionRequest,
   ManagedSessionSummary,
@@ -136,7 +142,7 @@ export function useSessionSnapshot(
   return useQuery<SessionSnapshotResponse>({
     queryKey: queryKeys.sessionSnapshot(id ?? ""),
     queryFn: async ({ signal }) => {
-      const token = beginSnapshotFetch(id!);
+      const token = beginSnapshotFetch(sessionRefreshKey(client, id!));
       const incoming = await api.getSession(id!, {
         messageLimit: SNAPSHOT_MESSAGE_LIMIT,
         threadEventLimit: SNAPSHOT_THREAD_EVENT_LIMIT,
@@ -147,10 +153,13 @@ export function useSessionSnapshot(
       if (!validSnapshotWindow(incoming)) {
         throw new Error("The server returned an invalid snapshot message page.");
       }
-      if (signal.aborted || !isCurrentSessionGeneration(id!, token.generation)) {
+      if (
+        signal.aborted ||
+        !isCurrentSessionGeneration(sessionRefreshKey(client, id!), token.generation)
+      ) {
         throw new DOMException("Snapshot superseded", "AbortError");
       }
-      finishSnapshotFetch(id!, token);
+      finishSnapshotFetch(sessionRefreshKey(client, id!), token);
       return mergeFocusedSnapshot(
         client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id!)),
         incoming,
@@ -175,26 +184,35 @@ export function useLoadOlderMessages(id: string) {
       if (start === undefined || start <= 0) {
         throw new Error("No older messages are available.");
       }
-      const generation = currentSessionGeneration(id);
-      const page = await api.getMessages(id, {
-        before: start,
-        limit: SNAPSHOT_MESSAGE_LIMIT,
-        includeSystem: true,
-      });
-      if (!validMessagesPage(page)) {
-        throw new Error("The server returned an invalid message page.");
-      }
-      if (!isCurrentSessionGeneration(id, generation)) return false;
+      const refreshKey = sessionRefreshKey(client, id);
+      const token = beginHistoryFetch(refreshKey);
+      try {
+        const page = await api.getMessages(id, {
+          before: start,
+          limit: SNAPSHOT_MESSAGE_LIMIT,
+          includeSystem: true,
+          signal: token.controller.signal,
+        });
+        if (!validMessagesPage(page)) {
+          throw new Error("The server returned an invalid message page.");
+        }
+        if (!isCurrentSessionGeneration(refreshKey, token.generation)) return false;
 
-      let accepted = false;
-      client.setQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id), (latest) => {
-        if (!latest) return latest;
-        const merged = prependMessagePage(latest, page, start);
-        if (!merged) return latest;
-        accepted = true;
-        return merged;
-      });
-      return accepted;
+        let accepted = false;
+        client.setQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id), (latest) => {
+          if (!latest) return latest;
+          const merged = prependMessagePage(latest, page, start);
+          if (!merged) return latest;
+          accepted = true;
+          return merged;
+        });
+        return accepted;
+      } catch (error) {
+        if (token.controller.signal.aborted) return false;
+        throw error;
+      } finally {
+        finishHistoryFetch(refreshKey, token);
+      }
     },
   });
 }
@@ -230,9 +248,22 @@ export function useSessionConfig(id: string | null) {
 
 export function useCreateSession() {
   const invalidate = useQueryInvalidators();
+  const client = useQueryClient();
   return useMutation({
-    mutationFn: (payload: CreateSessionRequest) => api.createSession(payload),
-    onSuccess: () => invalidate.sessions(),
+    retry: false,
+    mutationFn: (payload: CreateSessionRequest) =>
+      runCommand(
+        createChat({
+          create: () => api.createSession(payload),
+          accept: (snapshot) => {
+            const id = snapshot.metadata.session_id;
+            if (!id) throw new Error("The server returned a chat without an identity.");
+            fenceSessionSnapshot(sessionRefreshKey(client, id), true);
+            client.setQueryData(queryKeys.sessionSnapshot(id), snapshot);
+            void invalidate.sessions();
+          },
+        }),
+      ),
   });
 }
 
@@ -284,6 +315,7 @@ export interface RenameSessionVariables {
 export function useUpdatePresentation() {
   const invalidate = useQueryInvalidators();
   return useMutation({
+    retry: false,
     mutationFn: ({ id, title, pinned, expectedVersion }: RenameSessionVariables) =>
       api.updatePresentation(id, {
         title,
@@ -361,6 +393,7 @@ export function useUpdateConfig() {
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({ id, patch }: { id: string; patch: UpdateConfigRequest }) =>
       api.updateConfig(id, patch),
     onSuccess: (_data, { id }) => {
@@ -373,27 +406,47 @@ export function useUpdateConfig() {
 
 export function useSubmitRun() {
   const invalidate = useQueryInvalidators();
+  const client = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, prompt }: { id: string; prompt: string }) => {
-      const admission = await api.submitRun(id, prompt);
-      if (admission.status === "accepted") return admission.response;
-      if (admission.status === "not-sent") {
-        throw new DOMException("Prompt submission was cancelled before it was sent.", "AbortError");
-      }
-      throw new UncertainCommandAdmissionError(admission.requestId, admission.error);
+    retry: false,
+    mutationFn: ({ id, prompt, signal }: { id: string; prompt: string; signal?: AbortSignal }) => {
+      const current = captureRuntimeActivation(id);
+      return runCommand(
+        submitPrompt({
+          optimistic: () => {
+            if (current()) setOptimisticUserPrompt(prompt);
+          },
+          admit: async () => {
+            const admission = await (signal
+              ? api.submitRun(id, prompt, signal)
+              : api.submitRun(id, prompt));
+            if (admission.status === "accepted")
+              return { kind: "accepted", value: admission.response };
+            if (admission.status === "not-sent")
+              return {
+                kind: "not-sent",
+                error: new DOMException(
+                  "Prompt submission was cancelled before it was sent.",
+                  "AbortError",
+                ),
+              };
+            return {
+              kind: "uncertain",
+              error: new UncertainCommandAdmissionError(admission.requestId, admission.error),
+            };
+          },
+          rejected: () => {
+            if (current()) setOptimisticUserPrompt(null);
+          },
+          reconcile: (replace) => {
+            if (replace) {
+              fenceSessionSnapshot(sessionRefreshKey(client, id), true);
+              void invalidate.sessionRoot(id);
+            } else void invalidate.session(id);
+          },
+        }),
+      );
     },
-    onMutate: ({ prompt }) => {
-      setOptimisticUserPrompt(prompt);
-    },
-    onError: (error, { id }) => {
-      if (error instanceof UncertainCommandAdmissionError) {
-        fenceSessionSnapshot(id, true);
-        void invalidate.sessionRoot(id);
-      } else {
-        setOptimisticUserPrompt(null);
-      }
-    },
-    onSuccess: (_data, { id }) => invalidate.session(id),
   });
 }
 
@@ -419,65 +472,20 @@ export function useSteerThread() {
 }
 
 export function useCancelRun() {
-  const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.cancelActiveRun(id),
-    onMutate: (id) => {
-      const runtime = requestRunCancel();
-      const snapshot = client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id));
-      const sessions = client.getQueryData<ManagedSessionSummary[]>(queryKeys.sessions(false));
-      const sessionsWithStats = client.getQueryData<ManagedSessionSummary[]>(
-        queryKeys.sessions(true),
-      );
-      clearCachedActiveRun(client, id);
-      return { runtime, snapshot, sessions, sessionsWithStats };
-    },
-    onError: (_error, id, previous) => {
-      if (!previous) return;
-      restoreRunCancel(previous.runtime);
-      if (previous.snapshot !== undefined) {
-        client.setQueryData(queryKeys.sessionSnapshot(id), previous.snapshot);
-      }
-      if (previous.sessions !== undefined) {
-        client.setQueryData(queryKeys.sessions(false), previous.sessions);
-      }
-      if (previous.sessionsWithStats !== undefined) {
-        client.setQueryData(queryKeys.sessions(true), previous.sessionsWithStats);
-      }
-    },
-    onSuccess: (_data, id) => {
-      finishRunCancel();
-      void invalidate.session(id);
-      void invalidate.sessions();
-    },
+    retry: false,
+    mutationFn: (id: string) => runCommand(stopRun(makeStopPorts(client, id))),
   });
-}
-
-function idleSessionEntry(entry: ManagedSessionSummary, sessionId: string): ManagedSessionSummary {
-  if (entry.summary.session_id !== sessionId) return entry;
-  if (!entry.active && entry.active_run === undefined) return entry;
-  return { ...entry, active: false, active_run: undefined };
-}
-
-/** Drop a live run from every cache the tab strip and breadcrumbs read. */
-function clearCachedActiveRun(client: QueryClient, sessionId: string): void {
-  client.setQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(sessionId), (current) =>
-    current?.active_run ? { ...current, active_run: undefined } : current,
-  );
-  for (const workspaceStats of [false, true] as const) {
-    client.setQueryData<ManagedSessionSummary[]>(queryKeys.sessions(workspaceStats), (list) =>
-      list?.map((entry) => idleSessionEntry(entry, sessionId)),
-    );
-  }
 }
 
 export function useCompactSession() {
   const invalidate = useQueryInvalidators();
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.compactSession(id),
     onSuccess: (_data, id) => {
-      fenceSessionSnapshot(id, true);
+      fenceSessionSnapshot(sessionRefreshKey(client, id), true);
       return invalidate.sessionRoot(id);
     },
   });
@@ -490,11 +498,12 @@ export function useCompactSession() {
  */
 export function useRevertSession() {
   const invalidate = useQueryInvalidators();
+  const client = useQueryClient();
   return useMutation({
     mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
       api.revertSession(id, messageIdx),
     onSuccess: (_data, { id }) => {
-      fenceSessionSnapshot(id, true);
+      fenceSessionSnapshot(sessionRefreshKey(client, id), true);
       void invalidate.sessionRoot(id);
       void invalidate.sessions();
     },
@@ -507,11 +516,12 @@ export function useRevertSession() {
  */
 export function useRegenerateRun() {
   const invalidate = useQueryInvalidators();
+  const client = useQueryClient();
   return useMutation({
     mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
       api.regenerateRun(id, messageIdx),
     onSuccess: (_data, { id }) => {
-      fenceSessionSnapshot(id, true);
+      fenceSessionSnapshot(sessionRefreshKey(client, id), true);
       void invalidate.sessionRoot(id);
       void invalidate.sessions();
     },
@@ -544,4 +554,14 @@ export function useDismissSessionFork() {
       void invalidate.sessionRoot(id);
     },
   });
+}
+
+export function useVisibleSessions() {
+  const query = useSessions();
+  const policy = useUiPolicy();
+  const data = useMemo(
+    () => (query.data ? visibleSessions(policy, query.data) : undefined),
+    [query.data, policy],
+  );
+  return { ...query, data };
 }

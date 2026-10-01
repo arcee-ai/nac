@@ -226,9 +226,10 @@ export function useMcpRuntimeAction() {
   });
 }
 
-export function useModelConfigs() {
+export function useModelConfigs(enabled = true) {
   return useQuery<ModelConfigurationList>({
     queryKey: queryKeys.modelConfigs,
+    enabled,
     queryFn: ({ signal }) => api.listModelConfigs(signal),
     staleTime: 30_000,
     retry: false,
@@ -250,7 +251,8 @@ export function useProviderModels(
 ) {
   return useQuery<ProviderModelList>({
     queryKey: queryKeys.providerModels(backend, apiKey, baseUrl ?? ""),
-    queryFn: () => api.listProviderModels({ backend, api_key: apiKey, base_url: baseUrl }),
+    queryFn: ({ signal }) =>
+      api.listProviderModels({ backend, api_key: apiKey, base_url: baseUrl }, signal),
     enabled: enabled && apiKey.length > 0,
     retry: false,
     staleTime: 5 * 60_000,
@@ -271,12 +273,15 @@ export function useStoredKeyProviderModels(
 ) {
   return useQuery<ProviderModelList>({
     queryKey: queryKeys.storedKeyProviderModels(backend, apiKeyEnv, baseUrl ?? ""),
-    queryFn: () =>
-      api.listProviderModels({
-        backend,
-        api_key_env: apiKeyEnv,
-        base_url: baseUrl,
-      }),
+    queryFn: ({ signal }) =>
+      api.listProviderModels(
+        {
+          backend,
+          api_key_env: apiKeyEnv,
+          base_url: baseUrl,
+        },
+        signal,
+      ),
     enabled: enabled && apiKeyEnv.length > 0,
     retry: false,
     staleTime: 5 * 60_000,
@@ -308,14 +313,17 @@ export function useModelCatalog(enabled = true) {
 
 /** Reconcile every cached projection derived from provider-account state. */
 export async function refreshUnifiedProviderCatalog(client: QueryClient): Promise<void> {
-  client.removeQueries({ queryKey: queryKeys.managedProviderModelsAll });
-  await client.invalidateQueries({ queryKey: queryKeys.modelCatalog });
+  await Promise.all([
+    client.resetQueries({ queryKey: queryKeys.managedProviderModelsAll }),
+    client.invalidateQueries({ queryKey: queryKeys.modelCatalog }),
+  ]);
 }
 
 /** Reconcile every browser projection after a login is added or removed. */
 export async function refreshProviderAuthentication(client: QueryClient): Promise<void> {
   await Promise.all([
     client.invalidateQueries({ queryKey: queryKeys.managedAuth }),
+    client.invalidateQueries({ queryKey: queryKeys.managedHostStatus }),
     refreshUnifiedProviderCatalog(client),
     client.invalidateQueries({ queryKey: queryKeys.resolvedModelConfigsAll }),
     client.invalidateQueries({ queryKey: queryKeys.resolvedConfigFilesAll }),
@@ -352,7 +360,8 @@ export function useResolvedModelConfig(configId: string | null, filePath: string
     queryKey: configId
       ? queryKeys.resolvedModelConfig(configId)
       : queryKeys.resolvedConfigFile(path),
-    queryFn: () => (configId ? api.resolveModelConfig(configId) : api.resolveConfigFile(path)),
+    queryFn: ({ signal }) =>
+      configId ? api.resolveModelConfig(configId, signal) : api.resolveConfigFile(path, signal),
     enabled: Boolean(configId ?? path),
     retry: false,
     staleTime: 60_000,
@@ -362,6 +371,7 @@ export function useResolvedModelConfig(configId: string | null, filePath: string
 export function useCreateModelConfig() {
   const client = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: (payload: CreateModelConfigurationRequest) => api.createModelConfig(payload),
     onSuccess: async () => {
       // The server files the key under a generated credential name.
@@ -377,6 +387,7 @@ export function useCreateModelConfig() {
 export function useUpdateModelConfig() {
   const client = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({
       configId,
       payload,
@@ -398,6 +409,7 @@ export function useUpdateModelConfig() {
 export function useDeleteModelConfig() {
   const client = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: (configId: string) => api.deleteModelConfig(configId),
     onSuccess: async () => {
       await Promise.all([

@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -38,7 +39,7 @@ export function OrchestratorControls({
   showTrigger = true,
   openRequest = 0,
 }: OrchestratorControlsProps) {
-  const enabled = behavior === "direct-with-orchestrator";
+  const enabled = useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
   const query = useManagedOrchestrators(sessionId, enabled);
   const start = useStartManagedOrchestrator();
   const toast = useToast();

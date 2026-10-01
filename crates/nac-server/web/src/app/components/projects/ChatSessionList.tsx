@@ -1,3 +1,4 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMemo } from "react";
 
 import { ChatSessionButton } from "@/app/atoms";
@@ -40,6 +41,7 @@ export function ChatSessionList({
   isMobile = false,
   emptyLabel = "No chats",
 }: ChatSessionListProps) {
+  const policy = useUiPolicy();
   const now = useNow(RECENCY_TICK_MS);
   const sessionTitle = useSessionTitle();
   const groups = useMemo(
@@ -73,8 +75,8 @@ export function ChatSessionList({
                   key={entry.summary.session_id}
                   title={title}
                   icon={sessionBehaviorIcon(entry.summary.behavior)}
-                  badge={behavior.navigationLabel}
-                  badgeLabel={behavior.label}
+                  badge={policy.orchestrationEnabled ? behavior.navigationLabel : undefined}
+                  badgeLabel={policy.orchestrationEnabled ? behavior.label : undefined}
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}

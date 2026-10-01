@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 
+import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
+import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -7,7 +9,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { SettingsModal } from "@/app/components/modals/SettingsModal";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+import { api, ApiError } from "@/app/services/api";
 import type {
   ManagedHostStatus,
   ManagedSessionSummary,
@@ -20,8 +22,10 @@ vi.mock("@/app/components/modals/ConfigurationsPanel", () => ({
   ConfigurationsPanel: ({
     initial,
     onChange,
+    children,
   }: {
     initial?: Record<string, unknown>;
+    children?: React.ReactNode;
     onChange: (selection: Record<string, unknown>) => void;
   }) => {
     const select = (overrides: Record<string, unknown> = {}) =>
@@ -51,12 +55,18 @@ vi.mock("@/app/components/modals/ConfigurationsPanel", () => ({
         <button type="button" onClick={() => select()}>
           Keep current configuration
         </button>
-        <button type="button" onClick={() => select({ orchestrator_compaction_threshold: 222 })}>
+        <button
+          type="button"
+          onClick={() =>
+            select({ config_id: "chosen-preset", orchestrator_compaction_threshold: 222 })
+          }
+        >
           Select preset threshold 222
         </button>
         <button type="button" onClick={() => select({ orchestrator_compaction_threshold: null })}>
           Select preset with compaction disabled
         </button>
+        {children}
       </section>
     );
   },
@@ -85,9 +95,17 @@ afterEach(() => {
 function renderReadySettings({
   threshold = 111,
   headersJson = "{}",
+  orchestration = true,
+  lightModel = null,
+  projectId = null,
+  diagnostics = [],
 }: {
+  diagnostics?: string[];
+  projectId?: string | null;
   threshold?: number | null;
   headersJson?: string;
+  orchestration?: boolean;
+  lightModel?: RawSessionConfig["light_model"];
 } = {}) {
   const initial = {
     backend: "openai-responses",
@@ -100,6 +118,12 @@ function renderReadySettings({
   };
   vi.spyOn(api, "getManagedStatus").mockResolvedValue({
     model_ready: false,
+    model: {
+      backend: "arcee-api",
+      id: "trinity-large-thinking",
+      endpoint: "https://api.arcee.ai/api/v1",
+      display_name: "Managed Arcee",
+    },
   } as ManagedHostStatus);
   vi.spyOn(api, "getSession").mockResolvedValue({
     metadata: {
@@ -117,6 +141,7 @@ function renderReadySettings({
     {
       summary: {
         session_id: "settings-session",
+        project_id: projectId,
         title: "Settings session",
         pinned: false,
         presentation_version: 1,
@@ -137,9 +162,9 @@ function renderReadySettings({
     config_version: 1,
     ...initial,
     extra_headers_json: headersJson,
-    light_model: null,
+    light_model: lightModel,
     orchestrator_compaction_threshold: threshold,
-    diagnostics: [],
+    diagnostics,
   } as RawSessionConfig);
   vi.spyOn(api, "getModelCatalog").mockResolvedValue({
     catalog_version: 1,
@@ -172,11 +197,13 @@ function renderReadySettings({
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MemoryRouter>
-          <SettingsModal open id="settings-session" onClose={vi.fn()} />
-        </MemoryRouter>
-      </ToastProvider>
+      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+        <ToastProvider>
+          <MemoryRouter>
+            <SettingsModal open id="settings-session" onClose={vi.fn()} />
+          </MemoryRouter>
+        </ToastProvider>
+      </UiPolicyContext.Provider>
     </QueryClientProvider>,
   );
   return { client, update, view };
@@ -243,17 +270,19 @@ it("holds a fast settings submit until managed status authorizes the mounted mod
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <MemoryRouter>
-          <SettingsModal open id="managed-session" onClose={onClose} />
-        </MemoryRouter>
-      </ToastProvider>
+      <UiPolicyContext.Provider value={ORCHESTRATION_UI_POLICY}>
+        <ToastProvider>
+          <MemoryRouter>
+            <SettingsModal open id="managed-session" onClose={onClose} />
+          </MemoryRouter>
+        </ToastProvider>
+      </UiPolicyContext.Provider>
     </QueryClientProvider>,
   );
 
   try {
     fireEvent.click(await screen.findByRole("button", { name: "Choose Kimi" }));
-    const save = screen.getByRole("dialog").querySelector("button.btn-primary");
+    const save = screen.getByRole("button", { name: /^Save$/ });
     expect(save).toBeInstanceOf(HTMLButtonElement);
     if (!(save instanceof HTMLButtonElement)) throw new Error("Save button is missing");
     expect(save.disabled).toBe(true);
@@ -318,6 +347,160 @@ it("repairs malformed stored extra headers to an explicit empty object", async (
         extra_headers: {},
       }),
     );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("saving direct settings keeps a hidden light model and disabled compaction intact", async () => {
+  const { client, view, update } = renderReadySettings({
+    orchestration: false,
+    threshold: null,
+    headersJson: "{not-json}",
+    lightModel: { model: "gpt-5-mini", backend: "openai-responses", api_key_env: "OTHER_ACCOUNT" },
+  });
+  try {
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Keep current configuration" }));
+    expect(screen.queryByText("Optional light model")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    const patch = update.mock.calls[0]?.[1];
+    expect(patch).not.toHaveProperty("light_model");
+    expect(patch).not.toHaveProperty("orchestrator_compaction_threshold");
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("rejects a stale editor before creating a preset, saving configuration or renaming", async () => {
+  const { client, update, view } = renderReadySettings();
+  const title = vi
+    .spyOn(api, "updatePresentation")
+    .mockResolvedValue({} as Awaited<ReturnType<typeof api.updatePresentation>>);
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "New title" } });
+    const initial = await vi.mocked(api.getConfig).mock.results[0]?.value;
+    vi.mocked(api.getConfig).mockResolvedValue({
+      ...initial,
+      config_version: 2,
+    } as RawSessionConfig);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText(/settings changed/);
+    expect(update).not.toHaveBeenCalled();
+    expect(title).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("keeps an unknown configuration outcome visible and disables retry through further edits", async () => {
+  const { client, update, view } = renderReadySettings();
+  update.mockRejectedValue(new TypeError("response lost"));
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText(/outcome is unknown/);
+    fireEvent.change(screen.getByLabelText("Session title"), {
+      target: { value: "Edited after failure" },
+    });
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(update).toHaveBeenCalledTimes(1);
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("reports configuration saved but title rejected instead of closing with a false success", async () => {
+  const { client, update, view } = renderReadySettings();
+  vi.spyOn(api, "updatePresentation").mockRejectedValue(
+    new ApiError(409, "PATCH", "/test", "presentation revision changed", "test-request"),
+  );
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "New title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText(/Chat settings were saved/);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("updates a project default only after an explicit checkbox and the session save succeeds", async () => {
+  const { client, update, view } = renderReadySettings({ projectId: "settings-project" });
+  const project = vi
+    .spyOn(api, "updateProject")
+    .mockResolvedValue({ project_id: "settings-project" } as Awaited<
+      ReturnType<typeof api.updateProject>
+    >);
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Use selected preset as the project default/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(project).toHaveBeenCalledExactlyOnceWith("settings-project", {
+        default_model_config_id: "chosen-preset",
+      }),
+    );
+    expect(update.mock.invocationCallOrder[0]).toBeLessThan(project.mock.invocationCallOrder[0]!);
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("reports a project-default failure after the session save as partial progress and fences resubmission", async () => {
+  const { client, update, view } = renderReadySettings({ projectId: "settings-project" });
+  const project = vi.spyOn(api, "updateProject").mockRejectedValue(new TypeError("response lost"));
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Use selected preset as the project default/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText(/Chat settings were saved.*default save outcome is unknown/);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(project).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("clears malformed hidden legacy light data only through the explicit Advanced repair", async () => {
+  const { client, update, view } = renderReadySettings({
+    orchestration: false,
+    threshold: null,
+    diagnostics: ["malformed stored light model: invalid JSON"],
+  });
+  try {
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Keep current configuration" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced Configurations" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Clear malformed legacy light settings" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledExactlyOnceWith("settings-session", { light_model: null }),
+    );
+    expect(screen.queryByText("Optional light model")).toBeNull();
   } finally {
     view.unmount();
     client.clear();

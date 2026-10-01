@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 
+import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
+import { ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -46,11 +48,13 @@ function mount(records: ManagedOrchestratorRecord[] = []) {
   client.setQueryData(queryKeys.managedOrchestrators(SESSION_ID), records);
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <ToastProvider>
-          <OrchestratorControls sessionId={SESSION_ID} behavior="direct-with-orchestrator" />
-        </ToastProvider>
-      </MemoryRouter>
+      <UiPolicyContext.Provider value={ORCHESTRATION_UI_POLICY}>
+        <MemoryRouter>
+          <ToastProvider>
+            <OrchestratorControls sessionId={SESSION_ID} behavior="direct-with-orchestrator" />
+          </ToastProvider>
+        </MemoryRouter>
+      </UiPolicyContext.Provider>
     </QueryClientProvider>,
   );
 }

@@ -28,6 +28,7 @@ export function useProjects() {
 export function useCreateProject() {
   const invalidate = useQueryInvalidators();
   return useMutation({
+    retry: false,
     mutationFn: (payload: CreateProjectRequest) => api.createProject(payload),
     onSuccess: () => invalidate.projects(),
   });
@@ -41,6 +42,7 @@ export interface UpdateProjectVariables {
 export function useUpdateProject() {
   const invalidate = useQueryInvalidators();
   return useMutation({
+    retry: false,
     mutationFn: ({ projectId, payload }: UpdateProjectVariables) =>
       api.updateProject(projectId, payload),
     onSuccess: () => invalidate.projects(),

@@ -1,3 +1,5 @@
+import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
+import { visibleSessions } from "@/app/features/ui-policy/policy";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -49,7 +51,13 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   const toast = useToast();
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { data: sessions = [], isSuccess: sessionsLoaded } = useSessions();
+  const sessionsQuery = useSessions();
+  const policy = useUiPolicy();
+  const sessionsLoaded = sessionsQuery.isSuccess;
+  const sessions = useMemo(
+    () => visibleSessions(policy, sessionsQuery.data ?? []),
+    [sessionsQuery.data, policy],
+  );
   const { data: projectList } = useProjects();
   const pin = useToggleProjectPin();
   const assignSession = useAssignSessionToProject();
@@ -121,20 +129,26 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   // the one place holding both full lists, so it is where that memory is kept
   // clear of chats and projects that have since been deleted.
   useEffect(() => {
-    if (!sessionsLoaded || !projectList) return;
+    const existingSessions = sessionsQuery.data;
+    if (!sessionsLoaded || !existingSessions || !projectList) return;
+    // Presentation-hidden sessions still exist and keep their browser memory.
     pruneChatTabs(
-      sessions.map((entry) => entry.summary.session_id),
+      existingSessions.map((entry) => entry.summary.session_id),
       projectList.projects.map((project) => project.project_id),
     );
-    pruneSessionNavigation(primarySessions(sessions).map((entry) => entry.summary.session_id));
-  }, [sessionsLoaded, sessions, projectList]);
+    pruneSessionNavigation(
+      primarySessions(existingSessions).map((entry) => entry.summary.session_id),
+    );
+  }, [sessionsLoaded, sessionsQuery.data, projectList]);
 
   // Which project the screen is about, whether it was reached by its own route
-  // or through one of its chats.
+  // or through one of its chats. Hidden chats retain their project identity so
+  // the shortcut can create a direct chat without exposing the hidden session.
   const openSessionId = sessionIdFromPath(pathname);
   const openProjectId =
     projectIdFromPath(pathname) ??
-    sessions.find((entry) => entry.summary.session_id === openSessionId)?.summary.project_id ??
+    sessionsQuery.data?.find((entry) => entry.summary.session_id === openSessionId)?.summary
+      .project_id ??
     null;
 
   // "Make me a new one" is the single gesture bound to a key, and it means

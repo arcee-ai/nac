@@ -9,3 +9,4 @@ export type AssistantStreamDelta = ApiSchema<"AssistantStreamDelta">;
 export type LaggedEvent = ApiSchema<"LaggedEvent">;
 export type ReplayBoundaryEvent = ApiSchema<"ReplayBoundaryEvent">;
 export type ReplayGapEvent = ApiSchema<"ReplayGapEvent">;
+export type UiConfiguration = ApiSchema<"UiConfiguration">;

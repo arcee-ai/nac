@@ -1084,20 +1084,6 @@ impl SessionManager {
             .await
     }
 
-    fn newest_primary_project_session_id(&self, project_id: &str) -> Result<Option<String>> {
-        let mut candidates = sessions::list_sessions(&self.inner.store_path)?
-            .into_iter()
-            .filter(|summary| summary.project_id.as_deref() == Some(project_id))
-            .collect::<Vec<_>>();
-        candidates.sort_by(|left, right| right.created_at.cmp(&left.created_at));
-        for candidate in candidates {
-            if self.session_lineage(&candidate.session_id)?.is_none() {
-                return Ok(Some(candidate.session_id));
-            }
-        }
-        Ok(None)
-    }
-
     fn lifecycle_gate(&self, session_id: &str) -> Arc<Mutex<()>> {
         let mut gates = self
             .inner

@@ -233,7 +233,7 @@ export function buildSettingsPatch(
   let baseUrl: string;
   let apiKeyEnv: string | null;
   if (managedUrl) {
-    baseUrl = managedUrl;
+    baseUrl = nullable(values.base_url) ?? managedUrl;
     apiKeyEnv = null;
   } else {
     baseUrl = requiredSettingsString(values.base_url, "Base URL");

@@ -39,7 +39,7 @@ export function ManagedAuthCallout({
   className?: string;
 }) {
   const { provider, signedIn } = useManagedSignIn(backend);
-  const { state, start, cancel } = useDeviceLogin();
+  const { state, start, cancel } = useDeviceLogin(undefined, provider);
   const logout = useManagedLogout();
   // Being signed in only says the credential is on file. Whether it still works
   // is answered by the one request that spends it, so this asks for the model

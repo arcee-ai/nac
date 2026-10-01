@@ -21,6 +21,8 @@ export function useSidebarCommands() {
   const navigate = useNavigate();
   const actions = useProjectActions();
   const managed = useManagedHost();
+  // Route identity survives presentation filtering; navigation lists still
+  // use useVisibleSessions. This command always opens the central chat flow.
   const { data: sessions = [] } = useSessions();
   const { data: mcpServers } = useMcpServers();
   const { data: sshConfigs } = useSshConfigs();
