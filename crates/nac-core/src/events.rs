@@ -1798,6 +1798,26 @@ impl EventSink {
         }
     }
 
+    /// Transfer a selected terminal to an independent publication obligation
+    /// before awaiting it. Cancelling the waiter cannot replace this outcome.
+    pub(crate) async fn emit_terminal_lifecycle_async(&self, event: AgentEvent) {
+        if !self
+            .bus
+            .as_ref()
+            .is_some_and(|bus| bus.has_owned_persistence().unwrap_or(true))
+        {
+            self.emit_lifecycle_async(event).await;
+            return;
+        }
+        let sink = self.clone();
+        let publication = tokio::spawn(async move {
+            sink.emit_lifecycle_async(event).await;
+        });
+        if let Err(error) = publication.await {
+            eprintln!("nac: terminal lifecycle publication task failed: {error:#}");
+        }
+    }
+
     pub(crate) fn emit_cleanup(&self, event: AgentEvent) {
         if tokio::runtime::Handle::try_current().is_err()
             || !self

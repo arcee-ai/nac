@@ -232,7 +232,11 @@ Accepted lifecycle cleanup retains one obligation per admitted operation and
 may await caller capacity off-loop after a definite pre-execution rejection.
 This does not retry SQL or admit new user work after overload. Compaction Drop
 cleanup retains its operation lease until terminal publication and local
-operation cleanup complete. Permission grant waiters retain their distinct
+operation cleanup complete. Once compaction selects its terminal result,
+publication and manual completion delivery own independent cleanup obligations.
+Cancelling their waiter cannot replace that selected result with Cancelled or
+emit a second terminal event; cancellation before selection keeps its existing
+Cancelled outcome. Permission grant waiters retain their distinct
 synchronous final liveness fence.
 
 ## Consequences

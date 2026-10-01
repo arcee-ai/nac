@@ -167,17 +167,32 @@ impl ManualCompactionTaskGuard {
         reason = "the guard owns a lifecycle until its single completion path consumes it"
     )]
     async fn complete(mut self, result: SessionCompactionCompletion) {
-        self.lifecycle
-            .as_mut()
-            .expect("manual compaction lifecycle exists")
-            .finish(&result)
-            .await;
-        drop(self.lifecycle.take());
-        self.service
-            .clear_manual_compaction_async(self.snapshot.compaction_id)
-            .await;
-        if let Some(completion) = self.completion.take() {
-            let _ = completion.send(result);
+        // Selection transfers the exact result, waiter and lease cleanup before
+        // the first await. Drop may only choose Cancelled before this transfer.
+        let mut lifecycle = self
+            .lifecycle
+            .take()
+            .expect("manual compaction lifecycle exists");
+        let completion = self.completion.take();
+        let service = self.service.clone();
+        let id = self.snapshot.compaction_id;
+        let owned = crate::store::coordinator::owner_for(&service.metadata.store_path)
+            .map(|owner| owner.is_some())
+            .unwrap_or(true);
+        let finish = async move {
+            lifecycle.finish(&result).await;
+            drop(lifecycle);
+            service.clear_manual_compaction_async(id).await;
+            if let Some(completion) = completion {
+                let _ = completion.send(result);
+            }
+        };
+        if owned {
+            if let Err(error) = tokio::spawn(finish).await {
+                eprintln!("nac: compaction completion task failed: {error:#}");
+            }
+        } else {
+            finish.await;
         }
     }
 }

@@ -6,6 +6,60 @@ use super::*;
 use crate::events::CompactionSkipReason;
 use crate::model::ModelClient;
 
+#[tokio::test(flavor = "current_thread")]
+async fn selected_manual_result_survives_cancelled_completion_wait() {
+    let (parts, path) = test_active_service("owned_manual_completion_cancel", "session");
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let id = Uuid::new_v4();
+    let lifecycle = CompactionLifecycle::start_async(
+        EventSink::bus(parts.service.event_bus.clone()),
+        id,
+        CompactionReason::Manual,
+    )
+    .await;
+    let snapshot = ActiveCompactionSnapshot {
+        compaction_id: id,
+        client_id: None,
+        started_at_epoch_ms: now_epoch_ms(),
+    };
+    *parts.service.lock_active_operation() = Some(ActiveSessionOperation::ManualCompaction(
+        ActiveCompactionState {
+            snapshot: snapshot.clone(),
+            _operation_lease: Some(
+                sessions::SessionOperationLease::try_acquire(&path, "session").unwrap(),
+            ),
+        },
+    ));
+    let (completion, waiter) = oneshot::channel();
+    let guard = ManualCompactionTaskGuard {
+        service: parts.service.clone(),
+        snapshot,
+        completion: Some(completion),
+        lifecycle: Some(lifecycle),
+    };
+    let saturation = crate::store::reject_callers_for_test();
+    let task = tokio::spawn(guard.complete(Ok(CompactionResult::Compacted {
+        compaction_id: id,
+        projected_context: 256,
+    })));
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert!(!task.is_finished());
+    assert!(sessions::SessionOperationLease::try_acquire(&path, "session").is_err());
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    drop(saturation);
+    let result = tokio::time::timeout(Duration::from_secs(1), waiter)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(result, Ok(CompactionResult::Compacted { compaction_id, .. }) if compaction_id == id)
+    );
+    assert!(!parts.service.has_active_operation());
+    assert!(sessions::SessionOperationLease::try_acquire(&path, "session").is_ok());
+    owner.shutdown().await.unwrap();
+}
+
 fn persisted_response_state(
     store_path: &std::path::Path,
     session_id: &str,

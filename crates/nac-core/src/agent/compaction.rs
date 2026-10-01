@@ -105,7 +105,7 @@ pub(crate) struct CompactionLifecycle {
     event_sink: EventSink,
     compaction_id: Uuid,
     reason: CompactionReason,
-    terminal_emitted: bool,
+    terminal_selected: bool,
 }
 
 impl CompactionLifecycle {
@@ -122,7 +122,7 @@ impl CompactionLifecycle {
             event_sink,
             compaction_id,
             reason,
-            terminal_emitted: false,
+            terminal_selected: false,
         }
     }
 
@@ -135,7 +135,7 @@ impl CompactionLifecycle {
             event_sink,
             compaction_id,
             reason,
-            terminal_emitted: false,
+            terminal_selected: false,
         };
         lifecycle
             .event_sink
@@ -148,6 +148,9 @@ impl CompactionLifecycle {
     }
 
     pub(crate) async fn finish(&mut self, result: &CompactionCompletion) {
+        if self.terminal_selected {
+            return;
+        }
         let event = match result {
             Ok(CompactionResult::Compacted { .. }) => AgentEvent::OrchestratorCompactionCompleted {
                 compaction_id: self.compaction_id,
@@ -175,15 +178,15 @@ impl CompactionLifecycle {
                 }
             }
         };
-        self.event_sink.emit_lifecycle_async(event).await;
-        self.terminal_emitted = true;
+        self.terminal_selected = true;
+        self.event_sink.emit_terminal_lifecycle_async(event).await;
     }
 }
 
 impl Drop for CompactionLifecycle {
     fn drop(&mut self) {
-        if !self.terminal_emitted {
-            self.terminal_emitted = true;
+        if !self.terminal_selected {
+            self.terminal_selected = true;
             self.event_sink
                 .emit_cleanup(AgentEvent::OrchestratorCompactionFailed {
                     compaction_id: self.compaction_id,

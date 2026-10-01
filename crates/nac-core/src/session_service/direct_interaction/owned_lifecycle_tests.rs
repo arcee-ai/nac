@@ -116,3 +116,106 @@ async fn compaction_lifecycle_waits_off_runtime_behind_durable_publication() {
     tokio::time::sleep(Duration::from_millis(10)).await;
     owner.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn selected_compaction_terminal_survives_cancelled_publication_wait() {
+    let (parts, path) = test_direct_active_service(
+        "owned_compaction_terminal_cancel",
+        "session",
+        ModelClient::new_for_test(),
+    );
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let id = uuid::Uuid::new_v4();
+    let mut lifecycle = crate::agent::CompactionLifecycle::start_async(
+        EventSink::bus(parts.service.event_bus.clone()),
+        id,
+        crate::events::CompactionReason::Auto,
+    )
+    .await;
+    let saturation = crate::store::reject_callers_for_test();
+    let task = tokio::spawn(async move {
+        lifecycle
+            .finish(&Ok(crate::agent::CompactionResult::Compacted {
+                compaction_id: id,
+                projected_context: 256,
+            }))
+            .await;
+    });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert!(!task.is_finished());
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    drop(saturation);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let events = parts.service.recent_events(None, 64).1;
+            if events.iter().any(|e| {
+                matches!(e.event, SessionEvent::Agent {
+                event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
+            } if compaction_id == id)
+            }) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let events = parts.service.recent_events(None, 64).1;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e.event, SessionEvent::Agent {
+        event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
+            | AgentEvent::OrchestratorCompactionFailed { compaction_id, .. }
+    } if compaction_id == id))
+            .count(),
+        1
+    );
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancellation_drop_restores_local_run_after_caller_saturation_and_owner_drain() {
+    let (parts, path) = test_direct_active_service(
+        "owned_cancel_restore_saturation",
+        "session",
+        ModelClient::new_for_test(),
+    );
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let service = parts.service.clone();
+    let run = service
+        .coordinate_local(|service| service.try_begin_run(None, "hold run"))
+        .await
+        .unwrap()
+        .unwrap();
+    let task = tokio::spawn(std::future::pending::<()>());
+    service.set_run_task(&run.run_id, task);
+    let id = run.run_id.clone();
+    let cancellation = service
+        .coordinate_local(move |service| service.mark_run_cancelling(&id))
+        .await
+        .unwrap()
+        .unwrap();
+    let saturation = crate::store::reject_callers_for_test();
+    drop(cancellation);
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert!(
+        matches!(service.lock_active_operation().as_ref(), Some(ActiveSessionOperation::Run(active)) if active.finishing && active.task.is_none())
+    );
+    owner.shutdown().await.unwrap();
+    drop(saturation);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if matches!(service.lock_active_operation().as_ref(), Some(ActiveSessionOperation::Run(active)) if !active.finishing && active.task.is_some()) { break; }
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    let mut operation = service.lock_active_operation();
+    if let Some(ActiveSessionOperation::Run(active)) = operation.as_mut() {
+        active.task.take().unwrap().abort();
+        assert_eq!(active.snapshot.run_id, run.run_id);
+    }
+    *operation = None;
+}
