@@ -93,7 +93,8 @@ pub(crate) async fn readyz_handler(
     State(manager): State<SessionManager>,
 ) -> (StatusCode, Json<ReadinessResponse>) {
     let managed = manager.managed_host().is_some();
-    let snapshot = tokio::task::spawn_blocking(move || readiness_snapshot(&manager)).await;
+    let snapshot =
+        nac_core::store::spawn_blocking_store_caller(move || readiness_snapshot(&manager)).await;
     let response = match snapshot {
         Ok(response) => response,
         Err(error) => {
@@ -148,7 +149,7 @@ pub(crate) async fn managed_status_handler(
             message: "Managed NAC is not configured".to_string(),
         });
     }
-    tokio::task::spawn_blocking(move || managed_status_snapshot(&manager))
+    nac_core::store::spawn_blocking_store_caller(move || managed_status_snapshot(&manager))
         .await
         .map_err(|error| crate::ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,

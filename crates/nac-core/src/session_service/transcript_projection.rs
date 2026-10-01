@@ -23,7 +23,7 @@ impl SessionService {
         ) else {
             return Ok((0, Vec::new()));
         };
-        tokio::task::spawn_blocking(move || {
+        crate::store::spawn_blocking_store_caller(move || {
             writer.read_tail_window(&session_id, blob_len as u64, tail_start as u64, limit)
         })
         .await
@@ -45,7 +45,7 @@ impl SessionService {
         ) else {
             return Ok(Vec::new());
         };
-        tokio::task::spawn_blocking(move || {
+        crate::store::spawn_blocking_store_caller(move || {
             writer.read_tail_window_times(&session_id, blob_len as u64, tail_start as u64, limit)
         })
         .await
@@ -62,9 +62,11 @@ impl SessionService {
         ) else {
             return Ok(Vec::new());
         };
-        tokio::task::spawn_blocking(move || writer.read_tail_from(&session_id, blob_len as u64))
-            .await
-            .map_err(|error| anyhow::anyhow!("transcript log tail read task failed: {error}"))?
+        crate::store::spawn_blocking_store_caller(move || {
+            writer.read_tail_from(&session_id, blob_len as u64)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("transcript log tail read task failed: {error}"))?
     }
 
     /// The merged store transcript: the snapshot blob (authoritative legacy
@@ -239,7 +241,7 @@ impl SessionService {
         let revision = {
             let store_path = store_path.clone();
             let session_id = session_id.clone();
-            tokio::task::spawn_blocking(move || {
+            crate::store::spawn_blocking_store_caller(move || {
                 crate::store::workspace_revision_at_transcript_len(
                     &store_path,
                     &session_id,
@@ -255,7 +257,7 @@ impl SessionService {
                 let target = target.clone();
                 let session_id = session_id.clone();
                 let commit = revision.commit_sha.clone();
-                tokio::task::spawn_blocking(move || {
+                crate::store::spawn_blocking_store_caller(move || {
                     crate::workspace::restore(&target, &session_id, &commit)?;
                     crate::workspace::rewind_ref(&target, &session_id, &commit)
                 })
@@ -274,13 +276,13 @@ impl SessionService {
             let session_id = session_id.clone();
             if message_idx < blob_len {
                 let kept = messages[..message_idx].to_vec();
-                tokio::task::spawn_blocking(move || {
+                crate::store::spawn_blocking_store_caller(move || {
                     writer.replace_snapshot_and_delete_from(&session_id, &kept)
                 })
                 .await
                 .map_err(|error| anyhow::anyhow!("transcript truncation task failed: {error}"))??;
             } else {
-                tokio::task::spawn_blocking(move || {
+                crate::store::spawn_blocking_store_caller(move || {
                     writer.delete_from(&session_id, message_idx as u64)
                 })
                 .await
@@ -338,7 +340,7 @@ impl SessionService {
         };
         if let Some(update) = run_state_update {
             let store_path = store_path.clone();
-            tokio::task::spawn_blocking(move || {
+            crate::store::spawn_blocking_store_caller(move || {
                 sessions::save_session_run_state(&store_path, &update)
             })
             .await
@@ -349,7 +351,7 @@ impl SessionService {
             let store_path = store_path.clone();
             let session_id = session_id.clone();
             let keep_through_id = revision.as_ref().map(|revision| revision.id);
-            tokio::task::spawn_blocking(move || {
+            crate::store::spawn_blocking_store_caller(move || {
                 crate::store::delete_workspace_revisions_after(
                     &store_path,
                     &session_id,
@@ -377,7 +379,7 @@ impl SessionService {
         let threads_removed = {
             let store_path = store_path.clone();
             let session_id = session_id.clone();
-            tokio::task::spawn_blocking(move || {
+            crate::store::spawn_blocking_store_caller(move || {
                 let mut removed = 0usize;
                 for name in orphaned_threads {
                     if crate::store::delete_thread(&store_path, &session_id, &name)? {

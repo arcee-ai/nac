@@ -1662,6 +1662,28 @@ impl EventSink {
         }
     }
 
+    /// Persist a durable thread event before publishing it without parking an
+    /// async runtime worker. Streaming and other live-only events keep their
+    /// synchronous, allocation-free publication path.
+    pub async fn emit_async(&self, event: AgentEvent) {
+        let needs_persistence = self.bus.as_ref().is_some_and(|bus| {
+            matches!(
+                bus.thread_event_persistence,
+                ThreadEventPersistence::Available(_)
+            ) && persisted_thread_event_name(&event).is_some()
+        });
+        if needs_persistence {
+            let sink = self.clone();
+            if let Err(error) =
+                crate::store::spawn_blocking_store_caller(move || sink.emit(event)).await
+            {
+                eprintln!("nac: durable event publication task failed: {error}");
+            }
+        } else {
+            self.emit(event);
+        }
+    }
+
     /// Live-only transcript growth signal (DB-direct transcript workset,
     /// step 3). Emitted by the agent at each transcript commit point, after
     /// the log append commits, so session subscribers refetch the

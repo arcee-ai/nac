@@ -357,6 +357,17 @@ impl TranscriptLogWriter {
     pub(super) fn append_fault(&self, phase: AppendFault) -> Result<()> {
         #[cfg(test)]
         {
+            if let Some(barrier) = self.append_barrier.lock().unwrap().as_ref() {
+                if barrier.phase == phase {
+                    std::fs::write(&barrier.reached, format!("{phase:?}"))?;
+                    // Only the subprocess crash fixture installs this barrier.
+                    // Its parent kills this private-store process at the exact
+                    // transaction point and always reaps it on failure.
+                    loop {
+                        std::thread::park();
+                    }
+                }
+            }
             let mut fault = self.append_fault.lock().unwrap();
             if let Some((requested, remaining)) = *fault {
                 if requested != phase {
@@ -388,6 +399,12 @@ impl TranscriptLogWriter {
             .as_ref()
             .and_then(|fence| fence.generation.as_ref().map(|(_, generation)| *generation))
     }
+}
+
+#[cfg(test)]
+pub(super) struct AppendBarrier {
+    pub phase: AppendFault,
+    pub reached: PathBuf,
 }
 
 struct BindRunWriter {

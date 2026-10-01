@@ -1613,6 +1613,7 @@ fn migration_restart_process_helper() {
             initialize_with_hooks(
                 Path::new(&store_path),
                 || {},
+                || {},
                 || Err(anyhow!("injected subprocess migration failure")),
             )
             .expect_err("subprocess migration failure must be injected");
@@ -1622,6 +1623,7 @@ fn migration_restart_process_helper() {
             let ready = std::env::var_os("NAC_TEST_SCHEMA_MIGRATION_READY").unwrap();
             initialize_with_hooks(
                 Path::new(&store_path),
+                || {},
                 || {},
                 || {
                     std::fs::write(&ready, b"locked").unwrap();
@@ -1640,6 +1642,7 @@ fn migration_restart_process_helper() {
             std::fs::write(started, b"started").unwrap();
             initialize_with_hooks(
                 Path::new(&store_path),
+                || {},
                 || {},
                 || {
                     writeln!(
@@ -1811,6 +1814,7 @@ fn injected_migration_failure_rolls_back_and_restart_completes_forward() {
     let error = initialize_with_hooks(
         &path,
         || {},
+        || {},
         || Err(anyhow!("injected failure containing secret-canary")),
     )
     .unwrap_err();
@@ -1867,6 +1871,7 @@ fn concurrent_migrations_serialize_at_the_immediate_transaction() {
     let first = std::thread::spawn(move || {
         initialize_with_hooks(
             &first_path,
+            || {},
             || {
                 first_locked_tx.send(()).unwrap();
                 release_first_rx.recv().unwrap();
@@ -1886,9 +1891,9 @@ fn concurrent_migrations_serialize_at_the_immediate_transaction() {
     let (second_locked_tx, second_locked_rx) = std::sync::mpsc::channel();
     let second_path = path.clone();
     let second = std::thread::spawn(move || {
-        second_started_tx.send(()).unwrap();
         initialize_with_hooks(
             &second_path,
+            || second_started_tx.send(()).unwrap(),
             || second_locked_tx.send(()).unwrap(),
             || Ok(()),
         )

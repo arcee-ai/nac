@@ -69,7 +69,7 @@ async fn status(
         Ok(binding) => binding,
         Err(status) => return control_configuration_error(status),
     };
-    match tokio::task::spawn_blocking(move || {
+    match nac_core::store::spawn_blocking_store_caller(move || {
         nac_core::store::record_managed_status(
             &path,
             &assertion.jti,
@@ -124,7 +124,7 @@ async fn supersede(
         return internal_error();
     };
     let path = manager.inner.store_path.clone();
-    match tokio::task::spawn_blocking(move || {
+    match nac_core::store::spawn_blocking_store_caller(move || {
         nac_core::store::supersede_managed_upgrade_for_identity(
             &path,
             &assertion.jti,
@@ -175,7 +175,7 @@ async fn prepare_for_action(
     let Some(expected_identity) = manager.managed_identity().cloned() else {
         return internal_error();
     };
-    let result = tokio::task::spawn_blocking(move || {
+    let result = nac_core::store::spawn_blocking_store_caller(move || {
         let _process_gate = process_gate;
         let attempt_action = match action {
             ManagedControlAction::Prepare => ManagedControlAttemptAction::Prepare,

@@ -1,11 +1,9 @@
 //! The serving application's bounded, single-threaded durable command executor.
 //! Commands are concrete inward application operations, not SQL or plug-ins.
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
 
 use anyhow::Result;
@@ -13,6 +11,10 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::sessions::StoreProcessLease;
 use crate::telemetry::{self, Correlation, StoreOperation, TelemetryOutcome};
+
+#[path = "coordinator_ownership.rs"]
+mod ownership;
+pub(crate) use ownership::{is_execution_store, owner_for, require_execution_owner};
 
 const DEFAULT_QUEUE_CAPACITY: usize = 128;
 const MAX_QUEUE_CAPACITY: usize = 1_024;
@@ -210,71 +212,6 @@ pub struct StoreCoordinator {
     executor_lifetime: Weak<()>,
 }
 
-struct OwnerRegistration {
-    owner: Weak<StoreCoordinator>,
-    executor: Weak<()>,
-}
-static OWNERS: LazyLock<Mutex<HashMap<PathBuf, OwnerRegistration>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-std::thread_local! {
-    static EXECUTION_STORE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-}
-
-/// Lookup is only a compatibility bridge for existing path-based core APIs.
-/// Serving application services can await the explicit typed owner methods.
-/// The executor itself calls the unchanged transaction without re-enqueueing.
-pub(crate) fn owner_for(path: &Path) -> Result<Option<Arc<StoreCoordinator>>> {
-    if OWNERS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .is_empty()
-    {
-        return Ok(None);
-    }
-    let path = match std::fs::canonicalize(path) {
-        Ok(path) => path,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let Some(name) = path.file_name() else {
-                return Ok(None);
-            };
-            let parent = path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."));
-            match std::fs::canonicalize(parent) {
-                Ok(parent) => parent.join(name),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                Err(error) => return Err(error.into()),
-            }
-        }
-        Err(error) => return Err(error.into()),
-    };
-    if EXECUTION_STORE.with(|active| active.borrow().as_ref() == Some(&path)) {
-        return Ok(None);
-    }
-    let owners = OWNERS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    match owners.get(&path) {
-        Some(registration) => match registration.owner.upgrade() {
-            Some(owner) => Ok(Some(owner)),
-            None if registration.executor.strong_count() > 0 => {
-                Err(PersistenceAdmissionError::ShuttingDown.into())
-            }
-            None => Ok(None),
-        },
-        None => Ok(None),
-    }
-}
-
-pub(crate) fn require_execution_owner(path: &Path) -> Result<()> {
-    anyhow::ensure!(
-        owner_for(path)?.is_none(),
-        "managed store connection bypassed its persistence owner; submit a typed command"
-    );
-    Ok(())
-}
-
 impl StoreCoordinator {
     pub fn acquire(path: &Path) -> Result<Arc<Self>> {
         let lease = StoreProcessLease::try_acquire(path)?;
@@ -284,19 +221,7 @@ impl StoreCoordinator {
             Some(lease),
             DEFAULT_QUEUE_CAPACITY,
         )?);
-        let mut owners = OWNERS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        owners.retain(|_, registration| {
-            registration.owner.strong_count() > 0 || registration.executor.strong_count() > 0
-        });
-        owners.insert(
-            path,
-            OwnerRegistration {
-                owner: Arc::downgrade(&owner),
-                executor: Weak::clone(&owner.executor_lifetime),
-            },
-        );
+        ownership::register_owner(&owner);
         Ok(owner)
     }
 
@@ -315,12 +240,17 @@ impl StoreCoordinator {
         });
         let execution_counters = Arc::clone(&counters);
         let execution_path = path.clone();
+        #[cfg(any(test, feature = "test-support"))]
+        let test_recorder_member = telemetry::test_recorder_accepts_current_thread();
         std::thread::Builder::new()
             .name("nac-persistence".into())
             .spawn(move || {
+                #[cfg(any(test, feature = "test-support"))]
+                let _test_recorder =
+                    test_recorder_member.then(telemetry::register_test_recorder_thread);
                 let _lease = lease;
                 let _executor_alive = executor_alive;
-                EXECUTION_STORE.with(|active| *active.borrow_mut() = Some(execution_path.clone()));
+                let _execution_owner = ownership::ExecutionStore::enter(execution_path.clone());
                 while let Some(command) = receiver.blocking_recv() {
                     // Admission increments before enqueue while holding the same
                     // mutex. The executor can only observe an admitted entry.
@@ -391,9 +321,11 @@ impl StoreCoordinator {
     }
 
     pub(crate) fn check_blocking_context(&self) -> Result<()> {
-        if tokio::runtime::Handle::try_current().is_ok_and(|handle| {
-            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread
-        }) {
+        if !super::blocking_caller::is_blocking_caller()
+            && tokio::runtime::Handle::try_current().is_ok_and(|handle| {
+                handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread
+            })
+        {
             return Err(PersistenceAdmissionError::AsyncContext.into());
         }
         Ok(())
@@ -453,7 +385,9 @@ impl<T> PendingPersistence<T> {
                 .blocking_recv()
                 .map_err(|_| anyhow::Error::from(PersistenceAdmissionError::ExecutorStopped))?
         };
-        if tokio::runtime::Handle::try_current().is_ok() {
+        if !super::blocking_caller::is_blocking_caller()
+            && tokio::runtime::Handle::try_current().is_ok()
+        {
             tokio::task::block_in_place(wait)
         } else {
             wait()
@@ -473,3 +407,7 @@ mod tests;
 #[cfg(test)]
 #[path = "coordinator_contract_tests.rs"]
 mod contract_tests;
+
+#[cfg(test)]
+#[path = "coordinator_crash_tests.rs"]
+mod crash_tests;

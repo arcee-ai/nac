@@ -177,7 +177,7 @@ impl SessionManager {
         let source_id = session_id.to_string();
         let fork_id = uuid::Uuid::new_v4().to_string();
         let persist_fork_id = fork_id.clone();
-        tokio::task::spawn_blocking(move || {
+        nac_core::store::spawn_blocking_store_caller(move || {
             persist_fork(
                 &store_path,
                 &source_id,

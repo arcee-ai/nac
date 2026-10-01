@@ -995,8 +995,7 @@ pub fn supersede_managed_upgrade_for_identity(
             .map_err(anyhow::Error::new)
             .map_err(ManagedMaintenanceError::Store);
     }
-    let _host_maintenance = crate::sessions::HostMaintenanceLease::acquire(path)
-        .map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))?;
+    let _host_maintenance = acquire_host_maintenance(path)?;
     let mut conn = open_runtime_connection(path).map_err(ManagedMaintenanceError::Store)?;
     let transaction = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -1048,8 +1047,7 @@ fn supersede_managed_upgrade_at_startup(
     {
         return Err(ManagedMaintenanceError::MaintenanceConflict);
     }
-    let _host_maintenance = crate::sessions::HostMaintenanceLease::acquire(path)
-        .map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))?;
+    let _host_maintenance = acquire_host_maintenance(path)?;
     let mut conn = Connection::open_with_flags(
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -1359,8 +1357,25 @@ fn acquire_control_attempt_lease(
     let digest = Sha256::digest(jti.as_bytes());
     let stripe = digest[0] % CONTROL_ATTEMPT_LOCK_STRIPES;
     let lease_id = format!("managed-control-attempt-{stripe:02x}");
-    crate::sessions::SessionOperationLease::acquire(path, &lease_id)
-        .map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))
+    let acquire = if super::coordinator::is_execution_store(path) {
+        crate::sessions::SessionOperationLease::try_acquire
+    } else {
+        crate::sessions::SessionOperationLease::acquire
+    };
+    acquire(path, &lease_id).map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))
+}
+
+fn acquire_host_maintenance(
+    path: &Path,
+) -> std::result::Result<crate::sessions::HostMaintenanceLease, ManagedMaintenanceError> {
+    // The executor cannot wait for a lease held by an admitted operation:
+    // that operation may need this same queue to commit its settlement.
+    let acquire = if super::coordinator::is_execution_store(path) {
+        crate::sessions::HostMaintenanceLease::try_acquire
+    } else {
+        crate::sessions::HostMaintenanceLease::acquire
+    };
+    acquire(path).map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))
 }
 
 coordinated_command! {
@@ -1370,8 +1385,7 @@ pub fn accept_managed_forward_start(
     path: &Path,
     accepted: &ManagedAcceptedIdentity,
 ) -> std::result::Result<bool, ManagedMaintenanceError> {
-    let _host_maintenance = crate::sessions::HostMaintenanceLease::acquire(path)
-        .map_err(|error| ManagedMaintenanceError::Store(anyhow!(error)))?;
+    let _host_maintenance = acquire_host_maintenance(path)?;
     let mut conn = open_runtime_connection(path).map_err(ManagedMaintenanceError::Store)?;
     let transaction = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)

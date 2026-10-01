@@ -166,7 +166,7 @@ impl SessionService {
         let store_path = self.metadata.store_path.clone();
         let run_id = run_id.to_string();
         let failure = failure.clone();
-        match tokio::task::spawn_blocking(move || {
+        match crate::store::spawn_blocking_store_caller(move || {
             crate::store::stage_active_run_failure(&store_path, &session_id, &run_id, &failure)
         })
         .await
@@ -319,7 +319,7 @@ impl SessionService {
         // with, and a revert has nothing else to key off.
         let transcript_len = self.transcript_len().await.ok();
 
-        let outcome = tokio::task::spawn_blocking(move || -> Result<()> {
+        let outcome = crate::store::spawn_blocking_store_caller(move || -> Result<()> {
             let previous = crate::store::latest_workspace_revision(&store_path, &session_id)?
                 .map(|revision| revision.commit_sha);
             let captured = crate::workspace::capture(&target, &session_id, previous.as_deref())?;
@@ -627,8 +627,10 @@ impl SessionService {
         }
         let saved_session_id = update.session_id.clone();
         let store_path = self.metadata.store_path.clone();
-        tokio::task::spawn_blocking(move || sessions::save_session_run_state(&store_path, &update))
-            .await??;
+        crate::store::spawn_blocking_store_caller(move || {
+            sessions::save_session_run_state(&store_path, &update)
+        })
+        .await??;
 
         self.event_bus.emit_with_context(
             SessionEvent::SnapshotSaved {

@@ -1160,9 +1160,11 @@ impl Agent {
             let mut tail = {
                 let writer = Arc::clone(&writer);
                 let session_id = session_id.clone();
-                tokio::task::spawn_blocking(move || writer.read_from(&session_id, blob_len))
-                    .await
-                    .map_err(|error| anyhow!("transcript log read task failed: {error}"))??
+                crate::store::spawn_blocking_store_caller(move || {
+                    writer.read_from(&session_id, blob_len)
+                })
+                .await
+                .map_err(|error| anyhow!("transcript log read task failed: {error}"))??
             };
 
             let mut expected_idx = blob_len;
@@ -1200,11 +1202,12 @@ impl Agent {
             if gap.is_some() {
                 let repair_writer = Arc::clone(&writer);
                 let repair_session_id = session_id.clone();
-                let (repaired_tail, recovery) = tokio::task::spawn_blocking(move || {
-                    repair_writer.read_tail_repairing_gap(&repair_session_id, blob_len)
-                })
-                .await
-                .map_err(|error| anyhow!("transcript log repair task failed: {error}"))??;
+                let (repaired_tail, recovery) =
+                    crate::store::spawn_blocking_store_caller(move || {
+                        repair_writer.read_tail_repairing_gap(&repair_session_id, blob_len)
+                    })
+                    .await
+                    .map_err(|error| anyhow!("transcript log repair task failed: {error}"))??;
                 tail = repaired_tail;
                 if let Some(recovery) = recovery {
                     let row_label = if recovery.discarded_rows == 1 {
@@ -1266,7 +1269,7 @@ impl Agent {
                     let repair_writer = Arc::clone(&writer);
                     let repair_session_id = session_id.clone();
                     let repaired_messages = merged.clone();
-                    tokio::task::spawn_blocking(move || {
+                    crate::store::spawn_blocking_store_caller(move || {
                         repair_writer.replace_snapshot_and_delete_from(
                             &repair_session_id,
                             &repaired_messages,
@@ -1423,9 +1426,11 @@ impl Agent {
             .max(self.committed_log_len);
         let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
-        let tail = tokio::task::spawn_blocking(move || writer.read_from(&session_id, from_idx))
-            .await
-            .map_err(|error| anyhow!("transcript log read task failed: {error}"))??;
+        let tail = crate::store::spawn_blocking_store_caller(move || {
+            writer.read_from(&session_id, from_idx)
+        })
+        .await
+        .map_err(|error| anyhow!("transcript log read task failed: {error}"))??;
         Ok(!tail.is_empty())
     }
 
@@ -1441,7 +1446,7 @@ impl Agent {
         };
         let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
-        let (snapshot, tail) = tokio::task::spawn_blocking(move || {
+        let (snapshot, tail) = crate::store::spawn_blocking_store_caller(move || {
             let snapshot = writer.read_snapshot_messages(&session_id)?;
             let tail = writer.read_from(&session_id, snapshot.len() as u64)?;
             Ok::<_, anyhow::Error>((snapshot, tail))
@@ -1627,9 +1632,11 @@ impl Agent {
         };
         let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
-        tokio::task::spawn_blocking(move || writer.delete_from(&session_id, from_idx))
-            .await
-            .map_err(|error| anyhow!("transcript log tail delete task failed: {error}"))??;
+        crate::store::spawn_blocking_store_caller(move || {
+            writer.delete_from(&session_id, from_idx)
+        })
+        .await
+        .map_err(|error| anyhow!("transcript log tail delete task failed: {error}"))??;
         self.committed_log_len = self.committed_log_len.min(from_idx);
         self.pending_log_end = None;
         Ok(())
@@ -1663,7 +1670,7 @@ impl Agent {
         let claim_store_path = store_path.clone();
         let claim_session_id = session_id.clone();
         let claim_dispatch_id = dispatch_id.clone();
-        let records = tokio::task::spawn_blocking(move || {
+        let records = crate::store::spawn_blocking_store_caller(move || {
             crate::store::claim_thread_steering(
                 &claim_store_path,
                 &claim_session_id,

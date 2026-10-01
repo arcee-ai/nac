@@ -1,4 +1,6 @@
 use super::*;
+#[path = "managed_load/telemetry_evidence.rs"]
+mod telemetry_evidence;
 #[path = "managed_load/worker_completion.rs"]
 mod worker_completion;
 use serde::Serialize;
@@ -9,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use telemetry_evidence::drain_telemetry;
 const DEFAULT_SEED: u64 = 0xA11_0112;
 const VARIANTS: [usize; 3] = [1, 2, 4];
 const PHASE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -464,7 +467,10 @@ fn write_http_json(stream: &mut TcpStream, body: &str) -> std::io::Result<()> {
     stream.flush()
 }
 
-trait LoadStoreAdapter {
+pub(super) trait LoadStoreAdapter {
+    fn expected_terminal_settlements(&self, count: usize) -> usize {
+        count
+    }
     fn identity(&self) -> &'static str;
     fn create_manager(&self, root: &Path, worker: &Path) -> SessionManager;
     fn assert_integrity(&self, store_path: &Path);
@@ -472,7 +478,7 @@ trait LoadStoreAdapter {
     fn checkpoint(&self, store_path: &Path) -> CheckpointEvidence;
 }
 
-struct SqliteLoadStore;
+pub(super) struct SqliteLoadStore;
 
 impl LoadStoreAdapter for SqliteLoadStore {
     fn identity(&self) -> &'static str {
@@ -566,7 +572,7 @@ fn file_size(path: &Path) -> u64 {
 }
 
 #[derive(Serialize)]
-struct StoreConfiguration {
+pub(super) struct StoreConfiguration {
     engine: &'static str,
     journal_mode: String,
     synchronous: i64,
@@ -580,7 +586,7 @@ struct StoreConfiguration {
 }
 
 #[derive(Serialize)]
-struct CheckpointEvidence {
+pub(super) struct CheckpointEvidence {
     busy: i64,
     log_frames: i64,
     checkpointed_frames: i64,
@@ -635,7 +641,7 @@ struct TelemetryEvidence {
 }
 
 #[derive(Serialize)]
-struct VariantEvidence {
+pub(super) struct VariantEvidence {
     mode: &'static str,
     seed: u64,
     orchestrators: usize,
@@ -664,7 +670,7 @@ struct VariantEvidence {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LoadMode {
+pub(super) enum LoadMode {
     OrderedHealthy,
     ConcurrentSettlementProbe,
 }
@@ -1334,7 +1340,7 @@ async fn wait_for_parent_idle(parent: &nac_core::session_service::SessionService
     .expect("parent completion delivery should become idle");
 }
 
-fn write_secret_safe_artifact(path: &Path, value: &impl Serialize) {
+pub(super) fn write_secret_safe_artifact(path: &Path, value: &impl Serialize) {
     let bytes = serde_json::to_vec_pretty(value).unwrap();
     for secret in [
         "all112-deterministic-key",
@@ -1353,7 +1359,7 @@ fn write_secret_safe_artifact(path: &Path, value: &impl Serialize) {
     std::fs::write(path, bytes).unwrap();
 }
 
-async fn run_variant(
+pub(super) async fn run_variant(
     adapter: &dyn LoadStoreAdapter,
     worker: &Path,
     seed: u64,
@@ -1371,7 +1377,7 @@ async fn run_variant(
     .await
 }
 
-async fn run_variant_with_mode(
+pub(super) async fn run_variant_with_mode(
     adapter: &dyn LoadStoreAdapter,
     worker: &Path,
     seed: u64,
@@ -1781,7 +1787,7 @@ async fn run_variant_with_mode(
             .store_latency_us
             .get("terminal_settlement")
             .map(|distribution| distribution.count),
-        Some(orchestrator_count)
+        Some(adapter.expected_terminal_settlements(orchestrator_count))
     );
     assert_eq!(
         telemetry.child_process_started,
@@ -1824,109 +1830,6 @@ async fn run_variant_with_mode(
     drop(manager);
     let _ = std::fs::remove_dir_all(root);
     evidence
-}
-
-async fn drain_telemetry(
-    recorder: &nac_core::telemetry::TelemetryRecorder,
-    exporter: &nac_core::telemetry::InMemoryExporter,
-) -> TelemetryEvidence {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let stats = loop {
-        let stats = recorder.stats();
-        if stats.exported + stats.failures >= stats.accepted {
-            break stats;
-        }
-        assert!(Instant::now() < deadline, "telemetry export did not drain");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    };
-    let events = exporter.events();
-    let mut store_latencies: BTreeMap<String, Vec<u64>> = BTreeMap::new();
-    let mut api_latencies: BTreeMap<String, Vec<u64>> = BTreeMap::new();
-    let mut evidence = TelemetryEvidence {
-        store_latency_us: BTreeMap::new(),
-        api_latency_us: BTreeMap::new(),
-        max_connection_active: 0,
-        max_persistence_queue_active: 0,
-        max_orchestrators_active: 0,
-        max_child_processes_active: 0,
-        child_process_started: BTreeSet::new(),
-        child_process_stopped: BTreeSet::new(),
-        max_cpu_time_us: 0,
-        max_resident_memory_bytes: 0,
-        accepted: stats.accepted,
-        dropped: stats.dropped,
-        exported: stats.exported,
-        failures: stats.failures,
-    };
-    for event in events {
-        if let (Some(operation), Some(duration)) = (event.operation, event.duration_us) {
-            store_latencies
-                .entry(serde_label(operation))
-                .or_default()
-                .push(duration);
-        }
-        if event.name == nac_core::telemetry::TelemetryName::HttpRequestDuration {
-            if let (Some(route), Some(duration)) = (event.route, event.duration_us) {
-                api_latencies.entry(route).or_default().push(duration);
-            }
-        }
-        let value = event.value.unwrap_or(0);
-        match (event.name, event.activity) {
-            (nac_core::telemetry::TelemetryName::StoreConnectionActive, _) => {
-                evidence.max_connection_active = evidence.max_connection_active.max(value);
-            }
-            (nac_core::telemetry::TelemetryName::PersistenceQueueActive, _) => {
-                evidence.max_persistence_queue_active =
-                    evidence.max_persistence_queue_active.max(value);
-            }
-            (
-                nac_core::telemetry::TelemetryName::RuntimeActivityActive,
-                Some(nac_core::telemetry::RuntimeActivity::Orchestrator),
-            ) => evidence.max_orchestrators_active = evidence.max_orchestrators_active.max(value),
-            (
-                nac_core::telemetry::TelemetryName::RuntimeActivityActive,
-                Some(nac_core::telemetry::RuntimeActivity::ChildProcess),
-            ) => {
-                evidence.max_child_processes_active =
-                    evidence.max_child_processes_active.max(value);
-            }
-            _ => {}
-        }
-        if event.name == nac_core::telemetry::TelemetryName::ChildProcess {
-            if let Some(pid) = event.pid {
-                match event.outcome {
-                    Some(nac_core::telemetry::TelemetryOutcome::Started) => {
-                        evidence.child_process_started.insert(pid);
-                    }
-                    Some(nac_core::telemetry::TelemetryOutcome::Stopped) => {
-                        evidence.child_process_stopped.insert(pid);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        evidence.max_cpu_time_us = evidence.max_cpu_time_us.max(event.cpu_time_us.unwrap_or(0));
-        evidence.max_resident_memory_bytes = evidence
-            .max_resident_memory_bytes
-            .max(event.resident_memory_bytes.unwrap_or(0));
-    }
-    evidence.store_latency_us = store_latencies
-        .into_iter()
-        .map(|(name, values)| (name, LatencyDistribution::from_values(values)))
-        .collect();
-    evidence.api_latency_us = api_latencies
-        .into_iter()
-        .map(|(name, values)| (name, LatencyDistribution::from_values(values)))
-        .collect();
-    evidence
-}
-
-fn serde_label(value: impl Serialize) -> String {
-    serde_json::to_value(value)
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string()
 }
 
 async fn probe_pair(app: &Router, phase: &'static str) -> Vec<ProbeSample> {

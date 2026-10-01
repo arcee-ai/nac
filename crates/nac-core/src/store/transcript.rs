@@ -285,6 +285,9 @@ pub struct TranscriptLogWriter {
     pub(super) append_fault:
         std::sync::Arc<Mutex<Option<(super::transcript_append::AppendFault, usize)>>>,
     #[cfg(test)]
+    pub(super) append_barrier:
+        std::sync::Arc<Mutex<Option<super::transcript_append::AppendBarrier>>>,
+    #[cfg(test)]
     after_extent_read: std::sync::Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
     pub(super) append_fence: Option<super::transcript_append::RunAppendFence>,
 }
@@ -438,6 +441,8 @@ impl TranscriptLogWriter {
             append_fence: None,
             #[cfg(test)]
             append_fault: std::sync::Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            append_barrier: std::sync::Arc::new(Mutex::new(None)),
             #[cfg(test)]
             after_extent_read: std::sync::Arc::new(Mutex::new(None)),
         })

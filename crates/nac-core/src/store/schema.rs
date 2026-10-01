@@ -291,7 +291,7 @@ fn path_entry_exists(path: &Path) -> bool {
 
 coordinated_command! {
 pub fn initialize(path: &Path) -> Result<()> {
-    initialize_with_hooks(path, || {}, || Ok(()))
+    initialize_with_hooks(path, || {}, || {}, || Ok(()))
 }
 command InitializeCommand {
 }
@@ -302,6 +302,7 @@ port public;
 
 fn initialize_with_hooks(
     path: &Path,
+    after_preflight: impl FnOnce(),
     after_lock: impl FnOnce(),
     before_commit: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
@@ -315,7 +316,7 @@ fn initialize_with_hooks(
             failure: None,
         },
     );
-    match open_connection_with_hooks(&path, after_lock, before_commit) {
+    match open_connection_with_hooks(&path, after_preflight, after_lock, before_commit) {
         Ok(connection) => {
             drop(connection);
             finish_migration(
@@ -599,11 +600,12 @@ pub(crate) fn active_connection_counts(path: &Path) -> Result<(usize, usize)> {
 }
 
 pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
-    open_connection_with_hooks(path, || {}, || Ok(()))
+    open_connection_with_hooks(path, || {}, || {}, || Ok(()))
 }
 
 fn open_connection_with_hooks(
     path: &Path,
+    after_preflight: impl FnOnce(),
     after_lock: impl FnOnce(),
     before_commit: impl FnOnce() -> Result<()>,
 ) -> Result<StoreConnection> {
@@ -621,6 +623,7 @@ fn open_connection_with_hooks(
     if preflight_schema_version == STORE_SCHEMA_VERSION {
         return Ok(conn);
     }
+    after_preflight();
     // journal_mode is database-wide and persistent, so future schemas must be
     // rejected before this binary changes even their SQLite configuration.
     conn.pragma_update(None, "journal_mode", "WAL")?;

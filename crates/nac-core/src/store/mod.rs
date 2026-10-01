@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+mod blocking_caller;
 pub(crate) mod coordinator;
+pub use blocking_caller::spawn_blocking_store_caller;
 #[macro_use]
 pub(crate) mod coordinated_commands;
 mod managed_maintenance;

@@ -1007,6 +1007,7 @@ where
                 .await
                 .context("server task stopped unexpectedly")?
                 .context("server stopped unexpectedly");
+            shutdown_manager.drain_persistence().await?;
             let _ = shutdown_complete_tx.send(());
             watchdog
                 .join()
@@ -1070,8 +1071,10 @@ async fn shutdown_signal() {
 )]
 async fn health(State(manager): State<SessionManager>) -> (StatusCode, Json<HealthResponse>) {
     let store_path = manager.inner.store_path.clone();
-    let ready =
-        tokio::task::spawn_blocking(move || nac_core::store::check_readiness(&store_path)).await;
+    let ready = nac_core::store::spawn_blocking_store_caller(move || {
+        nac_core::store::check_readiness(&store_path)
+    })
+    .await;
     match ready {
         Ok(Ok(())) => (StatusCode::OK, Json(HealthResponse { status: "ok" })),
         Ok(Err(error)) => {

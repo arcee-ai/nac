@@ -359,9 +359,10 @@ impl<'a> SessionCatalogApplication<'a> {
         }
 
         let store_path = self.manager.inner.store_path.clone();
-        let summaries = tokio::task::spawn_blocking(move || view::list_sessions(&store_path))
-            .await
-            .context("session list task failed")??;
+        let summaries =
+            nac_core::store::spawn_blocking_store_caller(move || view::list_sessions(&store_path))
+                .await
+                .context("session list task failed")??;
         let mut sessions = {
             let active = self.manager.inner.active_sessions.read().await;
             summaries
@@ -400,7 +401,7 @@ impl<'a> SessionCatalogApplication<'a> {
         let store_path = self.manager.inner.store_path.clone();
         let session_id = session_id.to_string();
         let title = title.to_string();
-        tokio::task::spawn_blocking(move || {
+        nac_core::store::spawn_blocking_store_caller(move || {
             sessions::update_session_presentation(
                 &store_path,
                 &session_id,
@@ -427,7 +428,7 @@ impl<'a> SessionCatalogApplication<'a> {
         let store_path = self.manager.inner.store_path.clone();
         let session_ids = session_ids.to_vec();
         let expected_versions = expected_versions.clone();
-        tokio::task::spawn_blocking(move || {
+        nac_core::store::spawn_blocking_store_caller(move || {
             sessions::reorder_sessions(&store_path, pinned, &session_ids, &expected_versions)
                 .map(|summaries| summaries.into_iter().map(Into::into).collect())
         })
@@ -489,7 +490,7 @@ impl<'a> SessionCatalogApplication<'a> {
             }
             tasks.push((
                 key,
-                tokio::task::spawn_blocking(move || {
+                nac_core::store::spawn_blocking_store_caller(move || {
                     view::workspace_diff_totals(&display, Some(&target))
                 }),
             ));

@@ -459,6 +459,15 @@ pub fn register_test_recorder_thread() -> TestRecorderThreadGuard {
     TestRecorderThreadGuard(id)
 }
 
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn test_recorder_accepts_current_thread() -> bool {
+    TEST_RECORDER_OWNERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|owners| owners.contains(&std::thread::current().id()))
+}
+
 thread_local! {
     static STORE_CORRELATION: RefCell<Vec<Correlation>> = const { RefCell::new(Vec::new()) };
 }

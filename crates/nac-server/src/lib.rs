@@ -503,7 +503,7 @@ impl SessionManager {
             &config,
             build_identity::store_track(),
         );
-        let store_ownership = application::persistence::StoreOwnership::acquire(&store_path)?;
+        let (store_ownership, store_path) = application::persistence::acquire_store(&store_path)?;
         let worker_executable = executable::worker_executable(options.worker_executable)?;
 
         // This is deliberately before any managed model, credential, clone,

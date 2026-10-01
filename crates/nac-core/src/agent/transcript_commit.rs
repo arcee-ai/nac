@@ -52,7 +52,7 @@ impl Agent {
         // process's pending writes, so terminal normalization resolves it instead
         // of mistaking it for a peer's committed row (issue #146).
         self.pending_log_end = Some(start_idx + batch_len);
-        let appended = tokio::task::spawn_blocking(move || {
+        let appended = crate::store::spawn_blocking_store_caller(move || {
             if terminal {
                 writer.append_terminal_batch(&session_id, start_idx, &messages)
             } else {
@@ -99,10 +99,11 @@ impl Agent {
         // log_transcript_batch for why the straggler from a dropped run
         // task must stay within this process's own commits.
         self.pending_log_end = Some(idx + 1);
-        let appended =
-            tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
-                .await
-                .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
+        let appended = crate::store::spawn_blocking_store_caller(move || {
+            writer.append(&session_id, idx, &message)
+        })
+        .await
+        .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
         match appended {
             Ok(()) => {
                 // Live trigger (step 3): see log_transcript_batch.
@@ -163,7 +164,7 @@ impl Agent {
             let run_id = run_id.to_string();
             self.steering_append_pending = true;
             self.pending_log_end = Some(idx + 1);
-            let appended = tokio::task::spawn_blocking(move || {
+            let appended = crate::store::spawn_blocking_store_caller(move || {
                 let append = || match inbox_item_id {
                     Some(inbox_item_id) => writer.append_inbox_run_prompt(
                         &session_id,
@@ -265,7 +266,7 @@ impl Agent {
         self.pending_log_end = Some(from_idx as u64 + batch_len);
         let staged = staged.to_vec();
         self.steering_append_pending = true;
-        let joined = tokio::task::spawn_blocking(move || {
+        let joined = crate::store::spawn_blocking_store_caller(move || {
             writer.append_claimed_thread_steering(
                 &sink_session_id,
                 &dispatch_id,
@@ -309,7 +310,7 @@ impl Agent {
         // that commits after the async task is aborted as this process's row.
         self.pending_log_end = Some(start_idx + 1);
         self.direct_inbox_append_start = Some(start_idx);
-        let records = tokio::task::spawn_blocking(move || {
+        let records = crate::store::spawn_blocking_store_caller(move || {
             writer.append_pending_inbox_steers(&session_id, &run_id, start_idx)
         })
         .await

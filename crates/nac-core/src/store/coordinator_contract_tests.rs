@@ -200,6 +200,91 @@ async fn blocking_compatibility_caller_is_routed_through_the_owned_queue() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn blocking_pool_adapter_keeps_current_thread_runtime_responsive() {
+    let path = path();
+    let owner = seed(&path).await;
+    let error = crate::store::list_session_inbox(&path, "session").unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<PersistenceAdmissionError>(),
+        Some(&PersistenceAdmissionError::AsyncContext)
+    );
+    let (gate, release, _) = super::tests::block_executor(&owner);
+    let caller_path = path.clone();
+    let caller = crate::store::spawn_blocking_store_caller(move || {
+        crate::store::create_session_inbox_item(
+            &caller_path,
+            "session",
+            InboxDelivery::Queue,
+            "blocking pool",
+            None,
+            None,
+        )
+    });
+    while owner.stats().queued == 0 {
+        tokio::task::yield_now().await;
+    }
+    tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        tokio::time::sleep(std::time::Duration::from_millis(5)),
+    )
+    .await
+    .unwrap();
+    assert!(!caller.is_finished());
+    release.send(()).unwrap();
+    gate.acknowledge().await.unwrap();
+    assert_eq!(caller.await.unwrap().unwrap().content, "blocking pool");
+    owner.shutdown().await.unwrap();
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn maintenance_lease_contention_cannot_wait_for_settlement_on_the_executor() {
+    let path = path();
+    let owner = seed(&path).await;
+    let admission = crate::sessions::HostAdmissionLease::try_acquire(&path).unwrap();
+    let target = crate::store::ManagedUpgradeTarget {
+        release_id: "test-release".into(),
+        source_sha: "a".repeat(40),
+        product_version: "0.2.0".into(),
+        schema_version: crate::store::schema_version(),
+        minimum_schema_version: 0,
+    };
+    let identity = crate::store::ManagedAcceptedIdentity {
+        managed_host_id: "host".into(),
+        host_incarnation_id: "incarnation".into(),
+        operation_id: "replacement".into(),
+        target,
+    };
+    let error = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        owner.accept_managed_forward_start(identity.clone()),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        crate::store::ManagedMaintenanceError::Store(_)
+    ));
+    // Work holding the admission can still get its durable settlement into
+    // the same FIFO. Only then may it release the lease and admit maintenance.
+    owner
+        .create_session_inbox_item(
+            "session".into(),
+            InboxDelivery::Queue,
+            "settlement".into(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    drop(admission);
+    assert!(!owner.accept_managed_forward_start(identity).await.unwrap());
+    owner.shutdown().await.unwrap();
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn identified_append_faults_rollback_or_reconcile_exactly_once_through_the_executor() {
     use crate::store::transcript_append::AppendFault;
     for phase in [

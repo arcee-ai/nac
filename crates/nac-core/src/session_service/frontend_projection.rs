@@ -296,7 +296,7 @@ impl SessionService {
         // concurrently delivered record is either absent here or coverable by
         // the subsequent transcript scan, never rendered twice.
         let blocking_service = self.clone();
-        let blocking_task = tokio::task::spawn_blocking(move || {
+        let blocking_task = crate::store::spawn_blocking_store_caller(move || {
             blocking_service.load_frontend_snapshot_blocking(options)
         });
         let active_threads = self.active_thread_names();
