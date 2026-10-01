@@ -134,6 +134,8 @@ pub struct AgentConfig {
     pub permission_rules: Vec<crate::permissions::PermissionRule>,
 }
 
+type McpObservation = Arc<dyn Fn(EventSink, Option<String>) + Send + Sync>;
+
 pub struct Agent {
     client: ModelClient,
     mode: AgentMode,
@@ -148,6 +150,7 @@ pub struct Agent {
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
     thread_name: Option<String>,
+    mcp_observation: Option<McpObservation>,
     steering_dispatch_id: Option<String>,
     appended_steering_ids: HashSet<i64>,
     /// Top-level transcript log sink (DB-direct transcript workset, see
@@ -344,9 +347,9 @@ impl Agent {
         }
 
         let local_paths = crate::paths::PathContext::new(&config.config_cwd);
-        if let Some(mcp) = config.mcp.as_ref() {
-            mcp.set_event_sink(config.event_sink.clone(), config.thread_name.clone());
-        }
+        let mcp_observation = config.mcp.as_ref().map(|mcp| {
+            mcp.register_event_sink(config.event_sink.clone(), config.thread_name.clone())
+        });
         let workspace_lease_identity =
             crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
         let backend = crate::sandbox::select_execution_backend(
@@ -424,6 +427,7 @@ impl Agent {
             },
             event_sink: config.event_sink,
             thread_name: config.thread_name,
+            mcp_observation,
             steering_dispatch_id: config.dispatch_id,
             appended_steering_ids: HashSet::new(),
             transcript_log,
@@ -1022,8 +1026,10 @@ impl Agent {
 
     pub fn set_event_sink(&mut self, sink: EventSink) {
         self.event_sink = sink.clone();
-        self.tool_runtime
-            .set_event_sink(sink, self.thread_name.clone());
+        if let Some(observation) = self.mcp_observation.as_ref() {
+            observation(sink.clone(), self.thread_name.clone());
+        }
+        self.tool_runtime.set_event_sink(sink);
     }
 
     pub(crate) fn configure_permission_broker(

@@ -27,10 +27,24 @@ struct ObservationTarget {
     thread_name: Option<String>,
 }
 
+pub(super) struct McpObservationTarget {
+    target: StdRwLock<ObservationTarget>,
+}
+
+impl McpObservationTarget {
+    pub(super) fn update(&self, sink: EventSink, thread_name: Option<String>) {
+        *self
+            .target
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            ObservationTarget { sink, thread_name };
+    }
+}
+
 pub(super) struct McpSyncState {
     pub(super) snapshot: StdRwLock<Arc<McpCatalogSnapshot>>,
     resources: StdRwLock<HashMap<String, Vec<String>>>,
-    target: StdRwLock<ObservationTarget>,
+    targets: StdMutex<Vec<Weak<McpObservationTarget>>>,
     redactions: StdRwLock<HashMap<String, Vec<String>>>,
     last_observation: StdMutex<HashMap<(String, McpNotificationKind), Instant>>,
     recent_resource_updates: StdMutex<HashMap<(String, String), Instant>>,
@@ -76,7 +90,7 @@ impl McpSyncState {
         Self {
             snapshot: StdRwLock::new(Arc::new(McpCatalogSnapshot::default())),
             resources: StdRwLock::new(HashMap::new()),
-            target: StdRwLock::new(ObservationTarget::default()),
+            targets: StdMutex::new(Vec::new()),
             redactions: StdRwLock::new(HashMap::new()),
             last_observation: StdMutex::new(HashMap::new()),
             recent_resource_updates: StdMutex::new(HashMap::new()),
@@ -104,12 +118,21 @@ impl McpSyncState {
             .clone()
     }
 
-    pub(super) fn set_target(&self, sink: EventSink, thread_name: Option<String>) {
-        *self
-            .target
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            ObservationTarget { sink, thread_name };
+    pub(super) fn register_target(
+        &self,
+        sink: EventSink,
+        thread_name: Option<String>,
+    ) -> Arc<McpObservationTarget> {
+        let target = Arc::new(McpObservationTarget {
+            target: StdRwLock::new(ObservationTarget { sink, thread_name }),
+        });
+        let mut targets = self
+            .targets
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        targets.retain(|target| target.strong_count() > 0);
+        targets.push(Arc::downgrade(&target));
+        target
     }
 
     pub(super) fn set_redactions(&self, server: &str, values: Vec<String>) {
@@ -166,17 +189,28 @@ impl McpSyncState {
         let redaction_refs: Vec<&str> = redactions.iter().map(String::as_str).collect();
         let redacted = crate::model::redact_credentials(message.as_ref(), &redaction_refs);
         let bounded: String = redacted.chars().take(MAX_OBSERVATION_CHARS).collect();
-        let target = self
-            .target
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        target.sink.emit(AgentEvent::McpNotification {
-            thread_name: target.thread_name,
-            server_name: server.to_string(),
-            kind,
-            message: bounded,
-        });
+        let targets = {
+            let mut registered = self
+                .targets
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let targets: Vec<_> = registered.iter().filter_map(Weak::upgrade).collect();
+            registered.retain(|target| target.strong_count() > 0);
+            targets
+        };
+        for target in targets {
+            let target = target
+                .target
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            target.sink.emit(AgentEvent::McpNotification {
+                thread_name: target.thread_name,
+                server_name: server.to_string(),
+                kind,
+                message: bounded.clone(),
+            });
+        }
     }
 
     pub(super) fn emit_resource_update(&self, server: &str, uri: &str) {
@@ -311,22 +345,35 @@ impl NacMcpClientHandler {
 }
 
 impl McpServer {
-    pub(super) async fn reconcile_legacy_subscriptions(&self, peer: &Peer<RoleClient>) {
-        if !self
-            .capabilities
-            .resources
-            .as_ref()
-            .is_some_and(|resources| resources.subscribe == Some(true))
+    pub(super) async fn reconcile_legacy_subscriptions(
+        &self,
+        generation: u64,
+        peer: &Peer<RoleClient>,
+    ) {
+        if !self.is_current_connection_generation(generation)
+            || !self
+                .capabilities
+                .resources
+                .as_ref()
+                .is_some_and(|resources| resources.subscribe == Some(true))
         {
             return;
         }
         let wanted: HashSet<String> = self.sync.resources(&self.name).into_iter().collect();
-        let current = self
-            .legacy_subscriptions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let current = {
+            let subscriptions = self
+                .legacy_subscriptions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if subscriptions.generation != generation {
+                return;
+            }
+            subscriptions.uris.clone()
+        };
         for uri in wanted.difference(&current) {
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
             if matches!(
                 timeout(
                     self.catalog_timeout,
@@ -335,57 +382,38 @@ impl McpServer {
                 .await,
                 Ok(Ok(_))
             ) {
-                self.legacy_subscriptions
+                let mut subscriptions = self
+                    .legacy_subscriptions
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(uri.clone());
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if subscriptions.generation != generation
+                    || !self.is_current_connection_generation(generation)
+                {
+                    return;
+                }
+                subscriptions.uris.insert(uri.clone());
             }
         }
         for uri in current.difference(&wanted) {
+            if !self.is_current_connection_generation(generation) {
+                return;
+            }
             let _ = timeout(
                 self.catalog_timeout,
                 peer.unsubscribe(UnsubscribeRequestParams::new(uri.clone())),
             )
             .await;
-            self.legacy_subscriptions
+            let mut subscriptions = self
+                .legacy_subscriptions
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .remove(uri);
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if subscriptions.generation != generation
+                || !self.is_current_connection_generation(generation)
+            {
+                return;
+            }
+            subscriptions.uris.remove(uri);
         }
-    }
-
-    async fn process_notification(
-        self: &Arc<Self>,
-        generation: u64,
-        notification: ServerNotification,
-        peer: &Peer<RoleClient>,
-    ) -> bool {
-        if !self.is_current_connection_generation(generation) {
-            return false;
-        }
-        match notification {
-            ServerNotification::ToolListChangedNotification(_) => {
-                self.refresh_tools(generation, peer).await;
-            }
-            ServerNotification::PromptListChangedNotification(_) => {
-                self.refresh_prompts(generation, peer).await;
-            }
-            ServerNotification::ResourceListChangedNotification(_) => {
-                self.refresh_resources(generation, peer).await;
-                return self.protocol_version >= ProtocolVersion::V_2026_07_28;
-            }
-            ServerNotification::ResourceUpdatedNotification(notification) => self
-                .sync
-                .emit_resource_update(&self.name, &notification.params.uri),
-            ServerNotification::ProgressNotification(notification) => {
-                self.observe_progress(notification.params);
-            }
-            ServerNotification::LoggingMessageNotification(notification) => {
-                self.observe_log(notification.params);
-            }
-            _ => {}
-        }
-        false
     }
 
     fn observe_progress(&self, params: ProgressNotificationParam) {
@@ -417,10 +445,10 @@ impl McpServer {
 
     pub(super) async fn start_notification_processing(self: &Arc<Self>) {
         self.notification_task.abort();
-        self.reset_legacy_subscriptions();
         let service = self.current_service().await;
         let peer = service.read().await.peer().clone();
         let generation = self.current_connection_generation();
+        self.reset_legacy_subscriptions(generation);
         let weak = Arc::downgrade(self);
         let task = tokio::spawn(async move {
             let Some(server) = weak.upgrade() else {
@@ -483,16 +511,39 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>, gener
                         let _ = subscription.cancel().await;
                         return;
                     };
-                    restart = current
-                        .process_notification(generation, notification, &peer)
-                        .await;
                     if !current.is_current_connection_generation(generation) {
                         let _ = subscription.cancel().await;
                         return;
                     }
-                    if restart {
-                        let _ = subscription.cancel().await;
-                        break;
+                    match notification {
+                        ServerNotification::ToolListChangedNotification(_) => {
+                            let peer = peer.clone();
+                            tokio::spawn(async move {
+                                current.refresh_tools(generation, &peer).await;
+                            });
+                        }
+                        ServerNotification::PromptListChangedNotification(_) => {
+                            let peer = peer.clone();
+                            tokio::spawn(async move {
+                                current.refresh_prompts(generation, &peer).await;
+                            });
+                        }
+                        ServerNotification::ResourceListChangedNotification(_) => {
+                            let _ = subscription.cancel().await;
+                            current.refresh_resources(generation, &peer).await;
+                            restart = true;
+                            break;
+                        }
+                        ServerNotification::ResourceUpdatedNotification(notification) => current
+                            .sync
+                            .emit_resource_update(&current.name, &notification.params.uri),
+                        ServerNotification::ProgressNotification(notification) => {
+                            current.observe_progress(notification.params);
+                        }
+                        ServerNotification::LoggingMessageNotification(notification) => {
+                            current.observe_log(notification.params);
+                        }
+                        _ => {}
                     }
                 }
                 Ok(None) => break,
@@ -604,7 +655,7 @@ mod tests {
     fn observations_are_bounded_redacted_and_rate_limited() {
         let state = McpSyncState::new();
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        state.set_target(EventSink::channel(sender), Some("worker".to_string()));
+        let _target = state.register_target(EventSink::channel(sender), Some("worker".to_string()));
         state.set_redactions("docs", vec!["top-secret-value".to_string()]);
         state.emit(
             "docs",
@@ -625,7 +676,7 @@ mod tests {
     fn resource_updates_are_deduplicated() {
         let state = McpSyncState::new();
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        state.set_target(EventSink::channel(sender), None);
+        let _target = state.register_target(EventSink::channel(sender), None);
         state.emit_resource_update("docs", "doc://one");
         state.emit_resource_update("docs", "doc://one");
         assert!(matches!(
@@ -636,6 +687,35 @@ mod tests {
             })
         ));
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn observations_reach_each_registered_agent() {
+        let state = McpSyncState::new();
+        let (first_sender, mut first_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (second_sender, mut second_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let _first =
+            state.register_target(EventSink::channel(first_sender), Some("first".to_string()));
+        let _second = state.register_target(
+            EventSink::channel(second_sender),
+            Some("second".to_string()),
+        );
+
+        state.emit("docs", McpNotificationKind::Log, "shared observation");
+
+        for (receiver, expected) in [
+            (&mut first_receiver, "first"),
+            (&mut second_receiver, "second"),
+        ] {
+            assert!(matches!(
+                receiver.try_recv(),
+                Ok(AgentEvent::McpNotification {
+                    thread_name: Some(thread_name),
+                    message,
+                    ..
+                }) if thread_name == expected && message == "shared observation"
+            ));
+        }
     }
 
     #[test]

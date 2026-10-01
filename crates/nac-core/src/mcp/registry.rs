@@ -51,7 +51,7 @@ pub(super) struct McpServer {
     pub(super) tool_catalog_refresh: McpCatalogRefreshGate,
     pub(super) prompt_catalog_refresh: McpCatalogRefreshGate,
     pub(super) resource_catalog_refresh: McpCatalogRefreshGate,
-    pub(super) legacy_subscriptions: std::sync::Mutex<std::collections::HashSet<String>>,
+    pub(super) legacy_subscriptions: std::sync::Mutex<LegacySubscriptions>,
     pub(super) notification_task: McpNotificationTask,
 }
 
@@ -87,12 +87,20 @@ impl McpServer {
                 .is_some_and(|resources| resources.subscribe == Some(true))
     }
 
-    pub(super) fn reset_legacy_subscriptions(&self) {
-        self.legacy_subscriptions
+    pub(super) fn reset_legacy_subscriptions(&self, generation: u64) {
+        *self
+            .legacy_subscriptions
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clear();
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = LegacySubscriptions {
+            generation,
+            uris: std::collections::HashSet::new(),
+        };
     }
+}
+
+pub(super) struct LegacySubscriptions {
+    pub(super) generation: u64,
+    pub(super) uris: std::collections::HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -423,7 +431,10 @@ impl McpRegistry {
                 tool_catalog_refresh: McpCatalogRefreshGate::default(),
                 prompt_catalog_refresh: McpCatalogRefreshGate::default(),
                 resource_catalog_refresh: McpCatalogRefreshGate::default(),
-                legacy_subscriptions: std::sync::Mutex::new(std::collections::HashSet::new()),
+                legacy_subscriptions: std::sync::Mutex::new(LegacySubscriptions {
+                    generation: 0,
+                    uris: std::collections::HashSet::new(),
+                }),
                 notification_task: McpNotificationTask::default(),
             });
             handler.bind(&server);
@@ -558,12 +569,13 @@ impl McpRegistry {
         (definitions, captures)
     }
 
-    pub(crate) fn set_event_sink(
+    pub(crate) fn register_event_sink(
         &self,
         sink: crate::events::EventSink,
         thread_name: Option<String>,
-    ) {
-        self.sync.set_target(sink, thread_name);
+    ) -> Arc<dyn Fn(crate::events::EventSink, Option<String>) + Send + Sync> {
+        let target = self.sync.register_target(sink, thread_name);
+        Arc::new(move |sink, thread_name| target.update(sink, thread_name))
     }
 
     pub(crate) fn tool_definition(&self, name: &str) -> Option<ToolDefinition> {

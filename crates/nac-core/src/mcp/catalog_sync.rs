@@ -2,12 +2,28 @@ use super::capabilities::{MAX_PROMPT_ARGUMENTS, MAX_PROMPT_NAME_CHARS};
 use super::*;
 use crate::events::McpNotificationKind;
 use rmcp::service::{Peer, RoleClient};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex as StdMutex;
 use std::time::Instant;
 
 const MAX_DISCOVERED_PROMPTS: usize = 256;
+const MAX_PROMPT_DISCOVERY_PAGES: usize = 32;
 const MIN_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+
+fn stable_catalog_name(
+    server: &str,
+    remote: &str,
+    previous_names: &HashMap<String, String>,
+    occupied: &mut HashSet<String>,
+) -> String {
+    if let Some(previous) = previous_names
+        .get(remote)
+        .filter(|name| occupied.insert((*name).clone()))
+    {
+        return previous.clone();
+    }
+    unique_tool_name(server, remote, occupied)
+}
 
 #[derive(Default)]
 struct CatalogRefreshState {
@@ -175,6 +191,17 @@ impl McpSyncState {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let current = snapshot.clone();
         let mut next_tools = current.tools.clone();
+        let previous_names: HashMap<_, _> = current
+            .tools
+            .iter()
+            .filter_map(|(name, binding)| {
+                binding
+                    .server
+                    .upgrade()
+                    .filter(|owner| owner.name == server.name)
+                    .map(|_| (binding.tool_name.clone(), name.clone()))
+            })
+            .collect();
         next_tools.retain(|_, binding| {
             binding
                 .server
@@ -187,7 +214,8 @@ impl McpSyncState {
             .cloned()
             .collect();
         for tool in tools {
-            let qualified_name = unique_tool_name(&server.name, &tool.name, &mut occupied);
+            let qualified_name =
+                stable_catalog_name(&server.name, &tool.name, &previous_names, &mut occupied);
             let mut definition = tool_definition(&qualified_name, &server.name, &tool);
             if definition.function.parameters["properties"]
                 .as_object()
@@ -226,6 +254,12 @@ impl McpSyncState {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let current = snapshot.clone();
         let mut commands = current.prompt_commands.clone();
+        let previous_names: HashMap<_, _> = current
+            .prompt_commands
+            .iter()
+            .filter(|(_, command)| command.server_name == server.name)
+            .map(|(name, command)| (command.prompt_name.clone(), name.clone()))
+            .collect();
         commands.retain(|_, command| command.server_name != server.name);
         let mut occupied: HashSet<String> = current
             .tools
@@ -246,7 +280,8 @@ impl McpSyncState {
             {
                 continue;
             }
-            let name = unique_tool_name(&server.name, &prompt.name, &mut occupied);
+            let name =
+                stable_catalog_name(&server.name, &prompt.name, &previous_names, &mut occupied);
             commands.insert(
                 name.clone(),
                 McpPromptCommand::from_prompt(name, server.name.clone(), prompt),
@@ -394,7 +429,7 @@ impl McpServer {
                         "resource catalog refreshed",
                     );
                     if self.protocol_version < ProtocolVersion::V_2026_07_28 {
-                        self.reconcile_legacy_subscriptions(peer).await;
+                        self.reconcile_legacy_subscriptions(generation, peer).await;
                     }
                 }
                 Ok(Err(error)) => self.refresh_failed("resource", error.to_string()),
@@ -418,9 +453,27 @@ impl McpServer {
 }
 
 async fn list_bounded_prompts_peer(peer: &Peer<RoleClient>) -> Result<Vec<rmcp::model::Prompt>> {
-    let prompts = peer.list_all_prompts().await?;
-    if prompts.len() > MAX_DISCOVERED_PROMPTS {
-        bail!("prompt catalog exceeds the {MAX_DISCOVERED_PROMPTS}-entry bound");
+    let mut prompts = Vec::new();
+    let mut cursor = None;
+    let mut seen_cursors = HashSet::new();
+    for _ in 0..MAX_PROMPT_DISCOVERY_PAGES {
+        let result = peer
+            .list_prompts(Some(
+                rmcp::model::PaginatedRequestParams::default().with_cursor(cursor.clone()),
+            ))
+            .await?;
+        let remaining = MAX_DISCOVERED_PROMPTS.saturating_sub(prompts.len());
+        prompts.extend(result.prompts.into_iter().take(remaining));
+        if prompts.len() == MAX_DISCOVERED_PROMPTS {
+            break;
+        }
+        let Some(next_cursor) = result.next_cursor else {
+            break;
+        };
+        if !seen_cursors.insert(next_cursor.clone()) {
+            bail!("prompt discovery returned a repeated pagination cursor");
+        }
+        cursor = Some(next_cursor);
     }
     Ok(prompts)
 }
@@ -437,6 +490,27 @@ mod tests {
             unique_tool_name("docs", "search", &mut occupied),
             "mcp__docs__search__2"
         );
+    }
+
+    #[test]
+    fn refresh_keeps_prior_names_when_colliding_entries_reorder() {
+        let previous = HashMap::from([
+            (
+                "alpha beta".to_string(),
+                "mcp__docs__alpha_beta".to_string(),
+            ),
+            (
+                "alpha-beta".to_string(),
+                "mcp__docs__alpha_beta__2".to_string(),
+            ),
+        ]);
+        let mut occupied = HashSet::new();
+
+        let second = stable_catalog_name("docs", "alpha-beta", &previous, &mut occupied);
+        let first = stable_catalog_name("docs", "alpha beta", &previous, &mut occupied);
+
+        assert_eq!(second, "mcp__docs__alpha_beta__2");
+        assert_eq!(first, "mcp__docs__alpha_beta");
     }
 
     #[tokio::test]

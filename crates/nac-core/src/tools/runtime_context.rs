@@ -69,10 +69,7 @@ impl ToolRuntime {
         }
     }
 
-    pub(crate) fn set_event_sink(&mut self, sink: EventSink, thread_name: Option<String>) {
-        if let Some(mcp) = self.mcp.as_ref() {
-            mcp.set_event_sink(sink.clone(), thread_name);
-        }
+    pub(crate) fn set_event_sink(&mut self, sink: EventSink) {
         self.event_sink = sink;
     }
 
