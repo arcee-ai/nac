@@ -21,17 +21,20 @@ async fn oauth_callback_listener_accepts_localhost_on_both_ip_families() {
 #[test]
 fn oauth_callback_target_rejects_unrelated_and_malformed_requests() {
     assert_eq!(
-        oauth_callback_target(
+        oauth_callback_request_target(
             b"GET /mcp_library/oauth/callback?code=test&state=test HTTP/1.1\r\nHost: localhost\r\n\r\n"
         ),
         Some("/mcp_library/oauth/callback?code=test&state=test")
     );
-    assert_eq!(oauth_callback_target(b"GET / HTTP/1.1\r\n\r\n"), None);
     assert_eq!(
-        oauth_callback_target(b"POST /mcp_library/oauth/callback HTTP/1.1\r\n\r\n"),
+        oauth_callback_request_target(b"GET / HTTP/1.1\r\n\r\n"),
         None
     );
-    assert_eq!(oauth_callback_target(b"not http"), None);
+    assert_eq!(
+        oauth_callback_request_target(b"POST /mcp_library/oauth/callback HTTP/1.1\r\n\r\n"),
+        None
+    );
+    assert_eq!(oauth_callback_request_target(b"not http"), None);
 }
 
 #[test]
@@ -159,4 +162,23 @@ fn borrowed_http_credentials_are_bound_to_the_stored_origin() {
     assert!(require_stored_http_origin(true, Some(&record), "https://other.example/mcp").is_err());
     assert!(require_stored_http_origin(true, None, "https://trusted.example/mcp").is_err());
     require_stored_http_origin(false, Some(&record), "https://other.example/mcp").unwrap();
+}
+
+#[test]
+fn remote_oauth_callback_uses_only_the_configured_origin() {
+    assert_eq!(
+        remote_callback_uri("https://nac.example.test", "team/slack").unwrap(),
+        "https://nac.example.test/mcp_library/servers/team%2Fslack/oauth/callback"
+    );
+    for rejected in [
+        "http://nac.example.test",
+        "https://user@nac.example.test",
+        "https://nac.example.test/prefix",
+        "https://nac.example.test?forwarded=evil.example",
+    ] {
+        assert!(
+            remote_callback_uri(rejected, "slack").is_err(),
+            "{rejected}"
+        );
+    }
 }

@@ -73,10 +73,11 @@ pub use library::{
 };
 pub use lifecycle::{McpRuntimeManager, McpRuntimeState, McpRuntimeStatus};
 pub use oauth::{
-    begin_mcp_oauth_authorization, clear_mcp_oauth, configure_mcp_oauth, delete_mcp_oauth_profile,
-    has_mcp_oauth_profile, mcp_oauth_status, rename_mcp_oauth_profile,
-    McpOAuthAuthorizationSession, McpOAuthConfiguration, McpOAuthStatus, MCP_OAUTH_CALLBACK_PATH,
-    MCP_OAUTH_REDIRECT_URI,
+    begin_mcp_oauth_authorization, clear_mcp_oauth, complete_mcp_oauth_authorization,
+    configure_mcp_oauth, delete_mcp_oauth_profile, has_mcp_oauth_profile,
+    mcp_oauth_pending_authorization_url, mcp_oauth_status, rename_mcp_oauth_profile,
+    McpOAuthAuthorizationMetadata, McpOAuthAuthorizationSession, McpOAuthConfiguration,
+    McpOAuthRegistration, McpOAuthStatus, MCP_OAUTH_CALLBACK_PATH, MCP_OAUTH_REDIRECT_URI,
 };
 pub use registry::{McpRegistry, McpRootPolicy, McpToolMetadata, McpTransportPolicy};
 

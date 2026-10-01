@@ -54,8 +54,11 @@ describe("MCP OAuth controls", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          client_id_credential: "SLACK_CLIENT_ID_REF",
-          client_secret_credential: "SLACK_CLIENT_SECRET_REF",
+          registration: {
+            type: "pre_registered",
+            client_id_credential: "SLACK_CLIENT_ID_REF",
+            client_secret_credential: "SLACK_CLIENT_SECRET_REF",
+          },
           scopes: ["channels:history", "chat:write"],
         }),
       }),

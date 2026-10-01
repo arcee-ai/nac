@@ -655,6 +655,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(mcp_api::configure_oauth_handler))
         .routes(routes!(mcp_api::oauth_status_handler))
         .routes(routes!(mcp_api::authenticate_oauth_handler))
+        .routes(routes!(mcp_api::oauth_callback_handler))
         .routes(routes!(mcp_api::logout_oauth_handler))
         .routes(routes!(
             mcp_api::update_server_handler,

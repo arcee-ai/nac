@@ -1,4 +1,161 @@
 use super::*;
+use futures_util::stream::BoxStream;
+use rmcp::model::ClientJsonRpcMessage;
+use rmcp::transport::auth::AuthClient;
+use rmcp::transport::streamable_http_client::{
+    StreamableHttpClient, StreamableHttpError, StreamableHttpPostResponse,
+};
+
+#[derive(Clone)]
+struct NacOAuthClient {
+    inner: AuthClient<reqwest::Client>,
+    cwd: PathBuf,
+    server_name: String,
+    endpoint: String,
+}
+
+impl NacOAuthClient {
+    async fn capture_scope_step_up<T>(
+        &self,
+        result: std::result::Result<T, StreamableHttpError<reqwest::Error>>,
+    ) -> std::result::Result<T, StreamableHttpError<reqwest::Error>> {
+        if let Err(StreamableHttpError::InsufficientScope(error)) = &result {
+            let Some(required_scope) = error.get_required_scope() else {
+                return result;
+            };
+            let authorization_url = {
+                let manager = self.inner.auth_manager.lock().await;
+                manager.request_scope_upgrade(required_scope).await
+            };
+            match authorization_url {
+                Ok(url) => {
+                    if let Err(error) = super::oauth::record_mcp_oauth_pending_authorization_url(
+                        &self.cwd,
+                        &self.server_name,
+                        &self.endpoint,
+                        url,
+                        required_scope,
+                    ) {
+                        eprintln!(
+                            "MCP server '{}': failed to persist OAuth scope-upgrade URL: {error:#}",
+                            self.server_name
+                        );
+                    }
+                }
+                Err(error) => eprintln!(
+                    "MCP server '{}': failed to start OAuth scope upgrade: {error}",
+                    self.server_name
+                ),
+            }
+        }
+        result
+    }
+}
+
+impl StreamableHttpClient for NacOAuthClient {
+    type Error = reqwest::Error;
+
+    async fn post_message(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> std::result::Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
+        self.capture_scope_step_up(
+            self.inner
+                .post_message(uri, message, session_id, auth_header, custom_headers)
+                .await,
+        )
+        .await
+    }
+
+    async fn post_message_with_max_sse_event_size(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+        max_sse_event_size: usize,
+    ) -> std::result::Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
+        self.capture_scope_step_up(
+            self.inner
+                .post_message_with_max_sse_event_size(
+                    uri,
+                    message,
+                    session_id,
+                    auth_header,
+                    custom_headers,
+                    max_sse_event_size,
+                )
+                .await,
+        )
+        .await
+    }
+
+    async fn delete_session(
+        &self,
+        uri: Arc<str>,
+        session_id: Arc<str>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> std::result::Result<(), StreamableHttpError<Self::Error>> {
+        self.capture_scope_step_up(
+            self.inner
+                .delete_session(uri, session_id, auth_header, custom_headers)
+                .await,
+        )
+        .await
+    }
+
+    async fn get_stream(
+        &self,
+        uri: Arc<str>,
+        session_id: Option<Arc<str>>,
+        last_event_id: Option<String>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> std::result::Result<
+        BoxStream<'static, Result<sse_stream::Sse, sse_stream::Error>>,
+        StreamableHttpError<Self::Error>,
+    > {
+        self.capture_scope_step_up(
+            self.inner
+                .get_stream(uri, session_id, last_event_id, auth_header, custom_headers)
+                .await,
+        )
+        .await
+    }
+
+    async fn get_stream_with_max_sse_event_size(
+        &self,
+        uri: Arc<str>,
+        session_id: Option<Arc<str>>,
+        last_event_id: Option<String>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+        max_sse_event_size: usize,
+    ) -> std::result::Result<
+        BoxStream<'static, Result<sse_stream::Sse, sse_stream::Error>>,
+        StreamableHttpError<Self::Error>,
+    > {
+        self.capture_scope_step_up(
+            self.inner
+                .get_stream_with_max_sse_event_size(
+                    uri,
+                    session_id,
+                    last_event_id,
+                    auth_header,
+                    custom_headers,
+                    max_sse_event_size,
+                )
+                .await,
+        )
+        .await
+    }
+}
 
 pub(super) async fn close_mcp_service(service: &mut McpService) {
     let _ = service.close_with_timeout(MCP_SERVICE_CLOSE_TIMEOUT).await;
@@ -165,7 +322,12 @@ async fn connect_http_server(
     )?;
     if super::oauth::has_mcp_oauth_profile(cwd, name)? {
         let manager = super::oauth::authorized_manager(cwd, name, parameters.url).await?;
-        let client = rmcp::transport::auth::AuthClient::new(reqwest::Client::new(), manager);
+        let client = NacOAuthClient {
+            inner: AuthClient::new(reqwest::Client::new(), manager),
+            cwd: cwd.to_path_buf(),
+            server_name: name.to_string(),
+            endpoint: parameters.url.to_string(),
+        };
         let transport = StreamableHttpClientTransport::with_client(client, transport_config);
         handler
             .clone()

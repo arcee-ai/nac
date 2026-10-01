@@ -15,8 +15,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use axum::extract::{rejection::JsonRejection, Path as AxumPath, State};
-use axum::http::StatusCode;
+use axum::extract::{rejection::JsonRejection, Path as AxumPath, RawQuery, State};
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use nac_core::mcp_configurations::{
     self as mcp, McpHeaderHelperConfig, McpProbeResult, McpProbedTool, McpProtocolSelection,
@@ -235,11 +236,52 @@ pub struct TestMcpServerResponse {
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct ConfigureMcpOAuthRequest {
-    #[schema(write_only)]
-    pub client_id_credential: String,
-    #[schema(write_only)]
-    pub client_secret_credential: String,
+    #[serde(default)]
+    pub registration: Option<McpOAuthRegistrationRequest>,
+    #[serde(default)]
+    #[schema(write_only, deprecated)]
+    pub client_id_credential: Option<String>,
+    #[serde(default)]
+    #[schema(write_only, deprecated)]
+    pub client_secret_credential: Option<String>,
+    #[serde(default)]
     pub scopes: Vec<String>,
+    #[serde(default)]
+    pub authorization_metadata: Option<McpOAuthAuthorizationMetadataRequest>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum McpOAuthRegistrationRequest {
+    PreRegistered {
+        #[schema(write_only)]
+        client_id_credential: String,
+        #[serde(default)]
+        #[schema(write_only)]
+        client_secret_credential: Option<String>,
+    },
+    ClientMetadata {
+        url: String,
+    },
+    Dynamic {
+        #[serde(default)]
+        client_name: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct McpOAuthAuthorizationMetadataRequest {
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    pub registration_endpoint: Option<String>,
+    pub issuer: Option<String>,
+    pub jwks_uri: Option<String>,
+    pub scopes_supported: Option<Vec<String>>,
+    pub response_types_supported: Option<Vec<String>>,
+    pub code_challenge_methods_supported: Option<Vec<String>>,
+    #[serde(flatten)]
+    #[schema(additional_properties = true)]
+    pub additional_fields: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, utoipa::ToSchema)]
@@ -257,6 +299,8 @@ pub struct McpOAuthStatusResponse {
     pub status: McpOAuthPublicStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorization_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -265,18 +309,81 @@ pub struct AuthenticateMcpOAuthResponse {
     pub authorization_url: String,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
+pub struct AuthenticateMcpOAuthRequest {
+    #[serde(default)]
+    pub additional_scopes: Vec<String>,
+}
+
 enum OAuthFlowState {
     Connecting {
         generation: u64,
-        task: tokio::task::JoinHandle<()>,
+        authorization_url: String,
+        task: Option<tokio::task::JoinHandle<()>>,
     },
     Failed,
 }
 
-static OAUTH_FLOWS: LazyLock<tokio::sync::Mutex<HashMap<String, OAuthFlowState>>> =
+type OAuthFlowKey = (PathBuf, String);
+
+static OAUTH_FLOWS: LazyLock<tokio::sync::Mutex<HashMap<OAuthFlowKey, OAuthFlowState>>> =
     LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 static OAUTH_FLOW_GENERATION: AtomicU64 = AtomicU64::new(1);
 const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+pub const MCP_OAUTH_CALLBACK_ORIGIN_ENV: &str = "NAC_MCP_OAUTH_CALLBACK_ORIGIN";
+
+enum OAuthCallbackTarget {
+    Loopback,
+    Remote { redirect_uri: String },
+}
+
+fn oauth_flow_key(manager: &SessionManager, server_name: &str) -> OAuthFlowKey {
+    (manager.root_cwd().to_path_buf(), server_name.to_string())
+}
+
+fn remote_callback_uri(origin: &str, server_name: &str) -> Result<String, ApiError> {
+    let mut url = url::Url::parse(origin)
+        .map_err(|_| ApiError::bad_request("the OAuth callback origin is invalid".to_string()))?;
+    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
+    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
+        return Err(ApiError::bad_request(
+            "the OAuth callback origin must use HTTPS".to_string(),
+        ));
+    }
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
+        return Err(ApiError::bad_request(
+            "the OAuth callback origin must contain only a scheme and authority".to_string(),
+        ));
+    }
+    url.set_path("");
+    {
+        let mut path = url.path_segments_mut().map_err(|_| {
+            ApiError::bad_request("the OAuth callback origin cannot be a base URL".to_string())
+        })?;
+        path.extend(["mcp_library", "servers", server_name, "oauth", "callback"]);
+    }
+    Ok(url.to_string())
+}
+
+fn oauth_callback_target(
+    manager: &SessionManager,
+    server_name: &str,
+) -> Result<OAuthCallbackTarget, ApiError> {
+    if let Some(managed) = manager.managed_host() {
+        return remote_callback_uri(&format!("https://{}", managed.public_hostname), server_name)
+            .map(|redirect_uri| OAuthCallbackTarget::Remote { redirect_uri });
+    }
+    match std::env::var(MCP_OAUTH_CALLBACK_ORIGIN_ENV) {
+        Ok(origin) if !origin.trim().is_empty() => remote_callback_uri(&origin, server_name)
+            .map(|redirect_uri| OAuthCallbackTarget::Remote { redirect_uri }),
+        _ => Ok(OAuthCallbackTarget::Loopback),
+    }
+}
 
 /// True when the whole value is one `${ENV_VAR}` reference and nothing else.
 fn is_env_reference(value: &str) -> bool {
@@ -971,6 +1078,56 @@ fn public_oauth_status(status: mcp::McpOAuthStatus) -> McpOAuthPublicStatus {
     }
 }
 
+fn oauth_registration(
+    request: ConfigureMcpOAuthRequest,
+) -> Result<
+    (
+        mcp::McpOAuthRegistration,
+        Vec<String>,
+        Option<mcp::McpOAuthAuthorizationMetadata>,
+    ),
+    ApiError,
+> {
+    let registration = match request.registration {
+        Some(McpOAuthRegistrationRequest::PreRegistered {
+            client_id_credential,
+            client_secret_credential,
+        }) => mcp::McpOAuthRegistration::PreRegistered {
+            client_id_credential,
+            client_secret_credential,
+        },
+        Some(McpOAuthRegistrationRequest::ClientMetadata { url }) => {
+            mcp::McpOAuthRegistration::ClientMetadata { url }
+        }
+        Some(McpOAuthRegistrationRequest::Dynamic { client_name }) => {
+            mcp::McpOAuthRegistration::Dynamic { client_name }
+        }
+        None => {
+            let client_id_credential = request.client_id_credential.ok_or_else(|| {
+                ApiError::bad_request("an OAuth registration method is required".to_string())
+            })?;
+            mcp::McpOAuthRegistration::PreRegistered {
+                client_id_credential,
+                client_secret_credential: request.client_secret_credential,
+            }
+        }
+    };
+    let metadata = request
+        .authorization_metadata
+        .map(|value| mcp::McpOAuthAuthorizationMetadata {
+            authorization_endpoint: value.authorization_endpoint,
+            token_endpoint: value.token_endpoint,
+            registration_endpoint: value.registration_endpoint,
+            issuer: value.issuer,
+            jwks_uri: value.jwks_uri,
+            scopes_supported: value.scopes_supported,
+            response_types_supported: value.response_types_supported,
+            code_challenge_methods_supported: value.code_challenge_methods_supported,
+            additional_fields: value.additional_fields,
+        });
+    Ok((registration, request.scopes, metadata))
+}
+
 #[utoipa::path(
     post,
     path = "/mcp_library/servers/{server_name}/oauth/configure",
@@ -987,14 +1144,15 @@ pub async fn configure_oauth_handler(
 ) -> Result<Json<McpOAuthStatusResponse>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
     let endpoint = oauth_endpoint(&manager, &server_name)?;
+    let (registration, scopes, authorization_metadata) = oauth_registration(request)?;
     let status = mcp::configure_mcp_oauth(
         manager.root_cwd(),
         &server_name,
         &endpoint,
         mcp::McpOAuthConfiguration {
-            client_id_credential: request.client_id_credential,
-            client_secret_credential: request.client_secret_credential,
-            scopes: request.scopes,
+            registration,
+            scopes,
+            authorization_metadata,
         },
     )
     .map_err(|_| {
@@ -1006,6 +1164,7 @@ pub async fn configure_oauth_handler(
     Ok(Json(McpOAuthStatusResponse {
         status: public_oauth_status(status),
         message: None,
+        authorization_url: None,
     }))
 }
 
@@ -1022,25 +1181,48 @@ pub async fn oauth_status_handler(
     AxumPath(server_name): AxumPath<String>,
 ) -> Result<Json<McpOAuthStatusResponse>, ApiError> {
     let endpoint = oauth_endpoint(&manager, &server_name)?;
+    let flow_key = oauth_flow_key(&manager, &server_name);
     let flows = OAUTH_FLOWS.lock().await;
-    if let Some(flow) = flows.get(&server_name) {
-        let (status, message) = match flow {
-            OAuthFlowState::Connecting { .. } => (McpOAuthPublicStatus::Connecting, None),
+    if let Some(flow) = flows.get(&flow_key) {
+        let (status, message, authorization_url) = match flow {
+            OAuthFlowState::Connecting {
+                authorization_url, ..
+            } => (
+                McpOAuthPublicStatus::Connecting,
+                None,
+                Some(authorization_url.clone()),
+            ),
             OAuthFlowState::Failed => (
                 McpOAuthPublicStatus::Failed,
                 Some(
                     "OAuth authorization did not complete; start authentication again".to_string(),
                 ),
+                None,
             ),
         };
-        return Ok(Json(McpOAuthStatusResponse { status, message }));
+        return Ok(Json(McpOAuthStatusResponse {
+            status,
+            message,
+            authorization_url,
+        }));
     }
     drop(flows);
     let status = mcp::mcp_oauth_status(manager.root_cwd(), &server_name, &endpoint)
         .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?;
+    let authorization_url = if status == mcp::McpOAuthStatus::NeedsAuthorization
+        && matches!(
+            oauth_callback_target(&manager, &server_name)?,
+            OAuthCallbackTarget::Remote { .. }
+        ) {
+        mcp::mcp_oauth_pending_authorization_url(manager.root_cwd(), &server_name, &endpoint)
+            .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?
+    } else {
+        None
+    };
     Ok(Json(McpOAuthStatusResponse {
         status: public_oauth_status(status),
         message: None,
+        authorization_url,
     }))
 }
 
@@ -1050,68 +1232,100 @@ pub async fn oauth_status_handler(
     operation_id = "post_mcp_library_servers_server_name_oauth_authenticate",
     tag = "mcp-library",
     params(("server_name" = String, Path)),
+    request_body(content = AuthenticateMcpOAuthRequest, content_type = "application/json"),
     responses((status = 200, description = "OAuth browser authorization ready", body = AuthenticateMcpOAuthResponse, content_type = "application/json"), (status = 400, description = "Authentication could not start", body = crate::ApiErrorBody, content_type = "application/json"), (status = 409, description = "Loopback callback is unavailable", body = crate::ApiErrorBody, content_type = "application/json"))
 )]
 pub async fn authenticate_oauth_handler(
     State(manager): State<SessionManager>,
     AxumPath(server_name): AxumPath<String>,
+    payload: Option<Json<AuthenticateMcpOAuthRequest>>,
 ) -> Result<Json<AuthenticateMcpOAuthResponse>, ApiError> {
     let endpoint = oauth_endpoint(&manager, &server_name)?;
+    let flow_key = oauth_flow_key(&manager, &server_name);
+    let request = payload.map(|Json(value)| value).unwrap_or_default();
+    let callback = oauth_callback_target(&manager, &server_name)?;
 
-    let old_tasks = {
+    let old_task = {
         let mut flows = OAUTH_FLOWS.lock().await;
-        flows
-            .drain()
-            .filter_map(|(_, flow)| match flow {
-                OAuthFlowState::Connecting { task, .. } => Some(task),
-                OAuthFlowState::Failed => None,
-            })
-            .collect::<Vec<_>>()
+        flows.remove(&flow_key).and_then(|flow| match flow {
+            OAuthFlowState::Connecting { task, .. } => task,
+            OAuthFlowState::Failed => None,
+        })
     };
-    for task in old_tasks {
+    if let Some(task) = old_task {
         task.abort();
         let _ = task.await;
     }
 
-    let listeners = OAuthCallbackListeners::bind(1456).await.map_err(|_| {
+    let (listeners, redirect_uri) = match callback {
+        OAuthCallbackTarget::Loopback => {
+            let listeners = OAuthCallbackListeners::bind(1456).await.map_err(|_| {
+                oauth_error(
+                    StatusCode::CONFLICT,
+                    "the local OAuth callback port is unavailable",
+                )
+            })?;
+            (Some(listeners), mcp::MCP_OAUTH_REDIRECT_URI.to_string())
+        }
+        OAuthCallbackTarget::Remote { redirect_uri } => (None, redirect_uri),
+    };
+    let session = mcp::begin_mcp_oauth_authorization(
+        manager.root_cwd(),
+        &server_name,
+        &endpoint,
+        &redirect_uri,
+        &request.additional_scopes,
+    )
+    .await
+    .map_err(|_| {
         oauth_error(
-            StatusCode::CONFLICT,
-            "the local OAuth callback port is unavailable",
+            StatusCode::BAD_REQUEST,
+            "MCP OAuth authentication could not start",
         )
     })?;
-    let session = mcp::begin_mcp_oauth_authorization(manager.root_cwd(), &server_name, &endpoint)
-        .await
-        .map_err(|_| {
-            oauth_error(
-                StatusCode::BAD_REQUEST,
-                "MCP OAuth authentication could not start",
-            )
-        })?;
     let authorization_url = session.authorization_url().to_string();
     let generation = OAUTH_FLOW_GENERATION.fetch_add(1, Ordering::Relaxed);
-    let completion_name = server_name.clone();
+    let completion_key = flow_key.clone();
     let (start_sender, start_receiver) = tokio::sync::oneshot::channel();
-    let task = tokio::spawn(async move {
-        if start_receiver.await.is_err() {
-            return;
-        }
-        let success = run_oauth_callback(listeners, session).await;
-        let mut flows = OAUTH_FLOWS.lock().await;
-        let current = flows.get(&completion_name);
-        if !matches!(current, Some(OAuthFlowState::Connecting { generation: value, .. }) if *value == generation)
-        {
-            return;
-        }
-        if success {
-            flows.remove(&completion_name);
-        } else {
-            flows.insert(completion_name, OAuthFlowState::Failed);
-        }
-    });
-    {
-        let mut flows = OAUTH_FLOWS.lock().await;
-        flows.insert(server_name, OAuthFlowState::Connecting { generation, task });
-    }
+    let task = match listeners {
+        Some(listeners) => Some(tokio::spawn(async move {
+            if start_receiver.await.is_err() {
+                return;
+            }
+            let success = run_oauth_callback(listeners, session).await;
+            let mut flows = OAUTH_FLOWS.lock().await;
+            let current = flows.get(&completion_key);
+            if !matches!(current, Some(OAuthFlowState::Connecting { generation: value, .. }) if *value == generation)
+            {
+                return;
+            }
+            if success {
+                flows.remove(&completion_key);
+            } else {
+                flows.insert(completion_key, OAuthFlowState::Failed);
+            }
+        })),
+        None => Some(tokio::spawn(async move {
+            if start_receiver.await.is_err() {
+                return;
+            }
+            drop(session);
+            tokio::time::sleep(OAUTH_CALLBACK_TIMEOUT).await;
+            let mut flows = OAUTH_FLOWS.lock().await;
+            if matches!(flows.get(&completion_key), Some(OAuthFlowState::Connecting { generation: value, .. }) if *value == generation)
+            {
+                flows.insert(completion_key, OAuthFlowState::Failed);
+            }
+        })),
+    };
+    OAUTH_FLOWS.lock().await.insert(
+        flow_key,
+        OAuthFlowState::Connecting {
+            generation,
+            authorization_url: authorization_url.clone(),
+            task,
+        },
+    );
     let _ = start_sender.send(());
     Ok(Json(AuthenticateMcpOAuthResponse {
         status: McpOAuthPublicStatus::Connecting,
@@ -1155,6 +1369,65 @@ impl OAuthCallbackListeners {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/mcp_library/servers/{server_name}/oauth/callback",
+    operation_id = "get_mcp_library_servers_server_name_oauth_callback",
+    tag = "mcp-library",
+    params(("server_name" = String, Path)),
+    responses((status = 200, description = "OAuth authorization complete", content_type = "text/plain"), (status = 400, description = "OAuth callback rejected", content_type = "text/plain"))
+)]
+pub async fn oauth_callback_handler(
+    State(manager): State<SessionManager>,
+    AxumPath(server_name): AxumPath<String>,
+    RawQuery(query): RawQuery,
+) -> Response {
+    let result = async {
+        let endpoint = oauth_endpoint(&manager, &server_name)?;
+        let OAuthCallbackTarget::Remote { redirect_uri } =
+            oauth_callback_target(&manager, &server_name)?
+        else {
+            return Err(ApiError::bad_request(
+                "remote MCP OAuth callbacks are not configured".to_string(),
+            ));
+        };
+        let callback_url = match query {
+            Some(query) => format!("{redirect_uri}?{query}"),
+            None => redirect_uri,
+        };
+        mcp::complete_mcp_oauth_authorization(
+            manager.root_cwd(),
+            &server_name,
+            &endpoint,
+            &callback_url,
+        )
+        .await
+        .map_err(|_| ApiError::bad_request("MCP OAuth callback was rejected".to_string()))?;
+        OAUTH_FLOWS
+            .lock()
+            .await
+            .remove(&oauth_flow_key(&manager, &server_name));
+        Ok::<_, ApiError>(())
+    }
+    .await;
+
+    let (status, body) = match result {
+        Ok(()) => (
+            StatusCode::OK,
+            "Authorization complete. You can close this window.",
+        ),
+        Err(_) => (
+            StatusCode::BAD_REQUEST,
+            "Authorization could not be completed. Return to NAC and try again.",
+        ),
+    };
+    let mut response = (status, body).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
 async fn run_oauth_callback(
     listeners: OAuthCallbackListeners,
     session: mcp::McpOAuthAuthorizationSession,
@@ -1173,7 +1446,7 @@ async fn run_oauth_callback(
         else {
             continue;
         };
-        let Some(target) = oauth_callback_target(&request[..read]) else {
+        let Some(target) = oauth_callback_request_target(&request[..read]) else {
             write_oauth_callback_response(
                 &mut stream,
                 "404 Not Found",
@@ -1209,7 +1482,7 @@ async fn run_oauth_callback(
     }
 }
 
-fn oauth_callback_target(request: &[u8]) -> Option<&str> {
+fn oauth_callback_request_target(request: &[u8]) -> Option<&str> {
     if request.is_empty() || request.len() == 8192 {
         return None;
     }
@@ -1248,8 +1521,14 @@ pub async fn logout_oauth_handler(
     AxumPath(server_name): AxumPath<String>,
 ) -> Result<Json<McpOAuthStatusResponse>, ApiError> {
     let _ = oauth_endpoint(&manager, &server_name)?;
-    let flow = OAUTH_FLOWS.lock().await.remove(&server_name);
-    if let Some(OAuthFlowState::Connecting { task, .. }) = flow {
+    let flow = OAUTH_FLOWS
+        .lock()
+        .await
+        .remove(&oauth_flow_key(&manager, &server_name));
+    if let Some(OAuthFlowState::Connecting {
+        task: Some(task), ..
+    }) = flow
+    {
         task.abort();
         let _ = task.await;
     }
@@ -1262,6 +1541,7 @@ pub async fn logout_oauth_handler(
     Ok(Json(McpOAuthStatusResponse {
         status: public_oauth_status(status),
         message: None,
+        authorization_url: None,
     }))
 }
 
