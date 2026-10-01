@@ -32,6 +32,7 @@ import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SessionBehaviorPicker } from "@/app/components/modals/SessionBehaviorPicker";
+import { sessionBehaviourChoiceEnabled } from "@/app/lib/sessionBehavior";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { resolveCatalogModel } from "@/app/lib/catalog";
@@ -165,7 +166,9 @@ function CreateProjectForm({
   const creatingModelConfig = useAtomValue(createModelConfigAtom).waiting;
 
   const [mode, setMode] = useState<Mode>("local");
+  const behaviorChoice = sessionBehaviourChoiceEnabled();
   const [behavior, setBehavior] = useState<SessionBehavior>("orchestrator");
+  const sessionBehavior: SessionBehavior = behaviorChoice ? behavior : "direct";
   const [cwd, setCwd] = useState(defaultCwd);
   const [name, setName] = useState("");
   const [reasoning, setReasoning] = useState("");
@@ -443,7 +446,7 @@ function CreateProjectForm({
     // The location is the project's, so the request must not restate it: the
     // server rejects a project-selected create that also carries a cwd.
     const body: CreateSessionRequest = {
-      behavior,
+      behavior: sessionBehavior,
       first_chat: true,
       project_id: projectId,
       model,
@@ -557,7 +560,9 @@ function CreateProjectForm({
       }
     >
       <div className="flex flex-col gap-8 md:gap-6 [&>*]:shrink-0">
-        <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+        {behaviorChoice ? (
+          <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+        ) : null}
 
         <div className="flex flex-col gap-1">
           <FieldLabel label="Environment" hint="Where NAC runs commands and accesses files." />
@@ -663,7 +668,7 @@ function CreateProjectForm({
               <LightModelSection
                 key={savedLightKey}
                 initial={savedLight}
-                behavior={behavior}
+                behavior={sessionBehavior}
                 onChange={onLight}
               />
               <Separator />

@@ -19,6 +19,7 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { useNow } from "@/app/hooks/useNow";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { routes } from "@/app/lib/routes";
+import { sessionBehaviourChoiceEnabled } from "@/app/lib/sessionBehavior";
 import { cn } from "@/app/lib/cn";
 import {
   formatClock,
@@ -206,7 +207,7 @@ export function TopSingleSessionHeader({
               <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-1 py-[2px] text-basic-tertiary">
                 {relationship}
               </span>
-            ) : behavior ? (
+            ) : behavior && sessionBehaviourChoiceEnabled() ? (
               <span className="tag-label inline-flex shrink-0 items-center rounded-full border border-tertiary bg-elevation-sublevel-variant-B px-1 py-[2px] text-basic-tertiary">
                 {BEHAVIOR_BADGE[behavior]}
               </span>

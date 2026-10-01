@@ -22,6 +22,7 @@ import {
 import { TooltipPosition } from "@/app/atoms/tooltip";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
 import { readAsync } from "@/app/effect/remote";
+import { sessionBehaviourChoiceEnabled } from "@/app/lib/sessionBehavior";
 import {
   projectsAtom,
   SESSIONS_POLL_MS,
@@ -114,7 +115,7 @@ export function LeftSidebarPanel({
                   <TabButton onClick={openMenu}>
                     <Icon iconName={IconName.Add} />
                     <span className="text-left flex-grow">New Session</span>
-                    <Icon iconName={IconName.Right} />
+                    {sessionBehaviourChoiceEnabled() ? <Icon iconName={IconName.Right} /> : null}
                   </TabButton>
                 )}
               </NewSessionPopover>

@@ -136,6 +136,48 @@ function locatorJsx(): Plugin {
  * pasting into Cursor opens the file at the top. Rewrite that call to include
  * the absolute path and exact position.
  */
+/** Repo-root `.env` key, without executing the rest of the file. */
+function sessionBehaviourFromEnv(repoRoot: string): string {
+  const fromProcess = process.env.SESSION_BEHAVIOUR?.trim();
+  if (fromProcess) return fromProcess.replace(/^['"]|['"]$/g, "");
+  const file = path.join(repoRoot, ".env");
+  if (!fs.existsSync(file)) return "";
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const body = trimmed.startsWith("export ") ? trimmed.slice("export ".length) : trimmed;
+    if (!body.startsWith("SESSION_BEHAVIOUR=")) continue;
+    return body
+      .slice("SESSION_BEHAVIOUR=".length)
+      .trim()
+      .replace(/^['"]|['"]$/g, "");
+  }
+  return "";
+}
+
+/**
+ * Dev-only. The committed bundle stays behavior-neutral; nac-web injects the
+ * same global when it serves index.html, so a restarted binary honors the env.
+ */
+function sessionBehaviourFlag(): Plugin {
+  const repoRoot = path.resolve(__dirname, "../../..");
+  return {
+    name: "nac:session-behaviour",
+    apply: "serve",
+    transformIndexHtml() {
+      const value = sessionBehaviourFromEnv(repoRoot);
+      if (!value) return undefined;
+      return [
+        {
+          tag: "script",
+          children: `window.__NAC_SESSION_BEHAVIOUR__=${JSON.stringify(value)}`,
+          injectTo: "head-prepend",
+        },
+      ];
+    },
+  };
+}
+
 function locatorCopyWithLine(): Plugin {
   const needle = "navigator.clipboard.writeText(linkProps.filePath)";
   const replacement =
@@ -158,7 +200,14 @@ export default defineConfig(({ command }) => {
   const base = command === "build" ? BASE : "/";
   return {
     base,
-    plugins: [locatorJsx(), locatorCopyWithLine(), react(), tailwindcss(), mathjaxFonts()],
+    plugins: [
+      sessionBehaviourFlag(),
+      locatorJsx(),
+      locatorCopyWithLine(),
+      react(),
+      tailwindcss(),
+      mathjaxFonts(),
+    ],
     define: {
       __MATHJAX_FONT_URL__: JSON.stringify(base + MATHJAX_FONT_DIR),
       // MathJax reads its own version off disk with `eval('require')` unless a

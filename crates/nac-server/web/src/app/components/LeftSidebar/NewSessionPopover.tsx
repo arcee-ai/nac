@@ -6,7 +6,10 @@ import { Icon, IconName, Popover, PopoverPlacement, PopoverSize, TabButton } fro
 import { ClientRequestError } from "@/app/effect/errors";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
-import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
+import {
+  sessionBehaviorPresentation,
+  sessionBehaviourChoiceEnabled,
+} from "@/app/lib/sessionBehavior";
 import { useToast } from "@/app/providers/ToastProvider";
 import { createSessionAtom } from "@/app/services/queries";
 import type { SessionBehavior } from "@/app/types/api";
@@ -63,13 +66,7 @@ export function NewSessionPopover({
   const createSession = useAtomSet(createSessionAtom, { mode: "promise" });
   const creatingSession = useAtomValue(createSessionAtom).waiting;
 
-  const openMenu = () => {
-    if (!projectId) {
-      onUnavailable();
-      return;
-    }
-    setOpen((current) => !current);
-  };
+  const choiceEnabled = sessionBehaviourChoiceEnabled();
 
   const start = async (behavior: SessionBehavior) => {
     if (!projectId || creatingSession) return;
@@ -82,6 +79,22 @@ export function NewSessionPopover({
       toast.error(`Failed to start a chat: ${humanErrorText(toRunError(commandError(error)))}`);
     }
   };
+
+  const openMenu = () => {
+    if (!projectId) {
+      onUnavailable();
+      return;
+    }
+    if (!choiceEnabled) {
+      void start("direct");
+      return;
+    }
+    setOpen((current) => !current);
+  };
+
+  if (!choiceEnabled) {
+    return <div className={className}>{children(openMenu)}</div>;
+  }
 
   return (
     <Popover

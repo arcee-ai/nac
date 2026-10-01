@@ -1101,7 +1101,40 @@ async fn health(State(manager): State<SessionManager>) -> (StatusCode, Json<Heal
 // self-contained executable with no runtime filesystem dependency.
 pub(crate) static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets");
 
+fn session_behaviour_setting() -> Option<String> {
+    if let Ok(value) = std::env::var("SESSION_BEHAVIOUR") {
+        let trimmed = value.trim().trim_matches('"').trim_matches('\'').to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+    let path = std::env::current_dir().ok()?.join(".env");
+    let text = std::fs::read_to_string(path).ok()?;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let Some(raw) = line.strip_prefix("SESSION_BEHAVIOUR=") else {
+            continue;
+        };
+        let raw = raw.trim().trim_matches('"').trim_matches('\'');
+        if !raw.is_empty() {
+            return Some(raw.to_string());
+        }
+    }
+    None
+}
+
 async fn index_html() -> impl IntoResponse {
+    let mut html = include_str!("../../assets/dist/index.html").to_string();
+    // Same global the Vite dev server injects. Absent means the three behaviors stay.
+    if let Some(value) = session_behaviour_setting() {
+        let literal = serde_json::to_string(&value).unwrap_or_else(|_| "\"\"".to_string());
+        let tag = format!("<script>window.__NAC_SESSION_BEHAVIOUR__={literal}</script>");
+        html = html.replacen("<head>", &format!("<head>{tag}"), 1);
+    }
     (
         [
             (header::CONTENT_TYPE, "text/html; charset=utf-8"),
@@ -1109,7 +1142,7 @@ async fn index_html() -> impl IntoResponse {
             // cached or a client would keep loading a stale build forever.
             (header::CACHE_CONTROL, "no-cache"),
         ],
-        include_str!("../../assets/dist/index.html"),
+        html,
     )
 }
 

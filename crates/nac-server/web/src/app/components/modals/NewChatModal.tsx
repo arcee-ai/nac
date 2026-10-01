@@ -21,6 +21,7 @@ import {
 } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
+import { sessionBehaviourChoiceEnabled } from "@/app/lib/sessionBehavior";
 import { useToast } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import {
@@ -130,7 +131,9 @@ function NewChatForm({
   const projects = useAtomValue(projectsAtom, readAsync);
   const sessions = useAtomValue(sessionsAtom(SESSIONS_POLL_MS), readAsync);
   const modelConfigs = useAtomValue(modelConfigsAtom, readAsync);
+  const behaviorChoice = sessionBehaviourChoiceEnabled();
   const [behavior, setBehavior] = useState<SessionBehavior>("orchestrator");
+  const sessionBehavior: SessionBehavior = behaviorChoice ? behavior : "direct";
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
   const [light, setLight] = useState<LightSelection>({ mode: "single", light: null });
   const [error, setError] = useState("");
@@ -245,7 +248,7 @@ function NewChatForm({
           : null;
       const request: CreateSessionRequest = {
         project_id: projectId,
-        behavior,
+        behavior: sessionBehavior,
         first_chat: firstChat,
         backend: selected.backend,
         model: selected.model,
@@ -278,7 +281,11 @@ function NewChatForm({
       flush
       className="h-[700px]"
       title="New Chat"
-      subheader="Choose this chat's behavior and models. These settings apply to this chat without changing the project default."
+      subheader={
+        behaviorChoice
+          ? "Choose this chat's behavior and models. These settings apply to this chat without changing the project default."
+          : "Choose this chat's models. These settings apply to this chat without changing the project default."
+      }
       footer={
         <Button
           variant={ButtonVariant.Primary}
@@ -290,7 +297,9 @@ function NewChatForm({
         </Button>
       }
     >
-      <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+      {behaviorChoice ? (
+        <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+      ) : null}
       {inheritancePending ? (
         <div className="flex items-center gap-2 py-6 text-micro text-basic-muted" role="status">
           <Loader size={LoaderSize.Micro} />
@@ -320,7 +329,7 @@ function NewChatForm({
           <LightModelSection
             key={selectedLightKey}
             initial={selectedLight}
-            behavior={behavior}
+            behavior={sessionBehavior}
             onChange={onLight}
           />
           {error && !advanced ? (

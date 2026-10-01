@@ -2,6 +2,23 @@ import { IconName } from "@/app/atoms/icon";
 import type { SessionPanel } from "@/app/lib/routes";
 import type { SessionBehavior, SessionLineage } from "@/app/types/api";
 
+declare global {
+  interface Window {
+    /** Set by the dev server or nac-web from SESSION_BEHAVIOUR before the app boots. */
+    __NAC_SESSION_BEHAVIOUR__?: string;
+  }
+}
+
+/**
+ * False when SESSION_BEHAVIOUR is `false` or `0`. New chats are then Direct
+ * coding agents, and the behavior pickers stay hidden. Unset keeps all three.
+ */
+export function sessionBehaviourChoiceEnabled(): boolean {
+  if (typeof window === "undefined") return true;
+  const raw = window.__NAC_SESSION_BEHAVIOUR__?.trim().toLowerCase() ?? "";
+  return raw !== "false" && raw !== "0";
+}
+
 export interface SessionBehaviorPresentation {
   id: SessionBehavior;
   label: string;
