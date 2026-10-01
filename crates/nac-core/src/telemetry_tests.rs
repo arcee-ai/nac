@@ -368,15 +368,3 @@ fn sqlite_primary_and_extended_error_identity_are_retained_without_message() {
         .unwrap()
         .contains("file truncated"));
 }
-
-#[test]
-fn turso_adapter_error_contract_retains_only_numeric_identity() {
-    let identity = StoreErrorIdentity::turso(5, 517);
-    assert_eq!(identity.engine, "turso");
-    assert_eq!(identity.primary_code, 5);
-    assert_eq!(identity.extended_code, 517);
-    assert_eq!(
-        serde_json::to_string(&identity).unwrap(),
-        r#"{"engine":"turso","primary_code":5,"extended_code":517}"#
-    );
-}

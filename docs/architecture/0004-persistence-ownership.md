@@ -69,22 +69,22 @@ make the host process the commit-and-ack owner; workers will return mutation
 intent with session/run/generation identity. This decision does not implement
 that coordinator or change worker protocol yet.
 
-### Engine split and convergence
+### Selected backend
 
-Local and managed deployments may temporarily select different embedded
-engines only behind an explicit backend identity and one shared application
-conformance suite. No remote database service or Turso Cloud is permitted, and
-this decision does not select embedded Turso.
-
-Re-evaluate any engine split at stable-release planning. Converge when one of
-these becomes true: embedded Turso multiprocess behavior passes NAC
-qualification; local NAC adopts one store-owning daemon; one-process-per-store
-becomes the permanent local contract; or Managed NAC remains on SQLite.
+Local and Managed NAC remain on SQLite WAL. Allison accepted the ALL-114
+**NO-GO** decision on 2026-09-30; embedded and remote Turso are not supported
+backends. Qualification evidence remains in closed, unmerged
+[PR #310](https://github.com/arcee-ai/nac/pull/310) and
+[ALL-114](https://linear.app/arcee/issue/ALL-114).
+Any different engine requires new explicit decision and qualification work.
+The NO-GO decision does not establish the cause of ALL-106 or resolve its
+performance and durability symptoms.
 
 ### Conversion, backup, restore, and failure
 
-An engine conversion must be explicit, versioned, restartable, and performed
-while one process owns a quiesced source store. It writes a new target, verifies
+Any future engine conversion requires a new explicit product decision. It must
+be versioned, restartable, and performed while one process owns a quiesced
+source store. It writes a new target, verifies
 schema and application conformance, then atomically records or selects the new
 engine identity. It must never infer engine identity from a partially converted
 file or silently overwrite the source. Historical conversion and direct
@@ -126,5 +126,5 @@ ALL-106 incident cause is resolved.
   restart boundary.
 - Treating the ALL-106 incident as proof of an engine defect would exceed the
   available evidence.
-- Selecting Turso or introducing the full persistence coordinator here would
-  bypass their separate qualification and application-design gates.
+- Embedded Turso was rejected by the accepted ALL-114 qualification decision.
+  The full persistence coordinator remains separate application-design work.
