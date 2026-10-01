@@ -241,12 +241,21 @@ fn load_with_connection(
         .optional()?)
 }
 
+coordinated_command! {
 pub fn load_session_goal(path: &Path, session_id: &str) -> Result<Option<SessionGoalRecord>> {
     let connection = open_runtime_connection(path)?;
     require_direct_session(&connection, session_id)?;
     load_with_connection(&connection, session_id)
 }
+command LoadSessionGoalCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn create_session_goal(
     path: &Path,
     session_id: &str,
@@ -306,7 +315,18 @@ pub fn create_session_goal(
     transaction.commit()?;
     Ok(goal)
 }
+command CreateSessionGoalCommand {
+    session_id: String = session_id.to_owned(),
+    objective: String = objective.to_owned(),
+    token_budget: Option<u64> = token_budget,
+    active_run: Option<GoalRunBaseline> = active_run.cloned(),
+}
+call |command| (&command.session_id, &command.objective, command.token_budget, command.active_run.as_ref())
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn update_session_goal_by_user(
     path: &Path,
     session_id: &str,
@@ -386,7 +406,18 @@ pub fn update_session_goal_by_user(
     transaction.commit()?;
     Ok(goal)
 }
+command UpdateSessionGoalByUserCommand {
+    session_id: String = session_id.to_owned(),
+    goal_id: String = goal_id.to_owned(),
+    expected_version: i64 = expected_version,
+    update: UserGoalUpdate = update,
+}
+call |command| (&command.session_id, &command.goal_id, command.expected_version, command.update)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn update_session_goal_by_model(
     path: &Path,
     session_id: &str,
@@ -411,7 +442,17 @@ pub fn update_session_goal_by_model(
     }
     load_with_connection(&connection, session_id)?.ok_or_else(|| anyhow!("goal disappeared"))
 }
+command UpdateSessionGoalByModelCommand {
+    session_id: String = session_id.to_owned(),
+    goal_id: String = goal_id.to_owned(),
+    status: GoalStatus = status,
+}
+call |command| (&command.session_id, &command.goal_id, command.status)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn clear_session_goal(
     path: &Path,
     session_id: &str,
@@ -430,7 +471,17 @@ pub fn clear_session_goal(
     }
     Ok(())
 }
+command ClearSessionGoalCommand {
+    session_id: String = session_id.to_owned(),
+    goal_id: String = goal_id.to_owned(),
+    expected_version: i64 = expected_version,
+}
+call |command| (&command.session_id, &command.goal_id, command.expected_version)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn bind_session_goal_run(
     path: &Path,
     session_id: &str,
@@ -462,7 +513,16 @@ pub fn bind_session_goal_run(
     }
     load_with_connection(&connection, session_id)
 }
+command BindSessionGoalRunCommand {
+    session_id: String = session_id.to_owned(),
+    baseline: GoalRunBaseline = baseline.clone(),
+}
+call |command| (&command.session_id, &command.baseline)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn settle_session_goal_run(
     path: &Path,
     session_id: &str,
@@ -481,7 +541,19 @@ pub fn settle_session_goal_run(
         None,
     )
 }
+command SettleSessionGoalRunCommand {
+    session_id: String = session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    final_billable_tokens: u64 = final_billable_tokens,
+    terminal_at_epoch_ms: u64 = terminal_at_epoch_ms,
+    disposition: GoalRunDisposition = disposition,
+}
+call |command| (&command.session_id, &command.run_id, command.final_billable_tokens, command.terminal_at_epoch_ms, command.disposition)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(Some(&command.run_id));
+port public;
+}
 
+coordinated_command! {
 pub fn settle_session_goal_run_with_failure(
     path: &Path,
     session_id: &str,
@@ -505,6 +577,18 @@ pub fn settle_session_goal_run_with_failure(
     )?;
     transaction.commit()?;
     Ok(goal)
+}
+command SettleSessionGoalRunWithFailureCommand {
+    session_id: String = session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    final_billable_tokens: u64 = final_billable_tokens,
+    terminal_at_epoch_ms: u64 = terminal_at_epoch_ms,
+    disposition: GoalRunDisposition = disposition,
+    failure: Option<crate::run_failure::RunFailure> = failure.cloned(),
+}
+call |command| (&command.session_id, &command.run_id, command.final_billable_tokens, command.terminal_at_epoch_ms, command.disposition, command.failure.as_ref())
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(Some(&command.run_id));
+port public;
 }
 
 pub(crate) fn settle_session_goal_run_with_connection(
@@ -722,6 +806,7 @@ pub(crate) fn reconcile_session_goal_terminal_with_connection(
     Ok(())
 }
 
+coordinated_command! {
 /// Clear a stale run claim after the caller has acquired the session operation
 /// lease. No token delta can be reconstructed after a process loss; already
 /// terminal-checkpointed totals remain authoritative and the active goal is
@@ -741,6 +826,13 @@ pub fn reconcile_session_goal_run(
         params![now_utc(), session_id],
     )?;
     load_with_connection(&connection, session_id)
+}
+command ReconcileSessionGoalRunCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 #[cfg(test)]

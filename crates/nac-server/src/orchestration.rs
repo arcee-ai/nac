@@ -100,7 +100,7 @@ impl OrchestrationOperations {
     ) -> Result<Value> {
         let store_path = self.manager.store_info().store_path;
         let session_id = session_id.to_string();
-        tokio::task::spawn_blocking(move || {
+        nac_core::store::spawn_blocking_store_caller(move || {
             let mut all = if let Some(thread_name) = thread_name {
                 nac_core::store::thread_read(&store_path, &session_id, &thread_name)?
             } else {

@@ -71,19 +71,7 @@ impl SessionManager {
         &self,
         session_id: &str,
     ) -> Result<CompactSessionResponse, CompactSessionError> {
-        if !self
-            .persisted_operation_session_exists(session_id)
-            .map_err(|error| report_failure(session_id, "verify persisted session", &error))?
-        {
-            return Err(CompactSessionError::NotFound);
-        }
-        if self
-            .session_lineage(session_id)
-            .map_err(|error| report_failure(session_id, "verify session ownership", &error))?
-            .is_some()
-        {
-            return Err(CompactSessionError::NotFound);
-        }
+        self.validate_compaction_session(session_id).await?;
 
         let handle = {
             let gate = self.lifecycle_gate(session_id);
@@ -97,28 +85,23 @@ impl SessionManager {
                         }
                     })?;
 
-            if !self
-                .persisted_operation_session_exists(session_id)
-                .map_err(|error| report_failure(session_id, "recheck persisted session", &error))?
-            {
-                return Err(CompactSessionError::NotFound);
-            }
-            if self
-                .session_lineage(session_id)
-                .map_err(|error| report_failure(session_id, "recheck session ownership", &error))?
-                .is_some()
-            {
-                return Err(CompactSessionError::NotFound);
-            }
+            self.validate_compaction_session(session_id).await?;
 
             let service = self
                 .attach_current_operation_service_locked(session_id, &operation_lease)
                 .await
                 .map_err(|error| map_preparation_error(session_id, error))?;
-            service
-                .connect_client()
-                .try_compact_with_lease(operation_lease)
-                .map_err(|error| map_admission_error(session_id, error))?
+            let client = service.connect_client();
+            let session = session_id.to_owned();
+            self.inner
+                ._store_ownership
+                .call_legacy(move || {
+                    client
+                        .try_compact_with_lease(operation_lease)
+                        .map_err(|error| map_admission_error(&session, error))
+                })
+                .await
+                .map_err(|error| report_failure(session_id, "admit compaction caller", &error))??
         };
 
         match handle.wait().await {
@@ -139,6 +122,32 @@ impl SessionManager {
                 Err(report_failure(session_id, "complete compaction", &error))
             }
         }
+    }
+    async fn validate_compaction_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), CompactSessionError> {
+        let manager = self.clone();
+        let session = session_id.to_owned();
+        self.inner
+            ._store_ownership
+            .call_legacy(move || {
+                if !manager
+                    .persisted_operation_session_exists(&session)
+                    .map_err(|error| report_failure(&session, "verify persisted session", &error))?
+                    || manager
+                        .session_lineage(&session)
+                        .map_err(|error| {
+                            report_failure(&session, "verify session ownership", &error)
+                        })?
+                        .is_some()
+                {
+                    return Err(CompactSessionError::NotFound);
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|error| report_failure(session_id, "validate compaction caller", &error))?
     }
 }
 

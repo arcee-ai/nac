@@ -38,6 +38,29 @@ impl ThreadCancellation {
         }
     }
 
+    /// A final mutation gate can be held by an admitted caller awaiting SQL.
+    /// Cancellation owns one local obligation and waits off the runtime.
+    pub(crate) async fn cancel_async(&self) {
+        loop {
+            let cancellation = self.clone();
+            match crate::store::spawn_blocking_store_caller(move || cancellation.cancel()).await {
+                Err(error)
+                    if matches!(
+                        error.downcast_ref::<crate::store::PersistenceAdmissionError>(),
+                        Some(crate::store::PersistenceAdmissionError::CallerOverloaded)
+                    ) =>
+                {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                Err(error) => {
+                    eprintln!("nac: cancellation gate task failed: {error:#}");
+                    break;
+                }
+                Ok(()) => break,
+            }
+        }
+    }
+
     pub(crate) fn is_cancelled(&self) -> bool {
         self.state.cancelled.load(Ordering::Acquire)
             || self
@@ -210,6 +233,7 @@ impl ActiveThreadRegistry {
         .map(Some)
     }
 
+    #[cfg(test)]
     pub fn close(
         &self,
         store_path: &Path,
@@ -217,6 +241,15 @@ impl ActiveThreadRegistry {
         thread_name: &str,
         dispatch_id: &str,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        if !self.close_local(thread_name, dispatch_id) {
+            return Ok(Vec::new());
+        }
+        crate::store::expire_thread_steering(store_path, session_id, dispatch_id)
+    }
+
+    /// Mandatory process-local completion cannot depend on persistence admission.
+    /// Match the exact dispatch before notifying cancellation waiters.
+    pub(crate) fn close_local(&self, thread_name: &str, dispatch_id: &str) -> bool {
         let mut state = self.lock();
         if state
             .dispatches
@@ -224,12 +257,12 @@ impl ActiveThreadRegistry {
             .map(|dispatch| dispatch.dispatch_id.as_str())
             != Some(dispatch_id)
         {
-            return Ok(Vec::new());
+            return false;
         }
         state.dispatches.remove(thread_name);
         drop(state);
         self.activity.notify_waiters();
-        crate::store::expire_thread_steering(store_path, session_id, dispatch_id)
+        true
     }
 
     pub async fn cancel_and_drain(
@@ -250,14 +283,33 @@ impl ActiveThreadRegistry {
                 .retain(|_, dispatch| dispatch.state == ActiveThreadDispatchState::Running);
             (cancellation, targets)
         };
-        cancellation.cancel();
+        let owned = steering_store.is_some_and(|(path, _)| {
+            crate::store::coordinator::owner_for(path)
+                .map(|owner| owner.is_some())
+                .unwrap_or(true)
+        });
+        if owned {
+            cancellation.cancel_async().await;
+        } else {
+            cancellation.cancel();
+        }
         self.activity.notify_waiters();
 
         let mut expired = Vec::new();
         let mut steering_error = None;
         if let Some((store_path, session_id)) = steering_store {
             for dispatch_id in &targets {
-                match crate::store::expire_thread_steering(store_path, session_id, dispatch_id) {
+                let expiry = match crate::store::coordinator::owner_for(store_path)? {
+                    Some(owner) => {
+                        owner
+                            .expire_thread_steering(session_id.to_owned(), dispatch_id.clone())
+                            .await
+                    }
+                    None => {
+                        crate::store::expire_thread_steering(store_path, session_id, dispatch_id)
+                    }
+                };
+                match expiry {
                     Ok(records) => expired.extend(records),
                     Err(error) if steering_error.is_none() => steering_error = Some(error),
                     Err(_) => {}

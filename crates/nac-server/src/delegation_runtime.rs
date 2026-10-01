@@ -75,12 +75,14 @@ impl nac_core::traditional_children::TraditionalChildController
     {
         Box::pin(async move {
             let manager = self.manager()?;
-            let _host_admission = manager.managed_work_admission()?;
+            let _host_admission = manager.managed_work_admission_async().await?;
             nac_core::traditional_children::validate_general_profile(&request.profile)?;
             if request.prompt.trim().is_empty() {
                 return Err(anyhow!("traditional child prompt is empty"));
             }
-            manager.repair_orphaned_completion_suppressions(&request.parent_session_id)?;
+            manager
+                .repair_orphaned_completion_suppressions_async(&request.parent_session_id)
+                .await?;
             let child_session_id = match request.child_session_id {
                 Some(child_session_id) => child_session_id,
                 None => {
@@ -260,11 +262,13 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
     ) -> nac_core::orchestration_control::OrchestrationFuture<'a, ManagedOrchestratorRecord> {
         Box::pin(async move {
             let manager = self.manager()?;
-            let _host_admission = manager.managed_work_admission()?;
+            let _host_admission = manager.managed_work_admission_async().await?;
             if request.prompt.trim().is_empty() {
                 return Err(anyhow!("managed orchestrator prompt is empty"));
             }
-            manager.repair_orphaned_completion_suppressions(&request.parent_session_id)?;
+            manager
+                .repair_orphaned_completion_suppressions_async(&request.parent_session_id)
+                .await?;
             let orchestrator_session_id = match request.orchestrator_session_id {
                 Some(session_id) => session_id,
                 None => {
@@ -278,7 +282,8 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             };
             let mut relation = manager
                 .delegation()
-                .managed_orchestrator(&request.parent_session_id, &orchestrator_session_id)?;
+                .managed_orchestrator_async(&request.parent_session_id, &orchestrator_session_id)
+                .await?;
             if relation.description != request.description.trim() {
                 return Err(anyhow!(
                     "managed orchestrator description is immutable (expected '{}')",
@@ -288,11 +293,13 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             if relation.status == ManagedOrchestratorStatus::Running {
                 let service = manager.attach_session(&orchestrator_session_id).await?;
                 if service.active_run().is_some() {
-                    manager.queue_managed_orchestrator_steering(
-                        &request.parent_session_id,
-                        &orchestrator_session_id,
-                        &request.prompt,
-                    )?;
+                    manager
+                        .queue_managed_orchestrator_steering_async(
+                            &request.parent_session_id,
+                            &orchestrator_session_id,
+                            &request.prompt,
+                        )
+                        .await?;
                     return Ok(relation);
                 }
                 match sessions::SessionOperationLease::try_acquire(
@@ -300,11 +307,13 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                     &orchestrator_session_id,
                 ) {
                     Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                        manager.queue_managed_orchestrator_steering(
-                            &request.parent_session_id,
-                            &orchestrator_session_id,
-                            &request.prompt,
-                        )?;
+                        manager
+                            .queue_managed_orchestrator_steering_async(
+                                &request.parent_session_id,
+                                &orchestrator_session_id,
+                                &request.prompt,
+                            )
+                            .await?;
                         return Ok(relation);
                     }
                     Err(error) => return Err(anyhow::Error::new(error)),
@@ -331,11 +340,10 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                     request.execution_mode,
                 )
                 .await?;
-            let relation = nac_core::store::load_managed_orchestrator(
-                &manager.inner.store_path,
-                &orchestrator_session_id,
-            )?
-            .ok_or_else(|| anyhow!("managed orchestrator disappeared after run admission"))?;
+            let relation = manager
+                .delegation()
+                .managed_orchestrator_async(&request.parent_session_id, &orchestrator_session_id)
+                .await?;
             debug_assert_eq!(
                 relation.run_id.as_deref(),
                 Some(submitted.run_id.as_str()),
@@ -370,7 +378,8 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             let manager = self.manager()?;
             let relation = manager
                 .delegation()
-                .managed_orchestrator(parent_session_id, orchestrator_session_id)?;
+                .managed_orchestrator_async(parent_session_id, orchestrator_session_id)
+                .await?;
             if relation.status != ManagedOrchestratorStatus::Running {
                 return Err(anyhow!("managed orchestrator is not running"));
             }
@@ -389,15 +398,18 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
                     )
                     .await?;
             } else {
-                manager.queue_managed_orchestrator_steering(
-                    parent_session_id,
-                    orchestrator_session_id,
-                    instruction,
-                )?;
+                manager
+                    .queue_managed_orchestrator_steering_async(
+                        parent_session_id,
+                        orchestrator_session_id,
+                        instruction,
+                    )
+                    .await?;
             }
             manager
                 .delegation()
-                .managed_orchestrator(parent_session_id, orchestrator_session_id)
+                .managed_orchestrator_async(parent_session_id, orchestrator_session_id)
+                .await
         })
     }
 
@@ -413,7 +425,8 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             let operations = orchestration::OrchestrationOperations::new(manager.clone());
             manager
                 .delegation()
-                .managed_orchestrator(parent_session_id, orchestrator_session_id)?;
+                .managed_orchestrator_async(parent_session_id, orchestrator_session_id)
+                .await?;
             match kind {
                 nac_core::orchestration_control::ManagedOrchestratorReadKind::Messages => {
                     let page = operations
@@ -452,7 +465,8 @@ impl nac_core::orchestration_control::OrchestrationController for ServerOrchestr
             let manager = self.manager()?;
             let relation = manager
                 .delegation()
-                .managed_orchestrator(parent_session_id, orchestrator_session_id)?;
+                .managed_orchestrator_async(parent_session_id, orchestrator_session_id)
+                .await?;
             if relation.generation != expected_generation {
                 return Err(anyhow!(
                     "managed orchestrator generation {expected_generation} was superseded by {}",

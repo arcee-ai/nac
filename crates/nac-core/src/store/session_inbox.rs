@@ -107,6 +107,7 @@ pub(crate) fn row_to_inbox_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<S
     })
 }
 
+coordinated_command! {
 pub fn create_session_inbox_item(
     path: &Path,
     session_id: &str,
@@ -144,7 +145,19 @@ pub fn create_session_inbox_item(
     )?;
     load_session_inbox_item_with_connection(&connection, session_id, connection.last_insert_rowid())
 }
+command CreateSessionInboxItemCommand {
+    session_id: String = session_id.to_owned(),
+    delivery: InboxDelivery = delivery,
+    content: String = content.to_owned(),
+    target_run_id: Option<String> = target_run_id.map(str::to_owned),
+    client_id: Option<String> = client_id.map(str::to_owned),
+}
+call |command| (&command.session_id, command.delivery, &command.content, command.target_run_id.as_deref(), command.client_id.as_deref())
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn load_session_inbox_item(
     path: &Path,
     session_id: &str,
@@ -152,6 +165,14 @@ pub fn load_session_inbox_item(
 ) -> Result<SessionInboxRecord> {
     let connection = open_runtime_connection(path)?;
     load_session_inbox_item_with_connection(&connection, session_id, item_id)
+}
+command LoadSessionInboxItemCommand {
+    session_id: String = session_id.to_owned(),
+    item_id: i64 = item_id,
+}
+call |command| (&command.session_id, command.item_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 pub(crate) fn load_session_inbox_item_with_connection(
@@ -172,6 +193,7 @@ pub(crate) fn load_session_inbox_item_with_connection(
         .ok_or_else(|| anyhow!("inbox item {item_id} was not found in session '{session_id}'"))
 }
 
+coordinated_command! {
 pub fn list_session_inbox(path: &Path, session_id: &str) -> Result<Vec<SessionInboxRecord>> {
     let connection = open_runtime_connection(path)?;
     let mut statement = connection.prepare(&format!(
@@ -181,7 +203,15 @@ pub fn list_session_inbox(path: &Path, session_id: &str) -> Result<Vec<SessionIn
     let rows = statement.query_map(params![session_id], row_to_inbox_record)?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
+command ListSessionInboxCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn next_pending_session_inbox_item(
     path: &Path,
     session_id: &str,
@@ -199,7 +229,15 @@ pub fn next_pending_session_inbox_item(
         )
         .optional()?)
 }
+command NextPendingSessionInboxItemCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn update_pending_session_inbox_item(
     path: &Path,
     session_id: &str,
@@ -240,7 +278,19 @@ pub fn update_pending_session_inbox_item(
     }
     load_session_inbox_item_with_connection(&connection, session_id, item_id)
 }
+command UpdatePendingSessionInboxItemCommand {
+    session_id: String = session_id.to_owned(),
+    item_id: i64 = item_id,
+    expected_version: i64 = expected_version,
+    delivery: InboxDelivery = delivery,
+    target_run_id: Option<String> = target_run_id.map(str::to_owned),
+}
+call |command| (&command.session_id, command.item_id, command.expected_version, command.delivery, command.target_run_id.as_deref())
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn cancel_pending_session_inbox_item(
     path: &Path,
     session_id: &str,
@@ -269,6 +319,15 @@ pub fn cancel_pending_session_inbox_item(
         ));
     }
     load_session_inbox_item_with_connection(&connection, session_id, item_id)
+}
+command CancelPendingSessionInboxItemCommand {
+    session_id: String = session_id.to_owned(),
+    item_id: i64 = item_id,
+    expected_version: i64 = expected_version,
+}
+call |command| (&command.session_id, command.item_id, command.expected_version)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 fn pending_update_error(

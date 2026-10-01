@@ -40,6 +40,7 @@ const CHECKPOINT_COLUMNS: &str =
      old_context_estimate, summary_prompt_tokens, summary_completion_tokens, \
      new_context_estimate, created_at";
 
+coordinated_command! {
 pub(crate) fn append_orchestrator_compaction_checkpoint(
     path: &Path,
     checkpoint: &NewOrchestratorCompactionCheckpoint,
@@ -139,7 +140,15 @@ pub(crate) fn append_orchestrator_compaction_checkpoint(
     transaction.commit()?;
     Ok(inserted)
 }
+command AppendOrchestratorCompactionCheckpointCommand {
+    checkpoint: NewOrchestratorCompactionCheckpoint = checkpoint.clone(),
+}
+call |command| (&command.checkpoint)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 pub(crate) fn load_orchestrator_compaction_checkpoints(
     path: &Path,
     session_id: &str,
@@ -163,6 +172,13 @@ pub(crate) fn load_orchestrator_compaction_checkpoints(
         }
     }
     Ok(checkpoints)
+}
+command LoadOrchestratorCompactionCheckpointsCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
 }
 
 fn is_checkpoint_decode_error(error: &rusqlite::Error) -> bool {

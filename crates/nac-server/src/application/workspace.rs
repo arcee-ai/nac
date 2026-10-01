@@ -45,7 +45,7 @@ impl<'a> WorkspaceApplication<'a> {
         let target = self.workspace_root(session_id).await?;
 
         let revision = self.resolve_revision(session_id, query.revision)?;
-        tokio::task::spawn_blocking(move || match revision {
+        nac_core::store::spawn_blocking_store_caller(move || match revision {
             Some(revision) => view::revision_file_diff(
                 &target,
                 revision.base_sha.as_deref(),
@@ -164,7 +164,7 @@ impl<'a> WorkspaceApplication<'a> {
         T: Send + 'static,
         F: FnOnce(&GitTarget) -> Result<T> + Send + 'static,
     {
-        tokio::task::spawn_blocking(move || {
+        nac_core::store::spawn_blocking_store_caller(move || {
             // The admission owns every process-local and cross-process lease.
             // Moving it into this uncancellable closure keeps authority alive
             // even if the request future awaiting the JoinHandle is aborted.
@@ -199,7 +199,7 @@ impl<'a> WorkspaceApplication<'a> {
     ) -> Result<view::WorkspaceFileList> {
         let target = self.workspace_root(session_id).await?;
         let revision = self.resolve_revision(session_id, revision)?;
-        tokio::task::spawn_blocking(move || match revision {
+        nac_core::store::spawn_blocking_store_caller(move || match revision {
             Some(revision) => view::list_revision_files(&target, &revision.commit_sha),
             None => view::list_files(&target),
         })
@@ -215,7 +215,7 @@ impl<'a> WorkspaceApplication<'a> {
     ) -> Result<view::WorkspaceFileContent> {
         let target = self.workspace_root(session_id).await?;
         let revision = self.resolve_revision(session_id, revision)?;
-        tokio::task::spawn_blocking(move || match revision {
+        nac_core::store::spawn_blocking_store_caller(move || match revision {
             Some(revision) => view::read_revision_file(&target, &revision.commit_sha, &path),
             None => view::read_file(&target, &path),
         })
@@ -252,7 +252,7 @@ impl<'a> WorkspaceApplication<'a> {
                 )
             })?
             .to_path_buf();
-        tokio::task::spawn_blocking(move || view::open_local_path(&root, &path))
+        nac_core::store::spawn_blocking_store_caller(move || view::open_local_path(&root, &path))
             .await
             .context("workspace open task failed")?
     }
@@ -276,7 +276,7 @@ impl<'a> WorkspaceApplication<'a> {
             .resolve_revision(session_id, Some(revision_id))?
             .ok_or_else(|| anyhow!("revision '{revision_id}' was not found"))?;
 
-        tokio::task::spawn_blocking(move || {
+        nac_core::store::spawn_blocking_store_caller(move || {
             view::revision_changes(&target, revision.base_sha.as_deref(), &revision.commit_sha)
         })
         .await
@@ -300,7 +300,7 @@ impl<'a> WorkspaceApplication<'a> {
 
     pub async fn workspace_branches(&self, session_id: &str) -> Result<workspace::BranchList> {
         let target = self.workspace_root(session_id).await?;
-        tokio::task::spawn_blocking(move || workspace::list_branches(&target))
+        nac_core::store::spawn_blocking_store_caller(move || workspace::list_branches(&target))
             .await
             .context("branch listing task failed")?
     }
@@ -310,7 +310,12 @@ impl<'a> WorkspaceApplication<'a> {
         session_id: &str,
         request: SwitchBranch,
     ) -> Result<workspace::BranchList> {
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         let admission = self.idle_workspace_root(session_id).await?;
 
         Self::execute_workspace_mutation(admission, "branch switch task failed", move |target| {
@@ -337,7 +342,12 @@ impl<'a> WorkspaceApplication<'a> {
         session_id: &str,
         request: CommitWorkspace,
     ) -> Result<workspace::CommitOutcome> {
-        self.manager.require_primary_operation_session(session_id)?;
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         let admission = self.idle_workspace_root(session_id).await?;
 
         Self::execute_workspace_mutation(admission, "commit task failed", move |target| {

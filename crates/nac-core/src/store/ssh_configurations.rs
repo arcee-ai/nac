@@ -114,6 +114,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SshConfigurationRe
 const SELECT_COLUMNS: &str =
     "config_id, name, ssh_host, ssh_port, ssh_identity_file, created_at, updated_at";
 
+coordinated_command! {
 pub fn list_ssh_configurations(path: &Path) -> ConfigurationResult<Vec<SshConfigurationRecord>> {
     let conn = open_runtime_connection(path)?;
     let mut statement = conn
@@ -127,7 +128,14 @@ pub fn list_ssh_configurations(path: &Path) -> ConfigurationResult<Vec<SshConfig
         .map_err(|error| SshConfigurationStoreError::Store(error.into()))?;
     Ok(records)
 }
+command ListSshConfigurationsCommand {
+}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 pub fn load_ssh_configuration(
     path: &Path,
     config_id: &str,
@@ -141,6 +149,13 @@ pub fn load_ssh_configuration(
     .optional()
     .map_err(|error| SshConfigurationStoreError::Store(error.into()))?
     .ok_or_else(|| SshConfigurationStoreError::NotFound(config_id.to_string()))
+}
+command LoadSshConfigurationCommand {
+    config_id: String = config_id.to_owned(),
+}
+call |command| (&command.config_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 /// Checks the fields a row must carry and settles the optional ones, so insert
@@ -161,6 +176,7 @@ fn validated_record(
     })
 }
 
+coordinated_command! {
 pub fn insert_ssh_configuration(
     path: &Path,
     config_id: &str,
@@ -193,7 +209,16 @@ pub fn insert_ssh_configuration(
 
     Ok(record)
 }
+command InsertSshConfigurationCommand {
+    config_id: String = config_id.to_owned(),
+    configuration: NewSshConfiguration = configuration,
+}
+call |command| (&command.config_id, command.configuration)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 /// Replaces every stored field of an existing configuration.
 ///
 /// The caller passes a whole configuration rather than a patch: it has already
@@ -236,7 +261,16 @@ pub fn update_ssh_configuration(
 
     Ok(record)
 }
+command UpdateSshConfigurationCommand {
+    config_id: String = config_id.to_owned(),
+    configuration: NewSshConfiguration = configuration,
+}
+call |command| (&command.config_id, command.configuration)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 /// Returns whether a configuration was actually removed.
 pub fn delete_ssh_configuration(path: &Path, config_id: &str) -> ConfigurationResult<bool> {
     let conn = open_runtime_connection(path)?;
@@ -247,4 +281,11 @@ pub fn delete_ssh_configuration(path: &Path, config_id: &str) -> ConfigurationRe
         )
         .map_err(|error| SshConfigurationStoreError::Store(error.into()))?;
     Ok(removed > 0)
+}
+command DeleteSshConfigurationCommand {
+    config_id: String = config_id.to_owned(),
+}
+call |command| (&command.config_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }

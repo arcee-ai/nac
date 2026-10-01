@@ -53,9 +53,16 @@ impl<'a> SessionAttachmentApplication<'a> {
                 active.get(session_id).cloned()
             };
             if let Some(service) = cached_service {
-                let version = self.manager.session_config(session_id)?.config_version;
+                let version = self
+                    .manager
+                    .session_state()
+                    .config_async(session_id)
+                    .await?
+                    .config_version;
                 if service.config_version() == Some(version) {
-                    let has_recovery = service.has_unreconciled_durable_run_recovery()?;
+                    let has_recovery = service
+                        .has_unreconciled_durable_run_recovery_async()
+                        .await?;
                     if !has_recovery || service.has_active_operation() {
                         self.manager.wake_direct_inbox(&service).await?;
                         return Ok(service);
@@ -92,7 +99,12 @@ impl<'a> SessionAttachmentApplication<'a> {
             if !cacheable {
                 return Ok(service);
             }
-            let version = self.manager.session_config(session_id)?.config_version;
+            let version = self
+                .manager
+                .session_state()
+                .config_async(session_id)
+                .await?
+                .config_version;
             if service.config_version() != Some(version) {
                 continue;
             }
@@ -112,8 +124,17 @@ impl<'a> SessionAttachmentApplication<'a> {
 
     pub(crate) async fn wake_direct_inbox(&self, service: &SessionService) -> Result<()> {
         if let Some(parent_session_id) = service.metadata().session_id.as_deref() {
-            self.manager
-                .repair_orphaned_completion_suppressions(parent_session_id)?;
+            if self.manager.inner._store_ownership.coordinator().is_some() {
+                let manager = crate::SessionManager::clone(self.manager);
+                let parent_session_id = parent_session_id.to_owned();
+                nac_core::store::spawn_blocking_store_caller(move || {
+                    manager.repair_orphaned_completion_suppressions(&parent_session_id)
+                })
+                .await??;
+            } else {
+                self.manager
+                    .repair_orphaned_completion_suppressions(parent_session_id)?;
+            }
         }
         let child = service.reconcile_traditional_child_terminal().await?;
         if child.is_none() {
@@ -121,10 +142,17 @@ impl<'a> SessionAttachmentApplication<'a> {
             let Some(parent_session_id) = metadata.session_id.as_deref() else {
                 return Ok(());
             };
-            let running_children = nac_core::store::list_traditional_children(
-                &self.manager.inner.store_path,
-                parent_session_id,
-            )?
+            let running_children = match self.manager.inner._store_ownership.coordinator() {
+                Some(owner) => {
+                    owner
+                        .list_traditional_children(parent_session_id.to_owned())
+                        .await?
+                }
+                None => nac_core::store::list_traditional_children(
+                    &self.manager.inner.store_path,
+                    parent_session_id,
+                )?,
+            }
             .into_iter()
             .filter(|child| child.status == nac_core::store::TraditionalChildStatus::Running)
             .map(|child| child.child_session_id)
@@ -137,13 +165,20 @@ impl<'a> SessionAttachmentApplication<'a> {
                 Box::pin(self.manager.attach_session(&child_session_id)).await?;
             }
             if metadata.behavior == sessions::SessionBehavior::DirectWithOrchestrator {
-                for orchestrator in nac_core::store::list_managed_orchestrators(
-                    &self.manager.inner.store_path,
-                    parent_session_id,
-                )?
-                .into_iter()
-                .filter(|orchestrator| orchestrator.status == ManagedOrchestratorStatus::Running)
-                {
+                let orchestrators = match self.manager.inner._store_ownership.coordinator() {
+                    Some(owner) => {
+                        owner
+                            .list_managed_orchestrators(parent_session_id.to_owned())
+                            .await?
+                    }
+                    None => nac_core::store::list_managed_orchestrators(
+                        &self.manager.inner.store_path,
+                        parent_session_id,
+                    )?,
+                };
+                for orchestrator in orchestrators.into_iter().filter(|orchestrator| {
+                    orchestrator.status == ManagedOrchestratorStatus::Running
+                }) {
                     self.manager.spawn_managed_orchestrator_monitor(
                         orchestrator.orchestrator_session_id,
                         orchestrator.generation,
@@ -261,9 +296,12 @@ impl<'a> SessionAttachmentApplication<'a> {
         operation_lease
             .validate(&self.manager.inner.store_path, session_id)
             .map_err(anyhow::Error::new)?;
-        let persisted_version =
-            sessions::load_session_config(&self.manager.inner.store_path, session_id)?
-                .config_version;
+        let persisted_version = self
+            .manager
+            .session_state()
+            .config_async(session_id)
+            .await?
+            .config_version;
         let cached = self
             .manager
             .inner
@@ -296,7 +334,11 @@ impl<'a> SessionAttachmentApplication<'a> {
                 .attach_session_locked(session_id, Some(operation_lease))
                 .await?
         };
-        if service.has_unreconciled_durable_run_recovery()? && !service.has_active_operation() {
+        if service
+            .has_unreconciled_durable_run_recovery_async()
+            .await?
+            && !service.has_active_operation()
+        {
             service
                 .reconcile_durable_run_recovery(operation_lease)
                 .await?;

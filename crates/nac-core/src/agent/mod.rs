@@ -622,7 +622,8 @@ impl Agent {
         self.emit(AgentEvent::RunStarted {
             thread_name: self.thread_name.clone(),
             prompt_preview: preview(prompt, 160),
-        });
+        })
+        .await;
         // `last_usage` is per-send. Clearing it prevents a cancellation before
         // the first current model response from persisting a previous run's usage.
         self.last_usage = None;
@@ -650,7 +651,8 @@ impl Agent {
             self.emit(AgentEvent::Error {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
-            });
+            })
+            .await;
             self.record_terminal_cleanup_error().await;
             return Err(error);
         }
@@ -659,7 +661,8 @@ impl Agent {
             self.emit(AgentEvent::Error {
                 thread_name: self.thread_name.clone(),
                 message: error.to_string(),
-            });
+            })
+            .await;
             self.record_terminal_cleanup_error().await;
             return Err(error);
         }
@@ -691,7 +694,8 @@ impl Agent {
             self.emit(AgentEvent::ModelCallStarted {
                 thread_name: self.thread_name.clone(),
                 iteration,
-            });
+            })
+            .await;
 
             let call_started = Instant::now();
             self.clear_partial_stream();
@@ -738,7 +742,8 @@ impl Agent {
                     self.emit(AgentEvent::ModelError {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
-                    });
+                    })
+                    .await;
                     self.record_terminal_cleanup_error().await;
                     return Err(error);
                 }
@@ -762,7 +767,8 @@ impl Agent {
                 self.emit(AgentEvent::TokenUsageUpdated {
                     thread_name: self.thread_name.clone(),
                     usage,
-                });
+                })
+                .await;
             }
             if response.finish_reason.as_deref() == Some("length") {
                 if let Some(compaction) = &mut self.compaction {
@@ -780,7 +786,8 @@ impl Agent {
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
-                });
+                })
+                .await;
                 self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
@@ -811,7 +818,8 @@ impl Agent {
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
-                });
+                })
+                .await;
                 self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
@@ -846,7 +854,8 @@ impl Agent {
                             self.emit(AgentEvent::Error {
                                 thread_name: self.thread_name.clone(),
                                 message: error.to_string(),
-                            });
+                            })
+                            .await;
                             self.record_terminal_cleanup_error().await;
                             return Err(error);
                         }
@@ -861,7 +870,8 @@ impl Agent {
                     self.emit(AgentEvent::Error {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
-                    });
+                    })
+                    .await;
                     self.record_terminal_cleanup_error().await;
                     return Err(error);
                 };
@@ -869,18 +879,21 @@ impl Agent {
                     thread_name: self.thread_name.clone(),
                     content: content.clone(),
                     usage: Some(accumulated_usage.clone()),
-                });
+                })
+                .await;
                 self.last_usage = Some(accumulated_usage.clone());
                 if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
                     self.emit(AgentEvent::Error {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
-                    });
+                    })
+                    .await;
                     return Err(error);
                 }
                 self.emit(AgentEvent::RunFinished {
                     thread_name: self.thread_name.clone(),
-                });
+                })
+                .await;
                 return Ok(content);
             }
 
@@ -921,14 +934,16 @@ impl Agent {
             };
             let failure_detail = last_failure_detail.clone();
             let tool_messages =
-                finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name);
+                finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name)
+                    .await;
 
             if self.tool_runtime.command_cancellation.is_cancelled() {
                 let error = anyhow!("worker command cancelled");
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
-                });
+                })
+                .await;
                 self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
@@ -956,7 +971,8 @@ impl Agent {
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
-                });
+                })
+                .await;
                 self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
@@ -971,7 +987,8 @@ impl Agent {
                 self.emit(AgentEvent::ModelError {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
-                });
+                })
+                .await;
                 self.record_terminal_cleanup_error().await;
                 return Err(error);
             }
@@ -1160,9 +1177,11 @@ impl Agent {
             let mut tail = {
                 let writer = Arc::clone(&writer);
                 let session_id = session_id.clone();
-                tokio::task::spawn_blocking(move || writer.read_from(&session_id, blob_len))
-                    .await
-                    .map_err(|error| anyhow!("transcript log read task failed: {error}"))??
+                crate::store::spawn_blocking_store_caller(move || {
+                    writer.read_from(&session_id, blob_len)
+                })
+                .await
+                .map_err(|error| anyhow!("transcript log read task failed: {error}"))??
             };
 
             let mut expected_idx = blob_len;
@@ -1200,11 +1219,12 @@ impl Agent {
             if gap.is_some() {
                 let repair_writer = Arc::clone(&writer);
                 let repair_session_id = session_id.clone();
-                let (repaired_tail, recovery) = tokio::task::spawn_blocking(move || {
-                    repair_writer.read_tail_repairing_gap(&repair_session_id, blob_len)
-                })
-                .await
-                .map_err(|error| anyhow!("transcript log repair task failed: {error}"))??;
+                let (repaired_tail, recovery) =
+                    crate::store::spawn_blocking_store_caller(move || {
+                        repair_writer.read_tail_repairing_gap(&repair_session_id, blob_len)
+                    })
+                    .await
+                    .map_err(|error| anyhow!("transcript log repair task failed: {error}"))??;
                 tail = repaired_tail;
                 if let Some(recovery) = recovery {
                     let row_label = if recovery.discarded_rows == 1 {
@@ -1266,7 +1286,7 @@ impl Agent {
                     let repair_writer = Arc::clone(&writer);
                     let repair_session_id = session_id.clone();
                     let repaired_messages = merged.clone();
-                    tokio::task::spawn_blocking(move || {
+                    crate::store::spawn_blocking_store_caller(move || {
                         repair_writer.replace_snapshot_and_delete_from(
                             &repair_session_id,
                             &repaired_messages,
@@ -1423,9 +1443,11 @@ impl Agent {
             .max(self.committed_log_len);
         let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
-        let tail = tokio::task::spawn_blocking(move || writer.read_from(&session_id, from_idx))
-            .await
-            .map_err(|error| anyhow!("transcript log read task failed: {error}"))??;
+        let tail = crate::store::spawn_blocking_store_caller(move || {
+            writer.read_from(&session_id, from_idx)
+        })
+        .await
+        .map_err(|error| anyhow!("transcript log read task failed: {error}"))??;
         Ok(!tail.is_empty())
     }
 
@@ -1441,7 +1463,7 @@ impl Agent {
         };
         let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
-        let (snapshot, tail) = tokio::task::spawn_blocking(move || {
+        let (snapshot, tail) = crate::store::spawn_blocking_store_caller(move || {
             let snapshot = writer.read_snapshot_messages(&session_id)?;
             let tail = writer.read_from(&session_id, snapshot.len() as u64)?;
             Ok::<_, anyhow::Error>((snapshot, tail))
@@ -1627,9 +1649,11 @@ impl Agent {
         };
         let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
-        tokio::task::spawn_blocking(move || writer.delete_from(&session_id, from_idx))
-            .await
-            .map_err(|error| anyhow!("transcript log tail delete task failed: {error}"))??;
+        crate::store::spawn_blocking_store_caller(move || {
+            writer.delete_from(&session_id, from_idx)
+        })
+        .await
+        .map_err(|error| anyhow!("transcript log tail delete task failed: {error}"))??;
         self.committed_log_len = self.committed_log_len.min(from_idx);
         self.pending_log_end = None;
         Ok(())
@@ -1663,7 +1687,7 @@ impl Agent {
         let claim_store_path = store_path.clone();
         let claim_session_id = session_id.clone();
         let claim_dispatch_id = dispatch_id.clone();
-        let records = tokio::task::spawn_blocking(move || {
+        let records = crate::store::spawn_blocking_store_caller(move || {
             crate::store::claim_thread_steering(
                 &claim_store_path,
                 &claim_session_id,
@@ -1715,12 +1739,14 @@ impl Agent {
                     name: thread_name.clone(),
                     steering_id: record.id,
                     instruction_preview: preview(&record.instruction, 160),
-                });
+                })
+                .await;
             } else {
                 self.emit(AgentEvent::OrchestratorSteeringDelivered {
                     steering_id: record.id,
                     instruction_preview: preview(&record.instruction, 160),
-                });
+                })
+                .await;
             }
         }
         Ok(staged_ids.len())
@@ -1733,7 +1759,8 @@ impl Agent {
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
-                });
+                })
+                .await;
                 self.record_terminal_cleanup_error().await;
                 Err(error)
             }
@@ -1748,7 +1775,8 @@ impl Agent {
                     self.emit(AgentEvent::Error {
                         thread_name: self.thread_name.clone(),
                         message: error.to_string(),
-                    });
+                    })
+                    .await;
                     self.record_terminal_cleanup_error().await;
                     Err(error)
                 }
@@ -1763,12 +1791,13 @@ impl Agent {
             self.emit(AgentEvent::Error {
                 thread_name: self.thread_name.clone(),
                 message: format!("terminal cleanup incomplete: {error:#}"),
-            });
+            })
+            .await;
         }
     }
 
-    fn emit(&self, event: AgentEvent) {
-        self.event_sink.emit(event);
+    async fn emit(&self, event: AgentEvent) {
+        self.event_sink.emit_async(event).await;
     }
 }
 

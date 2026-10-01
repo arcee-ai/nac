@@ -56,11 +56,11 @@ async fn status(
         Ok(assertion) => assertion,
         Err(response) => return response,
     };
-    let _host_admission = match manager.managed_completion_admission() {
+    let _host_admission = match manager.managed_completion_admission_async().await {
         Ok(Some(admission)) => admission,
         _ => return internal_error(),
     };
-    let blockers = match manager.managed_upgrade_blockers() {
+    let blockers = match manager.managed_upgrade_blockers_async().await {
         Ok(blockers) => blockers,
         Err(_) => return internal_error(),
     };
@@ -69,7 +69,7 @@ async fn status(
         Ok(binding) => binding,
         Err(status) => return control_configuration_error(status),
     };
-    match tokio::task::spawn_blocking(move || {
+    match nac_core::store::spawn_blocking_store_caller(move || {
         nac_core::store::record_managed_status(
             &path,
             &assertion.jti,
@@ -124,7 +124,7 @@ async fn supersede(
         return internal_error();
     };
     let path = manager.inner.store_path.clone();
-    match tokio::task::spawn_blocking(move || {
+    match nac_core::store::spawn_blocking_store_caller(move || {
         nac_core::store::supersede_managed_upgrade_for_identity(
             &path,
             &assertion.jti,
@@ -154,7 +154,7 @@ async fn prepare_for_action(
     let process_gate = Arc::clone(&manager.inner.maintenance_gate)
         .try_write_owned()
         .ok();
-    let mut blockers = match manager.managed_upgrade_blockers() {
+    let mut blockers = match manager.managed_upgrade_blockers_async().await {
         Ok(blockers) => blockers,
         Err(_) => return internal_error(),
     };
@@ -175,7 +175,7 @@ async fn prepare_for_action(
     let Some(expected_identity) = manager.managed_identity().cloned() else {
         return internal_error();
     };
-    let result = tokio::task::spawn_blocking(move || {
+    let result = nac_core::store::spawn_blocking_store_caller(move || {
         let _process_gate = process_gate;
         let attempt_action = match action {
             ManagedControlAction::Prepare => ManagedControlAttemptAction::Prepare,

@@ -38,6 +38,16 @@ pub enum TelemetryName {
     StoreConnectionActive,
     #[serde(rename = "nac.persistence.queue.active")]
     PersistenceQueueActive,
+    #[serde(rename = "nac.persistence.queue.depth")]
+    PersistenceQueueDepth,
+    #[serde(rename = "nac.persistence.queue.capacity")]
+    PersistenceQueueCapacity,
+    #[serde(rename = "nac.persistence.executor.active")]
+    PersistenceExecutorActive,
+    #[serde(rename = "nac.persistence.caller.active")]
+    PersistenceCallerActive,
+    #[serde(rename = "nac.persistence.caller.capacity")]
+    PersistenceCallerCapacity,
     #[serde(rename = "nac.runtime.activity.active")]
     RuntimeActivityActive,
     #[serde(rename = "nac.runtime.child_process")]
@@ -54,6 +64,11 @@ impl TelemetryName {
             Self::StoreOperationDuration => "nac.store.operation.duration",
             Self::StoreConnectionActive => "nac.store.connection.active",
             Self::PersistenceQueueActive => "nac.persistence.queue.active",
+            Self::PersistenceQueueDepth => "nac.persistence.queue.depth",
+            Self::PersistenceQueueCapacity => "nac.persistence.queue.capacity",
+            Self::PersistenceExecutorActive => "nac.persistence.executor.active",
+            Self::PersistenceCallerActive => "nac.persistence.caller.active",
+            Self::PersistenceCallerCapacity => "nac.persistence.caller.capacity",
             Self::RuntimeActivityActive => "nac.runtime.activity.active",
             Self::ChildProcess => "nac.runtime.child_process",
             Self::ResourceSample => "nac.runtime.resource.sample",
@@ -77,6 +92,13 @@ pub enum StoreOperation {
     Recovery,
     TerminalSettlement,
     Readiness,
+    QueueAdmission,
+    QueueWait,
+    QueueExecution,
+    QueueAck,
+    QueueCancellation,
+    QueueShutdown,
+    CallerAdmission,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -444,6 +466,15 @@ pub fn register_test_recorder_thread() -> TestRecorderThreadGuard {
     TestRecorderThreadGuard(id)
 }
 
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn test_recorder_accepts_current_thread() -> bool {
+    TEST_RECORDER_OWNERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|owners| owners.contains(&std::thread::current().id()))
+}
+
 thread_local! {
     static STORE_CORRELATION: RefCell<Vec<Correlation>> = const { RefCell::new(Vec::new()) };
 }
@@ -509,6 +540,42 @@ pub fn observe_store<T>(
     };
     emit_store_duration(operation, correlation, started.elapsed(), outcome, error);
     result
+}
+
+pub(crate) fn in_store_command<T>(correlation: Correlation, action: impl FnOnce() -> T) -> T {
+    let _scope = StoreCorrelationScope::push(correlation.clone());
+    let _activity = PersistenceActivityGuard::start(correlation);
+    action()
+}
+
+pub(crate) fn emit_persistence_counts(
+    queued: usize,
+    executing: usize,
+    capacity: usize,
+    correlation: Correlation,
+) {
+    for (name, value) in [
+        (TelemetryName::PersistenceQueueDepth, queued),
+        (TelemetryName::PersistenceExecutorActive, executing),
+        (TelemetryName::PersistenceQueueCapacity, capacity),
+    ] {
+        emit_active(name, None, value, correlation.clone());
+    }
+}
+
+pub(crate) fn emit_persistence_caller_counts(active: usize, capacity: usize) {
+    emit_active(
+        TelemetryName::PersistenceCallerActive,
+        None,
+        active,
+        Correlation::default(),
+    );
+    emit_active(
+        TelemetryName::PersistenceCallerCapacity,
+        None,
+        capacity,
+        Correlation::default(),
+    );
 }
 
 pub fn emit_store_duration(

@@ -661,6 +661,7 @@ pub struct SessionEventBus {
     sender: broadcast::Sender<SessionEventEnvelope>,
     delta_sender: broadcast::Sender<AssistantStreamDelta>,
     state: Arc<StdMutex<SessionEventBusState>>,
+    publication: Arc<StdMutex<()>>,
     recent_capacity: usize,
     recent_byte_capacity: usize,
 }
@@ -741,6 +742,7 @@ impl SessionEventBus {
                 recent: VecDeque::with_capacity(capacity),
                 recent_bytes: 0,
             })),
+            publication: Arc::new(StdMutex::new(())),
             recent_capacity: capacity,
             recent_byte_capacity: byte_capacity,
         }
@@ -859,17 +861,111 @@ impl SessionEventBus {
         self.emit_sanitized(event, run_id, client_id)
     }
 
+    pub async fn emit_with_context_async(
+        &self,
+        event: SessionEvent,
+        run_id: Option<SessionRunId>,
+        client_id: Option<SessionClientId>,
+    ) -> anyhow::Result<SessionEventEnvelope> {
+        self.emit_with_context_async_policy(event, run_id, client_id, true)
+            .await
+    }
+
+    async fn emit_with_context_async_retryable(
+        &self,
+        event: SessionEvent,
+        run_id: Option<SessionRunId>,
+        client_id: Option<SessionClientId>,
+    ) -> anyhow::Result<SessionEventEnvelope> {
+        self.emit_with_context_async_policy(event, run_id, client_id, false)
+            .await
+    }
+
+    async fn emit_with_context_async_policy(
+        &self,
+        event: SessionEvent,
+        run_id: Option<SessionRunId>,
+        client_id: Option<SessionClientId>,
+        record_overload_gap: bool,
+    ) -> anyhow::Result<SessionEventEnvelope> {
+        // A broken store path must not suppress live-only terminal events.
+        // Unknown ownership takes the bounded caller path; durable checkout
+        // still rejects the lookup error instead of bypassing an owner.
+        if !self.has_owned_persistence().unwrap_or(true) {
+            let event = sanitize_external_session_event(event)
+                .ok_or_else(|| anyhow::anyhow!("internal-only session event"))?;
+            let (envelope, result) = self.publish_sanitized(event, run_id, client_id);
+            return result.map(|()| envelope);
+        }
+        let bus = self.clone();
+        let result = crate::store::spawn_blocking_store_caller(move || {
+            let event = sanitize_external_session_event(event)
+                .ok_or_else(|| anyhow::anyhow!("internal-only session event"))?;
+            let (envelope, result) = bus.publish_sanitized(event, run_id, client_id);
+            result.map(|()| envelope)
+        })
+        .await
+        .and_then(|result| result);
+        if record_overload_gap
+            && result.as_ref().is_err_and(|error| {
+                matches!(
+                    error.downcast_ref::<crate::store::PersistenceAdmissionError>(),
+                    Some(crate::store::PersistenceAdmissionError::CallerOverloaded)
+                )
+            })
+        {
+            self.record_publication_failure();
+        }
+        result
+    }
+
+    fn has_owned_persistence(&self) -> anyhow::Result<bool> {
+        match &self.thread_event_persistence {
+            ThreadEventPersistence::Available(store) => store.writer.has_owner(),
+            ThreadEventPersistence::Disabled => Ok(false),
+        }
+    }
+
     #[expect(
         clippy::expect_used,
-        reason = "overflowing the durable u64 event sequence would violate event identity"
+        reason = "overflowing the durable event sequence violates event identity"
     )]
+    pub(crate) fn record_publication_failure(&self) {
+        let mut state = self.lock_state();
+        state.next_sequence_id = state
+            .next_sequence_id
+            .checked_add(1)
+            .expect("session event sequence overflow");
+    }
+
     fn emit_sanitized(
         &self,
         event: SessionEvent,
         run_id: Option<SessionRunId>,
         client_id: Option<SessionClientId>,
     ) -> SessionEventEnvelope {
+        let (envelope, result) = self.publish_sanitized(event, run_id, client_id);
+        if let Err(error) = result {
+            eprintln!("nac: failed to persist thread event: {error:#}");
+        }
+        envelope
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "overflowing event sequence violates event identity"
+    )]
+    fn publish_sanitized(
+        &self,
+        event: SessionEvent,
+        run_id: Option<SessionRunId>,
+        client_id: Option<SessionClientId>,
+    ) -> (SessionEventEnvelope, anyhow::Result<()>) {
         let prepared = self.prepare_thread_event(&event);
+        let _publication = self
+            .publication
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut state = self.lock_state();
         state.next_sequence_id = state
             .next_sequence_id
@@ -883,19 +979,19 @@ impl SessionEventBus {
             run_id,
             event,
         };
+        drop(state);
         match prepared {
             Ok(Some(prepared)) => {
                 if let Err(error) = prepared.persist() {
-                    eprintln!("nac: failed to persist thread event: {error:#}");
-                    return envelope;
+                    return (envelope, Err(error));
                 }
             }
             Ok(None) => {}
             Err(error) => {
-                eprintln!("nac: failed to prepare thread event persistence: {error:#}");
-                return envelope;
+                return (envelope, Err(error));
             }
         }
+        let mut state = self.lock_state();
         state.published_sequence_id = envelope.sequence_id;
         if let Some(serialized_bytes) =
             serialized_envelope_len(&envelope, self.recent_byte_capacity)
@@ -915,7 +1011,7 @@ impl SessionEventBus {
             });
         }
         let _ = self.sender.send(envelope.clone());
-        envelope
+        (envelope, Ok(()))
     }
 
     pub fn emit_agent(&self, event: AgentEvent) -> Option<SessionEventEnvelope> {
@@ -936,8 +1032,12 @@ impl SessionEventBus {
         &self,
         query: impl FnOnce() -> anyhow::Result<T>,
     ) -> anyhow::Result<(SessionEventBoundary, T)> {
-        let state = self.lock_state();
+        let _publication = self
+            .publication
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let value = query()?;
+        let state = self.lock_state();
         Ok((
             SessionEventBoundary {
                 epoch_id: self.epoch_id.clone(),
@@ -992,7 +1092,7 @@ impl SessionEventBus {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Prepare persistence before taking the event state lock. Snapshot loading
+    /// Prepare persistence before taking the publication lock. Snapshot loading
     /// checks out SQLite before taking the same lock, so this order prevents a
     /// capacity/state inversion while preserving persistence-before-publication.
     fn prepare_thread_event(
@@ -1662,6 +1762,115 @@ impl EventSink {
         }
     }
 
+    /// Required host publications expose their durable acknowledgement.
+    pub async fn try_emit_async(&self, event: AgentEvent) -> anyhow::Result<()> {
+        self.try_emit_async_policy(event, false).await
+    }
+
+    async fn try_emit_async_policy(
+        &self,
+        event: AgentEvent,
+        retry_caller_overload: bool,
+    ) -> anyhow::Result<()> {
+        if self.defer_worker_finish && matches!(event, AgentEvent::RunFinished { .. }) {
+            return Ok(());
+        }
+        if matches!(event, AgentEvent::ModelCallStarted { .. }) {
+            self.emit(event);
+            return Ok(());
+        }
+        let Some(event) = sanitize_external_agent_event(event) else {
+            return Ok(());
+        };
+        if let Some(bus) = &self.bus {
+            let event = SessionEvent::Agent {
+                event: event.clone(),
+            };
+            if retry_caller_overload {
+                bus.emit_with_context_async_retryable(
+                    event,
+                    self.run_id.clone(),
+                    self.client_id.clone(),
+                )
+                .await?;
+            } else {
+                bus.emit_with_context_async(event, self.run_id.clone(), self.client_id.clone())
+                    .await?;
+            }
+        }
+        if self.stderr_prefixed {
+            eprintln!("{STDERR_EVENT_PREFIX}{}", serde_json::to_string(&event)?);
+        }
+        if let Some(channel) = &self.channel {
+            let _ = channel.send(event);
+        }
+        Ok(())
+    }
+
+    pub async fn emit_async(&self, event: AgentEvent) {
+        if let Err(error) = self.try_emit_async(event).await {
+            eprintln!("nac: durable event publication failed: {error:#}");
+        }
+    }
+
+    /// One publication obligation per accepted lifecycle; retry only definite
+    /// pre-execution caller rejection, never uncertain persistence failures.
+    pub(crate) async fn emit_lifecycle_async(&self, event: AgentEvent) {
+        loop {
+            match self.try_emit_async_policy(event.clone(), true).await {
+                Err(error)
+                    if matches!(
+                        error.downcast_ref::<crate::store::PersistenceAdmissionError>(),
+                        Some(crate::store::PersistenceAdmissionError::CallerOverloaded)
+                    ) =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                Err(error) => {
+                    eprintln!("nac: lifecycle publication failed: {error:#}");
+                    break;
+                }
+                Ok(()) => break,
+            }
+        }
+    }
+
+    /// Transfer a selected terminal to an independent publication obligation
+    /// before awaiting it. Cancelling the waiter cannot replace this outcome.
+    pub(crate) async fn emit_terminal_lifecycle_async(&self, event: AgentEvent) {
+        if !self
+            .bus
+            .as_ref()
+            .is_some_and(|bus| bus.has_owned_persistence().unwrap_or(true))
+        {
+            self.emit_lifecycle_async(event).await;
+            return;
+        }
+        let sink = self.clone();
+        let publication = tokio::spawn(async move {
+            sink.emit_lifecycle_async(event).await;
+        });
+        if let Err(error) = publication.await {
+            eprintln!("nac: terminal lifecycle publication task failed: {error:#}");
+        }
+    }
+
+    pub(crate) fn emit_cleanup(&self, event: AgentEvent) {
+        if tokio::runtime::Handle::try_current().is_err()
+            || !self
+                .bus
+                .as_ref()
+                .is_some_and(|bus| bus.has_owned_persistence().unwrap_or(true))
+        {
+            self.emit(event);
+            return;
+        }
+        let sink = self.clone();
+        tokio::spawn(async move {
+            sink.emit_lifecycle_async(event).await;
+        });
+    }
+
     /// Live-only transcript growth signal (DB-direct transcript workset,
     /// step 3). Emitted by the agent at each transcript commit point, after
     /// the log append commits, so session subscribers refetch the
@@ -1692,6 +1901,21 @@ impl EventSink {
                 self.run_id.clone(),
                 self.client_id.clone(),
             );
+        }
+    }
+
+    pub async fn emit_transcript_appended_async(&self, transcript_len: u64) {
+        if let Some(bus) = &self.bus {
+            if let Err(error) = bus
+                .emit_with_context_async(
+                    SessionEvent::TranscriptAppended { transcript_len },
+                    self.run_id.clone(),
+                    self.client_id.clone(),
+                )
+                .await
+            {
+                eprintln!("nac: transcript publication task failed: {error}");
+            }
         }
     }
 }

@@ -91,7 +91,7 @@ pub(super) async fn acquire_transcript_operation_lease_and_snapshot(
     writer: Arc<crate::store::TranscriptLogWriter>,
     session_id: String,
 ) -> Result<(crate::sessions::SessionOperationLease, Vec<Message>)> {
-    tokio::task::spawn_blocking(move || -> Result<_> {
+    crate::store::spawn_blocking_store_caller(move || -> Result<_> {
         let lease = crate::sessions::SessionOperationLease::try_acquire(&store_path, &session_id)
             .map_err(anyhow::Error::new)?;
         let messages = writer.read_snapshot_messages(&session_id)?;

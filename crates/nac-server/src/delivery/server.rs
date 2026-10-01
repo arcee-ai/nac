@@ -358,7 +358,7 @@ async fn enforce_managed_admission(
         return next.run(request).await;
     }
     if remains_available_during_maintenance(request.method(), request.uri().path()) {
-        let _host_lease = match manager.managed_completion_admission() {
+        let _host_lease = match manager.managed_completion_admission_async().await {
             Ok(Some(lease)) => lease,
             Ok(None) => return next.run(request).await,
             Err(_) => {
@@ -376,7 +376,7 @@ async fn enforce_managed_admission(
     let _process_gate = Arc::clone(&manager.inner.maintenance_gate)
         .read_owned()
         .await;
-    let _host_lease = match manager.managed_work_admission() {
+    let _host_lease = match manager.managed_work_admission_async().await {
         Ok(Some(lease)) => lease,
         Ok(None) => return next.run(request).await,
         Err(_) => {
@@ -1002,11 +1002,14 @@ where
                 })
                 .context("failed to start shutdown watchdog")?;
 
+            shutdown_manager.stop_local_run_admission().await;
             shutdown_manager.cancel_local_active_runs_for_shutdown().await;
             let result = (&mut server)
                 .await
                 .context("server task stopped unexpectedly")?
                 .context("server stopped unexpectedly");
+            shutdown_manager.quiesce_persistence_callers().await;
+            shutdown_manager.drain_persistence().await?;
             let _ = shutdown_complete_tx.send(());
             watchdog
                 .join()
@@ -1070,8 +1073,10 @@ async fn shutdown_signal() {
 )]
 async fn health(State(manager): State<SessionManager>) -> (StatusCode, Json<HealthResponse>) {
     let store_path = manager.inner.store_path.clone();
-    let ready =
-        tokio::task::spawn_blocking(move || nac_core::store::check_readiness(&store_path)).await;
+    let ready = nac_core::store::spawn_blocking_store_caller(move || {
+        nac_core::store::check_readiness(&store_path)
+    })
+    .await;
     match ready {
         Ok(Ok(())) => (StatusCode::OK, Json(HealthResponse { status: "ok" })),
         Ok(Err(error)) => {

@@ -2,6 +2,7 @@ use crate::events::{
     AgentEvent, CompactionFailure, CompactionReason, CompactionSkipReason, EventSink,
 };
 use crate::model::TokenUsage;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 mod planning;
@@ -101,11 +102,33 @@ impl std::error::Error for CompactionError {
 
 pub(crate) type CompactionCompletion = std::result::Result<CompactionResult, CompactionError>;
 
+#[derive(Clone, Default)]
+pub(crate) struct CompactionCommitMarker {
+    committed: Arc<Mutex<Option<CompactionResult>>>,
+}
+
+impl CompactionCommitMarker {
+    pub(crate) fn record(&self, result: CompactionResult) {
+        *self
+            .committed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
+    }
+
+    pub(crate) fn result(&self) -> Option<CompactionResult> {
+        *self
+            .committed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 pub(crate) struct CompactionLifecycle {
     event_sink: EventSink,
     compaction_id: Uuid,
     reason: CompactionReason,
-    terminal_emitted: bool,
+    commit: CompactionCommitMarker,
+    terminal_selected: bool,
 }
 
 impl CompactionLifecycle {
@@ -122,53 +145,117 @@ impl CompactionLifecycle {
             event_sink,
             compaction_id,
             reason,
-            terminal_emitted: false,
+            commit: CompactionCommitMarker::default(),
+            terminal_selected: false,
         }
     }
 
-    pub(crate) fn finish(&mut self, result: &CompactionCompletion) {
-        let event = match result {
-            Ok(CompactionResult::Compacted { .. }) => AgentEvent::OrchestratorCompactionCompleted {
-                compaction_id: self.compaction_id,
-                reason: self.reason,
-            },
-            Ok(CompactionResult::Unchanged { reason: cause, .. }) => {
+    pub(crate) async fn start_async(
+        event_sink: EventSink,
+        compaction_id: Uuid,
+        reason: CompactionReason,
+    ) -> Self {
+        let lifecycle = Self {
+            event_sink,
+            compaction_id,
+            reason,
+            commit: CompactionCommitMarker::default(),
+            terminal_selected: false,
+        };
+        lifecycle
+            .event_sink
+            .emit_lifecycle_async(AgentEvent::OrchestratorCompactionStarted {
+                compaction_id,
+                reason,
+            })
+            .await;
+        lifecycle
+    }
+
+    pub(crate) fn commit_marker(&self) -> CompactionCommitMarker {
+        self.commit.clone()
+    }
+
+    pub(crate) async fn finish(&mut self, result: &CompactionCompletion) {
+        if self.terminal_selected {
+            return;
+        }
+        let event = match self.commit.result() {
+            // Acknowledged checkpoint activation is the compaction outcome even
+            // if its caller is cancelled while publishing follow-up accounting.
+            Some(CompactionResult::Compacted { .. }) => {
+                AgentEvent::OrchestratorCompactionCompleted {
+                    compaction_id: self.compaction_id,
+                    reason: self.reason,
+                }
+            }
+            Some(CompactionResult::Unchanged { reason: cause, .. }) => {
                 AgentEvent::OrchestratorCompactionSkipped {
                     compaction_id: self.compaction_id,
                     reason: self.reason,
-                    cause: *cause,
+                    cause,
                 }
             }
-            Err(error) => {
-                debug_assert!(
-                    error
-                        .compaction_id()
-                        .map(|compaction_id| compaction_id == self.compaction_id)
-                        .unwrap_or(true),
-                    "compaction lifecycle and result IDs differ"
-                );
-                AgentEvent::OrchestratorCompactionFailed {
-                    compaction_id: self.compaction_id,
-                    reason: self.reason,
-                    failure: error.failure().unwrap_or(CompactionFailure::Cancelled),
+            None => match result {
+                Ok(CompactionResult::Compacted { .. }) => {
+                    AgentEvent::OrchestratorCompactionCompleted {
+                        compaction_id: self.compaction_id,
+                        reason: self.reason,
+                    }
                 }
-            }
+                Ok(CompactionResult::Unchanged { reason: cause, .. }) => {
+                    AgentEvent::OrchestratorCompactionSkipped {
+                        compaction_id: self.compaction_id,
+                        reason: self.reason,
+                        cause: *cause,
+                    }
+                }
+                Err(error) => {
+                    debug_assert!(
+                        error
+                            .compaction_id()
+                            .map(|compaction_id| compaction_id == self.compaction_id)
+                            .unwrap_or(true),
+                        "compaction lifecycle and result IDs differ"
+                    );
+                    AgentEvent::OrchestratorCompactionFailed {
+                        compaction_id: self.compaction_id,
+                        reason: self.reason,
+                        failure: error.failure().unwrap_or(CompactionFailure::Cancelled),
+                    }
+                }
+            },
         };
-        self.terminal_emitted = true;
-        self.event_sink.emit(event);
+        self.terminal_selected = true;
+        self.event_sink.emit_terminal_lifecycle_async(event).await;
     }
 }
 
 impl Drop for CompactionLifecycle {
     fn drop(&mut self) {
-        if !self.terminal_emitted {
-            self.terminal_emitted = true;
-            self.event_sink
-                .emit(AgentEvent::OrchestratorCompactionFailed {
+        if !self.terminal_selected {
+            self.terminal_selected = true;
+            let event = match self.commit.result() {
+                Some(CompactionResult::Compacted { .. }) => {
+                    AgentEvent::OrchestratorCompactionCompleted {
+                        compaction_id: self.compaction_id,
+                        reason: self.reason,
+                    }
+                }
+                Some(CompactionResult::Unchanged { reason: cause, .. }) => {
+                    AgentEvent::OrchestratorCompactionSkipped {
+                        compaction_id: self.compaction_id,
+                        reason: self.reason,
+                        cause,
+                    }
+                }
+                None => AgentEvent::OrchestratorCompactionFailed {
                     compaction_id: self.compaction_id,
                     reason: self.reason,
                     failure: CompactionFailure::Cancelled,
-                });
+                },
+            };
+            self.event_sink.emit_cleanup(event);
         }
     }
 }
@@ -183,10 +270,15 @@ impl super::Agent {
         }
         let compaction_id = Uuid::new_v4();
         let event_sink = self.event_sink.clone();
-        let mut lifecycle =
-            CompactionLifecycle::start(event_sink.clone(), compaction_id, CompactionReason::Manual);
-        let result = self.compact_inner(compaction_id, event_sink).await;
-        lifecycle.finish(&result);
+        let mut lifecycle = CompactionLifecycle::start_async(
+            event_sink.clone(),
+            compaction_id,
+            CompactionReason::Manual,
+        )
+        .await;
+        let commit = lifecycle.commit_marker();
+        let result = self.compact_inner(compaction_id, event_sink, commit).await;
+        lifecycle.finish(&result).await;
         result
     }
 
@@ -194,14 +286,16 @@ impl super::Agent {
         &mut self,
         compaction_id: Uuid,
         event_sink: EventSink,
+        commit: CompactionCommitMarker,
     ) -> CompactionCompletion {
-        self.compact_inner(compaction_id, event_sink).await
+        self.compact_inner(compaction_id, event_sink, commit).await
     }
 
     async fn compact_inner(
         &mut self,
         compaction_id: Uuid,
         event_sink: EventSink,
+        commit: CompactionCommitMarker,
     ) -> CompactionCompletion {
         self.refresh_compaction_tool_definitions();
         let Some(compaction) = self.compaction.as_mut() else {
@@ -210,7 +304,14 @@ impl super::Agent {
         let plan = compaction.plan(&self.messages, &self.tool_defs, CompactionReason::Manual);
         let CompactionPlan { prepared, decision } = plan;
         let (_, result) = self
-            .execute_triggered_compaction(compaction_id, prepared, decision, None, event_sink)
+            .execute_triggered_compaction(
+                compaction_id,
+                prepared,
+                decision,
+                None,
+                event_sink,
+                commit,
+            )
             .await;
         result
     }
@@ -236,8 +337,13 @@ impl super::Agent {
 
         let compaction_id = Uuid::new_v4();
         let event_sink = self.event_sink.clone();
-        let mut lifecycle =
-            CompactionLifecycle::start(event_sink.clone(), compaction_id, CompactionReason::Auto);
+        let mut lifecycle = CompactionLifecycle::start_async(
+            event_sink.clone(),
+            compaction_id,
+            CompactionReason::Auto,
+        )
+        .await;
+        let commit = lifecycle.commit_marker();
         let (prepared, result) = self
             .execute_triggered_compaction(
                 compaction_id,
@@ -245,9 +351,10 @@ impl super::Agent {
                 decision,
                 Some(accumulated_usage),
                 event_sink,
+                commit,
             )
             .await;
-        lifecycle.finish(&result);
+        lifecycle.finish(&result).await;
         if let Err(error) = result {
             eprintln!("nac: orchestrator compaction failed softly: {error}");
         }
@@ -265,6 +372,7 @@ impl super::Agent {
         decision: CompactionDecision,
         accumulated_usage: Option<&mut TokenUsage>,
         event_sink: EventSink,
+        commit: CompactionCommitMarker,
     ) -> (PreparedProviderView, CompactionCompletion) {
         let mut candidate = match decision {
             CompactionDecision::Skip(cause) => {
@@ -305,7 +413,8 @@ impl super::Agent {
                 summary_usage
                     .as_ref()
                     .map(|_| candidate.old_context_estimate),
-            );
+            )
+            .await;
             return (
                 prepared,
                 Err(CompactionError::failed(
@@ -334,7 +443,7 @@ impl super::Agent {
             .compaction
             .as_mut()
             .expect("compaction state exists for a triggered attempt")
-            .append_and_activate(
+            .append_and_activate_async(
                 &self.messages,
                 &candidate,
                 installed,
@@ -342,6 +451,7 @@ impl super::Agent {
                 summary_completion_tokens,
                 projected,
             )
+            .await
         {
             self.account_summary_usage(
                 &event_sink,
@@ -350,7 +460,8 @@ impl super::Agent {
                 summary_usage
                     .as_ref()
                     .map(|_| candidate.old_context_estimate),
-            );
+            )
+            .await;
             return (
                 prepared,
                 Err(CompactionError::failed(
@@ -361,51 +472,54 @@ impl super::Agent {
             );
         }
 
-        // Checkpoint commit, exact activation, and usage accounting are
-        // synchronous. The caller publishes completion before releasing its
-        // operation lease.
+        let result = CompactionResult::Compacted {
+            compaction_id,
+            projected_context: projected,
+        };
+        // The acknowledged checkpoint is the irreversible outcome boundary.
+        // Record it before any later await so cancellation cannot relabel an
+        // activated checkpoint as failed.
+        commit.record(result);
         self.account_summary_usage(
             &event_sink,
             accumulated_usage,
             summary_usage.as_ref(),
             Some(projected),
-        );
+        )
+        .await;
         let prepared = self
             .compaction
             .as_mut()
             .expect("compaction state exists after activation")
             .prepare(&self.messages, &self.tool_defs);
-        (
-            prepared,
-            Ok(CompactionResult::Compacted {
-                compaction_id,
-                projected_context: projected,
-            }),
-        )
+        (prepared, Ok(result))
     }
 
-    fn account_summary_usage(
+    async fn account_summary_usage(
         &mut self,
         event_sink: &EventSink,
         mut accumulated_usage: Option<&mut TokenUsage>,
         usage: Option<&TokenUsage>,
         installed_context: Option<u64>,
     ) {
+        if let (Some(usage), Some(accumulated_usage)) = (usage, accumulated_usage.as_mut()) {
+            accumulated_usage.add_cost_saturating(usage);
+        }
+        if let (Some(context), Some(accumulated_usage)) =
+            (installed_context, accumulated_usage.as_mut())
+        {
+            accumulated_usage.replace_context(context);
+            self.last_usage = Some((**accumulated_usage).clone());
+        }
         if let Some(usage) = usage {
-            if let Some(accumulated_usage) = accumulated_usage.as_mut() {
-                accumulated_usage.add_cost_saturating(usage);
-            }
-
             let mut delta = usage.clone();
             delta.replace_context(installed_context.unwrap_or_default());
-            event_sink.emit(AgentEvent::TokenUsageUpdated {
-                thread_name: self.thread_name.clone(),
-                usage: delta,
-            });
-        }
-        if let (Some(context), Some(accumulated_usage)) = (installed_context, accumulated_usage) {
-            accumulated_usage.replace_context(context);
-            self.last_usage = Some(accumulated_usage.clone());
+            event_sink
+                .emit_async(AgentEvent::TokenUsageUpdated {
+                    thread_name: self.thread_name.clone(),
+                    usage: delta,
+                })
+                .await;
         }
     }
 }

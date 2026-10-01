@@ -4,6 +4,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+mod blocking_caller;
+pub(crate) mod coordinator;
+pub(crate) use blocking_caller::call_legacy_store;
+pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
+#[macro_use]
+pub(crate) mod coordinated_commands;
 mod managed_maintenance;
 mod managed_orchestrators;
 mod model_configurations;
@@ -34,6 +40,7 @@ pub(crate) use worker_dispatches::{
     worker_dispatch_generation, worker_dispatch_result, WorkerDispatchIdentity,
 };
 
+pub use coordinator::{PersistenceAdmissionError, PersistenceStats, StoreCoordinator};
 pub use managed_maintenance::*;
 pub use managed_orchestrators::*;
 pub use model_configurations::*;
@@ -581,3 +588,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
     }
 }
+
+#[cfg(test)]
+pub(crate) use blocking_caller::reject_callers_for_test;

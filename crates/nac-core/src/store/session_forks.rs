@@ -38,6 +38,7 @@ pub struct SessionForkOrigin {
     pub deleted: bool,
 }
 
+coordinated_command! {
 pub fn insert_session_fork(
     path: &Path,
     source_session_id: &str,
@@ -53,6 +54,16 @@ pub fn insert_session_fork(
         source_message_idx,
         source_title,
     )
+}
+command InsertSessionForkCommand {
+    source_session_id: String = source_session_id.to_owned(),
+    fork_session_id: String = fork_session_id.to_owned(),
+    source_message_idx: usize = source_message_idx,
+    source_title: String = source_title.to_owned(),
+}
+call |command| (&command.source_session_id, &command.fork_session_id, command.source_message_idx, &command.source_title)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.source_session_id));
+port public;
 }
 
 pub(crate) fn insert_session_fork_with_connection(
@@ -79,6 +90,7 @@ pub(crate) fn insert_session_fork_with_connection(
     Ok(())
 }
 
+coordinated_command! {
 /// Duplicate the conversation artifacts named by `prefix` onto the forked
 /// session: threads, episodes, live thread events, steering, worksets, and
 /// workspace revisions.
@@ -122,6 +134,16 @@ pub fn clone_session_conversation_artifacts(
     )?;
     tx.commit()?;
     Ok(())
+}
+command CloneSessionConversationArtifactsCommand {
+    source_session_id: String = source_session_id.to_owned(),
+    fork_session_id: String = fork_session_id.to_owned(),
+    prefix: Vec<Message> = prefix.to_vec(),
+    source_transcript_len: usize = source_transcript_len,
+}
+call |command| (&command.source_session_id, &command.fork_session_id, &command.prefix, command.source_transcript_len)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.source_session_id));
+port public;
 }
 
 fn clone_all_conversation_artifacts(
@@ -517,9 +539,17 @@ fn json_nonempty_str(value: &serde_json::Value, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
+coordinated_command! {
 pub fn list_session_forks(path: &Path, source_session_id: &str) -> Result<Vec<SessionForkLink>> {
     let conn = open_runtime_connection(path)?;
     list_session_forks_with_connection(&conn, source_session_id)
+}
+command ListSessionForksCommand {
+    source_session_id: String = source_session_id.to_owned(),
+}
+call |command| (&command.source_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.source_session_id));
+port public;
 }
 
 pub(crate) fn list_session_forks_with_connection(
@@ -564,6 +594,7 @@ pub(crate) fn list_session_forks_with_connection(
     Ok(forks)
 }
 
+coordinated_command! {
 pub fn dismiss_session_fork(
     path: &Path,
     source_session_id: &str,
@@ -576,6 +607,14 @@ pub fn dismiss_session_fork(
         params![source_session_id, fork_session_id],
     )?;
     Ok(deleted > 0)
+}
+command DismissSessionForkCommand {
+    source_session_id: String = source_session_id.to_owned(),
+    fork_session_id: String = fork_session_id.to_owned(),
+}
+call |command| (&command.source_session_id, &command.fork_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.source_session_id));
+port public;
 }
 
 pub(crate) fn fork_origin_from_parts(

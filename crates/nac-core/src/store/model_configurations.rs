@@ -202,6 +202,7 @@ pub(crate) fn model_configuration_columns(alias: &str) -> String {
         .join(", ")
 }
 
+coordinated_command! {
 pub fn list_model_configurations(
     path: &Path,
 ) -> ConfigurationResult<Vec<ModelConfigurationRecord>> {
@@ -217,7 +218,14 @@ pub fn list_model_configurations(
         .map_err(|error| ModelConfigurationStoreError::Store(error.into()))?;
     Ok(records)
 }
+command ListModelConfigurationsCommand {
+}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 pub fn load_model_configuration(
     path: &Path,
     config_id: &str,
@@ -231,6 +239,13 @@ pub fn load_model_configuration(
     .optional()
     .map_err(|error| ModelConfigurationStoreError::Store(error.into()))?
     .ok_or_else(|| ModelConfigurationStoreError::NotFound(config_id.to_string()))
+}
+command LoadModelConfigurationCommand {
+    config_id: String = config_id.to_owned(),
+}
+call |command| (&command.config_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 /// Checks the fields a row must carry and settles the optional ones, so insert
@@ -276,6 +291,7 @@ fn validate_threshold(threshold: Option<u64>) -> ConfigurationResult<Option<u64>
     }
 }
 
+coordinated_command! {
 pub fn insert_model_configuration(
     path: &Path,
     config_id: &str,
@@ -317,7 +333,16 @@ pub fn insert_model_configuration(
 
     Ok(record)
 }
+command InsertModelConfigurationCommand {
+    config_id: String = config_id.to_owned(),
+    configuration: NewModelConfiguration = configuration,
+}
+call |command| (&command.config_id, command.configuration)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 /// Replaces every stored field of an existing configuration.
 ///
 /// The caller passes a whole configuration rather than a patch: it has already
@@ -373,7 +398,16 @@ pub fn update_model_configuration(
 
     Ok(record)
 }
+command UpdateModelConfigurationCommand {
+    config_id: String = config_id.to_owned(),
+    configuration: NewModelConfiguration = configuration,
+}
+call |command| (&command.config_id, command.configuration)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 /// Returns whether a configuration was actually removed.
 pub fn delete_model_configuration(path: &Path, config_id: &str) -> ConfigurationResult<bool> {
     let conn = open_runtime_connection(path)?;
@@ -399,6 +433,13 @@ pub fn delete_model_configuration(path: &Path, config_id: &str) -> Configuration
             }
         })?;
     Ok(removed > 0)
+}
+command DeleteModelConfigurationCommand {
+    config_id: String = config_id.to_owned(),
+}
+call |command| (&command.config_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 #[cfg(test)]

@@ -1,4 +1,6 @@
 use super::*;
+use crate::store::coordinated_commands::coordinated_command;
+use crate::store::coordinated_commands::coordinated_port;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
@@ -76,11 +78,19 @@ pub(super) fn deserialize_light_model(
     .transpose()
 }
 
+coordinated_command! {
 pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     crate::store::retry_busy_correlated(
         crate::telemetry::Correlation::session(Some(&snapshot.session_id)),
         || create_session_once(path, snapshot),
     )
+}
+command CreateSessionCommand {
+    snapshot: SessionSnapshot = snapshot.clone(),
+}
+call |command| (&command.snapshot)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.snapshot.session_id));
+port public;
 }
 
 fn create_session_once(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
@@ -122,6 +132,7 @@ pub(crate) fn insert_new_session_in_transaction(
     Ok(())
 }
 
+coordinated_command! {
 pub fn save_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
@@ -132,7 +143,15 @@ pub fn save_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     tx.commit()?;
     Ok(())
 }
+command SaveSessionCommand {
+    snapshot: SessionSnapshot = snapshot.clone(),
+}
+call |command| (&command.snapshot)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.snapshot.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Bumps the lifetime run counter for a session. Kept out of the snapshot write
 /// path so a stale in-memory service cannot roll the counter back.
 pub fn increment_run_count(path: &Path, session_id: &str) -> Result<()> {
@@ -143,7 +162,15 @@ pub fn increment_run_count(path: &Path, session_id: &str) -> Result<()> {
     )?;
     Ok(())
 }
+command IncrementRunCountCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Messages-sparing run-end save (DB-direct transcript workset, step 4 —
 /// never-fold): UPDATEs only run-state and row-context columns.
 /// `messages_json` is written once at session creation
@@ -166,6 +193,13 @@ pub fn save_session_run_state(path: &Path, update: &SessionRunStateUpdate) -> Re
         ),
         || save_session_run_state_inner(path, update),
     )
+}
+command SaveSessionRunStateCommand {
+    update: SessionRunStateUpdate = update.clone(),
+}
+call |command| (&command.update)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.update.session_id));
+port public;
 }
 
 fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> Result<()> {
@@ -276,6 +310,7 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
     Ok(())
 }
 
+coordinated_command! {
 pub fn update_session_config(
     path: &Path,
     snapshot: &SessionSnapshot,
@@ -308,7 +343,15 @@ pub fn update_session_config(
         },
     )
 }
+command UpdateSessionConfigCommand {
+    snapshot: SessionSnapshot = snapshot.clone(),
+}
+call |command| (&command.snapshot)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.snapshot.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Writes only revisioned session-configuration columns using the raw row
 /// revision as an optimistic CAS.
 /// Callers are responsible for strictly validating the complete prospective
@@ -375,7 +418,15 @@ pub fn update_raw_session_config(
     tx.commit()?;
     Ok(next_version)
 }
+command UpdateRawSessionConfigCommand {
+    config: RawSessionConfig = config.clone(),
+}
+call |command| (&command.config)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 pub fn session_exists(path: &Path, session_id: &str) -> Result<bool> {
     if !path.exists() {
         return Ok(false);
@@ -388,7 +439,15 @@ pub fn session_exists(path: &Path, session_id: &str) -> Result<bool> {
     )
     .map_err(Into::into)
 }
+command SessionExistsCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
@@ -414,7 +473,15 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
 
     row.into_snapshot()
 }
+command LoadSessionCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub(crate) fn load_session_run_state(
     path: &Path,
     session_id: &str,
@@ -459,7 +526,15 @@ pub(crate) fn load_session_run_state(
         updated_at,
     ))
 }
+command LoadSessionRunStateCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
+}
 
+coordinated_command! {
 pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionConfig> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
@@ -508,7 +583,15 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
     ));
     Ok(config)
 }
+command LoadSessionConfigCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Loads the durable answer policy for exactly one session. Legacy rows are
 /// migrated to manual, preserving headless fail-closed behavior by default.
 pub fn load_permission_approval_mode(
@@ -517,7 +600,15 @@ pub fn load_permission_approval_mode(
 ) -> Result<crate::permissions::PermissionApprovalMode> {
     load_permission_approval_state(path, session_id).map(|(mode, _, _)| mode)
 }
+command LoadPermissionApprovalModeCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Loads the answer policy that governs a requesting session.
 ///
 /// Traditional children resolve through their durable root ownership record,
@@ -554,7 +645,15 @@ pub(crate) fn load_effective_permission_approval_state(
         .ok_or_else(|| anyhow!("session '{requesting_session_id}' was not found"))?;
     decode_permission_approval_state(stored, generation, revision)
 }
+command LoadEffectivePermissionApprovalStateCommand {
+    requesting_session_id: String = requesting_session_id.to_owned(),
+}
+call |command| (&command.requesting_session_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port internal;
+}
 
+coordinated_command! {
 /// Loads the current mode, the monotonic auto-approve generation, and the
 /// latest reserved transition revision.
 pub(crate) fn load_permission_approval_state(
@@ -579,6 +678,13 @@ pub(crate) fn load_permission_approval_state(
         .optional()?
         .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
     decode_permission_approval_state(stored, generation, revision)
+}
+command LoadPermissionApprovalStateCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
 }
 
 fn decode_permission_approval_state(
@@ -606,6 +712,7 @@ fn decode_permission_approval_state(
     Ok((mode, generation, revision))
 }
 
+coordinated_command! {
 /// Changes only the session-local permission answer policy. This does not
 /// increment model config_version, invalidate remembered grants, or rewrite
 /// backend selection.
@@ -623,7 +730,16 @@ pub fn update_permission_approval_mode(
         ))
     }
 }
+command UpdatePermissionApprovalModeCommand {
+    session_id: String = session_id.to_owned(),
+    mode: crate::permissions::PermissionApprovalMode = mode,
+}
+call |command| (&command.session_id, command.mode)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Reserves the next durable user-intent ticket. A later reservation prevents
 /// an older delayed writer from applying, regardless of actual write order.
 pub(crate) fn reserve_permission_approval_transition(path: &Path, session_id: &str) -> Result<i64> {
@@ -646,7 +762,15 @@ pub(crate) fn reserve_permission_approval_transition(path: &Path, session_id: &s
     tx.commit()?;
     Ok(revision)
 }
+command ReservePermissionApprovalTransitionCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
+}
 
+coordinated_command! {
 /// Applies a reserved transition only while it is still the latest user
 /// intent. `false` means a later transition was reserved first.
 pub(crate) fn compare_and_update_permission_approval_state(
@@ -685,7 +809,17 @@ pub(crate) fn compare_and_update_permission_approval_state(
     tx.commit()?;
     Ok(true)
 }
+command CompareAndUpdatePermissionApprovalStateCommand {
+    session_id: String = session_id.to_owned(),
+    revision: i64 = revision,
+    mode: crate::permissions::PermissionApprovalMode = mode,
+}
+call |command| (&command.session_id, command.revision, command.mode)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
+}
 
+coordinated_command! {
 /// Reads only the immutable behavior discriminator. Configuration repair paths
 /// use this instead of decoding the whole snapshot, because an unrelated
 /// malformed legacy field must remain explicitly repairable.
@@ -702,7 +836,15 @@ pub fn load_session_behavior(path: &Path, session_id: &str) -> Result<SessionBeh
         .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?
         .parse()
 }
+command LoadSessionBehaviorCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
     let conn = crate::store::open_connection(path)?;
     let row = conn
@@ -729,7 +871,14 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
 
     row.into_snapshot()
 }
+command LoadLastSessionCommand {
+}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 pub fn delete_session(path: &Path, session_id: &str) -> Result<bool> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
@@ -757,6 +906,13 @@ pub fn delete_session(path: &Path, session_id: &str) -> Result<bool> {
     )?;
     tx.commit()?;
     Ok(deleted > 0)
+}
+command DeleteSessionCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
@@ -789,9 +945,16 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
     })
 }
 
+coordinated_command! {
 pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
     let conn = crate::store::open_runtime_connection(path)?;
     list_sessions_with_connection(&conn)
+}
+command ListSessionsCommand {
+}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 pub(crate) fn list_sessions_with_connection(
@@ -800,6 +963,7 @@ pub(crate) fn list_sessions_with_connection(
     query_session_summaries(conn, None)
 }
 
+coordinated_command! {
 pub fn update_session_presentation(
     path: &Path,
     session_id: &str,
@@ -887,7 +1051,18 @@ pub fn update_session_presentation(
     tx.commit()?;
     Ok(summary)
 }
+command UpdateSessionPresentationCommand {
+    session_id: String = session_id.to_owned(),
+    title: String = title.to_owned(),
+    pinned: bool = pinned,
+    expected_version: i64 = expected_version,
+}
+call |command| (&command.session_id, &command.title, command.pinned, command.expected_version)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn reorder_sessions(
     path: &Path,
     pinned: bool,
@@ -1002,6 +1177,15 @@ pub fn reorder_sessions(
     let summaries = query_session_summaries(&tx, Some(pinned))?;
     tx.commit()?;
     Ok(summaries)
+}
+command ReorderSessionsCommand {
+    pinned: bool = pinned,
+    session_ids: Vec<String> = session_ids.to_vec(),
+    expected_versions: BTreeMap<String, i64> = expected_versions.clone(),
+}
+call |command| (command.pinned, &command.session_ids, &command.expected_versions)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 fn normalize_presentation_title(

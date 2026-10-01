@@ -45,6 +45,7 @@ pub struct NewWorkspaceRevision {
     pub transcript_len: Option<u64>,
 }
 
+coordinated_command! {
 pub fn append_workspace_revision(
     path: &Path,
     session_id: &str,
@@ -91,7 +92,16 @@ pub fn append_workspace_revision(
         transcript_len: revision.transcript_len,
     })
 }
+command AppendWorkspaceRevisionCommand {
+    session_id: String = session_id.to_owned(),
+    revision: NewWorkspaceRevision = revision,
+}
+call |command| (&command.session_id, command.revision)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Newest first, which is the order the picker shows them in.
 pub fn list_workspace_revisions(
     path: &Path,
@@ -108,7 +118,15 @@ pub fn list_workspace_revisions(
     let rows = statement.query_map(params![session_id], decode_row)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
+command ListWorkspaceRevisionsCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn read_workspace_revision(
     path: &Path,
     session_id: &str,
@@ -126,7 +144,16 @@ pub fn read_workspace_revision(
         )
         .optional()?)
 }
+command ReadWorkspaceRevisionCommand {
+    session_id: String = session_id.to_owned(),
+    id: i64 = id,
+}
+call |command| (&command.session_id, command.id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn latest_workspace_revision(
     path: &Path,
     session_id: &str,
@@ -145,7 +172,15 @@ pub fn latest_workspace_revision(
         )
         .optional()?)
 }
+command LatestWorkspaceRevisionCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn workspace_revision_for_run(
     path: &Path,
     session_id: &str,
@@ -165,7 +200,16 @@ pub fn workspace_revision_for_run(
         )
         .optional()?)
 }
+command WorkspaceRevisionForRunCommand {
+    session_id: String = session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+}
+call |command| (&command.session_id, &command.run_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(Some(&command.run_id));
+port public;
+}
 
+coordinated_command! {
 /// The newest revision that describes a transcript no longer than
 /// `transcript_len` — the checkout as it stood at that point in the
 /// conversation. Rows without a recorded length predate the link and are
@@ -191,7 +235,16 @@ pub fn workspace_revision_at_transcript_len(
         )
         .optional()?)
 }
+command WorkspaceRevisionAtTranscriptLenCommand {
+    session_id: String = session_id.to_owned(),
+    transcript_len: u64 = transcript_len,
+}
+call |command| (&command.session_id, command.transcript_len)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Forget every revision newer than `keep_through_id`, or all of them when it
 /// is `None`. A revert rewinds the checkout, so the revisions taken after that
 /// point no longer describe anything the session can reach.
@@ -207,6 +260,14 @@ pub fn delete_workspace_revisions_after(
         params![session_id, keep_through_id.unwrap_or(0)],
     )?;
     Ok(deleted)
+}
+command DeleteWorkspaceRevisionsAfterCommand {
+    session_id: String = session_id.to_owned(),
+    keep_through_id: Option<i64> = keep_through_id,
+}
+call |command| (&command.session_id, command.keep_through_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 fn decode_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceRevisionRecord> {

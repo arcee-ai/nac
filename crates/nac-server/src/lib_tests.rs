@@ -321,8 +321,8 @@ fn owned_test_manager(root: &std::path::Path) -> Result<SessionManager> {
     })
 }
 
-#[test]
-fn serving_store_ownership_rejects_a_second_manager_and_allows_restart() {
+#[tokio::test]
+async fn serving_store_ownership_rejects_a_second_manager_and_allows_restart() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("store_owner_restart");
     let _env = ScopedModelEnv::isolated(&root.join("nac-home"), None);
@@ -336,8 +336,10 @@ fn serving_store_ownership_rejects_a_second_manager_and_allows_restart() {
         "store is already owned by another active nac-web process; stop that process or pass --store-path with a different database"
     );
 
+    first.drain_persistence().await.unwrap();
     drop(first);
     let restarted = owned_test_manager(&root).expect("restart should recover store ownership");
+    restarted.drain_persistence().await.unwrap();
     drop(restarted);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -979,6 +981,8 @@ mod managed_delivery;
 mod managed_load;
 #[path = "tests/managed_topology.rs"]
 mod managed_topology;
+#[path = "tests/persistence_load.rs"]
+mod persistence_load;
 #[path = "tests/presentation.rs"]
 mod presentation;
 #[path = "tests/projects.rs"]
@@ -987,3 +991,6 @@ mod project_routes;
 mod recovery;
 #[path = "tests/terminals.rs"]
 mod terminals;
+
+#[path = "tests/owned_serving.rs"]
+mod owned_serving;

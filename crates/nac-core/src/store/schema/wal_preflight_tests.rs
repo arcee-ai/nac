@@ -1,4 +1,55 @@
 use super::*;
+
+#[cfg(unix)]
+const LOCK_PROBE_STORE: &str = "NAC_TEST_PREFLIGHT_LOCK_PROBE_STORE";
+
+#[cfg(unix)]
+#[test]
+fn preflight_lock_probe_child() {
+    let Some(path) = std::env::var_os(LOCK_PROBE_STORE) else {
+        return;
+    };
+    let connection = rusqlite::Connection::open(PathBuf::from(path)).unwrap();
+    connection.busy_timeout(std::time::Duration::ZERO).unwrap();
+    let error = connection.execute_batch("BEGIN EXCLUSIVE").unwrap_err();
+    assert_eq!(
+        error.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseBusy)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn schema_preflight_preserves_an_existing_sqlite_process_lock() {
+    let path = temp_store_path("preflight_process_lock");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch("CREATE TABLE canary(value); PRAGMA user_version=1; BEGIN EXCLUSIVE")
+        .unwrap();
+    let probe = || {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "store::schema::wal_preflight::tests::preflight_lock_probe_child",
+                "--nocapture",
+            ])
+            .env(LOCK_PROBE_STORE, &path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "peer obtained the held SQLite lock: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    };
+    probe();
+    assert_eq!(read_schema_version_header(&path).unwrap(), Some(1));
+    probe();
+    connection.execute_batch("ROLLBACK").unwrap();
+    drop(connection);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
 use crate::store::{
     check_readiness, initialize, list_projects, migration_status, StoreMigrationFailure,
     StoreMigrationState, StoreMigrationStatus,

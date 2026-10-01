@@ -146,8 +146,10 @@ pub async fn execute_define(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let items_len = definition.items.len();
-    match tokio::task::spawn_blocking(move || store::define_workset(&store_path, &sid, &definition))
-        .await
+    match crate::store::spawn_blocking_store_caller(move || {
+        store::define_workset(&store_path, &sid, &definition)
+    })
+    .await
     {
         Ok(Ok(())) => ToolResult {
             content: (format!("Saved workset '{id}' with {items_len} item(s).")).into(),
@@ -177,7 +179,11 @@ pub async fn execute_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
     let wid = id.clone();
-    match tokio::task::spawn_blocking(move || store::read_workset(&store_path, &sid, &wid)).await {
+    match crate::store::spawn_blocking_store_caller(move || {
+        store::read_workset(&store_path, &sid, &wid)
+    })
+    .await
+    {
         Ok(Ok(Some(workset))) => ToolResult {
             content: (store::render_workset_document(&workset)).into(),
             is_error: false,
@@ -205,7 +211,9 @@ pub async fn execute_list(_args: Value, runtime: &ToolRuntime) -> ToolResult {
 
     let store_path = runtime.store_path.clone();
     let sid = session_id.clone();
-    match tokio::task::spawn_blocking(move || store::list_worksets(&store_path, &sid)).await {
+    match crate::store::spawn_blocking_store_caller(move || store::list_worksets(&store_path, &sid))
+        .await
+    {
         Ok(Ok(worksets)) => ToolResult {
             content: (store::render_workset_list(&worksets)).into(),
             is_error: false,

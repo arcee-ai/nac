@@ -260,6 +260,7 @@ fn load_project_with_connection(
     .ok_or_else(|| ProjectStoreError::NotFound(project_id.to_string()))
 }
 
+coordinated_command! {
 pub fn list_projects(path: &Path) -> ProjectResult<Vec<ProjectRecord>> {
     let conn = open_runtime_connection(path)?;
     let mut statement = conn.prepare(&format!(
@@ -270,7 +271,14 @@ pub fn list_projects(path: &Path) -> ProjectResult<Vec<ProjectRecord>> {
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(projects)
 }
+command ListProjectsCommand {
+}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 pub fn insert_project(path: &Path, project: NewProject) -> ProjectResult<ProjectRecord> {
     let mut record = validated_project(project)?;
     let mut conn = open_runtime_connection(path)?;
@@ -301,6 +309,13 @@ pub fn insert_project(path: &Path, project: NewProject) -> ProjectResult<Project
     tx.commit()?;
     Ok(record)
 }
+command InsertProjectCommand {
+    project: NewProject = project,
+}
+call |command| (command.project)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
 /// Next free slot at the end of a pin group, optionally ignoring the project
 /// that is being moved into it.
@@ -320,6 +335,7 @@ fn next_sort_order(
         .ok_or_else(|| ProjectStoreError::Store(anyhow!("project order overflow")))
 }
 
+coordinated_command! {
 pub fn update_project(
     path: &Path,
     project_id: &str,
@@ -387,7 +403,16 @@ pub fn update_project(
     tx.commit()?;
     Ok(updated)
 }
+command UpdateProjectCommand {
+    project_id: String = project_id.to_owned(),
+    patch: ProjectPatch = patch,
+}
+call |command| (&command.project_id, command.patch)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 /// Removes the project and releases its sessions instead of deleting them.
 ///
 /// `session_projects.project_id` is `ON DELETE RESTRICT`, so the links have to
@@ -415,7 +440,15 @@ pub fn delete_project(path: &Path, project_id: &str) -> ProjectResult<Vec<String
     tx.commit()?;
     Ok(released)
 }
+command DeleteProjectCommand {
+    project_id: String = project_id.to_owned(),
+}
+call |command| (&command.project_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 /// Links an existing session to a project.
 ///
 /// Membership stays immutable once set, so an already-assigned session is a
@@ -485,7 +518,16 @@ pub fn assign_session_to_project(
     tx.commit()?;
     Ok(project)
 }
+command AssignSessionToProjectCommand {
+    project_id: String = project_id.to_owned(),
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.project_id, &command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 /// Rewrites the order of one pin group.
 ///
 /// The submitted list must cover the whole group exactly once and carry each
@@ -579,7 +621,17 @@ pub fn reorder_projects(
     tx.commit()?;
     Ok(reordered)
 }
+command ReorderProjectsCommand {
+    pinned: bool = pinned,
+    project_ids: Vec<String> = project_ids.to_vec(),
+    expected_versions: BTreeMap<String, i64> = expected_versions.clone(),
+}
+call |command| (command.pinned, &command.project_ids, &command.expected_versions)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
 
+coordinated_command! {
 pub fn load_project_launch_context(
     path: &Path,
     project_id: &str,
@@ -613,6 +665,13 @@ pub fn load_project_launch_context(
     )
     .optional()?
     .ok_or_else(|| ProjectStoreError::NotFound(project_id.to_string()))
+}
+command LoadProjectLaunchContextCommand {
+    project_id: String = project_id.to_owned(),
+}
+call |command| (&command.project_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 #[cfg(test)]

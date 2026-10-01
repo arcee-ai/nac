@@ -197,6 +197,7 @@ fn normalized_description(description: &str) -> Result<&str> {
     Ok(description)
 }
 
+coordinated_command! {
 pub fn create_traditional_child_relationship(
     path: &Path,
     parent_session_id: &str,
@@ -213,7 +214,18 @@ pub fn create_traditional_child_relationship(
         description,
     )
 }
+command CreateTraditionalChildRelationshipCommand {
+    parent_session_id: String = parent_session_id.to_owned(),
+    child_session_id: String = child_session_id.to_owned(),
+    profile: String = profile.to_owned(),
+    description: String = description.to_owned(),
+}
+call |command| (&command.parent_session_id, &command.child_session_id, &command.profile, &command.description)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn create_traditional_child_session(
     path: &Path,
     snapshot: &crate::sessions::SessionSnapshot,
@@ -233,6 +245,16 @@ pub fn create_traditional_child_session(
     )?;
     transaction.commit()?;
     Ok(child)
+}
+command CreateTraditionalChildSessionCommand {
+    snapshot: crate::sessions::SessionSnapshot = snapshot.clone(),
+    parent_session_id: String = parent_session_id.to_owned(),
+    profile: String = profile.to_owned(),
+    description: String = description.to_owned(),
+}
+call |command| (&command.snapshot, &command.parent_session_id, &command.profile, &command.description)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
 }
 
 fn create_traditional_child_relationship_with_connection(
@@ -304,6 +326,7 @@ fn create_traditional_child_relationship_with_connection(
         .ok_or_else(|| anyhow!("traditional child relationship disappeared after creation"))
 }
 
+coordinated_command! {
 pub fn load_traditional_child(
     path: &Path,
     child_session_id: &str,
@@ -311,7 +334,15 @@ pub fn load_traditional_child(
     let connection = open_runtime_connection(path)?;
     load_child_with_connection(&connection, child_session_id)
 }
+command LoadTraditionalChildCommand {
+    child_session_id: String = child_session_id.to_owned(),
+}
+call |command| (&command.child_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn load_traditional_child_for_parent(
     path: &Path,
     parent_session_id: &str,
@@ -329,7 +360,16 @@ pub fn load_traditional_child_for_parent(
         )
         .optional()?)
 }
+command LoadTraditionalChildForParentCommand {
+    parent_session_id: String = parent_session_id.to_owned(),
+    child_session_id: String = child_session_id.to_owned(),
+}
+call |command| (&command.parent_session_id, &command.child_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn list_traditional_children(
     path: &Path,
     parent_session_id: &str,
@@ -342,7 +382,15 @@ pub fn list_traditional_children(
     let rows = statement.query_map(params![parent_session_id], row_to_child)?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
+command ListTraditionalChildrenCommand {
+    parent_session_id: String = parent_session_id.to_owned(),
+}
+call |command| (&command.parent_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
+}
 
+coordinated_command! {
 /// Durable rollback obligations left by an interrupted session deletion.
 /// Callers must fence each child with its relationship lease before restoring
 /// one, so an active peer deletion cannot be undone.
@@ -361,7 +409,15 @@ pub fn list_suppressed_traditional_child_generations(
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
+command ListSuppressedTraditionalChildGenerationsCommand {
+    parent_session_id: String = parent_session_id.to_owned(),
+}
+call |command| (&command.parent_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn begin_traditional_child_run(
     path: &Path,
     child_session_id: &str,
@@ -425,7 +481,17 @@ pub fn begin_traditional_child_run(
     transaction.commit()?;
     Ok(child)
 }
+command BeginTraditionalChildRunCommand {
+    child_session_id: String = child_session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    execution_mode: TraditionalChildExecutionMode = execution_mode,
+}
+call |command| (&command.child_session_id, &command.run_id, command.execution_mode)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id)).with_run(Some(&command.run_id));
+port public;
+}
 
+coordinated_command! {
 pub fn suppress_traditional_child_completion(
     path: &Path,
     child_session_id: &str,
@@ -452,7 +518,15 @@ pub fn suppress_traditional_child_completion(
     load_child_with_connection(&connection, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child disappeared during completion suppression"))
 }
+command SuppressTraditionalChildCompletionCommand {
+    child_session_id: String = child_session_id.to_owned(),
+}
+call |command| (&command.child_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id));
+port public;
+}
 
+coordinated_command! {
 /// Roll back deletion-time completion suppression for the same generation.
 /// If cancellation already settled the background child while suppression was
 /// active, synthesize the omitted parent inbox delivery in this transaction.
@@ -506,13 +580,24 @@ pub fn restore_traditional_child_completion(
     transaction.commit()?;
     Ok(())
 }
+command RestoreTraditionalChildCompletionCommand {
+    child_session_id: String = child_session_id.to_owned(),
+    generation: u64 = generation,
+}
+call |command| (&command.child_session_id, command.generation)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn settle_traditional_child_run(
     path: &Path,
     child_session_id: &str,
     run_id: &str,
-    mut terminal: TraditionalChildTerminal,
+    terminal: TraditionalChildTerminal,
 ) -> Result<TraditionalChildSettlement> {
+    let mut terminal = terminal;
+
     if !terminal.status.is_terminal() {
         return Err(anyhow!(
             "traditional child settlement requires a terminal status"
@@ -594,6 +679,15 @@ pub fn settle_traditional_child_run(
         child: settled,
         newly_settled: true,
     })
+}
+command SettleTraditionalChildRunCommand {
+    child_session_id: String = child_session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    terminal: TraditionalChildTerminal = terminal,
+}
+call |command| (&command.child_session_id, &command.run_id, command.terminal)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id)).with_run(Some(&command.run_id));
+port public;
 }
 
 fn truncate_optional(value: Option<String>) -> Option<String> {

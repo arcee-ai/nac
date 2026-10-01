@@ -253,7 +253,13 @@ impl SessionService {
                 );
             }
             let baseline = service.lock_transcript_scan().visible_response_count;
-            service.set_run_transcript_baseline(&task_run_id, baseline);
+            let id = task_run_id.clone();
+            if let Err(error) = service
+                .coordinate_local(move |service| service.set_run_transcript_baseline(&id, baseline))
+                .await
+            {
+                eprintln!("nac: baseline coordination failed: {error:#}");
+            }
             let (result, usage) = {
                 let mut agent = service.agent.lock().await;
                 agent.set_event_sink(EventSink::bus_with_context(
@@ -378,6 +384,16 @@ impl SessionService {
             managed_orchestrator_execution_mode,
         } = admission;
         let mut guard = self.lock_active_operation();
+        if self
+            .stopping_admission
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store(
+                    "session is shutting down; new runs are rejected".to_owned(),
+                ),
+            });
+        }
         match guard.as_ref() {
             Some(ActiveSessionOperation::Run(active_run)) => {
                 return Err(SessionSubmitError::Busy {

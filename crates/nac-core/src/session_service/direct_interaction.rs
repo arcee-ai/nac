@@ -1,6 +1,22 @@
 use super::*;
 
 impl SessionService {
+    /// Stop this serving lifetime's run admission before persistence drains.
+    /// The operation lock linearizes with admissions already establishing
+    /// durable preconditions; queued inbox items and goals remain restartable.
+    pub async fn stop_run_admission(&self) -> Result<()> {
+        // Raise the fail-closed gate before waiting for bounded caller
+        // capacity. An admission already holding the operation lock may
+        // finish; every later admission observes this flag under that lock.
+        self.stopping_admission
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.cancel_goal_retry_wake();
+        self.coordinate_local(|service| {
+            let _operation = service.lock_active_operation();
+        })
+        .await
+    }
+
     fn require_direct_behavior(&self) -> Result<()> {
         if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
             return Err(anyhow::anyhow!(
@@ -23,6 +39,22 @@ impl SessionService {
             ));
         }
         Ok(())
+    }
+
+    async fn require_direct_primary_behavior_async(&self) -> Result<()> {
+        let service = self.clone();
+        crate::store::call_legacy_store(&self.metadata.store_path, move || {
+            service.require_direct_primary_behavior()
+        })
+        .await?
+    }
+
+    async fn require_direct_goal_behavior_async(&self) -> Result<()> {
+        let service = self.clone();
+        crate::store::call_legacy_store(&self.metadata.store_path, move || {
+            service.require_direct_goal_behavior()
+        })
+        .await?
     }
 
     fn direct_permission_broker(&self) -> Result<&Arc<crate::permissions::PermissionBroker>> {
@@ -73,7 +105,7 @@ impl SessionService {
         &self,
         mode: crate::permissions::PermissionApprovalMode,
     ) -> Result<()> {
-        self.require_direct_primary_behavior()?;
+        self.require_direct_primary_behavior_async().await?;
         self.direct_permission_broker()?
             .set_approval_mode(mode)
             .await
@@ -99,7 +131,7 @@ impl SessionService {
         content: &str,
         client_id: Option<&SessionClientId>,
     ) -> Result<crate::store::SessionInboxRecord> {
-        self.require_direct_primary_behavior()?;
+        self.require_direct_primary_behavior_async().await?;
         self.enqueue_direct_input_unchecked(delivery, content, client_id)
             .await
     }
@@ -117,7 +149,11 @@ impl SessionService {
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        if crate::store::load_traditional_child(&self.metadata.store_path, session_id)?.is_none() {
+        let child = match crate::store::coordinator::owner_for(&self.metadata.store_path)? {
+            Some(owner) => owner.load_traditional_child(session_id.to_owned()).await?,
+            None => crate::store::load_traditional_child(&self.metadata.store_path, session_id)?,
+        };
+        if child.is_none() {
             return Err(anyhow::anyhow!("traditional child was not found"));
         }
         self.enqueue_direct_input_unchecked(delivery, content, None)
@@ -130,31 +166,36 @@ impl SessionService {
         content: &str,
         client_id: Option<&SessionClientId>,
     ) -> Result<crate::store::SessionInboxRecord> {
-        let session_id = self
-            .metadata
-            .session_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let (record, target_run_id) = {
-            let active = self.lock_active_operation();
-            let target_run_id = match (delivery, active.as_ref()) {
-                (crate::store::InboxDelivery::Steer, Some(ActiveSessionOperation::Run(run)))
-                    if !run.finishing =>
-                {
-                    Some(run.snapshot.run_id.to_string())
-                }
-                _ => None,
-            };
-            let record = crate::store::create_session_inbox_item(
-                &self.metadata.store_path,
-                session_id,
-                delivery,
-                content,
-                target_run_id.as_deref(),
-                client_id.map(SessionClientId::as_str),
-            )?;
-            (record, target_run_id)
-        };
+        let service = self.clone();
+        let content = content.to_owned();
+        let client_id = client_id.cloned();
+        let (record, target_run_id) =
+            crate::store::call_legacy_store(&self.metadata.store_path, move || -> Result<_> {
+                let session_id = service
+                    .metadata
+                    .session_id
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+
+                let active = service.lock_active_operation();
+                let target_run_id = match (delivery, active.as_ref()) {
+                    (
+                        crate::store::InboxDelivery::Steer,
+                        Some(ActiveSessionOperation::Run(run)),
+                    ) if !run.finishing => Some(run.snapshot.run_id.to_string()),
+                    _ => None,
+                };
+                let record = crate::store::create_session_inbox_item(
+                    &service.metadata.store_path,
+                    session_id,
+                    delivery,
+                    &content,
+                    target_run_id.as_deref(),
+                    client_id.as_ref().map(SessionClientId::as_str),
+                )?;
+                Ok((record, target_run_id))
+            })
+            .await??;
         if target_run_id.is_none() {
             self.start_next_direct_inbox_item().await?;
         }
@@ -167,32 +208,35 @@ impl SessionService {
         expected_version: i64,
         delivery: crate::store::InboxDelivery,
     ) -> Result<crate::store::SessionInboxRecord> {
-        self.require_direct_primary_behavior()?;
-        let session_id = self
-            .metadata
-            .session_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let (record, target_run_id) = {
-            let active = self.lock_active_operation();
-            let target_run_id = match (delivery, active.as_ref()) {
-                (crate::store::InboxDelivery::Steer, Some(ActiveSessionOperation::Run(run)))
-                    if !run.finishing =>
-                {
-                    Some(run.snapshot.run_id.to_string())
-                }
-                _ => None,
-            };
-            let record = crate::store::update_pending_session_inbox_item(
-                &self.metadata.store_path,
-                session_id,
-                item_id,
-                expected_version,
-                delivery,
-                target_run_id.as_deref(),
-            )?;
-            (record, target_run_id)
-        };
+        self.require_direct_primary_behavior_async().await?;
+        let service = self.clone();
+        let (record, target_run_id) =
+            crate::store::call_legacy_store(&self.metadata.store_path, move || -> Result<_> {
+                let session_id = service
+                    .metadata
+                    .session_id
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+
+                let active = service.lock_active_operation();
+                let target_run_id = match (delivery, active.as_ref()) {
+                    (
+                        crate::store::InboxDelivery::Steer,
+                        Some(ActiveSessionOperation::Run(run)),
+                    ) if !run.finishing => Some(run.snapshot.run_id.to_string()),
+                    _ => None,
+                };
+                let record = crate::store::update_pending_session_inbox_item(
+                    &service.metadata.store_path,
+                    session_id,
+                    item_id,
+                    expected_version,
+                    delivery,
+                    target_run_id.as_deref(),
+                )?;
+                Ok((record, target_run_id))
+            })
+            .await??;
         if target_run_id.is_none() {
             self.start_next_direct_inbox_item().await?;
         }
@@ -233,12 +277,7 @@ impl SessionService {
         objective: &str,
         token_budget: Option<u64>,
     ) -> Result<crate::store::SessionGoalRecord> {
-        self.require_direct_goal_behavior()?;
-        let session_id = self
-            .metadata
-            .session_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        self.require_direct_goal_behavior_async().await?;
         let _wake = self.inbox_wake.lock().await;
         // Freeze local run identity while capturing the lock-free GoalRuntime
         // usage snapshot and committing the goal. If no local run exists,
@@ -246,53 +285,67 @@ impl SessionService {
         // unbound goal: a peer-owned run cannot otherwise supply the exact
         // mid-run token baseline and must fail closed instead of silently
         // excluding that run from goal accounting.
-        let (goal, idle_lease) = {
-            let active = self.lock_active_operation();
-            let active_run_id = match active.as_ref() {
-                Some(ActiveSessionOperation::Run(run)) if !run.finishing => {
-                    Some(run.snapshot.run_id.clone())
-                }
-                _ => None,
-            };
-            let baseline = active_run_id.as_ref().map(|run_id| {
-                self.goal_runtime
-                    .as_ref()
-                    .and_then(|runtime| runtime.current_baseline())
-                    .filter(|baseline| baseline.run_id == run_id.as_str())
-                    .unwrap_or_else(|| crate::store::GoalRunBaseline {
-                        run_id: run_id.to_string(),
-                        billable_tokens: 0,
-                        started_at_epoch_ms: now_epoch_ms(),
-                        continuation: false,
-                    })
-            });
-            let idle_lease = if active_run_id.is_none() {
-                Some(
-                    sessions::SessionOperationLease::try_acquire(
-                        &self.metadata.store_path,
-                        session_id,
+        let service = self.clone();
+        let objective = objective.to_owned();
+        let (goal, idle_lease) = crate::store::call_legacy_store(
+            &self.metadata.store_path,
+            move || -> Result<_> {
+                let session_id = service
+                    .metadata
+                    .session_id
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+
+                let active = service.lock_active_operation();
+                let active_run_id = match active.as_ref() {
+                    Some(ActiveSessionOperation::Run(run)) if !run.finishing => {
+                        Some(run.snapshot.run_id.clone())
+                    }
+                    _ => None,
+                };
+                let baseline = active_run_id.as_ref().map(|run_id| {
+                    service
+                        .goal_runtime
+                        .as_ref()
+                        .and_then(|runtime| runtime.current_baseline())
+                        .filter(|baseline| baseline.run_id == run_id.as_str())
+                        .unwrap_or_else(|| crate::store::GoalRunBaseline {
+                            run_id: run_id.to_string(),
+                            billable_tokens: 0,
+                            started_at_epoch_ms: now_epoch_ms(),
+                            continuation: false,
+                        })
+                });
+                let idle_lease = if active_run_id.is_none() {
+                    Some(
+                        sessions::SessionOperationLease::try_acquire(
+                            &service.metadata.store_path,
+                            session_id,
+                        )
+                        .map_err(|error| match error {
+                            sessions::SessionOperationLeaseError::Busy(_) => anyhow::anyhow!(
+                                "cannot create a goal while session '{session_id}' is running in another process"
+                            ),
+                            sessions::SessionOperationLeaseError::Store(error) => error,
+                        })?,
                     )
-                    .map_err(|error| match error {
-                        sessions::SessionOperationLeaseError::Busy(_) => anyhow::anyhow!(
-                            "cannot create a goal while session '{session_id}' is running in another process"
-                        ),
-                        sessions::SessionOperationLeaseError::Store(error) => error,
-                    })?,
-                )
-            } else {
-                None
-            };
-            let goal = crate::store::create_session_goal(
-                &self.metadata.store_path,
-                session_id,
-                objective,
-                token_budget,
-                baseline.as_ref(),
-            )?;
-            (goal, idle_lease)
-        };
+                } else {
+                    None
+                };
+                let goal = crate::store::create_session_goal(
+                    &service.metadata.store_path,
+                    session_id,
+                    &objective,
+                    token_budget,
+                    baseline.as_ref(),
+                )?;
+                Ok((goal, idle_lease))
+            },
+        )
+        .await??;
         if let Some(lease) = idle_lease {
-            self.start_next_direct_inbox_item_with_lease(lease)?;
+            self.start_next_direct_inbox_item_with_lease_async(lease)
+                .await?;
         }
         Ok(goal)
     }
@@ -303,19 +356,24 @@ impl SessionService {
         expected_version: i64,
         update: crate::store::UserGoalUpdate,
     ) -> Result<crate::store::SessionGoalRecord> {
-        self.require_direct_goal_behavior()?;
-        let session_id = self
-            .metadata
-            .session_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let goal = crate::store::update_session_goal_by_user(
-            &self.metadata.store_path,
-            session_id,
-            goal_id,
-            expected_version,
-            update,
-        )?;
+        self.require_direct_goal_behavior_async().await?;
+        let service = self.clone();
+        let goal_id = goal_id.to_owned();
+        let goal = crate::store::call_legacy_store(&self.metadata.store_path, move || {
+            let session_id = service
+                .metadata
+                .session_id
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+            crate::store::update_session_goal_by_user(
+                &service.metadata.store_path,
+                session_id,
+                &goal_id,
+                expected_version,
+                update,
+            )
+        })
+        .await??;
         self.cancel_goal_retry_wake();
         if goal.status == crate::store::GoalStatus::Active {
             self.start_next_direct_inbox_item().await?;
@@ -346,7 +404,11 @@ impl SessionService {
     pub async fn start_next_direct_inbox_item(&self) -> Result<Option<SessionRunHandle>> {
         self.require_direct_behavior()?;
         let _wake = self.inbox_wake.lock().await;
-        if self.has_active_operation() {
+        if self
+            .stopping_admission
+            .load(std::sync::atomic::Ordering::Acquire)
+            || self.has_active_operation()
+        {
             return Ok(None);
         }
         let session_id = self
@@ -362,7 +424,19 @@ impl SessionService {
             Err(sessions::SessionOperationLeaseError::Busy(_)) => return Ok(None),
             Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
         };
-        self.start_next_direct_inbox_item_with_lease(lease)
+        self.start_next_direct_inbox_item_with_lease_async(lease)
+            .await
+    }
+
+    async fn start_next_direct_inbox_item_with_lease_async(
+        &self,
+        lease: sessions::SessionOperationLease,
+    ) -> Result<Option<SessionRunHandle>> {
+        let service = self.clone();
+        crate::store::spawn_blocking_store_caller(move || {
+            service.start_next_direct_inbox_item_with_lease(lease)
+        })
+        .await?
     }
 
     fn start_next_direct_inbox_item_with_lease(
@@ -478,15 +552,21 @@ impl SessionService {
             let Some(session_id) = service.metadata.session_id.as_deref() else {
                 return;
             };
-            let current =
-                match crate::store::load_session_goal(&service.metadata.store_path, session_id) {
-                    Ok(Some(goal)) => goal,
-                    Ok(None) => return,
-                    Err(error) => {
-                        eprintln!("nac: failed to load goal at retry deadline: {error:#}");
-                        return;
-                    }
-                };
+            let goal = match crate::store::coordinator::owner_for(&service.metadata.store_path) {
+                Ok(Some(owner)) => owner.load_session_goal(session_id.to_owned()).await,
+                Ok(None) => {
+                    crate::store::load_session_goal(&service.metadata.store_path, session_id)
+                }
+                Err(error) => Err(error),
+            };
+            let current = match goal {
+                Ok(Some(goal)) => goal,
+                Ok(None) => return,
+                Err(error) => {
+                    eprintln!("nac: failed to load goal at retry deadline: {error:#}");
+                    return;
+                }
+            };
             if current.goal_id != goal_id
                 || current.version != goal_version
                 || current.status != crate::store::GoalStatus::Active
@@ -506,3 +586,6 @@ impl SessionService {
         });
     }
 }
+
+#[cfg(test)]
+mod owned_lifecycle_tests;

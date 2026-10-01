@@ -91,6 +91,7 @@ fn load_with_connection(
         .optional()?)
 }
 
+coordinated_command! {
 pub fn create_managed_orchestrator_relationship(
     path: &Path,
     parent_session_id: &str,
@@ -105,7 +106,17 @@ pub fn create_managed_orchestrator_relationship(
         description,
     )
 }
+command CreateManagedOrchestratorRelationshipCommand {
+    parent_session_id: String = parent_session_id.to_owned(),
+    orchestrator_session_id: String = orchestrator_session_id.to_owned(),
+    description: String = description.to_owned(),
+}
+call |command| (&command.parent_session_id, &command.orchestrator_session_id, &command.description)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn create_managed_orchestrator_session(
     path: &Path,
     snapshot: &crate::sessions::SessionSnapshot,
@@ -123,6 +134,15 @@ pub fn create_managed_orchestrator_session(
     )?;
     transaction.commit()?;
     Ok(orchestrator)
+}
+command CreateManagedOrchestratorSessionCommand {
+    snapshot: crate::sessions::SessionSnapshot = snapshot.clone(),
+    parent_session_id: String = parent_session_id.to_owned(),
+    description: String = description.to_owned(),
+}
+call |command| (&command.snapshot, &command.parent_session_id, &command.description)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
 }
 
 fn create_managed_orchestrator_relationship_with_connection(
@@ -170,6 +190,7 @@ fn create_managed_orchestrator_relationship_with_connection(
         .ok_or_else(|| anyhow!("managed orchestrator relationship disappeared after creation"))
 }
 
+coordinated_command! {
 pub fn load_managed_orchestrator(
     path: &Path,
     orchestrator_session_id: &str,
@@ -177,7 +198,15 @@ pub fn load_managed_orchestrator(
     let connection = open_runtime_connection(path)?;
     load_with_connection(&connection, orchestrator_session_id)
 }
+command LoadManagedOrchestratorCommand {
+    orchestrator_session_id: String = orchestrator_session_id.to_owned(),
+}
+call |command| (&command.orchestrator_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.orchestrator_session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn load_managed_orchestrator_for_parent(
     path: &Path,
     parent_session_id: &str,
@@ -195,7 +224,16 @@ pub fn load_managed_orchestrator_for_parent(
         )
         .optional()?)
 }
+command LoadManagedOrchestratorForParentCommand {
+    parent_session_id: String = parent_session_id.to_owned(),
+    orchestrator_session_id: String = orchestrator_session_id.to_owned(),
+}
+call |command| (&command.parent_session_id, &command.orchestrator_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
+}
 
+coordinated_command! {
 /// Queue orchestrator-level steering only while the exact managed generation
 /// remains current. The relationship check and steering insert share one
 /// immediate transaction so settlement cannot redirect input to a successor.
@@ -227,7 +265,17 @@ pub fn queue_managed_orchestrator_steering(
     transaction.commit()?;
     Ok(record)
 }
+command QueueManagedOrchestratorSteeringCommand {
+    parent_session_id: String = parent_session_id.to_owned(),
+    orchestrator_session_id: String = orchestrator_session_id.to_owned(),
+    instruction: String = instruction.to_owned(),
+}
+call |command| (&command.parent_session_id, &command.orchestrator_session_id, &command.instruction)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn list_managed_orchestrators(
     path: &Path,
     parent_session_id: &str,
@@ -240,7 +288,15 @@ pub fn list_managed_orchestrators(
     let rows = statement.query_map(params![parent_session_id], row_to_record)?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
+command ListManagedOrchestratorsCommand {
+    parent_session_id: String = parent_session_id.to_owned(),
+}
+call |command| (&command.parent_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
+}
 
+coordinated_command! {
 /// Durable rollback obligations left by an interrupted session deletion.
 /// Callers must fence each orchestrator with its relationship lease before
 /// restoring one, so an active peer deletion cannot be undone.
@@ -259,7 +315,15 @@ pub fn list_suppressed_managed_orchestrator_generations(
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
+command ListSuppressedManagedOrchestratorGenerationsCommand {
+    parent_session_id: String = parent_session_id.to_owned(),
+}
+call |command| (&command.parent_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.parent_session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn begin_managed_orchestrator_run(
     path: &Path,
     orchestrator_session_id: &str,
@@ -324,7 +388,17 @@ pub fn begin_managed_orchestrator_run(
     transaction.commit()?;
     Ok(record)
 }
+command BeginManagedOrchestratorRunCommand {
+    orchestrator_session_id: String = orchestrator_session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    execution_mode: ManagedOrchestratorExecutionMode = execution_mode,
+}
+call |command| (&command.orchestrator_session_id, &command.run_id, command.execution_mode)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.orchestrator_session_id)).with_run(Some(&command.run_id));
+port public;
+}
 
+coordinated_command! {
 pub fn suppress_managed_orchestrator_completion(
     path: &Path,
     orchestrator_session_id: &str,
@@ -346,7 +420,15 @@ pub fn suppress_managed_orchestrator_completion(
     load_with_connection(&connection, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator disappeared during completion suppression"))
 }
+command SuppressManagedOrchestratorCompletionCommand {
+    orchestrator_session_id: String = orchestrator_session_id.to_owned(),
+}
+call |command| (&command.orchestrator_session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.orchestrator_session_id));
+port public;
+}
 
+coordinated_command! {
 /// Roll back deletion-time completion suppression for the same generation.
 /// If the orchestrator already settled while suppression was active, restore
 /// the omitted background completion delivery atomically.
@@ -419,13 +501,24 @@ pub fn restore_managed_orchestrator_completion(
     transaction.commit()?;
     Ok(())
 }
+command RestoreManagedOrchestratorCompletionCommand {
+    orchestrator_session_id: String = orchestrator_session_id.to_owned(),
+    generation: u64 = generation,
+}
+call |command| (&command.orchestrator_session_id, command.generation)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.orchestrator_session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn settle_managed_orchestrator_run(
     path: &Path,
     orchestrator_session_id: &str,
     run_id: &str,
-    mut terminal: ManagedOrchestratorTerminal,
+    terminal: ManagedOrchestratorTerminal,
 ) -> Result<ManagedOrchestratorSettlement> {
+    let mut terminal = terminal;
+
     crate::telemetry::observe_store(
         crate::telemetry::StoreOperation::TerminalSettlement,
         crate::telemetry::Correlation::session(Some(orchestrator_session_id))
@@ -439,6 +532,15 @@ pub fn settle_managed_orchestrator_run(
             )
         },
     )
+}
+command SettleManagedOrchestratorRunCommand {
+    orchestrator_session_id: String = orchestrator_session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    terminal: ManagedOrchestratorTerminal = terminal,
+}
+call |command| (&command.orchestrator_session_id, &command.run_id, command.terminal)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.orchestrator_session_id)).with_run(Some(&command.run_id));
+port public;
 }
 
 fn settle_managed_orchestrator_run_inner(

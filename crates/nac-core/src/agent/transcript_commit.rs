@@ -52,7 +52,7 @@ impl Agent {
         // process's pending writes, so terminal normalization resolves it instead
         // of mistaking it for a peer's committed row (issue #146).
         self.pending_log_end = Some(start_idx + batch_len);
-        let appended = tokio::task::spawn_blocking(move || {
+        let appended = crate::store::spawn_blocking_store_caller(move || {
             if terminal {
                 writer.append_terminal_batch(&session_id, start_idx, &messages)
             } else {
@@ -69,7 +69,8 @@ impl Agent {
                 self.committed_log_len = start_idx + batch_len;
                 self.pending_log_end = None;
                 self.event_sink
-                    .emit_transcript_appended(start_idx + batch_len);
+                    .emit_transcript_appended_async(start_idx + batch_len)
+                    .await;
                 Ok(())
             }
             Err(error) => {
@@ -99,17 +100,20 @@ impl Agent {
         // log_transcript_batch for why the straggler from a dropped run
         // task must stay within this process's own commits.
         self.pending_log_end = Some(idx + 1);
-        let appended =
-            tokio::task::spawn_blocking(move || writer.append(&session_id, idx, &message))
-                .await
-                .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
+        let appended = crate::store::spawn_blocking_store_caller(move || {
+            writer.append(&session_id, idx, &message)
+        })
+        .await
+        .map_err(|error| anyhow!("transcript log append task failed: {error}"))?;
         match appended {
             Ok(()) => {
                 // Live trigger (step 3): see log_transcript_batch.
                 self.committed_log_len = idx + 1;
                 self.pending_log_end = None;
                 self.unacknowledged_log_message = None;
-                self.event_sink.emit_transcript_appended(idx + 1);
+                self.event_sink
+                    .emit_transcript_appended_async(idx + 1)
+                    .await;
                 Ok(())
             }
             Err(error) => {
@@ -163,7 +167,7 @@ impl Agent {
             let run_id = run_id.to_string();
             self.steering_append_pending = true;
             self.pending_log_end = Some(idx + 1);
-            let appended = tokio::task::spawn_blocking(move || {
+            let appended = crate::store::spawn_blocking_store_caller(move || {
                 let append = || match inbox_item_id {
                     Some(inbox_item_id) => writer.append_inbox_run_prompt(
                         &session_id,
@@ -208,7 +212,9 @@ impl Agent {
             self.steering_append_pending = false;
             self.pending_log_end = None;
             self.committed_log_len = idx + 1;
-            self.event_sink.emit_transcript_appended(idx + 1);
+            self.event_sink
+                .emit_transcript_appended_async(idx + 1)
+                .await;
         }
         self.messages.push(message);
         Ok(())
@@ -265,7 +271,7 @@ impl Agent {
         self.pending_log_end = Some(from_idx as u64 + batch_len);
         let staged = staged.to_vec();
         self.steering_append_pending = true;
-        let joined = tokio::task::spawn_blocking(move || {
+        let joined = crate::store::spawn_blocking_store_caller(move || {
             writer.append_claimed_thread_steering(
                 &sink_session_id,
                 &dispatch_id,
@@ -283,7 +289,8 @@ impl Agent {
                 self.committed_log_len = from_idx as u64 + batch_len;
                 self.pending_log_end = None;
                 self.event_sink
-                    .emit_transcript_appended(from_idx as u64 + batch_len);
+                    .emit_transcript_appended_async(from_idx as u64 + batch_len)
+                    .await;
                 Ok(())
             }
             Err(error) => {
@@ -309,7 +316,7 @@ impl Agent {
         // that commits after the async task is aborted as this process's row.
         self.pending_log_end = Some(start_idx + 1);
         self.direct_inbox_append_start = Some(start_idx);
-        let records = tokio::task::spawn_blocking(move || {
+        let records = crate::store::spawn_blocking_store_caller(move || {
             writer.append_pending_inbox_steers(&session_id, &run_id, start_idx)
         })
         .await
@@ -335,7 +342,8 @@ impl Agent {
         self.pending_log_end = None;
         self.direct_inbox_append_start = None;
         self.event_sink
-            .emit_transcript_appended(self.messages.len() as u64);
+            .emit_transcript_appended_async(self.messages.len() as u64)
+            .await;
         Ok(records.len())
     }
 }

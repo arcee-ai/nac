@@ -722,3 +722,55 @@ fn typed_operation_admission_errors_reserve_500_for_real_failures() {
     assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(response.message, "session operation coordination failed");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn owned_current_thread_manual_compaction_acknowledges_checkpoint() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("owned_manual_compaction");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("server-compact-key"));
+    seed_session_with_messages(
+        &root,
+        "session",
+        "2026-01-01 00:00:00.000000000",
+        compactable_server_messages(),
+    );
+    let model =
+        OneShotModelServer::start("200 OK", compaction_model_response("owned durable summary"));
+    point_session_at_model_server(&root, "session", &model);
+    let manager = SessionManager::new_async(ServerOptions {
+        root_cwd: root.clone(),
+        store_path: Some(root.join("store.db")),
+        worker_executable: None,
+        managed_host: None,
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        manager.compact_session("session").await.unwrap(),
+        CompactSessionResponse::Compacted { .. }
+    ));
+    assert!(!manager
+        .attach_session("session")
+        .await
+        .unwrap()
+        .has_active_operation());
+    assert!(model.finish().starts_with("POST /v1/responses "));
+    manager.drain_persistence().await.unwrap();
+    drop(manager);
+    let conn = rusqlite::Connection::open(root.join("store.db")).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM orchestrator_compaction_checkpoints WHERE session_id = 'session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+    let snapshot = sessions::load_session(&root.join("store.db"), "session").unwrap();
+    assert!(
+        snapshot.unattributed_token_usage.is_some(),
+        "compaction context must persist with its checkpoint"
+    );
+    drop(conn);
+    let _ = std::fs::remove_dir_all(root);
+}

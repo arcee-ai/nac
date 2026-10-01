@@ -46,13 +46,13 @@ pub(crate) async fn load_session_async(
     path: PathBuf,
     session_id: String,
 ) -> Result<SessionSnapshot> {
-    tokio::task::spawn_blocking(move || load_session(&path, &session_id))
+    crate::store::spawn_blocking_store_caller(move || load_session(&path, &session_id))
         .await
         .context("session load task failed")?
 }
 
 pub(crate) async fn load_last_session_async(path: PathBuf) -> Result<SessionSnapshot> {
-    tokio::task::spawn_blocking(move || load_last_session(&path))
+    crate::store::spawn_blocking_store_caller(move || load_last_session(&path))
         .await
         .context("last-session load task failed")?
 }

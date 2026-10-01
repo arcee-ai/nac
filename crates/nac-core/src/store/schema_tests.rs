@@ -509,7 +509,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 31);
+    assert_eq!(STORE_SCHEMA_VERSION, 32);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -1613,6 +1613,7 @@ fn migration_restart_process_helper() {
             initialize_with_hooks(
                 Path::new(&store_path),
                 || {},
+                || {},
                 || Err(anyhow!("injected subprocess migration failure")),
             )
             .expect_err("subprocess migration failure must be injected");
@@ -1622,6 +1623,7 @@ fn migration_restart_process_helper() {
             let ready = std::env::var_os("NAC_TEST_SCHEMA_MIGRATION_READY").unwrap();
             initialize_with_hooks(
                 Path::new(&store_path),
+                || {},
                 || {},
                 || {
                     std::fs::write(&ready, b"locked").unwrap();
@@ -1640,6 +1642,7 @@ fn migration_restart_process_helper() {
             std::fs::write(started, b"started").unwrap();
             initialize_with_hooks(
                 Path::new(&store_path),
+                || {},
                 || {},
                 || {
                     writeln!(
@@ -1811,6 +1814,7 @@ fn injected_migration_failure_rolls_back_and_restart_completes_forward() {
     let error = initialize_with_hooks(
         &path,
         || {},
+        || {},
         || Err(anyhow!("injected failure containing secret-canary")),
     )
     .unwrap_err();
@@ -1857,40 +1861,6 @@ fn injected_migration_failure_rolls_back_and_restart_completes_forward() {
 }
 
 #[test]
-fn migration_observation_retention_is_bounded_without_evicting_active_work() {
-    let status = StoreMigrationStatus {
-        supported_schema_version: STORE_SCHEMA_VERSION,
-        opened_schema_version: Some(23),
-        state: StoreMigrationState::Failed,
-        failure: Some(StoreMigrationFailure::MigrationFailed),
-    };
-    let mut observations = HashMap::new();
-    for index in 0..(MIGRATION_OBSERVATION_LIMIT + 10) {
-        observations.insert(
-            PathBuf::from(format!("failed-{index}")),
-            MigrationObservation { active: 0, status },
-        );
-    }
-    let active_path = PathBuf::from("active");
-    observations.insert(
-        active_path.clone(),
-        MigrationObservation {
-            active: 1,
-            status: StoreMigrationStatus {
-                state: StoreMigrationState::Migrating,
-                failure: None,
-                ..status
-            },
-        },
-    );
-
-    prune_inactive_observations(&mut observations, MIGRATION_OBSERVATION_LIMIT, None);
-
-    assert_eq!(observations.len(), MIGRATION_OBSERVATION_LIMIT);
-    assert_eq!(observations[&active_path].active, 1);
-}
-
-#[test]
 fn concurrent_migrations_serialize_at_the_immediate_transaction() {
     let path = temp_store_path("concurrent_migration");
     prepare_populated_v23_store(&path);
@@ -1901,6 +1871,7 @@ fn concurrent_migrations_serialize_at_the_immediate_transaction() {
     let first = std::thread::spawn(move || {
         initialize_with_hooks(
             &first_path,
+            || {},
             || {
                 first_locked_tx.send(()).unwrap();
                 release_first_rx.recv().unwrap();
@@ -1920,9 +1891,9 @@ fn concurrent_migrations_serialize_at_the_immediate_transaction() {
     let (second_locked_tx, second_locked_rx) = std::sync::mpsc::channel();
     let second_path = path.clone();
     let second = std::thread::spawn(move || {
-        second_started_tx.send(()).unwrap();
         initialize_with_hooks(
             &second_path,
+            || second_started_tx.send(()).unwrap(),
             || second_locked_tx.send(()).unwrap(),
             || Ok(()),
         )

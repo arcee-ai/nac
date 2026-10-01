@@ -57,7 +57,39 @@ impl SessionService {
             gate.pause();
         }
 
-        let (
+        let store = &self.metadata.store_path;
+        let session_id = self.metadata.session_id.as_deref();
+        let projection = if let Some(owner) = crate::store::coordinator::owner_for(store)? {
+            owner.check_blocking_context()?;
+            // Event publication waits for its SQL command while holding the
+            // event boundary. The executor reads only durable records, never
+            // this lock, so queue saturation cannot invert that order.
+            let (boundary, mut projection) = self.event_bus.thread_event_boundary(|| {
+                owner
+                    .submit(ReadFrontendProjection {
+                        session_id: session_id.map(str::to_owned),
+                        options,
+                    })?
+                    .acknowledge_blocking()?
+            })?;
+            projection.thread_event_boundary = Some(boundary);
+            projection
+        } else {
+            // Keep legacy checkout-before-event-lock ordering for standalone
+            // and cross-process characterization fixtures.
+            let connection = crate::store::open_runtime_connection(store)?;
+            read_stored_projection(&connection, session_id, options, || {
+                self.event_bus
+                    .thread_event_boundary(|| {
+                        self.load_all_thread_events_with_connection(
+                            &connection,
+                            options.thread_event_limit,
+                        )
+                    })
+                    .map(|(boundary, events)| (Some(boundary), events))
+            })?
+        };
+        let StoredFrontendProjection {
             sessions,
             threads,
             thread_episodes,
@@ -67,66 +99,10 @@ impl SessionService {
             run_failure,
             worksets,
             forks,
-        ) = {
-            let conn = crate::store::open_runtime_connection(&self.metadata.store_path)?;
-            let session_id = self.metadata.session_id.as_deref();
-            let sessions = if options.include_sessions {
-                view::list_sessions_with_connection(&conn)?
-            } else {
-                Vec::new()
-            };
-            let threads = view::list_threads_with_connection(&conn, session_id)?;
-            let thread_episodes =
-                view::load_all_thread_episodes_with_connection(&conn, session_id)?;
-            let (thread_event_boundary, thread_events) =
-                self.event_bus.thread_event_boundary(|| {
-                    self.load_all_thread_events_with_connection(&conn, options.thread_event_limit)
-                })?;
-            let worksets = view::worksets_snapshot_with_connection(&conn, session_id);
-            // Keep this final storage read adjacent to the transcript scan so
-            // a delivery committed during slower workspace inspection has the
-            // current status needed to cover its canonical message.
-            let thread_steering = session_id
-                .map(|session_id| {
-                    crate::store::list_thread_steering_with_connection(&conn, session_id)
-                })
-                .transpose()?
-                .unwrap_or_default();
-            let forks = session_id
-                .map(|session_id| {
-                    crate::store::list_session_forks_with_connection(&conn, session_id)
-                })
-                .transpose()?
-                .unwrap_or_default();
-            let run_failure = session_id
-                .map(|session_id| {
-                    crate::store::load_run_recovery_with_connection(&conn, session_id)
-                })
-                .transpose()?
-                .flatten()
-                .and_then(|record| match record.status {
-                    crate::store::RunRecoveryStatus::Active => None,
-                    crate::store::RunRecoveryStatus::Interrupted => Some(
-                        crate::run_failure::RunFailure::interrupted(INTERRUPTED_RUN_WARNING),
-                    ),
-                    crate::store::RunRecoveryStatus::Failed => {
-                        Some(record.failure.unwrap_or_else(|| {
-                            crate::run_failure::RunFailure::unknown(FAILED_RUN_WARNING)
-                        }))
-                    }
-                });
-            (
-                sessions,
-                threads,
-                thread_episodes,
-                thread_events,
-                thread_event_boundary,
-                thread_steering,
-                run_failure,
-                worksets,
-                forks,
-            )
-        };
+        } = projection;
+        let thread_event_boundary = thread_event_boundary.ok_or_else(|| {
+            anyhow::anyhow!("frontend persistence projection omitted its event boundary")
+        })?;
         Ok(FrontendSnapshotBlockingLoad {
             sessions,
             threads,
@@ -203,17 +179,31 @@ impl SessionService {
             // Persistence also checks out before taking the event state lock.
             // Keep the latest-page snapshot on the same order so capacity
             // saturation cannot deadlock emitters against this boundary.
-            let connection = crate::store::open_runtime_connection(&self.metadata.store_path)?;
-            let load = || {
-                crate::store::load_thread_events_page_with_connection(
-                    &connection,
-                    session_id,
-                    thread_name,
-                    before_id,
-                    limit,
-                )
-            };
-            let (boundary, records) = self.event_bus.thread_event_boundary(load)?;
+            let (boundary, records) =
+                if crate::store::coordinator::owner_for(&self.metadata.store_path)?.is_some() {
+                    self.event_bus.thread_event_boundary(|| {
+                        crate::store::load_thread_events_page(
+                            &self.metadata.store_path,
+                            session_id,
+                            thread_name,
+                            before_id,
+                            limit,
+                        )
+                    })?
+                } else {
+                    let connection =
+                        crate::store::open_runtime_connection(&self.metadata.store_path)?;
+                    let load = || {
+                        crate::store::load_thread_events_page_with_connection(
+                            &connection,
+                            session_id,
+                            thread_name,
+                            before_id,
+                            limit,
+                        )
+                    };
+                    self.event_bus.thread_event_boundary(load)?
+                };
             (Some(boundary), records)
         } else {
             (
@@ -306,7 +296,7 @@ impl SessionService {
         // concurrently delivered record is either absent here or coverable by
         // the subsequent transcript scan, never rendered twice.
         let blocking_service = self.clone();
-        let blocking_task = tokio::task::spawn_blocking(move || {
+        let blocking_task = crate::store::spawn_blocking_store_caller(move || {
             blocking_service.load_frontend_snapshot_blocking(options)
         });
         let active_threads = self.active_thread_names();
@@ -385,5 +375,115 @@ impl SessionService {
             message_page: loaded_messages.page,
             message_cycle: loaded_messages.cycle,
         })
+    }
+}
+
+struct StoredFrontendProjection {
+    sessions: Vec<SessionSummarySnapshot>,
+    threads: Vec<ThreadSnapshot>,
+    thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
+    thread_events: DecodedThreadEvents,
+    thread_event_boundary: Option<SessionEventBoundary>,
+    thread_steering: Vec<crate::store::ThreadSteeringRecord>,
+    forks: Vec<crate::store::SessionForkLink>,
+    worksets: WorksetsSnapshot,
+    run_failure: Option<crate::run_failure::RunFailure>,
+}
+
+fn read_stored_projection(
+    conn: &rusqlite::Connection,
+    session_id: Option<&str>,
+    options: FrontendSnapshotLoadOptions,
+    load_events: impl FnOnce() -> Result<(Option<SessionEventBoundary>, DecodedThreadEvents)>,
+) -> Result<StoredFrontendProjection> {
+    let sessions = if options.include_sessions {
+        view::list_sessions_with_connection(conn)?
+    } else {
+        Vec::new()
+    };
+    let threads = view::list_threads_with_connection(conn, session_id)?;
+    let thread_episodes = view::load_all_thread_episodes_with_connection(conn, session_id)?;
+    let (thread_event_boundary, thread_events) = load_events()?;
+    let worksets = view::worksets_snapshot_with_connection(conn, session_id);
+    // Keep this final storage read adjacent to the transcript scan so
+    // a delivery committed during slower workspace inspection has the
+    // current status needed to cover its canonical message.
+    let thread_steering = session_id
+        .map(|session_id| crate::store::list_thread_steering_with_connection(conn, session_id))
+        .transpose()?
+        .unwrap_or_default();
+    let forks = session_id
+        .map(|session_id| crate::store::list_session_forks_with_connection(conn, session_id))
+        .transpose()?
+        .unwrap_or_default();
+    let run_failure = session_id
+        .map(|session_id| crate::store::load_run_recovery_with_connection(conn, session_id))
+        .transpose()?
+        .flatten()
+        .and_then(|record| match record.status {
+            crate::store::RunRecoveryStatus::Active => None,
+            crate::store::RunRecoveryStatus::Interrupted => Some(
+                crate::run_failure::RunFailure::interrupted(INTERRUPTED_RUN_WARNING),
+            ),
+            crate::store::RunRecoveryStatus::Failed => Some(
+                record
+                    .failure
+                    .unwrap_or_else(|| crate::run_failure::RunFailure::unknown(FAILED_RUN_WARNING)),
+            ),
+        });
+
+    Ok(StoredFrontendProjection {
+        sessions,
+        threads,
+        thread_episodes,
+        thread_events,
+        thread_event_boundary,
+        thread_steering,
+        run_failure,
+        worksets,
+        forks,
+    })
+}
+
+struct ReadFrontendProjection {
+    session_id: Option<String>,
+    options: FrontendSnapshotLoadOptions,
+}
+impl crate::store::coordinator::PersistenceCommand for ReadFrontendProjection {
+    type Output = Result<StoredFrontendProjection>;
+    fn correlation(&self) -> crate::telemetry::Correlation {
+        crate::telemetry::Correlation::session(self.session_id.as_deref())
+    }
+    fn outcome(output: &Self::Output) -> crate::telemetry::TelemetryOutcome {
+        if output.is_ok() {
+            crate::telemetry::TelemetryOutcome::Ok
+        } else {
+            crate::telemetry::TelemetryOutcome::Error
+        }
+    }
+    fn error_identity(output: &Self::Output) -> Option<crate::telemetry::StoreErrorIdentity> {
+        crate::store::coordinator::CommandOutput::error_identity(output)
+    }
+    fn execute(self, path: &std::path::Path) -> Result<Self::Output> {
+        let connection = crate::store::open_runtime_connection(path)?;
+        let session_id = self.session_id.as_deref();
+        Ok(read_stored_projection(
+            &connection,
+            session_id,
+            self.options,
+            || {
+                let records = session_id
+                    .map(|session_id| {
+                        crate::store::load_all_thread_events_with_connection(
+                            &connection,
+                            session_id,
+                            self.options.thread_event_limit,
+                        )
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
+                Ok((None, decode_thread_events(records)))
+            },
+        ))
     }
 }

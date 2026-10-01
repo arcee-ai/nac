@@ -345,6 +345,9 @@ fn wire_level_special_cases_are_encoded_in_data() {
 
 #[test]
 fn effective_settings_resolve_catalog_metadata_at_construction() {
+    // Overlay tests replace this process-global catalog under TEST_ENV_LOCK.
+    // Keep this baseline assertion outside their temporary machine-state view.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let settings = EffectiveModelSettings::from_optional(
         Some(BackendKind::DeepSeekChat),
         Some("deepseek-v4-flash".to_string()),

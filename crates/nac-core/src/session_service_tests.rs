@@ -292,7 +292,7 @@ pub(super) fn test_active_service(label: &str, session_id: &str) -> (SessionServ
     test_active_service_with_skills(label, session_id, ModelClient::new_for_test(), None)
 }
 
-fn test_direct_active_service(
+pub(super) fn test_direct_active_service(
     label: &str,
     session_id: &str,
     client: ModelClient,

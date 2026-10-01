@@ -1,5 +1,6 @@
 use super::*;
 
+coordinated_command! {
 pub fn define_workset(path: &Path, session_id: &str, workset: &WorksetDefinition) -> Result<()> {
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction()?;
@@ -74,10 +75,27 @@ pub fn define_workset(path: &Path, session_id: &str, workset: &WorksetDefinition
     tx.commit()?;
     Ok(())
 }
+command DefineWorksetCommand {
+    session_id: String = session_id.to_owned(),
+    workset: WorksetDefinition = workset.clone(),
+}
+call |command| (&command.session_id, &command.workset)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn read_workset(path: &Path, session_id: &str, id: &str) -> Result<Option<WorksetRecord>> {
     let conn = open_runtime_connection(path)?;
     read_workset_with_connection(&conn, session_id, id)
+}
+command ReadWorksetCommand {
+    session_id: String = session_id.to_owned(),
+    id: String = id.to_owned(),
+}
+call |command| (&command.session_id, &command.id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 pub(crate) fn read_workset_with_connection(
@@ -101,9 +119,17 @@ pub(crate) fn read_workset_with_connection(
     Ok(Some(workset))
 }
 
+coordinated_command! {
 pub fn list_worksets(path: &Path, session_id: &str) -> Result<Vec<WorksetSummary>> {
     let conn = open_runtime_connection(path)?;
     list_worksets_with_connection(&conn, session_id)
+}
+command ListWorksetsCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 pub(crate) fn list_worksets_with_connection(

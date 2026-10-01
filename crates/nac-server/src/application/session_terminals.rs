@@ -24,11 +24,19 @@ impl<'a> SessionTerminalApplication<'a> {
             return Err(anyhow!("terminal_id is invalid"));
         }
         self.manager
-            .require_persisted_operation_session(session_id)?;
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Persisted,
+            )
+            .await?;
         let gate = self.manager.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
         self.manager
-            .require_persisted_operation_session(session_id)?;
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Persisted,
+            )
+            .await?;
         let service = self.manager.attach_session_locked(session_id, None).await?;
         service.terminate_terminal(terminal_id).await
     }

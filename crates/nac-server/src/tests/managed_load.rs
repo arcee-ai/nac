@@ -1,4 +1,6 @@
 use super::*;
+#[path = "managed_load/telemetry_evidence.rs"]
+mod telemetry_evidence;
 #[path = "managed_load/worker_completion.rs"]
 mod worker_completion;
 use serde::Serialize;
@@ -9,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use telemetry_evidence::drain_telemetry;
 const DEFAULT_SEED: u64 = 0xA11_0112;
 const VARIANTS: [usize; 3] = [1, 2, 4];
 const PHASE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -464,15 +467,25 @@ fn write_http_json(stream: &mut TcpStream, body: &str) -> std::io::Result<()> {
     stream.flush()
 }
 
-trait LoadStoreAdapter {
+pub(super) trait LoadStoreAdapter {
+    fn expected_terminal_settlements(&self, count: usize) -> usize {
+        count
+    }
     fn identity(&self) -> &'static str;
     fn create_manager(&self, root: &Path, worker: &Path) -> SessionManager;
+    fn create_manager_async<'a>(
+        &'a self,
+        root: &'a Path,
+        worker: &'a Path,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = SessionManager> + 'a>> {
+        Box::pin(async move { self.create_manager(root, worker) })
+    }
     fn assert_integrity(&self, store_path: &Path);
     fn configuration(&self, store_path: &Path) -> StoreConfiguration;
     fn checkpoint(&self, store_path: &Path) -> CheckpointEvidence;
 }
 
-struct SqliteLoadStore;
+pub(super) struct SqliteLoadStore;
 
 impl LoadStoreAdapter for SqliteLoadStore {
     fn identity(&self) -> &'static str {
@@ -566,7 +579,7 @@ fn file_size(path: &Path) -> u64 {
 }
 
 #[derive(Serialize)]
-struct StoreConfiguration {
+pub(super) struct StoreConfiguration {
     engine: &'static str,
     journal_mode: String,
     synchronous: i64,
@@ -580,7 +593,7 @@ struct StoreConfiguration {
 }
 
 #[derive(Serialize)]
-struct CheckpointEvidence {
+pub(super) struct CheckpointEvidence {
     busy: i64,
     log_frames: i64,
     checkpointed_frames: i64,
@@ -635,7 +648,7 @@ struct TelemetryEvidence {
 }
 
 #[derive(Serialize)]
-struct VariantEvidence {
+pub(super) struct VariantEvidence {
     mode: &'static str,
     seed: u64,
     orchestrators: usize,
@@ -664,7 +677,7 @@ struct VariantEvidence {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LoadMode {
+pub(super) enum LoadMode {
     OrderedHealthy,
     ConcurrentSettlementProbe,
 }
@@ -964,13 +977,18 @@ async fn exercise_append_failure(
         start_planned_orchestrator(router(manager.clone()), &plan.orchestrators[0]).await;
     assert_eq!(response.status(), StatusCode::CREATED);
     wait_for_relation_status(
+        None,
         &store_path,
         &plan.orchestrators[0].session_id,
         ManagedOrchestratorStatus::Failed,
     )
     .await;
     wait_for_parent_idle(&parent).await;
-    assert_eq!(requests.recv_timeout(PHASE_TIMEOUT).unwrap(), 0);
+    tokio::task::spawn_blocking(move || {
+        assert_eq!(requests.recv_timeout(PHASE_TIMEOUT).unwrap(), 0);
+    })
+    .await
+    .unwrap();
     let relation =
         nac_core::store::load_managed_orchestrator(&store_path, &plan.orchestrators[0].session_id)
             .unwrap()
@@ -1239,6 +1257,7 @@ async fn exercise_restart_recovery(
     .await
     .unwrap();
     wait_for_relation_status(
+        None,
         &store_path,
         &plan.orchestrators[0].session_id,
         ManagedOrchestratorStatus::Interrupted,
@@ -1303,17 +1322,24 @@ async fn start_planned_orchestrator(app: Router, entry: &PlannedOrchestrator) ->
 }
 
 async fn wait_for_relation_status(
+    owner: Option<&nac_core::store::StoreCoordinator>,
     store_path: &Path,
     orchestrator_session_id: &str,
     expected: ManagedOrchestratorStatus,
 ) {
     tokio::time::timeout(PHASE_TIMEOUT, async {
         loop {
-            let status =
-                nac_core::store::load_managed_orchestrator(store_path, orchestrator_session_id)
-                    .unwrap()
-                    .unwrap()
-                    .status;
+            let record = match owner {
+                Some(owner) => {
+                    owner
+                        .load_managed_orchestrator(orchestrator_session_id.to_owned())
+                        .await
+                }
+                None => {
+                    nac_core::store::load_managed_orchestrator(store_path, orchestrator_session_id)
+                }
+            };
+            let status = record.unwrap().unwrap().status;
             if status == expected {
                 break;
             }
@@ -1334,7 +1360,7 @@ async fn wait_for_parent_idle(parent: &nac_core::session_service::SessionService
     .expect("parent completion delivery should become idle");
 }
 
-fn write_secret_safe_artifact(path: &Path, value: &impl Serialize) {
+pub(super) fn write_secret_safe_artifact(path: &Path, value: &impl Serialize) {
     let bytes = serde_json::to_vec_pretty(value).unwrap();
     for secret in [
         "all112-deterministic-key",
@@ -1353,7 +1379,7 @@ fn write_secret_safe_artifact(path: &Path, value: &impl Serialize) {
     std::fs::write(path, bytes).unwrap();
 }
 
-async fn run_variant(
+pub(super) async fn run_variant(
     adapter: &dyn LoadStoreAdapter,
     worker: &Path,
     seed: u64,
@@ -1371,7 +1397,7 @@ async fn run_variant(
     .await
 }
 
-async fn run_variant_with_mode(
+pub(super) async fn run_variant_with_mode(
     adapter: &dyn LoadStoreAdapter,
     worker: &Path,
     seed: u64,
@@ -1407,7 +1433,7 @@ async fn run_variant_with_mode(
     };
     seed_load_parent(&root, model.base_url.clone());
     seed_planned_orchestrators(&root.join("store.db"), &plan);
-    let manager = adapter.create_manager(&root, worker);
+    let manager = adapter.create_manager_async(&root, worker).await;
     // Model the production sessions as attached for the whole burst. The
     // primary lane controls cache lifetime explicitly so it measures the
     // intended orchestration concurrency rather than cache-eviction timing.
@@ -1457,6 +1483,7 @@ async fn run_variant_with_mode(
     if mode == LoadMode::OrderedHealthy {
         for (ordinal, entry) in plan.orchestrators.iter().enumerate() {
             wait_for_relation_status(
+                manager.inner._store_ownership.coordinator(),
                 &root.join("store.db"),
                 &entry.session_id,
                 ManagedOrchestratorStatus::Completed,
@@ -1464,11 +1491,24 @@ async fn run_variant_with_mode(
             .await;
             tokio::time::timeout(PHASE_TIMEOUT, async {
                 loop {
-                    let rows = nac_core::store::TranscriptLogWriter::new(&root.join("store.db"))
+                    let path = root.join("store.db");
+                    let rows = if manager.inner._store_ownership.coordinator().is_some() {
+                        nac_core::store::spawn_blocking_store_caller(move || {
+                            nac_core::store::TranscriptLogWriter::new(&path)
+                                .unwrap()
+                                .read_from("all112-parent", 0)
+                                .unwrap()
+                                .len()
+                        })
+                        .await
                         .unwrap()
-                        .read_from("all112-parent", 0)
-                        .unwrap()
-                        .len();
+                    } else {
+                        nac_core::store::TranscriptLogWriter::new(&path)
+                            .unwrap()
+                            .read_from("all112-parent", 0)
+                            .unwrap()
+                            .len()
+                    };
                     if rows == (ordinal + 1) * 2 && !parent_service.has_active_operation() {
                         break;
                     }
@@ -1496,14 +1536,25 @@ async fn run_variant_with_mode(
     };
     let settlement = tokio::time::timeout(settlement_timeout, async {
         loop {
-            let relations = nac_core::store::list_managed_orchestrators(
-                &root.join("store.db"),
-                "all112-parent",
-            )
+            let relations = match manager.inner._store_ownership.coordinator() {
+                Some(owner) => {
+                    owner
+                        .list_managed_orchestrators("all112-parent".to_owned())
+                        .await
+                }
+                None => nac_core::store::list_managed_orchestrators(
+                    &root.join("store.db"),
+                    "all112-parent",
+                ),
+            }
             .unwrap();
-            let inbox =
-                nac_core::store::list_session_inbox(&root.join("store.db"), "all112-parent")
-                    .unwrap();
+            let inbox = match manager.inner._store_ownership.coordinator() {
+                Some(owner) => owner.list_session_inbox("all112-parent".to_owned()).await,
+                None => {
+                    nac_core::store::list_session_inbox(&root.join("store.db"), "all112-parent")
+                }
+            }
+            .unwrap();
             let expected_terminal_state = relations.iter().all(|record| {
                 let expected_status = match mode {
                     LoadMode::OrderedHealthy => {
@@ -1570,6 +1621,19 @@ async fn run_variant_with_mode(
         .expect("concurrent probe cancellation should restore terminal state");
     }
 
+    assert!(
+        orchestrator_services
+            .iter()
+            .all(|service| !service.has_active_operation()),
+        "managed child services must be idle after settlement"
+    );
+    manager.drain_persistence().await.unwrap();
+    drop(orchestrator_services);
+    drop(parent_service);
+    drop(app);
+    drop(manager);
+    // Standalone post-mortem checks run only after serving ownership drained
+    // and was released; their checkpoint never bypasses a live coordinator.
     let store_path = root.join("store.db");
     let relations =
         nac_core::store::list_managed_orchestrators(&store_path, "all112-parent").unwrap();
@@ -1714,12 +1778,6 @@ async fn run_variant_with_mode(
         assert_eq!(worker_episode_counts, vec![1; orchestrator_count]);
     }
     assert!(
-        orchestrator_services
-            .iter()
-            .all(|service| !service.has_active_operation()),
-        "managed child services must be idle after settlement"
-    );
-    assert!(
         nac_core::store::load_run_recovery(&store_path, "all112-parent")
             .unwrap()
             .is_none(),
@@ -1781,7 +1839,7 @@ async fn run_variant_with_mode(
             .store_latency_us
             .get("terminal_settlement")
             .map(|distribution| distribution.count),
-        Some(orchestrator_count)
+        Some(adapter.expected_terminal_settlements(orchestrator_count))
     );
     assert_eq!(
         telemetry.child_process_started,
@@ -1819,114 +1877,8 @@ async fn run_variant_with_mode(
         checkpoint,
         telemetry,
     };
-    drop(orchestrator_services);
-    drop(parent_service);
-    drop(manager);
     let _ = std::fs::remove_dir_all(root);
     evidence
-}
-
-async fn drain_telemetry(
-    recorder: &nac_core::telemetry::TelemetryRecorder,
-    exporter: &nac_core::telemetry::InMemoryExporter,
-) -> TelemetryEvidence {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let stats = loop {
-        let stats = recorder.stats();
-        if stats.exported + stats.failures >= stats.accepted {
-            break stats;
-        }
-        assert!(Instant::now() < deadline, "telemetry export did not drain");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    };
-    let events = exporter.events();
-    let mut store_latencies: BTreeMap<String, Vec<u64>> = BTreeMap::new();
-    let mut api_latencies: BTreeMap<String, Vec<u64>> = BTreeMap::new();
-    let mut evidence = TelemetryEvidence {
-        store_latency_us: BTreeMap::new(),
-        api_latency_us: BTreeMap::new(),
-        max_connection_active: 0,
-        max_persistence_queue_active: 0,
-        max_orchestrators_active: 0,
-        max_child_processes_active: 0,
-        child_process_started: BTreeSet::new(),
-        child_process_stopped: BTreeSet::new(),
-        max_cpu_time_us: 0,
-        max_resident_memory_bytes: 0,
-        accepted: stats.accepted,
-        dropped: stats.dropped,
-        exported: stats.exported,
-        failures: stats.failures,
-    };
-    for event in events {
-        if let (Some(operation), Some(duration)) = (event.operation, event.duration_us) {
-            store_latencies
-                .entry(serde_label(operation))
-                .or_default()
-                .push(duration);
-        }
-        if event.name == nac_core::telemetry::TelemetryName::HttpRequestDuration {
-            if let (Some(route), Some(duration)) = (event.route, event.duration_us) {
-                api_latencies.entry(route).or_default().push(duration);
-            }
-        }
-        let value = event.value.unwrap_or(0);
-        match (event.name, event.activity) {
-            (nac_core::telemetry::TelemetryName::StoreConnectionActive, _) => {
-                evidence.max_connection_active = evidence.max_connection_active.max(value);
-            }
-            (nac_core::telemetry::TelemetryName::PersistenceQueueActive, _) => {
-                evidence.max_persistence_queue_active =
-                    evidence.max_persistence_queue_active.max(value);
-            }
-            (
-                nac_core::telemetry::TelemetryName::RuntimeActivityActive,
-                Some(nac_core::telemetry::RuntimeActivity::Orchestrator),
-            ) => evidence.max_orchestrators_active = evidence.max_orchestrators_active.max(value),
-            (
-                nac_core::telemetry::TelemetryName::RuntimeActivityActive,
-                Some(nac_core::telemetry::RuntimeActivity::ChildProcess),
-            ) => {
-                evidence.max_child_processes_active =
-                    evidence.max_child_processes_active.max(value);
-            }
-            _ => {}
-        }
-        if event.name == nac_core::telemetry::TelemetryName::ChildProcess {
-            if let Some(pid) = event.pid {
-                match event.outcome {
-                    Some(nac_core::telemetry::TelemetryOutcome::Started) => {
-                        evidence.child_process_started.insert(pid);
-                    }
-                    Some(nac_core::telemetry::TelemetryOutcome::Stopped) => {
-                        evidence.child_process_stopped.insert(pid);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        evidence.max_cpu_time_us = evidence.max_cpu_time_us.max(event.cpu_time_us.unwrap_or(0));
-        evidence.max_resident_memory_bytes = evidence
-            .max_resident_memory_bytes
-            .max(event.resident_memory_bytes.unwrap_or(0));
-    }
-    evidence.store_latency_us = store_latencies
-        .into_iter()
-        .map(|(name, values)| (name, LatencyDistribution::from_values(values)))
-        .collect();
-    evidence.api_latency_us = api_latencies
-        .into_iter()
-        .map(|(name, values)| (name, LatencyDistribution::from_values(values)))
-        .collect();
-    evidence
-}
-
-fn serde_label(value: impl Serialize) -> String {
-    serde_json::to_value(value)
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string()
 }
 
 async fn probe_pair(app: &Router, phase: &'static str) -> Vec<ProbeSample> {

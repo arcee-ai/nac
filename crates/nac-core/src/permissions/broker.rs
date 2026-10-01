@@ -84,7 +84,7 @@ impl PermissionBroker {
     {
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
-        let revision = tokio::task::spawn_blocking(move || {
+        let revision = crate::store::spawn_blocking_store_caller(move || {
             crate::sessions::reserve_permission_approval_transition(&store_path, &session_id)
         })
         .await
@@ -105,7 +105,7 @@ impl PermissionBroker {
         before_update().await;
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
-        let updated = tokio::task::spawn_blocking(move || {
+        let updated = crate::store::spawn_blocking_store_caller(move || {
             crate::sessions::compare_and_update_permission_approval_state(
                 &store_path,
                 &session_id,
@@ -124,7 +124,8 @@ impl PermissionBroker {
         // Publish immediately after the durable transition. Test hooks and
         // process-local waiter delivery must not let an older mode event trail
         // a later completed transition.
-        self.emit(crate::events::SessionEvent::PermissionApprovalModeChanged { mode });
+        self.emit_async(crate::events::SessionEvent::PermissionApprovalModeChanged { mode })
+            .await;
         after_commit().await;
         let replies = if mode == PermissionApprovalMode::AutoApprove {
             let mut state = self
@@ -146,17 +147,19 @@ impl PermissionBroker {
 
         for (request_id, pending) in replies {
             if pending.reply.send(PermissionReply::Once).is_ok() {
-                self.emit(crate::events::SessionEvent::PermissionReplied {
+                self.emit_async(crate::events::SessionEvent::PermissionReplied {
                     request_id,
                     reply: PermissionReply::Once,
-                });
+                })
+                .await;
             } else {
-                self.emit(crate::events::SessionEvent::PermissionDismissed {
+                self.emit_async(crate::events::SessionEvent::PermissionDismissed {
                     request_id,
                     reason:
                         "the operation awaiting automatic approval ended before the mode changed"
                             .to_string(),
-                });
+                })
+                .await;
             }
         }
         Ok(())
@@ -170,7 +173,7 @@ impl PermissionBroker {
         crate::store::delete_permission_grant(&self.store_path, &self.session_id, grant_id)
     }
 
-    pub fn reply(&self, request_id: &str, reply: PermissionReply) -> anyhow::Result<()> {
+    fn deliver_reply(&self, request_id: &str, reply: PermissionReply) -> anyhow::Result<()> {
         let pending = self
             .state
             .lock()
@@ -181,10 +184,25 @@ impl PermissionBroker {
         pending.reply.send(reply).map_err(|_| {
             anyhow::anyhow!("permission request '{request_id}' is no longer active")
         })?;
+        Ok(())
+    }
+
+    pub fn reply(&self, request_id: &str, reply: PermissionReply) -> anyhow::Result<()> {
+        self.deliver_reply(request_id, reply)?;
         self.emit(crate::events::SessionEvent::PermissionReplied {
-            request_id: request_id.to_string(),
+            request_id: request_id.to_owned(),
             reply,
         });
+        Ok(())
+    }
+
+    async fn reply_async(&self, request_id: &str, reply: PermissionReply) -> anyhow::Result<()> {
+        self.deliver_reply(request_id, reply)?;
+        self.emit_async(crate::events::SessionEvent::PermissionReplied {
+            request_id: request_id.to_owned(),
+            reply,
+        })
+        .await;
         Ok(())
     }
 
@@ -200,12 +218,32 @@ impl PermissionBroker {
                 "tool '{tool}' did not declare canonical permission resources"
             ));
         }
-        let remembered = match crate::store::list_effective_permission_grants(
-            &self.store_path,
-            &self.session_id,
-            self.backend,
-            self.session_config_version,
-        ) {
+        let owner = match crate::store::coordinator::owner_for(&self.store_path) {
+            Ok(owner) => owner,
+            Err(error) => {
+                return AuthorizationOutcome::Denied(format!(
+                    "permission grants could not be read: {error}"
+                ))
+            }
+        };
+        let grants = match &owner {
+            Some(owner) => {
+                owner
+                    .list_effective_permission_grants(
+                        self.session_id.clone(),
+                        self.backend.to_owned(),
+                        self.session_config_version,
+                    )
+                    .await
+            }
+            None => crate::store::list_effective_permission_grants(
+                &self.store_path,
+                &self.session_id,
+                self.backend,
+                self.session_config_version,
+            ),
+        };
+        let remembered = match grants {
             Ok(grants) => grants
                 .into_iter()
                 .map(|grant| {
@@ -259,15 +297,18 @@ impl PermissionBroker {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
-        let delegated_child =
-            match crate::store::load_traditional_child(&self.store_path, &self.session_id) {
-                Ok(child) => child.is_some(),
-                Err(error) => {
-                    return AuthorizationOutcome::Denied(format!(
-                        "delegated ownership could not be checked before approval: {error}"
-                    ));
-                }
-            };
+        let child = match &owner {
+            Some(owner) => owner.load_traditional_child(self.session_id.clone()).await,
+            None => crate::store::load_traditional_child(&self.store_path, &self.session_id),
+        };
+        let delegated_child = match child {
+            Ok(child) => child.is_some(),
+            Err(error) => {
+                return AuthorizationOutcome::Denied(format!(
+                    "delegated ownership could not be checked before approval: {error}"
+                ));
+            }
+        };
         let request = PermissionRequest {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: self.session_id.clone(),
@@ -327,9 +368,10 @@ impl PermissionBroker {
         let _waiter_liveness = PermissionWaiterLiveness {
             live: Arc::clone(&waiter_live),
         };
-        self.emit(crate::events::SessionEvent::PermissionAsked {
+        self.emit_async(crate::events::SessionEvent::PermissionAsked {
             request: request.clone(),
-        });
+        })
+        .await;
 
         tokio::pin!(receiver);
         let result = tokio::select! {
@@ -337,7 +379,7 @@ impl PermissionBroker {
             reply = &mut receiver => self.reply_outcome(reply, &request, &waiter_live).await,
             () = cancellation.cancelled() => {
                 let reason = "run was cancelled while awaiting approval".to_string();
-                if self.dismiss_pending(&request.id, reason.clone()) {
+                if self.dismiss_pending_async(&request.id, reason.clone()).await {
                     AuthorizationOutcome::Denied(reason)
                 } else {
                     self.reply_outcome(receiver.await, &request, &waiter_live).await
@@ -347,11 +389,11 @@ impl PermissionBroker {
                 // A local manual reply or cancellation may have claimed the
                 // request after the durable generation was read. Whichever
                 // removes it first owns the sole reply.
-                let _ = self.reply(&request.id, PermissionReply::Once);
+                let _ = self.reply_async(&request.id, PermissionReply::Once).await;
                 self.reply_outcome(receiver.await, &request, &waiter_live).await
             },
             reason = self.interactive_subscriber_unavailable(interactive) => {
-                if self.dismiss_pending(&request.id, reason.clone()) {
+                if self.dismiss_pending_async(&request.id, reason.clone()).await {
                     AuthorizationOutcome::Denied(reason)
                 } else {
                     self.reply_outcome(receiver.await, &request, &waiter_live).await
@@ -359,7 +401,7 @@ impl PermissionBroker {
             },
             () = tokio::time::sleep(APPROVAL_TIMEOUT) => {
                 let reason = "permission request timed out without a reply".to_string();
-                if self.dismiss_pending(&request.id, reason.clone()) {
+                if self.dismiss_pending_async(&request.id, reason.clone()).await {
                     AuthorizationOutcome::Denied(reason)
                 } else {
                     self.reply_outcome(receiver.await, &request, &waiter_live).await
@@ -399,7 +441,7 @@ impl PermissionBroker {
                     let backend = self.backend;
                     let session_config_version = self.session_config_version;
                     let waiter_live = Arc::clone(waiter_live);
-                    match tokio::task::spawn_blocking(move || {
+                    match crate::store::spawn_blocking_store_caller(move || {
                         crate::store::insert_permission_grant_set_if_waiter_live(
                             &store_path,
                             &session_id,
@@ -434,19 +476,58 @@ impl PermissionBroker {
         }
     }
 
-    pub(super) fn dismiss_pending(&self, request_id: &str, reason: String) -> bool {
-        let dismissed = self
-            .state
+    fn remove_pending(&self, request_id: &str) -> bool {
+        self.state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pending
             .remove(request_id)
-            .is_some();
+            .is_some()
+    }
+
+    async fn dismiss_pending_async(&self, request_id: &str, reason: String) -> bool {
+        let dismissed = self.remove_pending(request_id);
         if dismissed {
-            self.emit(crate::events::SessionEvent::PermissionDismissed {
-                request_id: request_id.to_string(),
+            self.emit_async(crate::events::SessionEvent::PermissionDismissed {
+                request_id: request_id.to_owned(),
                 reason,
-            });
+            })
+            .await;
+        }
+        dismissed
+    }
+
+    // Drop cannot await. Remove authority immediately, then let a bounded owned
+    // caller publish the dismissal without parking the runtime on another event.
+    pub(super) fn dismiss_pending(&self, request_id: &str, reason: String) -> bool {
+        let dismissed = self.remove_pending(request_id);
+        if dismissed {
+            let event = crate::events::SessionEvent::PermissionDismissed {
+                request_id: request_id.to_owned(),
+                reason,
+            };
+            if crate::store::coordinator::owner_for(&self.store_path)
+                .is_ok_and(|owner| owner.is_some())
+            {
+                let bus = self
+                    .event_bus
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
+                if let Some(bus) = bus {
+                    let publisher = bus.clone();
+                    if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
+                        publisher.emit(event);
+                    })
+                    .detach()
+                    {
+                        bus.record_publication_failure();
+                        eprintln!("nac: permission dismissal publication rejected: {error}");
+                    }
+                }
+            } else {
+                self.emit(event);
+            }
         }
         dismissed
     }
@@ -454,7 +535,7 @@ impl PermissionBroker {
     async fn load_approval_state(&self) -> Result<(PermissionApprovalMode, i64, i64), String> {
         let store_path = self.store_path.clone();
         let session_id = self.session_id.clone();
-        tokio::task::spawn_blocking(move || {
+        crate::store::spawn_blocking_store_caller(move || {
             crate::sessions::load_effective_permission_approval_state(&store_path, &session_id)
         })
         .await
@@ -535,6 +616,24 @@ impl PermissionBroker {
         }
         self.interactive_subscriber_lost().await;
         "the interactive session client disconnected while approval was pending".to_string()
+    }
+
+    async fn emit_async(&self, event: crate::events::SessionEvent) {
+        if crate::store::coordinator::owner_for(&self.store_path).is_ok_and(|owner| owner.is_some())
+        {
+            let bus = self
+                .event_bus
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some(bus) = bus {
+                if let Err(error) = bus.emit_with_context_async(event, None, None).await {
+                    eprintln!("nac: permission event publication failed: {error}");
+                }
+            }
+        } else {
+            self.emit(event);
+        }
     }
 
     fn emit(&self, event: crate::events::SessionEvent) {

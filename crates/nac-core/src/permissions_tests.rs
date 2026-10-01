@@ -7,7 +7,7 @@ fn local(root: &Path) -> ExecutionBackend {
     }
 }
 
-fn broker_fixture() -> (PathBuf, Arc<PermissionBroker>) {
+pub(super) fn broker_fixture() -> (PathBuf, Arc<PermissionBroker>) {
     let path = std::env::temp_dir()
         .join(format!("nac-permission-broker-{}", uuid::Uuid::new_v4()))
         .join("store.db");

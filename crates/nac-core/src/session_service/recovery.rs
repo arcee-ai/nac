@@ -13,6 +13,21 @@ impl SessionService {
         Ok(record.is_some_and(|record| reconciled.as_deref() != Some(record.run_id.as_str())))
     }
 
+    pub async fn has_unreconciled_durable_run_recovery_async(&self) -> Result<bool> {
+        let Some(session_id) = self.metadata.session_id.as_deref() else {
+            return Ok(false);
+        };
+        let Some(owner) = crate::store::coordinator::owner_for(&self.metadata.store_path)? else {
+            return self.has_unreconciled_durable_run_recovery();
+        };
+        let record = owner.load_run_recovery(session_id.to_owned()).await?;
+        let reconciled = self
+            .reconciled_recovery_run_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(record.is_some_and(|record| reconciled.as_deref() != Some(record.run_id.as_str())))
+    }
+
     /// Reconcile a durable run left by another process and refresh this cached
     /// service's transcript while the caller holds the session operation lease.
     /// This preserves the existing event bus/subscribers instead of replacing
@@ -34,7 +49,11 @@ impl SessionService {
         operation_lease
             .validate(&self.metadata.store_path, session_id)
             .map_err(anyhow::Error::new)?;
-        let recovery = crate::store::reconcile_active_run(&self.metadata.store_path, session_id)?;
+        let owner = crate::store::coordinator::owner_for(&self.metadata.store_path)?;
+        let recovery = match &owner {
+            Some(owner) => owner.reconcile_active_run(session_id.to_owned()).await?,
+            None => crate::store::reconcile_active_run(&self.metadata.store_path, session_id)?,
+        };
         let mut snapshot =
             sessions::load_session_async(self.metadata.store_path.clone(), session_id.to_string())
                 .await?;
@@ -64,9 +83,13 @@ impl SessionService {
             .transcript_recovery_warning
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = transcript_warning;
-        let reconciled_run_id =
-            crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
-                .map(|record| record.run_id);
+        let recovered_record = match &owner {
+            Some(owner) => owner.load_run_recovery(session_id.to_owned()).await?,
+            None => crate::store::load_run_recovery(&self.metadata.store_path, session_id)?,
+        };
+        let reconciled_run_id = recovered_record
+            .as_ref()
+            .map(|record| record.run_id.clone());
         *self
             .reconciled_recovery_run_id
             .lock()
@@ -74,9 +97,7 @@ impl SessionService {
 
         match &recovery {
             crate::store::ActiveRunReconciliation::CanonicalTerminal => {
-                if let Some(record) =
-                    crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
-                {
+                if let Some(record) = recovered_record {
                     if let Some(disposition) = record.terminal_disposition {
                         let status = match disposition {
                             crate::store::RunTerminalDisposition::Completed => {
@@ -93,7 +114,8 @@ impl SessionService {
                                 .then(|| terminal_report.clone())
                                 .flatten(),
                             None,
-                        );
+                        )
+                        .await;
                     }
                 }
             }
@@ -101,38 +123,44 @@ impl SessionService {
                 let failure = failure
                     .clone()
                     .unwrap_or_else(|| crate::run_failure::RunFailure::unknown(FAILED_RUN_WARNING));
-                self.event_bus.emit_with_context(
-                    SessionEvent::RunFailed {
-                        message: failure.diagnostic.clone(),
-                        failure: Some(failure.clone()),
-                    },
-                    Some(SessionRunId::from_stored(run_id.clone())),
-                    None,
-                );
+                self.event_bus
+                    .emit_with_context_async(
+                        SessionEvent::RunFailed {
+                            message: failure.diagnostic.clone(),
+                            failure: Some(failure.clone()),
+                        },
+                        Some(SessionRunId::from_stored(run_id.clone())),
+                        None,
+                    )
+                    .await?;
                 self.settle_traditional_child_run(
                     &SessionRunId::from_stored(run_id.clone()),
                     crate::store::TraditionalChildStatus::Failed,
                     None,
                     Some(failure.diagnostic),
-                );
+                )
+                .await;
             }
             crate::store::ActiveRunReconciliation::Interrupted { run_id } => {
-                self.event_bus.emit_with_context(
-                    SessionEvent::RunFailed {
-                        message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
-                        failure: Some(crate::run_failure::RunFailure::interrupted(
-                            INTERRUPTED_RUN_EVENT_MESSAGE,
-                        )),
-                    },
-                    Some(SessionRunId::from_stored(run_id.clone())),
-                    None,
-                );
+                self.event_bus
+                    .emit_with_context_async(
+                        SessionEvent::RunFailed {
+                            message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
+                            failure: Some(crate::run_failure::RunFailure::interrupted(
+                                INTERRUPTED_RUN_EVENT_MESSAGE,
+                            )),
+                        },
+                        Some(SessionRunId::from_stored(run_id.clone())),
+                        None,
+                    )
+                    .await?;
                 self.settle_traditional_child_run(
                     &SessionRunId::from_stored(run_id.clone()),
                     crate::store::TraditionalChildStatus::Interrupted,
                     None,
                     Some(INTERRUPTED_RUN_WARNING.to_string()),
-                );
+                )
+                .await;
             }
             crate::store::ActiveRunReconciliation::None => {}
         }
@@ -147,15 +175,22 @@ impl SessionService {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
             return Ok(None);
         };
-        let Some(child) =
+        let owner = crate::store::coordinator::owner_for(&self.metadata.store_path)?;
+        let Some(child) = (if let Some(owner) = &owner {
+            owner.load_traditional_child(session_id.to_owned()).await?
+        } else {
             crate::store::load_traditional_child(&self.metadata.store_path, session_id)?
-        else {
+        }) else {
             return Ok(None);
         };
         if child.status != crate::store::TraditionalChildStatus::Running {
             return Ok(Some(child));
         }
-        let recovery = crate::store::load_run_recovery(&self.metadata.store_path, session_id)?;
+        let recovery = if let Some(owner) = &owner {
+            owner.load_run_recovery(session_id.to_owned()).await?
+        } else {
+            crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
+        };
         let recovery = match recovery {
             Some(recovery) => recovery,
             None => {
@@ -172,7 +207,12 @@ impl SessionService {
                     }
                     Err(error) => return Err(anyhow::Error::new(error)),
                 };
-                if crate::store::load_run_recovery(&self.metadata.store_path, session_id)?.is_some()
+                if (if let Some(owner) = &owner {
+                    owner.load_run_recovery(session_id.to_owned()).await?
+                } else {
+                    crate::store::load_run_recovery(&self.metadata.store_path, session_id)?
+                })
+                .is_some()
                 {
                     return Ok(Some(child));
                 }
@@ -189,8 +229,14 @@ impl SessionService {
                         "child run ended before its prompt and recovery obligation committed"
                             .to_string(),
                     ),
-                );
-                return crate::store::load_traditional_child(&self.metadata.store_path, session_id);
+                )
+                .await;
+                return match owner {
+                    Some(owner) => owner.load_traditional_child(session_id.to_owned()).await,
+                    None => {
+                        crate::store::load_traditional_child(&self.metadata.store_path, session_id)
+                    }
+                };
             }
         };
         if recovery.run_id != child.run_id.as_deref().unwrap_or_default() {
@@ -236,7 +282,11 @@ impl SessionService {
             status,
             report,
             (!failure.is_empty()).then_some(failure),
-        );
-        crate::store::load_traditional_child(&self.metadata.store_path, session_id)
+        )
+        .await;
+        match owner {
+            Some(owner) => owner.load_traditional_child(session_id.to_owned()).await,
+            None => crate::store::load_traditional_child(&self.metadata.store_path, session_id),
+        }
     }
 }

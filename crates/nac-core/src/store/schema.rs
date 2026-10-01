@@ -4,9 +4,17 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 mod managed_tables;
+mod migration_status;
 mod model_configurations;
 mod transcript_tables;
 mod wal_preflight;
+
+#[cfg(test)]
+use migration_status::has_migration_observation;
+use migration_status::{begin_migration, finish_migration};
+pub use migration_status::{
+    migration_status, StoreMigrationFailure, StoreMigrationState, StoreMigrationStatus,
+};
 
 pub(super) use managed_tables::create_managed_maintenance_tables;
 use managed_tables::create_terminal_remote_cleanups_table;
@@ -53,7 +61,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 31;
+const STORE_SCHEMA_VERSION: i64 = 32;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -62,63 +70,6 @@ pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 pub fn schema_version() -> i64 {
     STORE_SCHEMA_VERSION
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StoreMigrationState {
-    Migrating,
-    Current,
-    Required,
-    Failed,
-}
-
-impl StoreMigrationState {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Migrating => "migrating",
-            Self::Current => "current",
-            Self::Required => "migration-required",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StoreMigrationFailure {
-    FutureSchema,
-    InvalidSchema,
-    MigrationFailed,
-    StoreUnavailable,
-}
-
-impl StoreMigrationFailure {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::FutureSchema => "future-schema",
-            Self::InvalidSchema => "invalid-schema",
-            Self::MigrationFailed => "migration-failed",
-            Self::StoreUnavailable => "store-unavailable",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StoreMigrationStatus {
-    pub supported_schema_version: i64,
-    pub opened_schema_version: Option<i64>,
-    pub state: StoreMigrationState,
-    pub failure: Option<StoreMigrationFailure>,
-}
-
-const MIGRATION_OBSERVATION_LIMIT: usize = 128;
-
-#[derive(Debug, Clone, Copy)]
-struct MigrationObservation {
-    active: usize,
-    status: StoreMigrationStatus,
-}
-
-static MIGRATION_OBSERVATIONS: std::sync::LazyLock<Mutex<HashMap<PathBuf, MigrationObservation>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Schema version that introduced `sessions.run_count`. Databases older than
 /// this have never had the column populated from their message history.
@@ -338,12 +289,20 @@ fn path_entry_exists(path: &Path) -> bool {
     }
 }
 
+coordinated_command! {
 pub fn initialize(path: &Path) -> Result<()> {
-    initialize_with_hooks(path, || {}, || Ok(()))
+    initialize_with_hooks(path, || {}, || {}, || Ok(()))
+}
+command InitializeCommand {
+}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 fn initialize_with_hooks(
     path: &Path,
+    after_preflight: impl FnOnce(),
     after_lock: impl FnOnce(),
     before_commit: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
@@ -357,7 +316,7 @@ fn initialize_with_hooks(
             failure: None,
         },
     );
-    match open_connection_with_hooks(&path, after_lock, before_commit) {
+    match open_connection_with_hooks(&path, after_preflight, after_lock, before_commit) {
         Ok(connection) => {
             drop(connection);
             finish_migration(
@@ -393,75 +352,6 @@ fn initialize_with_hooks(
     }
 }
 
-fn begin_migration(path: &Path, status: StoreMigrationStatus) {
-    let mut observations = MIGRATION_OBSERVATIONS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if !observations.contains_key(path) {
-        prune_inactive_observations(&mut observations, MIGRATION_OBSERVATION_LIMIT - 1, None);
-    }
-    let observation = observations
-        .entry(path.to_path_buf())
-        .or_insert(MigrationObservation { active: 0, status });
-    observation.active += 1;
-    observation.status = status;
-}
-
-fn finish_migration(path: &Path, status: StoreMigrationStatus) {
-    let mut observations = MIGRATION_OBSERVATIONS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(observation) = observations.get_mut(path) else {
-        debug_assert!(false, "migration completion must match its start");
-        return;
-    };
-    if observation.active == 0 {
-        debug_assert!(false, "migration observation active count underflow");
-        return;
-    }
-    observation.active -= 1;
-    if status.state == StoreMigrationState::Current && observation.active == 0 {
-        observations.remove(path);
-        return;
-    }
-    observation.status = if status.state == StoreMigrationState::Current {
-        StoreMigrationStatus {
-            state: StoreMigrationState::Migrating,
-            ..status
-        }
-    } else {
-        status
-    };
-    prune_inactive_observations(&mut observations, MIGRATION_OBSERVATION_LIMIT, Some(path));
-}
-
-fn prune_inactive_observations(
-    observations: &mut HashMap<PathBuf, MigrationObservation>,
-    maximum: usize,
-    preserve: Option<&Path>,
-) {
-    while observations.len() > maximum {
-        let Some(expired) = observations.iter().find_map(|(candidate, observation)| {
-            (preserve != Some(candidate.as_path()) && observation.active == 0)
-                .then(|| candidate.clone())
-        }) else {
-            break;
-        };
-        observations.remove(&expired);
-    }
-}
-
-#[cfg(test)]
-fn has_migration_observation(path: &Path) -> bool {
-    let Ok(path) = std::fs::canonicalize(path) else {
-        return false;
-    };
-    MIGRATION_OBSERVATIONS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .contains_key(&path)
-}
-
 fn read_opened_schema_version(path: &Path) -> Option<i64> {
     if let Ok(Some(version)) = read_schema_version_header(path) {
         if version > STORE_SCHEMA_VERSION {
@@ -474,7 +364,7 @@ fn read_opened_schema_version(path: &Path) -> Option<i64> {
         .ok()
 }
 
-/// Read the effective SQLite schema version without opening SQLite or creating
+/// Read the effective schema version without opening a SQLite pager or creating
 /// sidecars. Managed replacement admission uses this before any read-only
 /// ledger query so a future database is rejected without filesystem mutation.
 pub(super) fn preflight_schema_version(path: &Path) -> Result<Option<i64>> {
@@ -499,82 +389,7 @@ fn reject_future_schema_before_open(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Inspect exact schema/migration state without applying a migration. Failure
-/// details are deliberately categorical so paths, SQL, and stored data cannot
-/// cross an operational status boundary.
-pub fn migration_status(path: &Path) -> StoreMigrationStatus {
-    let Ok(path) = std::fs::canonicalize(path) else {
-        return StoreMigrationStatus {
-            supported_schema_version: STORE_SCHEMA_VERSION,
-            opened_schema_version: None,
-            state: StoreMigrationState::Failed,
-            failure: Some(StoreMigrationFailure::StoreUnavailable),
-        };
-    };
-    let Some(opened_schema_version) = read_opened_schema_version(&path) else {
-        return StoreMigrationStatus {
-            supported_schema_version: STORE_SCHEMA_VERSION,
-            opened_schema_version: None,
-            state: StoreMigrationState::Failed,
-            failure: Some(StoreMigrationFailure::StoreUnavailable),
-        };
-    };
-    if opened_schema_version > STORE_SCHEMA_VERSION {
-        return StoreMigrationStatus {
-            supported_schema_version: STORE_SCHEMA_VERSION,
-            opened_schema_version: Some(opened_schema_version),
-            state: StoreMigrationState::Failed,
-            failure: Some(StoreMigrationFailure::FutureSchema),
-        };
-    }
-    {
-        let mut observations = MIGRATION_OBSERVATIONS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(observed) = observations.get(&path).copied() {
-            if matches!(
-                observed.status.state,
-                StoreMigrationState::Migrating | StoreMigrationState::Failed
-            ) && observed.status.opened_schema_version == Some(opened_schema_version)
-            {
-                return observed.status;
-            }
-            if observed.active == 0 {
-                observations.remove(&path);
-            }
-        }
-    }
-    if opened_schema_version < STORE_SCHEMA_VERSION {
-        return StoreMigrationStatus {
-            supported_schema_version: STORE_SCHEMA_VERSION,
-            opened_schema_version: Some(opened_schema_version),
-            state: StoreMigrationState::Required,
-            failure: None,
-        };
-    }
-    let schema_valid = connect_existing(&path)
-        .and_then(|connection| {
-            connection
-                .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-                .map_err(anyhow::Error::from)
-        })
-        .unwrap_or(false);
-    StoreMigrationStatus {
-        supported_schema_version: STORE_SCHEMA_VERSION,
-        opened_schema_version: Some(opened_schema_version),
-        state: if schema_valid {
-            StoreMigrationState::Current
-        } else {
-            StoreMigrationState::Failed
-        },
-        failure: (!schema_valid).then_some(StoreMigrationFailure::InvalidSchema),
-    }
-}
-
+coordinated_command! {
 /// Verify that session-serving traffic can check out, open, and query the
 /// initialized store without creating or migrating a replacement database.
 pub fn check_readiness(path: &Path) -> Result<()> {
@@ -583,6 +398,12 @@ pub fn check_readiness(path: &Path) -> Result<()> {
         crate::telemetry::Correlation::default(),
         || check_readiness_inner(path),
     )
+}
+command CheckReadinessCommand {
+}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }
 
 fn check_readiness_inner(path: &Path) -> Result<()> {
@@ -600,7 +421,7 @@ fn check_readiness_inner(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn resolved_store_path(path: &Path) -> Result<PathBuf> {
+pub(crate) fn resolved_store_path(path: &Path) -> Result<PathBuf> {
     match std::fs::canonicalize(path) {
         Ok(path) => Ok(path),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -634,6 +455,7 @@ fn connect_with_capacity_using(
         crate::telemetry::Correlation::default(),
         || {
             let path = resolved_store_path(path)?;
+            super::coordinator::require_execution_owner(&path)?;
             let permit = capacity.acquire(&path, timeout)?;
             let connection = open(&path)
                 .with_context(|| format!("failed to open SQLite store {}", path.display()))?;
@@ -778,11 +600,12 @@ pub(crate) fn active_connection_counts(path: &Path) -> Result<(usize, usize)> {
 }
 
 pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
-    open_connection_with_hooks(path, || {}, || Ok(()))
+    open_connection_with_hooks(path, || {}, || {}, || Ok(()))
 }
 
 fn open_connection_with_hooks(
     path: &Path,
+    after_preflight: impl FnOnce(),
     after_lock: impl FnOnce(),
     before_commit: impl FnOnce() -> Result<()>,
 ) -> Result<StoreConnection> {
@@ -800,6 +623,7 @@ fn open_connection_with_hooks(
     if preflight_schema_version == STORE_SCHEMA_VERSION {
         return Ok(conn);
     }
+    after_preflight();
     // journal_mode is database-wide and persistent, so future schemas must be
     // rejected before this binary changes even their SQLite configuration.
     conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -852,7 +676,7 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -1020,6 +844,18 @@ fn open_connection_with_hooks(
         "TEXT",
     )?;
     super::worker_dispatches::create_worker_dispatches_table(&transaction)?;
+    ensure_column(
+        &transaction,
+        "worker_dispatches",
+        "history_start_id",
+        "INTEGER",
+    )?;
+    ensure_column(
+        &transaction,
+        "worker_dispatches",
+        "history_boundary_id",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;

@@ -27,6 +27,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionGrantRec
     })
 }
 
+coordinated_command! {
 pub fn list_permission_grants(path: &Path, session_id: &str) -> Result<Vec<PermissionGrantRecord>> {
     let connection = open_runtime_connection(path)?;
     let mut statement = connection.prepare(&format!(
@@ -36,7 +37,15 @@ pub fn list_permission_grants(path: &Path, session_id: &str) -> Result<Vec<Permi
     let rows = statement.query_map(params![session_id], row_to_record)?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
+command ListPermissionGrantsCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub(crate) fn list_effective_permission_grants(
     path: &Path,
     session_id: &str,
@@ -55,7 +64,17 @@ pub(crate) fn list_effective_permission_grants(
     )?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
+command ListEffectivePermissionGrantsCommand {
+    session_id: String = session_id.to_owned(),
+    backend: String = backend.to_owned(),
+    session_config_version: i64 = session_config_version,
+}
+call |command| (&command.session_id, &command.backend, command.session_config_version)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub fn insert_permission_grants(
     path: &Path,
     session_id: &str,
@@ -70,7 +89,19 @@ pub fn insert_permission_grants(
         .collect::<Vec<_>>();
     insert_permission_grant_set(path, session_id, &grants, backend, session_config_version)
 }
+command InsertPermissionGrantsCommand {
+    session_id: String = session_id.to_owned(),
+    action: String = action.to_owned(),
+    resources: Vec<String> = resources.to_vec(),
+    backend: String = backend.to_owned(),
+    session_config_version: i64 = session_config_version,
+}
+call |command| (&command.session_id, &command.action, &command.resources, &command.backend, command.session_config_version)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
 
+coordinated_command! {
 pub(crate) fn insert_permission_grant_set(
     path: &Path,
     session_id: &str,
@@ -88,14 +119,25 @@ pub(crate) fn insert_permission_grant_set(
     )?
     .ok_or_else(|| anyhow!("permission grant insertion unexpectedly lost its waiter"))
 }
+command InsertPermissionGrantSetCommand {
+    session_id: String = session_id.to_owned(),
+    grants: Vec<(String, String)> = grants.to_vec(),
+    backend: String = backend.to_owned(),
+    session_config_version: i64 = session_config_version,
+}
+call |command| (&command.session_id, &command.grants, &command.backend, command.session_config_version)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
+}
 
+coordinated_command! {
 pub(crate) fn insert_permission_grant_set_if_waiter_live(
     path: &Path,
     session_id: &str,
     grants: &[(String, String)],
     backend: &str,
     session_config_version: i64,
-    waiter_live: &std::sync::Mutex<bool>,
+    waiter_live: &std::sync::Arc<std::sync::Mutex<bool>>,
 ) -> Result<Option<Vec<PermissionGrantRecord>>> {
     insert_permission_grant_set_inner(
         path,
@@ -105,6 +147,17 @@ pub(crate) fn insert_permission_grant_set_if_waiter_live(
         session_config_version,
         Some(waiter_live),
     )
+}
+command InsertPermissionGrantSetIfWaiterLiveCommand {
+    session_id: String = session_id.to_owned(),
+    grants: Vec<(String, String)> = grants.to_vec(),
+    backend: String = backend.to_owned(),
+    session_config_version: i64 = session_config_version,
+    waiter_live: std::sync::Arc<std::sync::Mutex<bool>> = std::sync::Arc::clone(waiter_live),
+}
+call |command| (&command.session_id, &command.grants, &command.backend, command.session_config_version, &command.waiter_live)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
 }
 
 fn insert_permission_grant_set_inner(
@@ -183,6 +236,7 @@ fn insert_permission_grant_set_inner(
     Ok(Some(effective))
 }
 
+coordinated_command! {
 pub fn delete_permission_grant(path: &Path, session_id: &str, grant_id: &str) -> Result<()> {
     let connection = open_runtime_connection(path)?;
     let changed = connection.execute(
@@ -195,6 +249,14 @@ pub fn delete_permission_grant(path: &Path, session_id: &str, grant_id: &str) ->
         ));
     }
     Ok(())
+}
+command DeletePermissionGrantCommand {
+    session_id: String = session_id.to_owned(),
+    grant_id: String = grant_id.to_owned(),
+}
+call |command| (&command.session_id, &command.grant_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 #[cfg(test)]

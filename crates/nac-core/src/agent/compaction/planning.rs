@@ -278,7 +278,7 @@ impl CompactionState {
             .saturating_add(summary_completion_tokens)
     }
 
-    pub fn append_and_activate(
+    pub async fn append_and_activate_async(
         &mut self,
         messages: &[Message],
         candidate: &CompactionCandidate,
@@ -287,24 +287,29 @@ impl CompactionState {
         summary_completion_tokens: Option<u64>,
         new_context_estimate: u64,
     ) -> Result<()> {
-        let checkpoint = append_orchestrator_compaction_checkpoint(
-            &self.store_path,
-            &NewOrchestratorCompactionCheckpoint {
-                session_id: self.session_id.clone(),
-                previous_checkpoint_id: candidate.previous_checkpoint_id,
-                summary: installed_summary,
-                tail_start_message_index: candidate.boundary,
-                source_prefix_sha256: candidate.source_prefix_sha256,
-                system_policy_sha256: candidate.system_policy_sha256,
-                prompt_policy_version: self.policy.version(),
-                old_context_estimate: candidate.old_context_estimate,
-                summary_prompt_tokens,
-                summary_completion_tokens,
-                new_context_estimate,
-            },
-        )?;
-        // The append above is synchronous. There is deliberately no await
-        // between the durable commit and activating exactly that row.
+        let record = NewOrchestratorCompactionCheckpoint {
+            session_id: self.session_id.clone(),
+            previous_checkpoint_id: candidate.previous_checkpoint_id,
+            summary: installed_summary,
+            tail_start_message_index: candidate.boundary,
+            source_prefix_sha256: candidate.source_prefix_sha256,
+            system_policy_sha256: candidate.system_policy_sha256,
+            prompt_policy_version: self.policy.version(),
+            old_context_estimate: candidate.old_context_estimate,
+            summary_prompt_tokens,
+            summary_completion_tokens,
+            new_context_estimate,
+        };
+        let checkpoint = match crate::store::coordinator::owner_for(&self.store_path)? {
+            Some(owner) => {
+                owner
+                    .append_orchestrator_compaction_checkpoint(record)
+                    .await?
+            }
+            None => append_orchestrator_compaction_checkpoint(&self.store_path, &record)?,
+        };
+        // Activate exactly the acknowledged row before another await. A lost
+        // acknowledgement leaves the durable checkpoint for recovery.
         self.active_checkpoint = Some(checkpoint);
         let checkpoint_id = self
             .active_checkpoint

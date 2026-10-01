@@ -38,6 +38,7 @@ mod cancellation;
 mod direct_interaction;
 mod frontend_projection;
 mod manual_compaction;
+mod operation_state;
 mod recovery;
 mod settlement;
 mod transcript_projection;
@@ -589,6 +590,8 @@ pub struct SessionService {
     transcript_scan: Arc<StdMutex<TranscriptScanCache>>,
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
+    published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
+    stopping_admission: Arc<std::sync::atomic::AtomicBool>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
     /// The session's skill registry, captured from the agent at construction
     /// so `prepare_user_input` can expand top-level `$skillname` references
@@ -694,6 +697,10 @@ struct CancellingRun {
 
 impl Drop for CancellingRun {
     fn drop(&mut self) {
+        // Dropping this guard means cancellation did not reach the terminal
+        // clear. Restore the process-local run synchronously: routing this
+        // rollback through the bounded persistence caller can leave the run
+        // stuck as `finishing` when that caller is saturated or unavailable.
         let mut guard = self.service.lock_active_operation();
         let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() else {
             return;
@@ -936,8 +943,10 @@ impl SessionService {
             })
         };
         let store_path = self.metadata.store_path.clone();
-        tokio::task::spawn_blocking(move || sessions::save_session_run_state(&store_path, &update))
-            .await??;
+        crate::store::spawn_blocking_store_caller(move || {
+            sessions::save_session_run_state(&store_path, &update)
+        })
+        .await??;
         Ok(())
     }
 

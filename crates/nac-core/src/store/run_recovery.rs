@@ -191,6 +191,7 @@ fn retain_or_clear_terminal_obligation(
     Ok(())
 }
 
+coordinated_command! {
 pub fn clear_settled_run_recovery(path: &Path, session_id: &str, run_id: &str) -> Result<()> {
     let mut connection = open_runtime_connection(path)?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -203,6 +204,14 @@ pub fn clear_settled_run_recovery(path: &Path, session_id: &str, run_id: &str) -
     }
     transaction.commit()?;
     Ok(())
+}
+command ClearSettledRunRecoveryCommand {
+    session_id: String = session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+}
+call |command| (&command.session_id, &command.run_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(Some(&command.run_id));
+port public;
 }
 
 /// Retain a matching committed prompt as a durable failed outcome. No match is
@@ -232,6 +241,7 @@ pub(crate) fn mark_active_run_failed(
     Ok(())
 }
 
+coordinated_command! {
 /// Persist the typed terminal failure before transcript normalization. The run
 /// remains active until ordinary atomic settlement commits, but restart
 /// recovery can no longer mistake a known transient failure for a permanent
@@ -259,10 +269,27 @@ pub(crate) fn stage_active_run_failure(
     }
     Ok(())
 }
+command StageActiveRunFailureCommand {
+    session_id: String = session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    failure: crate::run_failure::RunFailure = failure.clone(),
+}
+call |command| (&command.session_id, &command.run_id, &command.failure)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(Some(&command.run_id));
+port internal;
+}
 
+coordinated_command! {
 pub fn load_run_recovery(path: &Path, session_id: &str) -> Result<Option<RunRecoveryRecord>> {
     let connection = open_runtime_connection(path)?;
     load_run_recovery_with_connection(&connection, session_id)
+}
+command LoadRunRecoveryCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 pub(crate) fn load_run_recovery_with_connection(
@@ -307,12 +334,20 @@ pub(crate) fn load_run_recovery_with_connection(
         .transpose()
 }
 
+coordinated_command! {
 pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunReconciliation> {
     crate::telemetry::observe_store(
         crate::telemetry::StoreOperation::Recovery,
         crate::telemetry::Correlation::session(Some(session_id)),
         || reconcile_active_run_inner(path, session_id),
     )
+}
+command ReconcileActiveRunCommand {
+    session_id: String = session_id.to_owned(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
 }
 
 fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRunReconciliation> {
