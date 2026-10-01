@@ -18,6 +18,13 @@ for (const orchestration of [null, "0"] as const) {
         await page.goto(`${harness.baseUrl}/#/session/${legacy}/threads`);
         await expect(page.getByText("This chat is unavailable in direct-only mode")).toBeVisible();
         await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
+        const modifier = process.platform === "darwin" ? "Meta" : "Control";
+        await page.keyboard.press(`${modifier}+Shift+O`);
+        const shortcutDialog = page.getByRole("dialog", { name: "New Chat" });
+        await expect(shortcutDialog).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(shortcutDialog).not.toBeVisible();
+        await expect(page.getByText("This chat is unavailable in direct-only mode")).toBeVisible();
         await page.getByRole("button", { name: "New direct chat" }).click();
         await expect(page.getByRole("dialog", { name: "New Chat" })).toBeVisible();
         await expect(page.getByRole("radiogroup")).toHaveCount(0);
@@ -31,6 +38,7 @@ for (const orchestration of [null, "0"] as const) {
         const response = await created;
         expect(response.request().postDataJSON()).toMatchObject({
           behavior: "direct",
+          project_id: projectId,
           first_chat: false,
         });
         const directId = (await response.json()).metadata.session_id;

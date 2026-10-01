@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
 import { DIRECT_UI_POLICY, ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
+import { MOD } from "@/app/lib/shortcuts";
 import { chatTabsStore, dismissChatTab, setChatTabOrder } from "@/app/store/chatTabsStore";
 import {
   sessionNavigationStore,
@@ -22,7 +23,6 @@ const fakes = vi.hoisted(() => ({
   assign: vi.fn(),
 }));
 
-vi.mock("@/app/hooks/useKeyboardShortcuts", () => ({ useKeyboardShortcuts: () => undefined }));
 vi.mock("@/app/providers/ToastProvider", () => ({
   errorMessage: (error: unknown) => String(error),
   useToast: () => ({ success: vi.fn(), error: vi.fn() }),
@@ -53,7 +53,12 @@ vi.mock("@/app/components/modals/NewChatModal", () => ({
     projectId: string | null;
     firstChat?: boolean;
     onClose: () => void;
-  }) => (projectId ? <button onClick={onClose}>Close required chat</button> : null),
+  }) =>
+    projectId ? (
+      <button data-project-id={projectId} onClick={onClose}>
+        Close required chat
+      </button>
+    ) : null,
 }));
 
 function Harness() {
@@ -67,9 +72,9 @@ function Harness() {
   );
 }
 
-function tree(orchestration = false) {
+function tree(orchestration = false, path = "/project/project-1") {
   return (
-    <MemoryRouter initialEntries={["/project/project-1"]}>
+    <MemoryRouter initialEntries={[path]}>
       <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
         <ProjectActionsProvider>
           <Harness />
@@ -146,3 +151,22 @@ it("keeps hidden orchestration navigation memory while pruning genuinely deleted
   view.rerender(tree(true));
   assertRetained();
 });
+
+it.each(["orchestrator", "direct-with-orchestrator"])(
+  "keeps the new-chat shortcut in the project of a hidden %s deep link",
+  (behavior) => {
+    fakes.projects = [{ project_id: "project-1" }];
+    fakes.sessions = [{ summary: { session_id: "legacy", behavior, project_id: "project-1" } }];
+    render(tree(false, "/session/legacy/threads"));
+    fireEvent.keyDown(window, {
+      key: "o",
+      shiftKey: true,
+      ctrlKey: MOD === "ctrl",
+      metaKey: MOD === "meta",
+    });
+    expect(
+      screen.getByRole("button", { name: "Close required chat" }).getAttribute("data-project-id"),
+    ).toBe("project-1");
+    expect(screen.getByTestId("location").textContent).toBe("/session/legacy/threads");
+  },
+);
