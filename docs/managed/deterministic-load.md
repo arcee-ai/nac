@@ -63,7 +63,10 @@ artifact is written.
 This scenario is an attribution harness, not a root-cause verdict. It keeps
 browser behavior and Kubernetes/PVC behavior outside the primary fixture. Its
 `LoadStoreAdapter` boundary records the current SQLite/WAL configuration and
-keeps a narrow future comparison seam; it does not add or select Turso. Results
-from experiments that change cache lifetime, backend, or deployment shape are
-separate evidence and must not be promoted into a causal claim without a
-focused reproducer.
+checkpoint results. SQLite WAL remains selected after the accepted ALL-114
+NO-GO; embedded and remote Turso are not supported backends. The
+[persistence decision](../architecture/0004-persistence-ownership.md#selected-backend)
+links the retained qualification evidence. A different backend requires new
+explicit decision and qualification work. Results from experiments that change
+cache lifetime, backend, or deployment shape are separate evidence and must not
+be promoted into a causal claim without a focused reproducer.

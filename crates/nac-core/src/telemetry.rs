@@ -113,16 +113,6 @@ impl StoreErrorIdentity {
             extended_code,
         }
     }
-
-    /// Adapter contract for a qualified Turso store implementation. NAC does
-    /// not select or introduce that engine here.
-    pub fn turso(primary_code: i32, extended_code: i32) -> Self {
-        Self {
-            engine: "turso",
-            primary_code,
-            extended_code,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]

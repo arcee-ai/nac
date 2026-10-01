@@ -27,9 +27,7 @@ Axum's matched route pattern or a fixed route class, never from the raw URI.
 SQLite statement profiling classifies only `BEGIN`, `COMMIT`, and
 `PRAGMA wal_checkpoint` prefixes and immediately discards the SQL callback
 value. All other SQL, including expanded bound parameters, is ignored. SQLite
-errors retain numeric primary and extended codes without their messages. The
-same numeric-only identity contract is available to a future qualified Turso
-adapter; it does not add or select that engine.
+errors retain numeric primary and extended codes without their messages.
 
 ## Names and ownership
 
@@ -81,7 +79,10 @@ observations for four generations, and proves they join on the same bounded
 correlation fields. It also serializes the result and checks prompt,
 transcript, tool, credential, repository, and SQL-parameter canaries are absent.
 
-The current store engine is SQLite/WAL. The event schema deliberately keeps
-`store_engine`, `journal_mode`, and numeric engine error identity explicit so a
-future qualified adapter can use the same contract; this instrumentation does
-not select or introduce that adapter.
+SQLite WAL remains selected after the accepted ALL-114 NO-GO; embedded and
+remote Turso are not supported backends. The
+[persistence decision](../architecture/0004-persistence-ownership.md#selected-backend)
+links the retained qualification evidence. The event schema keeps
+`store_engine`, `journal_mode`, and numeric error identity explicit for
+attribution. A different backend requires new explicit decision and
+qualification work.
