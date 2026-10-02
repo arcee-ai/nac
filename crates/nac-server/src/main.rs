@@ -477,7 +477,9 @@ struct SandboxArgs {
 
 #[tokio::main]
 async fn main() {
-    if let Err(error) = run().await {
+    let result = run().await;
+    let _ = nac_core::telemetry::finish_export(std::time::Duration::from_millis(100));
+    if let Err(error) = result {
         eprintln!("Error: {error:#}");
         process::exit(1);
     }

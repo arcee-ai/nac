@@ -1023,6 +1023,11 @@ where
                 .context("server stopped unexpectedly");
             shutdown_manager.quiesce_persistence_callers().await;
             shutdown_manager.drain_persistence().await?;
+            // Accounting drains inside the existing complete-shutdown watchdog.
+            // A missing/failed receipt is diagnostic, never an application error.
+            let _ = tokio::task::spawn_blocking(|| {
+                nac_core::telemetry::finish_export(Duration::from_millis(100))
+            }).await;
             let _ = shutdown_complete_tx.send(());
             watchdog
                 .join()
