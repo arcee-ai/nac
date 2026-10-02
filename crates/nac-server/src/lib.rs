@@ -584,6 +584,9 @@ impl SessionManager {
                 managed_monitor_peer_observed: tokio::sync::Notify::new(),
             }),
         };
+        if let Err(error) = mcp_api::synchronize_mcp_oauth_redirect_uris(&manager) {
+            eprintln!("MCP OAuth redirect synchronization failed: {error}");
+        }
         nac_core::traditional_children::register_controller(
             store_path.clone(),
             Arc::new(ServerTraditionalChildController {

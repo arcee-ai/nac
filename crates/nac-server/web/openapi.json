@@ -1936,6 +1936,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthenticateMcpOAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "OAuth browser authorization ready",
@@ -1965,6 +1975,38 @@
                   "$ref": "#/components/schemas/ApiErrorBody"
                 }
               }
+            }
+          }
+        }
+      }
+    },
+    "/mcp_library/servers/{server_name}/oauth/callback": {
+      "get": {
+        "tags": [
+          "mcp-library"
+        ],
+        "operationId": "get_mcp_library_servers_server_name_oauth_callback",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth authorization complete",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "400": {
+            "description": "OAuth callback rejected",
+            "content": {
+              "text/plain": {}
             }
           }
         }
@@ -8600,6 +8642,17 @@
           "no_credential"
         ]
       },
+      "AuthenticateMcpOAuthRequest": {
+        "type": "object",
+        "properties": {
+          "additional_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "AuthenticateMcpOAuthResponse": {
         "type": "object",
         "required": [
@@ -8912,19 +8965,42 @@
       },
       "ConfigureMcpOAuthRequest": {
         "type": "object",
-        "required": [
-          "client_id_credential",
-          "client_secret_credential",
-          "scopes"
-        ],
         "properties": {
+          "authorization_metadata": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpOAuthAuthorizationMetadataRequest"
+              }
+            ]
+          },
           "client_id_credential": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
+            "deprecated": true,
             "writeOnly": true
           },
           "client_secret_credential": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
+            "deprecated": true,
             "writeOnly": true
+          },
+          "registration": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpOAuthRegistrationRequest"
+              }
+            ]
           },
           "scopes": {
             "type": "array",
@@ -10909,6 +10985,67 @@
           "subscription_ended"
         ]
       },
+      "McpOAuthAuthorizationMetadataRequest": {
+        "type": "object",
+        "required": [
+          "authorization_endpoint",
+          "token_endpoint"
+        ],
+        "properties": {
+          "authorization_endpoint": {
+            "type": "string"
+          },
+          "code_challenge_methods_supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "jwks_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "registration_endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "response_types_supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "scopes_supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": {}
+      },
       "McpOAuthPublicStatus": {
         "type": "string",
         "enum": [
@@ -10919,12 +11056,86 @@
           "failed"
         ]
       },
+      "McpOAuthRegistrationRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "client_id_credential",
+              "type"
+            ],
+            "properties": {
+              "client_id_credential": {
+                "type": "string",
+                "writeOnly": true
+              },
+              "client_secret_credential": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "writeOnly": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pre_registered"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "url",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "client_metadata"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "client_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dynamic"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "McpOAuthStatusResponse": {
         "type": "object",
         "required": [
           "status"
         ],
         "properties": {
+          "authorization_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "message": {
             "type": [
               "string",

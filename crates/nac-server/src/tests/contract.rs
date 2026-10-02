@@ -98,6 +98,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/mcp_library/library"),
     ("GET", "/mcp_library/servers"),
     ("GET", "/mcp_library/servers/status"),
+    ("GET", "/mcp_library/servers/{server_name}/oauth/callback"),
     ("GET", "/mcp_library/servers/{server_name}/oauth/status"),
     ("GET", "/model-configs"),
     ("GET", "/projects"),

@@ -21,6 +21,7 @@ nac-process = { path = "../nac-process" }
 tokio = { workspace = true, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 reqwest = { workspace = true, features = ["json", "form", "rustls", "stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+sse-stream = "0.2"
 bytes = "1"
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }

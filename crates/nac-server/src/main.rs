@@ -22,6 +22,8 @@ use nac_core::{
 };
 use nac_server::{serve_with_policy, BindPolicy, ServerOptions, SessionManager};
 
+const MCP_OAUTH_CALLBACK_ORIGIN_ENV: &str = "NAC_MCP_OAUTH_CALLBACK_ORIGIN";
+
 /// Root NAC product version, intentionally independent of internal crate versions.
 const RELEASE_VERSION: &str = env!("NAC_PRODUCT_VERSION");
 const BUILD_VERSION: &str = concat!(
@@ -126,6 +128,11 @@ struct ServerCli {
     /// changing local defaults.
     #[arg(long)]
     managed_config: Option<PathBuf>,
+
+    /// Public origin used for MCP OAuth callbacks, for example
+    /// https://nac.example.com. Required with a remote bind outside Managed NAC.
+    #[arg(long, value_name = "ORIGIN")]
+    mcp_oauth_callback_origin: Option<String>,
 
     /// Open the dashboard in the default browser after listening.
     ///
@@ -555,6 +562,21 @@ async fn resolve_github_credential(
     Ok(Some(token))
 }
 
+fn configured_mcp_oauth_callback_origin(
+    cli_origin: Option<&str>,
+    environment_origin: Option<String>,
+) -> Option<String> {
+    cli_origin
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            environment_origin
+                .map(|origin| origin.trim().to_owned())
+                .filter(|origin| !origin.is_empty())
+        })
+}
+
 async fn run_server(cli: ServerCli, invocation_name: &str) -> Result<()> {
     let bind = cli.bind_addr();
     let bind_policy = cli.bind_policy();
@@ -570,6 +592,24 @@ async fn run_server(cli: ServerCli, invocation_name: &str) -> Result<()> {
     eprintln!("project: {}", root_cwd.display());
     let managed_host =
         nac_managed::ManagedHostConfig::load_optional(managed_config_path.as_deref())?;
+    if managed_host.is_none() {
+        let callback_origin = configured_mcp_oauth_callback_origin(
+            cli.mcp_oauth_callback_origin.as_deref(),
+            std::env::var(MCP_OAUTH_CALLBACK_ORIGIN_ENV).ok(),
+        );
+        if !bind.ip().is_loopback() && callback_origin.is_none() {
+            return Err(anyhow!(
+                "--mcp-oauth-callback-origin is required for a non-loopback server bind"
+            ));
+        }
+        if let Some(origin) = callback_origin {
+            // The HTTP handlers independently validate the origin before use. Store the
+            // explicit operator value process-wide so embedded router construction and
+            // the CLI share one immutable source that never consults request headers.
+            // SAFETY: startup is single-threaded here, before the server or workers spawn.
+            unsafe { std::env::set_var(MCP_OAUTH_CALLBACK_ORIGIN_ENV, origin) };
+        }
+    }
     configure_telemetry(managed_host.as_ref());
     let manager = SessionManager::new(ServerOptions {
         root_cwd,
@@ -1448,6 +1488,31 @@ thread_timeout_secs = 7200
 
         let allowed = parse_server(&["nac-web", "--bind", "192.168.1.20:3210", "--allow-remote"]);
         assert_eq!(allowed.bind_policy(), BindPolicy::AllowRemote);
+    }
+
+    #[test]
+    fn callback_origin_ignores_blank_cli_and_environment_values() {
+        assert_eq!(configured_mcp_oauth_callback_origin(None, None), None);
+        assert_eq!(
+            configured_mcp_oauth_callback_origin(Some(" \t "), Some(" \n ".into())),
+            None
+        );
+        assert_eq!(
+            configured_mcp_oauth_callback_origin(
+                Some(" \t "),
+                Some(" https://nac.example.test \n".into())
+            )
+            .as_deref(),
+            Some("https://nac.example.test")
+        );
+        assert_eq!(
+            configured_mcp_oauth_callback_origin(
+                Some(" https://cli.example.test "),
+                Some("https://environment.example.test".into())
+            )
+            .as_deref(),
+            Some("https://cli.example.test")
+        );
     }
 
     #[test]
