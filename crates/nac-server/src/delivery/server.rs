@@ -919,29 +919,22 @@ pub(crate) async fn serve_with_policy_and_readiness(
         }
     }
     on_listening(bound);
-    let control_server = control_listener.map(|listener| {
-        let app = managed_control::router(manager.clone());
-        tokio::spawn(async move { axum::serve(listener, app).await })
-    });
-    let result = serve_router_listener_with_shutdown(
+    serve_router_listener_with_shutdown(
         listener,
+        control_listener.map(|listener| (listener, managed_control::router(manager.clone()))),
         app,
         manager,
         shutdown_signal(),
         COMPLETE_SHUTDOWN_TIMEOUT,
         || std::process::exit(0),
     )
-    .await;
-    if let Some(control_server) = control_server {
-        control_server.abort();
-        let _ = control_server.await;
-    }
-    result
+    .await
 }
 
 #[cfg(test)]
 pub(crate) async fn serve_listener_with_shutdown<F, X>(
     listener: TcpListener,
+    control: Option<(TcpListener, Router)>,
     manager: SessionManager,
     shutdown: F,
     complete_shutdown_timeout: Duration,
@@ -954,6 +947,7 @@ where
     let app = router(manager.clone());
     serve_router_listener_with_shutdown(
         listener,
+        control,
         app,
         manager,
         shutdown,
@@ -969,6 +963,7 @@ where
 )]
 async fn serve_router_listener_with_shutdown<F, X>(
     listener: TcpListener,
+    control: Option<(TcpListener, Router)>,
     app: Router,
     manager: SessionManager,
     shutdown: F,
@@ -982,6 +977,16 @@ where
     let mut force_shutdown = Some(force_shutdown);
     let shutdown_manager = manager.clone();
     let (graceful_tx, graceful_rx) = tokio::sync::oneshot::channel();
+    let (control_graceful_tx, control_graceful_rx) = tokio::sync::oneshot::channel();
+    let mut control_server = control.map(|(listener, app)| {
+        tokio::spawn(
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = control_graceful_rx.await;
+                })
+                .into_future(),
+        )
+    });
     let mut server = tokio::spawn(
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {
@@ -1001,6 +1006,7 @@ where
             // Its watchdog is independent of the async runtime so a wedged
             // connection task cannot starve the forced process exit.
             let _ = graceful_tx.send(());
+            let _ = control_graceful_tx.send(());
             let (shutdown_complete_tx, shutdown_complete_rx) = std::sync::mpsc::channel();
             let force_shutdown = force_shutdown.take().expect("force shutdown callback");
             let watchdog = std::thread::Builder::new()
@@ -1021,8 +1027,16 @@ where
                 .await
                 .context("server task stopped unexpectedly")?
                 .context("server stopped unexpectedly");
+            if let Some(control_server) = control_server.take() {
+                let _ = control_server.await;
+            }
             shutdown_manager.quiesce_persistence_callers().await;
             shutdown_manager.drain_persistence().await?;
+            // Accounting drains inside the existing complete-shutdown watchdog.
+            // A missing/failed receipt is diagnostic, never an application error.
+            let _ = tokio::task::spawn_blocking(|| {
+                nac_core::telemetry::finish_export(Duration::from_millis(100))
+            }).await;
             let _ = shutdown_complete_tx.send(());
             watchdog
                 .join()
@@ -1030,6 +1044,10 @@ where
             result
         }
     };
+    if let Some(control_server) = control_server {
+        control_server.abort();
+        let _ = control_server.await;
+    }
     result
 }
 
