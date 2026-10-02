@@ -1399,6 +1399,7 @@ async fn complete_shutdown_is_bounded_with_an_open_session_event_stream() {
     let (forced_tx, forced_rx) = std::sync::mpsc::channel();
     let server = tokio::spawn(serve_listener_with_shutdown(
         listener,
+        None,
         manager,
         async move {
             let _ = shutdown_rx.await;
@@ -1810,5 +1811,83 @@ async fn cancelled_delete_request_keeps_authority_until_podman_cleanup_settles()
             }
         }
     }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_drains_private_control_requests_before_persistence_and_accounting() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("shutdown_control_drain");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("shutdown-test-key"));
+    let manager = test_manager(&root);
+    nac_core::store::initialize(&root.join("store.db")).unwrap();
+    let public = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let control = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let bound = control.local_addr().unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let app = Router::new().route(
+        "/held",
+        get({
+            let entered = entered.clone();
+            let release = release.clone();
+            let finished = finished.clone();
+            let store = root.join("store.db");
+            move || {
+                let entered = entered.clone();
+                let release = release.clone();
+                let finished = finished.clone();
+                let store = store.clone();
+                async move {
+                    entered.notify_one();
+                    release.notified().await;
+                    nac_core::store::check_readiness(&store).unwrap();
+                    finished.store(true, std::sync::atomic::Ordering::SeqCst);
+                    "done"
+                }
+            }
+        }),
+    );
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(serve_listener_with_shutdown(
+        public,
+        Some((control, app)),
+        manager,
+        async move {
+            let _ = shutdown_rx.await;
+        },
+        Duration::from_secs(1),
+        || panic!("control drain exceeded unchanged shutdown deadline"),
+    ));
+    let mut stream = tokio::net::TcpStream::connect(bound).await.unwrap();
+    stream
+        .write_all(b"GET /held HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), entered.notified())
+        .await
+        .unwrap();
+    shutdown_tx.send(()).unwrap();
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(
+        !server.is_finished(),
+        "server returned before private request drained"
+    );
+    assert!(!finished.load(std::sync::atomic::Ordering::SeqCst));
+    release.notify_one();
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(1), stream.read_to_end(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&response).starts_with("HTTP/1.1 200"));
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(finished.load(std::sync::atomic::Ordering::SeqCst));
     let _ = std::fs::remove_dir_all(root);
 }

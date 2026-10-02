@@ -39,7 +39,10 @@ establishes `accepted == exported + failures`. To claim complete zero-loss
 capture for a recorder, require exactly one final receipt, all observed lines
 bound to it, the captured observation count equal to `exported`, and zero
 `dropped`, `failures`, and `receipt_failures`. Inspect every recorder, including
-child processes. Parseable logs or a live snapshot alone do not meet this
+child processes. Worker pipes forward both reserved JSON prefixes to host
+stderr, including during cancellation drain, instead of emitting product
+thread-log events or retaining the receipt as worker failure output.
+Parseable logs or a live snapshot alone do not meet this
 requirement. A crash, forced exit, stalled writer or missing final receipt is
 incomplete evidence.
 

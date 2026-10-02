@@ -366,11 +366,13 @@ pub(super) async fn run_worker(
                 let _ = cancel_ack_tx.send(true);
                 continue;
             }
-            if stderr_cancellation.is_cancelled() {
-                break;
-            }
             if is_worker_telemetry_line(&line) {
                 eprintln!("{line}");
+                continue;
+            }
+            if stderr_cancellation.is_cancelled() {
+                // Drain accounting until pipe EOF or the existing reader-stop
+                // bound, while suppressing cancelled product events/output.
                 continue;
             }
             if let Some(event) = decode_stderr_event(&line) {
@@ -778,6 +780,7 @@ async fn commit_completion_frame(
 
 fn is_worker_telemetry_line(line: &str) -> bool {
     line.strip_prefix(crate::telemetry::JSON_LINE_PREFIX)
+        .or_else(|| line.strip_prefix(crate::telemetry::EXPORT_RECEIPT_PREFIX))
         .is_some_and(|payload| serde_json::from_str::<serde_json::Value>(payload).is_ok())
 }
 
@@ -815,6 +818,10 @@ mod tests {
         assert!(is_worker_telemetry_line(
             "nac-telemetry {\"name\":\"nac.runtime.resource.sample\"}"
         ));
+        assert!(is_worker_telemetry_line(
+            "nac-telemetry-export {\"final_receipt\":true,\"stats\":{\"dropped\":0}}"
+        ));
+        assert!(!is_worker_telemetry_line("nac-telemetry-export not-json"));
         assert!(!is_worker_telemetry_line("nac-telemetry not-json"));
         assert!(!is_worker_telemetry_line("ordinary worker output"));
     }
@@ -1751,6 +1758,8 @@ exit 0
             "#!/bin/sh\nprintf '%s\\n' 'before' >&2\n\
              printf '\\375\\376\\377\\n' >&2\n\
              printf '%s\\n' '{prefix}{after}' >&2\n\
+             printf '%s\\n' 'nac-telemetry {{\"name\":\"nac.runtime.resource.sample\"}}' >&2\n\
+             printf '%s\\n' 'nac-telemetry-export {{\"final_receipt\":true}}' >&2\n\
              printf '%s\\n' 'after' >&2\nexit 0\n",
             prefix = crate::events::STDERR_EVENT_PREFIX,
         );
