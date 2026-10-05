@@ -14,7 +14,8 @@ mod export;
 mod resource;
 
 pub use export::{
-    ExportStats, InMemoryExporter, TelemetryExportError, TelemetryExporter, TelemetryRecorder,
+    ExportReceipt, ExportShutdown, ExportStats, InMemoryExporter, TelemetryExportError,
+    TelemetryExporter, TelemetryRecorder, EXPORT_RECEIPT_PREFIX,
 };
 pub use resource::emit_resource_sample;
 
@@ -254,6 +255,8 @@ fn bounded_identity(value: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TelemetryEvent {
     pub timestamp_unix_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub export_recorder_id: Option<String>,
     pub name: TelemetryName,
     pub kind: TelemetryKind,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -320,6 +323,7 @@ impl Observation {
                 .as_millis()
                 .try_into()
                 .unwrap_or(u64::MAX),
+            export_recorder_id: None,
             name: self.name,
             kind: self.kind,
             operation: self.operation,
@@ -367,6 +371,29 @@ pub fn configure_from_env(runtime: RuntimeMetadata) -> ConfigureStatus {
         _ => ConfigureStatus::Invalid,
     };
     status
+}
+
+/// Seal the configured recorder after application work has quiesced and await
+/// its out-of-band final receipt within the caller's existing shutdown budget.
+/// Disabled telemetry has no exporter or wait. Missing/failed final receipts
+/// cannot establish zero loss.
+pub fn finish_export(timeout: Duration) -> ExportShutdown {
+    #[cfg(any(test, feature = "test-support"))]
+    if TEST_RECORDER_OWNERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|owners| !owners.contains(&std::thread::current().id()))
+    {
+        return ExportShutdown::Disabled;
+    }
+    let recorder = std::mem::replace(
+        &mut *GLOBAL_RECORDER
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        TelemetryRecorder::disabled(),
+    );
+    recorder.finish(timeout)
 }
 
 pub fn enabled() -> bool {

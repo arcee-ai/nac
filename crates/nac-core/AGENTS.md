@@ -45,6 +45,10 @@ listed responsibility closed; a new concern requires a real submodule/port:
   repeated-failure identity, transcript preparation, compaction algorithms,
   previews, and tests live beside it; do not return those policies or add
   session persistence/delivery mapping to the loop.
+- `telemetry.rs` owns the bounded observation vocabulary, content-free correlation,
+  global recorder seam and store/runtime observation guards. Export queue/accounting
+  and resource sampling remain private sibling modules; do not add transport DTOs,
+  application policy or provider payloads to this owner.
 - `events.rs` owns the typed agent/session event vocabulary plus the bounded
   replay/stream bus and durable thread-event bridge. Do not add React/SSE
   formatting; delivery serializes these contracts.

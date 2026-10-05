@@ -51,6 +51,10 @@ and rich results. Individual families own their native operation and tests.
 - `discovery/filesystem.rs` keeps Local, mounted-Podman, and SSH no-follow
   traversal parity together. Split only when an adapter boundary preserves the
   same validation algorithm and tests.
+- `thread/worker.rs` keeps one supervised worker subprocess and its typed
+  host/worker acknowledgement protocol, bounded stdout/stderr pumps, credential
+  redaction and terminal outcome together. Telemetry stays in its reserved pipe
+  path; do not add provider or application policy to this lifecycle owner.
 - `web.rs` keeps one provider family's schema, target validation, redirect and
   retry policy, cancellable transport injection, bounded decoding, and masking.
   Do not add managed onboarding or generic HTTP product clients there.

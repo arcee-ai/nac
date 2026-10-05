@@ -17,6 +17,42 @@ fills and cannot delay agent, store, or HTTP work. Export errors are counted in
 the recorder and are not returned to application code. Disabled telemetry has
 no exporter thread and does not change store, agent, process, or HTTP results.
 
+The stderr adapter additionally emits `nac-telemetry-export ` JSON Lines
+accounting receipts approximately once per second, including while idle, and
+one `final_receipt: true` receipt after the sealed recorder drains. Receipts
+bypass the bounded observation queue and run on the exporter thread, so a full
+queue cannot discard its own drop count. A stalled stderr writer may also
+stall receipts; a missing receipt never establishes zero loss.
+
+Each receipt carries cumulative observation `stats.accepted`, `stats.dropped`,
+`stats.exported`, and `stats.failures`, queue `capacity`, `receipt_failures`,
+timestamp, process PID, bounded runtime metadata, and a random `recorder_id`.
+Observation lines carry the matching `export_recorder_id`; neither recorder
+identity nor PID is a metric-series dimension. Receipts are not observations
+and do not increment the observation counters. Failed receipt writes are
+counted separately; a failed final write cannot report its own failure through
+that missing line.
+
+Live counters are independently sampled and can transiently disagree during
+concurrent enqueue/export. Only a final receipt after producer sealing/drain
+establishes `accepted == exported + failures`. To claim complete zero-loss
+capture for a recorder, require exactly one final receipt, all observed lines
+bound to it, the captured observation count equal to `exported`, and zero
+`dropped`, `failures`, and `receipt_failures`. Inspect every recorder, including
+child processes. Worker pipes forward both reserved JSON prefixes to host
+stderr, including during cancellation drain, instead of emitting product
+thread-log events or retaining the receipt as worker failure output.
+Parseable logs or a live snapshot alone do not meet this
+requirement. A crash, forced exit, stalled writer or missing final receipt is
+incomplete evidence.
+
+Normal server shutdown seals/drains telemetry after application and persistence
+work quiesce, inside the existing complete-shutdown watchdog, with a maximum
+100-ms receipt wait. Worker/early-error exits use the same bounded finalization
+at the binary boundary. Telemetry failures do not change application results
+or widen the existing shutdown watchdog. Disabled telemetry does not wait;
+the default in-memory test adapter retains its observation-only behavior.
+
 The schema has no fields for prompts, transcripts, tool arguments or results,
 credentials, repository data, SQL text, SQL parameters, paths, or error
 messages. Session, run, and host identifiers are emitted only as fixed
