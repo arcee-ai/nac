@@ -191,8 +191,14 @@ Direct non-loopback binding is an advanced option and requires an explicit
 acknowledgement. Bind to one private interface rather than every interface:
 
 ```sh
-nac-web --bind 192.168.1.20:3210 --allow-remote --no-open
+nac-web --bind 192.168.1.20:3210 --allow-remote --no-open \
+  --mcp-oauth-callback-origin https://nac.internal.example
 ```
+
+The callback origin is required for ordinary non-loopback servers. MCP OAuth
+redirects are built only from this explicit HTTPS origin, never from `Host` or
+forwarding headers. Managed NAC derives the same origin from its validated
+`public_hostname`. Loopback servers retain the local callback listener.
 
 Before doing this, use a firewall, mutually authenticated VPN policy, or
 equivalent control to restrict the exact identities and devices that can reach
@@ -207,7 +213,8 @@ comma-separated `NAC_ALLOWED_HOSTS` environment variable. For example:
 
 ```sh
 NAC_ALLOWED_HOSTS=nac.internal.example \
-  nac-web --bind 192.168.1.20:3210 --allow-remote --no-open
+  nac-web --bind 192.168.1.20:3210 --allow-remote --no-open \
+    --mcp-oauth-callback-origin https://nac.internal.example
 ```
 
 nac-web also rejects cross-origin browser control using Fetch Metadata and
@@ -217,7 +224,8 @@ origin in `NAC_ALLOWED_ORIGINS`; multiple origins are comma-separated:
 ```sh
 NAC_ALLOWED_HOSTS=nac.internal.example \
 NAC_ALLOWED_ORIGINS=https://app.example.com \
-  nac-web --bind 192.168.1.20:3210 --allow-remote --no-open
+  nac-web --bind 192.168.1.20:3210 --allow-remote --no-open \
+    --mcp-oauth-callback-origin https://nac.internal.example
 ```
 
 Only exact `http` or `https` origins are accepted; wildcard, path, query, and

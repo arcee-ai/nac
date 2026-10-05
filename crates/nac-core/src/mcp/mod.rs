@@ -44,6 +44,7 @@ mod invocation;
 mod library;
 mod lifecycle;
 mod naming;
+mod oauth;
 mod registry;
 mod result;
 mod sync;
@@ -71,6 +72,15 @@ pub use library::{
     McpLibraryAuth, McpLibraryEntry,
 };
 pub use lifecycle::{McpRuntimeManager, McpRuntimeState, McpRuntimeStatus};
+pub use oauth::{
+    begin_mcp_oauth_authorization, clear_mcp_oauth, complete_mcp_oauth_authorization,
+    configure_mcp_oauth, delete_mcp_oauth_profile, fail_mcp_oauth_authorization,
+    has_mcp_oauth_profile, mcp_oauth_callback_is_retryable, mcp_oauth_pending_authorization_url,
+    mcp_oauth_status, rename_mcp_oauth_profile, set_mcp_oauth_redirect_uri,
+    McpOAuthAuthorizationMetadata, McpOAuthAuthorizationSession, McpOAuthConfiguration,
+    McpOAuthRegistration, McpOAuthStatus, MCP_OAUTH_CALLBACK_PATH, MCP_OAUTH_REDIRECT_URI,
+    MCP_OAUTH_STATE_TTL,
+};
 pub use registry::{McpRegistry, McpRootPolicy, McpToolMetadata, McpTransportPolicy};
 
 /// A tool a probe discovered on a server, before anything is saved.

@@ -1920,6 +1920,238 @@
         }
       }
     },
+    "/mcp_library/servers/{server_name}/oauth/authenticate": {
+      "post": {
+        "tags": [
+          "mcp-library"
+        ],
+        "operationId": "post_mcp_library_servers_server_name_oauth_authenticate",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthenticateMcpOAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OAuth browser authorization ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticateMcpOAuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Authentication could not start",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Loopback callback is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp_library/servers/{server_name}/oauth/callback": {
+      "get": {
+        "tags": [
+          "mcp-library"
+        ],
+        "operationId": "get_mcp_library_servers_server_name_oauth_callback",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth authorization complete",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "400": {
+            "description": "OAuth callback rejected",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/mcp_library/servers/{server_name}/oauth/configure": {
+      "post": {
+        "tags": [
+          "mcp-library"
+        ],
+        "operationId": "post_mcp_library_servers_server_name_oauth_configure",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigureMcpOAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OAuth configuration saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpOAuthStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Configuration rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MCP server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp_library/servers/{server_name}/oauth/logout": {
+      "post": {
+        "tags": [
+          "mcp-library"
+        ],
+        "operationId": "post_mcp_library_servers_server_name_oauth_logout",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth credentials cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpOAuthStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MCP server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp_library/servers/{server_name}/oauth/status": {
+      "get": {
+        "tags": [
+          "mcp-library"
+        ],
+        "operationId": "get_mcp_library_servers_server_name_oauth_status",
+        "parameters": [
+          {
+            "name": "server_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpOAuthStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MCP server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/mcp_library/servers/{server_name}/reload": {
       "post": {
         "tags": [
@@ -8410,6 +8642,32 @@
           "no_credential"
         ]
       },
+      "AuthenticateMcpOAuthRequest": {
+        "type": "object",
+        "properties": {
+          "additional_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AuthenticateMcpOAuthResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "authorization_url"
+        ],
+        "properties": {
+          "authorization_url": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/McpOAuthPublicStatus"
+          }
+        }
+      },
       "BackendKind": {
         "type": "string",
         "enum": [
@@ -8704,6 +8962,53 @@
           "no_eligible_boundary",
           "already_compacted"
         ]
+      },
+      "ConfigureMcpOAuthRequest": {
+        "type": "object",
+        "properties": {
+          "authorization_metadata": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpOAuthAuthorizationMetadataRequest"
+              }
+            ]
+          },
+          "client_id_credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "deprecated": true,
+            "writeOnly": true
+          },
+          "client_secret_credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "deprecated": true,
+            "writeOnly": true
+          },
+          "registration": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpOAuthRegistrationRequest"
+              }
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "CostTier": {
         "type": "object",
@@ -10679,6 +10984,168 @@
           "progress",
           "subscription_ended"
         ]
+      },
+      "McpOAuthAuthorizationMetadataRequest": {
+        "type": "object",
+        "required": [
+          "authorization_endpoint",
+          "token_endpoint"
+        ],
+        "properties": {
+          "authorization_endpoint": {
+            "type": "string"
+          },
+          "code_challenge_methods_supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "jwks_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "registration_endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "response_types_supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "scopes_supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": {}
+      },
+      "McpOAuthPublicStatus": {
+        "type": "string",
+        "enum": [
+          "needs_configuration",
+          "needs_authorization",
+          "connecting",
+          "connected",
+          "failed"
+        ]
+      },
+      "McpOAuthRegistrationRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "client_id_credential",
+              "type"
+            ],
+            "properties": {
+              "client_id_credential": {
+                "type": "string",
+                "writeOnly": true
+              },
+              "client_secret_credential": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "writeOnly": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pre_registered"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "url",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "client_metadata"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "client_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dynamic"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "McpOAuthStatusResponse": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "authorization_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/McpOAuthPublicStatus"
+          }
+        }
       },
       "McpProbeResult": {
         "type": "object",

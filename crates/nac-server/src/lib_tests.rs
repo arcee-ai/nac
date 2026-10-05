@@ -981,6 +981,8 @@ mod managed_delivery;
 mod managed_load;
 #[path = "tests/managed_topology.rs"]
 mod managed_topology;
+#[path = "tests/mcp_oauth.rs"]
+mod mcp_oauth;
 #[path = "tests/persistence_load.rs"]
 mod persistence_load;
 #[path = "tests/presentation.rs"]

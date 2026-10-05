@@ -1,5 +1,104 @@
 use super::*;
 
+#[tokio::test]
+async fn oauth_callback_listener_accepts_localhost_on_both_ip_families() {
+    let listeners = OAuthCallbackListeners::bind(0).await.unwrap();
+    let port = listeners.ipv4.local_addr().unwrap().port();
+
+    let ipv4 = TcpStream::connect(("127.0.0.1", port));
+    let (connected, accepted) = tokio::join!(ipv4, listeners.accept());
+    connected.unwrap();
+    accepted.unwrap();
+
+    if listeners.ipv6.is_some() {
+        let ipv6 = TcpStream::connect(("::1", port));
+        let (connected, accepted) = tokio::join!(ipv6, listeners.accept());
+        connected.unwrap();
+        accepted.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn removing_deleted_server_oauth_flow_aborts_its_watchdog() {
+    let key = (
+        PathBuf::from("/deleted-oauth-flow-test"),
+        "deleted".to_string(),
+    );
+    let completion_key = key.clone();
+    let task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        OAUTH_FLOWS
+            .lock()
+            .await
+            .insert(completion_key, OAuthFlowState::Failed);
+    });
+    OAUTH_FLOWS.lock().await.insert(
+        key.clone(),
+        OAuthFlowState::Connecting {
+            generation: u64::MAX,
+            authorization_url: "https://auth.example.test/authorize".into(),
+            task: Some(task),
+        },
+    );
+
+    remove_oauth_flow(&key).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    assert!(!OAUTH_FLOWS.lock().await.contains_key(&key));
+}
+
+#[test]
+fn oauth_callback_target_rejects_unrelated_and_malformed_requests() {
+    assert_eq!(
+        oauth_callback_request_target(
+            b"GET /mcp_library/oauth/callback?code=test&state=test HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        ),
+        Some("/mcp_library/oauth/callback?code=test&state=test")
+    );
+    assert_eq!(
+        oauth_callback_request_target(b"GET / HTTP/1.1\r\n\r\n"),
+        None
+    );
+    assert_eq!(
+        oauth_callback_request_target(b"POST /mcp_library/oauth/callback HTTP/1.1\r\n\r\n"),
+        None
+    );
+    assert_eq!(oauth_callback_request_target(b"not http"), None);
+}
+
+#[test]
+fn callback_failure_requires_a_live_durable_authorization() {
+    let callback_url = "https://nac.example.test/oauth/callback?code=replay&state=done";
+    assert!(!callback_matches_pending_authorization(None, callback_url));
+    assert!(callback_matches_pending_authorization(
+        Some("https://auth.example.test/authorize?state=done"),
+        callback_url
+    ));
+}
+
+#[test]
+fn oauth_status_never_masks_a_pending_store_error_with_an_active_flow() {
+    let error = reconcile_oauth_status_urls(
+        Some("https://auth.example.test/authorize?state=stale".into()),
+        Err(anyhow::anyhow!("durable binding mismatch")),
+    )
+    .unwrap_err();
+    assert_eq!(error.to_string(), "durable binding mismatch");
+
+    let (active, pending) = reconcile_oauth_status_urls(
+        Some("https://auth.example.test/authorize?state=stale".into()),
+        Ok(Some(
+            "https://auth.example.test/authorize?state=current".into(),
+        )),
+    )
+    .unwrap();
+    assert!(active.is_none());
+    assert_eq!(
+        pending.as_deref(),
+        Some("https://auth.example.test/authorize?state=current")
+    );
+}
+
 #[test]
 fn recoverable_publication_conflicts_remain_http_conflicts() {
     let error: ApiError = McpServerConfigurationStoreError::RecoveryRequired {
@@ -35,6 +134,28 @@ fn create_request_allows_omitted_tool_policy_fields() {
     assert_eq!(request.approval, McpToolApproval::Ask);
     assert!(request.tool_approvals.is_empty());
     assert_eq!(request.protocol, McpProtocolSelection::Legacy);
+}
+
+#[test]
+fn oauth_metadata_request_allows_every_optional_field_to_be_omitted() {
+    let request: ConfigureMcpOAuthRequest = serde_json::from_value(serde_json::json!({
+        "registration": {
+            "type": "dynamic"
+        },
+        "authorization_metadata": {
+            "authorization_endpoint": "https://auth.example.test/authorize",
+            "token_endpoint": "https://auth.example.test/token"
+        }
+    }))
+    .unwrap();
+
+    let metadata = request.authorization_metadata.unwrap();
+    assert!(metadata.registration_endpoint.is_none());
+    assert!(metadata.issuer.is_none());
+    assert!(metadata.jwks_uri.is_none());
+    assert!(metadata.scopes_supported.is_none());
+    assert!(metadata.response_types_supported.is_none());
+    assert!(metadata.code_challenge_methods_supported.is_none());
 }
 
 #[test]
@@ -125,4 +246,27 @@ fn borrowed_http_credentials_are_bound_to_the_stored_origin() {
     assert!(require_stored_http_origin(true, Some(&record), "https://other.example/mcp").is_err());
     assert!(require_stored_http_origin(true, None, "https://trusted.example/mcp").is_err());
     require_stored_http_origin(false, Some(&record), "https://other.example/mcp").unwrap();
+}
+
+#[test]
+fn remote_oauth_callback_uses_only_the_configured_origin() {
+    assert_eq!(
+        remote_callback_uri("https://nac.example.test", "team/slack").unwrap(),
+        "https://nac.example.test/mcp_library/servers/team%2Fslack/oauth/callback"
+    );
+    assert_eq!(
+        remote_callback_uri("http://[::1]:8080", "slack").unwrap(),
+        "http://[::1]:8080/mcp_library/servers/slack/oauth/callback"
+    );
+    for rejected in [
+        "http://nac.example.test",
+        "https://user@nac.example.test",
+        "https://nac.example.test/prefix",
+        "https://nac.example.test?forwarded=evil.example",
+    ] {
+        assert!(
+            remote_callback_uri(rejected, "slack").is_err(),
+            "{rejected}"
+        );
+    }
 }

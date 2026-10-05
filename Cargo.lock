@@ -1647,6 +1647,7 @@ name = "nac-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "bytes",
  "cap-std",
@@ -1675,6 +1676,7 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "sha2 0.10.9",
+ "sse-stream",
  "tokio",
  "toml",
  "toml_edit",
@@ -1749,6 +1751,7 @@ dependencies = [
  "tokio",
  "tower",
  "tower-http",
+ "url",
  "utoipa",
  "utoipa-axum",
  "utoipa-swagger-ui",

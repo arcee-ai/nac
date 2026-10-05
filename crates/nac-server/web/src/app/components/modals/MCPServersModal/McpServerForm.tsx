@@ -16,6 +16,7 @@ import {
 import { FieldLabel } from "@/app/components/modals/ConfigRow";
 import { EntryDetails } from "@/app/components/modals/MCPServersModal/McpEntryDetails";
 import { KvEditor } from "@/app/components/modals/MCPServersModal/McpKvEditor";
+import { McpOAuthPanel } from "@/app/components/modals/MCPServersModal/McpOAuthPanel";
 import { FooterButton } from "@/app/components/modals/ModalFooterButton";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
@@ -701,6 +702,9 @@ export function McpServerForm({
             ) : null}
           </div>
         </div>
+        {record && transport === "streamable_http" ? (
+          <McpOAuthPanel serverName={record.name} />
+        ) : null}
         {tools && tools.length ? (
           <div className="flex flex-col gap-1">
             {tools.map((tool) => (

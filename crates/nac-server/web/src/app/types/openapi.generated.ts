@@ -135,6 +135,11 @@ export interface components {
       text?: string | null;
       thread_name?: string | null;
     };
+    AuthenticateMcpOAuthRequest: { additional_scopes?: string[] };
+    AuthenticateMcpOAuthResponse: {
+      authorization_url: string;
+      status: components["schemas"]["McpOAuthPublicStatus"];
+    };
     AuthStatus: "ready" | "no_credential";
     BackendKind:
       | "deepseek-chat"
@@ -192,6 +197,13 @@ export interface components {
           reason: components["schemas"]["CompactionSkipReason"];
           status: "unchanged";
         };
+    ConfigureMcpOAuthRequest: {
+      authorization_metadata?: null | components["schemas"]["McpOAuthAuthorizationMetadataRequest"];
+      client_id_credential?: string | null;
+      client_secret_credential?: string | null;
+      registration?: null | components["schemas"]["McpOAuthRegistrationRequest"];
+      scopes?: string[];
+    };
     CostTier: {
       cache_read: number;
       cache_write: number;
@@ -545,6 +557,35 @@ export interface components {
       | "log"
       | "progress"
       | "subscription_ended";
+    McpOAuthAuthorizationMetadataRequest: {
+      authorization_endpoint: string;
+      code_challenge_methods_supported?: string[] | null;
+      issuer?: string | null;
+      jwks_uri?: string | null;
+      registration_endpoint?: string | null;
+      response_types_supported?: string[] | null;
+      scopes_supported?: string[] | null;
+      token_endpoint: string;
+    } & Record<string, unknown>;
+    McpOAuthPublicStatus:
+      | "needs_configuration"
+      | "needs_authorization"
+      | "connecting"
+      | "connected"
+      | "failed";
+    McpOAuthRegistrationRequest:
+      | {
+          client_id_credential: string;
+          client_secret_credential?: string | null;
+          type: "pre_registered";
+        }
+      | { type: "client_metadata"; url: string }
+      | { client_name?: string | null; type: "dynamic" };
+    McpOAuthStatusResponse: {
+      authorization_url?: string | null;
+      message?: string | null;
+      status: components["schemas"]["McpOAuthPublicStatus"];
+    };
     McpProbedTool: {
       _meta?: unknown;
       annotations?: unknown;
