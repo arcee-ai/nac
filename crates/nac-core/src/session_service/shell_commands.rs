@@ -386,6 +386,13 @@ impl SessionService {
                 .session_id
                 .as_deref()
                 .context("missing session id")?;
+            let commands =
+                crate::store::list_shell_commands(&service.metadata.store_path, session_id)?;
+            // Ordinary snapshot reads must not contend with model admission for
+            // an operation lease. Only an unfinished command needs recovery.
+            if commands.iter().all(|command| command.state.is_terminal()) {
+                return Ok(commands);
+            }
             let operation = service.lock_active_operation();
             if operation.is_none() {
                 if let Ok(lease) = sessions::SessionOperationLease::try_acquire(
@@ -393,9 +400,13 @@ impl SessionService {
                     session_id,
                 ) {
                     service.reconcile_shell_commands_under_lease(&Arc::new(lease))?;
+                    return crate::store::list_shell_commands(
+                        &service.metadata.store_path,
+                        session_id,
+                    );
                 }
             }
-            crate::store::list_shell_commands(&service.metadata.store_path, session_id)
+            Ok(commands)
         })
         .await?
     }
