@@ -55,8 +55,30 @@ failure or revoked eligibility never authorizes billable request replay.
 Unresolved former-owner/customer-secret exposure remains a hard successor
 access/restart gate; storage preservation alone is insufficient.
 
+The opt-in controller configuration is version 3 with `model_backend=arcee-api`,
+`model_credential_source=managed-host-key`, the fixed bootstrap file, and a
+nonsecret `[managed_host_key]` block containing the eleven binding fields.
+NAC_HOME must equal state_root. Versions 1 and 2 keep their existing modes.
+Retained `arcee_auth.json` blocks import and static-key use without reading or
+clearing that credential. Broader retained-secret clearance remains an external
+successor gate, not something native local provenance can establish.
+
+Construction passes an ephemeral capability to new, resumed and route-matched
+light clients; neither private keys nor credential capability fields enter
+persisted session settings or public HTTP/model arguments. Hidden native
+workers carry only the nonsecret binding and independently revalidate version 3
+operator configuration from the existing NAC_MANAGED_CONFIG location or
+/etc/nac/managed.toml, NAC_HOME/state_root, exact route and current authority.
+The flag alone grants nothing. SSH and competing credential selectors are
+rejected; custom config locations without that established discovery mechanism
+fail closed. Static inference reloads authority before every request, prohibits
+HTTP/SSE automatic retries and bounds the complete request to five minutes.
+Readiness only checks local availability; it does not repair files or prove
+upstream eligibility. These changes leave ordinary/local and v1/v2 flows intact.
+
 Native tests exercise strict identity/class/schema negatives, file permissions,
 no-follow paths, authority-before-projection crash recovery, projection-write
 failure, missing/corrupt authority, revoked replay, repair CAS and thread/process
-concurrency. Runtime/configuration integration and live provider proof remain
-separate acceptance steps.
+concurrency, configuration boundaries, worker transport, new/resumed/light
+capabilities and request failures. Live provider, integrated controller/runtime
+qualification and independent final review remain separate acceptance steps.

@@ -7,6 +7,7 @@ use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 mod cost_attach;
 mod header_policy;
 mod http_contract;
+mod managed_host_key;
 mod s5_wire;
 
 fn test_model_client(
@@ -23,6 +24,7 @@ fn test_model_client(
         reasoning_effort: None,
         api_key_env: None,
         trusted_api_key_file: None,
+        trusted_managed_host_key: None,
         extra_headers,
         allow_insecure_http: false,
         arcee_credential_source: None,

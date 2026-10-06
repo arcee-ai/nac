@@ -7,7 +7,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use nac_contracts::{NewProject, ProjectRecord};
 use nac_core::{
     light_model::TrustedLightCredential,
-    model::{provider_uses_api_key, BackendKind},
+    model::{
+        provider_uses_api_key, BackendKind, ManagedHostKeyBinding, ManagedHostKeyStore,
+        TrustedManagedHostKey,
+    },
     runtime::ResumeModelOptions,
     sessions::SessionSnapshot,
 };
@@ -118,7 +121,7 @@ pub(crate) fn runtime_readiness_checks(
             policy.required_tools,
         ));
         if let Some(model) = manager.managed_model() {
-            if model.credential_source == ManagedModelCredentialSource::ManagedBootstrap {
+            if model.credential_source != ManagedModelCredentialSource::MountedApiKey {
                 checks.push(match model.credential_ready(managed) {
                     Ok(()) => ReadinessCheck::pass(
                         "model-credential",
@@ -290,10 +293,14 @@ pub(crate) struct ManagedModelProfile {
     pub(crate) auth_issuer: Option<String>,
     pub(crate) credential_file: PathBuf,
     pub(crate) credential_source: ManagedModelCredentialSource,
+    trusted_host_key: Option<TrustedManagedHostKey>,
 }
 
 impl ManagedModelProfile {
     pub(crate) fn from_config(config: &ManagedHostConfig) -> Result<Self> {
+        if config.model_credential_source == ManagedModelCredentialSource::ManagedHostKey {
+            config.validate()?;
+        }
         let backend = config
             .model_backend
             .parse::<BackendKind>()
@@ -336,6 +343,19 @@ impl ManagedModelProfile {
             }
             (_, None) => None,
         };
+        let trusted_host_key =
+            if config.model_credential_source == ManagedModelCredentialSource::ManagedHostKey {
+                let binding = config
+                    .managed_host_key
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("managed host-key binding is unavailable"))?;
+                Some(TrustedManagedHostKey::new(
+                    &config.state_root,
+                    core_host_key_binding(binding),
+                )?)
+            } else {
+                None
+            };
         Ok(Self {
             backend,
             model_id: config.model_id.clone(),
@@ -343,11 +363,12 @@ impl ManagedModelProfile {
             auth_issuer,
             credential_file: config.model_credential_file.clone(),
             credential_source: config.model_credential_source,
+            trusted_host_key,
         })
     }
 
     pub(crate) fn initialize(&self, config: &ManagedHostConfig) -> Result<()> {
-        if self.credential_source != ManagedModelCredentialSource::ManagedBootstrap {
+        if self.credential_source == ManagedModelCredentialSource::MountedApiKey {
             return Ok(());
         }
         let credential_root = nac_core::model::managed_arcee_auth_storage_root()?;
@@ -355,6 +376,12 @@ impl ManagedModelProfile {
             bail!(
                 "managed bootstrap requires NAC_HOME to equal managed state_root so rotated credentials remain on durable storage"
             );
+        }
+        if let Some(credential) = &self.trusted_host_key {
+            ManagedHostKeyStore::new(&credential_root)
+                .import(credential.binding(), &self.credential_file)
+                .context("failed to import managed static host key")?;
+            return Ok(());
         }
         let auth_issuer = self
             .auth_issuer
@@ -371,6 +398,17 @@ impl ManagedModelProfile {
     pub(crate) fn credential_ready(&self, config: &ManagedHostConfig) -> Result<()> {
         match self.credential_source {
             ManagedModelCredentialSource::MountedApiKey => config.model_credential().map(|_| ()),
+            ManagedModelCredentialSource::ManagedHostKey => {
+                let root = nac_core::model::managed_arcee_auth_storage_root()?;
+                if root != config.state_root {
+                    bail!("managed host key requires NAC_HOME to equal state_root");
+                }
+                let credential = self
+                    .trusted_host_key
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("managed host-key binding is unavailable"))?;
+                credential.check_available()
+            }
             ManagedModelCredentialSource::ManagedBootstrap => {
                 let auth_issuer = self.auth_issuer.as_deref().ok_or_else(|| {
                     anyhow!("managed bootstrap profile is missing its auth issuer")
@@ -432,7 +470,7 @@ impl ManagedModelProfile {
     /// Fail closed before a session uses the durable managed authorization.
     /// Mounted API-key sessions retain their existing launch-time file check.
     pub(crate) fn require_durable_authorization(&self, config: &ManagedHostConfig) -> Result<()> {
-        if self.credential_source == ManagedModelCredentialSource::ManagedBootstrap {
+        if self.credential_source != ManagedModelCredentialSource::MountedApiKey {
             self.credential_ready(config)
                 .context("durable managed model authorization is unavailable")?;
         }
@@ -446,11 +484,21 @@ impl ManagedModelProfile {
 
     pub(crate) fn trusted_light_credential(&self) -> Option<TrustedLightCredential> {
         self.trusted_api_key_file()
+            .or_else(|| {
+                self.trusted_host_key
+                    .as_ref()
+                    .map(|_| self.credential_file.clone())
+            })
             .map(|path| TrustedLightCredential {
                 backend: self.backend,
                 base_url: self.endpoint.clone(),
                 path,
+                managed_host_key: self.trusted_host_key.clone(),
             })
+    }
+
+    pub(crate) fn trusted_managed_host_key(&self) -> Option<TrustedManagedHostKey> {
+        self.trusted_host_key.clone()
     }
 
     pub(crate) fn matches_session(&self, snapshot: &SessionSnapshot) -> bool {
@@ -469,8 +517,11 @@ impl ManagedModelProfile {
         base_url: &str,
         api_key_env: Option<&str>,
     ) -> bool {
-        self.credential_source == ManagedModelCredentialSource::MountedApiKey
-            && backend == self.backend
+        matches!(
+            self.credential_source,
+            ManagedModelCredentialSource::MountedApiKey
+                | ManagedModelCredentialSource::ManagedHostKey
+        ) && backend == self.backend
             && base_url == self.endpoint
             && api_key_env.is_none()
     }
@@ -480,8 +531,27 @@ impl ManagedModelProfile {
             trusted_api_key_file: primary_matches
                 .then(|| self.trusted_api_key_file())
                 .flatten(),
+            trusted_managed_host_key: primary_matches
+                .then(|| self.trusted_managed_host_key())
+                .flatten(),
             trusted_light_credential: self.trusted_light_credential(),
         }
+    }
+}
+
+fn core_host_key_binding(binding: &nac_managed::ManagedHostKeyConfig) -> ManagedHostKeyBinding {
+    ManagedHostKeyBinding {
+        bootstrap_id: binding.bootstrap_id.clone(),
+        managed_host_id: binding.managed_host_id.clone(),
+        host_incarnation_id: binding.host_incarnation_id.clone(),
+        pvc_uid: binding.pvc_uid.clone(),
+        organization_id: binding.organization_id.clone(),
+        owner_epoch: binding.owner_epoch,
+        key_generation: binding.key_generation,
+        local_key_id: binding.local_key_id.clone(),
+        key_id: binding.key_id.clone(),
+        clerk_instance_id: binding.clerk_instance_id.clone(),
+        inference_origin: binding.inference_origin.clone(),
     }
 }
 
@@ -562,113 +632,5 @@ impl ManagedSecretsApplication {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn config(source: ManagedModelCredentialSource, backend: &str) -> ManagedHostConfig {
-        ManagedHostConfig {
-            version: nac_managed::LEGACY_MANAGED_CONFIG_VERSION,
-            logical_host_id: "21856443-8ed8-40ab-9036-72e837c99f27".to_string(),
-            host_incarnation_id: None,
-            owner: None,
-            public_hostname: "nac.example.test".to_string(),
-            repository_root: PathBuf::from("/var/lib/nac/repositories"),
-            state_root: PathBuf::from("/var/lib/nac"),
-            home_root: PathBuf::from("/home/nac"),
-            github_client_id: "Iv1.example".to_string(),
-            model_backend: backend.to_string(),
-            model_id: "trinity-large-thinking".to_string(),
-            model_endpoint: "https://api.arcee.ai".to_string(),
-            model_auth_issuer: None,
-            model_credential_file: match source {
-                ManagedModelCredentialSource::MountedApiKey => {
-                    PathBuf::from("/run/secrets/model/credential")
-                }
-                ManagedModelCredentialSource::ManagedBootstrap => {
-                    PathBuf::from(nac_core::model::MANAGED_ARCEE_BOOTSTRAP_PATH)
-                }
-            },
-            model_credential_source: source,
-            model_credential_environment_names: Vec::new(),
-            managed_control_bind: None,
-            managed_control_issuer: None,
-            managed_control_jwks_file: None,
-            managed_upgrade_expectation: None,
-        }
-    }
-
-    #[test]
-    fn mounted_api_key_profile_remains_the_compatible_default_shape() {
-        let profile = ManagedModelProfile::from_config(&config(
-            ManagedModelCredentialSource::MountedApiKey,
-            "arcee-api",
-        ))
-        .unwrap();
-        assert!(profile.trusted_api_key_file().is_some());
-        let options = profile.resume_options(true);
-        assert!(options.trusted_api_key_file.is_some());
-        assert!(options.trusted_light_credential.is_some());
-        assert!(profile.resume_options(false).trusted_api_key_file.is_none());
-    }
-
-    #[test]
-    fn managed_bootstrap_is_arcee_auth_only_and_never_attaches_a_key_file() {
-        let profile = ManagedModelProfile::from_config(&config(
-            ManagedModelCredentialSource::ManagedBootstrap,
-            "arcee-auth",
-        ))
-        .unwrap();
-        assert_eq!(profile.backend, BackendKind::ArceeAuth);
-        assert_eq!(
-            profile.auth_issuer.as_deref(),
-            Some(nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER)
-        );
-        assert!(profile.trusted_api_key_file().is_none());
-        let options = profile.resume_options(true);
-        assert!(options.trusted_api_key_file.is_none());
-        assert!(options.trusted_light_credential.is_none());
-
-        let error = ManagedModelProfile::from_config(&config(
-            ManagedModelCredentialSource::ManagedBootstrap,
-            "arcee-api",
-        ))
-        .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("require model_backend 'arcee-auth'"));
-    }
-
-    #[test]
-    fn managed_bootstrap_requires_the_fixed_regular_file_contract_path() {
-        let mut managed = config(ManagedModelCredentialSource::ManagedBootstrap, "arcee-auth");
-        managed.model_credential_file = PathBuf::from("/tmp/bootstrap.json");
-        let error = ManagedModelProfile::from_config(&managed).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains(nac_core::model::MANAGED_ARCEE_BOOTSTRAP_PATH));
-    }
-
-    #[test]
-    fn managed_bootstrap_auth_issuer_is_exact_and_arcee_auth_only() {
-        let mut managed = config(ManagedModelCredentialSource::ManagedBootstrap, "arcee-auth");
-        managed.model_auth_issuer = Some(nac_core::model::ARCEE_AUTH_DEV2_ISSUER.to_string());
-        let profile = ManagedModelProfile::from_config(&managed).unwrap();
-        assert_eq!(
-            profile.auth_issuer.as_deref(),
-            Some(nac_core::model::ARCEE_AUTH_DEV2_ISSUER)
-        );
-
-        managed.model_auth_issuer = Some("https://tenant.arcee.ai".to_string());
-        assert!(ManagedModelProfile::from_config(&managed)
-            .unwrap_err()
-            .to_string()
-            .contains("not approved"));
-
-        let mut api_key = config(ManagedModelCredentialSource::MountedApiKey, "arcee-api");
-        api_key.model_auth_issuer = Some(nac_core::model::ARCEE_AUTH_PRODUCTION_ISSUER.to_string());
-        assert!(ManagedModelProfile::from_config(&api_key)
-            .unwrap_err()
-            .to_string()
-            .contains("requires model_backend 'arcee-auth'"));
-    }
-}
+#[path = "managed_model_tests.rs"]
+mod tests;

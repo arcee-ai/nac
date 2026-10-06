@@ -427,3 +427,29 @@ fn separate_process_importers_share_the_durable_lock() {
     assert_eq!(authority.consumed_bootstrap_ids, [binding().bootstrap_id]);
     fixture.store.validate_local(&binding()).unwrap();
 }
+
+#[test]
+fn retained_legacy_authorization_blocks_import_and_use_without_clearing_it() {
+    let fixture = Fixture::new();
+    let expected = binding();
+    fixture.deliver(&expected);
+    let legacy = fixture.root.join("arcee_auth.json");
+    fs::write(&legacy, b"retained-former-user-credential").unwrap();
+    assert!(fixture.store.import(&expected, &fixture.input).is_err());
+    assert!(!fixture.store.authority.exists());
+    assert_eq!(
+        fs::read(&legacy).unwrap(),
+        b"retained-former-user-credential"
+    );
+    fs::remove_file(&legacy).unwrap();
+    fixture.store.import(&expected, &fixture.input).unwrap();
+    fs::write(&legacy, b"retained-former-user-credential").unwrap();
+    assert!(fixture.store.validate_local(&expected).is_err());
+    let capability = TrustedManagedHostKey::new(&fixture.root, expected.clone()).unwrap();
+    assert!(capability.credential().is_err());
+    fixture.store.record_revocation(&expected).unwrap();
+    assert_eq!(
+        fs::read(&legacy).unwrap(),
+        b"retained-former-user-credential"
+    );
+}

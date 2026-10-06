@@ -22,6 +22,8 @@ use nac_core::{
 };
 use nac_server::{serve_with_policy, BindPolicy, ServerOptions, SessionManager};
 
+mod main_managed_host_key;
+
 const MCP_OAUTH_CALLBACK_ORIGIN_ENV: &str = "NAC_MCP_OAUTH_CALLBACK_ORIGIN";
 
 /// Root NAC product version, intentionally independent of internal crate versions.
@@ -215,6 +217,10 @@ struct UpgradeCli {
 
 #[derive(Args)]
 struct ManagedWorkerCli {
+    /// Internal nonsecret identity; independently checked against operator configuration.
+    #[arg(long, hide = true)]
+    managed_host_key_binding: Option<String>,
+
     /// Internal inherited descriptor for the private native-credential socket.
     #[arg(long, hide = true, conflicts_with = "native_credential_socket")]
     native_credential_fd: Option<i32>,
@@ -750,6 +756,15 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         cli.native_credential_fd,
         cli.native_credential_socket,
     )?;
+    let trusted_managed_host_key = main_managed_host_key::resolve(
+        cli.managed_host_key_binding.as_deref(),
+        cli.model.backend.map(Into::into),
+        cli.model.api_base_url.as_deref(),
+        cli.model.api_key_env.as_deref(),
+        cli.model.trusted_api_key_file.as_deref(),
+        cli.model.allow_insecure_http,
+        cli.ssh_host.is_some(),
+    )?;
     configure_telemetry(None);
     // Fire-and-forget models.dev catalog overlay refresh; cadence-gated via
     // the sidecar, so usually a no-op read. Keeps the overlay fresh for
@@ -802,6 +817,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
                 .map(OptionalModelOption::Value)
                 .unwrap_or_default(),
             trusted_api_key_file: cli.model.trusted_api_key_file,
+            trusted_managed_host_key,
             trusted_light_credential: None,
             extra_headers: cli.model.extra_headers,
             light_model: None,
@@ -998,6 +1014,30 @@ fn resolve_cli_cwd(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_key_binding_is_only_a_hidden_worker_argument() {
+        assert!(Cli::try_parse_from(["nac-web", "--managed-host-key-binding", "{}"]).is_err());
+        let cli = Cli::try_parse_from([
+            "nac-web",
+            "__worker",
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--dispatch-id",
+            "dispatch",
+            "--action",
+            "work",
+            "--managed-host-key-binding",
+            "{}",
+        ])
+        .unwrap();
+        let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
+            panic!("worker expected")
+        };
+        assert_eq!(worker.managed_host_key_binding.as_deref(), Some("{}"));
+    }
 
     static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

@@ -179,11 +179,48 @@ struct Receipt<'a> {
 }
 
 /// A controller-selected durable root. Paths never enter model/session state.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ManagedHostKeyStore {
     authority: PathBuf,
     receipt: PathBuf,
     lock: PathBuf,
+    legacy_auth: PathBuf,
+}
+
+/// Ephemeral construction capability; never deserialized from a session/request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrustedManagedHostKey {
+    store: ManagedHostKeyStore,
+    binding: ManagedHostKeyBinding,
+}
+
+impl TrustedManagedHostKey {
+    pub fn new(root: &Path, binding: ManagedHostKeyBinding) -> Result<Self> {
+        binding.validate()?;
+        if !root.is_absolute() {
+            bail!("managed host-key root must be absolute");
+        }
+        let store = ManagedHostKeyStore::new(root);
+        Ok(Self { store, binding })
+    }
+
+    pub fn binding(&self) -> &ManagedHostKeyBinding {
+        &self.binding
+    }
+
+    /// Read-only local availability; never repairs receipt projection or contacts a provider.
+    pub fn check_available(&self) -> Result<()> {
+        self.credential().map(|_| ())
+    }
+
+    pub(crate) fn credential(&self) -> Result<String> {
+        self.store.with_bound_authority(&self.binding, |authority| {
+            self.store.ensure_no_legacy_auth()?;
+            authority
+                .api_key
+                .ok_or_else(|| anyhow!("managed host-key is consumed but unavailable"))
+        })
+    }
 }
 
 impl ManagedHostKeyStore {
@@ -192,6 +229,7 @@ impl ManagedHostKeyStore {
             authority: root.join("managed_host_key.json"),
             receipt: root.join("managed_host_key_receipt.json"),
             lock: root.join("arcee_auth.json.lock"),
+            legacy_auth: root.join("arcee_auth.json"),
         }
     }
 
@@ -209,6 +247,7 @@ impl ManagedHostKeyStore {
     ) -> Result<()> {
         expected.validate()?;
         with_credential_lock(&self.lock, || {
+            self.ensure_no_legacy_auth()?;
             if let Some(authority) = self.read_authority()? {
                 require_binding(&authority, expected)?;
                 return self.project_receipt(&authority);
@@ -239,6 +278,7 @@ impl ManagedHostKeyStore {
     /// Offline readiness checks only local provenance and a nonempty key slot.
     pub fn validate_local(&self, expected: &ManagedHostKeyBinding) -> Result<()> {
         self.with_bound_authority(expected, |authority| {
+            self.ensure_no_legacy_auth()?;
             if authority.api_key.is_none() {
                 bail!("managed host-key is consumed but unavailable; fenced repair is required");
             }
@@ -273,6 +313,7 @@ impl ManagedHostKeyStore {
             bail!("managed host-key repair requires same-owner successor generation");
         }
         with_credential_lock(&self.lock, || {
+            self.ensure_no_legacy_auth()?;
             let mut authority = self
                 .read_authority()?
                 .ok_or_else(|| anyhow!("managed host-key authority is unavailable"))?;
@@ -315,6 +356,13 @@ impl ManagedHostKeyStore {
             require_binding(&authority, expected)?;
             operation(authority)
         })
+    }
+
+    fn ensure_no_legacy_auth(&self) -> Result<()> {
+        match std::fs::symlink_metadata(&self.legacy_auth) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            _ => bail!("retained legacy Arcee authorization blocks managed host-key use; explicit clearance is required"),
+        }
     }
 
     fn read_authority(&self) -> Result<Option<Authority>> {

@@ -216,7 +216,7 @@ async fn read_response_body(
     })
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ModelClient {
     client: Client,
     base_url: String,
@@ -226,6 +226,7 @@ pub struct ModelClient {
     reasoning_effort: Option<ReasoningEffort>,
     api_key_env: Option<String>,
     trusted_api_key_file: Option<std::path::PathBuf>,
+    trusted_managed_host_key: Option<TrustedManagedHostKey>,
     extra_headers: std::collections::BTreeMap<String, String>,
     allow_insecure_http: bool,
     arcee_credential_source: Option<ArceeCredentialSource>,
@@ -240,14 +241,41 @@ pub struct ModelClient {
     resolved_model: ModelMetadata,
 }
 
+impl std::fmt::Debug for ModelClient {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ModelClient")
+            .field("backend", &self.backend)
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .finish_non_exhaustive()
+    }
+}
+
 impl ModelClient {
     pub fn from_effective_settings(settings: EffectiveModelSettings) -> Result<Self> {
+        if let Some(credential) = &settings.trusted_managed_host_key {
+            if settings.backend != BackendKind::ArceeApi
+                || settings.api_key_env.is_some()
+                || settings.trusted_api_key_file.is_some()
+                || settings.allow_insecure_http
+                || settings.resolved.api != catalog::ApiKind::OpenAiCompletions
+                || settings.base_url != credential.binding().inference_origin
+            {
+                return Err(model_configuration_error(
+                    "invalid managed host-key credential route",
+                ));
+            }
+        }
         validate_extra_headers(&settings.extra_headers)?;
         let backend = settings.backend;
         // ArceeApi validates through `resolve_arcee_api_credentials` below
         // (its base-url check must fire first); every other backend
         // validates its api_key_env selector here.
-        if settings.trusted_api_key_file.is_none() && backend != BackendKind::ArceeApi {
+        if settings.trusted_api_key_file.is_none()
+            && settings.trusted_managed_host_key.is_none()
+            && backend != BackendKind::ArceeApi
+        {
             validate_backend_api_key_env(backend, settings.api_key_env.as_deref())?;
         }
         if backend == BackendKind::ArceeAuth {
@@ -262,14 +290,18 @@ impl ModelClient {
             BackendKind::ArceeApi => {
                 arcee::validate_approved_base_url(&settings.base_url)
                     .map_err(classify_model_configuration_error)?;
-                let api_key = match settings.trusted_api_key_file.as_deref() {
-                    Some(path) => read_trusted_api_key_file(path)?,
-                    None => {
-                        resolve_arcee_api_credentials(
-                            &settings.base_url,
-                            settings.api_key_env.as_deref(),
-                        )?
-                        .1
+                let api_key = if let Some(credential) = &settings.trusted_managed_host_key {
+                    credential.credential()?
+                } else {
+                    match settings.trusted_api_key_file.as_deref() {
+                        Some(path) => read_trusted_api_key_file(path)?,
+                        None => {
+                            resolve_arcee_api_credentials(
+                                &settings.base_url,
+                                settings.api_key_env.as_deref(),
+                            )?
+                            .1
+                        }
                     }
                 };
                 let source = ArceeCredentialSource::ApiKey;
@@ -289,7 +321,15 @@ impl ModelClient {
                 (api_key, None)
             }
         };
-        let client = no_redirect_model_client()?;
+        let client = if settings.trusted_managed_host_key.is_some() {
+            Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(Duration::from_secs(300))
+                .build()
+                .context("failed to build bounded managed model HTTP client")?
+        } else {
+            no_redirect_model_client()?
+        };
 
         Ok(Self {
             client,
@@ -303,6 +343,7 @@ impl ModelClient {
             extra_headers: settings.extra_headers,
             allow_insecure_http: settings.allow_insecure_http,
             arcee_credential_source,
+            trusted_managed_host_key: settings.trusted_managed_host_key,
             cache_ttl: None,
             prompt_cache_key: None,
             resolved_model: settings.resolved,
@@ -339,6 +380,14 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
         on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
+        let mut current;
+        let this = if let Some(credential) = &self.trusted_managed_host_key {
+            current = self.clone();
+            current.api_key = credential.credential()?;
+            &current
+        } else {
+            self
+        };
         // S5 reasoning discipline: same-model gate, orphan reconciliation.
         // Runs once here so every adapter (and the compaction summary call)
         // inherits it; operates on the send-time copy, never the transcript.
@@ -350,7 +399,7 @@ impl ModelClient {
         // selects the URL join and credential style.
         match self.resolved_model.api {
             catalog::ApiKind::OpenAiCompletions => {
-                self.send_completions_chat(messages, tools, on_delta).await
+                this.send_completions_chat(messages, tools, on_delta).await
             }
             catalog::ApiKind::OpenAiResponses => {
                 self.send_openai_responses(messages, tools, on_delta).await
@@ -393,6 +442,11 @@ impl ModelClient {
 
     pub fn backend(&self) -> BackendKind {
         self.backend
+    }
+    pub(crate) fn managed_host_key_binding(&self) -> Option<&ManagedHostKeyBinding> {
+        self.trusted_managed_host_key
+            .as_ref()
+            .map(TrustedManagedHostKey::binding)
     }
     pub(crate) fn supports_image_tool_results(&self) -> bool {
         self.resolved_model.image_input
@@ -882,7 +936,12 @@ impl ModelClient {
             message: "No attempts made".to_string(),
         };
 
-        for attempt in 0..10 {
+        let attempts = if self.trusted_managed_host_key.is_some() {
+            1
+        } else {
+            10
+        };
+        for attempt in 0..attempts {
             let mut request = self.client.post(url);
             if !self.extra_headers_override_content_type() {
                 request = request.header("Content-Type", "application/json");
@@ -907,7 +966,7 @@ impl ModelClient {
                             with_source_chain(&e)
                         ),
                     };
-                    if attempt < 9 {
+                    if attempt + 1 < attempts {
                         sleep(super::backoff_duration(attempt)).await;
                     }
                     continue;
@@ -978,7 +1037,7 @@ impl ModelClient {
 
             if super::retryable_http_status(status) {
                 last_error = error;
-                if attempt < 9 {
+                if attempt + 1 < attempts {
                     let delay = retry_after.unwrap_or_else(|| super::backoff_duration(attempt));
                     sleep(delay).await;
                 }
@@ -1018,7 +1077,7 @@ impl ModelClient {
 
     #[expect(
         clippy::expect_used,
-        reason = "the fixed ten-attempt SSE loop always records a retryable failure before exhaustion"
+        reason = "the nonempty SSE attempt loop always records a retryable failure before exhaustion"
     )]
     async fn try_post_sse_with_retry_headers<F, MakeFold, Fold>(
         &self,
@@ -1034,7 +1093,12 @@ impl ModelClient {
         Fold: StreamFold,
     {
         let mut last_error = None;
-        for attempt in 0..10 {
+        let attempts = if self.trusted_managed_host_key.is_some() {
+            1
+        } else {
+            10
+        };
+        for attempt in 0..attempts {
             let response = self
                 .send_with_retry_headers(url, body, apply_headers, secrets)
                 .await?;
@@ -1053,7 +1117,7 @@ impl ModelClient {
                         status: None,
                         message: error.to_string(),
                     });
-                    if attempt < 9 {
+                    if attempt + 1 < attempts {
                         sleep(super::backoff_duration(attempt)).await;
                     }
                 }
@@ -1134,6 +1198,7 @@ impl ModelClient {
             reasoning_effort: Some(ReasoningEffort::Xhigh),
             api_key_env: None,
             trusted_api_key_file: None,
+            trusted_managed_host_key: None,
             extra_headers: std::collections::BTreeMap::new(),
             allow_insecure_http: false,
             arcee_credential_source: None,

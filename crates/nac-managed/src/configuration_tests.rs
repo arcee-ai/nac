@@ -44,6 +44,7 @@ fn valid_config(root: &Path) -> ManagedHostConfig {
         managed_control_issuer: None,
         managed_control_jwks_file: None,
         managed_upgrade_expectation: None,
+        managed_host_key: None,
     }
 }
 

@@ -30,13 +30,14 @@ pub struct LightModelSettings {
     pub reasoning_effort: Option<ReasoningEffort>,
 }
 
-/// Operator-authorized mounted credential route. Resolution rechecks the
-/// light model's backend and endpoint before attaching the file.
+/// Operator-authorized credential route. Resolution rechecks the light
+/// backend and endpoint before attaching a file or ephemeral host-key capability.
 #[derive(Debug, Clone)]
 pub struct TrustedLightCredential {
     pub backend: BackendKind,
     pub base_url: String,
     pub path: PathBuf,
+    pub managed_host_key: Option<crate::model::TrustedManagedHostKey>,
 }
 
 /// Error resolving a session's light model.
@@ -119,6 +120,17 @@ pub(crate) fn resolve_light_client_with_http_policy(
         allow_insecure_http,
     )
     .and_then(|mut settings| {
+        if let Some(credential) = trusted
+            .filter(|credential| {
+                settings.backend == credential.backend
+                    && settings.base_url == credential.base_url
+                    && !has_explicit_api_key_env
+            })
+            .and_then(|credential| credential.managed_host_key.clone())
+        {
+            settings.api_key_env = None;
+            return settings.with_trusted_managed_host_key(Some(credential));
+        }
         let trusted_file = trusted.and_then(|credential| {
             (settings.backend == credential.backend
                 && settings.base_url == credential.base_url
@@ -360,6 +372,7 @@ mod tests {
             backend: BackendKind::ArceeApi,
             base_url: "https://api.arcee.ai/api/v1".to_string(),
             path: credential_path.clone(),
+            managed_host_key: None,
         };
 
         let exact = LightModelSettings {

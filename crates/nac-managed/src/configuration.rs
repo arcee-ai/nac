@@ -36,6 +36,8 @@ pub enum ManagedModelCredentialSource {
     MountedApiKey,
     /// A one-time provider-owned bundle imported into writable durable state.
     ManagedBootstrap,
+    /// A restricted per-host key bound to controller-authored v3 identities.
+    ManagedHostKey,
 }
 
 /// Structurally validated, nonsecret controller-to-NAC host configuration.
@@ -72,6 +74,8 @@ pub struct ManagedHostConfig {
     pub managed_control_jwks_file: Option<PathBuf>,
     #[serde(default)]
     pub managed_upgrade_expectation: Option<ManagedUpgradeExpectation>,
+    #[serde(default)]
+    pub managed_host_key: Option<crate::ManagedHostKeyConfig>,
 }
 
 /// Controller-authored, nonsecret desired-release CAS used when a suspended or
@@ -112,19 +116,35 @@ impl ManagedHostConfig {
         Ok(config)
     }
 
+    /// Hidden workers independently load the operator document through the no-follow reader.
+    pub fn load_host_key_worker(path: &Path) -> Result<Self> {
+        let raw = read_mounted_credential_string(path)?
+            .ok_or_else(|| anyhow!("managed worker configuration is unavailable"))?;
+        let config: Self = toml::from_str(&raw).context("invalid managed worker configuration")?;
+        config.validate()?;
+        if config.model_credential_source != ManagedModelCredentialSource::ManagedHostKey {
+            bail!("managed worker requires a version 3 host-key configuration");
+        }
+        Ok(config)
+    }
+
     pub fn validate(&self) -> Result<()> {
         if !matches!(
             self.version,
-            LEGACY_MANAGED_CONFIG_VERSION | MANAGED_CONFIG_VERSION
+            LEGACY_MANAGED_CONFIG_VERSION
+                | MANAGED_CONFIG_VERSION
+                | crate::HOST_KEY_MANAGED_CONFIG_VERSION
         ) {
             bail!(
-                "unsupported managed configuration version {}; expected {} or {}",
+                "unsupported managed configuration version {}; expected {}, {} or {}",
                 self.version,
                 LEGACY_MANAGED_CONFIG_VERSION,
-                MANAGED_CONFIG_VERSION
+                MANAGED_CONFIG_VERSION,
+                crate::HOST_KEY_MANAGED_CONFIG_VERSION
             );
         }
         validate_nonblank("logical_host_id", &self.logical_host_id)?;
+        crate::host_key_configuration::validate_host_key_configuration(self)?;
         validate_nonblank("public_hostname", &self.public_hostname)?;
         validate_nonblank("github_client_id", &self.github_client_id)?;
         validate_nonblank("model_backend", &self.model_backend)?;

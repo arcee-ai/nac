@@ -199,6 +199,12 @@ fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
         command.arg("--managed-api-key-file").arg(path);
     }
 
+    if let Some(binding) = client.managed_host_key_binding() {
+        let binding =
+            serde_json::to_string(binding).expect("serializing a host binding cannot fail");
+        command.arg("--managed-host-key-binding").arg(binding);
+    }
+
     // Always transport the snapshot header map, including `{}`, so workers can
     // never reinterpret an empty map as permission to consult config.toml.
     let headers = serde_json::to_string(client.extra_headers())

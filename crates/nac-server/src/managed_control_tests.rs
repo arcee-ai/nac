@@ -107,6 +107,7 @@ impl Fixture {
             managed_control_issuer: Some("https://nac-api.example.test".to_string()),
             managed_control_jwks_file: Some(jwks),
             managed_upgrade_expectation: None,
+            managed_host_key: None,
         };
         managed_host.validate().unwrap();
         let manager = SessionManager::new_unowned_fixture(crate::ServerOptions {

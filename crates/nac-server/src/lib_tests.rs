@@ -386,6 +386,7 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
         managed_control_issuer: None,
         managed_control_jwks_file: None,
         managed_upgrade_expectation: None,
+        managed_host_key: None,
     };
     managed_host.validate().unwrap();
     SessionManager::new_unowned_fixture(ServerOptions {
@@ -459,6 +460,7 @@ fn test_managed_bootstrap_manager_with_contract(
         managed_control_issuer: managed_control.then(|| "https://nac-api.example.test".to_string()),
         managed_control_jwks_file: managed_control.then(|| root.join("control-jwks.json")),
         managed_upgrade_expectation: None,
+        managed_host_key: None,
     };
     managed_host.validate().unwrap();
     SessionManager::new_unowned_fixture(ServerOptions {

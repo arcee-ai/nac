@@ -361,6 +361,7 @@ impl<'a> SessionCreationApplication<'a> {
                     .require_durable_authorization(managed)
                     .map_err(request_configuration_error_from)?;
                 model.trusted_api_key_file = profile.trusted_api_key_file();
+                model.trusted_managed_host_key = profile.trusted_managed_host_key();
             }
         }
         model.light_model = match request.light_model {
