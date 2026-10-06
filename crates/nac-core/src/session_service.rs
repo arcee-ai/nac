@@ -44,6 +44,7 @@ mod settlement;
 mod shell_command_types;
 mod shell_commands;
 mod shell_output;
+mod shell_settlement;
 pub(crate) use shell_command_types::SubmittedShell;
 pub use shell_command_types::{
     ShellCommandError, ShellCommandRequest, ShellCommandSnapshot, ShellCommandState,
