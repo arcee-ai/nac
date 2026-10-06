@@ -28,6 +28,7 @@ cleanup() {
     "$runtime" volume rm "$state" "$repositories" "$home_volume" "$config" "$bootstrap" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT HUP INT TERM
+printf 'managed host-key image smoke: fixture namespace=%s\n' "$suffix"
 fail() {
     printf 'managed host-key image smoke: %s\n' "$1" >&2
     exit 1
@@ -80,7 +81,9 @@ inference_origin = "https://api.arcee.ai"
 EOF
         printf "%s\n" "{\"keys\":[{\"kty\":\"OKP\",\"crv\":\"Ed25519\",\"use\":\"sig\",\"alg\":\"EdDSA\",\"kid\":\"managed-smoke\",\"x\":\"11qYAYKxCrfVS_7TyWTfbp-JhBGHx7lqCMZ73HfAUT8\"}]}" > /etc/nac/control-jwks.json
         chown 0:10001 /etc/nac/managed.toml /etc/nac/control-jwks.json /run/secrets/nac/bootstrap.json
-        chmod 0440 /etc/nac/managed.toml /etc/nac/control-jwks.json /run/secrets/nac/bootstrap.json
+        chmod 0644 /etc/nac/managed.toml
+        chmod 0444 /etc/nac/control-jwks.json
+        chmod 0440 /run/secrets/nac/bootstrap.json
     '
 
 start() {
@@ -158,6 +161,19 @@ if [ -n "${NAC_SMOKE_REVISION:-}" ]; then
     [ "$revision" = "$NAC_SMOKE_REVISION" ] || fail 'compiled runtime revision differs from requested source'
 fi
 assert_receipt
+# The real hidden worker must read controller mode 0644 and reach route
+# validation. An intentionally conflicting backend is denied before inference.
+binding=$("$runtime" exec "$container" jq -c '.binding' /var/lib/nac/managed_host_key.json)
+worker_output=$("$runtime" exec "$container" timeout 10 /usr/local/bin/nac-web __worker \
+    --session-id 21856443-8ed8-40ab-9036-72e837c99f27 --thread-name smoke \
+    --dispatch-id 4712bc5e-30d5-421a-b416-8291d9f7d8f9 --action synthetic \
+    --managed-host-key-binding "$binding" --backend openai-chat-completions \
+    --api-base-url https://api.arcee.ai 2>&1 || true)
+assert_no_secret "$worker_output"
+case "$worker_output" in
+    *'managed host-key worker binding/route does not match trusted configuration'*) ;;
+    *) fail 'hidden worker did not validate public configuration and deny conflicting route' ;;
+esac
 authority_hash=$("$runtime" exec "$container" sha256sum /var/lib/nac/managed_host_key.json | cut -d ' ' -f 1)
 stop
 

@@ -10,6 +10,11 @@ reads must limit allocation before decoding and retain the same private-file,
 regular-file, no-follow and ownership checks. Errors never include credential
 values. Keep exact-value redaction and private writes unchanged.
 
+The separate mounted-configuration reader accepts public reads for nonsecret
+ConfigMaps, rejects group/other writes, and shares regular-file, no-follow and
+bounded decoding with mounted credentials. Never use that public-read policy
+for secret-bearing files; mounted/private credential policies stay unchanged.
+
 `src/lib.rs` is deliberately cohesive above 800 lines: private-file validation,
 read/write publication and portable lock behavior share one auditable adapter,
 with their adjacent safety characterization tests. Provider lifecycle and

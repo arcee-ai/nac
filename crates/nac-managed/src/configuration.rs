@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use nac_credential_store::{
-    read_auth_string_from_path, read_mounted_credential_string, with_credential_lock,
-    write_auth_string_to_path,
+    read_auth_string_from_path, read_mounted_configuration_string, read_mounted_credential_string,
+    with_credential_lock, write_auth_string_to_path,
 };
 
 pub use nac_contracts::CommandEnvironmentSnapshot;
@@ -118,7 +118,7 @@ impl ManagedHostConfig {
 
     /// Hidden workers independently load the operator document through the no-follow reader.
     pub fn load_host_key_worker(path: &Path) -> Result<Self> {
-        let raw = read_mounted_credential_string(path)?
+        let raw = read_mounted_configuration_string(path)?
             .ok_or_else(|| anyhow!("managed worker configuration is unavailable"))?;
         let config: Self = toml::from_str(&raw).context("invalid managed worker configuration")?;
         config.validate()?;

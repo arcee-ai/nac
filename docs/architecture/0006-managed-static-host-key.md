@@ -69,6 +69,10 @@ persisted session settings or public HTTP/model arguments. Hidden native
 workers carry only the nonsecret binding and independently revalidate version 3
 operator configuration from the existing NAC_MANAGED_CONFIG location or
 /etc/nac/managed.toml, NAC_HOME/state_root, exact route and current authority.
+The nonsecret configuration reader accepts public-readable ConfigMap modes,
+including controller mode 0644, while rejecting group/other writes, symlinks,
+nonregular files and oversized input. Mounted/private secret readers retain
+their stricter access policy; this does not establish a privilege split.
 The flag alone grants nothing. SSH and competing credential selectors are
 rejected; custom config locations without that established discovery mechanism
 fail closed. Static inference reloads authority before every request, prohibits

@@ -1,8 +1,8 @@
 use super::*;
 use std::path::PathBuf;
 
-fn config() -> ManagedHostConfig {
-    let raw = r#"
+fn raw_config() -> &'static str {
+    r#"
 version = 3
 logical_host_id = "21856443-8ed8-40ab-9036-72e837c99f27"
 host_incarnation_id = "cr-uid-1"
@@ -31,8 +31,11 @@ local_key_id = "00d61e35-4d17-4949-888f-5f153b03a53b"
 key_id = "provider-key-1"
 clerk_instance_id = "instance-test"
 inference_origin = "https://api.arcee.ai"
-"#;
-    toml::from_str(raw).unwrap()
+"#
+}
+
+fn config() -> ManagedHostConfig {
+    toml::from_str(raw_config()).unwrap()
 }
 
 #[test]
@@ -92,14 +95,34 @@ fn host_key_configuration_rejects_unbounded_or_noncanonical_binding() {
 
 #[cfg(unix)]
 #[test]
-fn hidden_worker_config_reader_denies_symlink_and_public_mode() {
+fn hidden_worker_config_reader_accepts_public_controller_document() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("nac-worker-config-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let real = root.join("managed.toml");
+    std::fs::write(&real, raw_config()).unwrap();
+    for mode in [0o644, 0o444, 0o440] {
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(mode)).unwrap();
+        assert_eq!(
+            ManagedHostConfig::load_host_key_worker(&real).unwrap(),
+            config()
+        );
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn hidden_worker_config_reader_denies_symlink_and_group_other_writes() {
     use std::os::unix::fs::{symlink, PermissionsExt};
     let root = std::env::temp_dir().join(format!("nac-worker-config-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let real = root.join("real");
-    std::fs::write(&real, "version=3").unwrap();
-    std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o644)).unwrap();
-    assert!(ManagedHostConfig::load_host_key_worker(&real).is_err());
+    std::fs::write(&real, raw_config()).unwrap();
+    for mode in [0o664, 0o646] {
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(mode)).unwrap();
+        assert!(ManagedHostConfig::load_host_key_worker(&real).is_err());
+    }
     std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
     let link = root.join("link");
     symlink(&real, &link).unwrap();
