@@ -238,6 +238,49 @@ impl CommandEnvironmentSnapshot {
         self.values.insert(name.into(), value);
     }
 
+    /// Bytes needed on either side of an output page to recognize crossing secrets.
+    pub fn redaction_context_bytes(&self) -> usize {
+        self.redactions.iter().map(String::len).max().unwrap_or(0)
+    }
+
+    /// Redact a byte range using surrounding bytes from the same retained stream.
+    /// Offsets remain in the original stream; a crossing secret is masked on every
+    /// intersecting page, so arbitrary offsets cannot reveal its fragments.
+    pub fn redact_byte_range(&self, bytes: &[u8], range: std::ops::Range<usize>) -> String {
+        if range.is_empty() {
+            return String::new();
+        }
+        let mut matches = Vec::new();
+        for value in self.redactions.iter().filter(|value| !value.is_empty()) {
+            for (start, window) in bytes.windows(value.len()).enumerate() {
+                if window == value.as_bytes() {
+                    let end = start + value.len();
+                    if start < range.end && end > range.start {
+                        matches.push((start.max(range.start), end.min(range.end)));
+                    }
+                }
+            }
+        }
+        matches.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (start, end) in matches {
+            if let Some(last) = merged.last_mut().filter(|last| start < last.1) {
+                last.1 = last.1.max(end);
+            } else {
+                merged.push((start, end));
+            }
+        }
+        let mut result = String::new();
+        let mut cursor = range.start;
+        for (start, end) in merged {
+            result.push_str(&String::from_utf8_lossy(&bytes[cursor..start]));
+            result.push_str("[REDACTED]");
+            cursor = end;
+        }
+        result.push_str(&String::from_utf8_lossy(&bytes[cursor..range.end]));
+        result
+    }
+
     pub fn redact(&self, text: &str) -> String {
         let mut redacted = text.to_string();
         let mut values = self
@@ -330,6 +373,31 @@ mod tests {
             compare_product_versions("1.2.3-rc.1", "1.2.3"),
             Some(std::cmp::Ordering::Less)
         );
+    }
+
+    #[test]
+    fn page_redaction_masks_every_intersection_and_overlapping_values() {
+        let snapshot = CommandEnvironmentSnapshot::from_parts(
+            BTreeMap::new(),
+            vec!["secret".into(), "cret-tail".into(), "".into()],
+        );
+        let bytes = b"prefix secret-tail suffix";
+        assert_eq!(snapshot.redaction_context_bytes(), 9);
+        assert_eq!(
+            snapshot.redact_byte_range(bytes, 0..bytes.len()),
+            "prefix [REDACTED] suffix"
+        );
+        for start in 7..18 {
+            for end in start + 1..=18 {
+                assert_eq!(snapshot.redact_byte_range(bytes, start..end), "[REDACTED]");
+            }
+        }
+        assert_eq!(snapshot.redact_byte_range(bytes, 0..7), "prefix ");
+        assert_eq!(
+            snapshot.redact_byte_range(bytes, 18..bytes.len()),
+            " suffix"
+        );
+        assert_eq!(snapshot.redact_byte_range(bytes, 10..10), "");
     }
 
     #[test]

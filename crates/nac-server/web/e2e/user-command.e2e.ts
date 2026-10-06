@@ -17,9 +17,15 @@ for (const mobile of [false, true]) {
       .getByRole("button", { name: "Send", exact: true });
     await expect(composer).toBeVisible();
 
-    await composer.fill("!echo USER_CMD_OUT; exit 3");
+    const exactCommand = "  echo USER_CMD_OUT; exit 3\n";
+    await composer.fill(`!${exactCommand}`);
     await expect(page.getByText("Runs as a shell command.", { exact: false })).toBeVisible();
+    const submission = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" && request.url().endsWith(`/sessions/${session}/user-commands`),
+    );
     await send.click();
+    expect((await submission).postDataJSON().command).toBe(exactCommand);
     const completed = page.getByRole("status", { name: "Command completed" });
     await expect(completed).toContainText("You ran a command · Completed · exit 3");
     await expect(completed).toContainText("echo USER_CMD_OUT; exit 3");
@@ -28,6 +34,9 @@ for (const mobile of [false, true]) {
     await expect(completed.getByRole("button", { name: /regenerate|edit/i })).toHaveCount(0);
     await waitForRunIdle(request, harness, session);
     expect(harness.provider.requests).toHaveLength(0);
+    await completed.getByRole("button", { name: "Show full output" }).click();
+    await expect(completed.getByText("Output", { exact: true })).toBeVisible();
+    await expect(completed).toContainText("USER_CMD_OUT");
 
     await composer.fill("!sleep 30");
     await send.click();
@@ -53,7 +62,7 @@ for (const mobile of [false, true]) {
       { kind: "text", text: "follow-up answer", stream: true },
     );
     await completed.getByRole("button", { name: "Ask about this" }).click();
-    await expect(composer).toHaveValue(/^About the output of `echo USER_CMD_OUT/);
+    await expect(composer).toHaveValue(/^About the output of ` {2}echo USER_CMD_OUT/);
     await composer.fill(`${await composer.inputValue()}FOLLOW_UP_TOKEN`);
     await send.click();
     await waitForRunIdle(request, harness, session);

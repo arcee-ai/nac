@@ -11,6 +11,23 @@ impl TerminalManager {
         self.output_registry.page(output_id, stream, offset, limit)
     }
 
+    pub(crate) fn read_redacted_output(
+        &self,
+        output_id: &str,
+        stream: OutputStream,
+        offset: u64,
+        limit: usize,
+        redaction: &nac_contracts::CommandEnvironmentSnapshot,
+    ) -> Result<OutputPage> {
+        self.output_registry
+            .page_with_redaction(output_id, stream, offset, limit, Some(redaction))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn one_shot_spawn_gate_for_test(&self) -> Arc<Mutex<()>> {
+        Arc::clone(&self.one_shot_spawn_gate)
+    }
+
     #[cfg(test)]
     pub(crate) async fn set_backend_cleanup_for_test(
         &self,

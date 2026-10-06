@@ -428,6 +428,17 @@ impl OutputRegistry {
         offset: u64,
         limit: usize,
     ) -> Result<OutputPage> {
+        self.page_with_redaction(output_id, stream, offset, limit, None)
+    }
+
+    pub(crate) fn page_with_redaction(
+        &self,
+        output_id: &str,
+        stream: OutputStream,
+        offset: u64,
+        limit: usize,
+        redaction: Option<&nac_contracts::CommandEnvironmentSnapshot>,
+    ) -> Result<OutputPage> {
         if limit == 0 {
             return Err(anyhow!("limit must be at least 1"));
         }
@@ -462,11 +473,28 @@ impl OutputRegistry {
         clip_segments(&mut segments, stream, actual_offset, consumed as u64);
         let next_offset = actual_offset + consumed as u64;
 
+        let content = if let Some(redaction) = redaction {
+            let context = redaction.redaction_context_bytes() as u64;
+            let context_start = actual_offset.saturating_sub(context).max(retained_start);
+            let context_end = next_offset.saturating_add(context).min(retained_end);
+            let (context_bytes, _) = artifact.bytes_from(
+                stream,
+                context_start,
+                (context_end - context_start) as usize,
+            );
+            redaction.redact_byte_range(
+                &context_bytes,
+                (actual_offset - context_start) as usize..(next_offset - context_start) as usize,
+            )
+        } else {
+            String::from_utf8_lossy(&bytes).into_owned()
+        };
+
         Ok(OutputPage {
             output_id: output_id.to_string(),
             stream,
             offset: actual_offset,
-            content: String::from_utf8_lossy(&bytes).into_owned(),
+            content,
             next_offset,
             eof: next_offset >= retained_end,
             overflowed,

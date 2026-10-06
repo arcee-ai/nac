@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use super::super::*;
 use super::*;
 use crate::agent::{AgentConfig, AgentMode};
 use crate::model::test_http::{ScriptedResponse, ScriptedServer};
@@ -9,10 +8,10 @@ use crate::permissions::{PermissionEffect, PermissionRule};
 use crate::store::UserCommandTerminal;
 use crate::terminal::OutputStream;
 
-const SESSION: &str = "user-command-session";
+pub(super) const SESSION: &str = "user-command-session";
 const SECRET: &str = "nac-user-command-secret-7f3a";
 /// Leaves one file in the runs directory per execution.
-const COUNTED: &str = "mktemp \"$NAC_TEST_RUNS/run.XXXXXX\"";
+pub(super) const COUNTED: &str = "mktemp \"$NAC_TEST_RUNS/run.XXXXXX\"";
 
 /// Supplies a credential and a per-test directory whose entries count executions.
 struct TestEnvironment {
@@ -46,10 +45,10 @@ impl nac_contracts::CommandEnvironmentProvider for TestEnvironment {
     }
 }
 
-struct Fixture {
+pub(super) struct Fixture {
     service: SessionService,
     events: SessionEventReceiver,
-    store_path: PathBuf,
+    pub(super) store_path: PathBuf,
     workspace: PathBuf,
     directory: PathBuf,
 }
@@ -61,7 +60,7 @@ impl Drop for Fixture {
 }
 
 impl Fixture {
-    fn new(label: &str, client: ModelClient, rules: Vec<PermissionRule>) -> Self {
+    pub(super) fn new(label: &str, client: ModelClient, rules: Vec<PermissionRule>) -> Self {
         let directory =
             std::env::temp_dir().join(format!("nac-user-command-{label}-{}", Uuid::new_v4()));
         std::fs::create_dir_all(directory.join("workspace")).unwrap();
@@ -78,7 +77,7 @@ impl Fixture {
         }
     }
 
-    fn reopen(&self) -> SessionService {
+    pub(super) fn reopen(&self) -> SessionService {
         direct_service(
             &self.store_path,
             &self.workspace,
@@ -88,7 +87,7 @@ impl Fixture {
         .service
     }
 
-    fn lease(&self) -> sessions::SessionOperationLease {
+    pub(super) fn lease(&self) -> sessions::SessionOperationLease {
         sessions::SessionOperationLease::try_acquire(&self.store_path, SESSION).unwrap()
     }
 
@@ -106,7 +105,7 @@ impl Fixture {
             .submit_user_command_with_lease(request(request_id, command, timeout_ms), self.lease())
     }
 
-    fn executions(&self) -> usize {
+    pub(super) fn executions(&self) -> usize {
         std::fs::read_dir(self.directory.join("runs"))
             .unwrap()
             .count()
@@ -127,7 +126,7 @@ impl Fixture {
     }
 }
 
-fn direct_service(
+pub(super) fn direct_service(
     store_path: &Path,
     workspace: &Path,
     client: ModelClient,
@@ -199,7 +198,11 @@ fn direct_service(
     })
 }
 
-fn request(request_id: &str, command: &str, timeout_ms: Option<u64>) -> UserCommandRequest {
+pub(super) fn request(
+    request_id: &str,
+    command: &str,
+    timeout_ms: Option<u64>,
+) -> UserCommandRequest {
     UserCommandRequest {
         request_id: request_id.to_string(),
         command: command.to_string(),
@@ -238,7 +241,7 @@ async fn executing(service: &SessionService, request_id: &str) {
     panic!("user command {request_id} did not start");
 }
 
-async fn records(service: &SessionService) -> Vec<String> {
+pub(super) async fn records(service: &SessionService) -> Vec<String> {
     service
         .messages_snapshot()
         .await
@@ -504,6 +507,56 @@ async fn timeout_cancel_and_rejection_are_distinct_terminal_states() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn cancellation_after_executing_commit_before_spawn_reports_no_started_process() {
+    let fixture = Fixture::new("cancel-at-spawn", ModelClient::new_for_test(), Vec::new());
+    let gate = fixture
+        .service
+        .terminal_manager
+        .one_shot_spawn_gate_for_test();
+    let held = gate.lock().await;
+    fixture.submit("cancel-at-spawn", COUNTED, None).unwrap();
+    executing(&fixture.service, "cancel-at-spawn").await;
+    fixture
+        .service
+        .cancel_user_command("cancel-at-spawn")
+        .await
+        .unwrap();
+    drop(held);
+    let cancelled = settled(&fixture.service, "cancel-at-spawn").await;
+    assert_eq!(cancelled.state, UserCommandState::Cancelled);
+    assert!(!cancelled.process_started);
+    assert_eq!(fixture.executions(), 0);
+}
+
+#[test]
+fn a_post_spawn_execution_failure_is_unknown_instead_of_a_spawn_failure() {
+    let output = CommandOutput {
+        status: CommandStatus::SpawnError,
+        exit_code: None,
+        wall_time_ms: 100,
+        stdout_preview: "effect already happened".into(),
+        stderr_preview: "cleanup failed".into(),
+        output_id: Some("retained-output".into()),
+        stdout_bytes: 23,
+        stderr_bytes: 0,
+        truncated: false,
+        overflowed: false,
+    };
+    let outcome = invocation_terminal(
+        Ok(ToolResult::text(
+            serde_json::to_string(&output).unwrap(),
+            true,
+        )),
+        false,
+    );
+    assert_eq!(outcome.state, UserCommandState::OutcomeUnknown);
+    assert!(outcome.process_started);
+    assert!(outcome.reason.unwrap().contains("not rerun"));
+    assert!(outcome.result.is_some());
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn failed_start_transition_terminates_without_spawning() {
     let fixture = Fixture::new("start-fault", ModelClient::new_for_test(), Vec::new());
     crate::store::fail_next_user_command_start_for_test("fault");
@@ -624,6 +677,25 @@ async fn credential_values_are_redacted_from_every_projection() {
         .await
         .unwrap();
     assert!(page.content.contains("[REDACTED]"));
+    let mut offset = 0;
+    let mut paged_output = String::new();
+    loop {
+        let page = fixture
+            .service
+            .read_user_command_output("secret", OutputStream::Combined, offset, 4)
+            .await
+            .unwrap();
+        paged_output.push_str(&page.content);
+        offset = page.next_offset;
+        if page.eof {
+            break;
+        }
+    }
+    assert!(
+        !paged_output.contains(SECRET),
+        "credential crossed page boundaries"
+    );
+    assert!(paged_output.contains("[REDACTED]"));
     for exposed in [
         lookup,
         row,
@@ -640,6 +712,29 @@ async fn credential_values_are_redacted_from_every_projection() {
             .unwrap_err(),
         UserCommandOutputError::NotFound
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn literal_credential_executes_exactly_but_is_redacted_from_durable_intent_and_results() {
+    let fixture = Fixture::new("literal-secret", ModelClient::new_for_test(), Vec::new());
+    let payload = format!("test '{SECRET}' = \"$NAC_TEST_SECRET\"");
+    let admitted = fixture.submit("literal", &payload, None).unwrap();
+    assert!(!admitted.command.command.contains(SECRET));
+    let command = settled(&fixture.service, "literal").await;
+    assert_eq!(command.state, UserCommandState::Completed, "{command:?}");
+    assert_eq!(command.exit_code, Some(0));
+    assert!(fixture.submit("literal", &payload, None).unwrap().replayed);
+    assert!(matches!(
+        fixture.submit("literal", "printf different", None),
+        Err(UserCommandSubmitError::Conflict { .. })
+    ));
+    for exposed in [
+        serde_json::to_string(&fixture.rows()).unwrap(),
+        records(&fixture.service).await.join("\n"),
+    ] {
+        assert!(!exposed.contains(SECRET), "literal credential leaked");
+    }
 }
 
 #[cfg(unix)]

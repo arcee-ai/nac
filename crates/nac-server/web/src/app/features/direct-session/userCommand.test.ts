@@ -4,14 +4,14 @@ import { runCommand, runUserCommand } from "./commandWorkflow";
 import { parseComposerInput } from "./userCommand";
 
 describe("parseComposerInput", () => {
-  it("recognizes a command and trims only its outer whitespace", () => {
+  it("preserves every byte after the command marker", () => {
     expect(parseComposerInput("!  ls -la \n", true)).toEqual({
       kind: "command",
-      command: "ls -la",
+      command: "  ls -la \n",
     });
     expect(parseComposerInput("!echo a\n  echo  b\t", true)).toEqual({
       kind: "command",
-      command: "echo a\n  echo  b",
+      command: "echo a\n  echo  b\t",
     });
   });
 

@@ -450,7 +450,7 @@ async fn credential_value_is_absent_from_lookup_and_output_responses() {
     let (status, admitted) = submit(
         app.clone(),
         SESSION,
-        serde_json::json!({"request_id": "req-1", "command": "printf '%s' \"$DEMO_TOKEN\""}),
+        serde_json::json!({"request_id": "req-1", "command": format!("printf '%s' '{canary}'")}),
     )
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{admitted}");
@@ -458,6 +458,15 @@ async fn credential_value_is_absent_from_lookup_and_output_responses() {
     assert_eq!(settled["state"], "completed", "{settled}");
     assert!(!settled["stdout_preview"].as_str().unwrap().is_empty());
 
+    assert!(!admitted.to_string().contains(canary));
+    let (status, replayed) = submit(
+        app.clone(),
+        SESSION,
+        serde_json::json!({"request_id": "req-1", "command": format!("printf '%s' '{canary}'")}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replayed}");
+    assert!(!replayed.to_string().contains(canary));
     let lookup = get_response(app.clone(), &command_uri(SESSION, "req-1"), None).await;
     assert_eq!(lookup.status(), StatusCode::OK);
     let lookup = String::from_utf8(response_body(lookup).await.to_vec()).unwrap();

@@ -105,6 +105,8 @@ pub(super) struct ActiveUserCommandState {
 }
 
 struct UserCommandExecution {
+    command: String,
+    redaction: nac_contracts::CommandEnvironmentSnapshot,
     runtime: ToolRuntime,
     client: ModelClient,
     cancellation: ThreadCancellation,
@@ -214,14 +216,19 @@ fn invocation_terminal(
             let text = result.content.to_string();
             match serde_json::from_str::<CommandOutput>(&text) {
                 Ok(output) => {
+                    // The one-shot owner publishes an output handle only after spawn.
+                    // SpawnError also covers post-spawn wait/reader/cleanup failures.
+                    let started = output.output_id.is_some();
                     let state = match output.status {
                         CommandStatus::Completed => UserCommandState::Completed,
                         CommandStatus::TimedOut => UserCommandState::TimedOut,
                         CommandStatus::Cancelled => UserCommandState::Cancelled,
+                        CommandStatus::SpawnError if started => UserCommandState::OutcomeUnknown,
                         CommandStatus::SpawnError => UserCommandState::SpawnFailed,
                     };
-                    let started = output.status != CommandStatus::SpawnError;
-                    terminal(from, state, Some(output), None, started)
+                    let reason = (state == UserCommandState::OutcomeUnknown)
+                        .then(|| "command started but execution or cleanup failed; its outcome is unknown and it was not rerun".to_owned());
+                    terminal(from, state, Some(output), reason, started)
                 }
                 Err(_) if cancelled => unstarted(UserCommandState::Cancelled, text),
                 Err(_) => unstarted(UserCommandState::Rejected, text),
@@ -321,6 +328,13 @@ impl SessionService {
                 message: SessionCoordinationError::local_agent_busy(),
             })?
             .user_command_services();
+        let redaction = match runtime.command_environment.as_ref() {
+            Some(provider) => provider
+                .redaction_snapshot()
+                .map_err(|error| store_error("failed to capture command redaction", error))?,
+            None => nac_contracts::CommandEnvironmentSnapshot::empty(),
+        };
+        let display_command = redaction.redact(&request.command);
         let cwd = runtime
             .backend
             .resolve_terminal_cwd(None)
@@ -331,7 +345,7 @@ impl SessionService {
             &session_id,
             &request.request_id,
             &digest,
-            &request.command,
+            &display_command,
             timeout_ms,
             cwd.as_deref(),
         )
@@ -363,6 +377,8 @@ impl SessionService {
         let command = admitted.clone();
         tokio::spawn(async move {
             let execution = UserCommandExecution {
+                command: request.command,
+                redaction,
                 runtime,
                 client,
                 cancellation,
@@ -374,6 +390,29 @@ impl SessionService {
             command: admitted,
             replayed: false,
         })
+    }
+
+    /// Reconcile a submission against its durable fingerprint, never its redacted display.
+    pub async fn reconcile_user_command_request(
+        &self,
+        request: &UserCommandRequest,
+    ) -> std::result::Result<Option<UserCommandAdmission>, UserCommandSubmitError> {
+        let timeout_ms = effective_timeout(request)?;
+        let Some(session_id) = self.metadata.session_id.clone() else {
+            return Ok(None);
+        };
+        let digest = payload_digest(&request.command, timeout_ms);
+        let path = self.metadata.store_path.clone();
+        let request_id = request.request_id.clone();
+        let existing = crate::store::spawn_blocking_store_caller(move || {
+            crate::store::find_user_command(&path, &session_id, &request_id)
+        })
+        .await
+        .and_then(|stored| stored)
+        .map_err(|error| store_error("failed to reconcile user command", error))?;
+        existing
+            .map(|stored| replay(stored, &digest, &request.request_id))
+            .transpose()
     }
 
     pub async fn user_command(&self, request_id: &str) -> Result<Option<UserCommandSnapshot>> {
@@ -428,11 +467,10 @@ impl SessionService {
             .get(&output_id)
             .cloned()
             .ok_or(UserCommandOutputError::NotRetained)?;
-        let mut page = self
+        let page = self
             .terminal_manager
-            .read_output(&output_id, stream, offset, limit)
+            .read_redacted_output(&output_id, stream, offset, limit, &redaction)
             .map_err(|_| UserCommandOutputError::NotRetained)?;
-        page.content = redaction.redact(&page.content);
         Ok(page)
     }
 
@@ -469,7 +507,10 @@ impl SessionService {
         mut command: UserCommandSnapshot,
         execution: UserCommandExecution,
     ) {
-        let terminal = self.run_admitted_command(&mut command, &execution).await;
+        let mut terminal = self.run_admitted_command(&mut command, &execution).await;
+        terminal.reason = terminal
+            .reason
+            .map(|reason| execution.redaction.redact(&reason));
         if let Err(error) = self
             .commit_user_command_terminal(&command, &terminal, &execution.lease)
             .await
@@ -525,6 +566,8 @@ impl SessionService {
         execution: &UserCommandExecution,
     ) -> UserCommandTerminal {
         let admitted = UserCommandState::Admitted;
+        #[cfg(test)]
+        crash_tests::pause_at_command_phase(&self.metadata.store_path, "admitted");
         if execution.cancellation.is_cancelled() {
             return terminal(
                 admitted,
@@ -568,8 +611,10 @@ impl SessionService {
         }
         command.state = UserCommandState::Executing;
         self.publish_executing(command.clone());
+        #[cfg(test)]
+        crash_tests::pause_at_command_phase(&self.metadata.store_path, "executing");
         let outcome = invoke_submitted_command(
-            &command.command,
+            &execution.command,
             command.timeout_ms,
             &execution.runtime,
             &execution.client,
@@ -610,6 +655,8 @@ impl SessionService {
                 &request_id,
                 &lease,
             )?;
+            #[cfg(test)]
+            writer.install_user_command_crash_barrier_for_test();
             let mut attempt = 1;
             loop {
                 match writer.commit_user_command(&session_id, &request_id, &record, &terminal) {
@@ -641,3 +688,7 @@ impl SessionService {
 #[cfg(test)]
 #[path = "user_command_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "user_command_crash_tests.rs"]
+mod crash_tests;

@@ -166,7 +166,9 @@ running children per root parent.
 user's authority in an idle direct primary session. The body has a
 client-chosen `request_id`, a nonblank `command`, and an optional `timeout_ms`
 between 1 and 3600000 (default 30000). A new admission returns 202 with the
-command snapshot. A command never starts a model run.
+command snapshot. The composer removes only the leading `!`, preserving the
+remaining payload exactly; `\!` submits literal chat text. A command never
+starts a model run.
 
 `request_id` is the idempotency key. Re-posting the same `request_id` with the
 same command and effective timeout returns 200 with the current snapshot in any
@@ -184,13 +186,19 @@ commands.
 `GET .../output` pages retained output with `stream` (`combined`, `stdout`, or
 `stderr`; default `combined`), `offset`, and `limit` (1 to 65536 bytes; default
 16384). Output is process-local: after a restart, or once the artifact is
-evicted, the route returns 410 while the snapshot keeps its previews.
+evicted, the route returns 410 while the snapshot keeps its previews. Offsets
+refer to original retained bytes. Redaction recognizes secrets across page
+boundaries, and a crossing secret can produce a mask on each intersecting page.
 
 Snapshots carry `state` (`admitted`, `executing`, `completed`, `timed_out`,
 `cancelled`, `spawn_failed`, `rejected`, `interrupted`, or `outcome_unknown`),
 exit code, wall time, cwd, stdout and stderr previews, truncation flags, the
 optional `output_id`, `reason`, and timestamps. Credential values exported to
-the command are redacted from previews, lookups, and output pages. Session
+the command are redacted from previews, lookups, and output pages, including
+literal values in the displayed command. Durable admission stores its redacted
+command and exact payload fingerprint; the admitted executor keeps the original
+payload privately and recovery never reruns it. A post-spawn execution or cleanup
+failure reports `outcome_unknown`, preserving available output. Session
 snapshots expose `active_user_command` and `user_commands`, message pages
 attribute commands through `user_commands[].message_index`, and every
 transition emits a `user_command_updated` event.

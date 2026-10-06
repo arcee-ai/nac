@@ -7,8 +7,8 @@ export type ComposerInput =
 /** `directPrimary` is a direct chat the user owns; elsewhere `!` and `\!` are plain text. */
 export function parseComposerInput(text: string, directPrimary: boolean): ComposerInput {
   if (directPrimary && text.startsWith("!")) {
-    const command = text.slice(1).trim();
-    if (command) return { kind: "command", command };
+    const command = text.slice(1);
+    if (command.trim()) return { kind: "command", command };
   }
   if (directPrimary && text.startsWith("\\!"))
     return { kind: "prompt", prompt: text.slice(1).trim() };

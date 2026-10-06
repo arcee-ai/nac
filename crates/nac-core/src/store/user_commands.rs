@@ -503,6 +503,22 @@ fn finish_user_command_in_transaction(
 }
 
 impl TranscriptLogWriter {
+    #[cfg(test)]
+    pub(crate) fn install_user_command_crash_barrier_for_test(&self) {
+        let Ok(phase) = std::env::var("NAC_TEST_ALL140_CRASH_PHASE") else {
+            return;
+        };
+        let phase = match phase.as_str() {
+            "before_commit" => super::transcript_append::AppendFault::BeforeCommit,
+            "after_commit" => super::transcript_append::AppendFault::AfterCommitBeforeAck,
+            _ => return,
+        };
+        *self.append_barrier.lock().unwrap() = Some(super::transcript_append::AppendBarrier {
+            phase,
+            reached: self.store_path.with_extension("reached"),
+        });
+    }
+
     /// Replaying the same record returns the prior receipt; a different record conflicts.
     pub(crate) fn commit_user_command(
         &self,

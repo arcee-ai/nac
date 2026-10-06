@@ -74,13 +74,13 @@ impl<'a> SessionUserCommandApplication<'a> {
         session_id: &str,
         request: UserCommandRequest,
     ) -> Outcome<(UserCommandSnapshot, bool)> {
-        let timeout_ms = validate_request(&request)?;
+        validate_request(&request)?;
         self.validate_session(session_id).await?;
         let gate = self.manager.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
         self.validate_session(session_id).await?;
         let service = self.manager.attach_session_locked(session_id, None).await?;
-        if let Some(existing) = replay(&service, &request, timeout_ms).await? {
+        if let Some(existing) = replay(&service, &request).await? {
             return Ok((existing, true));
         }
         let lease = match sessions::SessionOperationLease::try_acquire(
@@ -89,7 +89,7 @@ impl<'a> SessionUserCommandApplication<'a> {
         ) {
             Ok(lease) => lease,
             Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                return match replay(&service, &request, timeout_ms).await? {
+                return match replay(&service, &request).await? {
                     Some(existing) => Ok((existing, true)),
                     None => Err(map_submit_error(match service.active_operation() {
                         Some(active_operation) => UserCommandSubmitError::Busy { active_operation },
@@ -231,17 +231,12 @@ fn validate_request(request: &UserCommandRequest) -> Outcome<u64> {
 async fn replay(
     service: &SessionService,
     request: &UserCommandRequest,
-    timeout_ms: u64,
 ) -> Outcome<Option<UserCommandSnapshot>> {
-    let Some(existing) = service.user_command(&request.request_id).await? else {
-        return Ok(None);
-    };
-    if existing.command != request.command || existing.timeout_ms != timeout_ms {
-        return Err(map_submit_error(UserCommandSubmitError::Conflict {
-            request_id: request.request_id.clone(),
-        }));
-    }
-    Ok(Some(existing))
+    Ok(service
+        .reconcile_user_command_request(request)
+        .await
+        .map_err(map_submit_error)?
+        .map(|admission| admission.command))
 }
 
 fn map_submit_error(error: UserCommandSubmitError) -> UserCommandApplicationError {
