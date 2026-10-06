@@ -393,6 +393,10 @@ impl SessionService {
     }
 
     /// Reconcile a submission against its durable fingerprint, never its redacted display.
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
     pub async fn reconcile_user_command_request(
         &self,
         request: &UserCommandRequest,
