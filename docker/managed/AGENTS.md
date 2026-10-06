@@ -26,6 +26,8 @@ does not define managed domain behavior or server API semantics.
 - `../../scripts/test-managed-image-contract.sh` — deterministic static image
   contract.
 - `../../scripts/smoke-managed-image.sh` — live readiness/restart/SIGTERM smoke.
+- `../../scripts/smoke-managed-host-key-image.sh` — offline synthetic v3 import,
+  receipt recovery, restart, revoked replay and retained-credential smoke.
 - `../../docs/managed/README.md` — user-facing deployment behavior.
 
 ## Verification
@@ -34,10 +36,15 @@ does not define managed domain behavior or server API semantics.
 make test-managed-image-contract
 make managed-image
 make test-managed-image
+make test-managed-host-key-image MANAGED_IMAGE=<existing-image>
 ```
 
-The last two require Docker or Podman. Report unavailable infrastructure as a
-coverage gap. The static contract is still required everywhere.
+The image build and live smoke targets require Docker or Podman. The host-key
+smoke uses an existing image and requires jq; set NAC_SMOKE_REVISION to assert
+its compiled runtime source identity. Its network-disabled synthetic checks do
+not qualify live Clerk, privileged inference mediation, controller repair or
+fleet capability. Report unavailable infrastructure as a coverage gap. The
+static contract is still required everywhere.
 
 ## Generated artifacts and placement mistakes
 
