@@ -48,6 +48,7 @@ mod chat_stream;
 mod chatgpt_codex;
 mod client;
 mod history;
+mod managed_host_key;
 mod providers;
 mod pseudo_tool_calls;
 mod redact;
@@ -78,6 +79,7 @@ pub use catalog::{
 pub(crate) use catalog::{
     Compat, CompletionsThinkingFormat, CompletionsTokenLimit, ModelMetadata, ThinkingLevelMap,
 };
+pub use managed_host_key::{ManagedHostKeyBinding, ManagedHostKeyStore};
 pub use providers::{
     list_managed_provider_models, list_provider_models, list_provider_models_with_http_policy,
     provider_default_base_url, provider_uses_api_key, ProviderModel,
