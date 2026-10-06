@@ -14,8 +14,7 @@ const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const MAX_TIMEOUT_MS: u64 = 3_600_000;
 const COMMIT_ATTEMPTS: usize = 3;
 
-/// Proof that the session service admitted this exact submitted command. It also carries the
-/// typed result back, so classification never parses text that redaction may have altered.
+/// Admission proof that also returns the typed result, so redaction never affects classification.
 #[derive(Clone, Debug)]
 pub(crate) struct UserCommandAuthority(Arc<StdMutex<Option<CommandOutput>>>);
 
