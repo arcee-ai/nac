@@ -819,3 +819,6 @@ async fn revert_removes_the_record_while_lookup_keeps_the_terminal_state() {
     assert_eq!(after.message_index, None);
     assert!(records(&fixture.service).await.is_empty());
 }
+
+#[path = "user_command_lifecycle_tests.rs"]
+mod lifecycle;
