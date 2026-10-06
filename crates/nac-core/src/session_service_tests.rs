@@ -120,6 +120,7 @@ fn legacy_page_messages(messages: &[Message], request: MessagePageRequest) -> Me
             total,
             has_older: start > 0,
         },
+        user_commands: Vec::new(),
     }
 }
 

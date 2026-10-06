@@ -57,13 +57,14 @@ pub(super) enum AppendPurpose<'a> {
     RunPrompt(&'a str),
     RunMessages(&'a str),
     Terminal,
+    UserCommand(&'a str),
 }
 
 impl<'a> AppendPurpose<'a> {
     fn requested_run(self) -> Option<&'a str> {
         match self {
             Self::RunPrompt(run_id) | Self::RunMessages(run_id) => Some(run_id),
-            Self::Messages | Self::Terminal => None,
+            Self::Messages | Self::Terminal | Self::UserCommand(_) => None,
         }
     }
 }
@@ -121,6 +122,7 @@ impl TranscriptLogWriter {
                     session_id: session_id.to_owned(),
                     run_id: run_id.to_owned(),
                     lease: Arc::clone(lease),
+                    user_command: false,
                 })?
                 .acknowledge_blocking()?;
         }
@@ -140,6 +142,36 @@ impl TranscriptLogWriter {
             lease: Arc::downgrade(lease),
             generation: relationship
                 .map(|relationship| (relationship.kind, relationship.generation)),
+        });
+        Ok(writer)
+    }
+
+    /// Bind a writer to one admitted user command under its held operation lease.
+    pub(crate) fn for_user_command(
+        path: &Path,
+        session_id: &str,
+        request_id: &str,
+        lease: &Arc<SessionOperationLease>,
+    ) -> Result<Self> {
+        if let Some(owner) = super::coordinator::owner_for(path)? {
+            owner.check_blocking_context()?;
+            return owner
+                .submit(BindRunWriter {
+                    session_id: session_id.to_owned(),
+                    run_id: request_id.to_owned(),
+                    lease: Arc::clone(lease),
+                    user_command: true,
+                })?
+                .acknowledge_blocking()?;
+        }
+        lease.validate(path, session_id)?;
+        let mut writer = Self::new(path)?;
+        writer.append_scope = user_command_scope(request_id);
+        writer.append_fence = Some(RunAppendFence {
+            session_id: session_id.into(),
+            run_id: writer.append_scope.clone(),
+            lease: Arc::downgrade(lease),
+            generation: None,
         });
         Ok(writer)
     }
@@ -176,6 +208,12 @@ impl TranscriptLogWriter {
         };
         if requested_run.is_some_and(|run| run != fence.run_id) {
             return Err(TranscriptAppendError::StaleRun.into());
+        }
+        if let AppendPurpose::UserCommand(request_id) = purpose {
+            if fence.run_id != user_command_scope(request_id) {
+                return Err(TranscriptAppendError::StaleRun.into());
+            }
+            return Ok(());
         }
         let current = relationship_generation(transaction, session_id)?;
         let matches = match (&fence.generation, &current) {
@@ -407,10 +445,15 @@ pub(super) struct AppendBarrier {
     pub reached: PathBuf,
 }
 
+pub(super) fn user_command_scope(request_id: &str) -> String {
+    format!("user-command:{request_id}")
+}
+
 struct BindRunWriter {
     session_id: String,
     run_id: String,
     lease: Arc<SessionOperationLease>,
+    user_command: bool,
 }
 impl super::coordinator::PersistenceCommand for BindRunWriter {
     type Output = Result<TranscriptLogWriter>;
@@ -428,12 +471,11 @@ impl super::coordinator::PersistenceCommand for BindRunWriter {
         super::coordinator::CommandOutput::error_identity(output)
     }
     fn execute(self, path: &Path) -> Result<Self::Output> {
-        Ok(TranscriptLogWriter::for_run(
-            path,
-            &self.session_id,
-            &self.run_id,
-            &self.lease,
-        ))
+        Ok(if self.user_command {
+            TranscriptLogWriter::for_user_command(path, &self.session_id, &self.run_id, &self.lease)
+        } else {
+            TranscriptLogWriter::for_run(path, &self.session_id, &self.run_id, &self.lease)
+        })
     }
 }
 

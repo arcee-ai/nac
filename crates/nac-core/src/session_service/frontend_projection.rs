@@ -99,6 +99,7 @@ impl SessionService {
             run_failure,
             worksets,
             forks,
+            user_commands,
         } = projection;
         let thread_event_boundary = thread_event_boundary.ok_or_else(|| {
             anyhow::anyhow!("frontend persistence projection omitted its event boundary")
@@ -114,6 +115,7 @@ impl SessionService {
             run_failure,
             worksets,
             workspace,
+            user_commands,
         })
     }
 }
@@ -317,11 +319,21 @@ impl SessionService {
             FrontendSnapshotMessages::All => {
                 let messages = self.store_backed_transcript().await?;
                 let created_at = self.store_backed_transcript_times(messages.len()).await?;
+                let user_commands = blocking
+                    .user_commands
+                    .into_iter()
+                    .filter(|command| {
+                        command
+                            .message_index
+                            .is_some_and(|idx| idx < messages.len())
+                    })
+                    .collect();
                 LoadedFrontendMessages {
                     messages,
                     created_at,
                     page: None,
                     cycle: None,
+                    user_commands,
                 }
             }
             FrontendSnapshotMessages::Page(request) => {
@@ -332,6 +344,7 @@ impl SessionService {
                     created_at: page.created_at,
                     page: Some(page.page),
                     cycle: Some(cycle),
+                    user_commands: page.user_commands,
                 }
             }
         };
@@ -356,6 +369,8 @@ impl SessionService {
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
+            active_user_command: self.active_user_command(),
+            user_commands: loaded_messages.user_commands,
             sessions: blocking.sessions,
             active_threads,
             threads: blocking.threads,
@@ -388,6 +403,7 @@ struct StoredFrontendProjection {
     forks: Vec<crate::store::SessionForkLink>,
     worksets: WorksetsSnapshot,
     run_failure: Option<crate::run_failure::RunFailure>,
+    user_commands: Vec<crate::store::UserCommandSnapshot>,
 }
 
 fn read_stored_projection(
@@ -416,6 +432,10 @@ fn read_stored_projection(
         .map(|session_id| crate::store::list_session_forks_with_connection(conn, session_id))
         .transpose()?
         .unwrap_or_default();
+    let user_commands = session_id
+        .map(|session_id| crate::store::list_user_commands_with_connection(conn, session_id))
+        .transpose()?
+        .unwrap_or_default();
     let run_failure = session_id
         .map(|session_id| crate::store::load_run_recovery_with_connection(conn, session_id))
         .transpose()?
@@ -442,6 +462,7 @@ fn read_stored_projection(
         run_failure,
         worksets,
         forks,
+        user_commands,
     })
 }
 

@@ -35,7 +35,7 @@ pub enum CommandStatus {
     SpawnError,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandOutput {
     pub status: CommandStatus,
     #[serde(skip_serializing_if = "Option::is_none")]

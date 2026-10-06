@@ -147,6 +147,29 @@ impl SessionService {
         } else {
             (Vec::new(), Vec::new())
         };
+        let commands = self.load_user_commands().await?;
+        let user_commands = {
+            let snapshot = self.session_snapshot.lock().await;
+            let blob = snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.messages.as_slice())
+                .unwrap_or_default();
+            commands
+                .into_iter()
+                .filter_map(|mut command| {
+                    let raw = command.message_index?;
+                    let visible = if raw >= blob_len {
+                        blob_visible + (raw - blob_len)
+                    } else {
+                        blob[..raw].iter().filter(is_visible).count()
+                    };
+                    (start..end).contains(&visible).then(|| {
+                        command.message_index = Some(visible);
+                        command
+                    })
+                })
+                .collect()
+        };
         let mut created_at: Vec<Option<String>> = vec![None; blob_part.len()];
         created_at.extend(log_times.into_iter().map(Some));
         let mut messages = blob_part;
@@ -161,6 +184,7 @@ impl SessionService {
                 total,
                 has_older: start > 0,
             },
+            user_commands,
         })
     }
 

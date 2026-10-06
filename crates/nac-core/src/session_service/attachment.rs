@@ -79,6 +79,7 @@ impl SessionService {
         let skills = run_config.agent.skills();
         let mcp = run_config.agent.mcp_registry();
         let terminal_manager = run_config.agent.terminal_manager();
+        let command_redactions = run_config.agent.command_redactions();
         if let Some(target) = workspace_git.as_ref() {
             terminal_manager.configure_workspace_authority(
                 metadata.store_path.clone(),
@@ -118,6 +119,7 @@ impl SessionService {
             mcp,
             terminal_manager,
             permission_broker,
+            command_redactions,
             sandbox_resource_lease: Arc::new(StdMutex::new(None)),
             has_sandbox,
             managed_admission_enabled: false,

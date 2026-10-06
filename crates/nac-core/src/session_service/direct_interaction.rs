@@ -428,7 +428,7 @@ impl SessionService {
             .await
     }
 
-    async fn start_next_direct_inbox_item_with_lease_async(
+    pub(super) async fn start_next_direct_inbox_item_with_lease_async(
         &self,
         lease: sessions::SessionOperationLease,
     ) -> Result<Option<SessionRunHandle>> {

@@ -84,6 +84,23 @@ impl SessionService {
         // append at a stale index (rejected by the log's contiguity guard)
         // and terminal normalization would delete the peer's committed rows
         // from the stale length. Re-restoring under the lease is race-free.
+        if let (Some(_), Some(session_id)) = (
+            operation_lease.as_ref(),
+            self.metadata.session_id.as_deref(),
+        ) {
+            let reconciled = crate::store::reconcile_unsettled_user_command(
+                &self.metadata.store_path,
+                session_id,
+            )
+            .map_err(|error| OperationAdmissionPreparationError::Coordination {
+                message: SessionCoordinationError::store(format!(
+                    "failed to reconcile an unsettled user command: {error:#}"
+                )),
+            })?;
+            if let Some(command) = reconciled {
+                self.emit_user_command(command);
+            }
+        }
         if let Some(lease) = operation_lease.as_ref() {
             let mut agent = self.agent.try_lock().map_err(|_| {
                 OperationAdmissionPreparationError::Coordination {
@@ -400,7 +417,10 @@ impl SessionService {
                     active_run: active_run.snapshot.clone(),
                 });
             }
-            Some(ActiveSessionOperation::ManualCompaction(active)) => {
+            Some(
+                active @ (ActiveSessionOperation::ManualCompaction(_)
+                | ActiveSessionOperation::UserCommand(_)),
+            ) => {
                 return Err(SessionSubmitError::ExternalBusy {
                     session_id: SessionOperationBusy::Local {
                         session_id: self
@@ -408,9 +428,7 @@ impl SessionService {
                             .session_id
                             .clone()
                             .unwrap_or_else(|| "unavailable".to_string()),
-                        active_operation: ActiveSessionOperationSnapshot::ManualCompaction {
-                            compaction: active.snapshot.clone(),
-                        },
+                        active_operation: active.snapshot(),
                     },
                 });
             }
@@ -446,25 +464,8 @@ impl SessionService {
 
         if enforce_coordination {
             if let Some(session_id) = self.metadata.session_id.as_deref() {
-                let recovery =
-                    crate::store::reconcile_active_run(&self.metadata.store_path, session_id)
-                        .map_err(|error| SessionSubmitError::Coordination {
-                            message: SessionCoordinationError::store(format!(
-                                "failed to reconcile interrupted run state: {error:#}"
-                            )),
-                        })?;
-                if let crate::store::ActiveRunReconciliation::Interrupted { run_id } = recovery {
-                    self.event_bus.emit_with_context(
-                        SessionEvent::RunFailed {
-                            message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
-                            failure: Some(crate::run_failure::RunFailure::interrupted(
-                                INTERRUPTED_RUN_EVENT_MESSAGE,
-                            )),
-                        },
-                        Some(SessionRunId::from_stored(run_id)),
-                        None,
-                    );
-                }
+                self.reconcile_interrupted_run(session_id)
+                    .map_err(|message| SessionSubmitError::Coordination { message })?;
                 let mut expired =
                     crate::store::expire_session_steering(&self.metadata.store_path, session_id)
                         .map_err(|error| SessionSubmitError::Coordination {
@@ -635,5 +636,31 @@ impl SessionService {
         );
 
         Ok(active_run)
+    }
+
+    /// The caller holds the operation lease and no local operation is active.
+    pub(super) fn reconcile_interrupted_run(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<(), SessionCoordinationError> {
+        let recovery = crate::store::reconcile_active_run(&self.metadata.store_path, session_id)
+            .map_err(|error| {
+                SessionCoordinationError::store(format!(
+                    "failed to reconcile interrupted run state: {error:#}"
+                ))
+            })?;
+        if let crate::store::ActiveRunReconciliation::Interrupted { run_id } = recovery {
+            self.event_bus.emit_with_context(
+                SessionEvent::RunFailed {
+                    message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
+                    failure: Some(crate::run_failure::RunFailure::interrupted(
+                        INTERRUPTED_RUN_EVENT_MESSAGE,
+                    )),
+                },
+                Some(SessionRunId::from_stored(run_id)),
+                None,
+            );
+        }
+        Ok(())
     }
 }
