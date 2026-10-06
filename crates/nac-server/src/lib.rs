@@ -31,9 +31,11 @@ pub use delivery::contracts::{
     PermissionStateResponse, ProviderModelList, ProviderModelsRequest, RecentEventsResponse,
     ReplayBoundaryEvent, ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest,
     SessionLineageKind, SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse,
-    SshBrowseRequest, StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
-    ThreadSteeringRequest, ThreadSteeringResponse, UpdateConfigRequest, UpdateGoalRequest,
-    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
+    SshBrowseRequest, StoreInfo, SubmitPromptRequest, SubmitPromptResponse,
+    SubmitUserCommandRequest, ThreadEventsQuery, ThreadSteeringRequest, ThreadSteeringResponse,
+    UpdateConfigRequest, UpdateGoalRequest, UpdateInboxItemRequest,
+    UpdatePermissionApprovalModeRequest, UserCommandOutputPage, UserCommandOutputQuery,
+    UserCommandOutputSegment,
 };
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
@@ -887,6 +889,12 @@ impl SessionManager {
         application::session_terminals::SessionTerminalApplication::new(self)
     }
 
+    pub(crate) fn session_user_commands(
+        &self,
+    ) -> application::user_commands::SessionUserCommandApplication<'_> {
+        application::user_commands::SessionUserCommandApplication::new(self)
+    }
+
     pub(crate) fn session_lifecycle(
         &self,
     ) -> application::session_lifecycle::SessionLifecycleApplication<'_> {
@@ -1535,7 +1543,7 @@ impl SessionManager {
             .await
     }
 
-    /// Cancel every run owned by this process before a graceful server stop.
+    /// Cancel every run and user command owned by this process before a graceful server stop.
     ///
     /// Peer NAC processes keep ownership of their own durable leases. Runs
     /// that do not settle before process shutdown are reconciled by the
@@ -1550,6 +1558,14 @@ impl SessionManager {
             .cloned()
             .collect::<Vec<_>>();
         for service in services {
+            if let Some(command) = service.active_user_command() {
+                if let Err(error) = service.cancel_user_command(&command.request_id).await {
+                    eprintln!(
+                        "nac: failed to cancel user command {} during shutdown: {error}",
+                        command.request_id
+                    );
+                }
+            }
             let Some(active) = service.active_run() else {
                 continue;
             };

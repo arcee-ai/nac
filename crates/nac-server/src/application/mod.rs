@@ -14,6 +14,7 @@ pub(crate) mod session_runs;
 pub(crate) mod session_terminals;
 pub(crate) mod sessions;
 pub(crate) mod ssh_configurations;
+pub(crate) mod user_commands;
 pub(crate) mod workspace;
 
 /// Application-level tri-state update semantics. Delivery adapters map their

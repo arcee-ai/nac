@@ -5,7 +5,9 @@ use nac_core::{
     light_model::LightModelSettings,
     model::{BackendKind, ProviderModel, ReasoningEffort},
     permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
-    session_service::{ActiveRunSnapshot, MessagesPageSnapshot, SessionFrontendSnapshot},
+    session_service::{
+        ActiveRunSnapshot, MessagesPageSnapshot, SessionFrontendSnapshot, UserCommandSnapshot,
+    },
     sessions,
     store::{GoalStatus, InboxDelivery, PermissionGrantRecord, SessionInboxRecord},
     types::Message,
@@ -454,6 +456,57 @@ pub struct SubmitPromptRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct SubmitUserCommandRequest {
+    pub request_id: String,
+    pub command: String,
+    pub timeout_ms: Option<u64>,
+}
+
+impl SubmitUserCommandRequest {
+    pub(crate) fn into_core(self) -> nac_core::session_service::UserCommandRequest {
+        nac_core::session_service::UserCommandRequest {
+            request_id: self.request_id,
+            command: self.command,
+            timeout_ms: self.timeout_ms,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct UserCommandOutputQuery {
+    /// One of `combined` (default), `stdout`, or `stderr`.
+    pub stream: Option<String>,
+    pub offset: Option<u64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+pub struct UserCommandOutputSegment {
+    pub sequence: u64,
+    pub stream: String,
+    pub combined_start: u64,
+    pub combined_end: u64,
+    pub stream_start: u64,
+    pub stream_end: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+pub struct UserCommandOutputPage {
+    pub output_id: String,
+    pub stream: String,
+    pub offset: u64,
+    pub content: String,
+    pub next_offset: u64,
+    pub eof: bool,
+    pub overflowed: bool,
+    pub retained_start: u64,
+    pub retained_end: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub segments: Vec<UserCommandOutputSegment>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct CreateInboxItemRequest {
     pub delivery: InboxDelivery,
     pub prompt: String,
@@ -625,6 +678,8 @@ pub struct MessagesPageResponse {
     pub messages: Vec<Message>,
     pub created_at: Vec<Option<String>>,
     pub page: MessagePageMetadata,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_commands: Vec<UserCommandSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, utoipa::ToSchema)]
@@ -686,6 +741,7 @@ impl From<MessagesPageSnapshot> for MessagesPageResponse {
             messages: page.messages,
             created_at: page.created_at,
             page: page.page.into(),
+            user_commands: page.user_commands,
         }
     }
 }

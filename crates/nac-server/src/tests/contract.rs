@@ -125,6 +125,11 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ),
     ("GET", "/sessions/{session_id}/permissions"),
     ("GET", "/sessions/{session_id}/threads/{thread_name}/events"),
+    ("GET", "/sessions/{session_id}/user-commands/{request_id}"),
+    (
+        "GET",
+        "/sessions/{session_id}/user-commands/{request_id}/output",
+    ),
     ("GET", "/sessions/{session_id}/workspace/branches"),
     ("GET", "/sessions/{session_id}/workspace/diff"),
     ("GET", "/sessions/{session_id}/workspace/file"),
@@ -189,6 +194,11 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     (
         "POST",
         "/sessions/{session_id}/threads/{thread_name}/steering",
+    ),
+    ("POST", "/sessions/{session_id}/user-commands"),
+    (
+        "POST",
+        "/sessions/{session_id}/user-commands/{request_id}/cancel",
     ),
     ("POST", "/sessions/{session_id}/workspace/branches"),
     ("POST", "/sessions/{session_id}/workspace/commit"),

@@ -160,6 +160,41 @@ ownership, changes to a child's profile or description, sandboxed sessions
 without a host-backed shared workspace, and more than four simultaneously
 running children per root parent.
 
+## User commands
+
+`POST /sessions/{session_id}/user-commands` runs one shell command on the
+user's authority in an idle direct primary session. The body has a
+client-chosen `request_id`, a nonblank `command`, and an optional `timeout_ms`
+between 1 and 3600000 (default 30000). A new admission returns 202 with the
+command snapshot. A command never starts a model run.
+
+`request_id` is the idempotency key. Re-posting the same `request_id` with the
+same command and effective timeout returns 200 with the current snapshot in any
+state, and never starts a second process. A different command or timeout under
+the same `request_id` returns 409. While another run, compaction, or command is
+active, a new `request_id` returns 409 busy and no record is written. Orchestrator
+sessions return 400; unknown sessions and delegated sessions return 404.
+
+`GET /sessions/{session_id}/user-commands/{request_id}` reads the snapshot. A
+client that lost an admission response looks the command up here.
+`POST .../cancel` cancels an active command owned by this process and returns
+the snapshot; a terminal command is returned unchanged. Shutdown cancels active
+commands.
+
+`GET .../output` pages retained output with `stream` (`combined`, `stdout`, or
+`stderr`; default `combined`), `offset`, and `limit` (1 to 65536 bytes; default
+16384). Output is process-local: after a restart, or once the artifact is
+evicted, the route returns 410 while the snapshot keeps its previews.
+
+Snapshots carry `state` (`admitted`, `executing`, `completed`, `timed_out`,
+`cancelled`, `spawn_failed`, `rejected`, `interrupted`, or `outcome_unknown`),
+exit code, wall time, cwd, stdout and stderr previews, truncation flags, the
+optional `output_id`, `reason`, and timestamps. Credential values exported to
+the command are redacted from previews, lookups, and output pages. Session
+snapshots expose `active_user_command` and `user_commands`, message pages
+attribute commands through `user_commands[].message_index`, and every
+transition emits a `user_command_updated` event.
+
 ## Managed orchestrator sessions
 
 `GET /sessions/{session_id}/orchestrators` lists orchestrator sessions owned by
