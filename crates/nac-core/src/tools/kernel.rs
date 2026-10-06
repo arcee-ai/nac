@@ -710,6 +710,34 @@ impl ToolSnapshot {
         services: ToolServices<'_>,
         context: &ToolCallContext,
     ) -> ToolResult {
+        self.invoke_with_submission(name, input, services, context, None)
+            .await
+    }
+
+    pub(crate) async fn invoke_submitted_shell(
+        &self,
+        submission: &crate::session_service::SubmittedShell,
+        services: ToolServices<'_>,
+        context: &ToolCallContext,
+    ) -> ToolResult {
+        self.invoke_with_submission(
+            "exec_command",
+            submission.tool_input(),
+            services,
+            context,
+            Some(submission),
+        )
+        .await
+    }
+
+    async fn invoke_with_submission(
+        &self,
+        name: &str,
+        input: Value,
+        services: ToolServices<'_>,
+        context: &ToolCallContext,
+        submission: Option<&crate::session_service::SubmittedShell>,
+    ) -> ToolResult {
         match self.prepare(name, input, services) {
             Ok(mut prepared) => {
                 let _admission = prepared.descriptor().admission;
@@ -750,15 +778,29 @@ impl ToolSnapshot {
                     );
                 }
                 if let Some(broker) = &services.runtime.permission_broker {
-                    match broker
-                        .authorize(
-                            name,
-                            &resources,
-                            context,
-                            &services.runtime.command_cancellation,
-                        )
-                        .await
-                    {
+                    let outcome = match submission {
+                        Some(submission) => {
+                            broker
+                                .authorize_submitted_shell(
+                                    &resources,
+                                    context,
+                                    context.cancellation(services.runtime),
+                                    submission,
+                                )
+                                .await
+                        }
+                        None => {
+                            broker
+                                .authorize(
+                                    name,
+                                    &resources,
+                                    context,
+                                    context.cancellation(services.runtime),
+                                )
+                                .await
+                        }
+                    };
+                    match outcome {
                         crate::permissions::AuthorizationOutcome::Allowed => {}
                         crate::permissions::AuthorizationOutcome::Denied(reason) => {
                             return ToolResult::text(

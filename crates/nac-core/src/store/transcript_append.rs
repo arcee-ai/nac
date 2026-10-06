@@ -57,13 +57,14 @@ pub(super) enum AppendPurpose<'a> {
     RunPrompt(&'a str),
     RunMessages(&'a str),
     Terminal,
+    HumanShell,
 }
 
 impl<'a> AppendPurpose<'a> {
     fn requested_run(self) -> Option<&'a str> {
         match self {
             Self::RunPrompt(run_id) | Self::RunMessages(run_id) => Some(run_id),
-            Self::Messages | Self::Terminal => None,
+            Self::Messages | Self::Terminal | Self::HumanShell => None,
         }
     }
 }
@@ -190,6 +191,13 @@ impl TranscriptLogWriter {
         };
         if !matches {
             return Err(TranscriptAppendError::StaleRun.into());
+        }
+        if matches!(purpose, AppendPurpose::HumanShell) {
+            anyhow::ensure!(
+                current.is_none(),
+                "human shell result cannot mutate a delegated session"
+            );
+            return Ok(());
         }
         if let Some(recovery) = load_run_recovery_with_connection(transaction, session_id)? {
             let installing_successor = matches!(purpose, AppendPurpose::RunPrompt(_))

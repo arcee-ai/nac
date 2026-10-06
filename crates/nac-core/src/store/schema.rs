@@ -950,6 +950,7 @@ fn open_connection_with_hooks(
         "history_boundary_id",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    super::shell_commands::create_shell_commands_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;

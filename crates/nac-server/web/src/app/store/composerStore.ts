@@ -8,10 +8,11 @@ import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 interface ComposerState {
   /** Prompt waiting to be sent, or null once the composer has taken it. */
   pending: string | null;
+  draft: { sessionId: string; text: string } | null;
 }
 /** One presentation lifetime; hosted preferences are ephemeral. */
 export function createComposerStore(_storage?: Pick<Storage, "getItem" | "setItem">) {
-  const composerStore = createStore<ComposerState>({ pending: null }, "composer");
+  const composerStore = createStore<ComposerState>({ pending: null, draft: null }, "composer");
   const initial_composerStore = composerStore.getState();
 
   function sendPrompt(pending: string): void {
@@ -30,15 +31,28 @@ export function createComposerStore(_storage?: Pick<Storage, "getItem" | "setIte
       send(pending);
     });
   }
+  function draftPrompt(sessionId: string, text: string): void {
+    composerStore.setState({ draft: { sessionId, text } });
+  }
+  function consumeDraftRequests(sessionId: string, receive: (text: string) => void): () => void {
+    return composerStore.subscribe(() => {
+      const { draft } = composerStore.getState();
+      if (!draft || draft.sessionId !== sessionId) return;
+      composerStore.setState({ draft: null });
+      receive(draft.text);
+    });
+  }
   return {
     release: () => {
       composerStore.setState(initial_composerStore);
     },
     sendPrompt,
     consumePromptRequests,
+    draftPrompt,
+    consumeDraftRequests,
   };
 }
 
-export const { release, sendPrompt, consumePromptRequests } = createComposerStore(
+export const { release, sendPrompt, consumePromptRequests, draftPrompt, consumeDraftRequests } = createComposerStore(
   standalonePreferenceStorage,
 );

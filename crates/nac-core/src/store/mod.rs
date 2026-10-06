@@ -23,6 +23,10 @@ mod schema;
 mod session_forks;
 mod session_goals;
 mod session_inbox;
+mod shell_commands;
+pub(crate) use shell_commands::{
+    accept_shell_command, list_shell_commands, lookup_shell_command, start_shell_command,
+};
 mod ssh_configurations;
 mod steering;
 mod terminal_cleanups;

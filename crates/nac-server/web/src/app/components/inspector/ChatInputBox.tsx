@@ -1,4 +1,6 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { shellInput } from "@/app/features/human-shell/input";
+import { useSubmitShellCommand } from "@/app/features/human-shell/queries";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -298,6 +300,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const toast = useToast();
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
+  const submitShell = useSubmitShellCommand(sessionId);
+  const pendingShellRequest = useRef<{
+    sessionId: string;
+    command: string;
+    requestId: string;
+  } | null>(null);
   const steerOrchestrator = useSteerOrchestrator();
   const compactSession = useCompactSession();
   const createInboxItem = useCreateInboxItem();
@@ -371,6 +379,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const runningInteractive = runningDirect || runningClassic;
   const mutationPending =
     submitRun.isPending ||
+    submitShell.isPending ||
     steerOrchestrator.isPending ||
     compactSession.isPending ||
     createInboxItem.isPending ||
@@ -701,7 +710,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
    */
   const submit = useCallback(
     async (text: string = value, requestedDelivery?: InboxDelivery) => {
-      const prompt = text.trim();
+      const input = shellInput(text);
+      const prompt = input.kind === "prompt" ? input.prompt.trim() : text.trim();
       if (!prompt || busy || submitInFlight.current) return;
       const fromField = text === value;
       const clearField = () => {
@@ -716,6 +726,38 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       const current = captureRuntimeActivation(sessionId);
 
       try {
+        if (input.kind === "command") {
+          if (
+            !direct ||
+            readOnly ||
+            running ||
+            (snapshot?.shell_commands ?? []).some(
+              (command) => command.state === "accepted" || command.state === "started",
+            )
+          ) {
+            toast.error("Shell commands require an idle direct-primary chat");
+            return;
+          }
+          if (!input.command.trim()) {
+            toast.error("Enter a command after !");
+            return;
+          }
+          try {
+            const previous = pendingShellRequest.current;
+            const requestId =
+              previous?.sessionId === sessionId && previous.command === input.command
+                ? previous.requestId
+                : crypto.randomUUID();
+            pendingShellRequest.current = { sessionId, command: input.command, requestId };
+            await submitShell.mutateAsync({ request_id: requestId, command: input.command });
+            if (pendingShellRequest.current?.requestId === requestId)
+              pendingShellRequest.current = null;
+            if (current()) clearField();
+          } catch (error) {
+            if (current()) toast.error(`Command outcome: ${errorMessage(toRunError(error))}`);
+          }
+          return;
+        }
         let definitions = commandDefinitions;
         if (text.trimStart().startsWith("/") && definitions === undefined) {
           const result = await refetchCommands();
@@ -790,6 +832,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       rowPx,
       commandDefinitions,
       refetchCommands,
+      submitShell,
       toast,
       compactSession,
       pushLocalEvent,
@@ -808,6 +851,14 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   useEffect(
     () => consumePromptRequests((prompt) => void submit(prompt)),
     [consumePromptRequests, submit],
+  );
+  useEffect(
+    () => consumeDraftRequests(sessionId, (text) => {
+      setValue(text);
+      valueRef.current = text;
+      requestAnimationFrame(() => ref.current?.focus());
+    }),
+    [sessionId, consumeDraftRequests],
   );
 
   const stop = useCallback(async () => {

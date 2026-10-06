@@ -472,3 +472,6 @@ export type TerminalSelectionPreviewResponse = ApiSchema<"TerminalSelectionPrevi
 export type TerminalSelectionSubmissionRequest = ApiSchema<"TerminalSelectionSubmissionRequest">;
 export type TerminalSelectionSubmissionResponse = ApiSchema<"TerminalSelectionSubmissionResponse">;
 export type TerminalSelectionDelivery = ApiSchema<"TerminalSelectionDelivery">;
+export type ShellCommandRequest = ApiSchema<"ShellCommandRequest">;
+export type ShellCommandSnapshot = ApiSchema<"ShellCommandSnapshot">;
+export type ShellOutputPage = ApiSchema<"ShellOutputPage">;
