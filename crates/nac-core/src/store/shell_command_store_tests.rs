@@ -53,7 +53,9 @@ fn human_shell_result_reconciles_lost_commit_ack_and_fences_stale_writers() {
         uncertain.downcast_ref::<TranscriptAppendError>(),
         Some(TranscriptAppendError::CommitUncertain)
     ));
-    let first = writer.finish_shell_command("session", &command).unwrap();
+    let rebound =
+        TranscriptLogWriter::for_run(&path, "session", &command.operation_id, &lease).unwrap();
+    let first = rebound.finish_shell_command("session", &command).unwrap();
     let replay = writer.finish_shell_command("session", &command).unwrap();
     assert_eq!(first, replay);
     assert_eq!(list_shell_commands(&path, "session").unwrap(), vec![first]);

@@ -557,3 +557,6 @@ async fn human_shell_cancellation_reaps_the_descendant_process_tree() {
         .success();
     assert!(!alive, "cancelled descendant still exists");
 }
+
+#[path = "shell_recovery_tests.rs"]
+mod recovery;

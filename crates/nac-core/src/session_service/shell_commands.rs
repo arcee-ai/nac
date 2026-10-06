@@ -142,18 +142,15 @@ impl SessionService {
             .map_err(|_| ShellCommandError::Busy)?
             .shell_execution_context()
             .map_err(|_| ShellCommandError::Unsupported)?;
-        let lease = Arc::new(
-            self.prepare_operation_admission(None)
-                .map_err(|e| match e {
-                    OperationAdmissionPreparationError::ExternalBusy { .. } => {
-                        ShellCommandError::Busy
-                    }
-                    OperationAdmissionPreparationError::Coordination { message } => {
-                        store_error(message)
-                    }
-                })?
-                .ok_or(ShellCommandError::Unsupported)?,
-        );
+        let lease = self
+            .prepare_operation_admission(None)
+            .map_err(|e| match e {
+                OperationAdmissionPreparationError::ExternalBusy { .. } => ShellCommandError::Busy,
+                OperationAdmissionPreparationError::Coordination { message } => {
+                    store_error(message)
+                }
+            })?
+            .ok_or(ShellCommandError::Unsupported)?;
         let recovery = crate::store::reconcile_active_run(&self.metadata.store_path, session_id)
             .map_err(store_error)?;
         if let crate::store::ActiveRunReconciliation::Interrupted { run_id } = recovery {
@@ -171,8 +168,6 @@ impl SessionService {
         let workspace_lease = self
             .terminal_manager
             .acquire_workspace_activity_lease()
-            .map_err(store_error)?;
-        self.reconcile_shell_commands_under_lease(&lease)
             .map_err(store_error)?;
         let command = runtime
             .redact_output("", &request.command)
@@ -336,17 +331,10 @@ impl SessionService {
         snapshot.finished_at_epoch_ms = Some(now_epoch_ms());
         #[cfg(test)]
         test_crash_barrier("result");
-        let path = self.metadata.store_path.clone();
-        crate::store::spawn_blocking_store_caller(move || {
-            let writer =
-                TranscriptLogWriter::for_run(&path, &session_id, &snapshot.operation_id, &lease)?;
-            writer.finish_shell_command(&session_id, &snapshot)
-        })
-        .await??;
-        Ok(())
+        self.settle_shell_result(snapshot, lease).await
     }
 
-    fn reconcile_shell_commands_under_lease(
+    pub(super) fn reconcile_shell_commands_under_lease(
         &self,
         lease: &Arc<sessions::SessionOperationLease>,
     ) -> Result<()> {

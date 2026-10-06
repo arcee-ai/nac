@@ -149,7 +149,7 @@ impl std::error::Error for SessionCompactionAdmissionError {}
 
 pub(super) struct ActiveCompactionState {
     pub(super) snapshot: ActiveCompactionSnapshot,
-    pub(super) _operation_lease: Option<sessions::SessionOperationLease>,
+    pub(super) _operation_lease: Option<Arc<sessions::SessionOperationLease>>,
 }
 
 type SessionCompactionCompletion = CompactionCompletion;
