@@ -799,6 +799,10 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::session_runs::stream_events))
         .routes(routes!(delivery::session_runs::cancel_active_run))
         .routes(routes!(delivery::session_runs::cancel_exact_run))
+        .routes(routes!(delivery::shell_commands::submit_handler))
+        .routes(routes!(delivery::shell_commands::lookup_handler))
+        .routes(routes!(delivery::shell_commands::cancel_handler))
+        .routes(routes!(delivery::shell_commands::output_handler))
         .routes(routes!(delivery::session_terminals::terminate_handler))
 }
 

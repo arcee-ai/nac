@@ -36,6 +36,20 @@ impl ApiError {
     }
 }
 
+impl From<nac_core::session_service::ShellCommandError> for ApiError {
+    fn from(error: nac_core::session_service::ShellCommandError) -> Self {
+        use nac_core::session_service::ShellCommandError;
+        let status = match &error {
+            ShellCommandError::Invalid(_) | ShellCommandError::Unsupported => {
+                StatusCode::BAD_REQUEST
+            }
+            ShellCommandError::Busy | ShellCommandError::Conflict => StatusCode::CONFLICT,
+            ShellCommandError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self::new(status, error.to_string())
+    }
+}
+
 impl From<JsonRejection> for ApiError {
     fn from(error: JsonRejection) -> Self {
         Self {
@@ -202,6 +216,11 @@ impl From<RequestConfigurationError> for ApiError {
 
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
+        if let Some(command) = error.downcast_ref::<nac_core::session_service::ShellCommandError>()
+        {
+            return command.clone().into();
+        }
+
         let message = error.to_string();
         let status = if let Some(error) = error.downcast_ref::<sessions::SessionConfigUpdateError>()
         {

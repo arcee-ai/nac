@@ -12,3 +12,7 @@ export type ReplayBoundaryEvent = ApiSchema<"ReplayBoundaryEvent">;
 export type ReplayGapEvent = ApiSchema<"ReplayGapEvent">;
 
 export type UiConfiguration = ApiSchema<"UiConfiguration">;
+
+export type ShellCommandRequest = ApiSchema<"ShellCommandRequest">;
+export type ShellCommandSnapshot = ApiSchema<"ShellCommandSnapshot">;
+export type ShellOutputPage = ApiSchema<"ShellOutputPage">;

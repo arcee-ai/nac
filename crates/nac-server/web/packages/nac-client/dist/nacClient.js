@@ -331,6 +331,34 @@ export class NacClient {
         });
         return { snapshot, baseline, replay };
     }
+    async submitShellCommand(sessionId, request, signal) {
+        const admission = await this.transport.admit("POST", `${sessionPath(sessionId)}/user-commands`, {
+            body: request,
+            requestId: request.request_id,
+            signal,
+        });
+        if (admission.status === "accepted")
+            return admission.response;
+        if (admission.status === "not-sent")
+            throw new DOMException("Command was not sent", "AbortError");
+        // A lost admission response never triggers another submission. Read the
+        // same durable identity once; failure leaves the outcome explicitly unknown.
+        try {
+            return await this.getShellCommand(sessionId, request.request_id, signal);
+        }
+        catch {
+            throw new UncertainCommandAdmissionError(request.request_id, admission.error);
+        }
+    }
+    getShellCommand(sessionId, requestId, signal) {
+        return this.transport.request("GET", `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}`, { signal });
+    }
+    cancelShellCommand(sessionId, requestId, signal) {
+        return this.transport.request("POST", `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}/cancel`, { signal });
+    }
+    getShellOutput(sessionId, requestId, offset = 0, signal) {
+        return this.transport.request("GET", `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}/output?offset=${offset}`, { signal });
+    }
     submitPrompt(sessionId, prompt, signal) {
         return this.transport.admit("POST", `${sessionPath(sessionId)}/runs`, {
             body: { prompt },

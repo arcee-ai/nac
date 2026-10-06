@@ -132,6 +132,13 @@ pub fn clone_session_conversation_artifacts(
         prefix_len,
         prefix.len() == source_transcript_len,
     )?;
+    // Copy settled human history inside the same prefix transaction. Output
+    // handles belong to their original process/session and are never inherited.
+    tx.execute("INSERT INTO human_shell_operations (session_id, request_id, fingerprint, operation_id, phase, snapshot_json)
+        SELECT ?1, request_id, fingerprint, operation_id, phase, json_set(snapshot_json, '$.output_id', NULL)
+        FROM human_shell_operations WHERE session_id=?2 AND phase='finished'
+        AND json_extract(snapshot_json, '$.transcript_index') < ?3",
+        params![fork_session_id, source_session_id, prefix_len])?;
     tx.commit()?;
     Ok(())
 }

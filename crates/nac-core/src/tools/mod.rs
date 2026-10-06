@@ -484,3 +484,27 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         command_redactions: Arc::new(StdMutex::new(HashMap::new())),
     }
 }
+
+/// Native human invocation retains the same registered exec implementation.
+pub(crate) async fn execute_submitted_shell(
+    submission: &crate::session_service::SubmittedShell,
+    runtime: &ToolRuntime,
+    client: &crate::model::ModelClient,
+    context: &kernel::ToolCallContext,
+) -> ToolResult {
+    let registry = match kernel::ToolRegistry::builder()
+        .register(terminal_tools::ExecCommandTool)
+        .finish()
+    {
+        Ok(registry) => registry,
+        Err(error) => return ToolResult::text(error.to_string(), true),
+    };
+    let snapshot = registry.snapshot_where(|_| true);
+    snapshot
+        .invoke_submitted_shell(
+            submission,
+            kernel::ToolServices { runtime, client },
+            context,
+        )
+        .await
+}

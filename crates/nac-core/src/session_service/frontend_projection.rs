@@ -290,6 +290,11 @@ impl SessionService {
         &self,
         options: FrontendSnapshotLoadOptions,
     ) -> Result<SessionFrontendSnapshotLoad> {
+        let shell_commands = if self.metadata.session_id.is_some() {
+            self.shell_commands().await?
+        } else {
+            Vec::new()
+        };
         // SQLite and git are synchronous. Keep all dashboard storage reads on
         // one connection and move that connection plus git subprocesses off
         // the async runtime workers. Load steering before the transcript so a
@@ -356,6 +361,7 @@ impl SessionService {
             response_timing,
             active_run: self.active_run(),
             active_compaction: self.active_compaction(),
+            shell_commands,
             sessions: blocking.sessions,
             active_threads,
             threads: blocking.threads,

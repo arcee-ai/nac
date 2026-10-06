@@ -98,6 +98,11 @@ impl SessionService {
         } else {
             TranscriptScanCache::default()
         };
+        let shell_runtime = run_config
+            .agent
+            .shell_execution_context()
+            .ok()
+            .map(|(runtime, _)| runtime);
         let service = Self {
             agent: Arc::new(Mutex::new(run_config.agent)),
             goal_runtime,
@@ -117,6 +122,7 @@ impl SessionService {
             skills,
             mcp,
             terminal_manager,
+            shell_runtime,
             permission_broker,
             sandbox_resource_lease: Arc::new(StdMutex::new(None)),
             has_sandbox,

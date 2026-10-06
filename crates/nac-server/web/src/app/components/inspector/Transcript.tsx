@@ -1,3 +1,4 @@
+import { CommandCard } from "@/app/features/human-shell/CommandCard";
 import { useNavigate } from "react-router-dom";
 import {
   Fragment,
@@ -663,6 +664,21 @@ export function Transcript({
                 return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
               }
               if (turn.kind === "user") {
+                const command = (snapshot?.shell_commands ?? []).find(
+                  (candidate) =>
+                    candidate.transcript_index === turn.messageIndex &&
+                    turn.text.startsWith("<human_shell_result>\n") &&
+                    turn.text.includes(`"operation_id":"${candidate.operation_id}"`),
+                );
+                if (command)
+                  return (
+                    <CommandCard
+                      key={turn.key}
+                      sessionId={sessionId}
+                      command={command}
+                      readOnly={readOnly}
+                    />
+                  );
                 return (
                   <UserMessage
                     key={turn.key}
@@ -807,6 +823,16 @@ export function Transcript({
             />
           ) : null}
 
+          {(snapshot?.shell_commands ?? [])
+            .filter((command) => command.state === "accepted" || command.state === "started")
+            .map((command) => (
+              <CommandCard
+                key={command.operation_id}
+                sessionId={sessionId}
+                command={command}
+                readOnly={readOnly}
+              />
+            ))}
           <TranscriptRecoveryNotice warning={snapshot?.transcript_recovery_warning} />
         </div>
       </div>

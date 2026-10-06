@@ -881,6 +881,12 @@ impl SessionManager {
         application::session_runs::SessionRunApplication::new(self)
     }
 
+    pub(crate) fn shell_commands(
+        &self,
+    ) -> application::shell_commands::ShellCommandApplication<'_> {
+        application::shell_commands::ShellCommandApplication::new(self)
+    }
+
     pub(crate) fn session_terminals(
         &self,
     ) -> application::session_terminals::SessionTerminalApplication<'_> {

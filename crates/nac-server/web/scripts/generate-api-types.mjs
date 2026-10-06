@@ -28,6 +28,9 @@ const clientSchemaRoots = [
   "SessionEventEnvelope",
   "SessionSnapshotResponse",
   "SubmitPromptResponse",
+  "ShellCommandRequest",
+  "ShellCommandSnapshot",
+  "ShellOutputPage",
 ];
 
 const document = JSON.parse(await readFile(inputPath, "utf8"));

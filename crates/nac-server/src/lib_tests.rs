@@ -996,3 +996,6 @@ mod terminals;
 
 #[path = "tests/owned_serving.rs"]
 mod owned_serving;
+
+#[path = "tests/shell_commands.rs"]
+mod shell_commands;

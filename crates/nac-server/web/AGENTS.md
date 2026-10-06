@@ -51,6 +51,9 @@ server remains the source of business truth and wire schemas.
   SSH/sandbox fields and advanced launch draft in one accessible form. Ordered
   commands and session-request construction belong in `features/setup`, while
   the modal retains local field state and its presentation.
+- `components/inspector/Transcript.tsx` keeps canonical message grouping, tool
+  pairing, and attributed command results in one ordered transcript view. Feature
+  mutations and output paging remain in their feature owners.
 - `components/inspector/ThreadsView.tsx` keeps orchestrator thread/workset
   navigation and episode rendering together. Direct-child and managed-host
   workflows remain separate features.

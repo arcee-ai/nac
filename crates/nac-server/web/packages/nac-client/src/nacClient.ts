@@ -6,6 +6,9 @@ import type {
   SessionEventEnvelope,
   SessionSnapshotResponse,
   SubmitPromptResponse,
+  ShellCommandRequest,
+  ShellCommandSnapshot,
+  ShellOutputPage,
 } from "./types.js";
 
 export const NAC_HTTP_CLIENT_VERSION = 1 as const;
@@ -502,6 +505,56 @@ export class NacClient {
       signal: replayOptions.signal ?? snapshotOptions.signal,
     });
     return { snapshot, baseline, replay };
+  }
+
+  async submitShellCommand(
+    sessionId: string,
+    request: ShellCommandRequest,
+    signal?: AbortSignal,
+  ): Promise<ShellCommandSnapshot> {
+    const admission = await this.transport.admit<ShellCommandSnapshot>(
+      "POST",
+      `${sessionPath(sessionId)}/user-commands`,
+      {
+        body: request,
+        requestId: request.request_id,
+        signal,
+      },
+    );
+    if (admission.status === "accepted") return admission.response;
+    if (admission.status === "not-sent")
+      throw new DOMException("Command was not sent", "AbortError");
+    // A lost admission response never triggers another submission. Read the
+    // same durable identity once; failure leaves the outcome explicitly unknown.
+    try {
+      return await this.getShellCommand(sessionId, request.request_id, signal);
+    } catch {
+      throw new UncertainCommandAdmissionError(request.request_id, admission.error);
+    }
+  }
+
+  getShellCommand(sessionId: string, requestId: string, signal?: AbortSignal) {
+    return this.transport.request<ShellCommandSnapshot>(
+      "GET",
+      `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}`,
+      { signal },
+    );
+  }
+
+  cancelShellCommand(sessionId: string, requestId: string, signal?: AbortSignal) {
+    return this.transport.request<ShellCommandSnapshot>(
+      "POST",
+      `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}/cancel`,
+      { signal },
+    );
+  }
+
+  getShellOutput(sessionId: string, requestId: string, offset = 0, signal?: AbortSignal) {
+    return this.transport.request<ShellOutputPage>(
+      "GET",
+      `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}/output?offset=${offset}`,
+      { signal },
+    );
   }
 
   submitPrompt(sessionId: string, prompt: string, signal?: AbortSignal) {

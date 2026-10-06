@@ -400,6 +400,16 @@ impl SessionService {
                     active_run: active_run.snapshot.clone(),
                 });
             }
+            Some(ActiveSessionOperation::HumanShell(active)) => {
+                return Err(SessionSubmitError::ExternalBusy {
+                    session_id: SessionOperationBusy::Local {
+                        session_id: self.metadata.session_id.clone().unwrap_or_default(),
+                        active_operation: ActiveSessionOperationSnapshot::HumanShell {
+                            command: Box::new(active.snapshot.clone()),
+                        },
+                    },
+                });
+            }
             Some(ActiveSessionOperation::ManualCompaction(active)) => {
                 return Err(SessionSubmitError::ExternalBusy {
                     session_id: SessionOperationBusy::Local {
