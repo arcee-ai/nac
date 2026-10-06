@@ -20,6 +20,7 @@ import {
 import { AgentSpawnButton } from "@/app/components/inspector/AgentSpawnMenu";
 import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
 import { parseComposerInput } from "@/app/features/direct-session/userCommand";
+import { UncertainCommandAdmissionError } from "@/app/services/nacClient";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { GoalControls } from "@/app/components/inspector/GoalControls";
@@ -695,6 +696,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const submit = useCallback(
     async (text: string = value, requestedDelivery?: InboxDelivery) => {
       const input = parseComposerInput(text, direct && !readOnly);
+      if (input.kind === "unsupported-command") {
+        toast.error("Command not run: shell commands are available only in direct primary chats.");
+        return;
+      }
       const prompt = input.kind === "command" ? input.command : input.prompt;
       if (!prompt || busy || submitInFlight.current) return;
       const fromField = text === value;
@@ -717,7 +722,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             clearField();
           } catch (error) {
             if (!current()) return;
-            toast.error(`Command not run: ${errorMessage(toRunError(error))}`);
+            const label =
+              error instanceof UncertainCommandAdmissionError
+                ? "Command outcome unknown"
+                : "Command not run";
+            toast.error(`${label}: ${errorMessage(toRunError(error))}`);
           }
           return;
         }
@@ -821,7 +830,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       }),
     [],
   );
-  const commandMode = parseComposerInput(value, direct && !readOnly).kind === "command";
+  const commandMode = parseComposerInput(value, direct && !readOnly).kind;
 
   const stop = useCallback(async () => {
     await actions.stopRun(sessionId);
@@ -1263,9 +1272,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         fieldWithSuggestions
       )}
 
-      {commandMode ? (
+      {commandMode !== "prompt" ? (
         <p role="status" className="text-small text-basic-secondary">
-          Runs as a shell command. Start with \! to send text.
+          {commandMode === "command"
+            ? "Runs as a shell command."
+            : "Shell commands require a direct primary chat."}
+          {" Start with \\! to send text."}
         </p>
       ) : null}
 

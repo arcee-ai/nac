@@ -25,9 +25,12 @@ describe("parseComposerInput", () => {
     expect(parseComposerInput("\\!ls", true)).toEqual({ kind: "prompt", prompt: "!ls" });
   });
 
-  it("recognizes nothing outside a direct primary chat", () => {
-    expect(parseComposerInput("!ls", false)).toEqual({ kind: "prompt", prompt: "!ls" });
-    expect(parseComposerInput("\\!ls", false)).toEqual({ kind: "prompt", prompt: "\\!ls" });
+  it("recognizes and rejects shell intent outside a direct primary chat", () => {
+    expect(parseComposerInput("!ls", false)).toEqual({
+      kind: "unsupported-command",
+      command: "ls",
+    });
+    expect(parseComposerInput("\\!ls", false)).toEqual({ kind: "prompt", prompt: "!ls" });
   });
 });
 

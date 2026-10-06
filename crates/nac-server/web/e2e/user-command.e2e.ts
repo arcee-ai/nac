@@ -70,6 +70,21 @@ for (const mobile of [false, true]) {
     harness.provider.assertConsumed();
     expect(harness.provider.requests).toHaveLength(1);
     expect(JSON.stringify(harness.provider.requests[0].body)).toContain("USER_CMD_OUT");
+    // A transport failure plus unresolved lookup must remain unknown, never
+    // claim rejection or automatically submit the shell effect again.
+    let submissions = 0;
+    const commandRoute = `**/sessions/${session}/user-commands`;
+    await page.route(commandRoute, async (route) => {
+      submissions += 1;
+      await route.abort("failed");
+    });
+    await composer.fill("!echo uncertain");
+    await send.click();
+    await expect(page.getByText(/Command outcome unknown: NAC may have accepted/)).toBeVisible();
+    await expect(composer).toHaveValue("!echo uncertain");
+    expect(submissions).toBe(1);
+    expect(harness.provider.requests).toHaveLength(1);
+    await page.unroute(commandRoute);
     if (mobile) {
       expect(await page.locator("html").evaluate((node) => node.scrollWidth)).toBeLessThanOrEqual(
         390,

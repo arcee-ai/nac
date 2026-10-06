@@ -168,7 +168,8 @@ client-chosen `request_id`, a nonblank `command`, and an optional `timeout_ms`
 between 1 and 3600000 (default 30000). A new admission returns 202 with the
 command snapshot. The composer removes only the leading `!`, preserving the
 remaining payload exactly; `\!` submits literal chat text. A command never
-starts a model run.
+starts a model run. The composer rejects shell intent in unsupported topologies
+before ordinary prompt or steering admission.
 
 `request_id` is the idempotency key. Re-posting the same `request_id` with the
 same command and effective timeout returns 200 with the current snapshot in any
@@ -178,7 +179,9 @@ active, a new `request_id` returns 409 busy and no record is written. Orchestrat
 sessions return 400; unknown sessions and delegated sessions return 404.
 
 `GET /sessions/{session_id}/user-commands/{request_id}` reads the snapshot. A
-client that lost an admission response looks the command up here.
+client that lost an admission response looks the command up here. An unresolved
+lookup remains visibly uncertain and refreshes the session snapshot without
+retrying the submission or claiming that the command was rejected.
 `POST .../cancel` cancels an active command owned by this process and returns
 the snapshot; a terminal command is returned unchanged. Shutdown cancels active
 commands.

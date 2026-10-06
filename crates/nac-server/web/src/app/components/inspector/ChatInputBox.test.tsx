@@ -336,6 +336,22 @@ describe("responsive Enter behavior", () => {
     expect(fakes.compactSession).not.toHaveBeenCalled();
   });
 
+  it("rejects unsupported shell intent before model or steering submission", async () => {
+    const textarea = composer({ behavior: "orchestrator" });
+    type(textarea, "!echo unsupported");
+    expect(
+      screen.getByText("Shell commands require a direct primary chat.", { exact: false }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
+    await waitFor(() =>
+      expect(screen.getByText(/Command not run: shell commands are available only/)).toBeTruthy(),
+    );
+    expect(textarea.value).toBe("!echo unsupported");
+    expect(fakes.submitRun).not.toHaveBeenCalled();
+    expect(fakes.steerOrchestrator).not.toHaveBeenCalled();
+    expect(fakes.createInboxItem).not.toHaveBeenCalled();
+  });
+
   it("lets mobile Enter insert a newline while a suggestion is open", () => {
     mobile = true;
     const textarea = composer();

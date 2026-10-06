@@ -483,6 +483,9 @@ export function useSubmitUserCommand() {
       client.setQueryData(queryKeys.userCommand(id, command.request_id), command);
       void invalidate.session(id);
     },
+    onError: (error, { id }) => {
+      if (error instanceof UncertainCommandAdmissionError) void invalidate.session(id);
+    },
   });
 }
 
