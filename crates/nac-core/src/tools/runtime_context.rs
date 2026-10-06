@@ -111,13 +111,17 @@ impl ToolRuntime {
             .cloned();
         match snapshot {
             Some(snapshot) => Ok(snapshot.redact(text)),
-            None => {
-                let snapshot = match self.command_environment.as_ref() {
-                    Some(provider) => provider.redaction_snapshot()?,
-                    None => nac_contracts::CommandEnvironmentSnapshot::empty(),
-                };
-                Ok(snapshot.redact(text))
-            }
+            None => Ok(self.redaction_snapshot()?.redact(text)),
+        }
+    }
+
+    /// The current managed credential values, without resolving any new ones.
+    pub(crate) fn redaction_snapshot(
+        &self,
+    ) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
+        match self.command_environment.as_ref() {
+            Some(provider) => provider.redaction_snapshot(),
+            None => Ok(nac_contracts::CommandEnvironmentSnapshot::empty()),
         }
     }
 }

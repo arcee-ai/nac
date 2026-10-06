@@ -271,7 +271,7 @@ impl TranscriptLogWriter {
             expected_start,
             messages,
             AppendPurpose::Messages,
-            |_| Ok(()),
+            |_, _| Ok(()),
         )
     }
 
@@ -282,7 +282,7 @@ impl TranscriptLogWriter {
         expected_start: Option<u64>,
         messages: &[Message],
         purpose: AppendPurpose<'_>,
-        effects: impl Fn(&Transaction<'_>) -> Result<()>,
+        effects: impl Fn(&Transaction<'_>, i64) -> Result<()>,
     ) -> Result<TranscriptAppendReceipt> {
         if messages.is_empty() || operation_id.is_empty() {
             anyhow::bail!("an identified transcript append requires an identity and messages");
@@ -317,7 +317,7 @@ impl TranscriptLogWriter {
                     messages,
                 )?;
                 self.append_fault(AppendFault::Statements)?;
-                effects(transaction)?;
+                effects(transaction, last_message_id)?;
                 let end_idx = start_idx
                     .checked_add(messages.len() as u64)
                     .context("transcript log index overflowed")?;

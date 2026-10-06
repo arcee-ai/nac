@@ -219,8 +219,17 @@ async fn compaction_keeps_the_record_position_and_attribution() {
     assert_eq!(after.user_commands, vec![command.clone()]);
     assert_eq!(
         fixture.service.user_command("kept").await.unwrap(),
-        Some(command)
+        Some(command.clone())
     );
+
+    let reloaded = fixture.reopen();
+    let reloaded_snapshot = reloaded.frontend_snapshot().await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&reloaded_snapshot.messages[index]).unwrap(),
+        serde_json::to_value(&before.messages[index]).unwrap()
+    );
+    assert_eq!(reloaded_snapshot.user_commands, vec![command.clone()]);
+    assert_eq!(reloaded.user_command("kept").await.unwrap(), Some(command));
     assert_eq!(server.finish().len(), 3);
 }
 

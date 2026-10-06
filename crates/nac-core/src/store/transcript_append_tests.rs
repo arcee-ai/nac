@@ -450,7 +450,7 @@ fn transcript_append_in_flight_transaction_retains_lease_until_commit() {
                 Some(0),
                 &[message("prompt")],
                 AppendPurpose::RunPrompt("run"),
-                |transaction| {
+                |transaction, _| {
                     replace_with_active_run(
                         transaction,
                         "session",

@@ -76,6 +76,14 @@ impl OutputStream {
             )),
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Combined => "combined",
+            Self::Stdout => "stdout",
+            Self::Stderr => "stderr",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -17,7 +17,9 @@ pub(crate) fn visible_message_count(messages: &[Message]) -> usize {
 
 pub(crate) fn last_user_prompt(messages: &[Message]) -> Option<String> {
     messages.iter().rev().find_map(|message| match message {
-        Message::User { content } => Some(content.clone()),
+        Message::User { content } if !crate::store::is_user_command_record(content) => {
+            Some(content.clone())
+        }
         _ => None,
     })
 }

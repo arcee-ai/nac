@@ -117,15 +117,28 @@ impl UserCommandSnapshot {
     }
 }
 
+const RECORD_OPEN: &str = "<user_command>";
+
+/// Whether transcript user content is a user-command record rather than typed prompt text.
+pub(crate) fn is_user_command_record(content: &str) -> bool {
+    content.starts_with(RECORD_OPEN)
+}
+
+/// Escapes frame delimiters so interpolated text cannot open or close a record.
+fn inert(text: &str) -> String {
+    text.replace("</user_command", "&lt;/user_command")
+        .replace("<user_command", "&lt;user_command")
+}
+
 /// The deterministic attributed transcript record of one terminal user command.
 pub(crate) fn user_command_record(snapshot: &UserCommandSnapshot) -> Message {
     let mut lines = vec![
-        "<user_command>".to_string(),
+        RECORD_OPEN.to_string(),
         "The user ran this shell command directly; the assistant did not run it.".to_string(),
-        format!("command: {}", snapshot.command),
+        format!("command: {}", inert(&snapshot.command)),
         format!(
             "cwd: {}",
-            snapshot.cwd.as_deref().unwrap_or("session default")
+            inert(snapshot.cwd.as_deref().unwrap_or("session default"))
         ),
         format!("state: {}", snapshot.state.as_str()),
         format!("timeout_ms: {}", snapshot.timeout_ms),
@@ -137,20 +150,20 @@ pub(crate) fn user_command_record(snapshot: &UserCommandSnapshot) -> Message {
         lines.push(format!("duration_ms: {wall_time_ms}"));
     }
     if let Some(reason) = &snapshot.reason {
-        lines.push(format!("reason: {reason}"));
+        lines.push(format!("reason: {}", inert(reason)));
     }
     if snapshot.truncated || snapshot.overflowed {
         lines.push("output: truncated".to_string());
     }
     if let Some(output_id) = &snapshot.output_id {
-        lines.push(format!("output_id: {output_id}"));
+        lines.push(format!("output_id: {}", inert(output_id)));
     }
     for (name, preview) in [
         ("stdout", &snapshot.stdout_preview),
         ("stderr", &snapshot.stderr_preview),
     ] {
         if !preview.is_empty() {
-            lines.push(format!("{name}:\n{preview}"));
+            lines.push(format!("{name}:\n{}", inert(preview)));
         }
     }
     lines.push("</user_command>".to_string());
@@ -190,10 +203,10 @@ const SELECT_USER_COMMAND: &str = "SELECT c.request_id, c.command, c.timeout_ms,
      FROM session_user_commands c
      LEFT JOIN thread_events e ON e.id = c.transcript_message_id";
 
-fn row_to_user_command(row: &rusqlite::Row<'_>) -> rusqlite::Result<(StoredUserCommand, String)> {
-    let result = row
-        .get::<_, Option<String>>(4)?
-        .and_then(|json| serde_json::from_str::<CommandOutput>(&json).ok());
+/// A row with its state and result JSON still undecoded.
+type UserCommandRow = (StoredUserCommand, String, Option<String>);
+
+fn row_to_user_command(row: &rusqlite::Row<'_>) -> rusqlite::Result<UserCommandRow> {
     let snapshot = UserCommandSnapshot {
         request_id: row.get(0)?,
         command: row.get(1)?,
@@ -212,21 +225,31 @@ fn row_to_user_command(row: &rusqlite::Row<'_>) -> rusqlite::Result<(StoredUserC
         created_at_epoch_ms: row.get(8)?,
         finished_at_epoch_ms: row.get(9)?,
         message_index: row.get::<_, Option<i64>>(10)?.map(|idx| idx as usize),
-    }
-    .with_result(result.as_ref());
+    };
     Ok((
         StoredUserCommand {
             snapshot,
             payload_digest: row.get(11)?,
         },
         row.get(3)?,
+        row.get(4)?,
     ))
 }
 
 fn decode_user_command(
-    (mut stored, state): (StoredUserCommand, String),
+    (mut stored, state, result_json): UserCommandRow,
 ) -> Result<StoredUserCommand> {
     stored.snapshot.state = UserCommandState::parse(&state)?;
+    let result = result_json
+        .map(|json| serde_json::from_str::<CommandOutput>(&json))
+        .transpose()
+        .with_context(|| {
+            format!(
+                "corrupt result for user command '{}'",
+                stored.snapshot.request_id
+            )
+        })?;
+    stored.snapshot = stored.snapshot.with_result(result.as_ref());
     Ok(stored)
 }
 
@@ -439,18 +462,25 @@ pub(crate) fn reconcile_unsettled_user_command(
         state,
         result: None,
         reason: Some(reason.to_string()),
-        process_started: false,
+        // An executing row was committed before spawn, so its process may have run.
+        process_started: unsettled.state == UserCommandState::Executing,
         finished_at_epoch_ms: epoch_ms_now(),
     };
     let record = user_command_record(&unsettled.finished(&terminal));
     let start_idx = super::transcript::next_append_idx(&transaction, session_id)?;
-    super::transcript::append_messages_in_transaction(
+    let message_id = super::transcript::append_messages_in_transaction(
         &transaction,
         session_id,
         start_idx,
         std::slice::from_ref(&record),
     )?;
-    finish_user_command_in_transaction(&transaction, session_id, &unsettled.request_id, &terminal)?;
+    finish_user_command_in_transaction(
+        &transaction,
+        session_id,
+        &unsettled.request_id,
+        &terminal,
+        message_id,
+    )?;
     let reconciled = find_user_command_with_connection(&transaction, session_id, &unsettled.request_id)?
         .map(|stored| stored.snapshot);
     transaction.commit()?;
@@ -464,12 +494,13 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
-/// Precondition: the row is still `terminal.from`; the record was just appended.
+/// Precondition: the row is still `terminal.from`; `message_id` is the appended record.
 fn finish_user_command_in_transaction(
     transaction: &Transaction<'_>,
     session_id: &str,
     request_id: &str,
     terminal: &UserCommandTerminal,
+    message_id: i64,
 ) -> Result<()> {
     let result_json = terminal
         .result
@@ -489,7 +520,7 @@ fn finish_user_command_in_transaction(
             terminal.reason,
             terminal.process_started,
             terminal.finished_at_epoch_ms,
-            transaction.last_insert_rowid(),
+            message_id,
             terminal.from.as_str(),
         ],
     )?;
@@ -525,8 +556,14 @@ impl TranscriptLogWriter {
             None,
             std::slice::from_ref(record),
             AppendPurpose::UserCommand(request_id),
-            |transaction| {
-                finish_user_command_in_transaction(transaction, session_id, request_id, terminal)
+            |transaction, message_id| {
+                finish_user_command_in_transaction(
+                    transaction,
+                    session_id,
+                    request_id,
+                    terminal,
+                    message_id,
+                )
             },
         )
     }

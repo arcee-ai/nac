@@ -14,9 +14,27 @@ const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const MAX_TIMEOUT_MS: u64 = 3_600_000;
 const COMMIT_ATTEMPTS: usize = 3;
 
-/// Proof that the session service admitted this exact submitted command.
+/// Proof that the session service admitted this exact submitted command. It also carries the
+/// typed result back, so classification never parses text that redaction may have altered.
 #[derive(Clone, Debug)]
-pub(crate) struct UserCommandAuthority(());
+pub(crate) struct UserCommandAuthority(Arc<StdMutex<Option<CommandOutput>>>);
+
+impl UserCommandAuthority {
+    /// Records the one-shot result; the caller has already redacted the previews.
+    pub(crate) fn capture(&self, output: CommandOutput) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(output);
+    }
+
+    fn take(&self) -> Option<CommandOutput> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserCommandRequest {
@@ -24,6 +42,30 @@ pub struct UserCommandRequest {
     pub command: String,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+}
+
+impl UserCommandRequest {
+    /// Validates the request and returns the timeout it runs with.
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
+    pub fn effective_timeout_ms(&self) -> Result<u64, UserCommandSubmitError> {
+        let invalid = |message: &str| UserCommandSubmitError::Invalid {
+            message: message.to_owned(),
+        };
+        if self.request_id.trim().is_empty() {
+            return Err(invalid("request_id must not be empty"));
+        }
+        if self.command.trim().is_empty() {
+            return Err(invalid("command must not be empty"));
+        }
+        let timeout_ms = self.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
+        if !(1..=MAX_TIMEOUT_MS).contains(&timeout_ms) {
+            return Err(invalid("timeout_ms must be between 1 and 3600000"));
+        }
+        Ok(timeout_ms)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,51 +147,50 @@ pub(super) struct ActiveUserCommandState {
 }
 
 struct UserCommandExecution {
+    /// The command as typed; the snapshot keeps only its redacted form.
+    command: String,
+    redaction: nac_contracts::CommandEnvironmentSnapshot,
     runtime: ToolRuntime,
     client: ModelClient,
     cancellation: ThreadCancellation,
     lease: Arc<sessions::SessionOperationLease>,
 }
 
-pub(crate) async fn invoke_submitted_command(
+async fn invoke_captured(
     command: &str,
     timeout_ms: u64,
     runtime: &ToolRuntime,
     client: &ModelClient,
-) -> Result<ToolResult, ToolInvocationRejection> {
+) -> (
+    Result<ToolResult, ToolInvocationRejection>,
+    Option<CommandOutput>,
+) {
+    let authority = UserCommandAuthority(Arc::new(StdMutex::new(None)));
     let context = ToolCallContext {
-        authority: InvocationAuthority::SubmittedUserCommand(UserCommandAuthority(())),
+        authority: InvocationAuthority::SubmittedUserCommand(authority.clone()),
         ..Default::default()
     };
-    crate::tools::exec_command_snapshot()
+    let outcome = crate::tools::exec_command_snapshot()
         .invoke_authorized(
             "exec_command",
             json!({"cmd": command, "yield_time_ms": timeout_ms}),
             ToolServices { runtime, client },
             &context,
         )
-        .await
+        .await;
+    (outcome, authority.take())
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "admission errors carry the complete active-operation conflict snapshot"
-)]
-fn effective_timeout(request: &UserCommandRequest) -> Result<u64, UserCommandSubmitError> {
-    let invalid = |message: &str| UserCommandSubmitError::Invalid {
-        message: message.to_owned(),
-    };
-    if request.request_id.trim().is_empty() {
-        return Err(invalid("request_id must not be empty"));
-    }
-    if request.command.trim().is_empty() {
-        return Err(invalid("command must not be empty"));
-    }
-    let timeout_ms = request.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
-    if !(1..=MAX_TIMEOUT_MS).contains(&timeout_ms) {
-        return Err(invalid("timeout_ms must be between 1 and 3600000"));
-    }
-    Ok(timeout_ms)
+#[cfg(test)]
+pub(crate) async fn invoke_submitted_command(
+    command: &str,
+    timeout_ms: u64,
+    runtime: &ToolRuntime,
+    client: &ModelClient,
+) -> Result<ToolResult, ToolInvocationRejection> {
+    invoke_captured(command, timeout_ms, runtime, client)
+        .await
+        .0
 }
 
 fn payload_digest(command: &str, timeout_ms: u64) -> String {
@@ -171,7 +212,7 @@ fn store_error(context: &str, error: impl std::fmt::Display) -> UserCommandSubmi
     reason = "admission errors carry the complete active-operation conflict snapshot"
 )]
 fn replay(
-    existing: crate::store::StoredUserCommand,
+    existing: &crate::store::StoredUserCommand,
     digest: &str,
     request_id: &str,
 ) -> Result<UserCommandAdmission, UserCommandSubmitError> {
@@ -181,7 +222,7 @@ fn replay(
         });
     }
     Ok(UserCommandAdmission {
-        command: existing.snapshot,
+        command: existing.snapshot.clone(),
         replayed: true,
     })
 }
@@ -205,28 +246,26 @@ fn terminal(
 
 fn invocation_terminal(
     outcome: Result<ToolResult, ToolInvocationRejection>,
+    output: Option<CommandOutput>,
     cancelled: bool,
 ) -> UserCommandTerminal {
     let from = UserCommandState::Executing;
+    if let Some(output) = output {
+        let state = match output.status {
+            CommandStatus::Completed => UserCommandState::Completed,
+            CommandStatus::TimedOut => UserCommandState::TimedOut,
+            CommandStatus::Cancelled => UserCommandState::Cancelled,
+            CommandStatus::SpawnError => UserCommandState::SpawnFailed,
+        };
+        let started = output.status != CommandStatus::SpawnError;
+        return terminal(from, state, Some(output), None, started);
+    }
     let unstarted = |state, reason| terminal(from, state, None, Some(reason), false);
     match outcome {
-        Ok(result) => {
-            let text = result.content.to_string();
-            match serde_json::from_str::<CommandOutput>(&text) {
-                Ok(output) => {
-                    let state = match output.status {
-                        CommandStatus::Completed => UserCommandState::Completed,
-                        CommandStatus::TimedOut => UserCommandState::TimedOut,
-                        CommandStatus::Cancelled => UserCommandState::Cancelled,
-                        CommandStatus::SpawnError => UserCommandState::SpawnFailed,
-                    };
-                    let started = output.status != CommandStatus::SpawnError;
-                    terminal(from, state, Some(output), None, started)
-                }
-                Err(_) if cancelled => unstarted(UserCommandState::Cancelled, text),
-                Err(_) => unstarted(UserCommandState::Rejected, text),
-            }
+        Ok(result) if cancelled => {
+            unstarted(UserCommandState::Cancelled, result.content.to_string())
         }
+        Ok(result) => unstarted(UserCommandState::Rejected, result.content.to_string()),
         Err(rejection @ ToolInvocationRejection::Cancelled(_)) => unstarted(
             UserCommandState::Cancelled,
             rejection.reason("exec_command"),
@@ -249,7 +288,7 @@ impl SessionService {
         request: UserCommandRequest,
         lease: sessions::SessionOperationLease,
     ) -> Result<UserCommandAdmission, UserCommandSubmitError> {
-        let timeout_ms = effective_timeout(&request)?;
+        let timeout_ms = request.effective_timeout_ms()?;
         let Some(session_id) = self.metadata.session_id.clone() else {
             return Err(UserCommandSubmitError::NotDirectPrimary);
         };
@@ -268,7 +307,7 @@ impl SessionService {
             crate::store::find_user_command(&path, &session_id, &request.request_id)
                 .map_err(|error| store_error("failed to look up user command", error))?
         {
-            return replay(existing, &digest, &request.request_id);
+            return replay(&existing, &digest, &request.request_id);
         }
         let _host_admission = self
             .managed_admission_enabled
@@ -321,6 +360,9 @@ impl SessionService {
                 message: SessionCoordinationError::local_agent_busy(),
             })?
             .user_command_services();
+        let redaction = runtime
+            .redaction_snapshot()
+            .map_err(|error| store_error("failed to read the command redactions", error))?;
         let cwd = runtime
             .backend
             .resolve_terminal_cwd(None)
@@ -331,7 +373,7 @@ impl SessionService {
             &session_id,
             &request.request_id,
             &digest,
-            &request.command,
+            &redaction.redact(&request.command),
             timeout_ms,
             cwd.as_deref(),
         )
@@ -339,7 +381,7 @@ impl SessionService {
         {
             UserCommandAdmitOutcome::Admitted(snapshot) => snapshot,
             UserCommandAdmitOutcome::Existing(existing) => {
-                return replay(existing, &digest, &request.request_id);
+                return replay(&existing, &digest, &request.request_id);
             }
             UserCommandAdmitOutcome::Busy(command) => {
                 return Err(UserCommandSubmitError::Busy {
@@ -363,6 +405,8 @@ impl SessionService {
         let command = admitted.clone();
         tokio::spawn(async move {
             let execution = UserCommandExecution {
+                command: request.command,
+                redaction,
                 runtime,
                 client,
                 cancellation,
@@ -374,6 +418,32 @@ impl SessionService {
             command: admitted,
             replayed: false,
         })
+    }
+
+    /// Returns the earlier admission of this request, or a conflict when its payload differs.
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
+    pub async fn replay_user_command(
+        &self,
+        request: &UserCommandRequest,
+    ) -> Result<Option<UserCommandAdmission>, UserCommandSubmitError> {
+        let digest = payload_digest(&request.command, request.effective_timeout_ms()?);
+        let Some(session_id) = self.metadata.session_id.clone() else {
+            return Ok(None);
+        };
+        let path = self.metadata.store_path.clone();
+        let request_id = request.request_id.clone();
+        let existing = crate::store::spawn_blocking_store_caller(move || {
+            crate::store::find_user_command(&path, &session_id, &request_id)
+        })
+        .await
+        .and_then(|found| found)
+        .map_err(|error| store_error("failed to look up user command", error))?;
+        existing
+            .map(|existing| replay(&existing, &digest, &request.request_id))
+            .transpose()
     }
 
     pub async fn user_command(&self, request_id: &str) -> Result<Option<UserCommandSnapshot>> {
@@ -568,14 +638,19 @@ impl SessionService {
         }
         command.state = UserCommandState::Executing;
         self.publish_executing(command.clone());
-        let outcome = invoke_submitted_command(
-            &command.command,
+        let (outcome, output) = invoke_captured(
+            &execution.command,
             command.timeout_ms,
             &execution.runtime,
             &execution.client,
         )
         .await;
-        invocation_terminal(outcome, execution.cancellation.is_cancelled())
+        let mut terminal =
+            invocation_terminal(outcome, output, execution.cancellation.is_cancelled());
+        terminal.reason = terminal
+            .reason
+            .map(|reason| execution.redaction.redact(&reason));
+        terminal
     }
 
     fn publish_executing(&self, command: UserCommandSnapshot) {

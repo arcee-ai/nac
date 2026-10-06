@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use crate::terminal::{
     CommandStatus, OutputStream, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
 };
+use crate::tools::kernel::InvocationAuthority;
 use crate::tools::{ThreadCancellation, ToolResult, ToolRuntime};
 use crate::types::{FunctionDef, ToolDefinition};
 
@@ -77,15 +78,22 @@ pub fn read_command_output_definition() -> ToolDefinition {
 
 #[cfg(test)]
 pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> ToolResult {
-    execute_exec_command_with_cancellation(args, runtime, &runtime.command_cancellation).await
+    execute_exec_command_with_cancellation(
+        args,
+        runtime,
+        &runtime.command_cancellation,
+        &InvocationAuthority::Model,
+    )
+    .await
 }
 
 pub(crate) async fn execute_exec_command_with_cancellation(
     args: &Value,
     runtime: &ToolRuntime,
     cancellation: &ThreadCancellation,
+    authority: &InvocationAuthority,
 ) -> ToolResult {
-    match execute_exec_command_inner(args, runtime, cancellation).await {
+    match execute_exec_command_inner(args, runtime, cancellation, authority).await {
         Ok((content, is_error)) => ToolResult {
             content: content.into(),
             is_error,
@@ -101,6 +109,7 @@ async fn execute_exec_command_inner(
     args: &Value,
     runtime: &ToolRuntime,
     cancellation: &ThreadCancellation,
+    authority: &InvocationAuthority,
 ) -> Result<(String, bool)> {
     if cancellation.is_cancelled() {
         return Err(anyhow!(
@@ -143,6 +152,13 @@ async fn execute_exec_command_inner(
             .await;
         if let Some(output_id) = output.output_id.as_deref() {
             runtime.remember_output_environment(output_id, command_environment.clone());
+        }
+        if let InvocationAuthority::SubmittedUserCommand(submitted) = authority {
+            submitted.capture(crate::terminal::CommandOutput {
+                stdout_preview: command_environment.redact(&output.stdout_preview),
+                stderr_preview: command_environment.redact(&output.stderr_preview),
+                ..output.clone()
+            });
         }
         let is_error = output.status == CommandStatus::SpawnError;
         return Ok((

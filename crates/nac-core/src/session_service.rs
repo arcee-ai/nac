@@ -51,6 +51,9 @@ pub use manual_compaction::{
 };
 
 pub use crate::store::{UserCommandSnapshot, UserCommandState};
+pub use crate::terminal::{
+    OutputPage, OutputSegment, OutputStream, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
+};
 #[cfg(test)]
 pub(crate) use user_command::invoke_submitted_command;
 use user_command::ActiveUserCommandState;

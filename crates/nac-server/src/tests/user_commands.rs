@@ -509,3 +509,32 @@ async fn shutdown_cancels_and_terminalizes_an_active_user_command() {
     let (status, _) = get_json(fixture.app.clone(), &command_uri(SESSION, "req-2")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn external_lease_holder_makes_submission_busy_without_row_or_process() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let fixture = Fixture::new("user_command_external_lease");
+    let marker = fixture.root.join("ran");
+    let held = nac_core::sessions::SessionOperationLease::try_acquire(
+        &fixture.root.join("store.db"),
+        SESSION,
+    )
+    .unwrap();
+
+    let (status, busy) = submit(
+        fixture.app.clone(),
+        SESSION,
+        serde_json::json!({"request_id": "req-1", "command": format!("touch '{}'", marker.display())}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{busy}");
+    assert!(
+        busy["error"].as_str().unwrap().contains("another process"),
+        "{busy}"
+    );
+    drop(held);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (status, _) = get_json(fixture.app.clone(), &command_uri(SESSION, "req-1")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!marker.exists());
+}

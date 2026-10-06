@@ -161,7 +161,7 @@ impl SessionService {
                     let visible = if raw >= blob_len {
                         blob_visible + (raw - blob_len)
                     } else {
-                        blob[..raw].iter().filter(is_visible).count()
+                        blob.iter().take(raw).filter(is_visible).count()
                     };
                     (start..end).contains(&visible).then(|| {
                         command.message_index = Some(visible);

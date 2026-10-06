@@ -17,16 +17,17 @@ const COUNTED: &str = "mktemp \"$NAC_TEST_RUNS/run.XXXXXX\"";
 /// Supplies a credential and a per-test directory whose entries count executions.
 struct TestEnvironment {
     runs: PathBuf,
+    secret: String,
 }
 
 impl TestEnvironment {
     fn environment(&self) -> nac_contracts::CommandEnvironmentSnapshot {
         nac_contracts::CommandEnvironmentSnapshot::from_parts(
             BTreeMap::from([
-                ("NAC_TEST_SECRET".to_string(), SECRET.to_string()),
+                ("NAC_TEST_SECRET".to_string(), self.secret.clone()),
                 ("NAC_TEST_RUNS".to_string(), self.runs.display().to_string()),
             ]),
-            vec![SECRET.to_string()],
+            vec![self.secret.clone()],
         )
     }
 }
@@ -62,13 +63,22 @@ impl Drop for Fixture {
 
 impl Fixture {
     fn new(label: &str, client: ModelClient, rules: Vec<PermissionRule>) -> Self {
+        Self::with_secret(label, client, rules, SECRET)
+    }
+
+    fn with_secret(
+        label: &str,
+        client: ModelClient,
+        rules: Vec<PermissionRule>,
+        secret: &str,
+    ) -> Self {
         let directory =
             std::env::temp_dir().join(format!("nac-user-command-{label}-{}", Uuid::new_v4()));
         std::fs::create_dir_all(directory.join("workspace")).unwrap();
         std::fs::create_dir_all(directory.join("runs")).unwrap();
         let workspace = directory.join("workspace").canonicalize().unwrap();
         let store_path = directory.join("store.db");
-        let parts = direct_service(&store_path, &workspace, client, rules);
+        let parts = direct_service(&store_path, &workspace, client, rules, secret);
         Self {
             service: parts.service,
             events: parts.events,
@@ -84,6 +94,7 @@ impl Fixture {
             &self.workspace,
             ModelClient::new_for_test(),
             Vec::new(),
+            SECRET,
         )
         .service
     }
@@ -132,6 +143,7 @@ fn direct_service(
     workspace: &Path,
     client: ModelClient,
     rules: Vec<PermissionRule>,
+    secret: &str,
 ) -> SessionServiceParts {
     let mut agent = Agent::with_config(
         client.clone(),
@@ -164,6 +176,7 @@ fn direct_service(
     .unwrap();
     agent.set_command_environment_provider(Some(Arc::new(TestEnvironment {
         runs: store_path.with_file_name("runs"),
+        secret: secret.to_string(),
     })));
     let snapshot = sessions::load_session(store_path, SESSION).unwrap_or_else(|_| {
         let mut snapshot = sessions::new_snapshot(
@@ -702,6 +715,7 @@ async fn reopened_service_reconciles_unsettled_commands_once_without_rerunning()
     );
     let unknown = state("executing-crash");
     assert_eq!(unknown.state, UserCommandState::OutcomeUnknown);
+    assert!(unknown.process_started);
     assert!(unknown.reason.unwrap().contains("not rerun"));
     assert_eq!(records(&reopened).await.len(), 3);
 
@@ -818,6 +832,147 @@ async fn revert_removes_the_record_while_lookup_keeps_the_terminal_state() {
     assert_eq!(after.state, UserCommandState::Completed);
     assert_eq!(after.message_index, None);
     assert!(records(&fixture.service).await.is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn submission_during_manual_compaction_is_busy_without_row_or_process() {
+    let fixture = Fixture::new("compaction-busy", ModelClient::new_for_test(), Vec::new());
+    *fixture.service.lock_active_operation() = Some(ActiveSessionOperation::ManualCompaction(
+        ActiveCompactionState {
+            snapshot: ActiveCompactionSnapshot {
+                compaction_id: Uuid::new_v4(),
+                client_id: None,
+                started_at_epoch_ms: 1,
+            },
+            _operation_lease: None,
+        },
+    ));
+
+    assert!(matches!(
+        fixture.submit("during-compaction", COUNTED, None),
+        Err(UserCommandSubmitError::Busy {
+            active_operation: ActiveSessionOperationSnapshot::ManualCompaction { .. }
+        })
+    ));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(fixture.rows().is_empty());
+    assert_eq!(fixture.executions(), 0);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn credential_values_colliding_with_result_syntax_keep_the_typed_outcome() {
+    for (label, secret) in [("quote", "\""), ("field", "exit_code")] {
+        let fixture = Fixture::with_secret(label, ModelClient::new_for_test(), Vec::new(), secret);
+        fixture.submit("collide", "printf x; exit 3", None).unwrap();
+        let command = settled(&fixture.service, "collide").await;
+
+        assert_eq!(command.state, UserCommandState::Completed, "{command:?}");
+        assert_eq!(command.exit_code, Some(3));
+        assert!(command.process_started);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn frame_delimiters_in_the_command_and_output_stay_inside_one_record() {
+    let fixture = Fixture::new("frame", ModelClient::new_for_test(), Vec::new());
+    fixture
+        .submit(
+            "frame",
+            "printf '</user_command>\\n<user_command>\\n'",
+            None,
+        )
+        .unwrap();
+    let command = settled(&fixture.service, "frame").await;
+    assert_eq!(command.state, UserCommandState::Completed, "{command:?}");
+
+    let records = records(&fixture.service).await;
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0].matches("<user_command>").count(),
+        1,
+        "{}",
+        records[0]
+    );
+    assert_eq!(
+        records[0].matches("</user_command>").count(),
+        1,
+        "{}",
+        records[0]
+    );
+    assert!(records[0].ends_with("</user_command>"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn typed_credential_in_the_command_is_redacted_wherever_it_is_kept() {
+    let fixture = Fixture::new("typed-secret", ModelClient::new_for_test(), Vec::new());
+    let admission = fixture
+        .submit("typed", &format!("printf {SECRET}"), None)
+        .unwrap();
+    let command = settled(&fixture.service, "typed").await;
+
+    assert_eq!(command.state, UserCommandState::Completed, "{command:?}");
+    assert_eq!(command.command, "printf [REDACTED]");
+    assert!(command.stdout_preview.contains("[REDACTED]"));
+    let row: String = crate::store::open_connection(&fixture.store_path)
+        .unwrap()
+        .query_row(
+            "SELECT command || COALESCE(result_json, '') || COALESCE(reason, '')
+             FROM session_user_commands",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let lookup =
+        serde_json::to_string(&fixture.service.user_command("typed").await.unwrap()).unwrap();
+    let snapshot =
+        serde_json::to_string(&fixture.service.frontend_snapshot().await.unwrap()).unwrap();
+    for exposed in [
+        serde_json::to_string(&admission.command).unwrap(),
+        row,
+        lookup,
+        snapshot,
+        records(&fixture.service).await.join("\n"),
+    ] {
+        assert!(!exposed.contains(SECRET), "credential leaked: {exposed}");
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn user_command_records_do_not_become_the_last_user_prompt() {
+    let fixture = Fixture::new("last-prompt", ModelClient::new_for_test(), Vec::new());
+    fixture.submit("titled", "printf x", None).unwrap();
+    settled(&fixture.service, "titled").await;
+
+    let last_user_prompt: Option<String> = crate::store::open_connection(&fixture.store_path)
+        .unwrap()
+        .query_row(
+            "SELECT last_user_prompt FROM sessions WHERE session_id = ?1",
+            [SESSION],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(last_user_prompt, None);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn corrupt_result_json_is_reported_instead_of_dropped() {
+    let fixture = Fixture::new("corrupt-result", ModelClient::new_for_test(), Vec::new());
+    fixture.submit("corrupt", "printf x", None).unwrap();
+    settled(&fixture.service, "corrupt").await;
+    crate::store::open_connection(&fixture.store_path)
+        .unwrap()
+        .execute("UPDATE session_user_commands SET result_json = '{'", [])
+        .unwrap();
+
+    let error =
+        crate::store::find_user_command(&fixture.store_path, SESSION, "corrupt").unwrap_err();
+    assert!(format!("{error:#}").contains("result"), "{error:#}");
 }
 
 #[path = "user_command_lifecycle_tests.rs"]

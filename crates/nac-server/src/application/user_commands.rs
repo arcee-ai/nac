@@ -2,18 +2,14 @@ use std::sync::Arc;
 
 use nac_core::{
     session_service::{
-        SessionCoordinationError, SessionService, UserCommandOutputError, UserCommandRequest,
-        UserCommandSnapshot, UserCommandSubmitError,
+        OutputPage, OutputSegment, OutputStream, SessionCoordinationError, SessionService,
+        UserCommandOutputError, UserCommandRequest, UserCommandSnapshot, UserCommandSubmitError,
+        DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
     },
     sessions,
 };
 
-use crate::{SessionManager, UserCommandOutputPage};
-
-const DEFAULT_TIMEOUT_MS: u64 = 30_000;
-const MAX_TIMEOUT_MS: u64 = 3_600_000;
-const DEFAULT_OUTPUT_PAGE_BYTES: usize = 16 * 1024;
-const MAX_OUTPUT_PAGE_BYTES: usize = 64 * 1024;
+use crate::{SessionManager, UserCommandOutputPage, UserCommandOutputSegment};
 
 #[derive(Debug)]
 pub(crate) enum UserCommandApplicationError {
@@ -46,7 +42,12 @@ impl std::fmt::Display for UserCommandApplicationError {
 
 impl From<anyhow::Error> for UserCommandApplicationError {
     fn from(error: anyhow::Error) -> Self {
-        Self::Internal(error)
+        match error.downcast_ref::<sessions::SessionOperationLeaseError>() {
+            Some(busy @ sessions::SessionOperationLeaseError::Busy(_)) => {
+                Self::Busy(busy.to_string())
+            }
+            _ => Self::Internal(error),
+        }
     }
 }
 
@@ -74,13 +75,13 @@ impl<'a> SessionUserCommandApplication<'a> {
         session_id: &str,
         request: UserCommandRequest,
     ) -> Outcome<(UserCommandSnapshot, bool)> {
-        let timeout_ms = validate_request(&request)?;
+        request.effective_timeout_ms().map_err(map_submit_error)?;
         self.validate_session(session_id).await?;
         let gate = self.manager.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
         self.validate_session(session_id).await?;
         let service = self.manager.attach_session_locked(session_id, None).await?;
-        if let Some(existing) = replay(&service, &request, timeout_ms).await? {
+        if let Some(existing) = replay(&service, &request).await? {
             return Ok((existing, true));
         }
         let lease = match sessions::SessionOperationLease::try_acquire(
@@ -89,7 +90,7 @@ impl<'a> SessionUserCommandApplication<'a> {
         ) {
             Ok(lease) => lease,
             Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                return match replay(&service, &request, timeout_ms).await? {
+                return match replay(&service, &request).await? {
                     Some(existing) => Ok((existing, true)),
                     None => Err(map_submit_error(match service.active_operation() {
                         Some(active_operation) => UserCommandSubmitError::Busy { active_operation },
@@ -150,12 +151,8 @@ impl<'a> SessionUserCommandApplication<'a> {
         request_id: &str,
         request: UserCommandOutputRequest,
     ) -> Outcome<UserCommandOutputPage> {
-        let stream = request.stream.as_deref().unwrap_or("combined");
-        if !matches!(stream, "combined" | "stdout" | "stderr") {
-            return Err(UserCommandApplicationError::Invalid(format!(
-                "invalid stream '{stream}'; expected combined, stdout, or stderr"
-            )));
-        }
+        let stream = OutputStream::parse(request.stream.as_deref())
+            .map_err(|error| UserCommandApplicationError::Invalid(error.to_string()))?;
         let limit = request.limit.unwrap_or(DEFAULT_OUTPUT_PAGE_BYTES);
         if !(1..=MAX_OUTPUT_PAGE_BYTES).contains(&limit) {
             return Err(UserCommandApplicationError::Invalid(format!(
@@ -163,15 +160,8 @@ impl<'a> SessionUserCommandApplication<'a> {
             )));
         }
         let service = self.attach(session_id).await?;
-        // nac-core keeps its terminal types private, so the stream and page cross by serde.
         let page = service
-            .read_user_command_output(
-                request_id,
-                serde_json::from_value(serde_json::Value::from(stream))
-                    .map_err(anyhow::Error::new)?,
-                request.offset.unwrap_or(0),
-                limit,
-            )
+            .read_user_command_output(request_id, stream, request.offset.unwrap_or(0), limit)
             .await
             .map_err(|error| match error {
                 UserCommandOutputError::NotFound => UserCommandApplicationError::NotFound,
@@ -180,9 +170,7 @@ impl<'a> SessionUserCommandApplication<'a> {
                     UserCommandApplicationError::Internal(anyhow::anyhow!(message))
                 }
             })?;
-        Ok(serde_json::to_value(page)
-            .and_then(serde_json::from_value)
-            .map_err(anyhow::Error::new)?)
+        Ok(page.into())
     }
 
     async fn attach(&self, session_id: &str) -> Outcome<Arc<SessionService>> {
@@ -213,35 +201,45 @@ impl<'a> SessionUserCommandApplication<'a> {
     }
 }
 
-fn validate_request(request: &UserCommandRequest) -> Outcome<u64> {
-    let invalid = |message: &str| Err(UserCommandApplicationError::Invalid(message.to_owned()));
-    if request.request_id.trim().is_empty() {
-        return invalid("request_id must not be empty");
-    }
-    if request.command.trim().is_empty() {
-        return invalid("command must not be empty");
-    }
-    let timeout_ms = request.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
-    if !(1..=MAX_TIMEOUT_MS).contains(&timeout_ms) {
-        return invalid("timeout_ms must be between 1 and 3600000");
-    }
-    Ok(timeout_ms)
-}
-
 async fn replay(
     service: &SessionService,
     request: &UserCommandRequest,
-    timeout_ms: u64,
 ) -> Outcome<Option<UserCommandSnapshot>> {
-    let Some(existing) = service.user_command(&request.request_id).await? else {
-        return Ok(None);
-    };
-    if existing.command != request.command || existing.timeout_ms != timeout_ms {
-        return Err(map_submit_error(UserCommandSubmitError::Conflict {
-            request_id: request.request_id.clone(),
-        }));
+    Ok(service
+        .replay_user_command(request)
+        .await
+        .map_err(map_submit_error)?
+        .map(|admission| admission.command))
+}
+
+impl From<OutputSegment> for UserCommandOutputSegment {
+    fn from(segment: OutputSegment) -> Self {
+        Self {
+            sequence: segment.sequence,
+            stream: segment.stream.as_str().to_owned(),
+            combined_start: segment.combined_start,
+            combined_end: segment.combined_end,
+            stream_start: segment.stream_start,
+            stream_end: segment.stream_end,
+        }
     }
-    Ok(Some(existing))
+}
+
+impl From<OutputPage> for UserCommandOutputPage {
+    fn from(page: OutputPage) -> Self {
+        Self {
+            output_id: page.output_id,
+            stream: page.stream.as_str().to_owned(),
+            offset: page.offset,
+            content: page.content,
+            next_offset: page.next_offset,
+            eof: page.eof,
+            overflowed: page.overflowed,
+            retained_start: page.retained_start,
+            retained_end: page.retained_end,
+            segments: page.segments.into_iter().map(Into::into).collect(),
+        }
+    }
 }
 
 fn map_submit_error(error: UserCommandSubmitError) -> UserCommandApplicationError {

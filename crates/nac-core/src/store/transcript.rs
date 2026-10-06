@@ -483,7 +483,7 @@ impl TranscriptLogWriter {
             Some(start_idx),
             messages,
             AppendPurpose::Messages,
-            |_| Ok(()),
+            |_, _| Ok(()),
         )
         .map(|_| ())
     }
@@ -519,7 +519,7 @@ impl TranscriptLogWriter {
             Some(start_idx),
             messages,
             AppendPurpose::Terminal,
-            |_| Ok(()),
+            |_, _| Ok(()),
         )
         .map(|_| ())
     }
@@ -559,7 +559,7 @@ impl TranscriptLogWriter {
             Some(start_idx),
             messages,
             AppendPurpose::Messages,
-            |transaction| {
+            |transaction, _| {
                 super::steering::acknowledge_thread_steering_batch_with_connection(
                     transaction,
                     steering_ids,
@@ -627,8 +627,7 @@ impl TranscriptLogWriter {
             Some(idx),
             std::slice::from_ref(message),
             AppendPurpose::RunPrompt(run_id),
-            |transaction| {
-                let submitted_message_id = transaction.last_insert_rowid();
+            |transaction, submitted_message_id| {
                 replace_with_active_run(transaction, session_id, run_id, submitted_message_id)?;
                 if let Some(item_id) = inbox_item_id {
                     mark_inbox_item_delivered(transaction, session_id, item_id, run_id, content)?;
