@@ -69,6 +69,9 @@ impl kernel::NativeTool for ExecCommandTool {
                     return ToolResult::text("Error: command cancelled before workspace admission", true);
                 }
             };
+            if let Err(error) = services.runtime.check_host_execution_authority().await {
+                return ToolResult::text(format!("Error: {error}"), true);
+            }
             exec_command::execute_exec_command_with_cancellation(
                 &input,
                 services.runtime,
@@ -157,6 +160,9 @@ impl kernel::NativeTool for WriteStdinTool {
                     return ToolResult::text("Error: terminal input cancelled before workspace admission", true);
                 }
             };
+            if let Err(error) = services.runtime.check_host_execution_authority().await {
+                return ToolResult::text(format!("Error: {error}"), true);
+            }
             exec_command::execute_write_stdin_with_cancellation(
                 &input,
                 services.runtime,

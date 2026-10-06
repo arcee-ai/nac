@@ -34,6 +34,38 @@ pub(super) fn resolve(
     validate(&config, &root, &binding, backend, origin).map(Some)
 }
 
+pub(super) fn resolve_execution(
+    raw_binding: Option<&str>,
+    remote: bool,
+) -> Result<Option<nac_core::model::ManagedHostExecutionAuthority>> {
+    let Some(raw) = raw_binding else {
+        return Ok(None);
+    };
+    if remote {
+        bail!("managed execution binding cannot select a remote credential owner");
+    }
+    let supplied: ManagedHostKeyBinding =
+        serde_json::from_str(raw).map_err(|_| anyhow!("invalid managed execution binding"))?;
+    supplied.validate()?;
+    let path = std::env::var_os("NAC_MANAGED_CONFIG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| "/etc/nac/managed.toml".into());
+    let config = ManagedHostConfig::load_host_key_worker(&path)?;
+    let root = nac_core::model::managed_arcee_auth_storage_root()?;
+    // Execution authority grants no model credential or route. The operator's
+    // binding and local private authority are still independently validated.
+    let credential = validate(
+        &config,
+        &root,
+        &supplied,
+        Some(BackendKind::ArceeApi),
+        Some(&config.model_endpoint),
+    )?;
+    let authority = nac_core::model::ManagedHostExecutionAuthority::new(credential);
+    authority.check_available()?;
+    Ok(Some(authority))
+}
+
 fn validate(
     config: &ManagedHostConfig,
     root: &Path,

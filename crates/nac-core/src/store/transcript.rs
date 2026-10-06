@@ -269,6 +269,9 @@ pub fn last_transcript_log_user_prompt(
     .map_err(Into::into)
 }
 
+/// Ephemeral caller-owned gate for a run prompt's existing store transaction.
+pub(crate) type RunPromptAdmission = dyn Fn(&dyn Fn() -> Result<()>) -> Result<()> + Send + Sync;
+
 /// Dedicated path-backed writer/reader for the transcript log. Connections
 /// are checked out only for the duration of each operation. All methods are
 /// synchronous and the writer is Send + Sync, so every method is usable inside
@@ -569,6 +572,28 @@ impl TranscriptLogWriter {
             },
         )
         .map(|_| ())
+    }
+
+    /// Recheck ephemeral admission on the store executor after queue wait.
+    /// The caller owns the gate; persistence owns the unchanged prompt transaction.
+    pub(crate) fn append_admitted_run_prompt(
+        &self,
+        session_id: &str,
+        idx: u64,
+        message: &Message,
+        run_id: &str,
+        inbox_item_id: Option<i64>,
+        admission: &std::sync::Arc<RunPromptAdmission>,
+    ) -> Result<()> {
+        coordinate_writer!(self, Result<()>, {
+            session_id: String = session_id.to_owned(), idx: u64 = idx,
+            message: Message = message.clone(), run_id: String = run_id.to_owned(),
+            inbox_item_id: Option<i64> = inbox_item_id,
+            admission: std::sync::Arc<RunPromptAdmission> = std::sync::Arc::clone(admission),
+        }, call |command| command.writer.append_admitted_run_prompt(&command.session_id, command.idx,
+            &command.message, &command.run_id, command.inbox_item_id, &command.admission),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+        admission(&|| self.append_run_prompt_inner(session_id, idx, message, run_id, inbox_item_id))
     }
 
     pub fn append_run_prompt(

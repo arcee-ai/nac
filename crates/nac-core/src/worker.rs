@@ -188,7 +188,20 @@ async fn produce_worker_response(
         mut agent, action, ..
     } = run_config;
     agent.set_worker_web_credential(credentials.into_exa_api_key());
-    agent.send(&action).await
+    let cancellation = agent.command_cancellation();
+    let response = if cancellation.has_host_execution_authority() {
+        tokio::select! {
+        biased;
+        () = cancellation.cancelled() => Err(anyhow::anyhow!("worker execution authority cancelled")),
+        result = agent.send(&action) => result,
+        }
+    } else {
+        agent.send(&action).await
+    };
+    if cancellation.is_cancelled() {
+        agent.terminal_manager().settle_run().await?;
+    }
+    response
 }
 
 #[cfg(test)]
@@ -204,6 +217,43 @@ mod tests {
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio};
     use std::time::{Duration, Instant};
+
+    #[tokio::test]
+    async fn host_execution_worker_without_tool_activity_stops_after_local_denial() {
+        let fixture = crate::model::host_execution_test_support::Fixture::new();
+        let authority_path = fixture.root.join("managed_host_key.json");
+        let server = ScriptedServer::start_observed(
+            vec![ScriptedResponse::json("503 Service Unavailable", "{}")],
+            move |_, _| {
+                std::fs::remove_file(&authority_path).unwrap();
+            },
+        );
+        let client = ModelClient::new_for_test_server(server.base_url.clone())
+            .with_host_execution_authority(Some(fixture.authority.clone()))
+            .unwrap();
+        let store_path = fixture.root.join("worker-store.db");
+        store::initialize(&store_path).unwrap();
+        store::insert_test_session(&store_path, "session");
+        let agent = test_worker_agent(client, store_path);
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            produce_worker_response(
+                ManagedWorkerRunConfig {
+                    agent,
+                    session_id: "session".into(),
+                    thread_name: "impl".into(),
+                    action: "synthetic guarded work".into(),
+                    dispatch_id: "dispatch".into(),
+                },
+                ManagedWorkerNativeCredentials::default(),
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_err());
+        assert!(fixture.authority.check_available().is_err());
+        assert_eq!(server.finish().len(), 1);
+    }
 
     fn test_registry() -> SkillRegistry {
         SkillRegistry::load_for_test(vec![SkillRecord {

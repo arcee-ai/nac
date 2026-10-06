@@ -126,6 +126,9 @@ impl kernel::NativeTool for ReadTool {
         Box::pin(async move {
             let gate = shared_workspace_gate(services.runtime);
             let _read = gate.read().await;
+            if let Err(error) = services.runtime.check_host_execution_authority().await {
+                return ToolResult::text(format!("Error: {error}"), true);
+            }
             read::execute_native(input, services.runtime, self.image_read).await
         })
     }
@@ -375,11 +378,30 @@ pub async fn execute_tool(
     .await
 }
 
+pub async fn execute_tool_with_context(
+    name: &str,
+    args: Value,
+    runtime: &ToolRuntime,
+    client: &crate::model::ModelClient,
+    context: &kernel::ToolCallContext,
+) -> ToolResult {
+    if let Err(error) = runtime.check_host_execution_authority().await {
+        return ToolResult::text(format!("Error: {error}"), true);
+    }
+    let invocation = execute_tool_inner(name, args, runtime, client, context);
+    tokio::pin!(invocation);
+    tokio::select! {
+        biased;
+        () = runtime.observe_host_execution_denial() => invocation.await,
+        result = &mut invocation => result,
+    }
+}
+
 #[expect(
     clippy::expect_used,
     reason = "the static first-party tool registry is collision-checked during construction"
 )]
-pub async fn execute_tool_with_context(
+async fn execute_tool_inner(
     name: &str,
     args: Value,
     runtime: &ToolRuntime,
@@ -460,6 +482,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
     let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
     ToolRuntime {
         command_cancellation: crate::tools::ThreadCancellation::default(),
+        host_execution_authority: None,
         config_cwd: workspace_cwd.clone(),
         workspace_cwd,
         store_path: PathBuf::new(),
@@ -484,3 +507,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         command_redactions: Arc::new(StdMutex::new(HashMap::new())),
     }
 }
+
+#[cfg(test)]
+mod host_execution_tests;

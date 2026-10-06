@@ -199,6 +199,11 @@ fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
         command.arg("--managed-api-key-file").arg(path);
     }
 
+    if let Some(authority) = client.host_execution_authority() {
+        let binding = serde_json::to_string(authority.binding())
+            .expect("serializing a host binding cannot fail");
+        command.arg("--managed-execution-binding").arg(binding);
+    }
     if let Some(binding) = client.managed_host_key_binding() {
         let binding =
             serde_json::to_string(binding).expect("serializing a host binding cannot fail");
@@ -295,6 +300,12 @@ pub(super) async fn run_worker(
         .arg("--workspace-cwd")
         .arg(runtime.workspace_cwd.as_os_str());
     append_worker_model_arguments(&mut command, client);
+    if client.host_execution_authority().is_none() {
+        if let Some(authority) = &runtime.host_execution_authority {
+            let binding = serde_json::to_string(authority.binding())?;
+            command.arg("--managed-execution-binding").arg(binding);
+        }
+    }
 
     if !runtime.backend.workspace_cwd_is_local() || runtime.config_cwd != runtime.workspace_cwd {
         command

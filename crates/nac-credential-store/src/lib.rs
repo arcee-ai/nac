@@ -170,6 +170,15 @@ impl fmt::Display for UnsafeCredentialPermissionsError {
 impl std::error::Error for UnsafeCredentialPermissionsError {}
 
 pub fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
+    read_auth_bytes_inner(path, None)
+}
+
+/// Read a private credential snapshot with a caller-selected byte limit.
+pub fn read_auth_bytes_from_path_limited(path: &Path, max_bytes: u64) -> Result<Option<Vec<u8>>> {
+    read_auth_bytes_inner(path, Some(max_bytes))
+}
+
+fn read_auth_bytes_inner(path: &Path, max_bytes: Option<u64>) -> Result<Option<Vec<u8>>> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             return Err(anyhow!(
@@ -209,8 +218,23 @@ pub fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
     ensure_open_credential_file_is_safe(&file, path)?;
 
     let mut raw = Vec::new();
-    file.read_to_end(&mut raw)
-        .with_context(|| format!("failed to read credential file {}", path.display()))?;
+    match max_bytes {
+        Some(limit) => {
+            file.take(limit.saturating_add(1))
+                .read_to_end(&mut raw)
+                .with_context(|| format!("failed to read credential file {}", path.display()))?;
+            if raw.len() as u64 > limit {
+                return Err(anyhow!(
+                    "credential file {} exceeds the size limit",
+                    path.display()
+                ));
+            }
+        }
+        None => {
+            file.read_to_end(&mut raw)
+                .with_context(|| format!("failed to read credential file {}", path.display()))?;
+        }
+    }
     Ok(Some(raw))
 }
 
@@ -786,5 +810,32 @@ mod tests {
             .expect("symlink lock accepted");
         assert!(error.to_string().contains("symlink auth lock"));
         assert_eq!(fs::read_to_string(target).unwrap(), "unchanged");
+    }
+}
+
+#[cfg(test)]
+mod bounded_read_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_private_snapshot_rejects_oversize_without_changing_existing_reader() {
+        let root = std::env::temp_dir().join(format!("nac-bounded-auth-{}", uuid::Uuid::new_v4()));
+        let path = root.join("authority.json");
+        write_auth_string_to_path(&path, "synthetic-value").unwrap();
+        assert_eq!(
+            read_auth_bytes_from_path_limited(&path, 15)
+                .unwrap()
+                .unwrap(),
+            b"synthetic-value"
+        );
+        assert!(read_auth_bytes_from_path_limited(&path, 2)
+            .unwrap_err()
+            .to_string()
+            .contains("size limit"));
+        assert_eq!(
+            read_auth_bytes_from_path(&path).unwrap().unwrap(),
+            b"synthetic-value"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

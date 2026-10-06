@@ -774,3 +774,71 @@ async fn direct_broker_authorizes_between_prepare_and_side_effects() {
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     let _ = std::fs::remove_dir_all(directory);
 }
+
+#[tokio::test]
+async fn host_execution_denial_after_permission_approval_prevents_native_invocation() {
+    let fixture = crate::model::host_execution_test_support::Fixture::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let registry = ToolRegistry::builder()
+        .register(CountTool {
+            calls: calls.clone(),
+            name: "count",
+        })
+        .finish()
+        .unwrap();
+    let snapshot = registry.snapshot(["count"]).unwrap();
+    let path = fixture.root.join("store.db");
+    crate::store::initialize(&path).unwrap();
+    crate::store::insert_test_session(&path, "session-a");
+    let broker = Arc::new(crate::permissions::PermissionBroker::new(
+        path.clone(),
+        "session-a".into(),
+        crate::permissions::PermissionBackend::Local,
+        0,
+        [crate::permissions::PermissionRule::new(
+            "count",
+            "*",
+            crate::permissions::PermissionEffect::Ask,
+        )],
+    ));
+    let bus = crate::events::SessionEventBus::new(Some("session-a".into()));
+    let _interactive = bus.subscribe_assistant_deltas();
+    broker.attach_event_bus(bus);
+    let mut runtime = crate::tools::test_runtime();
+    runtime.store_path = path;
+    runtime.permission_broker = Some(broker.clone());
+    runtime.host_execution_authority = Some(fixture.authority.clone());
+    runtime.command_cancellation =
+        super::super::ThreadCancellation::for_host(Some(fixture.authority.clone()));
+    let client = crate::model::ModelClient::new_for_test();
+    let context = ToolCallContext::default();
+    let invoke = snapshot.invoke(
+        "count",
+        json!({"amount":2}),
+        ToolServices {
+            runtime: &runtime,
+            client: &client,
+        },
+        &context,
+    );
+    let reply = async {
+        loop {
+            if let Some(request) = broker.pending().pop() {
+                fixture.remove();
+                broker
+                    .reply(&request.id, crate::permissions::PermissionReply::Once)
+                    .unwrap();
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+    let (result, ()) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        tokio::join!(invoke, reply)
+    })
+    .await
+    .unwrap();
+    assert!(result.is_error);
+    assert!(result.content.contains("managed host execution authority"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}

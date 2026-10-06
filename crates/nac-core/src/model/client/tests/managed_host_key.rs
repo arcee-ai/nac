@@ -334,3 +334,52 @@ async fn managed_host_key_survives_resume_without_serializing_or_replaying_secre
     .await
     .is_err());
 }
+
+#[tokio::test]
+async fn host_execution_fence_is_independent_of_selected_model_and_sticky_after_restore() {
+    let fixture = crate::model::host_execution_test_support::Fixture::new();
+    let mut client = ModelClient::new_for_test()
+        .with_host_execution_authority(Some(fixture.authority.clone()))
+        .unwrap();
+    let server = ScriptedServer::start_unexpected_request_server(Duration::from_millis(150));
+    client.base_url = server.base_url.clone();
+    fixture.remove();
+    for restored in [false, true] {
+        if restored {
+            fixture.restore();
+        }
+        let error = client.send_turn(Vec::new(), Vec::new()).await.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("managed host execution authority"));
+        assert!(!error.to_string().contains("synthetic-execution-canary"));
+    }
+    assert_eq!(server.finish().len(), 0);
+}
+
+#[tokio::test]
+async fn host_execution_denial_during_unrelated_model_retry_prevents_second_request() {
+    let fixture = crate::model::host_execution_test_support::Fixture::new();
+    let authority_path = fixture.root.join("managed_host_key.json");
+    let server = ScriptedServer::start_observed(
+        vec![ScriptedResponse::json("503 Service Unavailable", "{}")],
+        move |_, _| {
+            std::fs::remove_file(&authority_path).unwrap();
+        },
+    );
+    let mut client = ModelClient::new_for_test()
+        .with_host_execution_authority(Some(fixture.authority.clone()))
+        .unwrap();
+    client.base_url = server.base_url.clone();
+    let error = tokio::time::timeout(
+        Duration::from_secs(5),
+        client.send_turn(Vec::new(), Vec::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("managed host execution authority"));
+    assert_eq!(server.finish().len(), 1);
+}

@@ -227,6 +227,7 @@ pub struct ModelClient {
     api_key_env: Option<String>,
     trusted_api_key_file: Option<std::path::PathBuf>,
     trusted_managed_host_key: Option<TrustedManagedHostKey>,
+    host_execution_authority: Option<ManagedHostExecutionAuthority>,
     extra_headers: std::collections::BTreeMap<String, String>,
     allow_insecure_http: bool,
     arcee_credential_source: Option<ArceeCredentialSource>,
@@ -253,7 +254,13 @@ impl std::fmt::Debug for ModelClient {
 }
 
 impl ModelClient {
-    pub fn from_effective_settings(settings: EffectiveModelSettings) -> Result<Self> {
+    pub fn from_effective_settings(mut settings: EffectiveModelSettings) -> Result<Self> {
+        if settings.host_execution_authority.is_none() {
+            settings.host_execution_authority = settings
+                .trusted_managed_host_key
+                .clone()
+                .map(ManagedHostExecutionAuthority::new);
+        }
         if let Some(credential) = &settings.trusted_managed_host_key {
             if settings.backend != BackendKind::ArceeApi
                 || settings.api_key_env.is_some()
@@ -266,6 +273,9 @@ impl ModelClient {
                     "invalid managed host-key credential route",
                 ));
             }
+        }
+        if let Some(authority) = &settings.host_execution_authority {
+            authority.check_available()?;
         }
         validate_extra_headers(&settings.extra_headers)?;
         let backend = settings.backend;
@@ -344,6 +354,7 @@ impl ModelClient {
             allow_insecure_http: settings.allow_insecure_http,
             arcee_credential_source,
             trusted_managed_host_key: settings.trusted_managed_host_key,
+            host_execution_authority: settings.host_execution_authority,
             cache_ttl: None,
             prompt_cache_key: None,
             resolved_model: settings.resolved,
@@ -380,6 +391,9 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
         on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
+        if let Some(authority) = &self.host_execution_authority {
+            authority.check_available()?;
+        }
         let mut current;
         let this = if let Some(credential) = &self.trusted_managed_host_key {
             current = self.clone();
@@ -443,6 +457,23 @@ impl ModelClient {
     pub fn backend(&self) -> BackendKind {
         self.backend
     }
+    pub(crate) fn with_host_execution_authority(
+        mut self,
+        authority: Option<ManagedHostExecutionAuthority>,
+    ) -> Result<Self> {
+        if let Some(authority) = &authority {
+            authority.check_available()?;
+        }
+        if authority.is_some() || self.host_execution_authority.is_none() {
+            self.host_execution_authority = authority;
+        }
+        Ok(self)
+    }
+
+    pub(crate) fn host_execution_authority(&self) -> Option<ManagedHostExecutionAuthority> {
+        self.host_execution_authority.clone()
+    }
+
     pub(crate) fn managed_host_key_binding(&self) -> Option<&ManagedHostKeyBinding> {
         self.trusted_managed_host_key
             .as_ref()
@@ -942,6 +973,14 @@ impl ModelClient {
             10
         };
         for attempt in 0..attempts {
+            if let Some(authority) = &self.host_execution_authority {
+                authority
+                    .check_available()
+                    .map_err(|error| ModelHttpError {
+                        status: None,
+                        message: error.to_string(),
+                    })?;
+            }
             let mut request = self.client.post(url);
             if !self.extra_headers_override_content_type() {
                 request = request.header("Content-Type", "application/json");
@@ -1199,6 +1238,7 @@ impl ModelClient {
             api_key_env: None,
             trusted_api_key_file: None,
             trusted_managed_host_key: None,
+            host_execution_authority: None,
             extra_headers: std::collections::BTreeMap::new(),
             allow_insecure_http: false,
             arcee_credential_source: None,

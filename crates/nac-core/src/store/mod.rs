@@ -591,3 +591,5 @@ mod tests {
 
 #[cfg(test)]
 pub(crate) use blocking_caller::reject_callers_for_test;
+
+pub(crate) use transcript::RunPromptAdmission;

@@ -142,6 +142,11 @@ fn static_host_key_profile_is_route_bound_and_ephemeral_for_new_resume_and_light
     assert!(profile.trusted_managed_host_key().is_some());
     let options = profile.resume_options(true);
     assert!(options.trusted_managed_host_key.is_some());
+    assert!(options.host_execution_authority.is_some());
+    assert!(profile
+        .resume_options(false)
+        .host_execution_authority
+        .is_some());
     assert!(options
         .trusted_light_credential
         .unwrap()

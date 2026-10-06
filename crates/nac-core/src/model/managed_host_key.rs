@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use nac_credential_store::{
-    read_auth_bytes_from_path, read_mounted_credential_string, with_credential_lock,
+    read_auth_bytes_from_path_limited, read_mounted_credential_string, with_credential_lock,
     write_auth_string_to_path,
 };
 use serde::{Deserialize, Serialize};
@@ -210,7 +210,22 @@ impl TrustedManagedHostKey {
 
     /// Read-only local availability; never repairs receipt projection or contacts a provider.
     pub fn check_available(&self) -> Result<()> {
-        self.credential().map(|_| ())
+        self.read_available_authority().map(|_| ())
+    }
+
+    fn read_available_authority(&self) -> Result<Authority> {
+        // Atomic publication makes a no-follow read a complete snapshot. This
+        // observer must not wait on a credential writer's cross-process lock.
+        self.store.ensure_no_legacy_auth()?;
+        let authority = self
+            .store
+            .read_authority()?
+            .ok_or_else(|| anyhow!("managed host-key authority is unavailable"))?;
+        require_binding(&authority, &self.binding)?;
+        if authority.api_key.is_none() {
+            bail!("managed host-key is consumed but unavailable");
+        }
+        Ok(authority)
     }
 
     pub(crate) fn credential(&self) -> Result<String> {
@@ -220,6 +235,86 @@ impl TrustedManagedHostKey {
                 .api_key
                 .ok_or_else(|| anyhow!("managed host-key is consumed but unavailable"))
         })
+    }
+}
+
+/// Host execution authority is independent of model credentials and selection.
+/// A denial is latched for this trusted binding; file restoration cannot clear it.
+#[derive(Clone)]
+pub struct ManagedHostExecutionAuthority {
+    credential: TrustedManagedHostKey,
+    denied: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    observation: std::sync::Arc<std::sync::Mutex<Option<[u8; 32]>>>,
+}
+
+impl std::fmt::Debug for ManagedHostExecutionAuthority {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ManagedHostExecutionAuthority")
+            .field("binding", self.binding())
+            .field(
+                "denied",
+                &self.denied.load(std::sync::atomic::Ordering::Acquire),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for ManagedHostExecutionAuthority {
+    fn eq(&self, other: &Self) -> bool {
+        self.credential == other.credential && std::sync::Arc::ptr_eq(&self.denied, &other.denied)
+    }
+}
+
+impl ManagedHostExecutionAuthority {
+    pub fn new(credential: TrustedManagedHostKey) -> Self {
+        Self {
+            credential,
+            denied: Default::default(),
+            observation: Default::default(),
+        }
+    }
+
+    pub fn binding(&self) -> &ManagedHostKeyBinding {
+        self.credential.binding()
+    }
+
+    pub fn check_available(&self) -> Result<()> {
+        use std::sync::atomic::Ordering;
+        if self.denied.load(Ordering::Acquire) {
+            bail!("managed host execution authority is denied");
+        }
+        let available = self
+            .credential
+            .read_available_authority()
+            .and_then(|authority| {
+                use sha2::Digest;
+                let raw = serde_json::to_vec(&authority)
+                    .map_err(|_| anyhow!("managed host execution authority cannot be validated"))?;
+                let digest: [u8; 32] = sha2::Sha256::digest(raw).into();
+                let mut observation = self
+                    .observation
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                match *observation {
+                    Some(previous) if previous != digest => {
+                        bail!("managed host execution authority changed")
+                    }
+                    None => *observation = Some(digest),
+                    _ => {}
+                }
+                Ok(())
+            });
+        if available.is_err() {
+            self.denied.store(true, Ordering::Release);
+            bail!(
+                "managed host execution authority is unavailable; new trusted binding is required"
+            );
+        }
+        if self.denied.load(Ordering::Acquire) {
+            bail!("managed host execution authority is denied");
+        }
+        Ok(())
     }
 }
 
@@ -366,12 +461,9 @@ impl ManagedHostKeyStore {
     }
 
     fn read_authority(&self) -> Result<Option<Authority>> {
-        let Some(raw) = read_auth_bytes_from_path(&self.authority)? else {
+        let Some(raw) = read_auth_bytes_from_path_limited(&self.authority, 256 * 1024)? else {
             return Ok(None);
         };
-        if raw.len() > 256 * 1024 {
-            bail!("managed host-key authority exceeds its size limit");
-        }
         let authority: Authority = serde_json::from_slice(&raw)
             .map_err(|_| anyhow!("managed host-key authority is invalid"))?;
         authority.validate()?;

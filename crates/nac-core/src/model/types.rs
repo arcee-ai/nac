@@ -157,6 +157,7 @@ pub struct EffectiveModelSettings {
     /// transported to workers; the credential value never enters argv or the
     /// command environment.
     pub(crate) trusted_api_key_file: Option<std::path::PathBuf>,
+    pub(crate) host_execution_authority: Option<super::ManagedHostExecutionAuthority>,
     pub(crate) trusted_managed_host_key: Option<super::TrustedManagedHostKey>,
     pub(crate) extra_headers: std::collections::BTreeMap<String, String>,
     /// Catalog metadata resolved at construction. Drives per-response cost,
@@ -315,6 +316,7 @@ impl EffectiveModelSettings {
             api_key_env,
             trusted_api_key_file: None,
             trusted_managed_host_key: None,
+            host_execution_authority: None,
             extra_headers,
             resolved,
         })
@@ -356,6 +358,17 @@ impl EffectiveModelSettings {
             }
         }
         self.trusted_managed_host_key = credential;
+        Ok(self)
+    }
+
+    pub(crate) fn with_host_execution_authority(
+        mut self,
+        authority: Option<super::ManagedHostExecutionAuthority>,
+    ) -> Result<Self> {
+        if let Some(authority) = &authority {
+            authority.check_available()?;
+        }
+        self.host_execution_authority = authority;
         Ok(self)
     }
 

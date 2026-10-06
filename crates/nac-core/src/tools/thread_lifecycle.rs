@@ -5,6 +5,7 @@ struct ThreadCancellationState {
     cancelled: AtomicBool,
     activity: Notify,
     mutation_gate: StdMutex<()>,
+    host_execution_authority: Option<crate::model::ManagedHostExecutionAuthority>,
 }
 
 #[derive(Clone, Default)]
@@ -14,6 +15,24 @@ pub(crate) struct ThreadCancellation {
 }
 
 impl ThreadCancellation {
+    pub(crate) fn has_host_execution_authority(&self) -> bool {
+        self.state.host_execution_authority.is_some()
+            || self
+                .parent
+                .as_deref()
+                .is_some_and(Self::has_host_execution_authority)
+    }
+
+    pub(crate) fn for_host(authority: Option<crate::model::ManagedHostExecutionAuthority>) -> Self {
+        Self {
+            state: Arc::new(ThreadCancellationState {
+                host_execution_authority: authority,
+                ..Default::default()
+            }),
+            parent: None,
+        }
+    }
+
     /// Create a cancellation domain that can be stopped independently while
     /// still observing the owning run's stop signal.
     pub(crate) fn child(&self) -> Self {
@@ -87,16 +106,32 @@ impl ThreadCancellation {
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
             })
             .collect::<Vec<_>>();
+        for cancellation in &lineage {
+            if cancellation
+                .state
+                .host_execution_authority
+                .as_ref()
+                .is_some_and(|authority| authority.check_available().is_err())
+                && !cancellation.state.cancelled.swap(true, Ordering::AcqRel)
+            {
+                cancellation.state.activity.notify_waiters();
+            }
+        }
         (!lineage
             .iter()
-            .any(|cancellation| cancellation.state.cancelled.load(Ordering::Acquire)))
+            .any(|cancellation| cancellation.is_cancelled()))
         .then(operation)
     }
 
     pub(crate) async fn cancelled(&self) {
         loop {
             let notified = self.state.activity.notified();
-            if self.is_cancelled() {
+            let cancelled = if self.has_host_execution_authority() {
+                self.run_if_active(|| ()).is_none()
+            } else {
+                self.is_cancelled()
+            };
+            if cancelled {
                 return;
             }
             if let Some(parent) = self.parent.as_deref() {
@@ -105,7 +140,14 @@ impl ThreadCancellation {
                     () = Box::pin(parent.cancelled()) => {}
                 }
             } else {
-                notified.await;
+                if self.state.host_execution_authority.is_some() {
+                    tokio::select! {
+                        () = notified => {}
+                        () = tokio::time::sleep(Duration::from_secs(1)) => {}
+                    }
+                } else {
+                    notified.await;
+                }
             }
         }
     }
@@ -397,6 +439,75 @@ mod active_thread_registry_tests {
         assert_eq!(child.run_if_active(|| 7), Some(7));
         parent.cancel();
         assert_eq!(child.run_if_active(|| 9), None);
+    }
+
+    #[test]
+    fn host_execution_fence_rechecks_at_final_mutation_and_stays_denied_after_restore() {
+        let fixture = crate::model::host_execution_test_support::Fixture::new();
+        let parent = ThreadCancellation::for_host(Some(fixture.authority.clone()));
+        let child = parent.child();
+        assert_eq!(child.run_if_active(|| 7), Some(7));
+        fixture.remove();
+        assert_eq!(child.run_if_active(|| panic!("denied mutation ran")), None);
+        assert!(parent.is_cancelled());
+        fixture.restore();
+        assert!(fixture.authority.check_available().is_err());
+        let next_run = ThreadCancellation::for_host(Some(fixture.authority.clone()));
+        assert_eq!(next_run.run_if_active(|| 9), None);
+        let fresh = crate::model::host_execution_test_support::Fixture::new();
+        assert_eq!(
+            ThreadCancellation::for_host(Some(fresh.authority.clone())).run_if_active(|| 11),
+            Some(11)
+        );
+    }
+
+    #[test]
+    fn host_execution_denies_a_changed_key_even_when_binding_is_unchanged() {
+        let fixture = crate::model::host_execution_test_support::Fixture::new();
+        let token = ThreadCancellation::for_host(Some(fixture.authority.clone()));
+        assert_eq!(token.run_if_active(|| 1), Some(1));
+        let path = fixture.root.join("managed_host_key.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        value["api_key"] = serde_json::json!("synthetic-different-key");
+        nac_credential_store::write_auth_string_to_path(&path, &value.to_string()).unwrap();
+        assert_eq!(token.run_if_active(|| 2), None);
+        fixture.restore();
+        assert_eq!(token.run_if_active(|| 3), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn host_execution_observer_does_not_wait_for_cross_process_credential_lock() {
+        let fixture = crate::model::host_execution_test_support::Fixture::new();
+        let held = nac_credential_store::try_acquire_credential_lock(
+            &fixture.root.join("arcee_auth.json.lock"),
+        )
+        .unwrap()
+        .unwrap();
+        let authority = fixture.authority.clone();
+        let check = tokio::task::spawn_blocking(move || authority.check_available());
+        let result = tokio::time::timeout(Duration::from_secs(3), check).await;
+        drop(held);
+        result.unwrap().unwrap().unwrap();
+        fixture.remove();
+        assert!(fixture.authority.check_available().is_err());
+    }
+
+    #[tokio::test]
+    async fn host_execution_observation_wakes_child_without_tool_activity() {
+        let fixture = crate::model::host_execution_test_support::Fixture::new();
+        let parent = ThreadCancellation::for_host(Some(fixture.authority.clone()));
+        let child = parent.child();
+        let observer = tokio::spawn(async move { child.cancelled().await });
+        tokio::task::yield_now().await;
+        let removed_at = std::time::Instant::now();
+        fixture.remove();
+        tokio::time::timeout(Duration::from_secs(3), observer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(removed_at.elapsed() < Duration::from_secs(3));
+        assert!(parent.is_cancelled());
     }
 
     #[tokio::test]

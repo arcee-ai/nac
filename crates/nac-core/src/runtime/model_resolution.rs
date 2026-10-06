@@ -54,7 +54,8 @@ pub fn effective_model_settings(
     }
     settings
         .with_trusted_api_key_file(model.trusted_api_key_file.clone())?
-        .with_trusted_managed_host_key(model.trusted_managed_host_key.clone())
+        .with_trusted_managed_host_key(model.trusted_managed_host_key.clone())?
+        .with_host_execution_authority(model.host_execution_authority.clone())
 }
 
 /// Resolve and normalize the persisted orchestrator compaction threshold for a
@@ -98,7 +99,8 @@ pub(super) fn managed_worker_effective_model_settings(
     }
     settings
         .with_trusted_api_key_file(model.trusted_api_key_file.clone())?
-        .with_trusted_managed_host_key(model.trusted_managed_host_key.clone())
+        .with_trusted_managed_host_key(model.trusted_managed_host_key.clone())?
+        .with_host_execution_authority(model.host_execution_authority.clone())
 }
 
 /// Parse the hidden worker header transport as a JSON object.

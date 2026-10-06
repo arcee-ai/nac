@@ -89,6 +89,10 @@ async fn build_run_config_inner(
                 )
             })
             .transpose()?
+            .map(|client| {
+                client.with_host_execution_authority(options.model.host_execution_authority.clone())
+            })
+            .transpose()?
             .map(std::sync::Arc::new)
     };
     let sandbox_options = effective_sandbox_options(options.sandbox, config);

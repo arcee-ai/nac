@@ -82,3 +82,24 @@ failure, missing/corrupt authority, revoked replay, repair CAS and thread/proces
 concurrency, configuration boundaries, worker transport, new/resumed/light
 capabilities and request failures. Live provider, integrated controller/runtime
 qualification and independent final review remain separate acceptance steps.
+
+Host execution carries a separate ephemeral authority even when the session or
+light worker selects another model. New/resumed sessions, prepared/native/MCP
+tool dispatch, post-approval checks, workspace admission, command spawn/input,
+atomic file publication and prompt admission consult the same exact private
+binding. Prompt admission checks on the owned store executor after queue wait;
+it wraps the existing identified transaction without changing persisted schema,
+run identity, inbox settlement or terminal recovery. Each serving lifetime
+latches denial across clients and children. File restoration cannot reopen that
+lifetime; the construction path must supply current trusted authority again.
+
+A one-second local observer wakes cancellation for managed workers and serving
+sessions, including idle retained terminals. Denial uses existing process-tree,
+child/managed-session and durable cancellation settlement. Local observation
+latency is measured separately from provider revocation propagation. These
+checks grant no permission, change no backend, and confer no upstream eligibility.
+Same-UID command access to private credential files remains a production gate:
+mode bits, nondumpable workers and private sockets do not establish a privilege
+split. The selected privileged mediated sender and authenticated upstream
+eligibility callback require independent integration before production release
+or any version 3 fleet capability advertisement.

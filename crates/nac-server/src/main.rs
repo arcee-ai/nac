@@ -221,6 +221,10 @@ struct ManagedWorkerCli {
     #[arg(long, hide = true)]
     managed_host_key_binding: Option<String>,
 
+    /// Internal host execution binding, independent of the selected model.
+    #[arg(long, hide = true)]
+    managed_execution_binding: Option<String>,
+
     /// Internal inherited descriptor for the private native-credential socket.
     #[arg(long, hide = true, conflicts_with = "native_credential_socket")]
     native_credential_fd: Option<i32>,
@@ -756,6 +760,10 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         cli.native_credential_fd,
         cli.native_credential_socket,
     )?;
+    let host_execution_authority = main_managed_host_key::resolve_execution(
+        cli.managed_execution_binding.as_deref(),
+        cli.ssh_host.is_some(),
+    )?;
     let trusted_managed_host_key = main_managed_host_key::resolve(
         cli.managed_host_key_binding.as_deref(),
         cli.model.backend.map(Into::into),
@@ -765,6 +773,13 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
         cli.model.allow_insecure_http,
         cli.ssh_host.is_some(),
     )?;
+    if trusted_managed_host_key.as_ref().is_some_and(|key| {
+        host_execution_authority
+            .as_ref()
+            .is_none_or(|authority| authority.binding() != key.binding())
+    }) {
+        anyhow::bail!("managed worker credential and execution bindings must match");
+    }
     configure_telemetry(None);
     // Fire-and-forget models.dev catalog overlay refresh; cadence-gated via
     // the sidecar, so usually a no-op read. Keeps the overlay fresh for
@@ -818,6 +833,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
                 .unwrap_or_default(),
             trusted_api_key_file: cli.model.trusted_api_key_file,
             trusted_managed_host_key,
+            host_execution_authority,
             trusted_light_credential: None,
             extra_headers: cli.model.extra_headers,
             light_model: None,

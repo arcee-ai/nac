@@ -293,6 +293,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn host_execution_denial_blocks_imported_mcp_before_transport() {
+        let fixture = crate::model::host_execution_test_support::Fixture::new();
+        let mut runtime = crate::tools::test_runtime();
+        runtime.host_execution_authority = Some(fixture.authority.clone());
+        let client = crate::model::ModelClient::new_for_test();
+        let snapshot = test_imported_snapshot(McpToolApproval::Allow);
+        fixture.remove();
+        let result = snapshot
+            .invoke(
+                "mcp__fake__echo",
+                serde_json::json!({}),
+                kernel::ToolServices {
+                    runtime: &runtime,
+                    client: &client,
+                },
+                &kernel::ToolCallContext::default(),
+            )
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("managed host execution authority"));
+        assert!(!result.content.contains("unknown MCP tool"));
+    }
+
+    #[tokio::test]
     async fn imported_tool_is_denied_by_policy_before_transport_execution() {
         let directory = std::env::temp_dir().join(format!(
             "nac-mcp-adapter-permission-{}",

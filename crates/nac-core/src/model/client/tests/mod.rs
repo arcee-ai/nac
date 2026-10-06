@@ -25,6 +25,7 @@ fn test_model_client(
         api_key_env: None,
         trusted_api_key_file: None,
         trusted_managed_host_key: None,
+        host_execution_authority: None,
         extra_headers,
         allow_insecure_http: false,
         arcee_credential_source: None,

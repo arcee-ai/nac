@@ -178,6 +178,7 @@ impl SessionService {
                     .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
 
                 let active = service.lock_active_operation();
+                service.check_host_execution_authority()?;
                 let target_run_id = match (delivery, active.as_ref()) {
                     (
                         crate::store::InboxDelivery::Steer,
@@ -219,6 +220,7 @@ impl SessionService {
                     .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
 
                 let active = service.lock_active_operation();
+                service.check_host_execution_authority()?;
                 let target_run_id = match (delivery, active.as_ref()) {
                     (
                         crate::store::InboxDelivery::Steer,
@@ -297,6 +299,7 @@ impl SessionService {
                     .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
 
                 let active = service.lock_active_operation();
+                service.check_host_execution_authority()?;
                 let active_run_id = match active.as_ref() {
                     Some(ActiveSessionOperation::Run(run)) if !run.finishing => {
                         Some(run.snapshot.run_id.clone())

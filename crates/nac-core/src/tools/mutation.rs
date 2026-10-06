@@ -696,8 +696,9 @@ async fn mutate_local_bound(
             Ok(lock) => lock,
             Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
         };
+        let cancellation = cancellation.cloned();
         match tokio::task::spawn_blocking(move || {
-            mutate_locked(target, path_display, request, lock)
+            mutate_locked_cancellable(target, path_display, request, lock, cancellation.as_ref())
         })
         .await
         {
@@ -735,6 +736,7 @@ async fn mutate_mounted(
             Ok(lock) => lock,
             Err(error) => return error_tool_result(MutationError::io(&path_display, error)),
         };
+        let cancellation = cancellation.cloned();
         match tokio::task::spawn_blocking(move || {
             mutate_mounted_locked(
                 root,
@@ -744,6 +746,7 @@ async fn mutate_mounted(
                 request,
                 create_parents,
                 lock,
+                cancellation.as_ref(),
             )
         })
         .await
@@ -766,6 +769,10 @@ async fn mutate_mounted(
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "atomic mounted mutation keeps bound descriptors, request, lock and cancellation explicit"
+)]
 fn mutate_mounted_locked(
     root: PathBuf,
     relative: PathBuf,
@@ -774,9 +781,12 @@ fn mutate_mounted_locked(
     request: MutationRequest,
     create_parents: bool,
     _lock: File,
+    cancellation: Option<&ThreadCancellation>,
 ) -> Result<MutationResult, MutationError> {
-    let (directory, name) = open_parent_beneath(&root, &relative, create_parents)
-        .map_err(|error| MutationError::io(&path_display, error))?;
+    let (directory, name) = admitted_mutation(cancellation, &path_display, || {
+        open_parent_beneath(&root, &relative, create_parents)
+            .map_err(|error| MutationError::io(&path_display, error))
+    })?;
     let mut old_file = open_target_at(&directory, &name)
         .map_err(|error| MutationError::io(&path_display, error))?;
     let mut old_bytes = None;
@@ -807,8 +817,25 @@ fn mutate_mounted_locked(
         &new_bytes,
         &path_display,
         &result.new_revision,
+        cancellation,
     )?;
     Ok(result)
+}
+
+fn admitted_mutation<T>(
+    cancellation: Option<&ThreadCancellation>,
+    path: &str,
+    operation: impl FnOnce() -> Result<T, MutationError>,
+) -> Result<T, MutationError> {
+    match cancellation {
+        None => operation(),
+        Some(cancellation) => cancellation.run_if_active(operation).unwrap_or_else(|| {
+            Err(MutationError::precondition(
+                "cancelled",
+                format!("file mutation cancelled: {path}"),
+            ))
+        }),
+    }
 }
 
 #[cfg(unix)]
@@ -920,6 +947,10 @@ fn open_target_at(directory: &File, name: &CString) -> io::Result<Option<File>> 
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "publication retains explicit descriptor, metadata, revision and final cancellation gate"
+)]
 fn publish_at(
     directory: &File,
     name: &CString,
@@ -928,6 +959,7 @@ fn publish_at(
     new_bytes: &[u8],
     path_display: &str,
     new_revision: &str,
+    cancellation: Option<&ThreadCancellation>,
 ) -> Result<(), MutationError> {
     let temp_name = c_string(format!(".nac-mutation-{}.tmp", Uuid::new_v4()).as_bytes())
         .map_err(|error| MutationError::io(path_display, error))?;
@@ -971,56 +1003,58 @@ fn publish_at(
     #[cfg(test)]
     wait_at_publish_gate(_identity);
 
-    if metadata.is_some() {
-        // SAFETY: both names are live NUL-terminated relative components and
-        // both directory arguments are the same live directory descriptor.
-        let result = unsafe {
-            libc::renameat(
-                directory.as_raw_fd(),
-                temp_name.as_ptr(),
-                directory.as_raw_fd(),
-                name.as_ptr(),
-            )
-        };
-        if result == -1 {
-            return Err(MutationError::io(path_display, io::Error::last_os_error()));
-        }
-        cleanup.disarm();
-    } else {
-        // SAFETY: both names are live NUL-terminated relative components and
-        // both directory arguments are the same live directory descriptor.
-        let result = unsafe {
-            libc::linkat(
-                directory.as_raw_fd(),
-                temp_name.as_ptr(),
-                directory.as_raw_fd(),
-                name.as_ptr(),
-                0,
-            )
-        };
-        if result == -1 {
-            let error = io::Error::last_os_error();
-            return if error.kind() == io::ErrorKind::AlreadyExists {
-                Err(MutationError::already_exists(path_display, None))
-            } else {
-                Err(MutationError::io(path_display, error))
+    admitted_mutation(cancellation, path_display, || {
+        if metadata.is_some() {
+            // SAFETY: both names are live NUL-terminated relative components and
+            // both directory arguments are the same live directory descriptor.
+            let result = unsafe {
+                libc::renameat(
+                    directory.as_raw_fd(),
+                    temp_name.as_ptr(),
+                    directory.as_raw_fd(),
+                    name.as_ptr(),
+                )
             };
+            if result == -1 {
+                return Err(MutationError::io(path_display, io::Error::last_os_error()));
+            }
+            cleanup.disarm();
+        } else {
+            // SAFETY: both names are live NUL-terminated relative components and
+            // both directory arguments are the same live directory descriptor.
+            let result = unsafe {
+                libc::linkat(
+                    directory.as_raw_fd(),
+                    temp_name.as_ptr(),
+                    directory.as_raw_fd(),
+                    name.as_ptr(),
+                    0,
+                )
+            };
+            if result == -1 {
+                let error = io::Error::last_os_error();
+                return if error.kind() == io::ErrorKind::AlreadyExists {
+                    Err(MutationError::already_exists(path_display, None))
+                } else {
+                    Err(MutationError::io(path_display, error))
+                };
+            }
+            // SAFETY: `directory` remains live and `temp_name` is the
+            // NUL-terminated temporary entry just linked into its final location.
+            let removed = unsafe { libc::unlinkat(directory.as_raw_fd(), temp_name.as_ptr(), 0) };
+            if removed == -1 {
+                return Err(MutationError::committed(
+                    path_display,
+                    new_revision.to_string(),
+                    io::Error::last_os_error(),
+                ));
+            }
+            cleanup.disarm();
         }
-        // SAFETY: `directory` remains live and `temp_name` is the
-        // NUL-terminated temporary entry just linked into its final location.
-        let removed = unsafe { libc::unlinkat(directory.as_raw_fd(), temp_name.as_ptr(), 0) };
-        if removed == -1 {
-            return Err(MutationError::committed(
-                path_display,
-                new_revision.to_string(),
-                io::Error::last_os_error(),
-            ));
-        }
-        cleanup.disarm();
-    }
-    directory
-        .sync_all()
-        .map_err(|error| MutationError::committed(path_display, new_revision.to_string(), error))
+        directory.sync_all().map_err(|error| {
+            MutationError::committed(path_display, new_revision.to_string(), error)
+        })
+    })
 }
 
 #[cfg(unix)]
@@ -1065,6 +1099,17 @@ fn mutate_locked(
     request: MutationRequest,
     _lock: File,
 ) -> Result<MutationResult, MutationError> {
+    mutate_locked_cancellable(target, path_display, request, _lock, None)
+}
+
+#[cfg(any(test, not(unix)))]
+fn mutate_locked_cancellable(
+    target: PathBuf,
+    path_display: String,
+    request: MutationRequest,
+    _lock: File,
+    cancellation: Option<&ThreadCancellation>,
+) -> Result<MutationResult, MutationError> {
     let old_bytes = match fs::read(&target) {
         Ok(bytes) => Some(bytes),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
@@ -1074,13 +1119,15 @@ fn mutate_locked(
     let new_bytes = prepare_new_bytes(&path_display, request, old_bytes.as_deref())?;
     let old_for_diff = old_bytes.as_deref().unwrap_or_default();
     let result = build_result(&path_display, old_for_diff, &new_bytes, old_revision);
-    publish(
-        &target,
-        old_bytes.as_deref(),
-        &new_bytes,
-        &path_display,
-        &result.new_revision,
-    )?;
+    admitted_mutation(cancellation, &path_display, || {
+        publish(
+            &target,
+            old_bytes.as_deref(),
+            &new_bytes,
+            &path_display,
+            &result.new_revision,
+        )
+    })?;
     Ok(result)
 }
 

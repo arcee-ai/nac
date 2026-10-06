@@ -8,8 +8,8 @@ use nac_contracts::{NewProject, ProjectRecord};
 use nac_core::{
     light_model::TrustedLightCredential,
     model::{
-        provider_uses_api_key, BackendKind, ManagedHostKeyBinding, ManagedHostKeyStore,
-        TrustedManagedHostKey,
+        provider_uses_api_key, BackendKind, ManagedHostExecutionAuthority, ManagedHostKeyBinding,
+        ManagedHostKeyStore, TrustedManagedHostKey,
     },
     runtime::ResumeModelOptions,
     sessions::SessionSnapshot,
@@ -294,6 +294,7 @@ pub(crate) struct ManagedModelProfile {
     pub(crate) credential_file: PathBuf,
     pub(crate) credential_source: ManagedModelCredentialSource,
     trusted_host_key: Option<TrustedManagedHostKey>,
+    execution_authority: Option<ManagedHostExecutionAuthority>,
 }
 
 impl ManagedModelProfile {
@@ -363,6 +364,9 @@ impl ManagedModelProfile {
             auth_issuer,
             credential_file: config.model_credential_file.clone(),
             credential_source: config.model_credential_source,
+            execution_authority: trusted_host_key
+                .clone()
+                .map(ManagedHostExecutionAuthority::new),
             trusted_host_key,
         })
     }
@@ -404,9 +408,9 @@ impl ManagedModelProfile {
                     bail!("managed host key requires NAC_HOME to equal state_root");
                 }
                 let credential = self
-                    .trusted_host_key
+                    .execution_authority
                     .as_ref()
-                    .ok_or_else(|| anyhow!("managed host-key binding is unavailable"))?;
+                    .ok_or_else(|| anyhow!("managed host execution authority is unavailable"))?;
                 credential.check_available()
             }
             ManagedModelCredentialSource::ManagedBootstrap => {
@@ -497,6 +501,10 @@ impl ManagedModelProfile {
             })
     }
 
+    pub(crate) fn host_execution_authority(&self) -> Option<ManagedHostExecutionAuthority> {
+        self.execution_authority.clone()
+    }
+
     pub(crate) fn trusted_managed_host_key(&self) -> Option<TrustedManagedHostKey> {
         self.trusted_host_key.clone()
     }
@@ -528,6 +536,7 @@ impl ManagedModelProfile {
 
     pub(crate) fn resume_options(&self, primary_matches: bool) -> ResumeModelOptions {
         ResumeModelOptions {
+            host_execution_authority: self.host_execution_authority(),
             trusted_api_key_file: primary_matches
                 .then(|| self.trusted_api_key_file())
                 .flatten(),
@@ -553,6 +562,28 @@ fn core_host_key_binding(binding: &nac_managed::ManagedHostKeyConfig) -> Managed
         clerk_instance_id: binding.clerk_instance_id.clone(),
         inference_origin: binding.inference_origin.clone(),
     }
+}
+
+/// One bounded local observer per cached service. Weak ownership prevents a
+/// removed service from being kept alive by its revocation monitor.
+pub(crate) fn monitor_host_execution_authority(
+    service: &Arc<nac_core::session_service::SessionService>,
+) {
+    let service = Arc::downgrade(service);
+    tokio::spawn(async move {
+        loop {
+            let Some(current) = service.upgrade() else {
+                return;
+            };
+            if current.check_host_execution_authority().is_err()
+                && current.settle_host_execution_denial().await.is_ok()
+            {
+                return;
+            }
+            drop(current);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
 }
 
 /// SQLite-backed adapter for the managed clone workflow's project port.

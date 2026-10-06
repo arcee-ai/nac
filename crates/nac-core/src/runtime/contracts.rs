@@ -45,6 +45,7 @@ pub struct ModelOptions {
     /// Trusted operator-mounted credential path. This is internal runtime
     /// composition state and is never populated from ordinary CLI/HTTP input.
     pub trusted_api_key_file: Option<PathBuf>,
+    pub host_execution_authority: Option<crate::model::ManagedHostExecutionAuthority>,
     pub trusted_managed_host_key: Option<crate::model::TrustedManagedHostKey>,
     /// Independently route-bound credential for the optional light client.
     /// The resolver attaches it only when backend, endpoint, and absent
@@ -62,6 +63,7 @@ pub struct ModelOptions {
 #[derive(Debug, Clone, Default)]
 pub struct ResumeModelOptions {
     pub trusted_api_key_file: Option<PathBuf>,
+    pub host_execution_authority: Option<crate::model::ManagedHostExecutionAuthority>,
     pub trusted_managed_host_key: Option<crate::model::TrustedManagedHostKey>,
     pub trusted_light_credential: Option<TrustedLightCredential>,
 }
