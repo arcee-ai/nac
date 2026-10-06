@@ -406,6 +406,7 @@ export interface components {
       run_id: components["schemas"]["SessionRunId"];
       submitted_at_epoch_ms: number;
     };
+    SubmitUserCommandRequest: { command: string; request_id: string; timeout_ms?: number | null };
     ThreadEventDecodeDiagnostic: {
       created_at: string;
       error: string;
@@ -456,6 +457,26 @@ export interface components {
     ToolContentSchema: string | components["schemas"]["ToolContentPartSchema"][];
     ToolImageSchema: { data: string; mime_type: string };
     UiConfiguration: { diagnostic?: string | null; orchestration_enabled: boolean };
+    UserCommandOutputPage: {
+      content: string;
+      eof: boolean;
+      next_offset: number;
+      offset: number;
+      output_id: string;
+      overflowed: boolean;
+      retained_end: number;
+      retained_start: number;
+      segments?: components["schemas"]["UserCommandOutputSegment"][];
+      stream: string;
+    };
+    UserCommandOutputSegment: {
+      combined_end: number;
+      combined_start: number;
+      sequence: number;
+      stream: string;
+      stream_end: number;
+      stream_start: number;
+    };
     UserCommandSnapshot: {
       command: string;
       created_at_epoch_ms: number;

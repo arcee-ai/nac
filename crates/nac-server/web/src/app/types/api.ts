@@ -449,6 +449,9 @@ export type SlashCommandDefinition = ApiSchema<"SlashCommandDefinition">;
 export type SubmitPromptRequest = ApiSchema<"SubmitPromptRequest">;
 
 export type SubmitPromptResponse = ApiSchema<"SubmitPromptResponse">;
+export type UserCommandSnapshot = ApiSchema<"UserCommandSnapshot">;
+export type UserCommandState = ApiSchema<"UserCommandState">;
+export type UserCommandOutputPage = ApiSchema<"UserCommandOutputPage">;
 
 export type CompactSessionResponse = ApiSchema<"CompactSessionResponse">;
 

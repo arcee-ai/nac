@@ -87,6 +87,7 @@ export function mergeMessageTail(
         messages: incoming.messages,
         message_created_at: incoming.created_at,
         message_page: incoming.page,
+        user_commands: incoming.user_commands,
       },
     };
   }
@@ -107,6 +108,12 @@ export function mergeMessageTail(
         start: currentPage.start,
         has_older: currentPage.start > 0,
       },
+      user_commands: [
+        ...(current.user_commands ?? []).filter(
+          (command) => command.message_index != null && command.message_index < incoming.page.start,
+        ),
+        ...(incoming.user_commands ?? []),
+      ],
     },
   };
 }
@@ -139,6 +146,7 @@ export function prependMessagePage(
       total: currentPage.total,
       has_older: incoming.page.start > 0,
     },
+    user_commands: [...(incoming.user_commands ?? []), ...(current.user_commands ?? [])],
   };
 }
 
@@ -155,6 +163,7 @@ export function mergeFocusedSnapshot(
     messages: incoming.messages,
     created_at: createdAt,
     page: incoming.message_page,
+    user_commands: incoming.user_commands,
   });
   return merged.kind === "accepted"
     ? {
@@ -162,6 +171,7 @@ export function mergeFocusedSnapshot(
         messages: merged.snapshot.messages,
         message_created_at: merged.snapshot.message_created_at,
         message_page: merged.snapshot.message_page,
+        user_commands: merged.snapshot.user_commands,
       }
     : incoming;
 }

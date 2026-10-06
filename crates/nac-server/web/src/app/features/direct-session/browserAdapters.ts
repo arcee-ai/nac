@@ -59,6 +59,9 @@ export function makeObservationPorts(
         onEnvelope: (envelope) => {
           if (!active) return;
           const event = envelope.event;
+          if (event.type === "user_command_updated") {
+            client.setQueryData(queryKeys.userCommand(id, event.command.request_id), event.command);
+          }
           callbacks.change({
             refresh: applyEnvelope(envelope),
             transcriptLength: event.type === "transcript_appended" ? event.transcript_len : 0,
