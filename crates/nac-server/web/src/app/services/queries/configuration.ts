@@ -275,6 +275,11 @@ export function useModelConfigs(enabled = true) {
  *
  * An opaque identity changes with the draft key; credentials never appear in cache keys.
  */
+let credentialSequence = 0;
+function draftCredentialIdentity(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `credential-${++credentialSequence}`;
+}
+
 export function useProviderModels(
   backend: BackendKind,
   apiKey: string,
@@ -282,7 +287,10 @@ export function useProviderModels(
   enabled: boolean,
 ) {
   const { api } = useNativeRuntime();
-  const credential = useMemo(() => ({ identity: crypto.randomUUID(), value: apiKey }), [apiKey]);
+  const credential = useMemo(
+    () => ({ identity: draftCredentialIdentity(), value: apiKey }),
+    [apiKey],
+  );
 
   return useQuery<ProviderModelList>({
     queryKey: queryKeys.providerModels(backend, credential.identity, baseUrl ?? ""),

@@ -1,7 +1,15 @@
 /** @vitest-environment jsdom */
 import { StrictMode, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { createNacClient } from "../services/nacClient";
@@ -17,6 +25,7 @@ import {
   useModelConfigs,
   useMcpServers,
   useStoredCredentials,
+  useProviderModels,
 } from "../services/queries";
 import { useNativeRuntime, RuntimeContext } from "./RuntimeContext";
 import { createNativeRuntime, type NativeRuntime } from "./nativeRuntime";
@@ -193,4 +202,21 @@ it("keeps concurrent native dialog stacks and keyboard ownership separate", asyn
   expect(rightView.getByRole("dialog")).toBeDefined();
   expect(second.container.querySelector("[data-nac-content]")?.hasAttribute("inert")).toBe(true);
   expect(first.container.querySelector("[data-nac-content]")?.hasAttribute("inert")).toBe(false);
+});
+
+it("keeps draft credentials out of query keys on standalone HTTP without crypto.randomUUID", async () => {
+  vi.stubGlobal("crypto", {});
+  const selected = instance("http");
+  const hook = renderHook(({ key }) => useProviderModels("openai-responses", key, null, true), {
+    initialProps: { key: "private-first" },
+    wrapper: ({ children }) => <Wrapper runtime={selected.runtime}>{children}</Wrapper>,
+  });
+  await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+  const initial = selected.runtime.queryClient.getQueryCache().getAll()[0].queryKey;
+  hook.rerender({ key: "private-second" });
+  await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+  const entries = selected.runtime.queryClient.getQueryCache().getAll();
+  expect(entries).toHaveLength(2);
+  expect(entries[1].queryKey).not.toEqual(initial);
+  expect(JSON.stringify(entries.map((query) => query.queryKey))).not.toContain("private-");
 });
