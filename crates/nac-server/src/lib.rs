@@ -21,6 +21,10 @@ mod orchestration;
 mod revert;
 pub(crate) use managed_control::running_target as managed_running_target;
 
+pub use application::managed_host_key_repair::{
+    ManagedHostKeyApply, ManagedHostKeyLifecycleAuthority, ManagedHostKeyMutation,
+    ManagedHostKeyRepairService, UnconfiguredManagedHostKeyLifecycleAuthority,
+};
 pub use compaction::{CompactSessionError, CompactSessionResponse};
 pub use delivery::contracts::{
     ApiErrorBody, CancelInboxItemRequest, ClearGoalRequest, CreateGoalRequest,

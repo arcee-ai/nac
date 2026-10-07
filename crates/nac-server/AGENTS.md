@@ -29,6 +29,13 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
 
 - `src/application/` — projects, sessions, delegation, configuration,
   credentials, workspace and managed use-case facades.
+- `src/application/managed_host_key_repair.rs` owns callable private-delivery
+  revocation/repair composition. Its narrow Rust facade is exported for a future
+  trusted privileged sender; the default authority denies before private I/O.
+  It defines no wire, route or startup repair. Activation requires the accepted
+  canonical lifecycle/readback contract and one current-authority barrier shared
+  with departure, plus independently established sender authorization. Synthetic
+  composition probes do not establish that production authority.
 - `src/delivery/` — contracts, errors, thin handlers, router/OpenAPI assembly,
   and server startup.
 - `src/delivery/server.rs` — assembled router and `openapi_document()` seam.

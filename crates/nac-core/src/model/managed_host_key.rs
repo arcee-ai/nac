@@ -384,8 +384,25 @@ impl ManagedHostKeyStore {
     /// Called only after a separately authenticated exact-generation revocation.
     /// Tombstones survive. This method does not revoke the provider key itself.
     pub fn record_revocation(&self, expected: &ManagedHostKeyBinding) -> Result<()> {
-        self.with_bound_authority(expected, |mut authority| {
+        self.record_revocation_with_authority_check(expected, || Ok(()))
+    }
+
+    /// Recheck an inward current-authority port after lock wait and before write.
+    /// The caller still owns sender authentication and the lifecycle barrier.
+    pub fn record_revocation_with_authority_check(
+        &self,
+        expected: &ManagedHostKeyBinding,
+        mut check_current: impl FnMut() -> Result<()>,
+    ) -> Result<()> {
+        expected.validate()?;
+        with_credential_lock(&self.lock, || {
+            check_current()?;
+            let mut authority = self
+                .read_authority()?
+                .ok_or_else(|| anyhow!("managed host-key authority is unavailable"))?;
+            require_binding(&authority, expected)?;
             authority.api_key = None;
+            check_current()?;
             self.write_authority(&authority)?;
             self.project_receipt(&authority)
         })
@@ -399,6 +416,18 @@ impl ManagedHostKeyStore {
         next: &ManagedHostKeyBinding,
         input: &Path,
     ) -> Result<()> {
+        self.repair_with_authority_check(predecessor, next, input, || Ok(()))
+    }
+
+    /// Private publication rechecks current authority inside the credential lock.
+    /// A callback failure never authorizes stale projection or key publication.
+    pub fn repair_with_authority_check(
+        &self,
+        predecessor: &ManagedHostKeyBinding,
+        next: &ManagedHostKeyBinding,
+        input: &Path,
+        mut check_current: impl FnMut() -> Result<()>,
+    ) -> Result<()> {
         predecessor.validate()?;
         next.validate()?;
         if !predecessor.same_owner(next)
@@ -408,11 +437,13 @@ impl ManagedHostKeyStore {
             bail!("managed host-key repair requires same-owner successor generation");
         }
         with_credential_lock(&self.lock, || {
+            check_current()?;
             self.ensure_no_legacy_auth()?;
             let mut authority = self
                 .read_authority()?
                 .ok_or_else(|| anyhow!("managed host-key authority is unavailable"))?;
             if authority.binding == *next {
+                check_current()?;
                 return self.project_receipt(&authority);
             }
             require_binding(&authority, predecessor)?;
@@ -433,6 +464,7 @@ impl ManagedHostKeyStore {
             authority
                 .consumed_bootstrap_ids
                 .push(next.bootstrap_id.clone());
+            check_current()?;
             self.write_authority(&authority)?;
             self.project_receipt(&authority)
         })

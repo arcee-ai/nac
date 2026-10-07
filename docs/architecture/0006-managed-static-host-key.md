@@ -45,6 +45,28 @@ explicit recovery decision rather than silently discarding replay history.
 Active-slot rotation and stopped-owner transfer require separate fenced
 operations; the initial importer cannot perform either.
 
+The server's callable `ManagedHostKeyRepairService` composes that storage seam
+with a private mounted-delivery adapter selected by validated v3 operator
+configuration. Its default lifecycle authority refuses revocation and repair
+before private I/O. A separately constructed sender port must authenticate the
+accepted exact lifecycle/readback, upstream cutoff/issuance and current resource
+eligibility, holding the same dispatch barrier as departure through publication.
+Its fresh current-authority check runs inside the credential lock after any
+writer wait and immediately before private publication. Time expiry is checked
+even when departure is held behind the shared lifecycle barrier.
+The borrowed Rust mutation inputs are not an accepted wire or proof. No sender
+factory, HTTP route, callback URI, CLI flag or automatic startup repair is
+installed. No legacy upgrade assertion grants Clerk authority. The workload
+receives no extra backend/M2M/Kubernetes credential.
+
+Composition tests use a synthetic gated sender to exercise revocation, empty
+slot, successor repair/receipt, mount-free ordinary startup, lost response and
+duplicate delivery, native CAS negatives, and both departure orderings. A
+duplicate after successor cutoff cannot refill the consumed slot or report local
+availability. Errors after a durable commit do not roll it back or authorize
+automatic replay. These tests prove the callable boundary, not authenticated
+sender activation or an actual controller-authorized image repair journey.
+
 Offline readiness proves exact local provenance and a nonempty credential.
 ALL-155 owns independent upstream verification of provider class, instance,
 organization subject, claims and current local host/key/member policy. The

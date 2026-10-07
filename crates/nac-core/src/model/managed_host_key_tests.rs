@@ -318,6 +318,42 @@ fn repair_rejects_reuse_owner_transfer_and_stale_predecessor() {
     }
 }
 
+#[test]
+fn current_authority_denial_before_publication_preserves_key_and_consumed_history() {
+    let fixture = Fixture::new();
+    let expected = binding();
+    fixture.deliver(&expected);
+    fixture.store.import(&expected, &fixture.input).unwrap();
+    let before = snapshot(&fixture);
+    let mut checks = 0;
+    let mut expire_before_write = || {
+        checks += 1;
+        anyhow::ensure!(checks == 1, "authority expired");
+        Ok(())
+    };
+    assert!(fixture
+        .store
+        .record_revocation_with_authority_check(&expected, &mut expire_before_write)
+        .is_err());
+    assert_eq!(checks, 2);
+    assert_eq!(snapshot(&fixture), before);
+    fixture.store.record_revocation(&expected).unwrap();
+    let empty = snapshot(&fixture);
+    let next = next_binding(&expected);
+    fixture.deliver(&next);
+    let mut checks = 0;
+    assert!(fixture
+        .store
+        .repair_with_authority_check(&expected, &next, &fixture.input, || {
+            checks += 1;
+            anyhow::ensure!(checks == 1, "authority expired");
+            Ok(())
+        })
+        .is_err());
+    assert_eq!(checks, 2);
+    assert_eq!(snapshot(&fixture), empty);
+}
+
 #[cfg(unix)]
 #[test]
 fn no_follow_mount_authority_and_projection_paths_preserve_targets() {
