@@ -7,7 +7,7 @@
 use super::managed_runtime_admission::{digest_hex, read_with_connection};
 use super::*;
 use rusqlite::TransactionBehavior;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 type LeaseResult<T> = std::result::Result<T, ManagedRuntimeJournalError>;
@@ -25,8 +25,46 @@ pub struct RuntimeLeaseBinding {
 /// Both clocks are sampled by native code; transport input cannot supply these.
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeLeaseClock {
-    pub wall_ms: i64,
-    pub monotonic: Instant,
+    wall_ms: i64,
+    monotonic: Instant,
+    live: bool,
+}
+impl RuntimeLeaseClock {
+    pub fn capture() -> LeaseResult<Self> {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| ManagedRuntimeJournalError::LeaseDenied)?
+            .as_millis();
+        Ok(Self {
+            wall_ms: i64::try_from(millis).map_err(|_| ManagedRuntimeJournalError::LeaseDenied)?,
+            monotonic: Instant::now(),
+            live: true,
+        })
+    }
+    pub fn wall_ms(&self) -> i64 {
+        self.wall_ms
+    }
+    pub fn monotonic(&self) -> Instant {
+        self.monotonic
+    }
+    fn at_execution(self) -> LeaseResult<Self> {
+        if !self.live {
+            return Ok(self);
+        }
+        let current = Self::capture()?;
+        if current.wall_ms < self.wall_ms || current.monotonic < self.monotonic {
+            return denied();
+        }
+        Ok(current)
+    }
+    #[cfg(test)]
+    pub(crate) fn fixed(wall_ms: i64, monotonic: Instant) -> Self {
+        Self {
+            wall_ms,
+            monotonic,
+            live: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,6 +128,21 @@ impl ActiveRuntimeLease {
     pub fn snapshot(&self) -> &RuntimeLeaseSnapshot {
         &self.snapshot
     }
+    pub(crate) fn binding(&self) -> &RuntimeLeaseBinding {
+        &self.binding
+    }
+    pub(crate) fn available_at(&self, clock: RuntimeLeaseClock) -> bool {
+        clock.wall_ms >= 0
+            && clock.wall_ms < self.snapshot.expires_ms
+            && clock.monotonic < self.monotonic_deadline
+    }
+    pub(crate) fn same_operation(&self, other: &Self) -> bool {
+        self.binding.identity == other.binding.identity
+            && self.binding.assignment_sha256 == other.binding.assignment_sha256
+            && self.binding.serving_lifetime_id == other.binding.serving_lifetime_id
+            && self.binding.original_expires_ms == other.binding.original_expires_ms
+            && self.reservation_id == other.reservation_id
+    }
 }
 
 #[derive(Debug)]
@@ -129,7 +182,13 @@ fn reserve_with_connection(
     let outcome = if let Some(existing) = read_with_connection(&transaction, &binding.identity)? {
         RuntimeLeaseReservationOutcome::Readback(existing)
     } else {
-        let remaining = remaining_ms(clock.wall_ms, binding.original_expires_ms, 300_000)?;
+        let original_deadline =
+            clock.monotonic + remaining_ms(clock.wall_ms, binding.original_expires_ms, 300_000)?;
+        let clock = clock.at_execution()?;
+        remaining_ms(clock.wall_ms, binding.original_expires_ms, 300_000)?;
+        if clock.monotonic >= original_deadline {
+            return denied();
+        }
         let reservation_id = Uuid::new_v4();
         transaction.execute(
             "INSERT INTO managed_runtime_operations (operation_id, full_input_sha256, recorded_at)
@@ -148,7 +207,7 @@ fn reserve_with_connection(
         RuntimeLeaseReservationOutcome::Fresh(FreshRuntimeReservation {
             binding: binding.clone(),
             reservation_id,
-            original_deadline: clock.monotonic + remaining,
+            original_deadline,
         })
     };
     transaction.commit()?;
@@ -164,16 +223,22 @@ pub fn challenge_managed_runtime_initial(path: &Path, fresh: FreshRuntimeReserva
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let row = read_row(&transaction, &fresh.binding)?;
     if row.reservation_id != fresh.reservation_id || row.phase != "reserved" { return denied(); }
+    let issued_ms = clock.wall_ms;
+    let deadline = clock.monotonic + validate_challenge(challenge, clock, fresh.binding.original_expires_ms)?;
+    let (transaction, clock) = live_clock_or_terminal(transaction, &fresh.binding, clock)?;
     if clock.monotonic >= fresh.original_deadline || clock.wall_ms < row.last_wall_ms ||
         clock.wall_ms >= fresh.binding.original_expires_ms {
         terminal(&transaction, &fresh.binding)?; transaction.commit()?; return denied();
     }
-    let remaining = validate_challenge(challenge, clock, fresh.binding.original_expires_ms)?;
+    if clock.wall_ms >= challenge.expires_ms || clock.monotonic >= deadline {
+        terminal(&transaction, &fresh.binding)?; transaction.commit()?; return denied();
+    }
+    validate_challenge(challenge, clock, fresh.binding.original_expires_ms)?;
     set_challenge(&transaction, &fresh.binding, challenge, clock, "challenged")?;
     transaction.commit()?;
     Ok(PendingRuntimeChallenge { binding: fresh.binding, reservation_id: fresh.reservation_id,
-        challenge: challenge.clone(), prior: None, issued_ms: clock.wall_ms,
-        monotonic_deadline: (clock.monotonic + remaining).min(fresh.original_deadline) })
+        challenge: challenge.clone(), prior: None, issued_ms,
+        monotonic_deadline: deadline.min(fresh.original_deadline) })
 }
 command ChallengeManagedRuntimeInitialCommand {
     fresh: FreshRuntimeReservation = fresh,
@@ -195,6 +260,9 @@ pub fn challenge_managed_runtime_renewal(path: &Path, active: &ActiveRuntimeLeas
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let row = read_row(&transaction, &active.binding)?;
     if !matches_active(&row, active) { return denied(); }
+    let issued_ms = clock.wall_ms;
+    let deadline = clock.monotonic + validate_challenge(challenge, clock, active.snapshot.expires_ms)?;
+    let (transaction, clock) = live_clock_or_terminal(transaction, &active.binding, clock)?;
     if expired(&row, active, clock) {
         terminal(&transaction, &active.binding)?; transaction.commit()?; return denied();
     }
@@ -204,12 +272,15 @@ pub fn challenge_managed_runtime_renewal(path: &Path, active: &ActiveRuntimeLeas
         return denied();
     }
     if row.challenge_sha256.is_some() { return denied(); }
-    let remaining = validate_challenge(challenge, clock, active.snapshot.expires_ms)?;
+    if clock.wall_ms >= challenge.expires_ms || clock.monotonic >= deadline {
+        terminal(&transaction, &active.binding)?; transaction.commit()?; return denied();
+    }
+    validate_challenge(challenge, clock, active.snapshot.expires_ms)?;
     set_challenge(&transaction, &active.binding, challenge, clock, "active")?;
     transaction.commit()?;
     Ok(PendingRuntimeChallenge { binding: active.binding.clone(), reservation_id: active.reservation_id,
-        challenge: challenge.clone(), prior: Some(active.snapshot.clone()), issued_ms: clock.wall_ms,
-        monotonic_deadline: (clock.monotonic + remaining).min(active.monotonic_deadline) })
+        challenge: challenge.clone(), prior: Some(active.snapshot.clone()), issued_ms,
+        monotonic_deadline: deadline.min(active.monotonic_deadline) })
 }
 command ChallengeManagedRuntimeRenewalCommand {
     active: ActiveRuntimeLeaseCheck = ActiveRuntimeLeaseCheck::from(active), native: ManagedRuntimeObservation = native.clone(),
@@ -255,9 +326,13 @@ fn consume_with_connection(
     {
         return denied();
     }
+    let receipt_deadline =
+        clock.monotonic + remaining_ms(clock.wall_ms, response.lease.expires_ms, 60_000)?;
+    let (transaction, clock) = live_clock_or_terminal(transaction, &pending.binding, clock)?;
     if clock.wall_ms < row.last_wall_ms
         || clock.wall_ms >= pending.challenge.expires_ms
         || clock.monotonic >= pending.monotonic_deadline
+        || clock.monotonic >= receipt_deadline
         || pending
             .prior
             .as_ref()
@@ -308,7 +383,7 @@ fn consume_with_connection(
         binding: pending.binding,
         reservation_id: pending.reservation_id,
         snapshot: response.lease.clone(),
-        monotonic_deadline: clock.monotonic + remaining,
+        monotonic_deadline: (clock.monotonic + remaining).min(receipt_deadline),
     })
 }
 
@@ -319,6 +394,7 @@ pub fn check_managed_runtime_lease(path: &Path, active: &ActiveRuntimeLease, clo
     let mut connection = open_runtime_connection(path)?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let row = read_row(&transaction, &active.binding)?;
+    let (transaction, clock) = live_clock_or_terminal(transaction, &active.binding, clock)?;
     let valid = matches_active(&row, active) && !expired(&row, active, clock);
     if valid {
         transaction.execute("UPDATE managed_runtime_leases SET last_wall_ms = ?2 WHERE operation_id = ?1",
@@ -338,7 +414,7 @@ port internal;
 }
 
 // Private queue copy is not exposed as a cloneable dispatch capability.
-struct ActiveRuntimeLeaseCheck(ActiveRuntimeLease);
+pub(crate) struct ActiveRuntimeLeaseCheck(ActiveRuntimeLease);
 impl From<&ActiveRuntimeLease> for ActiveRuntimeLeaseCheck {
     fn from(active: &ActiveRuntimeLease) -> Self {
         Self(ActiveRuntimeLease {
@@ -350,6 +426,31 @@ impl From<&ActiveRuntimeLease> for ActiveRuntimeLeaseCheck {
     }
 }
 impl StoreCoordinator {
+    pub(crate) async fn challenge_runtime_lease_view(
+        &self,
+        active: ActiveRuntimeLeaseCheck,
+        native: ManagedRuntimeObservation,
+        challenge: RuntimeChallengeSpec,
+        clock: RuntimeLeaseClock,
+    ) -> LeaseResult<PendingRuntimeChallenge> {
+        self.submit(ChallengeManagedRuntimeRenewalCommand {
+            active,
+            native,
+            challenge,
+            clock,
+        })?
+        .acknowledge()
+        .await?
+    }
+    pub(crate) async fn check_runtime_lease_view(
+        &self,
+        active: ActiveRuntimeLeaseCheck,
+        clock: RuntimeLeaseClock,
+    ) -> LeaseResult<bool> {
+        self.submit(CheckManagedRuntimeLeaseCommand { active, clock })?
+            .acknowledge()
+            .await?
+    }
     pub async fn challenge_managed_runtime_renewal(
         &self,
         active: &ActiveRuntimeLease,
@@ -399,6 +500,21 @@ port public;
 
 fn denied<T>() -> LeaseResult<T> {
     Err(ManagedRuntimeJournalError::LeaseDenied)
+}
+
+fn live_clock_or_terminal<'a>(
+    transaction: Transaction<'a>,
+    binding: &RuntimeLeaseBinding,
+    clock: RuntimeLeaseClock,
+) -> LeaseResult<(Transaction<'a>, RuntimeLeaseClock)> {
+    match clock.at_execution() {
+        Ok(clock) => Ok((transaction, clock)),
+        Err(error) => {
+            terminal(&transaction, binding)?;
+            transaction.commit()?;
+            Err(error)
+        }
+    }
 }
 
 fn remaining_ms(now: i64, expires: i64, maximum: i64) -> LeaseResult<Duration> {
@@ -458,7 +574,7 @@ fn expired(row: &LeaseRow, active: &ActiveRuntimeLease, clock: RuntimeLeaseClock
 
 fn terminal(transaction: &Transaction<'_>, binding: &RuntimeLeaseBinding) -> LeaseResult<()> {
     transaction.execute("UPDATE managed_runtime_leases SET phase = 'terminal',
-        challenge_sha256 = NULL, channel_id = NULL, challenge_expires_ms = NULL WHERE operation_id = ?1",
+        challenge_sha256 = NULL, channel_id = NULL, challenge_expires_ms = NULL WHERE operation_id = ?1 AND phase != 'terminal'",
         [binding.identity.operation_id.to_string()])?;
     Ok(())
 }

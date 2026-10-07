@@ -46,10 +46,15 @@ use crate::workspace::GitTarget;
 mod builders;
 mod configuration;
 mod contracts;
+mod effect_lease;
+mod managed_runtime_lease;
 mod model_resolution;
 mod remote;
 mod resume;
 mod sandboxing;
+
+pub use effect_lease::{RuntimeEffectLease, RuntimeEffectLeaseHandle};
+pub use managed_runtime_lease::ManagedRuntimeLeaseGuard;
 
 pub use builders::{
     build_managed_worker_config, build_run_config, build_run_config_for_project,

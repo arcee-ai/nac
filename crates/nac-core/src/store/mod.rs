@@ -51,6 +51,7 @@ pub use managed_runtime_admission::{
     record_managed_runtime_operation, ManagedRuntimeJournalError, ManagedRuntimeObservation,
     ManagedRuntimeOperationIdentity, ManagedRuntimeOperationSnapshot, ManagedRuntimeRecordOutcome,
 };
+pub(crate) use managed_runtime_leases::ActiveRuntimeLeaseCheck;
 pub use managed_runtime_leases::{
     challenge_managed_runtime_initial, challenge_managed_runtime_renewal,
     check_managed_runtime_lease, consume_managed_runtime_challenge, reserve_managed_runtime_lease,

@@ -23,17 +23,14 @@ impl Fixture {
                 serving_lifetime_id: Uuid::new_v4(),
                 original_expires_ms: 120_000,
             },
-            clock: RuntimeLeaseClock {
-                wall_ms: 100_000,
-                monotonic: Instant::now(),
-            },
+            clock: RuntimeLeaseClock::fixed(100_000, Instant::now()),
         }
     }
     fn at(&self, elapsed: u64) -> RuntimeLeaseClock {
-        RuntimeLeaseClock {
-            wall_ms: self.clock.wall_ms + i64::try_from(elapsed).unwrap(),
-            monotonic: self.clock.monotonic + Duration::from_millis(elapsed),
-        }
+        RuntimeLeaseClock::fixed(
+            self.clock.wall_ms + i64::try_from(elapsed).unwrap(),
+            self.clock.monotonic + Duration::from_millis(elapsed),
+        )
     }
     fn fresh(&self) -> FreshRuntimeReservation {
         match reserve_managed_runtime_lease(&self.path, &self.binding, self.clock).unwrap() {
@@ -173,10 +170,7 @@ fn managed_runtime_lease_process_helper() {
     let outcome = reserve_managed_runtime_lease(
         Path::new(&path),
         &binding,
-        RuntimeLeaseClock {
-            wall_ms: 100_000,
-            monotonic: Instant::now(),
-        },
+        RuntimeLeaseClock::fixed(100_000, Instant::now()),
     )
     .unwrap();
     println!(
