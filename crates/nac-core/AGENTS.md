@@ -41,6 +41,18 @@ It must not own HTTP/React delivery or managed-host product onboarding.
   creation on the selected store executor. Missing authority has no standalone
   fallback. This factory does not admit a run, install startup/receiver policy,
   fence resumed/worker construction, or qualify active-run continuation.
+- `src/sandbox/podman.rs` keeps the selected Podman adapter's container lifecycle,
+  creation receipts, process identity/cleanup scripts and rollback together; its
+  cohesive ownership explains its size above 800 lines. Fresh durable teardown
+  uses the recorded full container ID and per-launch token, while pending
+  creation retains ordered cleanup and missing runtimes preserve restart
+  evidence. `src/sandbox/session_worktree.rs` similarly owns fork/restore,
+  canonical scratch validation, rollback and neighboring characterizations.
+  Cancelling fresh construction rolls back only its proven unpersisted fork;
+  submitted session writes retain the fork until the selected store settles
+  ownership, including lost commit replies. Resume does not acquire that
+  destructive ownership. Cancellation during an unsettled write can retain a
+  provisional fork; restart reconciliation of that fork remains separate work.
 - `src/session_service/AGENTS.md` — run admission through durable settlement.
 - `src/store/AGENTS.md` and `src/sessions/` — persisted domain and schema.
 - `src/permissions/AGENTS.md` — policy, binding, grants, approval broker.

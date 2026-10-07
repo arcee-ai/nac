@@ -3,6 +3,10 @@ use crate::store::{self, ManagedRuntimeOperationIdentity, RuntimeLeaseReservatio
 use std::path::PathBuf;
 use uuid::Uuid;
 
+#[cfg(unix)]
+#[path = "construction_backend_tests.rs"]
+mod construction_backend_tests;
+
 struct Fixture {
     path: PathBuf,
     store: Arc<StoreCoordinator>,

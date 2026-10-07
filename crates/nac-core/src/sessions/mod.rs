@@ -57,6 +57,30 @@ pub(crate) async fn load_last_session_async(path: PathBuf) -> Result<SessionSnap
         .context("last-session load task failed")?
 }
 
+/// Negative cleanup must distinguish an absent session from an unavailable
+/// ownership store. This never reconstructs execution or restart authority.
+pub(crate) async fn has_durable_session_owner(path: &Path, session_id: &str) -> Result<bool> {
+    let metadata = std::fs::symlink_metadata(path)
+        .context("session ownership store is unavailable; provisional resources retained")?;
+    if !metadata.file_type().is_file() {
+        anyhow::bail!(
+            "session ownership store is not a regular file; provisional resources retained"
+        );
+    }
+    if let Some(owner) = crate::store::coordinator::owner_for(path)? {
+        owner
+            .durable_session_owner_exists(session_id.to_string(), metadata)
+            .await
+    } else {
+        let path = path.to_path_buf();
+        let session_id = session_id.to_string();
+        crate::store::spawn_blocking_store_caller(move || {
+            db::durable_session_owner_exists(&path, &session_id, &metadata)
+        })
+        .await?
+    }
+}
+
 use codec::*;
 pub(crate) use summary::{last_user_prompt, visible_message_count};
 

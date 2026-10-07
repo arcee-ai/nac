@@ -308,11 +308,17 @@ pub(crate) struct PodmanSession {
     /// has not yet transferred ownership to the committed session row.
     creation_store_path: Option<PathBuf>,
     creation_record: Mutex<Option<CreationRecordAuthority>>,
+    /// Only committed session ownership, never suppression of Drop rollback,
+    /// transfers a fresh durable launch away from its exact creation record.
+    creation_transferred: AtomicBool,
 }
 
 struct CreationRecordAuthority {
     cidfile: PathBuf,
     lock_file: File,
+    /// Live creation remembers its exact selected store/session. Recovered
+    /// records are separately checked against durable ownership by startup.
+    durable_binding: Option<(PathBuf, String)>,
 }
 
 impl CreationRecordAuthority {
@@ -391,9 +397,21 @@ async fn destroy_created_container(cidfile: &Path) -> Result<()> {
 }
 
 async fn destroy_created_container_record(record: CreationRecordAuthority) -> Result<()> {
-    destroy_created_container_only(&record.cidfile).await?;
+    settle_created_container(&record).await?;
     record.remove();
     Ok(())
+}
+
+/// A lost session-commit reply cannot turn a durable backend into provisional
+/// rollback. Uncertain ownership checks preserve the record and fail closed.
+async fn settle_created_container(record: &CreationRecordAuthority) -> Result<bool> {
+    if let Some((path, session_id)) = &record.durable_binding {
+        if crate::sessions::has_durable_session_owner(path, session_id).await? {
+            return Ok(true);
+        }
+    }
+    destroy_created_container_only(&record.cidfile).await?;
+    Ok(false)
 }
 
 async fn destroy_created_container_only(cidfile: &Path) -> Result<()> {
@@ -554,7 +572,7 @@ fn create_creation_record(
             &creation_session_path(&cidfile),
             format!("{session_key}\n").as_bytes(),
         )?;
-        if let Some(store_path) = store_path {
+        let durable_binding = if let Some(store_path) = store_path {
             let canonical_store = store_path.canonicalize().with_context(|| {
                 format!(
                     "failed to canonicalize durable store '{}' for Podman creation ownership",
@@ -565,14 +583,21 @@ fn create_creation_record(
                 &creation_store_path(&cidfile),
                 &serde_json::to_vec(&canonical_store)?,
             )?;
-        }
+            Some((canonical_store, session_key.to_string()))
+        } else {
+            None
+        };
         let lock_path = creation_lock_path(&cidfile);
         write_private_record(&lock_path, b"")?;
         let lock_file = OpenOptions::new().read(true).write(true).open(&lock_path)?;
         FileExt::lock_exclusive(&lock_file)?;
         #[cfg(unix)]
         File::open(&directory)?.sync_all()?;
-        Ok(CreationRecordAuthority { cidfile, lock_file })
+        Ok(CreationRecordAuthority {
+            cidfile,
+            lock_file,
+            durable_binding,
+        })
     })();
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&directory);
@@ -656,7 +681,11 @@ pub(crate) async fn reconcile_creation_records(store_path: &Path) -> Result<()> 
                 continue;
             }
         }
-        let record = CreationRecordAuthority { cidfile, lock_file };
+        let record = CreationRecordAuthority {
+            cidfile,
+            lock_file,
+            durable_binding: None,
+        };
         // The creator may have died while its detached `podman run` child was
         // still registering the container. An absent cidfile is therefore
         // uncertainty, not proof that no container can appear after this
@@ -737,6 +766,7 @@ impl PodmanSession {
             activity_key,
             creation_store_path: None,
             creation_record: Mutex::new(None),
+            creation_transferred: AtomicBool::new(false),
         }
     }
 
@@ -771,6 +801,7 @@ impl PodmanSession {
         reason = "poisoning the creation-record lock invalidates container cleanup ownership"
     )]
     pub(crate) fn retain_for_durable_session(&self) {
+        self.creation_transferred.store(true, Ordering::Release);
         self.cleanup_on_drop.store(false, Ordering::Release);
         let creation_record = self
             .creation_record
@@ -1260,6 +1291,33 @@ impl PodmanSession {
         reason = "poisoning the creation-record lock invalidates container cleanup ownership"
     )]
     pub(crate) async fn destroy(&self) -> Result<()> {
+        if self.creation_store_path.is_some() && !self.creation_transferred.load(Ordering::Acquire)
+        {
+            let record = self
+                .creation_record
+                .lock()
+                .expect("Podman creation record lock poisoned")
+                .take();
+            if let Some(record) = record {
+                let transferred = match settle_created_container(&record).await {
+                    Ok(transferred) => transferred,
+                    Err(error) => {
+                        self.creation_record
+                            .lock()
+                            .expect("Podman creation record lock poisoned")
+                            .replace(record);
+                        return Err(error);
+                    }
+                };
+                self.creation_transferred
+                    .store(transferred, Ordering::Release);
+                record.remove();
+                self.cleanup_on_drop.store(false, Ordering::Release);
+            }
+            // An in-flight creator's pending guard owns cleanup; a failed
+            // duplicate creator has no record and no peer-removal authority.
+            return Ok(());
+        }
         destroy_owned_container(&self.session_key).await?;
         let creation_record = self
             .creation_record
@@ -1280,6 +1338,37 @@ impl Drop for PodmanSession {
     )]
     fn drop(&mut self) {
         if !self.cleanup_on_drop.load(Ordering::Acquire) {
+            return;
+        }
+
+        if self.creation_store_path.is_some() {
+            // A durable launch owns only the exact creation record. When
+            // creation is still in flight its pending guard already owns that
+            // record and waits for registration before removal. Removing the
+            // deterministic name here could race ahead or delete a peer winner.
+            if let Some(record) = self
+                .creation_record
+                .get_mut()
+                .expect("Podman creation record lock poisoned")
+                .take()
+            {
+                match tokio::runtime::Handle::try_current() {
+                    Ok(runtime) => {
+                        runtime.spawn(async move {
+                            if let Err(error) = destroy_created_container_record(record).await {
+                                eprintln!(
+                                    "nac: failed to roll back durable sandbox creation: {error:#}"
+                                );
+                            }
+                        });
+                    }
+                    Err(_) => {
+                        // Closing the lock preserves the record for startup
+                        // reconciliation; it never manufactures name authority.
+                        eprintln!("nac: durable sandbox creation cleanup requires a live runtime; its ownership record was preserved");
+                    }
+                }
+            }
             return;
         }
 

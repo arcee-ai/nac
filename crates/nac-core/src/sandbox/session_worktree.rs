@@ -66,8 +66,8 @@ pub(crate) fn cwd_mount(cwd: &Path, session_key: &str, owner: bool) -> Result<Cw
 }
 
 /// Creates the sandbox for a freshly launched session. When the spec carries
-/// a forked worktree and creation fails, the fork is rolled back: it predates
-/// the session row, so nothing else would ever clean it up. (Resume takes a
+/// a forked worktree and creation fails or is cancelled, the fork is rolled back:
+/// it predates the session row, so nothing else would ever clean it up. (Resume takes a
 /// different path — `restore` then `SandboxSession::create` directly —
 /// because rolling back there would destroy a branch holding session work.)
 pub(crate) async fn launch_session(
@@ -78,7 +78,10 @@ pub(crate) async fn launch_session(
     durable_store_path: Option<PathBuf>,
 ) -> Result<SandboxSession> {
     let forked = spec.worktree.clone();
-    let launched = async {
+    // Own the fork before the first await. A cancelled creation future never
+    // reaches an explicit error branch, but still has no durable session owner.
+    let mut rollback = RollbackGuard::new(forked.clone());
+    let launched: Result<SandboxSession> = async {
         let session = if let Some(store_path) = durable_store_path {
             SandboxSession::create_for_durable_launch(
                 spec,
@@ -98,36 +101,56 @@ pub(crate) async fn launch_session(
         Ok(session)
     }
     .await;
-    match launched {
-        Ok(session) => Ok(session),
-        Err(error) => {
-            if let Some(worktree) = &forked {
-                rollback(worktree);
-            }
-            Err(error)
-        }
-    }
+    let session = launched?;
+    rollback.disarm();
+    Ok(session)
 }
 
 /// Owns a fresh fork until the session row durably records its cleanup
 /// metadata. Declaring this guard before the sandbox makes Rust drop the
 /// container first on an error, then remove the worktree.
-pub(crate) struct RollbackGuard(Option<SandboxWorktree>);
+pub(crate) struct RollbackGuard {
+    worktree: Option<SandboxWorktree>,
+    commit_pending: bool,
+}
 
 impl RollbackGuard {
     pub(crate) fn new(worktree: Option<SandboxWorktree>) -> Self {
-        Self(worktree)
+        Self {
+            worktree,
+            commit_pending: false,
+        }
     }
 
     pub(crate) fn disarm(&mut self) {
-        self.0 = None;
+        self.worktree = None;
+    }
+
+    /// Once a session write is submitted, dropped delivery is not evidence that
+    /// this fork is unowned. Preserve it until the selected store settles that.
+    pub(crate) fn preserve_pending_commit(&mut self) {
+        self.commit_pending = true;
+    }
+
+    pub(crate) async fn settle_failed_commit(
+        &mut self,
+        path: &Path,
+        session_id: &str,
+    ) -> Result<()> {
+        if self.commit_pending {
+            self.commit_pending =
+                crate::sessions::has_durable_session_owner(path, session_id).await?;
+        }
+        Ok(())
     }
 }
 
 impl Drop for RollbackGuard {
     fn drop(&mut self) {
-        if let Some(worktree) = self.0.take() {
-            rollback(&worktree);
+        if !self.commit_pending {
+            if let Some(worktree) = self.worktree.take() {
+                rollback(&worktree);
+            }
         }
     }
 }

@@ -272,11 +272,14 @@ async fn build_run_config_inner(
     let paths = PathContext::new(&workspace_cwd);
     let mut worktree_rollback: session_worktree::RollbackGuard;
     super::construction_admission::check(construction).await?;
-    let sandbox = build_sandbox_session_inner(
-        &sandbox_options,
-        &workspace_cwd,
-        Some(session_id.clone()),
-        Some(store_path.clone()),
+    let sandbox = super::construction_admission::during(
+        construction,
+        build_sandbox_session_inner(
+            &sandbox_options,
+            &workspace_cwd,
+            Some(session_id.clone()),
+            Some(store_path.clone()),
+        ),
     )
     .await?;
     worktree_rollback = session_worktree::RollbackGuard::new(
@@ -311,6 +314,8 @@ async fn build_run_config_inner(
     } else {
         None
     };
+    let ownership_store_path = store_path.clone();
+    let ownership_session_id = session_id.clone();
     let build_result: Result<OrchestratorRunConfig> = (async {
         super::construction_admission::check(construction).await?;
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
@@ -393,6 +398,7 @@ async fn build_run_config_inner(
         session_snapshot.project_id = project_id;
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.light_model = light_model;
+        worktree_rollback.preserve_pending_commit();
         super::construction_admission::create_session(construction, &store_path, &session_snapshot)
             .await?;
         if let Some(sandbox) = sandbox.as_ref() {
@@ -420,6 +426,14 @@ async fn build_run_config_inner(
     match build_result {
         Ok(run_config) => Ok(run_config),
         Err(error) => {
+            if let Err(ownership) = worktree_rollback
+                .settle_failed_commit(&ownership_store_path, &ownership_session_id)
+                .await
+            {
+                return Err(error.context(format!(
+                    "fresh sandbox session ownership is uncertain; its resources were retained: {ownership:#}"
+                )));
+            }
             if let Some(sandbox) = sandbox.as_ref() {
                 // Disable fire-and-forget Drop cleanup before performing the
                 // checked rollback. Every in-process failure after successful

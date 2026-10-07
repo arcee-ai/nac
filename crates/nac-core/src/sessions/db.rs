@@ -461,6 +461,44 @@ port public;
 }
 
 coordinated_command! {
+pub(crate) fn durable_session_owner_exists(path: &Path, session_id: &str,
+    expected: &std::fs::Metadata) -> Result<bool> {
+    let verify = || -> Result<()> {
+        let actual = std::fs::symlink_metadata(path)?;
+        anyhow::ensure!(actual.file_type().is_file(), "session ownership store is unavailable");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            anyhow::ensure!(actual.dev() == expected.dev() && actual.ino() == expected.ino(),
+                "session ownership store was replaced; resources retained");
+        }
+        #[cfg(not(unix))]
+        anyhow::ensure!(actual.created()? == expected.created()?,
+            "session ownership store was replaced; resources retained");
+        Ok(())
+    };
+    // The command runs after the selected owner's queue wait. This query must
+    // never initialize a missing/replaced path or translate uncertainty to false.
+    verify()?;
+    let conn = crate::store::open_initialized_read_connection(path)?;
+    let exists = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = ?1)",
+        params![session_id],
+        |row| row.get(0),
+    )?;
+    verify()?;
+    Ok(exists)
+}
+command DurableSessionOwnerExistsCommand {
+    session_id: String = session_id.to_owned(),
+    expected: std::fs::Metadata = expected.clone(),
+}
+call |command| (&command.session_id, &command.expected)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+coordinated_command! {
 pub fn session_exists(path: &Path, session_id: &str) -> Result<bool> {
     if !path.exists() {
         return Ok(false);
