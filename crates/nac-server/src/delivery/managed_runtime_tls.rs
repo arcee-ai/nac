@@ -27,6 +27,11 @@ const MAX_HANDSHAKES: usize = 32;
 #[path = "managed_runtime_issuer.rs"]
 pub(crate) mod issuer;
 
+#[path = "managed_runtime_control.rs"]
+pub(crate) mod control;
+#[path = "managed_runtime_intent.rs"]
+mod intent;
+
 /// Explicit construction capability; absent configuration creates no listener.
 /// DER bytes are loaded by trusted composition, never selected by an HTTP request.
 pub struct RuntimeTlsIdentity {

@@ -54,6 +54,15 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   current policy/challenge/journal composition exists. A channel UUID is a selector,
   never a grant or liveness proof; close/replacement must invalidate outstanding
   exchanges in the composed channel owner. No loader or listener startup is installed.
+- `src/delivery/managed_runtime_control.rs` consumes B's exact accepted control
+  contract and frozen vectors. It supplies format/digest/current-context comparison,
+  not nonce consumption, product policy, TLS purpose or execution permission.
+  `managed_runtime_intent.rs` consumes the unchanged HTTP237 original intent and
+  compares the actual HTTP parts/body and singleton operation/digest carriage.
+  Original dispatch expiry is distinct from renewal; absent org/user generation
+  fields cannot be inferred from the original intent. Both private consumers await
+  qualified default-off receiver/issuer composition; held artifacts remain local
+  until the coordinator confirms the upstream publication boundary.
 - `src/lib.rs` — composition state, remaining cross-use-case lifecycle wiring,
   and public re-exports; new cohesive operations should prefer an owner above.
 - `src/mcp.rs` / `mcp_api.rs` — outgoing session-control MCP and HTTP MCP config.
