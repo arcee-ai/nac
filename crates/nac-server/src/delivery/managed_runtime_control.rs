@@ -102,7 +102,7 @@ fn require(condition: bool) -> Result<()> {
         Err(RuntimeControlDenied)
     }
 }
-fn valid_uuid(value: &Value) -> bool {
+pub(super) fn valid_uuid(value: &Value) -> bool {
     value
         .as_str()
         .is_some_and(|text| Uuid::parse_str(text).is_ok_and(|id| id.to_string() == text))
@@ -128,6 +128,16 @@ fn valid(value: &Value, kind: Kind) -> bool {
         Kind::Phase => matches!(value.as_str(), Some("initial" | "renewal")),
     }
 }
+pub(super) fn assignment_fields(fields: &Fields) -> Result<Fields> {
+    let mut assignment = Fields::new();
+    for (name, kind) in ASSIGNMENT {
+        let value = fields.get(*name).ok_or(RuntimeControlDenied)?;
+        require(valid(value, *kind))?;
+        assignment.insert((*name).to_owned(), value.clone());
+    }
+    require(integer(fields, "owner_epoch")? > 0)?;
+    Ok(assignment)
+}
 fn shape(fields: &Fields, extra: &[(&str, Kind)]) -> Result<()> {
     require(fields.len() == ASSIGNMENT.len() + extra.len())?;
     for (name, kind) in ASSIGNMENT.iter().chain(extra.iter()) {
@@ -149,14 +159,17 @@ fn integer(fields: &Fields, name: &str) -> Result<i64> {
         .ok_or(RuntimeControlDenied)
 }
 pub(super) fn canonical(fields: &Fields) -> Result<Vec<u8>> {
+    canonical_bounded(fields, MAX_BYTES)
+}
+pub(super) fn canonical_bounded(fields: &Fields, maximum: usize) -> Result<Vec<u8>> {
     let text = serde_json::to_string(fields)
         .map_err(|_| RuntimeControlDenied)?
         .replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029");
-    require(text.len() <= MAX_BYTES)?;
+    require(text.len() <= maximum)?;
     Ok(text.into_bytes())
 }
-fn domain_digest(domain: &[u8], bytes: &[u8]) -> String {
+pub(super) fn domain_digest(domain: &[u8], bytes: &[u8]) -> String {
     let mut hash = Sha256::new();
     hash.update(domain);
     hash.update(bytes);
@@ -193,7 +206,10 @@ impl<'de> Deserialize<'de> for UniqueFields {
     }
 }
 pub(super) fn decode(raw: &[u8]) -> Result<Fields> {
-    require(!raw.is_empty() && raw.len() <= MAX_BYTES)?;
+    decode_bounded(raw, MAX_BYTES)
+}
+pub(super) fn decode_bounded(raw: &[u8], maximum: usize) -> Result<Fields> {
+    require(!raw.is_empty() && raw.len() <= maximum)?;
     serde_json::from_slice::<UniqueFields>(raw)
         .map(|fields| fields.0)
         .map_err(|_| RuntimeControlDenied)

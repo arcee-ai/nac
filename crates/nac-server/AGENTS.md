@@ -63,6 +63,12 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   fields cannot be inferred from the original intent. Both private consumers await
   qualified default-off receiver/issuer composition; held artifacts remain local
   until the coordinator confirms the upstream publication boundary.
+  `managed_runtime_preparation.rs` consumes B's exact preparation/hello framing
+  and all 88 frozen vectors. It bounds both raw and canonical outer bytes, checks
+  the embedded exact HTTP237 bytes and full input digest, and compares all 21
+  independently supplied assignment facts plus original anchored deadlines.
+  Comparison returns remaining time only; current policy, live channel ownership,
+  initial reservation and atomic fresh lease consumption remain separate gates.
 - `src/lib.rs` — composition state, remaining cross-use-case lifecycle wiring,
   and public re-exports; new cohesive operations should prefer an owner above.
 - `src/mcp.rs` / `mcp_api.rs` — outgoing session-control MCP and HTTP MCP config.

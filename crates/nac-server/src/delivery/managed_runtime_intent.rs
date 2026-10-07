@@ -18,6 +18,16 @@ use uuid::Uuid;
 type Fields = BTreeMap<String, Value>;
 type Result<T> = std::result::Result<T, RuntimeControlDenied>;
 
+pub(super) struct RuntimeActualRequest<'a> {
+    pub operation_id: &'a str,
+    pub full_input_sha256: &'a str,
+    pub method: &'a str,
+    pub path: &'a str,
+    pub query: &'a str,
+    pub content_type: &'a str,
+    pub body: &'a [u8],
+}
+
 pub(super) struct RuntimeIntentReceiver<'a> {
     pub environment: &'a str,
     pub instance: &'a str,
@@ -149,6 +159,9 @@ impl RuntimeHttpIntent {
     pub(super) fn sha256(&self) -> Result<String> {
         Ok(digest(&self.canonical()?))
     }
+    pub(super) fn original_created_ms(&self) -> Result<i64> {
+        integer(&self.0, "created_at_epoch_ms")
+    }
     pub(super) fn original_expires_ms(&self) -> Result<i64> {
         integer(&self.0, "expires_at_epoch_ms")
     }
@@ -197,16 +210,29 @@ impl RuntimeHttpIntent {
         } else {
             ""
         };
+        self.compare_request_values(&RuntimeActualRequest {
+            operation_id: operation,
+            full_input_sha256: full_input,
+            method: parts.method.as_str(),
+            path: parts.uri.path(),
+            query: parts.uri.query().unwrap_or(""),
+            content_type,
+            body,
+        })?;
+        require(self.original_created_ms()? <= now_ms && now_ms < self.original_expires_ms()?)
+    }
+
+    /// Pure exact-value comparison. Transport must first establish actual parts
+    /// and singleton header carriage; these values establish no provenance.
+    pub(super) fn compare_request_values(&self, request: &RuntimeActualRequest<'_>) -> Result<()> {
         require(
-            parts.method.as_str() == text(&self.0, "method")?
-                && parts.uri.path() == text(&self.0, "normalized_path")?
-                && parts.uri.query().unwrap_or("") == text(&self.0, "normalized_query")?
-                && content_type == text(&self.0, "content_type")?,
-        )?;
-        require(digest(body) == text(&self.0, "body_sha256")?)?;
-        require(
-            integer(&self.0, "created_at_epoch_ms")? <= now_ms
-                && now_ms < self.original_expires_ms()?,
+            request.operation_id == text(&self.0, "operation_id")?
+                && request.full_input_sha256 == self.sha256()?
+                && request.method == text(&self.0, "method")?
+                && request.path == text(&self.0, "normalized_path")?
+                && request.query == text(&self.0, "normalized_query")?
+                && request.content_type == text(&self.0, "content_type")?
+                && digest(request.body) == text(&self.0, "body_sha256")?,
         )
     }
 

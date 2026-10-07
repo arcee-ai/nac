@@ -31,6 +31,8 @@ pub(crate) mod issuer;
 pub(crate) mod control;
 #[path = "managed_runtime_intent.rs"]
 mod intent;
+#[path = "managed_runtime_preparation.rs"]
+mod preparation;
 
 /// Explicit construction capability; absent configuration creates no listener.
 /// DER bytes are loaded by trusted composition, never selected by an HTTP request.
