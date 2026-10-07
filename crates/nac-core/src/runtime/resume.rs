@@ -271,7 +271,7 @@ pub async fn build_resume_config_for_runtime_operation(
         snapshot.session_id == session_id,
         "runtime session target mismatch"
     );
-    let mut built = build_resume_config_from_snapshot_inner(
+    let mut built = Box::pin(build_resume_config_from_snapshot_inner(
         snapshot,
         store_path.clone(),
         config,
@@ -282,7 +282,7 @@ pub async fn build_resume_config_for_runtime_operation(
         None,
         model,
         Some(&admission.guard),
-    )
+    ))
     .await?;
     record_run_failure_recovery(&mut built, recovery);
     let run_admission = admission
@@ -311,7 +311,11 @@ pub(super) async fn build_resume_config_from_snapshot(
     resolved_metadata: Option<ModelMetadata>,
     model: ResumeModelOptions,
 ) -> Result<OrchestratorRunConfig> {
-    build_resume_config_from_snapshot_inner(
+    // Attachment/recovery nests this substantial construction future through
+    // several application operations. Keep its state on the heap instead of
+    // multiplying inline future layout and stack use at each caller. This does
+    // not spawn construction: cancellation still drops it and its owned leases.
+    Box::pin(build_resume_config_from_snapshot_inner(
         snapshot,
         store_path,
         config,
@@ -322,7 +326,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         resolved_metadata,
         model,
         None,
-    )
+    ))
     .await
 }
 
