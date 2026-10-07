@@ -7,7 +7,10 @@ use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 mod cost_attach;
 mod header_policy;
 mod http_contract;
+mod managed_host_key;
 mod s5_wire;
+#[cfg(unix)]
+pub(super) mod sender_prototype;
 
 fn test_model_client(
     backend: BackendKind,
@@ -18,11 +21,15 @@ fn test_model_client(
         client: no_redirect_model_client().unwrap(),
         base_url,
         api_key: "selected-provider-credential".to_string(),
+        #[cfg(all(test, unix))]
+        sender_prototype: None,
         model: "test-model".to_string(),
         backend,
         reasoning_effort: None,
         api_key_env: None,
         trusted_api_key_file: None,
+        trusted_managed_host_key: None,
+        host_execution_authority: None,
         extra_headers,
         allow_insecure_http: false,
         arcee_credential_source: None,

@@ -21,6 +21,8 @@ pub struct ToolRuntime {
     pub skills: Option<Arc<SkillRegistry>>,
     pub terminal_manager: TerminalManager,
     pub command_cancellation: ThreadCancellation,
+    /// Trusted host admission, independent of this agent's selected model.
+    pub host_execution_authority: Option<crate::model::ManagedHostExecutionAuthority>,
     pub thread_timeout_secs: u64,
     /// Accumulated worker token usage from thread dispatches.  The agent
     /// loop reads and resets this after each tool-execution round so worker
@@ -74,6 +76,30 @@ impl ToolRuntime {
 
     pub(crate) fn set_event_sink(&mut self, sink: EventSink) {
         self.event_sink = sink;
+    }
+
+    pub(crate) async fn check_host_execution_authority(&self) -> anyhow::Result<()> {
+        if let Some(authority) = &self.host_execution_authority {
+            if let Err(error) = authority.check_available() {
+                self.command_cancellation.cancel_async().await;
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn observe_host_execution_denial(&self) {
+        let Some(authority) = &self.host_execution_authority else {
+            std::future::pending::<()>().await;
+            return;
+        };
+        loop {
+            if authority.check_available().is_err() {
+                self.command_cancellation.cancel_async().await;
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
     }
 
     pub(crate) fn allows_tool(&self, name: &str) -> bool {

@@ -350,6 +350,7 @@ impl<'a> SessionCreationApplication<'a> {
         )?;
         if let Some(profile) = self.manager.managed_model() {
             model.trusted_light_credential = profile.trusted_light_credential();
+            model.host_execution_authority = profile.host_execution_authority();
             let uses_host_credentials = model.backend == Some(profile.backend)
                 && model.api_base_url.as_deref() == Some(profile.endpoint.as_str())
                 && matches!(model.api_key_env, OptionalModelOption::Clear);
@@ -361,6 +362,7 @@ impl<'a> SessionCreationApplication<'a> {
                     .require_durable_authorization(managed)
                     .map_err(request_configuration_error_from)?;
                 model.trusted_api_key_file = profile.trusted_api_key_file();
+                model.trusted_managed_host_key = profile.trusted_managed_host_key();
             }
         }
         model.light_model = match request.light_model {
@@ -432,12 +434,21 @@ impl<'a> SessionCreationApplication<'a> {
             .session_id
             .clone()
             .ok_or_else(|| anyhow!("new session did not include a session id"))?;
+        let service = Arc::new(service);
+        if self
+            .manager
+            .managed_model()
+            .and_then(super::managed::ManagedModelProfile::host_execution_authority)
+            .is_some()
+        {
+            super::managed::monitor_host_execution_authority(&service);
+        }
         self.manager
             .inner
             .active_sessions
             .write()
             .await
-            .insert(session_id, Arc::new(service));
+            .insert(session_id, service);
         Ok(snapshot)
     }
 }

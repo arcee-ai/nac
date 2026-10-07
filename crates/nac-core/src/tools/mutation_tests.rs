@@ -1117,3 +1117,43 @@ fn run_python_protocol_exact(
         .unwrap();
     child.wait_with_output().unwrap()
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn host_execution_denial_before_atomic_publication_keeps_original_and_cleans_temporary() {
+    let fixture = crate::model::host_execution_test_support::Fixture::new();
+    let path = fixture.root.join("publication.txt");
+    fs::write(&path, "before").unwrap();
+    let (entered, release) = gate_before_publish(path.canonicalize().unwrap());
+    let cancellation = crate::tools::ThreadCancellation::for_host(Some(fixture.authority.clone()));
+    let target = path.clone();
+    let mutation = tokio::spawn(async move {
+        write_local_cancellable(
+            target,
+            "publication.txt".into(),
+            "after".into(),
+            Some(revision(b"before")),
+            Some(&cancellation),
+        )
+        .await
+    });
+    tokio::task::spawn_blocking(move || entered.recv().unwrap())
+        .await
+        .unwrap();
+    fixture.remove();
+    release.send(()).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(3), mutation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(result.is_error);
+    assert!(result.content.contains("cancelled"));
+    assert_eq!(fs::read_to_string(&path).unwrap(), "before");
+    assert!(!fs::read_dir(&fixture.root).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".nac-mutation-")
+    }));
+}

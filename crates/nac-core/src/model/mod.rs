@@ -48,6 +48,7 @@ mod chat_stream;
 mod chatgpt_codex;
 mod client;
 mod history;
+mod managed_host_key;
 mod providers;
 mod pseudo_tool_calls;
 mod redact;
@@ -77,6 +78,10 @@ pub use catalog::{
 };
 pub(crate) use catalog::{
     Compat, CompletionsThinkingFormat, CompletionsTokenLimit, ModelMetadata, ThinkingLevelMap,
+};
+pub use managed_host_key::{
+    ManagedHostExecutionAuthority, ManagedHostExecutionObserver, ManagedHostKeyBinding,
+    ManagedHostKeyStore, TrustedManagedHostKey, UnconfiguredManagedHostExecutionObserver,
 };
 pub use providers::{
     list_managed_provider_models, list_provider_models, list_provider_models_with_http_policy,
@@ -462,3 +467,6 @@ use responses::*;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) mod host_execution_test_support;

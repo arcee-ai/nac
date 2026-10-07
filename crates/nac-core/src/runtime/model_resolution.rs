@@ -35,7 +35,7 @@ pub fn effective_model_settings(
     // error. No config tier.
     let api_key_env = model.api_key_env.snapshot_value();
 
-    EffectiveModelSettings::from_optional_with_http_policy(
+    let mut settings = EffectiveModelSettings::from_optional_with_http_policy(
         backend,
         model_id,
         base_url,
@@ -48,8 +48,14 @@ pub fn effective_model_settings(
             .clone()
             .unwrap_or_else(|| config.model.extra_headers.clone()),
         model.allow_insecure_http,
-    )?
-    .with_trusted_api_key_file(model.trusted_api_key_file.clone())
+    )?;
+    if model.trusted_managed_host_key.is_some() && model.api_key_env.snapshot_value().is_none() {
+        settings.api_key_env = None;
+    }
+    settings
+        .with_trusted_api_key_file(model.trusted_api_key_file.clone())?
+        .with_trusted_managed_host_key(model.trusted_managed_host_key.clone())?
+        .with_host_execution_authority(model.host_execution_authority.clone())
 }
 
 /// Resolve and normalize the persisted orchestrator compaction threshold for a
@@ -79,7 +85,7 @@ pub fn effective_orchestrator_compaction_threshold(
 pub(super) fn managed_worker_effective_model_settings(
     model: &ModelOptions,
 ) -> Result<EffectiveModelSettings> {
-    EffectiveModelSettings::from_optional_with_http_policy(
+    let mut settings = EffectiveModelSettings::from_optional_with_http_policy(
         model.backend,
         model.api_model.clone(),
         model.api_base_url.clone(),
@@ -87,8 +93,14 @@ pub(super) fn managed_worker_effective_model_settings(
         model.api_key_env.snapshot_value(),
         model.extra_headers.clone().unwrap_or_default(),
         model.allow_insecure_http,
-    )?
-    .with_trusted_api_key_file(model.trusted_api_key_file.clone())
+    )?;
+    if model.trusted_managed_host_key.is_some() && model.api_key_env.snapshot_value().is_none() {
+        settings.api_key_env = None;
+    }
+    settings
+        .with_trusted_api_key_file(model.trusted_api_key_file.clone())?
+        .with_trusted_managed_host_key(model.trusted_managed_host_key.clone())?
+        .with_host_execution_authority(model.host_execution_authority.clone())
 }
 
 /// Parse the hidden worker header transport as a JSON object.

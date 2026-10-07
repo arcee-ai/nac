@@ -1,4 +1,4 @@
-.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size test-mcp-conformance generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size test-mcp-conformance generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-image-contract managed-image test-managed-image test-managed-host-key-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -178,6 +178,7 @@ test-managed-image-contract:
 	sh -n docker/managed/entrypoint.sh
 	sh -n scripts/smoke-managed-git-lfs.sh
 	sh -n scripts/smoke-managed-image.sh
+	sh -n scripts/smoke-managed-host-key-image.sh
 	sh -n scripts/test-managed-image-contract.sh
 	sh scripts/test-managed-image-contract.sh
 
@@ -194,6 +195,10 @@ managed-image:
 ## Build and smoke the managed image, including readiness/restart/SIGTERM
 test-managed-image:
 	MANAGED_IMAGE="$(MANAGED_IMAGE)" sh scripts/smoke-managed-image.sh
+
+## Smoke an existing managed image with an offline synthetic version 3 key
+test-managed-host-key-image:
+	MANAGED_IMAGE="$(MANAGED_IMAGE)" sh scripts/smoke-managed-host-key-image.sh
 
 ## Check source ownership size and type-check without producing binaries
 check: test-source-size
@@ -266,6 +271,7 @@ help:
 		'  test-managed-image-contract Check managed image/workflow statically' \
 		'  managed-image Build the linux/amd64 managed developer image' \
 		'  test-managed-image Build and smoke the managed image locally' \
+		'  test-managed-host-key-image Smoke an existing image with synthetic v3 state' \
 		'  check        Run cargo check --workspace --locked' \
 		'  lint         Lint frontend and production Rust targets' \
 		'  fix          Apply safe Rust lint fixes and format Rust sources' \

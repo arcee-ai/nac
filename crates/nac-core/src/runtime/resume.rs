@@ -297,7 +297,18 @@ pub(super) async fn build_resume_config_from_snapshot(
         metadata,
         snapshot.allow_insecure_http,
     )
-    .and_then(|settings| settings.with_trusted_api_key_file(model.trusted_api_key_file.clone()))
+    .and_then(|mut settings| {
+        if model.trusted_managed_host_key.is_some() && snapshot.api_key_env.is_none() {
+            settings.api_key_env = None;
+        }
+        settings.with_trusted_api_key_file(model.trusted_api_key_file.clone())
+    })
+    .and_then(|settings| {
+        settings.with_trusted_managed_host_key(model.trusted_managed_host_key.clone())
+    })
+    .and_then(|settings| {
+        settings.with_host_execution_authority(model.host_execution_authority.clone())
+    })
     .map_err(|error| {
         anyhow::anyhow!(
             "stored session model settings are invalid; settings repair required: {error}"
@@ -364,6 +375,10 @@ pub(super) async fn build_resume_config_from_snapshot(
                 // the light model as the failing component.
                 error @ LightModelError::Other(_) => anyhow::Error::from(error),
             })?
+            .map(|client| {
+                client.with_host_execution_authority(model.host_execution_authority.clone())
+            })
+            .transpose()?
             .map(std::sync::Arc::new)
     };
     let sandbox = if ssh.is_some() {

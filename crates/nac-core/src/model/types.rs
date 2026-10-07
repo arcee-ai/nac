@@ -157,6 +157,8 @@ pub struct EffectiveModelSettings {
     /// transported to workers; the credential value never enters argv or the
     /// command environment.
     pub(crate) trusted_api_key_file: Option<std::path::PathBuf>,
+    pub(crate) host_execution_authority: Option<super::ManagedHostExecutionAuthority>,
+    pub(crate) trusted_managed_host_key: Option<super::TrustedManagedHostKey>,
     pub(crate) extra_headers: std::collections::BTreeMap<String, String>,
     /// Catalog metadata resolved at construction. Drives per-response cost,
     /// effort validation/translation, and api-axis dispatch.
@@ -313,6 +315,8 @@ impl EffectiveModelSettings {
             reasoning_effort,
             api_key_env,
             trusted_api_key_file: None,
+            trusted_managed_host_key: None,
+            host_execution_authority: None,
             extra_headers,
             resolved,
         })
@@ -336,6 +340,35 @@ impl EffectiveModelSettings {
             }
         }
         self.trusted_api_key_file = path;
+        Ok(self)
+    }
+
+    pub(crate) fn with_trusted_managed_host_key(
+        mut self,
+        credential: Option<super::TrustedManagedHostKey>,
+    ) -> Result<Self> {
+        if let Some(credential) = &credential {
+            if self.backend != BackendKind::ArceeApi
+                || self.allow_insecure_http
+                || self.api_key_env.is_some()
+                || self.trusted_api_key_file.is_some()
+                || self.base_url != credential.binding().inference_origin
+            {
+                return Err(model_configuration_error("managed host-key capability requires its exact Arcee API route without another credential selector"));
+            }
+        }
+        self.trusted_managed_host_key = credential;
+        Ok(self)
+    }
+
+    pub(crate) fn with_host_execution_authority(
+        mut self,
+        authority: Option<super::ManagedHostExecutionAuthority>,
+    ) -> Result<Self> {
+        if let Some(authority) = &authority {
+            authority.check_available()?;
+        }
+        self.host_execution_authority = authority;
         Ok(self)
     }
 

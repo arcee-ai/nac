@@ -85,11 +85,15 @@ async fn arcee_sensitive_extra_header_still_fails_before_connection() {
         client: no_redirect_model_client().unwrap(),
         base_url: format!("http://{address}"),
         api_key: "stored-login-secret-must-not-leak".to_string(),
+        #[cfg(all(test, unix))]
+        sender_prototype: None,
         model: "test-model".to_string(),
         backend: BackendKind::ArceeApi,
         reasoning_effort: None,
         api_key_env: None,
         trusted_api_key_file: None,
+        trusted_managed_host_key: None,
+        host_execution_authority: None,
         extra_headers: std::collections::BTreeMap::from([(
             "hOsT".to_string(),
             address.to_string(),

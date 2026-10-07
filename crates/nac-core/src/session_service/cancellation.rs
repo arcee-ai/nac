@@ -1,6 +1,39 @@
 use super::*;
 
 impl SessionService {
+    /// Local host admission is independent of model selection and user permissions.
+    pub fn check_host_execution_authority(&self) -> Result<()> {
+        if let Some(authority) = &self.host_execution_authority {
+            if let Err(error) = authority.check_available() {
+                self.stopping_admission
+                    .store(true, std::sync::atomic::Ordering::Release);
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    /// Close admission and use existing cancellation/settlement after local denial.
+    pub async fn settle_host_execution_denial(&self) -> Result<()> {
+        if self.check_host_execution_authority().is_ok() {
+            return Ok(());
+        }
+        self.stop_run_admission().await?;
+        let run_id = match self.lock_active_operation().as_ref() {
+            Some(ActiveSessionOperation::Run(run)) => Some(run.snapshot.run_id.clone()),
+            _ => None,
+        };
+        if let Some(run_id) = run_id {
+            match self.request_cancel(&run_id).await {
+                Ok(_) | Err(SessionCancelError::NotActive { .. }) => {}
+                Err(error) => return Err(anyhow::anyhow!(error)),
+            }
+        } else {
+            self.terminal_manager.settle_run().await?;
+        }
+        Ok(())
+    }
+
     pub async fn request_cancel(
         &self,
         run_id: &SessionRunId,
@@ -214,5 +247,79 @@ impl SessionService {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod host_execution_tests {
+    use super::*;
+    use crate::model::host_execution_test_support::Fixture;
+
+    #[tokio::test]
+    async fn host_execution_denial_fences_admission_in_all_session_behaviors() {
+        for behavior in [
+            sessions::SessionBehavior::Orchestrator,
+            sessions::SessionBehavior::Direct,
+            sessions::SessionBehavior::DirectWithOrchestrator,
+        ] {
+            let fixture = Fixture::new();
+            let client = crate::model::ModelClient::new_for_test()
+                .with_host_execution_authority(Some(fixture.authority.clone()))
+                .unwrap();
+            let (mut parts, path) = super::super::tests::test_active_service_with_skills(
+                "host-execution-admission",
+                &uuid::Uuid::new_v4().to_string(),
+                client,
+                None,
+            );
+            Arc::make_mut(&mut parts.service.metadata).behavior = behavior;
+            let session = parts.service.metadata.session_id.as_deref().unwrap();
+            let queued = crate::store::create_session_inbox_item(
+                &path,
+                session,
+                crate::store::InboxDelivery::Queue,
+                "retained input",
+                None,
+                None,
+            )
+            .unwrap();
+            fixture.remove();
+            assert!(matches!(
+                parts.service.try_submit_prompt("denied prompt".into()),
+                Err(SessionSubmitError::Coordination { .. })
+            ));
+            parts.service.settle_host_execution_denial().await.unwrap();
+            fixture.restore();
+            assert!(parts
+                .service
+                .try_submit_prompt("still denied".into())
+                .is_err());
+            assert!(parts.service.lock_active_operation().is_none());
+            let pending = crate::store::list_session_inbox(&path, session).unwrap();
+            assert!(pending.iter().any(|record| record.id == queued.id));
+        }
+    }
+
+    #[tokio::test]
+    async fn host_execution_denial_rejects_new_direct_input_without_changing_pending_rows() {
+        let fixture = Fixture::new();
+        let client = crate::model::ModelClient::new_for_test()
+            .with_host_execution_authority(Some(fixture.authority.clone()))
+            .unwrap();
+        let (parts, path) = super::super::tests::test_direct_active_service(
+            "host-execution-inbox",
+            &uuid::Uuid::new_v4().to_string(),
+            client,
+        );
+        fixture.remove();
+        assert!(parts
+            .service
+            .enqueue_direct_input(crate::store::InboxDelivery::Queue, "denied input", None)
+            .await
+            .is_err());
+        let session = parts.service.metadata.session_id.as_deref().unwrap();
+        assert!(crate::store::list_session_inbox(&path, session)
+            .unwrap()
+            .is_empty());
     }
 }

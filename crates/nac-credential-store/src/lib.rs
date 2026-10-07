@@ -61,18 +61,39 @@ pub fn read_auth_string_from_path(path: &Path) -> Result<Option<String>> {
 /// and oversized values. Callers remain responsible for checking any expected
 /// owner/group identity that is part of their deployment contract.
 pub fn read_mounted_credential_string(path: &Path) -> Result<Option<String>> {
-    const MAX_MOUNTED_CREDENTIAL_BYTES: u64 = 64 * 1024;
+    read_mounted_file_string(path, "credential", ensure_mounted_credential_permissions)
+}
+
+/// Read nonsecret operator configuration from a regular, no-follow mount.
+///
+/// Public reads are allowed for Kubernetes ConfigMaps. Group/other writes are
+/// rejected. This is not a credential reader; private and mounted secret reads
+/// retain their existing access restrictions.
+pub fn read_mounted_configuration_string(path: &Path) -> Result<Option<String>> {
+    read_mounted_file_string(
+        path,
+        "configuration",
+        ensure_mounted_configuration_permissions,
+    )
+}
+
+fn read_mounted_file_string(
+    path: &Path,
+    kind: &str,
+    validate_permissions: fn(&File, &Path) -> Result<()>,
+) -> Result<Option<String>> {
+    const MAX_MOUNTED_FILE_BYTES: u64 = 64 * 1024;
 
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             return Err(anyhow!(
-                "refusing to read symlink credential path {}",
+                "refusing to read symlink {kind} path {}",
                 path.display()
             ));
         }
         Ok(metadata) if !metadata.file_type().is_file() => {
             return Err(anyhow!(
-                "refusing to read non-regular credential path {}",
+                "refusing to read non-regular {kind} path {}",
                 path.display()
             ));
         }
@@ -95,29 +116,45 @@ pub fn read_mounted_credential_string(path: &Path) -> Result<Option<String>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
             return Err(error).with_context(|| {
-                format!(
-                    "failed to securely open mounted credential {}",
-                    path.display()
-                )
+                format!("failed to securely open mounted {kind} {}", path.display())
             });
         }
     };
-    ensure_open_file_is_regular(&file, path, "mounted credential file")?;
-    ensure_mounted_credential_permissions(&file, path)?;
+    ensure_open_file_is_regular(&file, path, &format!("mounted {kind} file"))?;
+    validate_permissions(&file, path)?;
 
     let mut raw = Vec::new();
-    file.take(MAX_MOUNTED_CREDENTIAL_BYTES + 1)
+    file.take(MAX_MOUNTED_FILE_BYTES + 1)
         .read_to_end(&mut raw)
-        .with_context(|| format!("failed to read mounted credential {}", path.display()))?;
-    if raw.len() as u64 > MAX_MOUNTED_CREDENTIAL_BYTES {
+        .with_context(|| format!("failed to read mounted {kind} {}", path.display()))?;
+    if raw.len() as u64 > MAX_MOUNTED_FILE_BYTES {
         return Err(anyhow!(
-            "mounted credential {} exceeds the size limit",
+            "mounted {kind} {} exceeds the size limit",
             path.display()
         ));
     }
     String::from_utf8(raw)
         .map(Some)
-        .with_context(|| format!("credential file {} is not valid UTF-8", path.display()))
+        .with_context(|| format!("{kind} file {} is not valid UTF-8", path.display()))
+}
+
+#[cfg(unix)]
+fn ensure_mounted_configuration_permissions(file: &File, path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = file.metadata()?.permissions().mode() & 0o777;
+    if mode & 0o022 == 0 {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "refusing to read mounted configuration {} writable by group or other users",
+            path.display()
+        ))
+    }
+}
+
+#[cfg(not(unix))]
+fn ensure_mounted_configuration_permissions(_file: &File, _path: &Path) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -170,6 +207,15 @@ impl fmt::Display for UnsafeCredentialPermissionsError {
 impl std::error::Error for UnsafeCredentialPermissionsError {}
 
 pub fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
+    read_auth_bytes_inner(path, None)
+}
+
+/// Read a private credential snapshot with a caller-selected byte limit.
+pub fn read_auth_bytes_from_path_limited(path: &Path, max_bytes: u64) -> Result<Option<Vec<u8>>> {
+    read_auth_bytes_inner(path, Some(max_bytes))
+}
+
+fn read_auth_bytes_inner(path: &Path, max_bytes: Option<u64>) -> Result<Option<Vec<u8>>> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             return Err(anyhow!(
@@ -209,8 +255,23 @@ pub fn read_auth_bytes_from_path(path: &Path) -> Result<Option<Vec<u8>>> {
     ensure_open_credential_file_is_safe(&file, path)?;
 
     let mut raw = Vec::new();
-    file.read_to_end(&mut raw)
-        .with_context(|| format!("failed to read credential file {}", path.display()))?;
+    match max_bytes {
+        Some(limit) => {
+            file.take(limit.saturating_add(1))
+                .read_to_end(&mut raw)
+                .with_context(|| format!("failed to read credential file {}", path.display()))?;
+            if raw.len() as u64 > limit {
+                return Err(anyhow!(
+                    "credential file {} exceeds the size limit",
+                    path.display()
+                ));
+            }
+        }
+        None => {
+            file.read_to_end(&mut raw)
+                .with_context(|| format!("failed to read credential file {}", path.display()))?;
+        }
+    }
     Ok(Some(raw))
 }
 
@@ -685,6 +746,48 @@ mod tests {
     }
 
     #[test]
+    fn mounted_configuration_public_reads_do_not_relax_credential_policy() {
+        let dir = TestDir::new("mounted-config-read");
+        let path = dir.path("managed.toml");
+        fs::write(&path, "nonsecret-operator-config").unwrap();
+        for mode in [0o644, 0o444, 0o440] {
+            set_mode(&path, mode);
+            assert_eq!(
+                read_mounted_configuration_string(&path).unwrap().as_deref(),
+                Some("nonsecret-operator-config")
+            );
+        }
+        set_mode(&path, 0o644);
+        assert!(read_mounted_credential_string(&path).is_err());
+        assert!(read_auth_string_from_path(&path).is_err());
+        for mode in [0o664, 0o646, 0o602] {
+            set_mode(&path, mode);
+            let error = read_mounted_configuration_string(&path).unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("writable by group or other users"));
+            assert!(!error.to_string().contains("nonsecret-operator-config"));
+        }
+    }
+
+    #[test]
+    fn mounted_configuration_keeps_no_follow_regular_file_and_size_guards() {
+        let dir = TestDir::new("mounted-config-guards");
+        let target = dir.path("target");
+        let link = dir.path("link");
+        fs::write(&target, "nonsecret-operator-config").unwrap();
+        set_mode(&target, 0o644);
+        symlink(&target, &link).unwrap();
+        assert!(read_mounted_configuration_string(&link).is_err());
+        assert!(read_mounted_configuration_string(&dir.0).is_err());
+        fs::write(&target, vec![b'x'; 64 * 1024 + 1]).unwrap();
+        assert!(read_mounted_configuration_string(&target)
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds the size limit"));
+    }
+
+    #[test]
     fn mounted_credential_read_rejects_symlink_without_reading_target() {
         let dir = TestDir::new("mounted-read-symlink");
         let target = dir.path("target-token");
@@ -786,5 +889,32 @@ mod tests {
             .expect("symlink lock accepted");
         assert!(error.to_string().contains("symlink auth lock"));
         assert_eq!(fs::read_to_string(target).unwrap(), "unchanged");
+    }
+}
+
+#[cfg(test)]
+mod bounded_read_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_private_snapshot_rejects_oversize_without_changing_existing_reader() {
+        let root = std::env::temp_dir().join(format!("nac-bounded-auth-{}", uuid::Uuid::new_v4()));
+        let path = root.join("authority.json");
+        write_auth_string_to_path(&path, "synthetic-value").unwrap();
+        assert_eq!(
+            read_auth_bytes_from_path_limited(&path, 15)
+                .unwrap()
+                .unwrap(),
+            b"synthetic-value"
+        );
+        assert!(read_auth_bytes_from_path_limited(&path, 2)
+            .unwrap_err()
+            .to_string()
+            .contains("size limit"));
+        assert_eq!(
+            read_auth_bytes_from_path(&path).unwrap().unwrap(),
+            b"synthetic-value"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

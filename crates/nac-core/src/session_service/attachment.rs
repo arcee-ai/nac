@@ -113,6 +113,7 @@ impl SessionService {
             active_operation: Arc::new(StdMutex::new(None)),
             published_operation: Arc::new(StdMutex::new(None)),
             stopping_admission: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            host_execution_authority: run_config.client.host_execution_authority(),
             active_threads,
             skills,
             mcp,

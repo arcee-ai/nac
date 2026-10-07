@@ -97,7 +97,7 @@ fn scripted_tool_call_response(calls: &[(&str, &str, &str)]) -> String {
     .to_string()
 }
 
-fn read_log(store_path: &std::path::Path, session_id: &str) -> Vec<(u64, Message)> {
+pub(super) fn read_log(store_path: &std::path::Path, session_id: &str) -> Vec<(u64, Message)> {
     crate::store::TranscriptLogWriter::new(store_path)
         .unwrap()
         .read_from(session_id, 0)
@@ -123,7 +123,7 @@ fn canonical(message: &Message) -> Vec<u8> {
     serde_json::to_vec(message).unwrap()
 }
 
-fn user_message(content: &str) -> Message {
+pub(super) fn user_message(content: &str) -> Message {
     Message::User {
         content: content.to_string(),
     }
@@ -926,7 +926,7 @@ async fn direct_failure_replays_unacknowledged_assistant_without_duplicate_parti
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
-fn fenced_prompt_agent(
+pub(super) fn fenced_prompt_agent(
     path: &std::path::Path,
 ) -> (Agent, Arc<crate::sessions::SessionOperationLease>) {
     crate::store::initialize(path).unwrap();

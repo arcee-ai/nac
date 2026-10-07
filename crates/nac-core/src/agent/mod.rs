@@ -389,6 +389,7 @@ impl Agent {
         // The initial messages are exactly the snapshot blob written at
         // session creation; the log tail starts at this length.
         let committed_log_len = messages.len() as u64;
+        let host_execution_authority = client.host_execution_authority();
         Ok(Self {
             client,
             mode,
@@ -413,7 +414,10 @@ impl Agent {
                 mcp_tools: Arc::new(HashMap::new()),
                 skills: config.skills,
                 terminal_manager,
-                command_cancellation: crate::tools::ThreadCancellation::default(),
+                command_cancellation: crate::tools::ThreadCancellation::for_host(
+                    host_execution_authority.clone(),
+                ),
+                host_execution_authority,
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
                 light_client: config.light_client,
@@ -1009,7 +1013,9 @@ impl Agent {
     /// direct sessions reuse the agent across turns, so a cancelled command
     /// token must never poison the next run.
     pub(crate) fn begin_run_cancellation(&mut self) -> crate::tools::ThreadCancellation {
-        let cancellation = crate::tools::ThreadCancellation::default();
+        let cancellation = crate::tools::ThreadCancellation::for_host(
+            self.tool_runtime.host_execution_authority.clone(),
+        );
         self.tool_runtime.command_cancellation = cancellation.clone();
         cancellation
     }
@@ -1803,3 +1809,6 @@ impl Agent {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod host_execution_tests;

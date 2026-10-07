@@ -159,24 +159,52 @@ impl Agent {
         run_id: &SessionRunId,
         inbox_item_id: Option<i64>,
     ) -> Result<()> {
+        self.tool_runtime.check_host_execution_authority().await?;
         let idx = self.messages.len() as u64;
         if let Some(sink) = &self.transcript_log {
             let writer = Arc::clone(&sink.writer);
             let session_id = sink.session_id.clone();
             let stored_message = message.clone();
             let run_id = run_id.to_string();
+            let admission: Option<Arc<crate::store::RunPromptAdmission>> = self
+                .tool_runtime
+                .host_execution_authority
+                .as_ref()
+                .map(|_| {
+                    let cancellation = self.tool_runtime.command_cancellation.clone();
+                    Arc::new(move |operation: &dyn Fn() -> Result<()>| {
+                        cancellation.run_if_active(operation).unwrap_or_else(|| {
+                            Err(anyhow!("run prompt denied before durable commit"))
+                        })
+                    }) as Arc<crate::store::RunPromptAdmission>
+                });
             self.steering_append_pending = true;
             self.pending_log_end = Some(idx + 1);
             let appended = crate::store::spawn_blocking_store_caller(move || {
-                let append = || match inbox_item_id {
-                    Some(inbox_item_id) => writer.append_inbox_run_prompt(
-                        &session_id,
-                        idx,
-                        &stored_message,
-                        &run_id,
-                        inbox_item_id,
-                    ),
-                    None => writer.append_run_prompt(&session_id, idx, &stored_message, &run_id),
+                let append = || {
+                    if let Some(admission) = &admission {
+                        writer.append_admitted_run_prompt(
+                            &session_id,
+                            idx,
+                            &stored_message,
+                            &run_id,
+                            inbox_item_id,
+                            admission,
+                        )
+                    } else {
+                        match inbox_item_id {
+                            Some(inbox_item_id) => writer.append_inbox_run_prompt(
+                                &session_id,
+                                idx,
+                                &stored_message,
+                                &run_id,
+                                inbox_item_id,
+                            ),
+                            None => {
+                                writer.append_run_prompt(&session_id, idx, &stored_message, &run_id)
+                            }
+                        }
+                    }
                 };
                 match append() {
                     Err(error)

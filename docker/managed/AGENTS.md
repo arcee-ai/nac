@@ -26,6 +26,8 @@ does not define managed domain behavior or server API semantics.
 - `../../scripts/test-managed-image-contract.sh` — deterministic static image
   contract.
 - `../../scripts/smoke-managed-image.sh` — live readiness/restart/SIGTERM smoke.
+- `../../scripts/smoke-managed-host-key-image.sh` — offline synthetic v3 import,
+  receipt recovery, restart, revoked replay and retained-credential smoke.
 - `../../docs/managed/README.md` — user-facing deployment behavior.
 
 ## Verification
@@ -34,10 +36,15 @@ does not define managed domain behavior or server API semantics.
 make test-managed-image-contract
 make managed-image
 make test-managed-image
+make test-managed-host-key-image MANAGED_IMAGE=<existing-image>
 ```
 
-The last two require Docker or Podman. Report unavailable infrastructure as a
-coverage gap. The static contract is still required everywhere.
+The image build and live smoke targets require Docker or Podman. The host-key
+smoke uses an existing image and requires jq; set NAC_SMOKE_REVISION to assert
+its compiled runtime source identity. Its network-disabled synthetic checks do
+not qualify live Clerk, privileged inference mediation, controller repair or
+fleet capability. Report unavailable infrastructure as a coverage gap. The
+static contract is still required everywhere.
 
 ## Generated artifacts and placement mistakes
 
@@ -47,3 +54,13 @@ container layers or generated runtime data.
 Do not implement GitHub flows, secrets administration, clone state, readiness
 domain facts, or HTTP handlers here. Those belong to `nac-managed` or
 `nac-server`; the image only supplies deployment wiring.
+
+## Separate sender fixture
+
+`sender-prototype.Dockerfile` and
+`../../scripts/smoke-managed-sender-prototype.sh` own an explicitly selected,
+network-disabled two-UID experiment. Its native client/issuer/control protocol
+exists only in core test code. Do not add fixture enrollment to normal startup,
+change NAC UID10001, grant runtime capabilities, or qualify production ingress,
+provider delivery or release capability from this proof. See
+`../../docs/managed/sender-prototype.md` for scope and reproducible local inputs.

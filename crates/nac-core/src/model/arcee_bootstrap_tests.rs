@@ -892,6 +892,123 @@ fn strict_validation_rejects_unknown_fields_mismatch_and_secret_echo() {
 }
 
 #[test]
+fn static_keys_cannot_be_imported_as_legacy_token_bootstrap() {
+    const STATIC_KEY: &str = "synthetic-clerk-host-key-canary";
+    for version in [1, 2, 3] {
+        let dir = TestDir::new(&format!("static-key-v{version}"));
+        let paths = dir.paths();
+        let mut value = bootstrap_v2_value(BOOTSTRAP_ID, ARCEE_AUTH_PRODUCTION_ISSUER);
+        value["version"] = json!(version);
+        let object = value.as_object_mut().unwrap();
+        object.remove("access_token");
+        object.remove("refresh_token");
+        if version == 1 {
+            object.remove("auth_issuer");
+            object.remove("repair_intent");
+        }
+        object.insert("api_key".to_string(), json!(STATIC_KEY));
+        write_private(&paths.input, serde_json::to_vec(&value).unwrap());
+
+        let error = import(&paths).unwrap_err().to_string();
+        assert!(error.contains("strict") || error.contains("unsupported version"));
+        assert!(!error.contains(STATIC_KEY));
+        assert!(!error.contains(REPAIR_INTENT));
+        assert!(!paths.auth.exists());
+        assert!(!paths.receipt.exists());
+        assert!(!paths.repair.exists());
+    }
+}
+
+#[test]
+fn consumed_receipt_never_restores_removed_auth_from_a_reconciled_mount() {
+    let dir = TestDir::new("consumed-removed-auth");
+    let paths = dir.paths();
+    write_repair_bootstrap(&paths, BOOTSTRAP_ID);
+    import(&paths).unwrap();
+    let receipt_before = fs::read(&paths.receipt).unwrap();
+    let repair_before = fs::read(&paths.repair).unwrap();
+    fs::remove_file(&paths.auth).unwrap();
+
+    // Neither the original replay nor a newly reconciled bootstrap may replace
+    // a credential removed by logout/revocation. Repair is a separate operation.
+    for bootstrap_id in [BOOTSTRAP_ID, "27062ca7-2fca-49ad-b6c4-fe1e5d9ae6fa"] {
+        write_repair_bootstrap(&paths, bootstrap_id);
+        assert_eq!(
+            import(&paths).unwrap(),
+            ManagedArceeBootstrapOutcome::AlreadyConsumed
+        );
+        assert!(!paths.auth.exists());
+        assert!(validate(&paths).is_err());
+        assert_eq!(fs::read(&paths.receipt).unwrap(), receipt_before);
+        assert_eq!(fs::read(&paths.repair).unwrap(), repair_before);
+    }
+
+    // A corrupt stale mount also stays unopened once consumption is durable.
+    write_private(&paths.input, b"{synthetic-stale-secret-canary");
+    assert_eq!(
+        import(&paths).unwrap(),
+        ManagedArceeBootstrapOutcome::AlreadyConsumed
+    );
+    assert!(!paths.auth.exists());
+    assert_eq!(fs::read(&paths.receipt).unwrap(), receipt_before);
+    assert_eq!(fs::read(&paths.repair).unwrap(), repair_before);
+}
+
+#[test]
+fn concurrent_recovery_preserves_the_durable_generation_after_a_partial_write() {
+    let dir = TestDir::new("concurrent-receipt-recovery");
+    let paths = dir.paths();
+    write_repair_bootstrap(&paths, BOOTSTRAP_ID);
+    import_with_paths(
+        HOST_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER,
+        paths.borrowed(),
+        || Err(anyhow!("synthetic post-credential crash")),
+    )
+    .unwrap_err();
+    let auth_before = fs::read(&paths.auth).unwrap();
+    let repair_before = fs::read(&paths.repair).unwrap();
+    assert!(!paths.receipt.exists());
+    write_repair_bootstrap(&paths, "27062ca7-2fca-49ad-b6c4-fe1e5d9ae6fa");
+
+    let barrier = Arc::new(Barrier::new(3));
+    let handles = (0..2)
+        .map(|_| {
+            let paths = paths.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                import(&paths).unwrap()
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+    let outcomes = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|&&outcome| outcome == ManagedArceeBootstrapOutcome::RecoveredReceipt)
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|&&outcome| outcome == ManagedArceeBootstrapOutcome::AlreadyConsumed)
+            .count(),
+        1
+    );
+    assert_eq!(fs::read(&paths.auth).unwrap(), auth_before);
+    assert_eq!(fs::read(&paths.repair).unwrap(), repair_before);
+    let receipt: Value = serde_json::from_slice(&fs::read(&paths.receipt).unwrap()).unwrap();
+    assert_eq!(receipt["bootstrap_id"], BOOTSTRAP_ID);
+    validate(&paths).unwrap();
+}
+
+#[test]
 fn strict_v2_persists_exact_prod_and_dev2_issuers_independently_of_inference() {
     for (label, auth_issuer, inference_base_url) in [
         (

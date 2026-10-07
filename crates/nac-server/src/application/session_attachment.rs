@@ -96,6 +96,14 @@ impl<'a> SessionAttachmentApplication<'a> {
                 self.manager.resume_session_attachment(session_id).await?;
             drop(operation_lease);
             let service = Arc::new(service);
+            if self
+                .manager
+                .managed_model()
+                .and_then(super::managed::ManagedModelProfile::host_execution_authority)
+                .is_some()
+            {
+                super::managed::monitor_host_execution_authority(&service);
+            }
             if !cacheable {
                 return Ok(service);
             }
@@ -276,6 +284,14 @@ impl<'a> SessionAttachmentApplication<'a> {
                 .resume_session(session_id, operation_lease)
                 .await?,
         );
+        if self
+            .manager
+            .managed_model()
+            .and_then(super::managed::ManagedModelProfile::host_execution_authority)
+            .is_some()
+        {
+            super::managed::monitor_host_execution_authority(&service);
+        }
         let mut active = self.manager.inner.active_sessions.write().await;
         if let Some(existing) = active.get(session_id) {
             return Ok(Arc::clone(existing));

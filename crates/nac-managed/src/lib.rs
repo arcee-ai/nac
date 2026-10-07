@@ -10,6 +10,7 @@ mod clone_workflow;
 mod configuration;
 mod github;
 mod github_credential_store;
+mod host_key_configuration;
 mod managed_control_assertion;
 mod readiness;
 
@@ -30,6 +31,7 @@ pub use github::{
     GitHubAccessToken, GitHubAuthError, GitHubAuthFailureKind, GitHubConnectionStatus,
     GitHubDeviceLogin, GitHubDevicePrompt, GitHubEndpoints, GitHubRepository, ManagedGitHubAuth,
 };
+pub use host_key_configuration::{ManagedHostKeyConfig, HOST_KEY_MANAGED_CONFIG_VERSION};
 pub use managed_control_assertion::{
     ManagedControlAction, ManagedControlAssertion, ManagedControlAssertionError,
     ManagedControlRequest, ManagedControlTarget, ManagedControlVerifier,
