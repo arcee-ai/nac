@@ -221,6 +221,8 @@ pub struct ModelClient {
     client: Client,
     base_url: String,
     api_key: String,
+    #[cfg(all(test, unix))]
+    sender_prototype: Option<tests::sender_prototype::EnrolledSender>,
     pub model: String,
     backend: BackendKind,
     reasoning_effort: Option<ReasoningEffort>,
@@ -345,6 +347,8 @@ impl ModelClient {
             client,
             base_url: settings.base_url,
             api_key,
+            #[cfg(all(test, unix))]
+            sender_prototype: None,
             model: settings.model,
             backend,
             reasoning_effort: settings.reasoning_effort,
@@ -949,6 +953,14 @@ impl ModelClient {
         })
     }
 
+    fn single_managed_attempt(&self) -> bool {
+        #[cfg(all(test, unix))]
+        if self.sender_prototype.is_some() {
+            return true;
+        }
+        self.trusted_managed_host_key.is_some()
+    }
+
     /// Issue the request under the retry policy and hand back the response with
     /// its body still unread, so a caller can either buffer it or stream it.
     /// Every non-success outcome is resolved here, including its bounded body.
@@ -962,16 +974,19 @@ impl ModelClient {
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder + Copy,
     {
+        #[cfg(all(test, unix))]
+        let sender_url = self
+            .sender_prototype
+            .as_ref()
+            .map(|_| "http://nac-sender/inference");
+        #[cfg(all(test, unix))]
+        let url = sender_url.unwrap_or(url);
         let mut last_error = ModelHttpError {
             status: None,
             message: "No attempts made".to_string(),
         };
 
-        let attempts = if self.trusted_managed_host_key.is_some() {
-            1
-        } else {
-            10
-        };
+        let attempts = if self.single_managed_attempt() { 1 } else { 10 };
         for attempt in 0..attempts {
             if let Some(authority) = &self.host_execution_authority {
                 authority
@@ -985,8 +1000,16 @@ impl ModelClient {
             if !self.extra_headers_override_content_type() {
                 request = request.header("Content-Type", "application/json");
             }
+            #[cfg(all(test, unix))]
+            let request = if let Some(sender) = &self.sender_prototype {
+                request.header("X-Nac-Fixture-Grant", &sender.capability)
+            } else {
+                apply_headers(request)
+            };
+            #[cfg(not(all(test, unix)))]
+            let request = apply_headers(request);
             let response = match self
-                .apply_extra_headers(apply_headers(request))
+                .apply_extra_headers(request)
                 .map_err(|error| ModelHttpError {
                     status: None,
                     message: error.to_string(),
@@ -1132,11 +1155,7 @@ impl ModelClient {
         Fold: StreamFold,
     {
         let mut last_error = None;
-        let attempts = if self.trusted_managed_host_key.is_some() {
-            1
-        } else {
-            10
-        };
+        let attempts = if self.single_managed_attempt() { 1 } else { 10 };
         for attempt in 0..attempts {
             let response = self
                 .send_with_retry_headers(url, body, apply_headers, secrets)
@@ -1232,6 +1251,8 @@ impl ModelClient {
             client: no_redirect_model_client().expect("build no-redirect test model client"),
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "test_dummy_key".to_string(),
+            #[cfg(all(test, unix))]
+            sender_prototype: None,
             model: "gpt-5.5".to_string(),
             backend: BackendKind::OpenAiResponses,
             reasoning_effort: Some(ReasoningEffort::Xhigh),

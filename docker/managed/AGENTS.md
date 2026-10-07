@@ -54,3 +54,13 @@ container layers or generated runtime data.
 Do not implement GitHub flows, secrets administration, clone state, readiness
 domain facts, or HTTP handlers here. Those belong to `nac-managed` or
 `nac-server`; the image only supplies deployment wiring.
+
+## Separate sender fixture
+
+`sender-prototype.Dockerfile` and
+`../../scripts/smoke-managed-sender-prototype.sh` own an explicitly selected,
+network-disabled two-UID experiment. Its native client/issuer/control protocol
+exists only in core test code. Do not add fixture enrollment to normal startup,
+change NAC UID10001, grant runtime capabilities, or qualify production ingress,
+provider delivery or release capability from this proof. See
+`../../docs/managed/sender-prototype.md` for scope and reproducible local inputs.

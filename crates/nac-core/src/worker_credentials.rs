@@ -42,6 +42,9 @@ pub fn restrict_same_uid_inspection() -> io::Result<()> {
 #[serde(deny_unknown_fields)]
 pub(crate) struct ManagedWorkerNativeCredentials {
     exa_api_key: Option<String>,
+    #[cfg(all(test, unix))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sender_prototype_grant: Option<String>,
 }
 
 static MANAGED_NATIVE_CREDENTIALS: OnceLock<ManagedWorkerNativeCredentials> = OnceLock::new();
@@ -92,7 +95,11 @@ impl ManagedWorkerNativeCredentials {
             })
             .transpose()?
             .filter(|value| !value.trim().is_empty());
-        Ok(Self { exa_api_key })
+        Ok(Self {
+            exa_api_key,
+            #[cfg(all(test, unix))]
+            sender_prototype_grant: None,
+        })
     }
 
     pub(crate) fn exact_redactions(&self) -> Vec<String> {
@@ -107,6 +114,8 @@ impl ManagedWorkerNativeCredentials {
     pub(crate) fn for_test(exa_api_key: Option<&str>) -> Self {
         Self {
             exa_api_key: exa_api_key.map(str::to_string),
+            #[cfg(all(test, unix))]
+            sender_prototype_grant: None,
         }
     }
 

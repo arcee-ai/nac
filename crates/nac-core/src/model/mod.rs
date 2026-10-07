@@ -80,8 +80,8 @@ pub(crate) use catalog::{
     Compat, CompletionsThinkingFormat, CompletionsTokenLimit, ModelMetadata, ThinkingLevelMap,
 };
 pub use managed_host_key::{
-    ManagedHostExecutionAuthority, ManagedHostKeyBinding, ManagedHostKeyStore,
-    TrustedManagedHostKey,
+    ManagedHostExecutionAuthority, ManagedHostExecutionObserver, ManagedHostKeyBinding,
+    ManagedHostKeyStore, TrustedManagedHostKey, UnconfiguredManagedHostExecutionObserver,
 };
 pub use providers::{
     list_managed_provider_models, list_provider_models, list_provider_models_with_http_policy,

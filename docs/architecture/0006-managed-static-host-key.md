@@ -129,3 +129,15 @@ mode bits, nondumpable workers and private sockets do not establish a privilege
 split. The selected privileged mediated sender and authenticated upstream
 eligibility callback require independent integration before production release
 or any version 3 fleet capability advertisement.
+
+A separately authenticated sender can provide the inward read-only
+`ManagedHostExecutionObserver` port. It returns an opaque nonsecret observation
+revision for the exact binding; the unconfigured implementation denies. The
+existing shared execution authority latches unavailable or changed observations
+and never reopens old clones after restoration. No sender enrollment factory is
+installed. The optional [two-UID experiment](../managed/sender-prototype.md)
+compiles forwarding/grant adapters only in tests and demonstrates native client
+and private-worker transport without loading the provider key in NAC. Its
+synthetic verifier and local protocol are not production enrollment or an
+accepted lifecycle wire. B's published lifecycle9e8b22e settles canonical phase
+comparison; authenticated native producers and private delivery remain required.

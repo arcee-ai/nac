@@ -9,6 +9,8 @@ mod header_policy;
 mod http_contract;
 mod managed_host_key;
 mod s5_wire;
+#[cfg(unix)]
+pub(super) mod sender_prototype;
 
 fn test_model_client(
     backend: BackendKind,
@@ -19,6 +21,8 @@ fn test_model_client(
         client: no_redirect_model_client().unwrap(),
         base_url,
         api_key: "selected-provider-credential".to_string(),
+        #[cfg(all(test, unix))]
+        sender_prototype: None,
         model: "test-model".to_string(),
         backend,
         reasoning_effort: None,

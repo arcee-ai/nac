@@ -104,6 +104,8 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         client: arcee::no_redirect_client().unwrap(),
         base_url: format!("{}/tenant/base", server.base_url),
         api_key: "stored-login-credential".to_string(),
+        #[cfg(all(test, unix))]
+        sender_prototype: None,
         model: "arcee-test-model".to_string(),
         backend: BackendKind::ArceeApi,
         reasoning_effort: None,
@@ -616,6 +618,8 @@ async fn custom_arcee_routes_are_exact_on_wire() {
             client: arcee::no_redirect_client().unwrap(),
             base_url: format!("{}{configured_path}", server.base_url),
             api_key: "custom-endpoint-key".to_string(),
+            #[cfg(all(test, unix))]
+            sender_prototype: None,
             model: "arcee-test-model".to_string(),
             backend: BackendKind::ArceeApi,
             reasoning_effort: None,
@@ -663,6 +667,8 @@ async fn arcee_cross_origin_redirects_do_not_replay_prompt_credentials_or_header
             client: arcee::no_redirect_client().unwrap(),
             base_url: source.base_url.clone(),
             api_key: "sensitive-arcee-credential".to_string(),
+            #[cfg(all(test, unix))]
+            sender_prototype: None,
             model: "arcee-test-model".to_string(),
             backend: BackendKind::ArceeApi,
             reasoning_effort: None,
@@ -932,6 +938,8 @@ async fn arcee_multibyte_error_body_does_not_panic() {
         client: arcee::no_redirect_client().unwrap(),
         base_url: format!("http://{address}"),
         api_key: "rcai-test".to_string(),
+        #[cfg(all(test, unix))]
+        sender_prototype: None,
         model: "test-model".to_string(),
         backend: BackendKind::ArceeApi,
         reasoning_effort: None,
