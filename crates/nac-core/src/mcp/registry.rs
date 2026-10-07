@@ -67,6 +67,10 @@ pub(super) struct McpServer {
     pub(super) resource_catalog_refresh: McpCatalogRefreshGate,
     pub(super) legacy_subscriptions: std::sync::Mutex<LegacySubscriptions>,
     pub(super) notification_task: McpNotificationTask,
+    pub(super) runtime_effect: Option<crate::runtime::RuntimeEffectLeaseHandle>,
+    pub(super) runtime_effect_task: McpNotificationTask,
+    pub(super) runtime_effect_cancellation:
+        std::sync::Mutex<Option<rmcp::service::RunningServiceCancellationToken>>,
 }
 
 impl McpServer {
@@ -80,7 +84,7 @@ impl McpServer {
     }
 
     pub(super) fn is_current_connection_generation(&self, generation: u64) -> bool {
-        self.current_connection_generation() == generation
+        self.current_connection_generation() == generation && self.runtime_effect_available()
     }
 
     pub(super) fn next_connection_generation(&self) -> u64 {
@@ -233,8 +237,17 @@ impl McpRegistry {
         transport_policy: McpTransportPolicy,
         root_policy: McpRootPolicy,
     ) -> Result<McpLoadOutcome> {
-        Self::load_reporting_skips_inner(cwd, sandbox, paths, transport_policy, root_policy, None)
-            .await
+        // Keep the catalog/connection state machine off enclosing session
+        // construction stacks. Ownership and cancellation stay in this caller.
+        Box::pin(Self::load_reporting_skips_inner(
+            cwd,
+            sandbox,
+            paths,
+            transport_policy,
+            root_policy,
+            None,
+        ))
+        .await
     }
 
     pub(crate) async fn load_reporting_skips_with_effect_lease(
@@ -245,14 +258,14 @@ impl McpRegistry {
         root_policy: McpRootPolicy,
         effect: crate::runtime::RuntimeEffectLeaseHandle,
     ) -> Result<McpLoadOutcome> {
-        Self::load_reporting_skips_inner(
+        Box::pin(Self::load_reporting_skips_inner(
             cwd,
             sandbox,
             paths,
             transport_policy,
             root_policy,
             Some(effect),
-        )
+        ))
         .await
     }
 
@@ -502,6 +515,9 @@ impl McpRegistry {
                     uris: std::collections::HashSet::new(),
                 }),
                 notification_task: McpNotificationTask::default(),
+                runtime_effect: effect.as_ref().map(Arc::clone),
+                runtime_effect_task: McpNotificationTask::default(),
+                runtime_effect_cancellation: std::sync::Mutex::new(None),
             });
             handler.bind(&server);
             sync.set_redactions(&server_name, redaction_values);
@@ -613,6 +629,10 @@ impl McpRegistry {
 
         sync.initialize(tools, prompt_commands);
         for server in mounted_servers.values() {
+            if let Err(error) = server.start_runtime_effect_watch().await {
+                close_mounted_services(&mut mounted_services).await;
+                return Err(error);
+            }
             server.start_notification_processing().await;
         }
         let registry = if mounted_servers.is_empty() {

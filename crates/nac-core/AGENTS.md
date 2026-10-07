@@ -61,6 +61,16 @@ It must not own HTTP/React delivery or managed-host product onboarding.
   Terminal workspace capture and HTTP/stream integration remain open; these
   primitives do not qualify listener activation or the complete protected
   execution lifecycle.
+- `src/mcp/effect_lease.rs` retains the same original on the selected registry,
+  imported tool captures and connection owner. SDK requests recheck after both
+  service locks, results recheck before release, and denial cancels the current
+  connection independently of those locks before owned transport cleanup.
+  Auth refresh publishes its cancellation token with the replacement connection;
+  catalog/subscription tasks and notifications share the captured lease. Sealed
+  pending prompt admission also checks the initial HTTP deadline at the SDK
+  boundary. Continuation tools use the current lease, preserving active runs
+  beyond their initial HTTP expiry. This does not establish worker IPC or
+  authenticate HTTP delivery.
 - `src/sandbox/podman.rs` keeps the selected Podman adapter's container lifecycle,
   creation receipts, process identity/cleanup scripts and rollback together; its
   cohesive ownership explains its size above 800 lines. Fresh durable teardown
@@ -112,6 +122,12 @@ listed responsibility closed; a new concern requires a real submodule/port:
 - `mcp/file_config.rs` keeps revision-checked TOML editing, publication journal,
   locking, recovery, validation, and probe-facing records together. MCP
   transport invocation belongs elsewhere.
+- `mcp/registry.rs`, `mcp/capabilities.rs`, and `mcp/sync.rs` keep configured
+  mounting/capability capture, prompt/resource/completion semantics, and live
+  generation-aware catalog/notification ownership respectively with their
+  characterizations. The original-operation connection lifecycle is a private
+  sibling owner in `mcp/effect_lease.rs`; do not add HTTP admission or credential
+  policy to these modules.
 - `view.rs` is the typed read-projection facade over session/thread/workset and
   workspace owners; `terminal/output.rs` is the bounded output registry,
   paging/UTF-8 boundary, preview, eviction, and lease owner. Neither may acquire

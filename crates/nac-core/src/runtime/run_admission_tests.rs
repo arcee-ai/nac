@@ -66,7 +66,7 @@ pub(super) fn count(fixture: &Fixture, session: &str) -> i64 {
         .unwrap()
 }
 
-async fn ended(service: &crate::session_service::SessionService) {
+pub(super) async fn ended(service: &crate::session_service::SessionService) {
     tokio::time::timeout(Duration::from_secs(5), async {
         while service.has_active_operation() {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -76,12 +76,12 @@ async fn ended(service: &crate::session_service::SessionService) {
     .unwrap();
 }
 
-fn response() -> String {
+pub(super) fn response() -> String {
     serde_json::json!({"status":"completed", "output":[{"type":"message", "content":[{"type":"output_text", "text":"original result"}]}],
         "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}).to_string()
 }
 
-async fn renew_original(
+pub(super) async fn renew_original(
     guard: &Arc<ManagedRuntimeLeaseGuard>,
     native: &crate::store::ManagedRuntimeObservation,
     digest: [u8; 32],

@@ -39,6 +39,9 @@ mod catalog_sync;
 mod config;
 #[cfg(feature = "test-support")]
 mod conformance;
+mod effect_lease;
+#[cfg(all(test, unix))]
+pub(crate) mod effect_lease_tests;
 mod file_config;
 mod invocation;
 mod library;

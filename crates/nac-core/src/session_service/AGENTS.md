@@ -30,6 +30,9 @@ durable records; runtime/tool modules own execution internals.
   and original Run acknowledgement together. Pending delivery abort denies the
   guard. The initial HTTP deadline still fences the first prompt transaction;
   an admitted active continuation uses freshly renewed leases thereafter.
+  Pending MCP prompt resolution requires the same captured registry original,
+  checks initial admission after connection-lock waits at the SDK boundary, and
+  aborts the original on lost caller delivery before durable run admission.
   This is an opt-in core primitive, not authenticated HTTP delivery or startup
   selection. Durable start/prompt markers and guarded resume reconciliation
   now cover matching starts lost before prompt publication under the actual

@@ -118,10 +118,15 @@ impl SessionService {
                     .mcp
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("MCP prompt capability is unavailable"))?;
+                let effect: crate::runtime::RuntimeEffectLeaseHandle =
+                    Arc::<ManagedRuntimeLeaseGuard>::clone(&original.guard);
+                let checking = Arc::clone(&original.guard);
+                let initial: Arc<crate::store::MutationAdmission> =
+                    Arc::new(move || checking.check_initial_admission_now());
                 tokio::select! {
                     biased;
                     () = original.guard.wait_for_denial() => anyhow::bail!("runtime prompt expansion denied"),
-                    result = registry.resolve_prompt_invocation(invocation) => result?,
+                    result = registry.resolve_runtime_prompt_invocation(invocation, &effect, initial.as_ref()) => result?,
                 }
             }
         };

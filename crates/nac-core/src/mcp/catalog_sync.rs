@@ -345,12 +345,16 @@ impl McpServer {
                 return;
             }
             Self::wait_for_refresh_turn(gate).await;
-            let result = timeout(self.catalog_timeout, peer.list_all_tools()).await;
+            let result = self
+                .during_runtime_effect(async {
+                    Ok(timeout(self.catalog_timeout, peer.list_all_tools()).await)
+                })
+                .await;
             if !self.is_current_connection_generation(generation) {
                 return;
             }
             match result {
-                Ok(Ok(tools)) => {
+                Ok(Ok(Ok(tools))) => {
                     self.sync.replace_tools(self, tools);
                     self.sync.emit(
                         &self.name,
@@ -358,8 +362,9 @@ impl McpServer {
                         "tool catalog refreshed",
                     );
                 }
-                Ok(Err(error)) => self.refresh_failed("tool", error.to_string()),
-                Err(_) => self.refresh_failed("tool", "refresh timed out".to_string()),
+                Ok(Ok(Err(error))) => self.refresh_failed("tool", error.to_string()),
+                Ok(Err(_)) => self.refresh_failed("tool", "refresh timed out".to_string()),
+                Err(error) => self.refresh_failed("tool", error.to_string()),
             }
             if !permit.finish_iteration() {
                 break;
@@ -391,12 +396,16 @@ impl McpServer {
                 return;
             }
             Self::wait_for_refresh_turn(gate).await;
-            let result = timeout(self.catalog_timeout, list_bounded_prompts_peer(peer)).await;
+            let result = self
+                .during_runtime_effect(async {
+                    Ok(timeout(self.catalog_timeout, list_bounded_prompts_peer(peer)).await)
+                })
+                .await;
             if !self.is_current_connection_generation(generation) {
                 return;
             }
             match result {
-                Ok(Ok(prompts)) => {
+                Ok(Ok(Ok(prompts))) => {
                     self.sync.replace_prompts(self, prompts);
                     self.sync.emit(
                         &self.name,
@@ -404,8 +413,9 @@ impl McpServer {
                         "prompt catalog refreshed",
                     );
                 }
-                Ok(Err(error)) => self.refresh_failed("prompt", format!("{error:#}")),
-                Err(_) => self.refresh_failed("prompt", "refresh timed out".to_string()),
+                Ok(Ok(Err(error))) => self.refresh_failed("prompt", format!("{error:#}")),
+                Ok(Err(_)) => self.refresh_failed("prompt", "refresh timed out".to_string()),
+                Err(error) => self.refresh_failed("prompt", error.to_string()),
             }
             if !permit.finish_iteration() {
                 break;
@@ -437,12 +447,16 @@ impl McpServer {
                 return;
             }
             Self::wait_for_refresh_turn(gate).await;
-            let result = timeout(self.catalog_timeout, peer.list_all_resources()).await;
+            let result = self
+                .during_runtime_effect(async {
+                    Ok(timeout(self.catalog_timeout, peer.list_all_resources()).await)
+                })
+                .await;
             if !self.is_current_connection_generation(generation) {
                 return;
             }
             match result {
-                Ok(Ok(resources)) => {
+                Ok(Ok(Ok(resources))) => {
                     self.sync
                         .set_resources(&self.name, bounded_resource_uris(resources));
                     self.sync.emit(
@@ -454,8 +468,9 @@ impl McpServer {
                         self.reconcile_legacy_subscriptions(generation, peer).await;
                     }
                 }
-                Ok(Err(error)) => self.refresh_failed("resource", error.to_string()),
-                Err(_) => self.refresh_failed("resource", "refresh timed out".to_string()),
+                Ok(Ok(Err(error))) => self.refresh_failed("resource", error.to_string()),
+                Ok(Err(_)) => self.refresh_failed("resource", "refresh timed out".to_string()),
+                Err(error) => self.refresh_failed("resource", error.to_string()),
             }
             if !permit.finish_iteration() {
                 break;

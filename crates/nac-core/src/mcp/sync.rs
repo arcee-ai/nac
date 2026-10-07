@@ -56,7 +56,7 @@ pub(super) struct McpNotificationTask {
 }
 
 impl McpNotificationTask {
-    fn replace(&self, task: JoinHandle<()>) {
+    pub(super) fn replace(&self, task: JoinHandle<()>) {
         let previous = self
             .task
             .lock()
@@ -67,7 +67,7 @@ impl McpNotificationTask {
         }
     }
 
-    fn abort(&self) {
+    pub(super) fn abort(&self) {
         let task = self
             .task
             .lock()
@@ -375,10 +375,13 @@ impl McpServer {
                 return;
             }
             if matches!(
-                timeout(
-                    self.catalog_timeout,
-                    peer.subscribe(SubscribeRequestParams::new(uri.clone()))
-                )
+                self.during_runtime_effect(async {
+                    Ok(timeout(
+                        self.catalog_timeout,
+                        peer.subscribe(SubscribeRequestParams::new(uri.clone())),
+                    )
+                    .await?)
+                })
                 .await,
                 Ok(Ok(_))
             ) {
@@ -398,11 +401,15 @@ impl McpServer {
             if !self.is_current_connection_generation(generation) {
                 return;
             }
-            let _ = timeout(
-                self.catalog_timeout,
-                peer.unsubscribe(UnsubscribeRequestParams::new(uri.clone())),
-            )
-            .await;
+            let _ = self
+                .during_runtime_effect(async {
+                    Ok(timeout(
+                        self.catalog_timeout,
+                        peer.unsubscribe(UnsubscribeRequestParams::new(uri.clone())),
+                    )
+                    .await?)
+                })
+                .await;
             let mut subscriptions = self
                 .legacy_subscriptions
                 .lock()
@@ -445,8 +452,11 @@ impl McpServer {
 
     pub(super) async fn start_notification_processing(self: &Arc<Self>) {
         self.notification_task.abort();
-        let service = self.current_service().await;
-        let peer = service.read().await.peer().clone();
+        let Ok(service) = self.request_service().await else {
+            return;
+        };
+        let peer = service.peer().clone();
+        drop(service);
         let generation = self.current_connection_generation();
         self.reset_legacy_subscriptions(generation);
         let weak = Arc::downgrade(self);
@@ -513,10 +523,17 @@ async fn run_subscription(server: Weak<McpServer>, peer: Peer<RoleClient>, gener
             return;
         }
         let filter = current.subscription_filter();
-        drop(current);
         let capacity =
             NonZeroUsize::new(SUBSCRIPTION_CHANNEL_CAPACITY).unwrap_or(NonZeroUsize::MIN);
-        let mut subscription = match peer.listen_with_capacity(filter, capacity).await {
+        let subscription = current
+            .during_runtime_effect(async {
+                peer.listen_with_capacity(filter, capacity)
+                    .await
+                    .map_err(Into::into)
+            })
+            .await;
+        drop(current);
+        let mut subscription = match subscription {
             Ok(subscription) => subscription,
             Err(error) => {
                 if let Some(current) = server

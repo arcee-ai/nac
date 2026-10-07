@@ -310,6 +310,32 @@ impl McpRegistry {
         &self,
         invocation: McpPromptInvocation,
     ) -> Result<crate::commands::PreparedPrompt> {
+        self.resolve_prompt_invocation_inner(invocation, None).await
+    }
+
+    pub(crate) async fn resolve_runtime_prompt_invocation(
+        &self,
+        invocation: McpPromptInvocation,
+        effect: &crate::runtime::RuntimeEffectLeaseHandle,
+        initial: &crate::store::MutationAdmission,
+    ) -> Result<crate::commands::PreparedPrompt> {
+        anyhow::ensure!(
+            self.matches_runtime_effect(effect),
+            "MCP prompt capability does not belong to this runtime original"
+        );
+        initial()?;
+        let prompt = self
+            .resolve_prompt_invocation_inner(invocation, Some(initial))
+            .await?;
+        initial()?;
+        Ok(prompt)
+    }
+
+    async fn resolve_prompt_invocation_inner(
+        &self,
+        invocation: McpPromptInvocation,
+        initial: Option<&crate::store::MutationAdmission>,
+    ) -> Result<crate::commands::PreparedPrompt> {
         let snapshot = self.sync.snapshot();
         let command = snapshot
             .prompt_commands
@@ -327,6 +353,7 @@ impl McpRegistry {
                 &command.server_name,
                 &command.prompt_name,
                 invocation.arguments.clone(),
+                initial,
             ),
         )
         .await
@@ -369,6 +396,18 @@ impl McpRegistry {
             .ok_or_else(|| anyhow!("{name} requires object arguments"))?;
         let server_name = required_string(input, "server")?;
         let server = self.server_for(server_name)?;
+        server
+            .during_runtime_effect(self.call_server_capability(name, input, server_name, server))
+            .await
+    }
+
+    async fn call_server_capability(
+        &self,
+        name: &str,
+        input: &Map<String, Value>,
+        server_name: &str,
+        server: &McpServer,
+    ) -> Result<Value> {
         let cursor = optional_string(input, "cursor")?.map(ToOwned::to_owned);
         let page = || Some(PaginatedRequestParams::default().with_cursor(cursor.clone()));
         let value = match name {
@@ -378,8 +417,8 @@ impl McpRegistry {
                     server_name,
                     "resources",
                 )?;
-                let service = server.current_service().await;
-                let result = service.read().await.list_resources(page()).await?;
+                let service = server.request_service().await?;
+                let result = service.list_resources(page()).await?;
                 json!({"server": server_name, "trust": "untrusted_remote_data", "resources": sanitized_value(serde_json::to_value(result.resources)?), "nextCursor": result.next_cursor})
             }
             LIST_RESOURCE_TEMPLATES_TOOL => {
@@ -388,8 +427,8 @@ impl McpRegistry {
                     server_name,
                     "resource templates",
                 )?;
-                let service = server.current_service().await;
-                let result = service.read().await.list_resource_templates(page()).await?;
+                let service = server.request_service().await?;
+                let result = service.list_resource_templates(page()).await?;
                 json!({"server": server_name, "trust": "untrusted_remote_data", "resourceTemplates": sanitized_value(serde_json::to_value(result.resource_templates)?), "nextCursor": result.next_cursor})
             }
             READ_RESOURCE_TOOL => {
@@ -399,10 +438,8 @@ impl McpRegistry {
                     "resources",
                 )?;
                 let uri = required_string(input, "uri")?;
-                let service = server.current_service().await;
+                let service = server.request_service().await?;
                 let result = service
-                    .read()
-                    .await
                     .read_resource(ReadResourceRequestParams::new(uri))
                     .await?;
                 json!({"server": server_name, "uri": uri, "trust": "untrusted_remote_content", "contents": sanitized_value(serde_json::to_value(result.contents)?)})
@@ -413,8 +450,8 @@ impl McpRegistry {
                     server_name,
                     "prompts",
                 )?;
-                let service = server.current_service().await;
-                let result = service.read().await.list_prompts(page()).await?;
+                let service = server.request_service().await?;
+                let result = service.list_prompts(page()).await?;
                 json!({"server": server_name, "trust": "untrusted_remote_data", "prompts": sanitized_value(serde_json::to_value(result.prompts)?), "nextCursor": result.next_cursor})
             }
             GET_PROMPT_TOOL => {
@@ -428,7 +465,9 @@ impl McpRegistry {
                     .cloned()
                     .unwrap_or_default();
                 ensure_string_values(&arguments, "prompt argument")?;
-                let result = self.get_prompt(server_name, prompt_name, arguments).await?;
+                let result = self
+                    .get_prompt(server_name, prompt_name, arguments, None)
+                    .await?;
                 json!({"server": server_name, "prompt": prompt_name, "trust": "untrusted_remote_prompt_data", "result": sanitized_value(serde_json::to_value(result)?)})
             }
             COMPLETE_PROMPT_ARGUMENT_TOOL => {
@@ -449,10 +488,8 @@ impl McpRegistry {
                     .map(string_map)
                     .transpose()?
                     .map(CompletionContext::with_arguments);
-                let service = server.current_service().await;
+                let service = server.request_service().await?;
                 let completion = service
-                    .read()
-                    .await
                     .complete_prompt_argument(prompt_name, argument, value, context)
                     .await?;
                 json!({"server": server_name, "prompt": prompt_name, "argument": argument, "completion": sanitized_value(serde_json::to_value(completion)?)})
@@ -467,6 +504,7 @@ impl McpRegistry {
         server_name: &str,
         prompt_name: &str,
         arguments: Map<String, Value>,
+        initial: Option<&crate::store::MutationAdmission>,
     ) -> Result<rmcp::model::GetPromptResult> {
         let server = self.server_for(server_name)?;
         require_capability(
@@ -479,14 +517,15 @@ impl McpRegistry {
         } else {
             GetPromptRequestParams::new(prompt_name).with_arguments(arguments)
         };
-        let service = server.current_service().await;
-        let result = service
-            .read()
+        server
+            .during_runtime_effect(async {
+                let service = server.request_service().await?;
+                if let Some(initial) = initial {
+                    initial()?;
+                }
+                service.get_prompt(params).await.map_err(Into::into)
+            })
             .await
-            .get_prompt(params)
-            .await
-            .map_err(Into::into);
-        result
     }
 
     fn server_for(&self, name: &str) -> Result<&Arc<McpServer>> {
