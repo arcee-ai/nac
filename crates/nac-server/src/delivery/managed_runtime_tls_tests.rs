@@ -3,7 +3,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::{rustls::pki_types::ServerName, TlsConnector};
 use tower::ServiceExt;
 
-fn certificate(name: &str) -> CertificateDer<'static> {
+pub(super) fn certificate(name: &str) -> CertificateDer<'static> {
     let bytes: &[u8] = match name {
         "ca" => include_bytes!("fixtures/runtime_tls/ca.der"),
         "host" => include_bytes!("fixtures/runtime_tls/host.der"),
@@ -15,7 +15,7 @@ fn certificate(name: &str) -> CertificateDer<'static> {
     CertificateDer::from(bytes.to_vec())
 }
 
-fn key(name: &str) -> PrivateKeyDer<'static> {
+pub(super) fn key(name: &str) -> PrivateKeyDer<'static> {
     let bytes: &[u8] = match name {
         "host" => include_bytes!("fixtures/runtime_tls/host-key.der"),
         "nac-api" => include_bytes!("fixtures/runtime_tls/nac-api-key.der"),
@@ -26,7 +26,7 @@ fn key(name: &str) -> PrivateKeyDer<'static> {
     PrivateKeyDer::try_from(bytes.to_vec()).unwrap()
 }
 
-fn identity() -> RuntimeTlsIdentity {
+pub(super) fn identity() -> RuntimeTlsIdentity {
     RuntimeTlsIdentity {
         serving_chain: vec![certificate("host")],
         serving_key: key("host"),
@@ -35,7 +35,7 @@ fn identity() -> RuntimeTlsIdentity {
     }
 }
 
-async fn client(
+pub(super) async fn client(
     addr: SocketAddr,
     peer: Option<&str>,
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>> {

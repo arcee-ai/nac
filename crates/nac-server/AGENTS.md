@@ -48,6 +48,12 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   maintenance listener separate. Neither helper is installed at startup and no
   new configuration is defined. Synthetic DER fixtures
   are publicly known test identities, never production enrollment or delivery.
+- `src/delivery/managed_runtime_issuer.rs` keeps separately configured issuer
+  purpose and its native connection identity distinct from ordinary runtime peers.
+  It reuses bounded TLS1.3 handshake admission and always denies effects until
+  current policy/challenge/journal composition exists. A channel UUID is a selector,
+  never a grant or liveness proof; close/replacement must invalidate outstanding
+  exchanges in the composed channel owner. No loader or listener startup is installed.
 - `src/lib.rs` — composition state, remaining cross-use-case lifecycle wiring,
   and public re-exports; new cohesive operations should prefer an owner above.
 - `src/mcp.rs` / `mcp_api.rs` — outgoing session-control MCP and HTTP MCP config.

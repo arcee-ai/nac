@@ -24,6 +24,9 @@ use tokio_rustls::{
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_HANDSHAKES: usize = 32;
 
+#[path = "managed_runtime_issuer.rs"]
+pub(crate) mod issuer;
+
 /// Explicit construction capability; absent configuration creates no listener.
 /// DER bytes are loaded by trusted composition, never selected by an HTTP request.
 pub struct RuntimeTlsIdentity {
