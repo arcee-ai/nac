@@ -2,6 +2,7 @@ use super::auth_store::{
     arcee_auth_file_path, arcee_auth_lock_path, read_auth_bytes_from_path,
     read_auth_string_from_path, with_arcee_auth_lock, write_auth_string_to_path, FileLock,
 };
+use super::effect_scope::CallEffectScope;
 use super::*;
 use anyhow::{bail, Context};
 use std::fs;
@@ -795,25 +796,55 @@ async fn acquire_refresh_lock(lock_path: &Path) -> Result<FileLock> {
 /// (credential writes are atomic renames, so a reader always sees a complete
 /// record); the refresh itself is serialized in- and cross-process.
 pub(super) async fn fresh_access_token(client: &Client, expected_base_url: &str) -> Result<String> {
+    fresh_access_token_with_effects(client, expected_base_url, &CallEffectScope::default()).await
+}
+
+pub(super) async fn fresh_access_token_with_effects(
+    client: &Client,
+    expected_base_url: &str,
+    scope: &CallEffectScope,
+) -> Result<String> {
+    scope.check_current().await?;
+    scope.check_available()?;
     let auth = read_stored_auth_for_base_url(expected_base_url)?;
     if !near_expiry(&auth) {
         return Ok(auth.access_token);
     }
-    refresh_locked(client, expected_base_url, near_expiry).await
+    refresh_locked(client, expected_base_url, near_expiry, scope).await
 }
 
 /// Refreshes after a 401. Passing the access token that failed lets a queued
 /// caller detect that another holder already rotated past it and reuse the new
 /// token instead of triggering a redundant rotation. Every re-read remains
 /// bound to the inference origin selected by the existing model client.
+#[cfg(test)]
 pub(super) async fn force_refresh_access_token(
     client: &Client,
     expected_base_url: &str,
     stale_access_token: &str,
 ) -> Result<String> {
-    refresh_locked(client, expected_base_url, |auth| {
-        auth.access_token == stale_access_token
-    })
+    force_refresh_access_token_with_effects(
+        client,
+        expected_base_url,
+        stale_access_token,
+        &CallEffectScope::default(),
+    )
+    .await
+}
+
+pub(super) async fn force_refresh_access_token_with_effects(
+    client: &Client,
+    expected_base_url: &str,
+    stale_access_token: &str,
+    scope: &CallEffectScope,
+) -> Result<String> {
+    scope.check_current().await?;
+    refresh_locked(
+        client,
+        expected_base_url,
+        |auth| auth.access_token == stale_access_token,
+        scope,
+    )
     .await
 }
 
@@ -824,20 +855,23 @@ async fn refresh_locked(
     client: &Client,
     expected_base_url: &str,
     should_refresh: impl Fn(&StoredArceeAuth) -> bool,
+    scope: &CallEffectScope,
 ) -> Result<String> {
     let auth_path = arcee_auth_file_path()?;
     let lock_path = arcee_auth_lock_path()?;
-    refresh_locked_with(
+    refresh_locked_with_effects(
         client,
         expected_base_url,
         should_refresh,
         &auth_path,
         &lock_path,
         ArceeAuthService::approved,
+        scope,
     )
     .await
 }
 
+#[cfg(test)]
 async fn refresh_locked_with(
     client: &Client,
     expected_base_url: &str,
@@ -846,16 +880,41 @@ async fn refresh_locked_with(
     lock_path: &Path,
     resolve_service: impl Fn(&str) -> Result<ArceeAuthService>,
 ) -> Result<String> {
+    refresh_locked_with_effects(
+        client,
+        expected_base_url,
+        should_refresh,
+        auth_path,
+        lock_path,
+        resolve_service,
+        &CallEffectScope::default(),
+    )
+    .await
+}
+
+async fn refresh_locked_with_effects(
+    client: &Client,
+    expected_base_url: &str,
+    should_refresh: impl Fn(&StoredArceeAuth) -> bool,
+    auth_path: &Path,
+    lock_path: &Path,
+    resolve_service: impl Fn(&str) -> Result<ArceeAuthService>,
+    scope: &CallEffectScope,
+) -> Result<String> {
     let _gate = refresh_gate().lock().await;
     let _lock = acquire_refresh_lock(lock_path).await?;
+    scope.check_current().await?;
+    scope.check_available()?;
     let auth = read_stored_auth_for_base_url_at(auth_path, expected_base_url)?;
     if !should_refresh(&auth) {
         return Ok(auth.access_token);
     }
     let service = resolve_service(&auth.auth_issuer)?;
-    Ok(refresh_and_store_auth_at(client, &service, auth_path, auth)
-        .await?
-        .access_token)
+    Ok(
+        refresh_and_store_auth_at(client, &service, auth_path, auth, scope)
+            .await?
+            .access_token,
+    )
 }
 
 async fn refresh_and_store_auth_at(
@@ -863,15 +922,22 @@ async fn refresh_and_store_auth_at(
     service: &ArceeAuthService,
     auth_path: &Path,
     current: StoredArceeAuth,
+    scope: &CallEffectScope,
 ) -> Result<StoredArceeAuth> {
+    scope.check_current().await?;
+    scope.check_available()?;
     match request_token_refresh(client, service, &current.refresh_token, &current.client_id).await?
     {
         RefreshOutcome::Success(refreshed) => {
             let updated = stored_auth_from_refresh(current, refreshed);
+            scope.check_current().await?;
+            scope.check_available()?;
             write_stored_auth_at(auth_path, &updated)?;
             Ok(updated)
         }
         RefreshOutcome::Revoked => {
+            scope.check_current().await?;
+            scope.check_available()?;
             let _ = remove_auth_path(auth_path);
             Err(stored_auth_configuration_error(
                 "Arcee authorization was revoked or expired; run `nac arcee-auth login` again.",
@@ -1351,3 +1417,7 @@ fn arcee_redirect_error(
 #[cfg(test)]
 #[path = "arcee_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "arcee_effect_tests.rs"]
+mod effect_tests;

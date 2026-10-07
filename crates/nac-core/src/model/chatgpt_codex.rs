@@ -1,6 +1,7 @@
 use super::auth_store::ensure_open_credential_file_is_safe;
+use super::effect_scope::CallEffectScope;
 use super::responses_stream::ResponsesStreamFold;
-use super::sse::{read_sse_response, with_source_chain, StreamFold, StreamFoldError};
+use super::sse::{read_sse_response_with_effects, with_source_chain, StreamFold, StreamFoldError};
 use super::*;
 use crate::run_failure::{
     PartialModelOutput, RecoveryAction, RunFailure, RunFailureKind, RunFailurePhase,
@@ -496,9 +497,9 @@ pub fn codex_auth_status() -> Result<()> {
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "the provider adapter keeps request, auth, streaming, cache, and cancellation inputs explicit"
+    reason = "provider adapter preserves explicit auth/cache/stream inputs alongside the inward per-call effect scope"
 )]
-pub async fn send_responses(
+pub(super) async fn send_responses_with_effects(
     client: &Client,
     base_url: &str,
     model: &str,
@@ -508,7 +509,9 @@ pub async fn send_responses(
     thinking_levels: &ThinkingLevelMap,
     prompt_cache_key: Option<&str>,
     on_delta: DeltaSink<'_>,
+    scope: &CallEffectScope,
 ) -> Result<ModelTurnResponse> {
+    scope.check_current().await?;
     let url = codex_responses_url(base_url)?;
     let request = codex_responses_request(
         model,
@@ -518,25 +521,35 @@ pub async fn send_responses(
         thinking_levels,
         prompt_cache_key,
     );
-    let auth = fresh_auth(client)
+    let auth = fresh_auth_with_effects(client, scope, false)
         .await
         .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
 
-    match post_codex_json_with_retry(client, &url, &request, &auth, prompt_cache_key, on_delta)
-        .await
+    match post_codex_json_with_retry_effects(
+        client,
+        &url,
+        &request,
+        &auth,
+        prompt_cache_key,
+        on_delta,
+        scope,
+    )
+    .await
     {
         Ok(value) => parse_openai_responses_response(&value, &url),
         Err(error) if error.status == Some(StatusCode::UNAUTHORIZED) => {
-            let refreshed = force_refresh_auth(client)
+            scope.check_current().await?;
+            let refreshed = fresh_auth_with_effects(client, scope, true)
                 .await
                 .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
-            let value = post_codex_json_with_retry(
+            let value = post_codex_json_with_retry_effects(
                 client,
                 &url,
                 &request,
                 &refreshed,
                 prompt_cache_key,
                 on_delta,
+                scope,
             )
             .await
             .map_err(|error| anyhow::Error::new(error.into_run_failure()))?;
@@ -825,7 +838,13 @@ async fn exchange_authorization_code(
     .await
 }
 
-async fn refresh_access_token(client: &Client, refresh_token: &str) -> Result<TokenResponse> {
+async fn refresh_access_token(
+    client: &Client,
+    refresh_token: &str,
+    scope: &CallEffectScope,
+) -> Result<TokenResponse> {
+    scope.check_current().await?;
+    scope.check_available()?;
     let response = client
         .post(TOKEN_URL)
         .header("Content-Type", "application/x-www-form-urlencoded")
@@ -861,36 +880,37 @@ async fn parse_token_response(
     serde_json::from_str(&body).with_context(|| format!("failed to parse {label} response"))
 }
 
-async fn fresh_auth(client: &Client) -> Result<StoredCodexAuth> {
-    let _lock = acquire_auth_lock()?;
+async fn fresh_auth_with_effects(
+    client: &Client,
+    scope: &CallEffectScope,
+    force: bool,
+) -> Result<StoredCodexAuth> {
+    scope.check_current().await?;
+    let _lock = if scope.is_leased() {
+        acquire_effect_auth_lock(&auth_lock_path()?, scope).await?
+    } else {
+        acquire_auth_lock()?
+    };
+    // Recheck after a potentially contended credential lock, before reading.
+    scope.check_current().await?;
+    scope.check_available()?;
     let auth = read_auth_file()?;
-    if auth.expires_at_ms > now_ms().saturating_add(REFRESH_SKEW_MS) {
+    if !force && auth.expires_at_ms > now_ms().saturating_add(REFRESH_SKEW_MS) {
         return Ok(auth);
     }
-    refresh_and_store_auth(client, auth).await
+    let tokens = refresh_access_token(client, &auth.refresh, scope).await?;
+    let refreshed = auth_from_token_response(tokens, Some(&auth.account_id))?;
+    scope.check_current().await?;
+    scope.check_available()?;
+    write_auth_file(&refreshed)?;
+    Ok(refreshed)
 }
 
 /// Bearer token and account id for a read-only call to the Codex API, renewed
 /// first when the stored one is close to expiring.
 pub(super) async fn stored_auth_for_request(client: &Client) -> Result<(String, String)> {
-    let auth = fresh_auth(client).await?;
+    let auth = fresh_auth_with_effects(client, &CallEffectScope::default(), false).await?;
     Ok((auth.access, auth.account_id))
-}
-
-async fn force_refresh_auth(client: &Client) -> Result<StoredCodexAuth> {
-    let _lock = acquire_auth_lock()?;
-    let auth = read_auth_file()?;
-    refresh_and_store_auth(client, auth).await
-}
-
-async fn refresh_and_store_auth(
-    client: &Client,
-    current: StoredCodexAuth,
-) -> Result<StoredCodexAuth> {
-    let tokens = refresh_access_token(client, &current.refresh).await?;
-    let refreshed = auth_from_token_response(tokens, Some(&current.account_id))?;
-    write_auth_file(&refreshed)?;
-    Ok(refreshed)
 }
 
 fn auth_from_token_response(
@@ -998,6 +1018,7 @@ fn apply_codex_session_headers(
     request
 }
 
+#[cfg(test)]
 async fn post_codex_json_with_retry(
     client: &Client,
     url: &str,
@@ -1018,6 +1039,29 @@ async fn post_codex_json_with_retry(
     .await
 }
 
+async fn post_codex_json_with_retry_effects(
+    client: &Client,
+    url: &str,
+    body: &Value,
+    auth: &StoredCodexAuth,
+    prompt_cache_key: Option<&str>,
+    on_delta: DeltaSink<'_>,
+    scope: &CallEffectScope,
+) -> std::result::Result<Value, CodexRequestError> {
+    post_codex_json_with_retry_delay_effects(
+        client,
+        url,
+        body,
+        auth,
+        prompt_cache_key,
+        on_delta,
+        super::backoff_duration,
+        scope,
+    )
+    .await
+}
+
+#[cfg(test)]
 async fn post_codex_json_with_retry_delay(
     client: &Client,
     url: &str,
@@ -1026,6 +1070,33 @@ async fn post_codex_json_with_retry_delay(
     prompt_cache_key: Option<&str>,
     on_delta: DeltaSink<'_>,
     retry_delay: impl Fn(usize) -> Duration,
+) -> std::result::Result<Value, CodexRequestError> {
+    post_codex_json_with_retry_delay_effects(
+        client,
+        url,
+        body,
+        auth,
+        prompt_cache_key,
+        on_delta,
+        retry_delay,
+        &CallEffectScope::default(),
+    )
+    .await
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "delay injection and per-call admission remain independent of provider wire/auth"
+)]
+async fn post_codex_json_with_retry_delay_effects(
+    client: &Client,
+    url: &str,
+    body: &Value,
+    auth: &StoredCodexAuth,
+    prompt_cache_key: Option<&str>,
+    on_delta: DeltaSink<'_>,
+    retry_delay: impl Fn(usize) -> Duration,
+    scope: &CallEffectScope,
 ) -> std::result::Result<Value, CodexRequestError> {
     let mut last_error = CodexRequestError {
         status: None,
@@ -1038,7 +1109,19 @@ async fn post_codex_json_with_retry_delay(
         phase: RunFailurePhase::Request,
     };
 
-    for attempt in 0..10 {
+    let admission_error = |error: anyhow::Error| CodexRequestError {
+        status: None,
+        message: error.to_string(),
+        retryable_stream: false,
+        partial_output: PartialModelOutput::default(),
+        attempt_count: 0,
+        retry_after_ms: None,
+        kind: RunFailureKind::Validation,
+        phase: RunFailurePhase::Request,
+    };
+    let attempts = if scope.is_leased() { 1 } else { 10 };
+    for attempt in 0..attempts {
+        scope.check_current().await.map_err(admission_error)?;
         let request = client
             .post(url)
             .header("Authorization", format!("Bearer {}", auth.access))
@@ -1048,6 +1131,7 @@ async fn post_codex_json_with_retry_delay(
             .header("OpenAI-Beta", "responses=experimental")
             .header(header::ACCEPT, "text/event-stream")
             .header(header::CONTENT_TYPE, "application/json");
+        scope.check_available().map_err(admission_error)?;
         let response = match apply_codex_session_headers(request, prompt_cache_key)
             .json(body)
             .send()
@@ -1065,7 +1149,8 @@ async fn post_codex_json_with_retry_delay(
                     kind: RunFailureKind::Transport,
                     phase: RunFailurePhase::Request,
                 };
-                if attempt < 9 {
+                if attempt + 1 < attempts {
+                    scope.check_available().map_err(admission_error)?;
                     if let Some(on_delta) = on_delta {
                         on_delta(ModelStreamDelta::retry_reset((attempt + 2) as u32));
                     }
@@ -1092,8 +1177,15 @@ async fn post_codex_json_with_retry_delay(
             // Codex often omits Content-Type on streamed responses. `Accept`
             // and `stream: true` make a missing header an SSE response here.
             let mut result = if content_type.is_none() || is_event_stream(content_type.as_deref()) {
-                stream_codex_responses(response, url, status, on_delta, &[auth.access.as_str()])
-                    .await
+                stream_codex_responses(
+                    response,
+                    url,
+                    status,
+                    on_delta,
+                    &[auth.access.as_str()],
+                    scope,
+                )
+                .await
             } else {
                 read_codex_body(response, url, status)
                     .await
@@ -1115,7 +1207,8 @@ async fn post_codex_json_with_retry_delay(
                 Err(mut error) if error.can_retry_stream() => {
                     error.attempt_count = (attempt + 1) as u32;
                     last_error = error;
-                    if attempt < 9 {
+                    if attempt + 1 < attempts {
+                        scope.check_available().map_err(admission_error)?;
                         if let Some(on_delta) = on_delta {
                             on_delta(ModelStreamDelta::retry_reset((attempt + 2) as u32));
                         }
@@ -1161,7 +1254,8 @@ async fn post_codex_json_with_retry_delay(
                 retryable_stream: true,
                 ..error
             };
-            if attempt < 9 {
+            if attempt + 1 < attempts {
+                scope.check_available().map_err(admission_error)?;
                 if let Some(on_delta) = on_delta {
                     on_delta(ModelStreamDelta::retry_reset((attempt + 2) as u32));
                 }
@@ -1210,19 +1304,26 @@ async fn stream_codex_responses(
     status: StatusCode,
     on_delta: DeltaSink<'_>,
     secrets: &[&str],
+    scope: &CallEffectScope,
 ) -> std::result::Result<Value, CodexRequestError> {
-    read_sse_response(url, response, ResponsesStreamFold::new(on_delta), secrets)
-        .await
-        .map_err(|error| CodexRequestError {
-            status: Some(status),
-            message: error.to_string(),
-            retryable_stream: error.is_retryable(),
-            partial_output: error.partial_output(),
-            attempt_count: 1,
-            retry_after_ms: None,
-            kind: error.kind(),
-            phase: RunFailurePhase::Stream,
-        })
+    read_sse_response_with_effects(
+        url,
+        response,
+        ResponsesStreamFold::new(on_delta),
+        secrets,
+        scope,
+    )
+    .await
+    .map_err(|error| CodexRequestError {
+        status: Some(status),
+        message: error.to_string(),
+        retryable_stream: error.is_retryable(),
+        partial_output: error.partial_output(),
+        attempt_count: 1,
+        retry_after_ms: None,
+        kind: error.kind(),
+        phase: RunFailurePhase::Stream,
+    })
 }
 
 fn bounded_retry_delay(local_delay: Duration, provider_delay: Option<Duration>) -> Duration {
@@ -1337,6 +1438,24 @@ fn acquire_auth_lock() -> Result<FileLock> {
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     FileLock::acquire(&path)
+}
+
+async fn acquire_effect_auth_lock(path: &Path, scope: &CallEffectScope) -> Result<FileLock> {
+    scope.check_available()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = FileLock::open(path)?;
+    loop {
+        scope.check_available()?;
+        match FileExt::try_lock_exclusive(&file) {
+            Ok(()) => return Ok(FileLock { file }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            Err(error) => return Err(error).context("failed to lock Codex auth"),
+        }
+    }
 }
 
 fn with_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
@@ -1631,6 +1750,12 @@ struct FileLock {
 
 impl FileLock {
     fn acquire(path: &Path) -> Result<Self> {
+        let file = Self::open(path)?;
+        lock_file(&file).with_context(|| format!("failed to lock {}", path.display()))?;
+        Ok(Self { file })
+    }
+
+    fn open(path: &Path) -> Result<File> {
         validate_lock_destination(path)?;
         let mut options = OpenOptions::new();
         options.create(true).truncate(false).read(true).write(true);
@@ -1646,8 +1771,7 @@ impl FileLock {
             .with_context(|| format!("failed to open auth lock {}", path.display()))?;
         ensure_open_file_is_regular(&file, path, "auth lock")?;
         make_file_private(&file, path)?;
-        lock_file(&file).with_context(|| format!("failed to lock {}", path.display()))?;
-        Ok(Self { file })
+        Ok(file)
     }
 }
 
@@ -1782,3 +1906,7 @@ fn truncate(value: &str) -> String {
 #[cfg(test)]
 #[path = "chatgpt_codex_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "chatgpt_codex_effect_tests.rs"]
+mod effect_tests;

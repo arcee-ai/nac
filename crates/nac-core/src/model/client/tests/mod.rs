@@ -5,6 +5,7 @@ use super::*;
 use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
 mod cost_attach;
+mod effect_lease;
 mod header_policy;
 mod http_contract;
 mod managed_host_key;
@@ -26,6 +27,8 @@ fn test_model_client(
         trusted_api_key_file: None,
         trusted_managed_host_key: None,
         host_execution_authority: None,
+        effect_lease_required: false,
+        effect_scope: CallEffectScope::default(),
         extra_headers,
         allow_insecure_http: false,
         arcee_credential_source: None,

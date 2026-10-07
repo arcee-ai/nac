@@ -383,3 +383,42 @@ async fn host_execution_denial_during_unrelated_model_retry_prevents_second_requ
         .contains("managed host execution authority"));
     assert_eq!(server.finish().len(), 1);
 }
+
+#[tokio::test]
+async fn operation_lease_denial_does_not_revoke_or_reset_global_host_key() {
+    use crate::model::effect_lease_test_support::ControlledLease;
+    let fixture = Fixture::new();
+    let server = ScriptedServer::start_unexpected_request_server(Duration::from_millis(80));
+    let mut client = fixture.client().with_required_effect_lease();
+    client.base_url = server.base_url.clone();
+    let error = client
+        .send_turn_streaming_with_effect_lease(vec![], vec![], None, Some(ControlledLease::new(1)))
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), "managed runtime effect lease denied");
+    assert!(server.finish().is_empty());
+    assert_eq!(fixture.capability.credential().unwrap(), KEY);
+    let server = ScriptedServer::start(vec![s5_completions_response()]);
+    client.base_url = server.base_url.clone();
+    assert_eq!(
+        client
+            .send_turn_streaming_with_effect_lease(
+                vec![],
+                vec![],
+                None,
+                Some(ControlledLease::new(0))
+            )
+            .await
+            .unwrap()
+            .assistant
+            .content
+            .as_deref(),
+        Some("done")
+    );
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].headers["authorization"],
+        format!("Bearer {KEY}")
+    );
+}

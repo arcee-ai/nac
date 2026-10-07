@@ -47,6 +47,9 @@ mod chat;
 mod chat_stream;
 mod chatgpt_codex;
 mod client;
+#[cfg(test)]
+mod effect_lease_test_support;
+mod effect_scope;
 mod history;
 mod managed_host_key;
 mod providers;

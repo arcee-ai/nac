@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::pin::Pin;
 
+use super::effect_scope::CallEffectScope;
 use super::{redact_credentials, redact_credentials_with_extra_headers};
 use crate::run_failure::{PartialModelOutput, RunFailureKind};
 use anyhow::{anyhow, Result};
@@ -258,15 +259,25 @@ pub(super) trait StreamFold {
 }
 
 /// Read an SSE body to completion, folding it into a response value.
+#[cfg(test)]
 pub(super) async fn read_sse_response<F: StreamFold>(
     url: &str,
     response: Response,
     fold: F,
     secrets: &[&str],
 ) -> std::result::Result<Value, SseError> {
-    read_sse_response_with_request_secrets(url, response, fold, secrets, None).await
+    read_sse_response_with_request_secrets(
+        url,
+        response,
+        fold,
+        secrets,
+        None,
+        &CallEffectScope::default(),
+    )
+    .await
 }
 
+#[cfg(test)]
 pub(super) async fn read_sse_response_with_extra_headers<F: StreamFold>(
     url: &str,
     response: Response,
@@ -274,7 +285,37 @@ pub(super) async fn read_sse_response_with_extra_headers<F: StreamFold>(
     secrets: &[&str],
     extra_headers: &BTreeMap<String, String>,
 ) -> std::result::Result<Value, SseError> {
-    read_sse_response_with_request_secrets(url, response, fold, secrets, Some(extra_headers)).await
+    read_sse_response_with_request_secrets(
+        url,
+        response,
+        fold,
+        secrets,
+        Some(extra_headers),
+        &CallEffectScope::default(),
+    )
+    .await
+}
+
+pub(super) async fn read_sse_response_with_effects<F: StreamFold>(
+    url: &str,
+    response: Response,
+    fold: F,
+    secrets: &[&str],
+    scope: &CallEffectScope,
+) -> std::result::Result<Value, SseError> {
+    read_sse_response_with_request_secrets(url, response, fold, secrets, None, scope).await
+}
+
+pub(super) async fn read_sse_response_with_extra_headers_and_effects<F: StreamFold>(
+    url: &str,
+    response: Response,
+    fold: F,
+    secrets: &[&str],
+    extra_headers: &BTreeMap<String, String>,
+    scope: &CallEffectScope,
+) -> std::result::Result<Value, SseError> {
+    read_sse_response_with_request_secrets(url, response, fold, secrets, Some(extra_headers), scope)
+        .await
 }
 
 async fn read_sse_response_with_request_secrets<F: StreamFold>(
@@ -283,6 +324,7 @@ async fn read_sse_response_with_request_secrets<F: StreamFold>(
     mut fold: F,
     secrets: &[&str],
     extra_headers: Option<&BTreeMap<String, String>>,
+    scope: &CallEffectScope,
 ) -> std::result::Result<Value, SseError> {
     let mut reader = SseReader::new(response);
 
@@ -316,6 +358,13 @@ async fn read_sse_response_with_request_secrets<F: StreamFold>(
                 fold.partial_output(),
             )
         })?;
+        scope.check_current().await.map_err(|error| {
+            SseError::permanent(
+                error.to_string(),
+                fold.has_observable_delta(),
+                fold.partial_output(),
+            )
+        })?;
         if let Err(error) = fold.push(&event) {
             return Err(SseError::fold(
                 url,
@@ -326,11 +375,26 @@ async fn read_sse_response_with_request_secrets<F: StreamFold>(
                 extra_headers,
             ));
         }
+        scope.check_available().map_err(|error| {
+            SseError::permanent(
+                error.to_string(),
+                fold.has_observable_delta(),
+                fold.partial_output(),
+            )
+        })?;
+        scope.record_partial(fold.partial_output());
         if fold.is_complete() {
             break;
         }
     }
 
+    scope.check_current().await.map_err(|error| {
+        SseError::permanent(
+            error.to_string(),
+            fold.has_observable_delta(),
+            fold.partial_output(),
+        )
+    })?;
     let observable_delta = fold.has_observable_delta();
     let partial_output = fold.partial_output();
     fold.finish().map_err(|error| {

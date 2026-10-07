@@ -92,6 +92,8 @@ async fn arcee_sensitive_extra_header_still_fails_before_connection() {
         trusted_api_key_file: None,
         trusted_managed_host_key: None,
         host_execution_authority: None,
+        effect_lease_required: false,
+        effect_scope: CallEffectScope::default(),
         extra_headers: std::collections::BTreeMap::from([(
             "hOsT".to_string(),
             address.to_string(),

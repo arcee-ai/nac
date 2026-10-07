@@ -1,9 +1,11 @@
 use super::anthropic_stream::AnthropicStreamFold;
 use super::chat_stream::ChatStreamFold;
+use super::effect_scope::CallEffectScope;
 use super::pseudo_tool_calls::finalize_chat_tool_recovery;
 use super::responses_stream::ResponsesStreamFold;
-use super::sse::{read_sse_response_with_extra_headers, with_source_chain, StreamFold};
+use super::sse::{read_sse_response_with_extra_headers_and_effects, with_source_chain, StreamFold};
 use super::*;
+use crate::runtime::RuntimeEffectLeaseHandle;
 use anyhow::Context;
 
 fn read_trusted_api_key_file(path: &std::path::Path) -> Result<String> {
@@ -228,6 +230,8 @@ pub struct ModelClient {
     trusted_api_key_file: Option<std::path::PathBuf>,
     trusted_managed_host_key: Option<TrustedManagedHostKey>,
     host_execution_authority: Option<ManagedHostExecutionAuthority>,
+    effect_lease_required: bool,
+    effect_scope: CallEffectScope,
     extra_headers: std::collections::BTreeMap<String, String>,
     allow_insecure_http: bool,
     arcee_credential_source: Option<ArceeCredentialSource>,
@@ -355,6 +359,8 @@ impl ModelClient {
             arcee_credential_source,
             trusted_managed_host_key: settings.trusted_managed_host_key,
             host_execution_authority: settings.host_execution_authority,
+            effect_lease_required: false,
+            effect_scope: CallEffectScope::default(),
             cache_ttl: None,
             prompt_cache_key: None,
             resolved_model: settings.resolved,
@@ -391,12 +397,70 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
         on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
+        self.send_turn_streaming_with_effect_lease(messages, tools, on_delta, None)
+            .await
+    }
+
+    /// Trusted per-run selection only. There is no clearing setter or wire flag.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "paired native mediated caller integration remains separately owned and uninstalled"
+        )
+    )]
+    pub(crate) fn with_required_effect_lease(mut self) -> Self {
+        self.effect_lease_required = true;
+        self
+    }
+
+    pub(crate) async fn send_turn_streaming_with_effect_lease(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        on_delta: DeltaSink<'_>,
+        lease: Option<RuntimeEffectLeaseHandle>,
+    ) -> Result<ModelTurnResponse> {
+        if lease.is_none() && !self.effect_lease_required {
+            return self
+                .send_turn_streaming_inner(messages, tools, on_delta)
+                .await;
+        }
+        let scope = CallEffectScope::new(self.effect_lease_required, lease)?;
+        let mut client = self.clone();
+        client.effect_scope = scope.clone();
+        let guarded_delta = |delta: ModelStreamDelta| {
+            if scope.check_available().is_ok() {
+                scope.record_partial(crate::run_failure::PartialModelOutput {
+                    text: !delta.text.is_empty(),
+                    reasoning: !delta.reasoning.is_empty(),
+                    tool_call: false,
+                });
+                if let Some(sink) = on_delta {
+                    sink(delta);
+                }
+            }
+        };
+        let sink: DeltaSink<'_> = on_delta.map(|_| &guarded_delta as _);
+        scope
+            .run(client.send_turn_streaming_inner(messages, tools, sink))
+            .await
+    }
+
+    async fn send_turn_streaming_inner(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        on_delta: DeltaSink<'_>,
+    ) -> Result<ModelTurnResponse> {
+        self.effect_scope.check_current().await?;
         if let Some(authority) = &self.host_execution_authority {
             authority.check_available()?;
         }
         let mut current;
         let this = if let Some(credential) = &self.trusted_managed_host_key {
             current = self.clone();
+            self.effect_scope.check_available()?;
             current.api_key = credential.credential()?;
             &current
         } else {
@@ -423,7 +487,7 @@ impl ModelClient {
                     .await
             }
             catalog::ApiKind::ChatGptCodexResponses => {
-                let response = chatgpt_codex::send_responses(
+                let response = chatgpt_codex::send_responses_with_effects(
                     &self.client,
                     &self.base_url,
                     &self.model,
@@ -433,6 +497,7 @@ impl ModelClient {
                     &self.resolved_model.thinking_level_map,
                     self.prompt_cache_key.as_deref(),
                     on_delta,
+                    &self.effect_scope,
                 )
                 .await?;
                 Ok(self.with_usage_cost(response))
@@ -843,15 +908,25 @@ impl ModelClient {
             body["stream"] = Value::Bool(true);
             body["stream_options"] = json!({"include_usage": true});
         }
-        let token = arcee::fresh_access_token(&self.client, &self.base_url).await?;
+        let token = arcee::fresh_access_token_with_effects(
+            &self.client,
+            &self.base_url,
+            &self.effect_scope,
+        )
+        .await?;
         match self
             .try_post_arcee_auth(url, &body, &token, reasoning_field, on_delta)
             .await
         {
             Ok(value) => Ok(value),
             Err(error) if error.status == Some(401) => {
-                let refreshed =
-                    arcee::force_refresh_access_token(&self.client, &self.base_url, &token).await?;
+                let refreshed = arcee::force_refresh_access_token_with_effects(
+                    &self.client,
+                    &self.base_url,
+                    &token,
+                    &self.effect_scope,
+                )
+                .await?;
                 self.try_post_arcee_auth(url, &body, &refreshed, reasoning_field, on_delta)
                     .await
                     .map_err(|error| anyhow!(error.message))
@@ -949,6 +1024,10 @@ impl ModelClient {
         })
     }
 
+    fn single_managed_attempt(&self) -> bool {
+        self.trusted_managed_host_key.is_some() || self.effect_scope.is_leased()
+    }
+
     /// Issue the request under the retry policy and hand back the response with
     /// its body still unread, so a caller can either buffer it or stream it.
     /// Every non-success outcome is resolved here, including its bounded body.
@@ -967,12 +1046,15 @@ impl ModelClient {
             message: "No attempts made".to_string(),
         };
 
-        let attempts = if self.trusted_managed_host_key.is_some() {
-            1
-        } else {
-            10
-        };
+        let attempts = if self.single_managed_attempt() { 1 } else { 10 };
         for attempt in 0..attempts {
+            self.effect_scope
+                .check_current()
+                .await
+                .map_err(|error| ModelHttpError {
+                    status: None,
+                    message: error.to_string(),
+                })?;
             if let Some(authority) = &self.host_execution_authority {
                 authority
                     .check_available()
@@ -985,6 +1067,12 @@ impl ModelClient {
             if !self.extra_headers_override_content_type() {
                 request = request.header("Content-Type", "application/json");
             }
+            self.effect_scope
+                .check_available()
+                .map_err(|error| ModelHttpError {
+                    status: None,
+                    message: error.to_string(),
+                })?;
             let response = match self
                 .apply_extra_headers(apply_headers(request))
                 .map_err(|error| ModelHttpError {
@@ -1141,12 +1229,13 @@ impl ModelClient {
             let response = self
                 .send_with_retry_headers(url, body, apply_headers, secrets)
                 .await?;
-            match read_sse_response_with_extra_headers(
+            match read_sse_response_with_extra_headers_and_effects(
                 url,
                 response,
                 make_fold(),
                 secrets,
                 &self.extra_headers,
+                &self.effect_scope,
             )
             .await
             {
@@ -1239,6 +1328,8 @@ impl ModelClient {
             trusted_api_key_file: None,
             trusted_managed_host_key: None,
             host_execution_authority: None,
+            effect_lease_required: false,
+            effect_scope: CallEffectScope::default(),
             extra_headers: std::collections::BTreeMap::new(),
             allow_insecure_http: false,
             arcee_credential_source: None,
