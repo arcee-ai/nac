@@ -361,3 +361,6 @@ async fn runtime_mcp_denial_keeps_independent_legacy_connection_live() {
     other.finish().await;
     selected.finish().await;
 }
+
+#[path = "effect_lease_http_tests.rs"]
+mod http_tests;
