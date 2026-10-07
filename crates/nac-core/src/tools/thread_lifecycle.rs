@@ -6,6 +6,8 @@ struct ThreadCancellationState {
     activity: Notify,
     mutation_gate: StdMutex<()>,
     host_execution_authority: Option<crate::model::ManagedHostExecutionAuthority>,
+    runtime_effect_lease: Option<crate::runtime::RuntimeEffectLeaseHandle>,
+    runtime_effect_required: bool,
 }
 
 #[derive(Clone, Default)]
@@ -23,10 +25,27 @@ impl ThreadCancellation {
                 .is_some_and(Self::has_host_execution_authority)
     }
 
+    pub(crate) fn runtime_effect_lease(&self) -> Option<crate::runtime::RuntimeEffectLeaseHandle> {
+        self.state
+            .runtime_effect_lease
+            .clone()
+            .or_else(|| self.parent.as_deref().and_then(Self::runtime_effect_lease))
+    }
+
     pub(crate) fn for_host(authority: Option<crate::model::ManagedHostExecutionAuthority>) -> Self {
+        Self::for_execution(authority, None, false)
+    }
+
+    pub(crate) fn for_execution(
+        authority: Option<crate::model::ManagedHostExecutionAuthority>,
+        lease: Option<crate::runtime::RuntimeEffectLeaseHandle>,
+        required: bool,
+    ) -> Self {
         Self {
             state: Arc::new(ThreadCancellationState {
                 host_execution_authority: authority,
+                runtime_effect_lease: lease,
+                runtime_effect_required: required,
                 ..Default::default()
             }),
             parent: None,
@@ -82,6 +101,17 @@ impl ThreadCancellation {
 
     pub(crate) fn is_cancelled(&self) -> bool {
         self.state.cancelled.load(Ordering::Acquire)
+            || (self.state.runtime_effect_required && self.state.runtime_effect_lease.is_none())
+            || self
+                .state
+                .runtime_effect_lease
+                .as_ref()
+                .is_some_and(|lease| lease.check_available().is_err())
+            || self
+                .state
+                .host_execution_authority
+                .as_ref()
+                .is_some_and(|authority| authority.check_available().is_err())
             || self
                 .parent
                 .as_deref()
@@ -126,12 +156,9 @@ impl ThreadCancellation {
     pub(crate) async fn cancelled(&self) {
         loop {
             let notified = self.state.activity.notified();
-            let cancelled = if self.has_host_execution_authority() {
-                self.run_if_active(|| ()).is_none()
-            } else {
-                self.is_cancelled()
-            };
-            if cancelled {
+            // Operation expiry remains observable even while a durable prompt
+            // owns the mutation gate. The final gate independently rechecks it.
+            if self.is_cancelled() {
                 return;
             }
             if let Some(parent) = self.parent.as_deref() {
@@ -140,7 +167,13 @@ impl ThreadCancellation {
                     () = Box::pin(parent.cancelled()) => {}
                 }
             } else {
-                if self.state.host_execution_authority.is_some() {
+                if let Some(lease) = &self.state.runtime_effect_lease {
+                    tokio::select! {
+                        () = notified => {}
+                        () = lease.wait_for_denial() => { return; }
+                        () = tokio::time::sleep(Duration::from_millis(100)) => {}
+                    }
+                } else if self.state.host_execution_authority.is_some() {
                     tokio::select! {
                         () = notified => {}
                         () = tokio::time::sleep(Duration::from_secs(1)) => {}

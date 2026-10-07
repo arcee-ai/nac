@@ -23,6 +23,10 @@ pub struct ToolRuntime {
     pub command_cancellation: ThreadCancellation,
     /// Trusted host admission, independent of this agent's selected model.
     pub host_execution_authority: Option<crate::model::ManagedHostExecutionAuthority>,
+    /// Ephemeral original-operation authority. Never reconstructed from rows,
+    /// goal/inbox state, worker arguments or model-visible input.
+    pub(crate) runtime_effect_lease: Option<crate::runtime::RuntimeEffectLeaseHandle>,
+    pub(crate) runtime_effect_required: bool,
     pub thread_timeout_secs: u64,
     /// Accumulated worker token usage from thread dispatches.  The agent
     /// loop reads and resets this after each tool-execution round so worker
@@ -78,28 +82,67 @@ impl ToolRuntime {
         self.event_sink = sink;
     }
 
-    pub(crate) async fn check_host_execution_authority(&self) -> anyhow::Result<()> {
+    pub(crate) async fn check_execution_authority(&self) -> anyhow::Result<()> {
         if let Some(authority) = &self.host_execution_authority {
             if let Err(error) = authority.check_available() {
                 self.command_cancellation.cancel_async().await;
                 return Err(error);
             }
         }
+        if self.runtime_effect_required && self.runtime_effect_lease.is_none() {
+            anyhow::bail!("runtime operation unavailable");
+        }
+        if let Some(lease) = &self.runtime_effect_lease {
+            lease
+                .check_current()
+                .await
+                .map_err(|_| anyhow::anyhow!("runtime operation unavailable"))?;
+            lease
+                .check_available()
+                .map_err(|_| anyhow::anyhow!("runtime operation unavailable"))?;
+        }
         Ok(())
     }
 
-    pub(crate) async fn observe_host_execution_denial(&self) {
-        let Some(authority) = &self.host_execution_authority else {
-            std::future::pending::<()>().await;
-            return;
+    pub(crate) async fn observe_execution_denial(&self) {
+        let host_denial = async {
+            let Some(authority) = &self.host_execution_authority else {
+                std::future::pending::<()>().await;
+                return;
+            };
+            loop {
+                if authority.check_available().is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
         };
-        loop {
-            if authority.check_available().is_err() {
-                self.command_cancellation.cancel_async().await;
+        let lease_denial = async {
+            if self.runtime_effect_required && self.runtime_effect_lease.is_none() {
                 return;
             }
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            match &self.runtime_effect_lease {
+                Some(lease) => lease.wait_for_denial().await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            () = host_denial => self.command_cancellation.cancel_async().await,
+            () = lease_denial => {}
         }
+    }
+
+    pub(crate) async fn finish_tool_result(&self, result: ToolResult) -> ToolResult {
+        let unavailable = self.runtime_effect_required && self.runtime_effect_lease.is_none();
+        if unavailable {
+            return ToolResult::text("Error: runtime operation unavailable", true);
+        }
+        if let Some(lease) = &self.runtime_effect_lease {
+            if lease.check_current().await.is_err() || lease.check_available().is_err() {
+                return ToolResult::text("Error: runtime operation unavailable", true);
+            }
+        }
+        result
     }
 
     pub(crate) fn allows_tool(&self, name: &str) -> bool {

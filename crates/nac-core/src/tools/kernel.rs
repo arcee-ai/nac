@@ -325,10 +325,11 @@ impl PreparedToolCall {
         context: &'a ToolCallContext,
     ) -> BoxFuture<'a, ToolResult> {
         Box::pin(async move {
-            if let Err(error) = services.runtime.check_host_execution_authority().await {
+            if let Err(error) = services.runtime.check_execution_authority().await {
                 return ToolResult::text(format!("Error: {error}"), true);
             }
-            self.invocation.invoke(services, context).await
+            let result = self.invocation.invoke(services, context).await;
+            services.runtime.finish_tool_result(result).await
         })
     }
 
@@ -642,10 +643,11 @@ impl<T: NativeTool> NativeToolHandle<T> {
         context: &'a ToolCallContext,
     ) -> BoxFuture<'a, ToolResult> {
         Box::pin(async move {
-            if let Err(error) = services.runtime.check_host_execution_authority().await {
+            if let Err(error) = services.runtime.check_execution_authority().await {
                 return ToolResult::text(format!("Error: {error}"), true);
             }
-            self.tool.execute(input, services, context).await
+            let result = self.tool.execute(input, services, context).await;
+            services.runtime.finish_tool_result(result).await
         })
     }
 }
@@ -806,7 +808,7 @@ impl ToolSnapshot {
                 if let Err(error) = prepared.bind_authorized_resources(&resources, services) {
                     return error;
                 }
-                if let Err(error) = services.runtime.check_host_execution_authority().await {
+                if let Err(error) = services.runtime.check_execution_authority().await {
                     return ToolResult::text(format!("Error: {error}"), true);
                 }
                 prepared.invoke_bounded(name, services, context).await

@@ -181,6 +181,46 @@ impl TerminalManager {
                 info
             }
         };
+        let output_id = sessions
+            .get(&info.name)
+            .map(|session| session.output_id().to_owned());
+        drop(sessions);
+        if let (Some(lease), Some(output_id)) = (
+            cancellation.and_then(ThreadCancellation::runtime_effect_lease),
+            output_id,
+        ) {
+            // The exact process keeps its ORIGINAL operation lease even after
+            // the foreground tool returns or a later run uses another lease.
+            let manager = self.clone();
+            let name = info.name.clone();
+            tokio::spawn(async move {
+                tokio::select! {
+                    biased;
+                    () = lease.wait_for_denial() => {}
+                    () = async {
+                        loop {
+                            if manager.sessions.lock().await.get(&name).is_none_or(|session| session.output_id() != output_id) { return; }
+                            sleep(Duration::from_millis(100)).await;
+                        }
+                    } => return,
+                }
+                loop {
+                    // Lease denial overrides retain. Do not wait for another
+                    // create operation's gate or terminate unrelated handles.
+                    match manager
+                        .kill_owned_session_matching(&name, false, Some(&output_id))
+                        .await
+                    {
+                        Ok(Some(mut session)) => {
+                            manager.remember_completed(&mut session).await;
+                            return;
+                        }
+                        Ok(None) => return,
+                        Err(_) => sleep(Duration::from_millis(100)).await,
+                    }
+                }
+            });
+        }
         Ok(info)
     }
 

@@ -155,10 +155,25 @@ impl TerminalManager {
         name: &str,
         preserve_if_retained: bool,
     ) -> Result<Option<TerminalSession>> {
+        self.kill_owned_session_matching(name, preserve_if_retained, None)
+            .await
+    }
+
+    /// Match the immutable output identity under the cleanup lock so a reused
+    /// native handle cannot make an old operation kill a replacement process.
+    pub(super) async fn kill_owned_session_matching(
+        &self,
+        name: &str,
+        preserve_if_retained: bool,
+        output_id: Option<&str>,
+    ) -> Result<Option<TerminalSession>> {
         let mut sessions = self.sessions.lock().await;
         let Some(session) = sessions.get_mut(name) else {
             return Ok(None);
         };
+        if output_id.is_some_and(|expected| session.output_id() != expected) {
+            return Ok(None);
+        }
         // Selection and cleanup use different lock acquisitions so retain can
         // win in between. Recheck under the same lock held through kill;
         // once retain has reported success, settlement/eviction cannot kill

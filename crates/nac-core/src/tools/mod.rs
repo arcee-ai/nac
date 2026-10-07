@@ -126,7 +126,7 @@ impl kernel::NativeTool for ReadTool {
         Box::pin(async move {
             let gate = shared_workspace_gate(services.runtime);
             let _read = gate.read().await;
-            if let Err(error) = services.runtime.check_host_execution_authority().await {
+            if let Err(error) = services.runtime.check_execution_authority().await {
                 return ToolResult::text(format!("Error: {error}"), true);
             }
             read::execute_native(input, services.runtime, self.image_read).await
@@ -385,14 +385,14 @@ pub async fn execute_tool_with_context(
     client: &crate::model::ModelClient,
     context: &kernel::ToolCallContext,
 ) -> ToolResult {
-    if let Err(error) = runtime.check_host_execution_authority().await {
+    if let Err(error) = runtime.check_execution_authority().await {
         return ToolResult::text(format!("Error: {error}"), true);
     }
     let invocation = execute_tool_inner(name, args, runtime, client, context);
     tokio::pin!(invocation);
     tokio::select! {
         biased;
-        () = runtime.observe_host_execution_denial() => invocation.await,
+        () = runtime.observe_execution_denial() => invocation.await,
         result = &mut invocation => result,
     }
 }
@@ -483,6 +483,8 @@ pub(crate) fn test_runtime() -> ToolRuntime {
     ToolRuntime {
         command_cancellation: crate::tools::ThreadCancellation::default(),
         host_execution_authority: None,
+        runtime_effect_lease: None,
+        runtime_effect_required: false,
         config_cwd: workspace_cwd.clone(),
         workspace_cwd,
         store_path: PathBuf::new(),
@@ -510,3 +512,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
 
 #[cfg(test)]
 mod host_execution_tests;
+
+#[cfg(test)]
+pub(crate) mod runtime_effect_tests;

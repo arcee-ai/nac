@@ -418,6 +418,8 @@ impl Agent {
                     host_execution_authority.clone(),
                 ),
                 host_execution_authority,
+                runtime_effect_lease: None,
+                runtime_effect_required: false,
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
                 light_client: config.light_client,
@@ -1013,8 +1015,10 @@ impl Agent {
     /// direct sessions reuse the agent across turns, so a cancelled command
     /// token must never poison the next run.
     pub(crate) fn begin_run_cancellation(&mut self) -> crate::tools::ThreadCancellation {
-        let cancellation = crate::tools::ThreadCancellation::for_host(
+        let cancellation = crate::tools::ThreadCancellation::for_execution(
             self.tool_runtime.host_execution_authority.clone(),
+            self.tool_runtime.runtime_effect_lease.clone(),
+            self.tool_runtime.runtime_effect_required,
         );
         self.tool_runtime.command_cancellation = cancellation.clone();
         cancellation

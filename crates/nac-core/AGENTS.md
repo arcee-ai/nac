@@ -27,7 +27,14 @@ It must not own HTTP/React delivery or managed-host product onboarding.
 - `src/agent/` — model loop, prompt rendering, compaction, transcript state,
   repeated tool-failure policy, and message/tool boundaries.
 - `src/runtime/` — configuration/model resolution and direct/orchestrator/
-  worker/resume/backend construction.
+  worker/resume/backend construction. `runtime/effect_lease.rs` is the narrow
+  inward per-call lease port agreed with the provider owner; its implementer
+  `runtime/managed_runtime_lease.rs` owns one delivered sealed store capability,
+  selected coordinator and serving lifetime. Real clocks are sampled natively,
+  expiry remains observable while persistence queues wait, and failed renewal
+  delivery terminates rather than reconstructing authority from retained rows.
+  Private tool/cancellation/prompt hooks default to absent for standalone work;
+  they do not install mediated startup or worker IPC, or revoke a global key.
 - `src/session_service/AGENTS.md` — run admission through durable settlement.
 - `src/store/AGENTS.md` and `src/sessions/` — persisted domain and schema.
 - `src/permissions/AGENTS.md` — policy, binding, grants, approval broker.

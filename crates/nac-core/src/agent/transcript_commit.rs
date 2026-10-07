@@ -159,7 +159,7 @@ impl Agent {
         run_id: &SessionRunId,
         inbox_item_id: Option<i64>,
     ) -> Result<()> {
-        self.tool_runtime.check_host_execution_authority().await?;
+        self.tool_runtime.check_execution_authority().await?;
         let idx = self.messages.len() as u64;
         if let Some(sink) = &self.transcript_log {
             let writer = Arc::clone(&sink.writer);
@@ -170,7 +170,13 @@ impl Agent {
                 .tool_runtime
                 .host_execution_authority
                 .as_ref()
-                .map(|_| {
+                .map(|_| ())
+                .or_else(|| {
+                    (self.tool_runtime.runtime_effect_required
+                        || self.tool_runtime.runtime_effect_lease.is_some())
+                    .then_some(())
+                })
+                .map(|()| {
                     let cancellation = self.tool_runtime.command_cancellation.clone();
                     Arc::new(move |operation: &dyn Fn() -> Result<()>| {
                         cancellation.run_if_active(operation).unwrap_or_else(|| {
