@@ -257,10 +257,20 @@ pub async fn build_resume_config_for_runtime_operation(
     let selected_guard = std::sync::Arc::clone(&admission.guard);
     let lease = store::spawn_blocking_store_caller(move || {
         selected_guard.check_now()?;
-        let lease = sessions::SessionOperationLease::try_acquire(&path, &selected_session)?;
+        let lease = std::sync::Arc::new(sessions::SessionOperationLease::try_acquire(
+            &path,
+            &selected_session,
+        )?);
         lease.validate(&path, &selected_session)?;
         selected_guard.check_now()?;
-        Ok::<_, anyhow::Error>(lease)
+        store::reconcile_runtime_run_starts(
+            &path,
+            &selected_session,
+            &lease,
+            &selected_guard.mutation_admission(),
+        )?;
+        std::sync::Arc::try_unwrap(lease)
+            .map_err(|_| anyhow::anyhow!("runtime session reconciliation retained ownership"))
     })
     .await
     .context("runtime session lease acquisition failed")??;

@@ -620,7 +620,32 @@ pub fn settle_traditional_child_run(
 
     let mut connection = open_runtime_connection(path)?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let current = load_child_with_connection(&transaction, child_session_id)?
+    let result = settle_traditional_child_run_in_transaction(&transaction, child_session_id, run_id, terminal)?;
+    transaction.commit()?;
+    Ok(result)
+}
+
+command SettleTraditionalChildRunCommand {
+    child_session_id: String = child_session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    terminal: TraditionalChildTerminal = terminal,
+}
+call |command| (&command.child_session_id, &command.run_id, command.terminal)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id)).with_run(Some(&command.run_id));
+port public;
+}
+
+pub(super) fn settle_traditional_child_run_in_transaction(
+    transaction: &Transaction<'_>,
+    child_session_id: &str,
+    run_id: &str,
+    terminal: TraditionalChildTerminal,
+) -> Result<TraditionalChildSettlement> {
+    anyhow::ensure!(
+        terminal.status.is_terminal(),
+        "traditional child settlement requires terminal status"
+    );
+    let current = load_child_with_connection(transaction, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child session '{child_session_id}' was not found"))?;
     if current.run_id.as_deref() != Some(run_id) {
         return Err(anyhow!(
@@ -657,7 +682,7 @@ pub fn settle_traditional_child_run(
             now
         ],
     )?;
-    let mut settled = load_child_with_connection(&transaction, child_session_id)?
+    let mut settled = load_child_with_connection(transaction, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child disappeared during settlement"))?;
     let completion_suppressed: bool = transaction.query_row(
         "SELECT completion_suppressed FROM traditional_children WHERE child_session_id = ?1",
@@ -681,23 +706,13 @@ pub fn settle_traditional_child_run(
              WHERE child_session_id = ?1 AND completion_inbox_id IS NULL",
             params![child_session_id, inbox_id],
         )?;
-        settled = load_child_with_connection(&transaction, child_session_id)?
+        settled = load_child_with_connection(transaction, child_session_id)?
             .ok_or_else(|| anyhow!("traditional child disappeared after completion delivery"))?;
     }
-    transaction.commit()?;
     Ok(TraditionalChildSettlement {
         child: settled,
         newly_settled: true,
     })
-}
-command SettleTraditionalChildRunCommand {
-    child_session_id: String = child_session_id.to_owned(),
-    run_id: String = run_id.to_owned(),
-    terminal: TraditionalChildTerminal = terminal,
-}
-call |command| (&command.child_session_id, &command.run_id, command.terminal)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id)).with_run(Some(&command.run_id));
-port public;
 }
 
 fn truncate_optional(value: Option<String>) -> Option<String> {

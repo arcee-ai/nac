@@ -16,6 +16,9 @@ mod run_admission_tests;
 #[path = "run_input_admission_tests.rs"]
 mod run_input_admission_tests;
 
+#[path = "lost_start_recovery_tests.rs"]
+mod lost_start_recovery_tests;
+
 struct Fixture {
     path: PathBuf,
     store: Arc<StoreCoordinator>,

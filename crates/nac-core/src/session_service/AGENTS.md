@@ -31,10 +31,12 @@ durable records; runtime/tool modules own execution internals.
   guard. The initial HTTP deadline still fences the first prompt transaction;
   an admitted active continuation uses freshly renewed leases thereafter.
   This is an opt-in core primitive, not authenticated HTTP delivery or startup
-  selection. Terminal workspace capture is not yet fenced, and a committed
-  start lost before prompt publication needs restart reconciliation; do not
-  qualify the complete protected lifecycle or enable a listener from these
-  tests alone.
+  selection. Durable start/prompt markers and guarded resume reconciliation
+  now cover matching starts lost before prompt publication under the actual
+  selected OS lease. Later relationship generations and edited goal revisions
+  retain their ownership; unanchored predecessor history remains uncertainty.
+  Terminal workspace capture is not yet fenced; do not qualify the complete
+  protected lifecycle or enable a listener from these tests alone.
 - Orchestrator, direct, traditional-child, and managed-orchestrator paths retain
   their distinct topology invariants even when sharing lifecycle helpers.
 - This layer depends inward on sessions/store/runtime contracts, not HTTP DTOs

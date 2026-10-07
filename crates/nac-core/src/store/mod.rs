@@ -25,6 +25,8 @@ mod permission_grants;
 mod projects;
 mod render;
 mod run_recovery;
+mod runtime_run_recovery;
+pub(crate) use runtime_run_recovery::reconcile_runtime_run_starts;
 mod runtime_run_start;
 pub(crate) use runtime_run_start::{commit_runtime_run_start, RuntimeRunStart};
 mod schema;

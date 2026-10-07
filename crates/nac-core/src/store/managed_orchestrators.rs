@@ -568,7 +568,27 @@ fn settle_managed_orchestrator_run_inner(
     terminal.failure = truncate_optional(terminal.failure.take());
     let mut connection = open_runtime_connection(path)?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let current = load_with_connection(&transaction, orchestrator_session_id)?
+    let result = settle_managed_orchestrator_run_in_transaction(
+        &transaction,
+        orchestrator_session_id,
+        run_id,
+        terminal,
+    )?;
+    transaction.commit()?;
+    Ok(result)
+}
+
+pub(super) fn settle_managed_orchestrator_run_in_transaction(
+    transaction: &Transaction<'_>,
+    orchestrator_session_id: &str,
+    run_id: &str,
+    terminal: &mut ManagedOrchestratorTerminal,
+) -> Result<ManagedOrchestratorSettlement> {
+    anyhow::ensure!(
+        terminal.status.is_terminal(),
+        "managed orchestrator settlement requires terminal status"
+    );
+    let current = load_with_connection(transaction, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator was not found"))?;
     if current.run_id.as_deref() != Some(run_id) {
         return Err(anyhow!(
@@ -594,7 +614,7 @@ fn settle_managed_orchestrator_run_inner(
             now_utc()
         ],
     )?;
-    let mut settled = load_with_connection(&transaction, orchestrator_session_id)?
+    let mut settled = load_with_connection(transaction, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator disappeared during settlement"))?;
     let completion_suppressed: bool = transaction.query_row(
         "SELECT completion_suppressed FROM managed_orchestrators
@@ -631,10 +651,9 @@ fn settle_managed_orchestrator_run_inner(
              WHERE orchestrator_session_id = ?1 AND completion_inbox_id IS NULL",
             params![orchestrator_session_id, inbox_id],
         )?;
-        settled = load_with_connection(&transaction, orchestrator_session_id)?
+        settled = load_with_connection(transaction, orchestrator_session_id)?
             .ok_or_else(|| anyhow!("managed orchestrator disappeared after delivery"))?;
     }
-    transaction.commit()?;
     Ok(ManagedOrchestratorSettlement {
         orchestrator: settled,
         newly_settled: true,

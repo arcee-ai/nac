@@ -681,6 +681,11 @@ impl TranscriptLogWriter {
             |transaction| {
                 let submitted_message_id = transaction.last_insert_rowid();
                 replace_with_active_run(transaction, session_id, run_id, submitted_message_id)?;
+                super::runtime_run_recovery::mark_prompt_committed(
+                    transaction,
+                    session_id,
+                    run_id,
+                )?;
                 if let Some(item_id) = inbox_item_id {
                     mark_inbox_item_delivered(transaction, session_id, item_id, run_id, content)?;
                 }

@@ -53,9 +53,14 @@ It must not own HTTP/React delivery or managed-host product onboarding.
   lease without turning the initial HTTP deadline into a job deadline.
   Startup/receiver policy and worker IPC remain separate. Guarded resume still
   needs qualification of synchronous Git restoration and selected SSH/Podman
-  effects. Terminal workspace capture and reconciliation of an accepted start
-  lost before its first prompt remain open; these primitives do not qualify
-  listener activation or the complete protected execution lifecycle.
+  effects. `store/runtime_run_recovery.rs` records accepted-start ownership in
+  the start transaction and prompt commitment in the prompt transaction. The
+  guarded resume factory reconciles pending starts only while retaining the
+  actual selected session OS lease; it preserves ack/count and later or unknown
+  generations. Unanchored predecessor history is not inferred into authority.
+  Terminal workspace capture and HTTP/stream integration remain open; these
+  primitives do not qualify listener activation or the complete protected
+  execution lifecycle.
 - `src/sandbox/podman.rs` keeps the selected Podman adapter's container lifecycle,
   creation receipts, process identity/cleanup scripts and rollback together; its
   cohesive ownership explains its size above 800 lines. Fresh durable teardown

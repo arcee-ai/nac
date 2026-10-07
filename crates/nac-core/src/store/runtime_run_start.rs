@@ -60,6 +60,7 @@ pub(crate) fn commit_runtime_run_start(path: &Path, selected: &RuntimeRunStart,
         &selected.run_id, lease, &transaction)?.with_runtime_run_admission(Arc::clone(current), Arc::clone(initial));
     let native = ManagedRuntimeObservation::Run { session_id: selected.session_id.parse()?, run_id: selected.run_id.parse()? };
     managed_runtime_admission::acknowledge_with_connection(&transaction, &selected.identity, &native)?;
+    runtime_run_recovery::record_start(&transaction, selected)?;
     initial()?;
     transaction.commit()?;
     Ok(writer)

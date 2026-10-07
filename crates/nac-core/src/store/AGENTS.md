@@ -51,7 +51,16 @@ workspace revisions, recovery markers, and cross-process coordination.
   and immutable native Run acknowledgement. It reuses the separate traditional
   child and managed orchestrator algorithms. Admission callbacks run after the
   transaction wait and before commit. A retained ack supplies no live owner;
-  start-before-prompt crash reconciliation remains an application obligation.
+  durable start ownership is recorded before commit in `runtime_run_recovery.rs`.
+- `runtime_run_recovery.rs` — retained native accepted-start ownership and its
+  pending/prompted/abandoned phases. Prompt marking shares the transcript and
+  recovery transaction. Reconciliation requires the actual selected session OS
+  lease across the command, admission after waits/precommit, exact immutable
+  Run ack, absence of conflicting prompt evidence, and captured topology/goal
+  ownership. It settles only that relationship generation or goal revision,
+  preserves totals/count/ack, and does not launch execution. Newer generations
+  and uncertain edited claims are preserved. Version34 unanchored acks receive
+  no inferred start marker or recovery authority during additive migration.
 - `managed_runtime_leases.rs` — native sealed reservation/challenge capabilities,
   atomic one-use lease advancement, original deadline and serving-lifetime binding,
   terminal expiry/rollback, and retained lease identity. Authentication/current
@@ -71,6 +80,14 @@ forward-start settlement must share exact SQLite transaction and lock ordering.
 Splitting those operations would obscure the atomic no-new-work/safe-to-stop
 invariant. None of these files may acquire network, process, HTTP, or unrelated
 lifecycle logic.
+
+`traditional_children.rs` and `managed_orchestrators.rs` retain each distinct
+generation's admission, terminal transition, suppression and exactly-once
+completion inbox algorithm together, including their characterization ledgers.
+Their cohesive ownership explains their size above 800 lines. Private
+transaction helpers let accepted-start recovery share those same algorithms;
+they must not acquire model execution, transport policy or the other topology's
+public vocabulary.
 
 ## Verification
 
