@@ -26,8 +26,10 @@ include_dir = "0.7"
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 rmcp = { workspace = true, features = ["server", "macros", "transport-streamable-http-server"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws_lc_rs", "tls12"] }
 tower-http = { version = "0.6", features = ["compression-gzip", "cors"] }
 url = "2"
 uuid = { workspace = true, features = ["v4"] }
@@ -41,6 +43,5 @@ flate2 = "1"
 nac-core = { path = "../nac-core", features = ["test-support"] }
 nac-managed = { path = "../nac-managed", features = ["openapi", "test-support"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
-sha2.workspace = true
 ring.workspace = true
 tower = { version = "0.5", features = ["util"] }

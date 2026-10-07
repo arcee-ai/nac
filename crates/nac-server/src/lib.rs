@@ -44,6 +44,9 @@ pub use delivery::credentials::{
 };
 pub use delivery::delegation::{StartManagedOrchestratorRequest, StartTraditionalChildRequest};
 pub use delivery::error::ApiError;
+pub use delivery::managed_runtime_tls::{
+    denied_runtime_router, serve_denied_runtime, RuntimeTlsIdentity, RuntimeTlsListener,
+};
 pub use delivery::managed_secrets::{
     ManagedSecretList, ManagedSecretSummary, PutManagedSecretRequest,
 };
