@@ -1,9 +1,9 @@
 //! Process-tree supervision shared by terminal, worker, and managed Git adapters.
 
-#[cfg(target_os = "macos")]
-use std::collections::HashSet;
 #[cfg(unix)]
 use std::collections::VecDeque;
+#[cfg(target_os = "macos")]
+use std::collections::{BTreeMap, HashSet};
 #[cfg(target_os = "linux")]
 use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "linux")]
@@ -41,6 +41,10 @@ pub struct ProcessTreeGuard {
     root_pid: Option<libc::pid_t>,
     #[cfg(target_os = "linux")]
     root_start_time: Option<u64>,
+    #[cfg(target_os = "linux")]
+    pending_descendants: CapturedDescendants,
+    #[cfg(any(test, feature = "test-support"))]
+    cleanup_failures_remaining: usize,
     #[cfg(unix)]
     pgid: Option<libc::pid_t>,
     #[cfg(unix)]
@@ -68,6 +72,10 @@ impl ProcessTreeGuard {
             root_pid,
             #[cfg(target_os = "linux")]
             root_start_time,
+            #[cfg(target_os = "linux")]
+            pending_descendants: CapturedDescendants::default(),
+            #[cfg(any(test, feature = "test-support"))]
+            cleanup_failures_remaining: 0,
             // Worker pipe commands skip process-group isolation, so the
             // child is not necessarily a group leader; only allow killpg
             // when it actually is one, otherwise fall back to killing the
@@ -144,6 +152,10 @@ impl ProcessTreeGuard {
                 root_pid,
                 #[cfg(target_os = "linux")]
                 root_start_time,
+                #[cfg(target_os = "linux")]
+                pending_descendants: CapturedDescendants::default(),
+                #[cfg(any(test, feature = "test-support"))]
+                cleanup_failures_remaining: 0,
                 pgid: Some(pgid),
                 group_leader: Some(group_leader),
                 tree_id: Some(tree_id),
@@ -165,6 +177,12 @@ impl ProcessTreeGuard {
         }
     }
 
+    /// Deterministic instance-local cleanup failure; never supplies ownership.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn fail_cleanup_attempts_for_test(&mut self, attempts: usize) {
+        self.cleanup_failures_remaining = attempts;
+    }
+
     pub fn disarm(&mut self) {
         #[cfg(unix)]
         {
@@ -172,6 +190,7 @@ impl ProcessTreeGuard {
             #[cfg(target_os = "linux")]
             {
                 self.root_start_time = None;
+                self.pending_descendants = CapturedDescendants::default();
             }
             self.pgid = None;
             self.group_leader = None;
@@ -216,6 +235,13 @@ impl ProcessTreeGuard {
     }
 
     pub async fn terminate(&mut self, child: &mut Child) -> std::io::Result<()> {
+        #[cfg(any(test, feature = "test-support"))]
+        if self.cleanup_failures_remaining > 0 {
+            self.cleanup_failures_remaining -= 1;
+            return Err(std::io::Error::other(
+                "injected owned process cleanup failure",
+            ));
+        }
         #[cfg(target_os = "linux")]
         let mut cleanup_result = Ok(());
         #[cfg(not(target_os = "linux"))]
@@ -261,7 +287,8 @@ impl ProcessTreeGuard {
                             "final descendant scan",
                         ));
                     }
-                    cleanup_result = descendants.signal_all(libc::SIGKILL);
+                    self.pending_descendants.extend(descendants);
+                    cleanup_result = self.pending_descendants.signal_retained(libc::SIGKILL);
                 }
 
                 #[cfg(all(unix, not(target_os = "linux")))]
@@ -287,16 +314,27 @@ impl ProcessTreeGuard {
                 }
             }
 
-            self.terminate_owned_group().await;
+            cleanup_result =
+                first_cleanup_error(cleanup_result, self.terminate_owned_group().await);
             if child.id().is_some() {
-                let _ = child.wait().await;
+                cleanup_result = first_cleanup_error(cleanup_result, reap_owned_child(child).await);
             }
             #[cfg(unix)]
             {
                 cleanup_result =
                     first_cleanup_error(cleanup_result, self.finish_tagged_cleanup().await);
             }
-            self.disarm();
+            // Clear numeric identity only after the owned child was reaped.
+            // Failed waits retain the actual handle for a bounded retry.
+            if child.id().is_none() {
+                self.mark_leader_reaped();
+                if self.group_leader.is_none() {
+                    self.pgid = None;
+                }
+            }
+            if cleanup_result.is_ok() {
+                self.disarm();
+            }
             return cleanup_result;
         }
 
@@ -308,21 +346,29 @@ impl ProcessTreeGuard {
             let mut descendants =
                 capture_descendants(root_pid, self.root_start_time, None, "descendant scan");
             descendants.extend(self.capture_tagged("descendant tag scan"));
-            cleanup_result = descendants.signal_all(libc::SIGKILL);
+            self.pending_descendants.extend(descendants);
+            cleanup_result = self.pending_descendants.signal_retained(libc::SIGKILL);
         }
         #[cfg(all(unix, not(target_os = "linux")))]
         if let Some(root_pid) = self.root_pid {
             signal_pids(&descendant_pids(root_pid), libc::SIGKILL);
         }
 
-        let _ = child.kill().await;
-        let _ = child.wait().await;
+        if child.id().is_some() {
+            cleanup_result = first_cleanup_error(cleanup_result, child.start_kill());
+            cleanup_result = first_cleanup_error(cleanup_result, reap_owned_child(child).await);
+        }
         #[cfg(unix)]
         {
             cleanup_result =
                 first_cleanup_error(cleanup_result, self.finish_tagged_cleanup().await);
         }
-        self.disarm();
+        if child.id().is_none() {
+            self.mark_leader_reaped();
+        }
+        if cleanup_result.is_ok() {
+            self.disarm();
+        }
         cleanup_result
     }
 
@@ -362,8 +408,19 @@ impl ProcessTreeGuard {
         self.signal_tagged(libc::SIGKILL);
         let deadline = Instant::now() + TERMINATE_GRACE;
         loop {
+            #[cfg(target_os = "macos")]
+            if let Some(census) = &self.census {
+                census.check_identities()?;
+            }
             let leftovers = self.live_tagged_pids();
-            if leftovers.is_empty() {
+            #[cfg(target_os = "linux")]
+            let identities_exited = {
+                self.pending_descendants.signal_retained(libc::SIGKILL)?;
+                self.pending_descendants.all_exited()
+            };
+            #[cfg(not(target_os = "linux"))]
+            let identities_exited = true;
+            if leftovers.is_empty() && identities_exited {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -431,9 +488,9 @@ impl ProcessTreeGuard {
     }
 
     #[cfg(unix)]
-    async fn terminate_owned_group(&mut self) {
+    async fn terminate_owned_group(&mut self) -> std::io::Result<()> {
         let Some(pgid) = self.pgid else {
-            return;
+            return Ok(());
         };
         // SAFETY: `pgid` identifies the process group this guard owns;
         // `killpg` accepts the integer id and signal value.
@@ -458,9 +515,17 @@ impl ProcessTreeGuard {
         unsafe {
             libc::killpg(pgid, libc::SIGKILL);
         }
-        if let Some(mut group_leader) = self.group_leader.take() {
-            let _ = group_leader.wait().await;
+        // Signal delivery is best effort; actual owned reaps plus the retained
+        // descendant verifier are required before cleanup can report success.
+        let mut result = Ok(());
+        if let Some(group_leader) = self.group_leader.as_mut() {
+            result = first_cleanup_error(result, reap_owned_child(group_leader).await);
+            if group_leader.id().is_none() {
+                self.group_leader = None;
+                self.pgid = None;
+            }
         }
+        result
     }
 }
 
@@ -469,6 +534,8 @@ impl Drop for ProcessTreeGuard {
         #[cfg(unix)]
         {
             self.signal_tagged(libc::SIGKILL);
+            #[cfg(target_os = "linux")]
+            let _ = self.pending_descendants.signal_retained(libc::SIGKILL);
             let owns_group = self.root_pid.is_some() || self.group_leader.is_some();
             if owns_group {
                 if let Some(pgid) = self.pgid.take() {
@@ -483,7 +550,13 @@ impl Drop for ProcessTreeGuard {
     }
 }
 
-#[cfg(unix)]
+async fn reap_owned_child(child: &mut Child) -> std::io::Result<()> {
+    tokio::time::timeout(TERMINATE_GRACE, child.wait())
+        .await
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "owned child reap pending"))?
+        .map(|_| ())
+}
+
 fn first_cleanup_error(
     current: std::io::Result<()>,
     tagged: std::io::Result<()>,
@@ -618,8 +691,36 @@ fn process_is_live(pid: libc::pid_t) -> bool {
 }
 
 #[cfg(target_os = "macos")]
+fn macos_start_identity(pid: libc::pid_t) -> std::io::Result<Option<(u64, u64)>> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: this buffer is writable for the supplied size; the kernel only
+    // supplies a complete proc_bsdinfo on the exact-size successful return.
+    let returned = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if returned == size {
+        // SAFETY: the exact-size return initialized the complete structure.
+        let info = unsafe { info.assume_init() };
+        return Ok(Some((info.pbi_start_tvsec, info.pbi_start_tvusec)));
+    }
+    let error = std::io::Error::last_os_error();
+    if matches!(error.raw_os_error(), Some(libc::ESRCH | libc::ENOENT)) {
+        return Ok(None);
+    }
+    Err(error)
+}
+
+#[cfg(target_os = "macos")]
 struct MacosCensus {
-    seen: Arc<Mutex<HashSet<libc::pid_t>>>,
+    identities: Arc<Mutex<BTreeMap<libc::pid_t, (u64, u64)>>>,
+    uncertain: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -628,21 +729,77 @@ struct MacosCensus {
 impl MacosCensus {
     fn start(root: libc::pid_t) -> Self {
         let seen = Arc::new(Mutex::new(HashSet::from([root])));
+        let identities = Arc::new(Mutex::new(BTreeMap::new()));
+        let uncertain = Arc::new(AtomicBool::new(false));
+        match macos_start_identity(root) {
+            Ok(Some(identity)) => {
+                if let Ok(mut ids) = identities.lock() {
+                    ids.insert(root, identity);
+                } else {
+                    uncertain.store(true, Ordering::Release);
+                }
+            }
+            Ok(None) => {}
+            Err(_) => {
+                uncertain.store(true, Ordering::Release);
+            }
+        }
+        let identities_thread = Arc::clone(&identities);
+        let uncertain_thread = Arc::clone(&uncertain);
         let stop = Arc::new(AtomicBool::new(false));
         let seen_thread = Arc::clone(&seen);
         let stop_thread = Arc::clone(&stop);
         let thread = std::thread::Builder::new()
             .name("nac-process-census".to_string())
-            .spawn(move || macos_census_loop(root, seen_thread, stop_thread))
+            .spawn(move || {
+                macos_census_loop(
+                    root,
+                    seen_thread,
+                    identities_thread,
+                    uncertain_thread,
+                    stop_thread,
+                );
+            })
             .ok();
-        Self { seen, stop, thread }
+        if thread.is_none() {
+            uncertain.store(true, Ordering::Release);
+        }
+        Self {
+            identities,
+            uncertain,
+            stop,
+            thread,
+        }
     }
 
     fn snapshot(&self) -> Vec<libc::pid_t> {
-        self.seen
+        self.identities
             .lock()
-            .map(|seen| seen.iter().copied().collect())
+            .map(|identities| {
+                identities
+                    .iter()
+                    .filter_map(|(&pid, &expected)| {
+                        (macos_start_identity(pid).ok().flatten() == Some(expected)).then_some(pid)
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
+    }
+
+    fn check_identities(&self) -> std::io::Result<()> {
+        if self.uncertain.load(Ordering::Acquire) {
+            return Err(std::io::Error::other(
+                "Darwin descendant identity inspection incomplete",
+            ));
+        }
+        let identities = self
+            .identities
+            .lock()
+            .map_err(|_| std::io::Error::other("Darwin identity lock unavailable"))?;
+        for &pid in identities.keys() {
+            macos_start_identity(pid)?;
+        }
+        Ok(())
     }
 
     fn stop(&mut self) {
@@ -675,13 +832,39 @@ fn macos_watch_pid(kq: i32, pid: libc::pid_t) {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_discover_children(pid: libc::pid_t, seen: &Mutex<HashSet<libc::pid_t>>, kq: i32) {
+fn macos_discover_children(
+    pid: libc::pid_t,
+    seen: &Mutex<HashSet<libc::pid_t>>,
+    identities: &Mutex<BTreeMap<libc::pid_t, (u64, u64)>>,
+    uncertain: &AtomicBool,
+    kq: i32,
+) {
+    let expected = identities
+        .lock()
+        .ok()
+        .and_then(|ids| ids.get(&pid).copied());
+    if expected.is_none() || macos_start_identity(pid).ok().flatten() != expected {
+        return;
+    }
     for child in direct_child_pids_macos(pid) {
         let inserted = seen
             .lock()
             .map(|mut seen| seen.insert(child))
             .unwrap_or(false);
         if inserted {
+            match macos_start_identity(child) {
+                Ok(Some(identity)) => {
+                    if let Ok(mut ids) = identities.lock() {
+                        ids.insert(child, identity);
+                    } else {
+                        uncertain.store(true, Ordering::Release);
+                    }
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    uncertain.store(true, Ordering::Release);
+                }
+            }
             macos_watch_pid(kq, child);
         }
     }
@@ -691,6 +874,8 @@ fn macos_discover_children(pid: libc::pid_t, seen: &Mutex<HashSet<libc::pid_t>>,
 fn macos_census_loop(
     root: libc::pid_t,
     seen: Arc<Mutex<HashSet<libc::pid_t>>>,
+    identities: Arc<Mutex<BTreeMap<libc::pid_t, (u64, u64)>>>,
+    uncertain: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
 ) {
     // SAFETY: `kqueue` has no pointer preconditions and returns either an
@@ -705,7 +890,7 @@ fn macos_census_loop(
             .map(|seen| seen.iter().copied().collect::<Vec<_>>())
             .unwrap_or_default();
         for pid in snapshot {
-            macos_discover_children(pid, &seen, kq);
+            macos_discover_children(pid, &seen, &identities, &uncertain, kq);
         }
         if kq < 0 {
             std::thread::sleep(Duration::from_millis(5));
@@ -736,9 +921,11 @@ fn macos_census_loop(
         for event in events.iter().take(n as usize) {
             let pid = event.ident as libc::pid_t;
             if pid > 1 {
+                // Events wake already-registered owners. A numeric event PID
+                // never constructs a new start identity or cleanup target.
                 let _ = seen.lock().map(|mut seen| seen.insert(pid));
                 macos_watch_pid(kq, pid);
-                macos_discover_children(pid, &seen, kq);
+                macos_discover_children(pid, &seen, &identities, &uncertain, kq);
             }
         }
     }
@@ -757,7 +944,7 @@ fn process_is_live(pid: libc::pid_t) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn capture_env_tagged(key: &str, value: &str, context: &str) -> CapturedDescendants {
+fn capture_env_tagged(key: &str, value: &str, _context: &str) -> CapturedDescendants {
     let mut captured = CapturedDescendants::default();
     for pid in pids_with_env(key, value) {
         if pid == self_pid() {
@@ -780,7 +967,12 @@ fn capture_env_tagged(key: &str, value: &str, context: &str) -> CapturedDescenda
         }) {
             Ok(Some(identity)) => captured.processes.push(identity),
             Ok(None) => {}
-            Err(error) => captured.failures.record(pid, context, error),
+            Err(_) => captured.pending_inspections.push(ProcessMetadata {
+                pid,
+                ppid,
+                pgrp,
+                start_time,
+            }),
         }
     }
     captured
@@ -911,6 +1103,26 @@ impl ProcessIdentity {
             Ok(())
         }
     }
+
+    fn has_exited(&self) -> std::io::Result<bool> {
+        let mut descriptor = libc::pollfd {
+            fd: self.pidfd.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: descriptor points to one initialized pollfd containing our
+        // owned pidfd. A zero timeout only inspects its current exit readiness.
+        let result = unsafe { libc::poll(&mut descriptor, 1, 0) };
+        if result < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if descriptor.revents & (libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Err(std::io::Error::other("owned pidfd readiness unavailable"));
+        }
+        // POLLIN marks whole-process exit even while it is an unreaped zombie;
+        // POLLHUP marks reaping. Neither permits retargeting a numeric PID.
+        Ok(descriptor.revents & (libc::POLLIN | libc::POLLHUP) != 0)
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -958,6 +1170,7 @@ impl CleanupFailures {
 struct CapturedDescendants {
     processes: Vec<ProcessIdentity>,
     failures: CleanupFailures,
+    pending_inspections: Vec<ProcessMetadata>,
 }
 #[cfg(target_os = "linux")]
 impl CapturedDescendants {
@@ -972,6 +1185,47 @@ impl CapturedDescendants {
             }
         }
         self.failures.extend(other.failures);
+        for metadata in other.pending_inspections {
+            if !self.pending_inspections.contains(&metadata) {
+                self.pending_inspections.push(metadata);
+            }
+        }
+    }
+
+    // Retry only the originally observed start identity. PID reuse cannot
+    // create a replacement cleanup target; unreadable identity stays pending.
+    fn signal_retained(&mut self, signal: libc::c_int) -> std::io::Result<()> {
+        let mut retry_errors = CleanupFailures::default();
+        for expected in std::mem::take(&mut self.pending_inspections) {
+            match ProcessIdentity::capture(expected) {
+                Ok(Some(identity)) => self.processes.push(identity),
+                Ok(None) => {}
+                Err(error) => {
+                    self.pending_inspections.push(expected);
+                    retry_errors.record(expected.pid, "retained pidfd capture", error);
+                }
+            }
+        }
+        self.processes
+            .retain(|process| match process.send_signal(signal) {
+                Err(error) if error.raw_os_error() == Some(libc::ESRCH) => false,
+                Err(error) => {
+                    retry_errors.record(
+                        process.metadata.pid,
+                        "pidfd_send_signal (retained)",
+                        error,
+                    );
+                    true
+                }
+                Ok(()) => true,
+            });
+        if let Some(first) = self.failures.first.as_ref() {
+            return Err(std::io::Error::new(
+                first.kind(),
+                format!("unresolved process discovery: {first}"),
+            ));
+        }
+        retry_errors.into_result()
     }
 
     fn signal_best_effort(&mut self, signal: libc::c_int) {
@@ -983,24 +1237,15 @@ impl CapturedDescendants {
     }
 
     fn all_exited(&mut self) -> bool {
-        self.processes
-            .retain(|process| match process.send_signal(0) {
-                Err(error) if error.raw_os_error() == Some(libc::ESRCH) => false,
-                Ok(()) | Err(_) => true,
-            });
-        self.processes.is_empty() && self.failures.count == 0
+        self.processes.retain(|process| match process.has_exited() {
+            Ok(true) => false,
+            Ok(false) | Err(_) => true,
+        });
+        self.processes.is_empty() && self.failures.count == 0 && self.pending_inspections.is_empty()
     }
 
     fn signal_all(mut self, signal: libc::c_int) -> std::io::Result<()> {
-        for process in self.processes {
-            if let Err(error) = process.send_signal(signal) {
-                if error.raw_os_error() != Some(libc::ESRCH) {
-                    self.failures
-                        .record(process.metadata.pid, "pidfd_send_signal", error);
-                }
-            }
-        }
-        self.failures.into_result()
+        self.signal_retained(signal)
     }
 }
 
@@ -1023,6 +1268,7 @@ fn capture_descendants(
         );
         return CapturedDescendants {
             processes: Vec::new(),
+            pending_inspections: Vec::new(),
             failures,
         };
     };
@@ -1033,6 +1279,7 @@ fn capture_descendants(
             failures.record(root, operation, error);
             return CapturedDescendants {
                 processes: Vec::new(),
+                pending_inspections: Vec::new(),
                 failures,
             };
         }
@@ -1052,18 +1299,20 @@ fn capture_descendants(
         );
         return CapturedDescendants {
             processes: Vec::new(),
+            pending_inspections: Vec::new(),
             failures,
         };
     }
     let candidates = descendant_metadata(root, processes);
 
     let mut captured = Vec::new();
+    let mut pending_inspections = Vec::new();
     let mut failures = CleanupFailures::default();
     for candidate in candidates {
         match ProcessIdentity::capture(candidate) {
             Ok(Some(process)) => captured.push(process),
             Ok(None) => {}
-            Err(error) => failures.record(candidate.pid, "pidfd_open/capture", error),
+            Err(_) => pending_inspections.push(candidate),
         }
     }
     if !process_identity_matches(root, root_start_time) {
@@ -1076,6 +1325,7 @@ fn capture_descendants(
             ),
         );
         captured.clear();
+        pending_inspections.clear();
     } else {
         retain_authoritative_descendants(root, excluded_pgrp, &mut captured, &mut failures);
     }
@@ -1083,6 +1333,7 @@ fn capture_descendants(
     let processes = captured;
     CapturedDescendants {
         processes,
+        pending_inspections,
         failures,
     }
 }
@@ -1368,12 +1619,14 @@ mod tests {
         let mut descendants = CapturedDescendants {
             processes: vec![identity],
             failures: CleanupFailures::default(),
+            pending_inspections: Vec::new(),
         };
         descendants.processes[0].metadata.ppid = 1;
 
         descendants.extend(CapturedDescendants {
             processes: Vec::new(),
             failures: CleanupFailures::default(),
+            pending_inspections: Vec::new(),
         });
         descendants.signal_all(libc::SIGKILL).unwrap();
 
@@ -1418,6 +1671,7 @@ mod tests {
         let descendants = CapturedDescendants {
             processes: vec![invalid, stale, live_identity],
             failures: CleanupFailures::default(),
+            pending_inspections: Vec::new(),
         };
 
         let error = descendants.signal_all(libc::SIGKILL).unwrap_err();
@@ -1543,3 +1797,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+
+#[cfg(all(test, unix))]
+mod cleanup_retry_tests;

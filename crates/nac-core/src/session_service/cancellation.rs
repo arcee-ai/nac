@@ -138,6 +138,9 @@ impl SessionService {
                 task.abort();
                 let _ = (&mut *task).await;
             }
+            // The join (including aborted/panicked completion) was consumed.
+            // Cleanup retry retains the run/leases, not a handle to poll twice.
+            cancelling_run.task = None;
         }
 
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
@@ -151,6 +154,14 @@ impl SessionService {
                 });
             }
         }
+
+        self.capture_cleanups
+            .retry_run(&cancelling_run.snapshot.run_id)
+            .await
+            .map_err(|error| SessionCancelError::Cleanup {
+                run_id: cancelling_run.snapshot.run_id.clone(),
+                message: format!("{error:#}"),
+            })?;
 
         self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id)
             .await;

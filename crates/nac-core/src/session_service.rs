@@ -35,6 +35,9 @@ use crate::workspace::GitTarget;
 mod admission;
 mod attachment;
 mod cancellation;
+mod capture_cleanup;
+#[cfg(test)]
+mod capture_cleanup_tests;
 mod completion_capture;
 mod direct_interaction;
 mod frontend_projection;
@@ -593,6 +596,9 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     completion_capture: Arc<Mutex<()>>,
+    capture_cleanups: Arc<capture_cleanup::CaptureCleanups>,
+    #[cfg(test)]
+    capture_cleanup_failures: Arc<std::sync::atomic::AtomicUsize>,
     published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
     stopping_admission: Arc<std::sync::atomic::AtomicBool>,
     host_execution_authority: Option<crate::model::ManagedHostExecutionAuthority>,
@@ -678,7 +684,7 @@ struct ActiveRunState {
     inbox_item_id: Option<i64>,
     _operation_lease: Option<Arc<sessions::SessionOperationLease>>,
     runtime_original: Option<Box<crate::runtime::RuntimeRunAdmission>>,
-    _workspace_activity_lease: Option<sessions::WorkspaceActivityLease>,
+    _workspace_activity_lease: Option<Arc<sessions::WorkspaceActivityLease>>,
 }
 
 #[derive(Default)]

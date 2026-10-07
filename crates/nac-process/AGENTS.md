@@ -12,18 +12,32 @@ identity on supported operating systems.
   and always reap the leader.
 - Cleanup authority survives partial inspection failures according to the
   existing retry contract; do not silently declare an unknown tree gone.
+  `terminate` keeps its exact tagged/census owner and retained Linux pidfds or
+  observed start identities on failure. Reaped group IDs are cleared before
+  retry so numeric group reuse cannot create a replacement target. Callers must
+  keep the actual guard/child owner until cleanup succeeds; dropping an error
+  does not prove quiescence. Darwin census signals only matching observed start
+  identities and keeps inspection uncertainty closed. This process-local
+  capability is not a durable restart receipt or reconstructed execution grant.
 - Keep Linux pidfd/proc, macOS process-table, and portable fallback behavior
   explicit and tested. Platform-specific weakening requires a deliberate safety
   decision.
 - This crate is infrastructure only. It does not know sessions, tools,
   permissions, Podman policy, HTTP, managed workflows, or terminal rendering.
+- Bounded child/group reap failures remain errors. Group signals are best effort;
+  actual owned reaps and the descendant verifier establish cleanup completion.
+  Failed waits retain actual child handles; retry never reconstructs them from
+  PIDs. Linux pidfd readiness distinguishes whole-process exit from reaping.
 
 ## Starting points and size exception
 
 - `src/lib.rs` — `ProcessTreeGuard`, process-group isolation, descendant
   capture/identity, signaling, termination, retry authority, and platform
   adapters.
-- `Cargo.toml` feature `test-support` exposes only deterministic failure hooks.
+- `Cargo.toml` feature `test-support` exposes only deterministic failure hooks,
+  including per-instance failed cleanup attempts.
+- `src/cleanup_retry_tests.rs` — actual failed cleanup ownership/retry and retained
+  start-identity rejection; Linux retained pidfd inspection tests need Linux.
 
 `src/lib.rs` deliberately exceeds 800 lines because the cross-platform
 termination algorithm and its shared authority state must remain auditable as

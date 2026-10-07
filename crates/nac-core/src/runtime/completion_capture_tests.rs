@@ -22,7 +22,10 @@ fn git(root: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap().trim().into()
 }
 
-async fn snapshot(fixture: &Fixture, base_url: &str) -> crate::sessions::SessionSnapshot {
+pub(super) async fn snapshot(
+    fixture: &Fixture,
+    base_url: &str,
+) -> crate::sessions::SessionSnapshot {
     let root = fixture.path.parent().unwrap().join("checkout");
     fs::create_dir(&root).unwrap();
     git(&root, &["init", "--initial-branch=main"]);
@@ -127,6 +130,7 @@ async fn revisions(fixture: &Fixture, session: &str) -> Vec<crate::store::Worksp
 #[tokio::test]
 async fn runtime_completion_capture_renews_same_original_after_initial_expiry_and_reaps_escaped_child(
 ) {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
     let fixture = Fixture::new();
     eprintln!("owned completion fixture: {}", fixture.path.display());
     let _home = ConstructionHome::new(&fixture);
@@ -220,12 +224,13 @@ async fn runtime_completion_capture_renews_same_original_after_initial_expiry_an
 }
 
 async fn denied_capture(cancel: bool) {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
     let fixture = Fixture::new();
     eprintln!("owned completion fixture: {}", fixture.path.display());
     let _home = ConstructionHome::new(&fixture);
     let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", response())]);
     let snapshot = snapshot(&fixture, &server.base_url).await;
-    let guard = fixture.guard(if cancel { 20_000 } else { 2_000 }).await;
+    let guard = fixture.guard(if cancel { 20_000 } else { 5_000 }).await;
     let (parts, original) = build(&fixture, &snapshot, &guard).await;
     let target = crate::workspace::GitTarget::local(&snapshot.cwd);
     let old = crate::workspace::capture(&target, &snapshot.session_id, None).unwrap();
@@ -328,6 +333,7 @@ async fn runtime_completion_capture_cancellation_wins_without_waiting_for_captur
 #[tokio::test]
 async fn runtime_completion_capture_denial_after_ref_publication_does_no_compensating_git() {
     use std::os::unix::fs::PermissionsExt;
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
     let fixture = Fixture::new();
     let _home = ConstructionHome::new(&fixture);
     eprintln!("owned completion fixture: {}", fixture.path.display());
@@ -400,6 +406,7 @@ async fn runtime_completion_capture_denial_after_ref_publication_does_no_compens
 
 #[tokio::test]
 async fn runtime_completion_capture_denied_before_model_return_starts_no_git() {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
     let fixture = Fixture::new();
     let _home = ConstructionHome::new(&fixture);
     eprintln!("owned completion fixture: {}", fixture.path.display());

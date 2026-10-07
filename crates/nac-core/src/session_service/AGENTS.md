@@ -49,8 +49,14 @@ durable records; runtime/tool modules own execution internals.
   snapshots without manufacturing a current-run revision. Capturing ordinary
   requested cancellation after quiescence still needs a separate ownership
   mechanism: the existing finishing claim immediately denies renewal/effects.
-  Do not qualify that behavior, cleanup uncertainty/retry, the complete protected
-  lifecycle, or listener activation from the Local capture fixtures alone.
+  Failed capture cleanup retains an actual shared child/tree owner and selected
+  session/workspace OS leases. Completion/cancellation retries that owner before
+  terminalization, never Git after denial. Owned retry tasks survive caller/task
+  drop; cancellation retry does not restore an already-consumed task join handle.
+  These are process-local cleanup capabilities. Durable cleanup recovery after
+  process death remains separate; do not reconstruct an owner from a row/UUID.
+  Do not qualify post-quiescence cancellation capture, durable cleanup restart,
+  the complete protected lifecycle, or listener activation from these fixtures.
 - Orchestrator, direct, traditional-child, and managed-orchestrator paths retain
   their distinct topology invariants even when sharing lifecycle helpers.
 - This layer depends inward on sessions/store/runtime contracts, not HTTP DTOs
@@ -63,6 +69,7 @@ durable records; runtime/tool modules own execution internals.
 - `admission.rs` / `settlement.rs` — run generation and durable completion.
 - `runtime_admission.rs` — sealed-original submission and private run observation.
 - `completion_capture.rs` — exact-original Local completion capture and supervised cutoff.
+- `capture_cleanup.rs` — retained actual process/OS owners and cleanup-only retry.
 - `direct_interaction.rs` — steering/queue submission.
 - `cancellation.rs` — abort and cleanup ordering.
 - `recovery.rs` — restart/peer/crash-window reconciliation.

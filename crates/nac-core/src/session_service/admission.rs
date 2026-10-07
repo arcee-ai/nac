@@ -600,7 +600,7 @@ impl SessionService {
             ),
             inbox_item_id,
             _operation_lease: operation_lease,
-            _workspace_activity_lease: workspace_activity_lease,
+            _workspace_activity_lease: workspace_activity_lease.map(Arc::new),
             runtime_original: runtime_original.map(Box::new),
         };
         if let Some(original) = selected.runtime_original.as_ref() {

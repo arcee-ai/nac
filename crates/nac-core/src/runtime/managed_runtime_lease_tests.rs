@@ -24,6 +24,10 @@ mod mcp_admission_tests;
 #[path = "completion_capture_tests.rs"]
 mod completion_capture_tests;
 
+#[cfg(unix)]
+#[path = "capture_cleanup_tests.rs"]
+mod capture_cleanup_tests;
+
 #[path = "lost_start_recovery_tests.rs"]
 mod lost_start_recovery_tests;
 

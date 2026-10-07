@@ -113,6 +113,9 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             completion_capture: Arc::new(Mutex::new(())),
+            capture_cleanups: Arc::new(capture_cleanup::CaptureCleanups::default()),
+            #[cfg(test)]
+            capture_cleanup_failures: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             published_operation: Arc::new(StdMutex::new(None)),
             stopping_admission: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             host_execution_authority: run_config.client.host_execution_authority(),

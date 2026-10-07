@@ -17,6 +17,7 @@ struct CompletionCapture {
     run_id: SessionRunId,
     original: Arc<ManagedRuntimeLeaseGuard>,
     lease: Arc<sessions::SessionOperationLease>,
+    workspace: Option<Arc<sessions::WorkspaceActivityLease>>,
     deadline: tokio::time::Instant,
     executor: tokio::runtime::Handle,
     failed: AtomicBool,
@@ -37,7 +38,7 @@ impl SessionService {
         if !matches!(target, GitTarget::Local { .. }) {
             bail!("protected SSH revision capture requires remote cleanup ownership");
         }
-        let (original, lease, label) = {
+        let (original, lease, workspace, label) = {
             let active = self.lock_active_operation();
             let Some(ActiveSessionOperation::Run(run)) = active.as_ref() else {
                 bail!("completion run unavailable");
@@ -57,6 +58,7 @@ impl SessionService {
                         .as_ref()
                         .ok_or_else(|| anyhow!("completion OS lease unavailable"))?,
                 ),
+                run._workspace_activity_lease.clone(),
                 run.snapshot.prompt_preview.clone(),
             )
         };
@@ -65,6 +67,7 @@ impl SessionService {
             run_id: run_id.clone(),
             original,
             lease,
+            workspace,
             deadline: tokio::time::Instant::now() + CAPTURE_BUDGET,
             executor: tokio::runtime::Handle::current(),
             failed: AtomicBool::new(false),
@@ -142,6 +145,14 @@ impl CompletionCapture {
                     .is_some_and(|lease| Arc::ptr_eq(lease, &self.lease)),
             "completion ownership changed"
         );
+        anyhow::ensure!(
+            match (&run._workspace_activity_lease, &self.workspace) {
+                (Some(actual), Some(expected)) => Arc::ptr_eq(actual, expected),
+                (None, None) => true,
+                _ => false,
+            },
+            "completion workspace ownership changed"
+        );
         self.lease
             .validate(&self.service.metadata.store_path, &original.session_id)?;
         self.original.check_now()
@@ -170,45 +181,80 @@ impl CompletionCapture {
             .kill_on_drop(true);
         // Cancellation takes the same canonical ownership lock. It is free to
         // win during waits, but cannot mark finishing between this check/spawn.
-        let (mut child, mut tree) = {
+        let (id, owner) = {
             let active = self.service.lock_active_operation();
             self.selected(&active)?;
-            ProcessTreeGuard::spawn_supervised(&mut command)?
+            #[cfg_attr(
+                not(test),
+                allow(
+                    unused_mut,
+                    reason = "only the test-support hook mutates the new guard"
+                )
+            )]
+            let (child, mut tree) = ProcessTreeGuard::spawn_supervised(&mut command)?;
+            #[cfg(test)]
+            tree.fail_cleanup_attempts_for_test(
+                self.service
+                    .capture_cleanup_failures
+                    .swap(0, Ordering::AcqRel),
+            );
+            self.service.capture_cleanups.register(
+                self.run_id.clone(),
+                Arc::clone(&self.lease),
+                self.workspace.clone(),
+                child,
+                tree,
+            )
         };
-        let stdout = child
+        let mut process = owner.process.lock().await;
+        let stdout = process
+            .child
             .stdout
             .take()
             .ok_or_else(|| anyhow!("capture stdout unavailable"))?;
-        let stderr = child
+        let stderr = process
+            .child
             .stderr
             .take()
             .ok_or_else(|| anyhow!("capture stderr unavailable"))?;
-        let result = tokio::select! {
+        let mut stdout = CaptureReader(tokio::spawn(limited_output(stdout)));
+        let mut stderr = CaptureReader(tokio::spawn(limited_output(stderr)));
+        let status = tokio::select! {
             biased;
             () = self.original.wait_for_denial() => Err(anyhow!("workspace capture original denied")),
-            result = tokio::time::timeout_at(self.deadline, async {
-                let wait = async {
-                    let status = child.wait().await?;
-                    // Successful leaders can leave escaped descendants. Use
-                    // identity/tag cleanup on success as well as on denial.
-                    tree.mark_leader_reaped();
-                    tree.terminate(&mut child).await?;
-                    Ok::<_, anyhow::Error>(status)
-                };
-                let (status, stdout, stderr) = tokio::join!(wait, limited_output(stdout), limited_output(stderr));
-                Ok::<_, anyhow::Error>(Output { status: status?, stdout: stdout?, stderr: stderr? })
-            }) => result.map_err(Into::into).and_then(|output| output),
+            result = tokio::time::timeout_at(self.deadline, process.child.wait()) => result.map_err(Into::into).and_then(|status| status.map_err(Into::into)),
         };
-        if result.is_err() {
-            // Owned cleanup remains permitted after denial; no Git rollback or
-            // readback occurs. The blocking caller retains the actual OS lease.
-            tree.terminate(&mut child)
-                .await
-                .context("workspace capture cleanup incomplete")?;
+        if status.is_ok() {
+            process.tree.mark_leader_reaped();
         }
-        let output = result?;
+        // No denial/deadline selection may drop a half-completed termination.
+        // This blocking caller owns the future; retries use owned registry tasks.
+        if let Err(error) = process.cleanup().await {
+            self.original.deny_now();
+            return Err(error.context("workspace capture cleanup incomplete"));
+        }
+        drop(process);
+        self.service.capture_cleanups.forget(id, &owner);
+        let status = status?;
+        let (stdout, stderr) = tokio::time::timeout_at(self.deadline, async {
+            Ok::<_, anyhow::Error>(((&mut stdout.0).await??, (&mut stderr.0).await??))
+        })
+        .await??;
+        let output = Output {
+            status,
+            stdout,
+            stderr,
+        };
         self.current().await?;
         Ok(output)
+    }
+}
+
+// Reader tasks own only bounded pipe drains and are aborted on every exit.
+struct CaptureReader(tokio::task::JoinHandle<Result<Vec<u8>>>);
+impl Drop for CaptureReader {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -267,6 +313,10 @@ impl CaptureExecutor for CompletionCapture {
         let result = self.executor.block_on(self.command(cwd, envs, args));
         if result.is_err() {
             self.failed.store(true, Ordering::Release);
+            // An error may leave an actual registered cleanup owner (for
+            // example a pipe setup failure). Retry is cleanup after denial,
+            // never another Git command under the failed capture sequence.
+            self.original.deny_now();
         }
         result
     }

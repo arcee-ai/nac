@@ -23,6 +23,10 @@ impl SessionService {
     }
 
     pub(super) async fn finish_run_once(&self, run_id: &SessionRunId, outcome: RunOutcome) -> bool {
+        if let Err(error) = self.capture_cleanups.retry_run(run_id).await {
+            eprintln!("nac: run remains active for owned capture cleanup: {error:#}");
+            return false;
+        }
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
             if let Err(error) = self.terminal_manager.settle_run().await {
                 EventSink::bus(self.event_bus.clone())
@@ -55,6 +59,12 @@ impl SessionService {
             } else {
                 None
             };
+        // Capture may have retained an actual failed cleanup owner. Never turn
+        // its best-effort Git error into a proof of quiescence.
+        if let Err(error) = self.capture_cleanups.retry_run(run_id).await {
+            eprintln!("nac: run remains active for owned capture cleanup: {error:#}");
+            return false;
+        }
         let id = run_id.clone();
         let finishing = self
             .coordinate_local(move |service| service.mark_run_finishing(&id))
