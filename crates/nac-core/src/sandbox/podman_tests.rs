@@ -2,6 +2,67 @@ use super::*;
 use crate::sandbox::DEFAULT_SANDBOX_WORKDIR;
 use std::path::PathBuf;
 
+// Callers hold TEST_ENV_LOCK across construction and drop. Restore before
+// releasing that lock, including when a fixture assertion unwinds.
+#[cfg(unix)]
+struct ScopedPodmanEnv(Vec<(&'static str, Option<std::ffi::OsString>)>);
+
+#[cfg(unix)]
+impl ScopedPodmanEnv {
+    fn set(entries: &[(&'static str, &std::path::Path)]) -> Self {
+        let original = entries
+            .iter()
+            .map(|(name, _)| (*name, std::env::var_os(name)))
+            .collect();
+        for (name, value) in entries {
+            unsafe { std::env::set_var(name, value) };
+        }
+        Self(original)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ScopedPodmanEnv {
+    fn drop(&mut self) {
+        for (name, value) in self.0.iter().rev() {
+            unsafe {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn fixture_environment_is_restored_when_an_assertion_panics() {
+    let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+    let existing = "NAC_TEST_PODMAN_ENV_EXISTING";
+    let untouched = "NAC_TEST_PODMAN_ENV_UNTOUCHED";
+    let original_untouched = std::env::var_os(untouched);
+    let _baseline = ScopedPodmanEnv::set(&[(existing, std::path::Path::new("original"))]);
+    let failure = std::panic::catch_unwind(|| {
+        let _fixture = ScopedPodmanEnv::set(&[
+            (existing, std::path::Path::new("fixture")),
+            (untouched, std::path::Path::new("fixture")),
+        ]);
+        panic!("simulated fixture readiness assertion");
+    });
+    assert!(failure.is_err(), "fixture must exercise unwind restoration");
+    assert_eq!(
+        std::env::var_os(existing),
+        Some("original".into()),
+        "unwind must restore a preexisting fixture value"
+    );
+    assert_eq!(
+        std::env::var_os(untouched),
+        original_untouched,
+        "unwind must restore the original optional environment value"
+    );
+}
+
 fn sample_session() -> PodmanSession {
     PodmanSession::new(
         SandboxSpec {
@@ -584,15 +645,14 @@ exit 0
     )
     .unwrap();
     std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let original_path = std::env::var_os("PATH");
-    unsafe {
-        std::env::set_var("PATH", &root);
-        std::env::set_var("NAC_TEST_CREATE_STARTED", &started);
-        std::env::set_var("NAC_TEST_CREATE_RELEASE", &release);
-        std::env::set_var("NAC_TEST_CONTAINER", &container);
-        std::env::set_var("NAC_TEST_REMOVE_STARTED", &removed);
-        std::env::set_var("NAC_TEST_OWNERSHIP_TOKEN", &ownership_token);
-    }
+    let environment = ScopedPodmanEnv::set(&[
+        ("PATH", &root),
+        ("NAC_TEST_CREATE_STARTED", &started),
+        ("NAC_TEST_CREATE_RELEASE", &release),
+        ("NAC_TEST_CONTAINER", &container),
+        ("NAC_TEST_REMOVE_STARTED", &removed),
+        ("NAC_TEST_OWNERSHIP_TOKEN", &ownership_token),
+    ]);
 
     let session = std::sync::Arc::new(PodmanSession::new(
         SandboxSpec::default(),
@@ -610,7 +670,17 @@ exit 0
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
-    assert!(started.exists(), "fake podman run did not start");
+    if !started.exists() {
+        let outcome = if launch.is_finished() {
+            format!("{:?}", launch.await)
+        } else {
+            // A late fake process must not remain blocked on its fixture gate.
+            let _ = std::fs::write(&release, b"");
+            launch.abort();
+            format!("pending at readiness deadline; abort={:?}", launch.await)
+        };
+        panic!("fake podman run did not start: {outcome}");
+    }
     launch.abort();
     let _ = launch.await;
     tokio::time::sleep(Duration::from_millis(30)).await;
@@ -629,17 +699,7 @@ exit 0
     assert!(removed.exists(), "ordered cancellation cleanup did not run");
     assert!(!container.exists(), "cancelled creation left a container");
 
-    unsafe {
-        match original_path {
-            Some(path) => std::env::set_var("PATH", path),
-            None => std::env::remove_var("PATH"),
-        }
-        std::env::remove_var("NAC_TEST_CREATE_STARTED");
-        std::env::remove_var("NAC_TEST_CREATE_RELEASE");
-        std::env::remove_var("NAC_TEST_CONTAINER");
-        std::env::remove_var("NAC_TEST_REMOVE_STARTED");
-        std::env::remove_var("NAC_TEST_OWNERSHIP_TOKEN");
-    }
+    drop(environment);
     drop(session);
     let _ = std::fs::remove_dir_all(root);
 }
