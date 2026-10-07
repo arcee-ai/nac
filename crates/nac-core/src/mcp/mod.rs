@@ -246,6 +246,7 @@ fn redacted_probe_error(redactor: &McpRedactor, error: anyhow::Error) -> anyhow:
 
 use config::*;
 use naming::*;
+pub(crate) use registry::McpLoadOutcome;
 use registry::*;
 use result::*;
 use sync::*;

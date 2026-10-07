@@ -35,6 +35,12 @@ It must not own HTTP/React delivery or managed-host product onboarding.
   delivery terminates rather than reconstructing authority from retained rows.
   Private tool/cancellation/prompt hooks default to absent for standalone work;
   they do not install mediated startup or worker IPC, or revoke a global key.
+  `construction_admission.rs` and the explicit runtime-operation fresh factory
+  consume one live guard claim before client/backend/MCP construction. They pin
+  captured clients, bound in-flight MCP initialization, and recheck session
+  creation on the selected store executor. Missing authority has no standalone
+  fallback. This factory does not admit a run, install startup/receiver policy,
+  fence resumed/worker construction, or qualify active-run continuation.
 - `src/session_service/AGENTS.md` — run admission through durable settlement.
 - `src/store/AGENTS.md` and `src/sessions/` — persisted domain and schema.
 - `src/permissions/AGENTS.md` — policy, binding, grants, approval broker.

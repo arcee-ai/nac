@@ -30,6 +30,7 @@ struct State {
     publishing: bool,
     last_wall_ms: i64,
     terminal_scheduled: bool,
+    construction_started: bool,
 }
 
 /// Only a consumed, delivered sealed store capability creates this owner.
@@ -68,6 +69,7 @@ impl ManagedRuntimeLeaseGuard {
                 publishing: false,
                 last_wall_ms: clock.wall_ms(),
                 terminal_scheduled: false,
+                construction_started: false,
             }),
             executor: tokio::runtime::Handle::try_current().map_err(|_| denied())?,
         });
@@ -137,6 +139,44 @@ impl ManagedRuntimeLeaseGuard {
     }
     pub fn binding(&self) -> Result<RuntimeLeaseBinding> {
         Ok(self.state()?.active.binding().clone())
+    }
+
+    pub(super) fn claim_construction(&self, path: &std::path::Path) -> Result<()> {
+        // Resolve through the already-selected owner, never initialize a path
+        // or move an operation to another executor to satisfy construction.
+        let selected = crate::store::coordinator::owner_for(path)?.ok_or_else(denied)?;
+        if !Arc::ptr_eq(&selected, &self.store) {
+            return Err(denied());
+        }
+        self.check_now()?;
+        let mut state = self.state()?;
+        let clock = native_clock()?;
+        Self::local(&mut state, clock)?;
+        if state.construction_started || !state.active.initial_admission_available_at(clock) {
+            return Err(denied());
+        }
+        state.construction_started = true;
+        Ok(())
+    }
+
+    pub(super) async fn initialize_store(&self) -> Result<()> {
+        self.check().await?;
+        self.store.initialize().await?;
+        self.check().await
+    }
+
+    pub(super) async fn create_session(
+        self: &Arc<Self>,
+        snapshot: crate::sessions::SessionSnapshot,
+    ) -> Result<()> {
+        self.check().await?;
+        let guard = Arc::clone(self);
+        let admission: Arc<crate::sessions::SessionCreationCheck> =
+            Arc::new(move || guard.check_now());
+        self.store
+            .create_admitted_session(snapshot, admission)
+            .await?;
+        self.check_now()
     }
 
     /// Native connection/removal/stop owners mark denial synchronously before

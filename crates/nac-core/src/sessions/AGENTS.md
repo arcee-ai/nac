@@ -14,6 +14,10 @@ recovery, cancellation, and settlement over these contracts.
   as a side effect of loading.
 - Snapshot and summary projections are read models over canonical durable
   state; they do not invent liveness from process-local tasks.
+- Explicit admitted creation carries a nonserialized final-check callback into
+  the same session transaction after persistence/SQLite waits and before commit.
+  A failed check rolls back the inserted row. The callback is supplied by trusted
+  runtime construction; it is not durable permission or restart authority.
 - Operation leases coordinate across processes and retain owner/generation
   identity. Recovery must be able to distinguish an active peer from a stale
   owner.

@@ -138,6 +138,16 @@ pub(crate) struct McpLoadOutcome {
     pub skipped: Vec<McpSkippedServer>,
 }
 
+async fn check_construction_effect(
+    effect: Option<&crate::runtime::RuntimeEffectLeaseHandle>,
+) -> Result<()> {
+    if let Some(effect) = effect {
+        effect.check_current().await?;
+        effect.check_available()?;
+    }
+    Ok(())
+}
+
 async fn close_mounted_services(services: &mut Vec<SharedMcpService>) {
     while let Some(service) = services.pop() {
         close_shared_mcp_service(service).await;
@@ -223,6 +233,38 @@ impl McpRegistry {
         transport_policy: McpTransportPolicy,
         root_policy: McpRootPolicy,
     ) -> Result<McpLoadOutcome> {
+        Self::load_reporting_skips_inner(cwd, sandbox, paths, transport_policy, root_policy, None)
+            .await
+    }
+
+    pub(crate) async fn load_reporting_skips_with_effect_lease(
+        cwd: &Path,
+        sandbox: Option<&SandboxSession>,
+        paths: &PathContext,
+        transport_policy: McpTransportPolicy,
+        root_policy: McpRootPolicy,
+        effect: crate::runtime::RuntimeEffectLeaseHandle,
+    ) -> Result<McpLoadOutcome> {
+        Self::load_reporting_skips_inner(
+            cwd,
+            sandbox,
+            paths,
+            transport_policy,
+            root_policy,
+            Some(effect),
+        )
+        .await
+    }
+
+    async fn load_reporting_skips_inner(
+        cwd: &Path,
+        sandbox: Option<&SandboxSession>,
+        paths: &PathContext,
+        transport_policy: McpTransportPolicy,
+        root_policy: McpRootPolicy,
+        effect: Option<crate::runtime::RuntimeEffectLeaseHandle>,
+    ) -> Result<McpLoadOutcome> {
+        check_construction_effect(effect.as_ref()).await?;
         let (defaults, servers, config_error) = file_servers_for_policy(paths, transport_policy);
         if let Some(skipped) = config_error {
             return Ok(McpLoadOutcome {
@@ -252,6 +294,7 @@ impl McpRegistry {
             if !server_config.enabled {
                 continue;
             }
+            check_construction_effect(effect.as_ref()).await?;
             let redaction_values = redaction_values(&server_config)?;
             let redactor = McpRedactor::new(redaction_values.clone());
             // Two names for the same endpoint would mount the same advertised
@@ -294,6 +337,7 @@ impl McpRegistry {
                     continue;
                 }
             };
+            check_construction_effect(effect.as_ref()).await?;
             let handler = NacMcpClientHandler::unbound(roots.clone());
             let mut service =
                 match connect_server(&server_name, &server_config, &handler, cwd, startup_timeout)
@@ -319,6 +363,7 @@ impl McpRegistry {
                     }
                 };
 
+            check_construction_effect(effect.as_ref()).await?;
             let peer_info = match service.peer_info() {
                 Some(peer_info) => peer_info,
                 None => {
@@ -341,6 +386,7 @@ impl McpRegistry {
             let listed_tools = if capabilities.tools.is_none() {
                 Vec::new()
             } else {
+                check_construction_effect(effect.as_ref()).await?;
                 match timeout(catalog_timeout, service.list_all_tools()).await {
                     Ok(Ok(tools)) => tools,
                     Ok(Err(error)) => {
@@ -379,9 +425,11 @@ impl McpRegistry {
                 }
             };
 
+            check_construction_effect(effect.as_ref()).await?;
             let listed_prompts = if capabilities.prompts.is_none() {
                 Vec::new()
             } else {
+                check_construction_effect(effect.as_ref()).await?;
                 match timeout(catalog_timeout, list_bounded_prompts(&service)).await {
                     Ok(Ok(prompts)) => prompts,
                     Ok(Err(error)) => {
@@ -427,6 +475,7 @@ impl McpRegistry {
             // startup requests and preserving predecessor admission behavior.
             let listed_resource_uris = Vec::new();
 
+            check_construction_effect(effect.as_ref()).await?;
             seen_endpoints.insert(endpoint, server_name.clone());
             let service = Arc::new(tokio::sync::RwLock::new(service));
             let server = Arc::new(McpServer {

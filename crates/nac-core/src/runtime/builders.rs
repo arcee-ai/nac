@@ -17,6 +17,7 @@ pub async fn build_run_config(
         config,
         None,
         sessions::SessionBehavior::Orchestrator,
+        None,
     )
     .await
 }
@@ -31,6 +32,7 @@ pub async fn build_run_config_for_project(
         config,
         project_id,
         sessions::SessionBehavior::Orchestrator,
+        None,
     )
     .await
 }
@@ -44,7 +46,43 @@ pub async fn build_run_config_for_project_with_behavior(
     project_id: Option<String>,
     behavior: sessions::SessionBehavior,
 ) -> Result<OrchestratorRunConfig> {
-    build_run_config_inner(options, config, project_id, behavior).await
+    build_run_config_inner(options, config, project_id, behavior, None).await
+}
+
+/// Trusted, explicit construction for a newly admitted original operation.
+/// Missing authority never falls back to standalone. This pins required mode;
+/// SessionService fresh run admission and protected startup remain separate.
+pub async fn build_run_config_for_runtime_operation(
+    options: RunOptions,
+    config: &NacConfig,
+    project_id: Option<String>,
+    behavior: sessions::SessionBehavior,
+    guard: Option<std::sync::Arc<ManagedRuntimeLeaseGuard>>,
+) -> Result<OrchestratorRunConfig> {
+    let guard = guard.ok_or_else(|| anyhow::anyhow!("runtime construction admission required"))?;
+    guard.check().await?;
+    let ssh_host = options.ssh.host();
+    let config_cwd = options
+        .config_cwd
+        .clone()
+        .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
+    let base = if ssh_host.is_some() {
+        &config_cwd
+    } else {
+        &options.workspace_cwd
+    };
+    let path = resolve_store_path(base, options.store.clone(), config);
+    let admission = super::construction_admission::ConstructionAdmission::new(guard, &path).await?;
+    let built = build_run_config_inner(
+        options,
+        config,
+        project_id,
+        behavior,
+        Some(&admission.guard),
+    )
+    .await?;
+    admission.complete().await?;
+    Ok(built.with_required_runtime_effects())
 }
 
 async fn build_run_config_inner(
@@ -52,7 +90,9 @@ async fn build_run_config_inner(
     config: &NacConfig,
     project_id: Option<String>,
     behavior: sessions::SessionBehavior,
+    construction: Option<&std::sync::Arc<ManagedRuntimeLeaseGuard>>,
 ) -> Result<OrchestratorRunConfig> {
+    super::construction_admission::check(construction).await?;
     let agent_mode = match behavior {
         sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
         sessions::SessionBehavior::Direct | sessions::SessionBehavior::DirectWithOrchestrator => {
@@ -69,7 +109,12 @@ async fn build_run_config_inner(
         options.orchestrator_compaction_threshold,
         settings.resolved.context_window,
     )?;
-    let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
+    super::construction_admission::check(construction).await?;
+    let client = super::construction_admission::pin_client(
+        ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h")),
+        construction,
+    );
+    super::construction_admission::check(construction).await?;
     let light_model = options.model.light_model.clone();
     let light_client = if behavior == sessions::SessionBehavior::Direct {
         // ALL-36 owns the future responsibilities of a light model in a plain
@@ -81,6 +126,9 @@ async fn build_run_config_inner(
         light_model
             .as_ref()
             .map(|light| {
+                if let Some(guard) = construction {
+                    guard.check_now().map_err(LightModelError::Other)?;
+                }
                 resolve_light_client_with_http_policy(
                     light,
                     &settings.extra_headers,
@@ -93,6 +141,7 @@ async fn build_run_config_inner(
                 client.with_host_execution_authority(options.model.host_execution_authority.clone())
             })
             .transpose()?
+            .map(|client| super::construction_admission::pin_client(client, construction))
             .map(std::sync::Arc::new)
     };
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
@@ -103,7 +152,12 @@ async fn build_run_config_inner(
         &options.workspace_cwd
     };
     let store_path = resolve_store_path(store_base_cwd, options.store, config);
-    store::initialize(&store_path)?;
+    super::construction_admission::check(construction).await?;
+    if let Some(guard) = construction {
+        guard.initialize_store().await?;
+    } else {
+        store::initialize(&store_path)?;
+    }
 
     let config_paths = PathContext::new(&config_cwd);
     options.ssh.validate(&config_paths)?;
@@ -116,15 +170,18 @@ async fn build_run_config_inner(
         let requested_remote_cwd_text = requested_remote_cwd
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("remote working directory is not valid UTF-8"))?;
-        let remote_cwd =
-            canonical_remote_session_cwd(&connection, requested_remote_cwd_text, &config_paths)
-                .await?;
+        let remote_cwd = super::construction_admission::during(
+            construction,
+            canonical_remote_session_cwd(&connection, requested_remote_cwd_text, &config_paths),
+        )
+        .await?;
         let working_directory = directory_display(&remote_cwd);
         let workspace_git = GitTarget::ssh(connection.clone(), remote_cwd.clone(), &config_cwd);
         let session_id = Uuid::new_v4().to_string();
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
         let mcp = if agent_mode == AgentMode::Direct {
-            McpRegistry::load_reporting_skips(
+            super::construction_admission::load_mcp(
+                construction,
                 &options.workspace_cwd,
                 None,
                 &config_paths,
@@ -143,7 +200,8 @@ async fn build_run_config_inner(
         let agents_md_message = mcp
             .as_ref()
             .and_then(|registry| registry.instructions_message());
-        let agent = Agent::with_config(
+        let agent = super::construction_admission::build_agent(
+            construction,
             client.clone(),
             AgentConfig {
                 command_output_limits: worker_command_output_limits(config)?,
@@ -170,7 +228,8 @@ async fn build_run_config_inner(
                 light_client: light_client.clone(),
                 permission_rules: config.permissions.rules.clone(),
             },
-        )?;
+        )
+        .await?;
         let mut session_snapshot = sessions::new_snapshot(
             session_id.clone(),
             remote_cwd,
@@ -189,7 +248,8 @@ async fn build_run_config_inner(
         session_snapshot.project_id = project_id.clone();
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.light_model = light_model;
-        sessions::create_session(&store_path, &session_snapshot)?;
+        super::construction_admission::create_session(construction, &store_path, &session_snapshot)
+            .await?;
 
         return Ok(OrchestratorRunConfig {
             agent,
@@ -211,6 +271,7 @@ async fn build_run_config_inner(
     let session_id = Uuid::new_v4().to_string();
     let paths = PathContext::new(&workspace_cwd);
     let mut worktree_rollback: session_worktree::RollbackGuard;
+    super::construction_admission::check(construction).await?;
     let sandbox = build_sandbox_session_inner(
         &sandbox_options,
         &workspace_cwd,
@@ -224,7 +285,8 @@ async fn build_run_config_inner(
             .and_then(|session| session.spec().worktree.clone()),
     );
     let mcp = if agent_mode == AgentMode::Direct {
-        match McpRegistry::load_reporting_skips(
+        match super::construction_admission::load_mcp(
+            construction,
             &workspace_cwd,
             sandbox.as_ref(),
             &paths,
@@ -249,7 +311,8 @@ async fn build_run_config_inner(
     } else {
         None
     };
-    let build_result = (|| -> Result<OrchestratorRunConfig> {
+    let build_result: Result<OrchestratorRunConfig> = (async {
+        super::construction_admission::check(construction).await?;
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
         let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
         let (skill_workspace, visibility) = if sandbox.is_some() {
@@ -282,7 +345,8 @@ async fn build_run_config_inner(
             .map(|registry| registry.model_tool_definitions())
             .unwrap_or_default();
 
-        let agent = Agent::with_config(
+        let agent = super::construction_admission::build_agent(
+            construction,
             client.clone(),
             AgentConfig {
                 command_output_limits: worker_command_output_limits(config)?,
@@ -309,7 +373,8 @@ async fn build_run_config_inner(
                 light_client: light_client.clone(),
                 permission_rules: config.permissions.rules.clone(),
             },
-        )?;
+        )
+        .await?;
         let mut session_snapshot = sessions::new_snapshot(
             session_id.clone(),
             workspace_cwd.clone(),
@@ -328,7 +393,8 @@ async fn build_run_config_inner(
         session_snapshot.project_id = project_id;
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.light_model = light_model;
-        sessions::create_session(&store_path, &session_snapshot)?;
+        super::construction_admission::create_session(construction, &store_path, &session_snapshot)
+            .await?;
         if let Some(sandbox) = sandbox.as_ref() {
             sandbox.retain_for_durable_session();
         }
@@ -348,7 +414,8 @@ async fn build_run_config_inner(
             workspace_git,
             resume_base_cwd: workspace_cwd,
         })
-    })();
+    })
+    .await;
 
     match build_result {
         Ok(run_config) => Ok(run_config),

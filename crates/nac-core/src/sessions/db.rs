@@ -94,10 +94,44 @@ port public;
 }
 
 fn create_session_once(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
+    create_session_once_with_check(path, snapshot, None)
+}
+
+/// Ephemeral final check supplied by trusted construction; no transport, tool
+/// implementation or authority can be reconstructed from a durable snapshot.
+pub(crate) type SessionCreationCheck = dyn Fn() -> Result<()> + Send + Sync;
+
+coordinated_command! {
+pub(crate) fn create_admitted_session(path: &Path, snapshot: &SessionSnapshot,
+    admission: &std::sync::Arc<SessionCreationCheck>) -> Result<()> {
+    crate::store::retry_busy_correlated(
+        crate::telemetry::Correlation::session(Some(&snapshot.session_id)),
+        || create_session_once_with_check(path, snapshot, Some(admission.as_ref())),
+    )
+}
+command CreateAdmittedSessionCommand {
+    snapshot: SessionSnapshot = snapshot.clone(),
+    admission: std::sync::Arc<SessionCreationCheck> = std::sync::Arc::clone(admission),
+}
+call |command| (&command.snapshot, &command.admission)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.snapshot.session_id));
+port public;
+}
+
+fn create_session_once_with_check(
+    path: &Path,
+    snapshot: &SessionSnapshot,
+    admission: Option<&SessionCreationCheck>,
+) -> Result<()> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-
+    if let Some(check) = admission {
+        check()?;
+    }
     insert_new_session_in_transaction(&tx, path, snapshot)?;
+    if let Some(check) = admission {
+        check()?;
+    }
     tx.commit()?;
     Ok(())
 }

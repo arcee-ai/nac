@@ -110,6 +110,7 @@ fn duplicate_pending(pending: &PendingRuntimeChallenge) -> PendingRuntimeChallen
         challenge: pending.challenge.clone(),
         prior: pending.prior.clone(),
         issued_ms: pending.issued_ms,
+        original_admission_deadline: pending.original_admission_deadline,
         monotonic_deadline: pending.monotonic_deadline,
     }
 }
@@ -738,6 +739,7 @@ async fn coordinator_retains_sealed_capabilities_and_loss_of_reservation_ack_is_
 fn fresh_active_renewal_can_cross_original_http_expiry_without_resetting_monotonic_ceiling() {
     let fixture = Fixture::new();
     let initial = fixture.active();
+    assert!(initial.initial_admission_available_at(fixture.at(1_000)));
     let native = fixture.native();
     let pending = challenge_managed_runtime_renewal(
         &fixture.path,
@@ -752,6 +754,16 @@ fn fresh_active_renewal_can_cross_original_http_expiry_without_resetting_monoton
     let active =
         consume_managed_runtime_challenge(&fixture.path, pending, &response, fixture.at(11_000))
             .unwrap();
+    let admission_stalled_wall =
+        RuntimeLeaseClock::fixed(fixture.at(11_000).wall_ms, fixture.at(21_000).monotonic);
+    assert!(
+        active.available_at(admission_stalled_wall),
+        "active original lease can continue"
+    );
+    assert!(
+        !active.initial_admission_available_at(admission_stalled_wall),
+        "renewal cannot rebase the retained initial HTTP admission ceiling"
+    );
     assert!(fixture.at(30_000).wall_ms > fixture.binding.original_expires_ms);
     let pending = challenge_managed_runtime_renewal(
         &fixture.path,

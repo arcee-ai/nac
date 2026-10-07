@@ -125,6 +125,354 @@ impl Fixture {
     }
 }
 
+struct ConstructionHome(Option<std::ffi::OsString>);
+impl ConstructionHome {
+    fn new(fixture: &Fixture) -> Self {
+        let previous = std::env::var_os("NAC_HOME");
+        unsafe { std::env::set_var("NAC_HOME", fixture.path.parent().unwrap()) };
+        Self(previous)
+    }
+}
+impl Drop for ConstructionHome {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(previous) = self.0.take() {
+                std::env::set_var("NAC_HOME", previous);
+            } else {
+                std::env::remove_var("NAC_HOME");
+            }
+        }
+    }
+}
+fn construction_options(fixture: &Fixture) -> crate::runtime::RunOptions {
+    let cwd = fixture.path.parent().unwrap().to_path_buf();
+    let key = cwd.join("synthetic-construction-key");
+    std::fs::write(&key, "synthetic-public-test-key").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    crate::runtime::RunOptions {
+        workspace_cwd: cwd.clone(),
+        config_cwd: Some(cwd),
+        store: crate::runtime::StoreOptions {
+            store_path: Some(fixture.path.clone()),
+        },
+        model: crate::runtime::ModelOptions {
+            backend: Some(crate::model::BackendKind::OpenAiResponses),
+            api_model: Some("gpt-5-mini".into()),
+            api_base_url: Some("https://api.openai.com/v1".into()),
+            api_key_env: crate::runtime::OptionalModelOption::Clear,
+            trusted_api_key_file: Some(key),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+fn construction_snapshot() -> crate::sessions::SessionSnapshot {
+    crate::sessions::new_snapshot(
+        Uuid::new_v4().to_string(),
+        PathBuf::from("/fixture"),
+        "gpt-5-mini".into(),
+        "https://api.openai.com/v1".into(),
+        crate::model::BackendKind::OpenAiResponses,
+        None,
+        None,
+        None,
+        Vec::new(),
+        None,
+        std::collections::BTreeMap::new(),
+    )
+}
+
+#[tokio::test]
+async fn runtime_construction_missing_closed_or_wrong_store_denies_before_model_resolution() {
+    let fixture = Fixture::new();
+    let guard = fixture.guard(10_000).await;
+    let options = || crate::runtime::RunOptions {
+        workspace_cwd: fixture.path.parent().unwrap().to_path_buf(),
+        store: crate::runtime::StoreOptions {
+            store_path: Some(fixture.path.clone()),
+        },
+        // Deliberately invalid settings must not be examined on denied admission.
+        ..Default::default()
+    };
+    for selected in [None, {
+        guard.deny_now();
+        Some(guard.clone())
+    }] {
+        let error = crate::runtime::build_run_config_for_runtime_operation(
+            options(),
+            &crate::runtime::NacConfig::default(),
+            None,
+            crate::sessions::SessionBehavior::Direct,
+            selected,
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(error.to_string().contains("runtime"), "{error:#}");
+    }
+    let other = Fixture::new();
+    let live = other.guard(10_000).await;
+    assert!(crate::runtime::build_run_config_for_runtime_operation(
+        options(),
+        &crate::runtime::NacConfig::default(),
+        None,
+        crate::sessions::SessionBehavior::Direct,
+        Some(live.clone()),
+    )
+    .await
+    .is_err());
+    assert!(
+        live.check_now().is_ok(),
+        "wrong-store caller cannot revoke another operation"
+    );
+    assert!(fixture.store.list_sessions().await.unwrap().is_empty());
+    other.finish().await;
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn runtime_construction_actual_positive_pins_required_clients_and_cannot_repeat() {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
+    let fixture = Fixture::new();
+    let _home = ConstructionHome::new(&fixture);
+    let guard = fixture.guard(20_000).await;
+    let options = construction_options(&fixture);
+    let configured = crate::runtime::build_run_config_for_runtime_operation(
+        options.clone(),
+        &crate::runtime::NacConfig::default(),
+        None,
+        crate::sessions::SessionBehavior::Direct,
+        Some(guard.clone()),
+    )
+    .await
+    .unwrap();
+    assert!(configured.agent.requires_runtime_effects());
+    assert!(
+        configured
+            .client
+            .send_turn(Vec::new(), Vec::new())
+            .await
+            .is_err(),
+        "captured client must reject its legacy unleased API before provider I/O"
+    );
+    assert_eq!(fixture.store.list_sessions().await.unwrap().len(), 1);
+    assert!(crate::runtime::build_run_config_for_runtime_operation(
+        options,
+        &crate::runtime::NacConfig::default(),
+        None,
+        crate::sessions::SessionBehavior::Direct,
+        Some(guard.clone()),
+    )
+    .await
+    .is_err());
+    assert!(
+        guard.check_now().is_ok(),
+        "duplicate construction is observational, not revocation"
+    );
+    let parts = crate::session_service::SessionService::from_orchestrator_run_config(configured);
+    assert!(parts
+        .service
+        .try_submit_prompt("no fresh admission".into())
+        .is_err());
+    assert!(parts.service.active_operation().is_none());
+    drop(parts);
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn runtime_construction_queued_create_rechecks_the_actual_owner_after_expiry() {
+    let fixture = Fixture::new();
+    let guard = fixture.guard(700).await;
+    guard.check().await.unwrap();
+    let (release, blocked) = block(&fixture.store).await;
+    let selected = guard.clone();
+    let admission: Arc<crate::sessions::SessionCreationCheck> =
+        Arc::new(move || selected.check_now());
+    let owner = fixture.store.clone();
+    let create = tokio::spawn(async move {
+        owner
+            .create_admitted_session(construction_snapshot(), admission)
+            .await
+    });
+    queued(&fixture.store, 1).await;
+    tokio::time::timeout(Duration::from_secs(2), guard.wait_for_denial())
+        .await
+        .unwrap();
+    release.send(()).unwrap();
+    blocked.acknowledge().await.unwrap();
+    assert!(create.await.unwrap().is_err());
+    assert!(fixture.store.list_sessions().await.unwrap().is_empty());
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn runtime_construction_final_check_rolls_back_an_insert_on_native_close() {
+    let fixture = Fixture::new();
+    let guard = fixture.guard(10_000).await;
+    guard.check().await.unwrap();
+    let selected = guard.clone();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
+    let admission: Arc<crate::sessions::SessionCreationCheck> = Arc::new(move || {
+        if observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+            selected.deny_now();
+        }
+        selected.check_now()
+    });
+    assert!(fixture
+        .store
+        .create_admitted_session(construction_snapshot(), admission)
+        .await
+        .is_err());
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert!(fixture.store.list_sessions().await.unwrap().is_empty());
+    fixture.finish().await;
+}
+
+#[cfg(unix)]
+async fn construction_mcp_marker(path: &std::path::Path) -> i32 {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(pid) = std::fs::read_to_string(path) {
+                if let Ok(pid) = pid.parse::<i32>() {
+                    return pid;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap()
+}
+#[cfg(unix)]
+async fn construction_mcp_gone(pid: i32) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                assert_eq!(
+                    std::io::Error::last_os_error().raw_os_error(),
+                    Some(libc::ESRCH)
+                );
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+#[cfg(unix)]
+fn blocked_construction_mcp(fixture: &Fixture) -> PathBuf {
+    let root = fixture.path.parent().unwrap();
+    let pid = root.join("owned-mcp-pid");
+    // UUID fixture paths contain no shell metacharacters. The fixture records
+    // its actual PID and execs one silent child, with no descendant or secret.
+    let script = format!("printf %s $$ > '{}'; exec sleep 30", pid.display());
+    std::fs::write(root.join("config.toml"), format!(
+        "[mcp_servers.blocked]\ntransport = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", {}]\nrequired = true\nstartup_timeout_ms = 10000\n",
+        serde_json::to_string(&script).unwrap(),
+    )).unwrap();
+    pid
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn runtime_construction_expiry_interrupts_actual_silent_mcp_startup_and_reaps_it() {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
+    let fixture = Fixture::new();
+    let _home = ConstructionHome::new(&fixture);
+    let options = construction_options(&fixture);
+    let marker = blocked_construction_mcp(&fixture);
+    let guard = fixture.guard(1_500).await;
+    let selected = guard.clone();
+    let started = std::time::Instant::now();
+    let building = tokio::spawn(async move {
+        crate::runtime::build_run_config_for_runtime_operation(
+            options,
+            &crate::runtime::NacConfig::default(),
+            None,
+            crate::sessions::SessionBehavior::Direct,
+            Some(selected),
+        )
+        .await
+    });
+    let pid = construction_mcp_marker(&marker).await;
+    assert!(tokio::time::timeout(Duration::from_secs(3), building)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_err());
+    assert!(started.elapsed() < Duration::from_secs(4));
+    construction_mcp_gone(pid).await;
+    assert!(fixture.store.list_sessions().await.unwrap().is_empty());
+    assert!(guard.check_now().is_err());
+    fixture.finish().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn runtime_construction_cancelled_caller_closes_actual_mcp_without_replaying() {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
+    let fixture = Fixture::new();
+    let _home = ConstructionHome::new(&fixture);
+    let options = construction_options(&fixture);
+    let marker = blocked_construction_mcp(&fixture);
+    let denied = crate::runtime::build_run_config_for_runtime_operation(
+        options.clone(),
+        &crate::runtime::NacConfig::default(),
+        None,
+        crate::sessions::SessionBehavior::Direct,
+        None,
+    )
+    .await
+    .err()
+    .unwrap();
+    assert_eq!(
+        denied.to_string(),
+        "runtime construction admission required"
+    );
+    assert!(
+        !marker.exists(),
+        "required None must launch zero configured MCP subprocesses"
+    );
+    let guard = fixture.guard(20_000).await;
+    let selected = guard.clone();
+    let building = tokio::spawn(async move {
+        crate::runtime::build_run_config_for_runtime_operation(
+            options,
+            &crate::runtime::NacConfig::default(),
+            None,
+            crate::sessions::SessionBehavior::Direct,
+            Some(selected),
+        )
+        .await
+    });
+    let pid = construction_mcp_marker(&marker).await;
+    building.abort();
+    assert!(building.await.err().unwrap().is_cancelled());
+    assert!(
+        guard.check_now().is_err(),
+        "caller Drop must synchronously close the original operation"
+    );
+    construction_mcp_gone(pid).await;
+    assert!(fixture.store.list_sessions().await.unwrap().is_empty());
+    // No scope can be reconstructed from an uncertain retained row or failed
+    // construction; the same UUID remains observational after task cancellation.
+    assert!(matches!(
+        fixture
+            .store
+            .reserve_managed_runtime_lease(guard.binding().unwrap(), native_clock().unwrap())
+            .await
+            .unwrap(),
+        RuntimeLeaseReservationOutcome::Readback(_)
+    ));
+    fixture.finish().await;
+}
+
 struct Block {
     entered: std::sync::mpsc::SyncSender<()>,
     release: std::sync::mpsc::Receiver<()>,

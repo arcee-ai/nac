@@ -110,6 +110,7 @@ pub struct PendingRuntimeChallenge {
     challenge: RuntimeChallengeSpec,
     prior: Option<RuntimeLeaseSnapshot>,
     issued_ms: i64,
+    original_admission_deadline: Instant,
     monotonic_deadline: Instant,
 }
 
@@ -121,6 +122,7 @@ pub struct ActiveRuntimeLease {
     binding: RuntimeLeaseBinding,
     reservation_id: Uuid,
     snapshot: RuntimeLeaseSnapshot,
+    original_admission_deadline: Instant,
     monotonic_deadline: Instant,
 }
 
@@ -136,6 +138,11 @@ impl ActiveRuntimeLease {
             && clock.wall_ms < self.snapshot.expires_ms
             && clock.monotonic < self.monotonic_deadline
     }
+    pub(crate) fn initial_admission_available_at(&self, clock: RuntimeLeaseClock) -> bool {
+        self.available_at(clock)
+            && clock.wall_ms < self.binding.original_expires_ms
+            && clock.monotonic < self.original_admission_deadline
+    }
     pub(crate) fn remaining_at(&self, clock: RuntimeLeaseClock) -> Option<Duration> {
         self.available_at(clock).then(|| {
             Duration::from_millis((self.snapshot.expires_ms - clock.wall_ms) as u64).min(
@@ -150,6 +157,7 @@ impl ActiveRuntimeLease {
             && self.binding.serving_lifetime_id == other.binding.serving_lifetime_id
             && self.binding.original_expires_ms == other.binding.original_expires_ms
             && self.reservation_id == other.reservation_id
+            && self.original_admission_deadline == other.original_admission_deadline
     }
 }
 
@@ -246,6 +254,7 @@ pub fn challenge_managed_runtime_initial(path: &Path, fresh: FreshRuntimeReserva
     transaction.commit()?;
     Ok(PendingRuntimeChallenge { binding: fresh.binding, reservation_id: fresh.reservation_id,
         challenge: challenge.clone(), prior: None, issued_ms,
+        original_admission_deadline: fresh.original_deadline,
         monotonic_deadline: deadline.min(fresh.original_deadline) })
 }
 command ChallengeManagedRuntimeInitialCommand {
@@ -288,6 +297,7 @@ pub fn challenge_managed_runtime_renewal(path: &Path, active: &ActiveRuntimeLeas
     transaction.commit()?;
     Ok(PendingRuntimeChallenge { binding: active.binding.clone(), reservation_id: active.reservation_id,
         challenge: challenge.clone(), prior: Some(active.snapshot.clone()), issued_ms,
+        original_admission_deadline: active.original_admission_deadline,
         monotonic_deadline: deadline.min(active.monotonic_deadline) })
 }
 command ChallengeManagedRuntimeRenewalCommand {
@@ -391,6 +401,7 @@ fn consume_with_connection(
         binding: pending.binding,
         reservation_id: pending.reservation_id,
         snapshot: response.lease.clone(),
+        original_admission_deadline: pending.original_admission_deadline,
         monotonic_deadline: (clock.monotonic + remaining).min(receipt_deadline),
     })
 }
@@ -429,6 +440,7 @@ impl From<&ActiveRuntimeLease> for ActiveRuntimeLeaseCheck {
             binding: active.binding.clone(),
             reservation_id: active.reservation_id,
             snapshot: active.snapshot.clone(),
+            original_admission_deadline: active.original_admission_deadline,
             monotonic_deadline: active.monotonic_deadline,
         })
     }

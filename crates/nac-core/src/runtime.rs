@@ -45,6 +45,7 @@ use crate::workspace::GitTarget;
 
 mod builders;
 mod configuration;
+mod construction_admission;
 mod contracts;
 mod effect_lease;
 mod managed_runtime_lease;
@@ -58,7 +59,7 @@ pub use managed_runtime_lease::{ManagedRuntimeExpiryObservation, ManagedRuntimeL
 
 pub use builders::{
     build_managed_worker_config, build_run_config, build_run_config_for_project,
-    build_run_config_for_project_with_behavior,
+    build_run_config_for_project_with_behavior, build_run_config_for_runtime_operation,
 };
 #[cfg(test)]
 use configuration::NonModelNacConfig;
