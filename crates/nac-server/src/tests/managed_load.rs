@@ -841,6 +841,7 @@ async fn managed_load_scenario() {
 
     let fault_started = Instant::now();
     let identity = build_identity::current();
+    // Keep the large fault futures off the debug test thread's stack.
     let fault_evidence = FaultEvidence {
         seed,
         store: adapter.identity(),
@@ -874,10 +875,11 @@ async fn managed_load_scenario() {
             },
         ],
         busy_conflict: exercise_busy_conflict(&adapter, seed),
-        append_failure: exercise_append_failure(&adapter, &worker, seed).await,
-        monitor_failure: exercise_monitor_failure(&adapter, &worker, seed).await,
-        worker_interruption: exercise_worker_interruption(&adapter, &worker, seed).await,
-        host_interruption_restart: exercise_restart_recovery(&adapter, &worker, seed).await,
+        append_failure: Box::pin(exercise_append_failure(&adapter, &worker, seed)).await,
+        monitor_failure: Box::pin(exercise_monitor_failure(&adapter, &worker, seed)).await,
+        worker_interruption: Box::pin(exercise_worker_interruption(&adapter, &worker, seed)).await,
+        host_interruption_restart: Box::pin(exercise_restart_recovery(&adapter, &worker, seed))
+            .await,
     };
     let fault_evidence = FaultEvidence {
         elapsed_ms: fault_started.elapsed().as_millis(),
