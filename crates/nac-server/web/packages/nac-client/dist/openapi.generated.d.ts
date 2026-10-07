@@ -135,6 +135,12 @@ export interface components {
             thread_name?: string | null;
             type: "run_finished";
         };
+        ApiErrorBody: {
+            error: string;
+        };
+        AssignSessionRequest: {
+            session_id: string;
+        };
         AssistantStreamDelta: {
             reasoning?: string | null;
             reset?: boolean;
@@ -142,17 +148,192 @@ export interface components {
             text?: string | null;
             thread_name?: string | null;
         };
+        AuthenticateMcpOAuthRequest: {
+            additional_scopes?: string[];
+        };
+        AuthenticateMcpOAuthResponse: {
+            authorization_url: string;
+            status: components["schemas"]["McpOAuthPublicStatus"];
+        };
+        AuthStatus: "ready" | "no_credential";
         BackendKind: "deepseek-chat" | "fireworks-chat" | "together-chat" | "openai-responses" | "openai-chat-completions" | "chatgpt-codex-responses" | "anthropic-messages" | "arcee-auth" | "arcee-api";
+        Branch: {
+            is_current: boolean;
+            name: string;
+        };
+        BranchList: {
+            branches: components["schemas"]["Branch"][];
+            current?: string | null;
+            dirty: boolean;
+        };
+        BrowseEntry: {
+            is_directory: boolean;
+            name: string;
+            path: string;
+        };
+        BrowseKind: "directory" | "toml" | "file";
+        BrowseListing: {
+            entries: components["schemas"]["BrowseEntry"][];
+            home?: string | null;
+            parent?: string | null;
+            path: string;
+            truncated: boolean;
+        };
+        CancelInboxItemRequest: {
+            expected_version: number;
+        };
         ChangedFileStat: {
             additions?: number | null;
             deletions?: number | null;
             path: string;
             status: string;
         };
+        ClearGoalRequest: {
+            expected_version: number;
+        };
         CommandStatus: "completed" | "timed_out" | "cancelled" | "spawn_error";
+        CommitOutcome: {
+            additions: number;
+            branch?: string | null;
+            deletions: number;
+            files_changed: number;
+            sha: string;
+        };
+        CommitWorkspaceRequest: {
+            message: string;
+        };
         CompactionFailure: "summary_request_failed" | "summary_rejected" | "checkpoint_persistence_failed" | "cancelled";
         CompactionReason: "auto" | "manual";
         CompactionSkipReason: "no_eligible_boundary" | "already_compacted";
+        CompactSessionResponse: {
+            compaction_id: string;
+            status: "compacted";
+        } | {
+            compaction_id: string;
+            reason: components["schemas"]["CompactionSkipReason"];
+            status: "unchanged";
+        };
+        ConfigureMcpOAuthRequest: {
+            authorization_metadata?: null | components["schemas"]["McpOAuthAuthorizationMetadataRequest"];
+            client_id_credential?: string | null;
+            client_secret_credential?: string | null;
+            registration?: null | components["schemas"]["McpOAuthRegistrationRequest"];
+            scopes?: string[];
+        };
+        CostTier: {
+            cache_read: number;
+            cache_write: number;
+            input: number;
+            input_tokens_above: number;
+            output: number;
+        };
+        CreateGoalRequest: {
+            objective: string;
+            token_budget?: number | null;
+        };
+        CreateInboxItemRequest: {
+            delivery: components["schemas"]["InboxDelivery"];
+            prompt: string;
+        };
+        CreateMcpServerRequest: {
+            allowed_tools?: string[] | null;
+            approval?: components["schemas"]["McpToolApproval"];
+            args?: string[];
+            bearer_token_env_var?: string | null;
+            catalog_timeout_ms?: number | null;
+            command?: string | null;
+            cwd?: string | null;
+            denied_tools?: string[];
+            enabled?: boolean;
+            env?: Record<string, string>;
+            env_headers?: Record<string, string>;
+            env_vars?: string[];
+            execution_timeout_ms?: number | null;
+            header_helper?: null | components["schemas"]["McpHeaderHelperConfig"];
+            headers?: Record<string, string>;
+            library_id?: string | null;
+            name: string;
+            protocol?: components["schemas"]["McpProtocolSelection"];
+            required?: boolean;
+            startup_timeout_ms?: number | null;
+            tool_approvals?: Record<string, components["schemas"]["McpToolApproval"]>;
+            transport: components["schemas"]["McpTransportSchema"];
+            url?: string | null;
+        };
+        CreateModelConfigurationRequest: {
+            allow_insecure_http?: boolean;
+            api_key?: string | null;
+            backend: components["schemas"]["BackendKind"];
+            base_url?: string | null;
+            extra_headers?: Record<string, string> | null;
+            initial_prompt?: string | null;
+            light_model?: null | components["schemas"]["LightModelSettings"];
+            model: string;
+            name: string;
+            orchestrator_compaction_threshold?: number | null;
+            reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
+        };
+        CreateProjectRequest: {
+            cwd: string;
+            default_model_config_id?: string | null;
+            description?: string | null;
+            name?: string | null;
+            ssh_host?: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        CreateSessionRequest: {
+            allow_insecure_http?: components["schemas"]["RequestField_bool_bool"];
+            api_key_env?: components["schemas"]["RequestField_String_String"];
+            backend?: components["schemas"]["RequestField_String_String"];
+            base_url?: components["schemas"]["RequestField_String_String"];
+            behavior?: components["schemas"]["SessionBehavior"];
+            cwd?: string | null;
+            extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
+            first_chat?: boolean;
+            first_chat_same_behavior?: boolean;
+            light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
+            model?: components["schemas"]["RequestField_String_String"];
+            orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
+            project_id?: string | null;
+            reasoning_effort?: components["schemas"]["RequestField_String_String"];
+            sandbox?: components["schemas"]["SandboxRequest"];
+            ssh_host?: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        CreateSshConfigurationRequest: {
+            name: string;
+            ssh_host: string;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        DefaultLimits: {
+            context_window: number;
+            max_tokens: number;
+            supported_efforts: components["schemas"]["ReasoningEffort"][];
+        };
+        DeleteProjectResponse: {
+            deleted_session_ids: string[];
+            released_session_ids: string[];
+        };
+        DeleteProjectSessions: "keep" | "delete";
+        DeviceLoginStartedResponse: {
+            expires_in_secs: number;
+            login_id: string;
+            provider: components["schemas"]["ManagedAuthProvider"];
+            user_code: string | null;
+            verification_uri: string;
+        };
+        DeviceLoginStateResponse: {
+            state: "pending";
+        } | {
+            auth: components["schemas"]["ManagedAuthStatusResponse"];
+            state: "complete";
+        } | {
+            error: string;
+            state: "failed";
+        };
         EpisodeSnapshot: {
             action: string;
             content: string;
@@ -163,14 +344,362 @@ export interface components {
             thread_name: string;
         };
         EpisodeStatus: "ok" | "error" | "timed_out" | "cancelled";
+        ForkSessionRequest: {
+            message_idx: number;
+        };
+        ForkSessionResponse: {
+            session_id: string;
+        };
         FunctionCall: {
             arguments: string;
             name: string;
         };
+        GeneratedCredential: {
+            name: string;
+        };
+        GitHubBranchListResponse: {
+            branches: string[];
+        };
+        GitHubLoginStartedResponse: {
+            expires_in_secs: number;
+            login_id: string;
+            user_code: string;
+            verification_uri: string;
+        };
+        GitHubLoginStateResponse: {
+            state: "pending";
+        } | {
+            auth: components["schemas"]["GitHubStatusResponse"];
+            state: "complete";
+        } | {
+            error: string;
+            state: "failed";
+        };
+        GitHubRepositoryListResponse: {
+            repositories: components["schemas"]["GitHubRepositoryResponse"][];
+        };
+        GitHubRepositoryResponse: {
+            can_read: boolean;
+            can_write: boolean;
+            clone_url: string;
+            default_branch: string;
+            full_name: string;
+            html_url: string;
+            id: number;
+            name: string;
+            private: boolean;
+        };
+        GitHubStatusResponse: {
+            avatar_url?: string | null;
+            configured: boolean;
+            connected: boolean;
+            expires_at_ms?: number | null;
+            git_configured: boolean;
+            git_email?: string | null;
+            git_name?: string | null;
+            login?: string | null;
+            name?: string | null;
+            organization?: string | null;
+        };
+        GitIdentityResponse: {
+            email: string;
+            name: string;
+        };
+        GoalStatus: "active" | "paused" | "blocked" | "usage_limited" | "budget_limited" | "complete";
+        HealthResponse: {
+            status: string;
+        };
+        InboxDelivery: "steer" | "queue";
+        InboxItemResponse: {
+            cancelled_at?: string | null;
+            client_id?: string | null;
+            created_at: string;
+            delivered_at?: string | null;
+            delivered_run_id?: string | null;
+            delivery: components["schemas"]["InboxDelivery"];
+            id: number;
+            prompt: string;
+            session_id: string;
+            status: components["schemas"]["InboxStatus"];
+            target_run_id?: string | null;
+            updated_at: string;
+            version: number;
+        };
+        InboxStatus: "pending" | "delivered" | "cancelled";
         LaggedEvent: {
             missed: number;
         };
+        LaunchModelDefaults: {
+            configured_model?: string | null;
+            configured_reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
+        };
+        LaunchModelDefaultsRequest: {
+            cwd?: string | null;
+            ssh_host?: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        LightModelSettings: {
+            api_key_env?: string | null;
+            backend?: null | components["schemas"]["BackendKind"];
+            base_url?: string | null;
+            model: string;
+            reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
+        };
+        ManagedAcceptedIdentity: {
+            host_incarnation_id: string;
+            managed_host_id: string;
+            operation_id: string;
+            target: components["schemas"]["ManagedUpgradeTarget"];
+        };
+        ManagedAuthListResponse: {
+            providers: components["schemas"]["ManagedAuthStatusResponse"][];
+        };
+        ManagedAuthProvider: "arcee" | "codex";
+        ManagedAuthStatusResponse: {
+            account: string | null;
+            backend: components["schemas"]["BackendKind"];
+            base_url: string | null;
+            expires_at_ms: number | null;
+            organization: string | null;
+            path: string;
+            provider: components["schemas"]["ManagedAuthProvider"];
+            signed_in: boolean;
+        };
+        ManagedBlockerKind: "active_run" | "compaction" | "traditional_child" | "managed_orchestrator" | "terminal_process" | "clone_operation" | "workspace_mutation" | "operation_lease" | "resource_lease" | "maintenance_operation";
+        ManagedCloneOperation: {
+            branch: string;
+            created_at_unix_ms: number;
+            destination: string;
+            error?: string | null;
+            operation_id: string;
+            progress: string;
+            project?: null | components["schemas"]["ProjectRecord"];
+            project_id: string;
+            project_name: string;
+            repository: string;
+            repository_id: number;
+            reused_existing_checkout: boolean;
+            source_identity: string;
+            status: components["schemas"]["ManagedCloneStatus"];
+            updated_at_unix_ms: number;
+            version: number;
+        };
+        ManagedCloneStatus: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+        ManagedHostStatusResponse: {
+            build_id: string;
+            build_track: string;
+            checks: components["schemas"]["ReadinessCheck"][];
+            github_status: string;
+            logical_host_id: string;
+            maintenance?: null | components["schemas"]["ManagedMaintenanceSnapshot"];
+            maintenance_state: string;
+            managed: boolean;
+            migration_failure?: string | null;
+            migration_state: string;
+            minimum_migratable_schema_version: number;
+            model: components["schemas"]["ManagedModelStatus"];
+            model_ready: boolean;
+            opened_schema_version?: number | null;
+            owner?: string | null;
+            product_version: string;
+            project_count: number;
+            public_hostname: string;
+            ready: boolean;
+            repository_root: string;
+            schema_version: number;
+            secret_count: number;
+            session_count: number;
+            source_revision: string;
+            supported_schema_version: number;
+            version: string;
+        };
+        ManagedMaintenanceSnapshot: {
+            accepted_identity?: null | components["schemas"]["ManagedAcceptedIdentity"];
+            blockers: components["schemas"]["ManagedUpgradeBlocker"][];
+            operation_id?: string | null;
+            prepared_at?: string | null;
+            state: components["schemas"]["ManagedMaintenanceState"];
+            target?: null | components["schemas"]["ManagedUpgradeTarget"];
+            version: number;
+        };
+        ManagedMaintenanceState: "serving" | "maintenance";
+        ManagedModelStatus: {
+            backend: components["schemas"]["BackendKind"];
+            display_name: string;
+            endpoint: string;
+            id: string;
+        };
+        ManagedOrchestratorRecord: {
+            completion_inbox_id?: number | null;
+            created_at: string;
+            description: string;
+            execution_mode?: null | components["schemas"]["TraditionalChildExecutionMode"];
+            failure?: string | null;
+            generation: number;
+            orchestrator_session_id: string;
+            parent_session_id: string;
+            report?: string | null;
+            root_session_id: string;
+            run_id?: string | null;
+            status: components["schemas"]["TraditionalChildStatus"];
+            updated_at: string;
+            version: number;
+        };
+        ManagedSecretList: {
+            healthy: boolean;
+            secrets: components["schemas"]["ManagedSecretSummary"][];
+        };
+        ManagedSecretSummary: {
+            name: string;
+            updated_at_unix_ms: number;
+        };
+        ManagedSessionSummary: {
+            active: boolean;
+            active_run?: null | components["schemas"]["ActiveRunSnapshot"];
+            lineage?: null | components["schemas"]["SessionLineageSnapshot"];
+            summary: components["schemas"]["SessionSummarySnapshot"];
+            workspace_diff?: null | components["schemas"]["WorkspaceDiffTotals"];
+        };
+        ManagedUpgradeBlocker: {
+            detail: string;
+            id: string;
+            kind: components["schemas"]["ManagedBlockerKind"];
+            session_id?: string | null;
+        };
+        ManagedUpgradeTarget: {
+            minimum_schema_version: number;
+            product_version: string;
+            release_id: string;
+            schema_version: number;
+            source_sha: string;
+        };
+        McpHeaderHelperConfig: {
+            args?: string[];
+            command: string;
+            cwd?: string | null;
+            env?: Record<string, string>;
+            env_vars?: string[];
+            timeout_ms?: number | null;
+        };
+        McpLibraryAuth: "none" | "optional_header" | "required_header";
+        McpLibraryEntry: {
+            auth: components["schemas"]["McpLibraryAuth"];
+            auth_header?: string | null;
+            auth_hint?: string | null;
+            category: string;
+            description: string;
+            docs_url: string;
+            icon_url?: string | null;
+            id: string;
+            name: string;
+            tags: string[];
+            transport: string;
+            url: string;
+        };
+        McpLibraryResponse: {
+            entries: components["schemas"]["McpLibraryEntry"][];
+        };
         McpNotificationKind: "catalog_refreshed" | "catalog_refresh_failed" | "resource_updated" | "log" | "progress" | "subscription_ended";
+        McpOAuthAuthorizationMetadataRequest: {
+            authorization_endpoint: string;
+            code_challenge_methods_supported?: string[] | null;
+            issuer?: string | null;
+            jwks_uri?: string | null;
+            registration_endpoint?: string | null;
+            response_types_supported?: string[] | null;
+            scopes_supported?: string[] | null;
+            token_endpoint: string;
+        } & Record<string, unknown>;
+        McpOAuthPublicStatus: "needs_configuration" | "needs_authorization" | "connecting" | "connected" | "failed";
+        McpOAuthRegistrationRequest: {
+            client_id_credential: string;
+            client_secret_credential?: string | null;
+            type: "pre_registered";
+        } | {
+            type: "client_metadata";
+            url: string;
+        } | {
+            client_name?: string | null;
+            type: "dynamic";
+        };
+        McpOAuthStatusResponse: {
+            authorization_url?: string | null;
+            message?: string | null;
+            status: components["schemas"]["McpOAuthPublicStatus"];
+        };
+        McpProbedTool: {
+            _meta?: unknown;
+            annotations?: unknown;
+            description?: string | null;
+            icons?: unknown;
+            name: string;
+            output_schema?: unknown;
+            title?: string | null;
+        };
+        McpProbeResult: {
+            capabilities: string[];
+            catalog_warnings: string[];
+            instructions?: string | null;
+            prompt_count: number;
+            protocol_version: string;
+            resource_count: number;
+            resource_template_count: number;
+            server_name?: string | null;
+            server_version?: string | null;
+            tools: components["schemas"]["McpProbedTool"][];
+        };
+        McpPromptArgument: {
+            description?: string | null;
+            name: string;
+            required: boolean;
+        };
+        McpProtocolSelection: "legacy" | "auto" | "current";
+        McpRuntimeState: "disabled" | "disconnected" | "connecting" | "connected" | "failed";
+        McpRuntimeStatus: {
+            auth_required: boolean;
+            error?: string | null;
+            name: string;
+            protocol_version?: string | null;
+            required: boolean;
+            server_name?: string | null;
+            server_version?: string | null;
+            state: components["schemas"]["McpRuntimeState"];
+            tool_count: number;
+        };
+        McpRuntimeStatusList: {
+            servers: components["schemas"]["McpRuntimeStatus"][];
+        };
+        McpServerList: {
+            servers: components["schemas"]["McpServerView"][];
+        };
+        McpServerView: {
+            allowed_tools?: string[] | null;
+            approval: components["schemas"]["McpToolApproval"];
+            args: string[];
+            bearer_token_env_var?: string | null;
+            catalog_timeout_ms?: number | null;
+            command?: string | null;
+            cwd?: string | null;
+            denied_tools: string[];
+            enabled: boolean;
+            env: Record<string, string>;
+            env_headers: Record<string, string>;
+            env_vars: string[];
+            execution_timeout_ms?: number | null;
+            header_helper?: null | components["schemas"]["McpHeaderHelperConfig"];
+            headers: Record<string, string>;
+            library_id?: string | null;
+            name: string;
+            protocol: components["schemas"]["McpProtocolSelection"];
+            required: boolean;
+            startup_timeout_ms?: number | null;
+            tool_approvals: Record<string, components["schemas"]["McpToolApproval"]>;
+            transport: components["schemas"]["McpTransportSchema"];
+            url?: string | null;
+        };
+        McpToolApproval: "allow" | "ask";
+        McpTransportSchema: "stdio" | "streamable_http";
         Message: {
             content: string;
             role: "system";
@@ -201,9 +730,73 @@ export interface components {
             start: number;
             total: number;
         };
+        MessagesPageResponse: {
+            created_at: (string | null)[];
+            messages: components["schemas"]["Message"][];
+            page: components["schemas"]["MessagePageMetadata"];
+        };
+        ModelConfigFromFileRequest: {
+            path: string;
+        };
+        ModelConfigurationList: {
+            configurations: components["schemas"]["ModelConfigurationRecord"][];
+        };
+        ModelConfigurationRecord: {
+            allow_insecure_http: boolean;
+            api_key_env?: string | null;
+            backend: string;
+            base_url: string;
+            config_id: string;
+            created_at: string;
+            extra_headers: Record<string, string>;
+            initial_prompt?: string | null;
+            light_model?: null | components["schemas"]["LightModelSettings"];
+            model: string;
+            name: string;
+            orchestrator_compaction_threshold?: number | null;
+            reasoning_effort?: string | null;
+            updated_at: string;
+        };
+        ModelCostRates: {
+            cache_read: number;
+            cache_write: number;
+            input: number;
+            output: number;
+            tiers?: components["schemas"]["CostTier"][] | null;
+        };
+        ModelEntry: {
+            context_window: number;
+            cost: components["schemas"]["ModelCostRates"];
+            display_name: string | null;
+            id: string;
+            max_tokens: number;
+            reasoning: boolean;
+            source: components["schemas"]["ModelSource"];
+            supported_efforts: components["schemas"]["ReasoningEffort"][];
+        };
+        ModelListing: {
+            catalog_version: number;
+            providers: components["schemas"]["ProviderListing"][];
+        };
         ModelOrigin: {
             backend: components["schemas"]["BackendKind"];
             model: string;
+        };
+        ModelSource: "baseline" | "overlay" | "user_override" | "provider_default" | "fallback";
+        OpenLocalPathResult: {
+            fell_back_to_parent: boolean;
+            opened: string;
+        };
+        OpenWorkspacePathRequest: {
+            path: string;
+        };
+        OrchestratorSteeringRequest: {
+            instruction: string;
+        };
+        OrchestratorSteeringResponse: {
+            instruction_preview: string;
+            status: string;
+            steering_id: number;
         };
         PartialModelOutput: {
             reasoning?: boolean;
@@ -211,6 +804,15 @@ export interface components {
             tool_call?: boolean;
         };
         PermissionApprovalMode: "manual" | "auto_approve";
+        PermissionGrantRecord: {
+            action: string;
+            backend: string;
+            created_at: string;
+            id: string;
+            resource: string;
+            session_config_version: number;
+            session_id: string;
+        };
         PermissionReply: "once" | "always" | "reject";
         PermissionRequest: {
             call_id?: string | null;
@@ -225,6 +827,77 @@ export interface components {
             display: string;
             resource: string;
             save_resource?: string | null;
+        };
+        PermissionStateResponse: {
+            approval_mode: components["schemas"]["PermissionApprovalMode"];
+            grants: components["schemas"]["PermissionGrantRecord"][];
+            requests: components["schemas"]["PermissionRequest"][];
+        };
+        ProjectList: {
+            projects: components["schemas"]["ProjectRecord"][];
+        };
+        ProjectRecord: {
+            created_at: string;
+            cwd: string;
+            default_model_config_id?: string | null;
+            description?: string | null;
+            name: string;
+            pinned: boolean;
+            presentation_version: number;
+            project_id: string;
+            sort_order: number;
+            ssh_host?: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+            updated_at: string;
+        };
+        ProviderAuth: "api_key_env" | "managed_arcee" | "codex_oauth";
+        ProviderConnection: {
+            api_key_env: string | null;
+            base_url: string;
+        };
+        ProviderListing: {
+            auth: components["schemas"]["ProviderAuth"];
+            auth_hint: string | null;
+            auth_status: components["schemas"]["AuthStatus"];
+            connection: null | components["schemas"]["ProviderConnection"];
+            default_base_url: string | null;
+            default_limits: components["schemas"]["DefaultLimits"];
+            id: components["schemas"]["BackendKind"];
+            managed_base_url: string | null;
+            models: components["schemas"]["ModelEntry"][];
+        };
+        ProviderModel: {
+            display_name: string | null;
+            id: string;
+        };
+        ProviderModelList: {
+            base_url: string;
+            models: components["schemas"]["ProviderModel"][];
+        };
+        ProviderModelsRequest: {
+            allow_insecure_http?: boolean;
+            api_key?: string | null;
+            api_key_env?: string | null;
+            backend: components["schemas"]["BackendKind"];
+            base_url?: string | null;
+        };
+        PutManagedSecretRequest: {
+            value: string;
+        };
+        RawSessionConfig: {
+            allow_insecure_http: boolean;
+            api_key_env: string | null;
+            backend: string | null;
+            base_url: string;
+            config_version: number;
+            diagnostics?: string[];
+            extra_headers_json: string | null;
+            light_model?: null | components["schemas"]["LightModelSettings"];
+            model: string;
+            orchestrator_compaction_threshold: number | null;
+            reasoning_effort: string | null;
+            session_id: string;
         };
         ReadinessCheck: {
             detail: string;
@@ -248,17 +921,80 @@ export interface components {
             supported_schema_version: number;
             version: string;
         };
+        ReasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
         RecentEventsResponse: {
             boundary: components["schemas"]["SessionEventBoundary"];
             events: components["schemas"]["SessionEventEnvelope"][];
         };
         RecoveryAction: "automatic_retry" | "resume_goal" | "regenerate_with_rewind" | "settings" | "none";
+        RegenerateSessionRequest: {
+            message_idx: number;
+        };
+        ReorderProjectsRequest: {
+            expected_versions: Record<string, number>;
+            pinned: boolean;
+            project_ids: string[];
+        };
+        ReorderProjectsResponse: {
+            pinned: boolean;
+            projects: components["schemas"]["ProjectRecord"][];
+        };
+        ReorderSessionsRequest: {
+            expected_versions: Record<string, number>;
+            pinned: boolean;
+            session_ids: string[];
+        };
+        ReorderSessionsResponse: {
+            pinned: boolean;
+            sessions: components["schemas"]["SessionSummarySnapshot"][];
+        };
         ReplayBoundaryEvent: {
             epoch_id: string;
             replay_boundary_sequence_id: number;
         };
         ReplayGapEvent: {
             replay_gap: components["schemas"]["SessionReplayGap"];
+        };
+        ReplyPermissionRequest: {
+            reply: components["schemas"]["PermissionReply"];
+        };
+        RequestField_BackendKind_BackendKind: null | ("deepseek-chat" | "fireworks-chat" | "together-chat" | "openai-responses" | "openai-chat-completions" | "chatgpt-codex-responses" | "anthropic-messages" | "arcee-auth" | "arcee-api");
+        RequestField_bool_bool: null | boolean;
+        RequestField_BTreeMap_BTreeMap_String_McpToolApproval: null | Record<string, "allow" | "ask">;
+        RequestField_BTreeMap_BTreeMap_String_Option_String: null | Record<string, null | string>;
+        RequestField_BTreeMap_BTreeMap_String_String: null | Record<string, string>;
+        RequestField_HeadersRequest_HeadersRequest: null | (Record<string, string> | string);
+        RequestField_LightModelSettings_LightModelSettings: null | {
+            api_key_env?: string | null;
+            backend?: null | components["schemas"]["BackendKind"];
+            base_url?: string | null;
+            model: string;
+            reasoning_effort?: null | components["schemas"]["ReasoningEffort"];
+        };
+        RequestField_McpProtocolSelection_McpProtocolSelection: null | ("legacy" | "auto" | "current");
+        RequestField_McpToolApproval_McpToolApproval: null | ("allow" | "ask");
+        RequestField_ReasoningEffort_ReasoningEffort: null | ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max");
+        RequestField_String_String: null | string;
+        RequestField_u16_u16: null | number;
+        RequestField_u64_u64: null | number;
+        RequestField_UpdateMcpHeaderHelperRequest_UpdateMcpHeaderHelperRequest: null | {
+            args?: string[];
+            command: string;
+            cwd?: string | null;
+            env?: Record<string, string | null>;
+            env_vars?: string[];
+            timeout_ms?: number | null;
+        };
+        RequestField_Vec_Vec_String: null | string[];
+        ResolvedModelConfiguration: {
+            allow_insecure_http: boolean;
+            api_key_env: string | null;
+            backend: components["schemas"]["BackendKind"];
+            base_url: string;
+            model: string | null;
+            models: components["schemas"]["ProviderModel"][];
+            models_error: string | null;
+            reasoning_effort: null | components["schemas"]["ReasoningEffort"];
         };
         ResponseTimingSnapshot: {
             cumulative_token_usage?: null | components["schemas"]["TokenUsage"];
@@ -268,6 +1004,16 @@ export interface components {
             response_durations_ms?: (number | null)[] | null;
             token_usages?: (null | components["schemas"]["TokenUsage"])[] | null;
             unattributed_token_usage?: null | components["schemas"]["TokenUsage"];
+        };
+        RevertSessionRequest: {
+            message_idx: number;
+        };
+        RevertSessionResponse: {
+            messages_removed: number;
+            revisions_removed: number;
+            threads_removed: number;
+            transcript_len: number;
+            workspace_restored: boolean;
         };
         RunFailure: {
             attempt_count: number;
@@ -283,6 +1029,31 @@ export interface components {
         };
         RunFailureKind: "transport" | "capacity" | "authentication" | "validation" | "configuration" | "protocol" | "interrupted" | "unknown";
         RunFailurePhase: "request" | "response" | "stream" | "decode" | "agent";
+        SandboxActivity: {
+            phase: string;
+            since_epoch_ms: number;
+        };
+        SandboxAvailability: {
+            detail?: string | null;
+            guidance?: string | null;
+            status: components["schemas"]["SandboxAvailabilityStatus"];
+        };
+        SandboxAvailabilityStatus: "ready" | "missing" | "unavailable";
+        SandboxRequest: {
+            activity_key?: string | null;
+            backend?: string | null;
+            cpus?: number | null;
+            enabled?: boolean;
+            gpus?: string[];
+            image?: string | null;
+            memory_mib?: number | null;
+            mounts?: string[];
+            mounts_ro?: string[];
+            no_mount_cwd?: boolean;
+            session_key?: string | null;
+            shm_size?: string | null;
+            workdir?: string | null;
+        };
         SessionBehavior: "orchestrator" | "direct" | "direct-with-orchestrator";
         SessionClientId: string;
         SessionEvent: {
@@ -373,6 +1144,25 @@ export interface components {
             worksets: components["schemas"]["WorksetsSnapshot"];
             workspace: components["schemas"]["WorkspaceSnapshot"];
         };
+        SessionGoalRecord: {
+            accounting_run_id: string | null;
+            accounting_started_at_epoch_ms: number | null;
+            accounting_token_baseline: number | null;
+            consecutive_transient_failures: number;
+            continuation_run_id: string | null;
+            created_at: string;
+            goal_id: string;
+            last_failure: null | components["schemas"]["RunFailure"];
+            next_attempt_at_epoch_ms: number | null;
+            objective: string;
+            session_id: string;
+            status: components["schemas"]["GoalStatus"];
+            time_used_ms: number;
+            token_budget: number | null;
+            tokens_used: number;
+            updated_at: string;
+            version: number;
+        };
         SessionLineageKind: "traditional-child" | "managed-orchestrator";
         SessionLineageSnapshot: {
             description: string;
@@ -431,6 +1221,77 @@ export interface components {
             updated_at: string;
             visible_message_count: number;
         };
+        SkillCatalogEntry: {
+            compatibility?: string | null;
+            description: string;
+            name: string;
+        };
+        SlashCommand: "compact" | "goal" | "mcp_prompt";
+        SlashCommandDefinition: {
+            accepts_arguments: boolean;
+            arguments?: components["schemas"]["McpPromptArgument"][];
+            command: components["schemas"]["SlashCommand"];
+            description: string;
+            name: string;
+        };
+        SshBrowseRequest: {
+            hidden?: boolean;
+            path?: string | null;
+            ssh_host?: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        SshConfigurationList: {
+            configurations: components["schemas"]["SshConfigurationRecord"][];
+        };
+        SshConfigurationRecord: {
+            config_id: string;
+            created_at: string;
+            name: string;
+            ssh_host: string;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+            updated_at: string;
+        };
+        StartManagedCloneRequest: {
+            branch: string;
+            destination: string;
+            project_description?: string | null;
+            project_name: string;
+            repository: string;
+            repository_id: number;
+        };
+        StartManagedOrchestratorRequest: {
+            background?: boolean;
+            description: string;
+            orchestrator_session_id?: string | null;
+            prompt: string;
+        };
+        StartTraditionalChildRequest: {
+            background?: boolean;
+            child_session_id?: string | null;
+            description: string;
+            profile: string;
+            prompt: string;
+        };
+        StoreCredentialRequest: {
+            value: string;
+        };
+        StoredCredentialList: {
+            credentials: components["schemas"]["StoredCredentialSummary"][];
+        };
+        StoredCredentialSummary: {
+            last_four: string;
+            name: string;
+        };
+        StoreInfo: {
+            root_cwd: string;
+            store_path: string;
+            worker_executable: string;
+        };
+        SubmitPromptRequest: {
+            prompt: string;
+        };
         SubmitPromptResponse: {
             client_id?: string | null;
             display_prompt: string;
@@ -442,11 +1303,53 @@ export interface components {
             run_id: components["schemas"]["SessionRunId"];
             submitted_at_epoch_ms: number;
         };
+        SwitchBranchRequest: {
+            create?: boolean;
+            name: string;
+        };
+        TestMcpServerRequest: {
+            args?: string[] | null;
+            bearer_token_env_var?: string | null;
+            catalog_timeout_ms?: number | null;
+            command?: string | null;
+            cwd?: string | null;
+            env?: Record<string, string | null> | null;
+            env_headers?: Record<string, string> | null;
+            env_vars?: string[] | null;
+            execution_timeout_ms?: number | null;
+            header_helper?: null | components["schemas"]["UpdateMcpHeaderHelperRequest"];
+            headers?: Record<string, string | null> | null;
+            name?: string | null;
+            protocol?: null | components["schemas"]["McpProtocolSelection"];
+            startup_timeout_ms?: number | null;
+            stored_name?: string | null;
+            transport?: string | null;
+            url?: string | null;
+        };
+        TestMcpServerResponse: {
+            auth_required: boolean;
+            connected: boolean;
+            error?: string | null;
+            probe?: null | components["schemas"]["McpProbeResult"];
+            tools: components["schemas"]["McpProbedTool"][];
+        };
         ThreadEventDecodeDiagnostic: {
             created_at: string;
             error: string;
             id: number;
             thread_name: string;
+        };
+        ThreadEventPage: {
+            diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
+            events: components["schemas"]["ThreadEventPageItem"][];
+            has_older: boolean;
+            next_before_id?: number | null;
+            thread_event_boundary?: null | components["schemas"]["SessionEventBoundary"];
+        };
+        ThreadEventPageItem: {
+            created_at: string;
+            event: components["schemas"]["AgentEvent"];
+            id: number;
         };
         ThreadSnapshot: {
             created_at: string;
@@ -466,6 +1369,15 @@ export interface components {
             instruction: string;
             session_id: string;
             status: string;
+            thread_name: string;
+        };
+        ThreadSteeringRequest: {
+            instruction: string;
+        };
+        ThreadSteeringResponse: {
+            instruction_preview: string;
+            status: string;
+            steering_id: number;
             thread_name: string;
         };
         TokenCostMicros: {
@@ -502,9 +1414,122 @@ export interface components {
             data: string;
             mime_type: string;
         };
+        TraditionalChildExecutionMode: "foreground" | "background";
+        TraditionalChildRecord: {
+            change_summary: string | null;
+            child_session_id: string;
+            completion_inbox_id: number | null;
+            created_at: string;
+            description: string;
+            execution_mode: null | components["schemas"]["TraditionalChildExecutionMode"];
+            failure: string | null;
+            generation: number;
+            nesting_depth: number;
+            parent_session_id: string;
+            profile: string;
+            report: string | null;
+            root_session_id: string;
+            run_id: string | null;
+            status: components["schemas"]["TraditionalChildStatus"];
+            updated_at: string;
+            verification_summary: string | null;
+            version: number;
+        };
+        TraditionalChildStatus: "idle" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
         UiConfiguration: {
             diagnostic?: string | null;
             orchestration_enabled: boolean;
+        };
+        UpdateConfigRequest: {
+            allow_insecure_http?: components["schemas"]["RequestField_bool_bool"];
+            api_key_env?: components["schemas"]["RequestField_String_String"];
+            backend?: components["schemas"]["RequestField_String_String"];
+            base_url?: components["schemas"]["RequestField_String_String"];
+            extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
+            light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
+            model?: components["schemas"]["RequestField_String_String"];
+            orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
+            reasoning_effort?: components["schemas"]["RequestField_String_String"];
+        };
+        UpdateGitIdentityRequest: {
+            email: string;
+            name: string;
+        };
+        UpdateGoalRequest: {
+            expected_version: number;
+            objective?: string | null;
+            status?: null | components["schemas"]["GoalStatus"];
+            token_budget?: components["schemas"]["RequestField_u64_u64"];
+        };
+        UpdateInboxItemRequest: {
+            delivery: components["schemas"]["InboxDelivery"];
+            expected_version: number;
+        };
+        UpdateMcpHeaderHelperRequest: {
+            args?: string[];
+            command: string;
+            cwd?: string | null;
+            env?: Record<string, string | null>;
+            env_vars?: string[];
+            timeout_ms?: number | null;
+        };
+        UpdateMcpServerRequest: {
+            allowed_tools?: components["schemas"]["RequestField_Vec_Vec_String"];
+            approval?: components["schemas"]["RequestField_McpToolApproval_McpToolApproval"];
+            args?: components["schemas"]["RequestField_Vec_Vec_String"];
+            bearer_token_env_var?: components["schemas"]["RequestField_String_String"];
+            catalog_timeout_ms?: components["schemas"]["RequestField_u64_u64"];
+            command?: components["schemas"]["RequestField_String_String"];
+            cwd?: components["schemas"]["RequestField_String_String"];
+            denied_tools?: components["schemas"]["RequestField_Vec_Vec_String"];
+            enabled?: components["schemas"]["RequestField_bool_bool"];
+            env?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_Option_String"];
+            env_headers?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_String"];
+            env_vars?: components["schemas"]["RequestField_Vec_Vec_String"];
+            execution_timeout_ms?: components["schemas"]["RequestField_u64_u64"];
+            header_helper?: components["schemas"]["RequestField_UpdateMcpHeaderHelperRequest_UpdateMcpHeaderHelperRequest"];
+            headers?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_Option_String"];
+            library_id?: components["schemas"]["RequestField_String_String"];
+            name?: components["schemas"]["RequestField_String_String"];
+            protocol?: components["schemas"]["RequestField_McpProtocolSelection_McpProtocolSelection"];
+            required?: components["schemas"]["RequestField_bool_bool"];
+            startup_timeout_ms?: components["schemas"]["RequestField_u64_u64"];
+            tool_approvals?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_McpToolApproval"];
+            transport?: components["schemas"]["RequestField_String_String"];
+            url?: components["schemas"]["RequestField_String_String"];
+        };
+        UpdateModelConfigurationRequest: {
+            allow_insecure_http?: components["schemas"]["RequestField_bool_bool"];
+            api_key?: components["schemas"]["RequestField_String_String"];
+            backend?: components["schemas"]["RequestField_BackendKind_BackendKind"];
+            base_url?: components["schemas"]["RequestField_String_String"];
+            extra_headers?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_String"];
+            initial_prompt?: components["schemas"]["RequestField_String_String"];
+            light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
+            model?: components["schemas"]["RequestField_String_String"];
+            name?: components["schemas"]["RequestField_String_String"];
+            orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
+            reasoning_effort?: components["schemas"]["RequestField_ReasoningEffort_ReasoningEffort"];
+        };
+        UpdatePermissionApprovalModeRequest: {
+            mode: components["schemas"]["PermissionApprovalMode"];
+        };
+        UpdateProjectRequest: {
+            default_model_config_id?: components["schemas"]["RequestField_String_String"];
+            description?: components["schemas"]["RequestField_String_String"];
+            name?: components["schemas"]["RequestField_String_String"];
+            pinned?: components["schemas"]["RequestField_bool_bool"];
+        };
+        UpdateSessionPresentationRequest: {
+            expected_version: number;
+            pinned: boolean;
+            title: string;
+        };
+        UpdateSshConfigurationRequest: {
+            name?: components["schemas"]["RequestField_String_String"];
+            ssh_host?: components["schemas"]["RequestField_String_String"];
+            ssh_identity_file?: components["schemas"]["RequestField_String_String"];
+            ssh_port?: components["schemas"]["RequestField_u16_u16"];
         };
         WorksetItemSnapshot: {
             acceptance: string;
@@ -531,6 +1556,74 @@ export interface components {
         WorksetsSnapshot: {
             error?: string | null;
             items: components["schemas"]["WorksetSnapshot"][];
+        };
+        WorkspaceDiffHunk: {
+            function_context: string | null;
+            lines: components["schemas"]["WorkspaceDiffLine"][];
+            new_lines: number;
+            new_start: number;
+            old_lines: number;
+            old_start: number;
+        };
+        WorkspaceDiffLine: {
+            content: string;
+            has_trailing_newline: boolean;
+            kind: string;
+            new_lineno: number | null;
+            old_lineno: number | null;
+        };
+        WorkspaceDiffSection: {
+            additions: number;
+            binary: boolean;
+            deletions: number;
+            error: string | null;
+            hunks: components["schemas"]["WorkspaceDiffHunk"][];
+            stage: string;
+            status: string;
+            too_large: boolean;
+            truncated: boolean;
+        };
+        WorkspaceDiffTotals: {
+            error?: string | null;
+            total_additions: number;
+            total_deletions: number;
+        };
+        WorkspaceFileContent: {
+            binary: boolean;
+            content?: string | null;
+            path: string;
+            size: number;
+            too_large: boolean;
+        };
+        WorkspaceFileDiff: {
+            error: string | null;
+            old_path: string | null;
+            path: string;
+            sections: components["schemas"]["WorkspaceDiffSection"][];
+        };
+        WorkspaceFileList: {
+            files: string[];
+            truncated: boolean;
+        };
+        WorkspaceRevisionChanges: {
+            changed_files: components["schemas"]["ChangedFileStat"][];
+            error?: string | null;
+            total_additions: number;
+            total_deletions: number;
+        };
+        WorkspaceRevisionRecord: {
+            additions: number;
+            base_sha: string | null;
+            branch: string | null;
+            changed_files: number;
+            commit_sha: string;
+            created_at: string;
+            deletions: number;
+            id: number;
+            label: string;
+            run_id: string;
+            session_id: string;
+            transcript_len: number | null;
         };
         WorkspaceSnapshot: {
             branch?: string | null;

@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -27,13 +28,7 @@ import { applyTabOrder, placeIdAt, targetIndexInGroup } from "@/app/lib/sessionO
 import { NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
-import {
-  dismissChatTab,
-  restoreChatTab,
-  setChatTabOrder,
-  useChatTabOrder,
-  useDismissedChatTabs,
-} from "@/app/store/chatTabsStore";
+
 import type {
   ManagedSessionSummary,
   SessionBehavior,
@@ -89,6 +84,9 @@ export function ProjectSessionTabs({
   leading?: React.ReactNode;
   trailing?: React.ReactNode;
 }) {
+  const { useDismissedChatTabs, useChatTabOrder, setChatTabOrder, restoreChatTab, dismissChatTab } =
+    useNativeRuntime().stores.chatTabsStore;
+
   const policy = useUiPolicy();
   const navigate = useNavigate();
   const projectActions = useProjectActions();
@@ -104,7 +102,7 @@ export function ProjectSessionTabs({
   // is as much "open it" as clicking its tab, so it earns its place back.
   useEffect(() => {
     restoreChatTab(activeSessionId);
-  }, [activeSessionId]);
+  }, [activeSessionId, restoreChatTab]);
 
   // Unassigned is a fact about a loaded chat. A missing summary is just a gap
   // — first paint, or the list dropping this id before the router leaves it —

@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useState } from "react";
 
 import {
@@ -14,7 +15,7 @@ import {
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useCommitWorkspace } from "@/app/services/queries";
-import { useRunning } from "@/app/store/runtimeStore";
+
 import type { ChangedFileStat } from "@/app/types/api";
 
 /** Why committing is refused right now, or null when it is free to go. */
@@ -48,6 +49,8 @@ export function CommitPopover({
   changed: ChangedFileStat[];
   revision: number | null;
 }) {
+  const { useRunning } = useNativeRuntime().stores.runtimeStore;
+
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
 

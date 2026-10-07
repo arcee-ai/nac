@@ -1,7 +1,7 @@
 import { QueryObserver, type QueryClient } from "@tanstack/react-query";
 
 import { errorMessage } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+import { runtimeForQueryClient } from "@/app/runtime/nativeRuntime";
 import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
 import type { DeviceLoginStarted, ManagedAuthProvider } from "@/app/types/api";
 import { toRunError } from "@/app/lib/providerError";
@@ -31,6 +31,7 @@ export const deviceLoginKey = (provider: ManagedAuthProvider | null) =>
 
 /** One provider attempt per origin QueryClient; no persisted browser credential. */
 export async function startDeviceLogin(client: QueryClient, provider: ManagedAuthProvider) {
+  const { api } = runtimeForQueryClient(client);
   const key = deviceLoginKey(provider);
   const existing = client.getQueryData<DeviceLoginOperation>(key);
   if (existing && ["starting", "waiting"].includes(existing.state.status))
@@ -122,6 +123,7 @@ export async function startDeviceLogin(client: QueryClient, provider: ManagedAut
 
 /** Explicit Cancel, including start races, alone abandons the durable login. */
 export async function cancelDeviceLogin(client: QueryClient, provider: ManagedAuthProvider) {
+  const { api } = runtimeForQueryClient(client);
   const key = deviceLoginKey(provider);
   const operation = client.getQueryData<DeviceLoginOperation>(key);
   if (!operation || !["starting", "waiting"].includes(operation.state.status)) return;

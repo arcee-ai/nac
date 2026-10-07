@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   Suspense,
   isValidElement,
@@ -22,14 +23,9 @@ import type { RunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { classifyMarkdownHref, markdownUrlTransform } from "@/app/lib/workspaceLink";
 import { useToast } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+
 import { queryKeys } from "@/app/services/queries";
-import {
-  revealSidePanel,
-  selectFile,
-  selectFileListing,
-  selectRevision,
-} from "@/app/store/sessionLayoutStore";
+
 import type { SessionSnapshotResponse } from "@/app/types/api";
 
 const remarkPlugins = [remarkGfm];
@@ -128,6 +124,11 @@ interface MarkdownRendererProps {
  * hash route, and land on the homescreen.
  */
 function MarkdownLink({ href, children, ...props }: ComponentPropsWithoutRef<"a">) {
+  const { selectRevision, selectFileListing, selectFile, revealSidePanel } =
+    useNativeRuntime().stores.sessionLayoutStore;
+
+  const { api } = useNativeRuntime();
+
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();

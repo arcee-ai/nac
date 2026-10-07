@@ -1,9 +1,11 @@
+export const RANGE_ANY = "any";
+export const SORT_DEFAULT = "default";
 // Client-side view state for the sessions list. The API returns every session,
 // so search, sort and filters are applied here.
 
 import { useMemo } from "react";
 
-import { createStore } from "@/app/lib/store";
+import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 import { useNow } from "@/app/hooks/useNow";
 import {
   SESSION_ENVS,
@@ -17,45 +19,17 @@ import { providersFromBackends } from "@/app/lib/providers";
 import type { ProjectListItem } from "@/app/lib/projects";
 import type { ManagedSessionSummary, ProjectRecord, SessionSummarySnapshot } from "@/app/types/api";
 
-/** Backend `sort_order` within each pin group (API list order). */
-export const SORT_DEFAULT = "default";
-
 export type SortId =
   | typeof SORT_DEFAULT
   | "created_desc"
   | "created_asc"
   | "updated_desc"
   | "title_asc";
-
-export const SORT_ITEMS: { id: SortId; label: string }[] = [
-  { id: SORT_DEFAULT, label: "Default" },
-  { id: "created_desc", label: "Newest first" },
-  { id: "created_asc", label: "Oldest first" },
-  { id: "updated_desc", label: "Recently updated" },
-  { id: "title_asc", label: "Title A–Z" },
-];
-
-export const RANGE_ANY = "any";
 export type RangeId = typeof RANGE_ANY | "24h" | "7d" | "30d";
-
-export const RANGE_ITEMS: { id: RangeId; label: string }[] = [
-  { id: RANGE_ANY, label: "Any time" },
-  { id: "24h", label: "Last 24 hours" },
-  { id: "7d", label: "Last 7 days" },
-  { id: "30d", label: "Last 30 days" },
-];
-
-const RANGE_TICK_MS = 60_000;
 
 interface RangeMsMap {
   [range: string]: number | undefined;
 }
-
-const RANGE_MS: RangeMsMap = {
-  "24h": 86_400_000,
-  "7d": 604_800_000,
-  "30d": 2_592_000_000,
-};
 
 interface FiltersState {
   query: string;
@@ -67,258 +41,344 @@ interface FiltersState {
   providers: string[];
 }
 
-export const sessionFiltersStore = createStore<FiltersState>({
-  query: "",
-  sort: SORT_DEFAULT,
-  createdRange: RANGE_ANY,
-  modifiedRange: RANGE_ANY,
-  envs: [],
-  providers: [],
-});
+type Comparator = (a: SessionSummarySnapshot, b: SessionSummarySnapshot) => number;
+/** One presentation lifetime; hosted preferences are ephemeral. */
+export function createSessionFiltersStore(_storage?: Pick<Storage, "getItem" | "setItem">) {
+  /** Backend `sort_order` within each pin group (API list order). */
 
-const { getState, setState, useStore } = sessionFiltersStore;
+  const SORT_ITEMS: { id: SortId; label: string }[] = [
+    { id: SORT_DEFAULT, label: "Default" },
+    { id: "created_desc", label: "Newest first" },
+    { id: "created_asc", label: "Oldest first" },
+    { id: "updated_desc", label: "Recently updated" },
+    { id: "title_asc", label: "Title A–Z" },
+  ];
 
-const toggle = <T>(list: T[], value: T): T[] =>
-  list.includes(value) ? list.filter((v) => v !== value) : list.concat(value);
+  const RANGE_ITEMS: { id: RangeId; label: string }[] = [
+    { id: RANGE_ANY, label: "Any time" },
+    { id: "24h", label: "Last 24 hours" },
+    { id: "7d", label: "Last 7 days" },
+    { id: "30d", label: "Last 30 days" },
+  ];
 
-export const setQuery = (query: string) => setState({ query });
-export const setSort = (sort: SortId) => setState({ sort });
-export const setCreatedRange = (createdRange: RangeId) => setState({ createdRange });
-export const setModifiedRange = (modifiedRange: RangeId) => setState({ modifiedRange });
-export const toggleEnv = (env: SessionEnv) => setState((s) => ({ envs: toggle(s.envs, env) }));
-export const toggleProvider = (provider: string) =>
-  setState((s) => ({ providers: toggle(s.providers, provider) }));
+  const RANGE_TICK_MS = 60_000;
 
-export function resetFilters(): void {
-  setState({
+  const RANGE_MS: RangeMsMap = {
+    "24h": 86_400_000,
+    "7d": 604_800_000,
+    "30d": 2_592_000_000,
+  };
+
+  const sessionFiltersStore = createStore<FiltersState>({
     query: "",
+    sort: SORT_DEFAULT,
     createdRange: RANGE_ANY,
     modifiedRange: RANGE_ANY,
     envs: [],
     providers: [],
   });
-}
+  const initial_sessionFiltersStore = sessionFiltersStore.getState();
 
-export function hasActiveFilters(): boolean {
-  const s = getState();
-  return (
-    s.query.trim() !== "" ||
-    s.createdRange !== RANGE_ANY ||
-    s.modifiedRange !== RANGE_ANY ||
-    s.envs.length > 0 ||
-    s.providers.length > 0
-  );
-}
+  const { getState, setState, useStore } = sessionFiltersStore;
 
-/** Unparseable timestamps must not hide a session, so they pass every range. */
-function withinRange(value: string, range: RangeId, now: number): boolean {
-  const span = RANGE_MS[range];
-  if (!span) return true;
-  const ts = parseStoreTime(value);
-  if (!Number.isFinite(ts)) return true;
-  return now - ts <= span;
-}
+  const toggle = <T>(list: T[], value: T): T[] =>
+    list.includes(value) ? list.filter((v) => v !== value) : list.concat(value);
 
-function matchesQuery(
-  summary: SessionSummarySnapshot,
-  needle: string,
-  numbered: ReadonlyMap<string, string>,
-): boolean {
-  if (!needle) return true;
-  const haystack = [
-    sessionTitle(summary, numbered),
-    summary.cwd,
-    summary.model,
-    summary.backend,
-    summary.ssh_host,
-    summary.last_user_prompt,
-    summary.session_id,
-  ];
-  return haystack.some((v) => v && String(v).toLowerCase().includes(needle));
-}
+  const setQuery = (query: string) => setState({ query });
+  const setSort = (sort: SortId) => setState({ sort });
+  const setCreatedRange = (createdRange: RangeId) => setState({ createdRange });
+  const setModifiedRange = (modifiedRange: RangeId) => setState({ modifiedRange });
+  const toggleEnv = (env: SessionEnv) => setState((s) => ({ envs: toggle(s.envs, env) }));
+  const toggleProvider = (provider: string) =>
+    setState((s) => ({ providers: toggle(s.providers, provider) }));
 
-type Comparator = (a: SessionSummarySnapshot, b: SessionSummarySnapshot) => number;
-
-const comparators = {
-  // Mirrors the API: pinned grouping is applied by the page; within a group
-  // `sort_order` is the custom index, then creation time as a stable tiebreak.
-  [SORT_DEFAULT]: (a, b) => {
-    const order =
-      (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
-      parseStoreTime(b.created_at) - parseStoreTime(a.created_at);
-    return order;
-  },
-  created_desc: (a, b) => parseStoreTime(b.created_at) - parseStoreTime(a.created_at),
-  created_asc: (a, b) => parseStoreTime(a.created_at) - parseStoreTime(b.created_at),
-  updated_desc: (a, b) => parseStoreTime(b.updated_at) - parseStoreTime(a.updated_at),
-} satisfies Partial<Record<SortId, Comparator>>;
-
-/**
- * Filtered and sorted entries. Pinned grouping stays in the page, which renders
- * pinned sessions as their own block above the rest.
- */
-export function useVisibleSessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[] {
-  const filters = useStore();
-  // Relative ranges span hours, so re-evaluating them once a minute is plenty.
-  const now = useNow(RANGE_TICK_MS);
-  return useMemo(() => {
-    const numbered = numberUntitledSessions(sessions);
-    const needle = filters.query.trim().toLowerCase();
-    const visible = sessions.filter(({ summary }) => {
-      if (!matchesQuery(summary, needle, numbered)) return false;
-      if (!withinRange(summary.created_at, filters.createdRange, now)) return false;
-      if (!withinRange(summary.updated_at, filters.modifiedRange, now)) return false;
-      if (filters.envs.length > 0 && !filters.envs.includes(sessionEnvLabel(summary))) {
-        return false;
-      }
-      if (filters.providers.length > 0 && !filters.providers.includes(summary.backend)) {
-        return false;
-      }
-      return true;
+  function resetFilters(): void {
+    setState({
+      query: "",
+      createdRange: RANGE_ANY,
+      modifiedRange: RANGE_ANY,
+      envs: [],
+      providers: [],
     });
+  }
 
-    if (filters.sort === "title_asc") {
-      visible.sort((a, b) =>
-        sessionTitle(a.summary, numbered).localeCompare(
-          sessionTitle(b.summary, numbered),
-          undefined,
-          {
-            sensitivity: "base",
-          },
-        ),
-      );
-    } else {
-      const compare = comparators[filters.sort];
-      if (compare) visible.sort((a, b) => compare(a.summary, b.summary));
-    }
-    return visible;
-  }, [sessions, filters, now]);
-}
+  function hasActiveFilters(): boolean {
+    const s = getState();
+    return (
+      s.query.trim() !== "" ||
+      s.createdRange !== RANGE_ANY ||
+      s.modifiedRange !== RANGE_ANY ||
+      s.envs.length > 0 ||
+      s.providers.length > 0
+    );
+  }
 
-function projectMatchesQuery(project: ProjectRecord, needle: string): boolean {
-  if (!needle) return true;
-  const haystack = [project.name, project.description, project.cwd, project.ssh_host];
-  return haystack.some((v) => v && String(v).toLowerCase().includes(needle));
-}
+  /** Unparseable timestamps must not hide a session, so they pass every range. */
+  function withinRange(value: string, range: RangeId, now: number): boolean {
+    const span = RANGE_MS[range];
+    if (!span) return true;
+    const ts = parseStoreTime(value);
+    if (!Number.isFinite(ts)) return true;
+    return now - ts <= span;
+  }
 
-function sessionsFromItems(items: ProjectListItem[]): ManagedSessionSummary[] {
-  return items.flatMap((item) => (item.kind === "project" ? item.entry.sessions : [item.session]));
-}
+  function matchesQuery(
+    summary: SessionSummarySnapshot,
+    needle: string,
+    numbered: ReadonlyMap<string, string>,
+  ): boolean {
+    if (!needle) return true;
+    const haystack = [
+      sessionTitle(summary, numbered),
+      summary.cwd,
+      summary.model,
+      summary.backend,
+      summary.ssh_host,
+      summary.last_user_prompt,
+      summary.session_id,
+    ];
+    return haystack.some((v) => v && String(v).toLowerCase().includes(needle));
+  }
 
-function itemTitle(item: ProjectListItem, numbered: ReadonlyMap<string, string>): string {
-  return item.kind === "project"
-    ? item.entry.project.name
-    : sessionTitle(item.session.summary, numbered);
-}
+  const comparators = {
+    // Mirrors the API: pinned grouping is applied by the page; within a group
+    // `sort_order` is the custom index, then creation time as a stable tiebreak.
+    [SORT_DEFAULT]: (a, b) => {
+      const order =
+        (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+        parseStoreTime(b.created_at) - parseStoreTime(a.created_at);
+      return order;
+    },
+    created_desc: (a, b) => parseStoreTime(b.created_at) - parseStoreTime(a.created_at),
+    created_asc: (a, b) => parseStoreTime(a.created_at) - parseStoreTime(b.created_at),
+    updated_desc: (a, b) => parseStoreTime(b.updated_at) - parseStoreTime(a.updated_at),
+  } satisfies Partial<Record<SortId, Comparator>>;
 
-function itemTimes(item: ProjectListItem): { createdAt: string; updatedAt: string } {
-  return item.kind === "project"
-    ? { createdAt: item.entry.project.created_at, updatedAt: item.entry.updatedAt }
-    : {
-        createdAt: item.session.summary.created_at,
-        updatedAt: item.session.summary.updated_at,
-      };
-}
-
-/**
- * The same filters, applied to the project listing. A project answers for the
- * chats inside it: the environment and provider facets keep it while any of its
- * chats qualifies, and the search box matches its own name as well as theirs.
- *
- * Default sort keeps the order the caller passed in, which is the backend's —
- * pinned projects first, then the unassigned chats.
- */
-export function useVisibleProjectItems(items: ProjectListItem[]): ProjectListItem[] {
-  const filters = useStore();
-  const now = useNow(RANGE_TICK_MS);
-  return useMemo(() => {
-    const numbered = numberUntitledSessions(sessionsFromItems(items));
-    const needle = filters.query.trim().toLowerCase();
-    const facetPasses = (summary: SessionSummarySnapshot) => {
-      if (filters.envs.length > 0 && !filters.envs.includes(sessionEnvLabel(summary))) {
-        return false;
-      }
-      return filters.providers.length === 0 || filters.providers.includes(summary.backend);
-    };
-    const facetsActive = filters.envs.length > 0 || filters.providers.length > 0;
-
-    const visible = items.filter((item) => {
-      const { createdAt, updatedAt } = itemTimes(item);
-      if (!withinRange(createdAt, filters.createdRange, now)) return false;
-      if (!withinRange(updatedAt, filters.modifiedRange, now)) return false;
-
-      if (item.kind === "orphan") {
-        const { summary } = item.session;
-        return facetPasses(summary) && matchesQuery(summary, needle, numbered);
-      }
-
-      const { project, sessions } = item.entry;
-      if (facetsActive && !sessions.some((entry) => facetPasses(entry.summary))) return false;
-      return (
-        projectMatchesQuery(project, needle) ||
-        sessions.some((entry) => matchesQuery(entry.summary, needle, numbered))
-      );
-    });
-
-    if (filters.sort === "title_asc") {
-      visible.sort((a, b) =>
-        itemTitle(a, numbered).localeCompare(itemTitle(b, numbered), undefined, {
-          sensitivity: "base",
-        }),
-      );
-    } else if (filters.sort !== SORT_DEFAULT) {
-      const key = filters.sort === "updated_desc" ? "updatedAt" : "createdAt";
-      const ascending = filters.sort === "created_asc";
-      visible.sort((a, b) => {
-        const delta = parseStoreTime(itemTimes(b)[key]) - parseStoreTime(itemTimes(a)[key]);
-        return ascending ? -delta : delta;
+  /**
+   * Filtered and sorted entries. Pinned grouping stays in the page, which renders
+   * pinned sessions as their own block above the rest.
+   */
+  function useVisibleSessions(sessions: ManagedSessionSummary[]): ManagedSessionSummary[] {
+    const filters = useStore();
+    // Relative ranges span hours, so re-evaluating them once a minute is plenty.
+    const now = useNow(RANGE_TICK_MS);
+    return useMemo(() => {
+      const numbered = numberUntitledSessions(sessions);
+      const needle = filters.query.trim().toLowerCase();
+      const visible = sessions.filter(({ summary }) => {
+        if (!matchesQuery(summary, needle, numbered)) return false;
+        if (!withinRange(summary.created_at, filters.createdRange, now)) return false;
+        if (!withinRange(summary.updated_at, filters.modifiedRange, now)) return false;
+        if (filters.envs.length > 0 && !filters.envs.includes(sessionEnvLabel(summary))) {
+          return false;
+        }
+        if (filters.providers.length > 0 && !filters.providers.includes(summary.backend)) {
+          return false;
+        }
+        return true;
       });
-    }
-    return visible;
-  }, [items, filters, now]);
+
+      if (filters.sort === "title_asc") {
+        visible.sort((a, b) =>
+          sessionTitle(a.summary, numbered).localeCompare(
+            sessionTitle(b.summary, numbered),
+            undefined,
+            {
+              sensitivity: "base",
+            },
+          ),
+        );
+      } else {
+        const compare = comparators[filters.sort];
+        if (compare) visible.sort((a, b) => compare(a.summary, b.summary));
+      }
+      return visible;
+    }, [sessions, filters, now]);
+  }
+
+  function projectMatchesQuery(project: ProjectRecord, needle: string): boolean {
+    if (!needle) return true;
+    const haystack = [project.name, project.description, project.cwd, project.ssh_host];
+    return haystack.some((v) => v && String(v).toLowerCase().includes(needle));
+  }
+
+  function sessionsFromItems(items: ProjectListItem[]): ManagedSessionSummary[] {
+    return items.flatMap((item) =>
+      item.kind === "project" ? item.entry.sessions : [item.session],
+    );
+  }
+
+  function itemTitle(item: ProjectListItem, numbered: ReadonlyMap<string, string>): string {
+    return item.kind === "project"
+      ? item.entry.project.name
+      : sessionTitle(item.session.summary, numbered);
+  }
+
+  function itemTimes(item: ProjectListItem): { createdAt: string; updatedAt: string } {
+    return item.kind === "project"
+      ? { createdAt: item.entry.project.created_at, updatedAt: item.entry.updatedAt }
+      : {
+          createdAt: item.session.summary.created_at,
+          updatedAt: item.session.summary.updated_at,
+        };
+  }
+
+  /**
+   * The same filters, applied to the project listing. A project answers for the
+   * chats inside it: the environment and provider facets keep it while any of its
+   * chats qualifies, and the search box matches its own name as well as theirs.
+   *
+   * Default sort keeps the order the caller passed in, which is the backend's —
+   * pinned projects first, then the unassigned chats.
+   */
+  function useVisibleProjectItems(items: ProjectListItem[]): ProjectListItem[] {
+    const filters = useStore();
+    const now = useNow(RANGE_TICK_MS);
+    return useMemo(() => {
+      const numbered = numberUntitledSessions(sessionsFromItems(items));
+      const needle = filters.query.trim().toLowerCase();
+      const facetPasses = (summary: SessionSummarySnapshot) => {
+        if (filters.envs.length > 0 && !filters.envs.includes(sessionEnvLabel(summary))) {
+          return false;
+        }
+        return filters.providers.length === 0 || filters.providers.includes(summary.backend);
+      };
+      const facetsActive = filters.envs.length > 0 || filters.providers.length > 0;
+
+      const visible = items.filter((item) => {
+        const { createdAt, updatedAt } = itemTimes(item);
+        if (!withinRange(createdAt, filters.createdRange, now)) return false;
+        if (!withinRange(updatedAt, filters.modifiedRange, now)) return false;
+
+        if (item.kind === "orphan") {
+          const { summary } = item.session;
+          return facetPasses(summary) && matchesQuery(summary, needle, numbered);
+        }
+
+        const { project, sessions } = item.entry;
+        if (facetsActive && !sessions.some((entry) => facetPasses(entry.summary))) return false;
+        return (
+          projectMatchesQuery(project, needle) ||
+          sessions.some((entry) => matchesQuery(entry.summary, needle, numbered))
+        );
+      });
+
+      if (filters.sort === "title_asc") {
+        visible.sort((a, b) =>
+          itemTitle(a, numbered).localeCompare(itemTitle(b, numbered), undefined, {
+            sensitivity: "base",
+          }),
+        );
+      } else if (filters.sort !== SORT_DEFAULT) {
+        const key = filters.sort === "updated_desc" ? "updatedAt" : "createdAt";
+        const ascending = filters.sort === "created_asc";
+        visible.sort((a, b) => {
+          const delta = parseStoreTime(itemTimes(b)[key]) - parseStoreTime(itemTimes(a)[key]);
+          return ascending ? -delta : delta;
+        });
+      }
+      return visible;
+    }, [items, filters, now]);
+  }
+
+  /** Provider chips are derived from the data so they never list unused ones. */
+  function useSessionProviders(sessions: ManagedSessionSummary[]): string[] {
+    return useMemo(
+      () => providersFromBackends(sessions.map(({ summary }) => summary.backend)),
+      [sessions],
+    );
+  }
+
+  /** The same for environments, in the canonical order rather than first-seen. */
+  function useSessionEnvs(sessions: ManagedSessionSummary[]): SessionEnv[] {
+    return useMemo(() => {
+      const present = new Set(sessions.map(({ summary }) => sessionEnvLabel(summary)));
+      return SESSION_ENVS.filter((env) => present.has(env));
+    }, [sessions]);
+  }
+
+  /**
+   * Forgets facet selections that no longer have a chip.
+   *
+   * A facet whose values all vanished — the last SSH project deleted, say — would
+   * otherwise keep narrowing the list from a control the user can no longer see,
+   * leaving an empty page with nothing to click to fill it again.
+   */
+  function pruneUnavailableFacets(
+    availableEnvs: readonly SessionEnv[],
+    availableProviders: readonly string[],
+  ): void {
+    setState((state) => {
+      const envs = state.envs.filter((env) => availableEnvs.includes(env));
+      const providers = state.providers.filter((provider) => availableProviders.includes(provider));
+      if (envs.length === state.envs.length && providers.length === state.providers.length) {
+        return null;
+      }
+      return { envs, providers };
+    });
+  }
+
+  const useFilterQuery = () => useStore((s) => s.query);
+  const useSort = () => useStore((s) => s.sort);
+  const useCreatedRange = () => useStore((s) => s.createdRange);
+  const useModifiedRange = () => useStore((s) => s.modifiedRange);
+  const useSelectedEnvs = () => useStore((s) => s.envs);
+  const useSelectedProviders = () => useStore((s) => s.providers);
+  const useIsDefaultSort = () => useStore((s) => s.sort === SORT_DEFAULT);
+  return {
+    release: () => {
+      sessionFiltersStore.setState(initial_sessionFiltersStore);
+    },
+    SORT_DEFAULT,
+    SORT_ITEMS,
+    RANGE_ITEMS,
+    sessionFiltersStore,
+    setQuery,
+    setSort,
+    setCreatedRange,
+    setModifiedRange,
+    toggleEnv,
+    toggleProvider,
+    resetFilters,
+    hasActiveFilters,
+    useVisibleSessions,
+    useVisibleProjectItems,
+    useSessionProviders,
+    useSessionEnvs,
+    pruneUnavailableFacets,
+    useFilterQuery,
+    useSort,
+    useCreatedRange,
+    useModifiedRange,
+    useSelectedEnvs,
+    useSelectedProviders,
+    useIsDefaultSort,
+  };
 }
 
-/** Provider chips are derived from the data so they never list unused ones. */
-export function useSessionProviders(sessions: ManagedSessionSummary[]): string[] {
-  return useMemo(
-    () => providersFromBackends(sessions.map(({ summary }) => summary.backend)),
-    [sessions],
-  );
-}
-
-/** The same for environments, in the canonical order rather than first-seen. */
-export function useSessionEnvs(sessions: ManagedSessionSummary[]): SessionEnv[] {
-  return useMemo(() => {
-    const present = new Set(sessions.map(({ summary }) => sessionEnvLabel(summary)));
-    return SESSION_ENVS.filter((env) => present.has(env));
-  }, [sessions]);
-}
-
-/**
- * Forgets facet selections that no longer have a chip.
- *
- * A facet whose values all vanished — the last SSH project deleted, say — would
- * otherwise keep narrowing the list from a control the user can no longer see,
- * leaving an empty page with nothing to click to fill it again.
- */
-export function pruneUnavailableFacets(
-  availableEnvs: readonly SessionEnv[],
-  availableProviders: readonly string[],
-): void {
-  setState((state) => {
-    const envs = state.envs.filter((env) => availableEnvs.includes(env));
-    const providers = state.providers.filter((provider) => availableProviders.includes(provider));
-    if (envs.length === state.envs.length && providers.length === state.providers.length) {
-      return null;
-    }
-    return { envs, providers };
-  });
-}
-
-export const useFilterQuery = () => useStore((s) => s.query);
-export const useSort = () => useStore((s) => s.sort);
-export const useCreatedRange = () => useStore((s) => s.createdRange);
-export const useModifiedRange = () => useStore((s) => s.modifiedRange);
-export const useSelectedEnvs = () => useStore((s) => s.envs);
-export const useSelectedProviders = () => useStore((s) => s.providers);
-export const useIsDefaultSort = () => useStore((s) => s.sort === SORT_DEFAULT);
+export const {
+  release,
+  SORT_ITEMS,
+  RANGE_ITEMS,
+  sessionFiltersStore,
+  setQuery,
+  setSort,
+  setCreatedRange,
+  setModifiedRange,
+  toggleEnv,
+  toggleProvider,
+  resetFilters,
+  hasActiveFilters,
+  useVisibleSessions,
+  useVisibleProjectItems,
+  useSessionProviders,
+  useSessionEnvs,
+  pruneUnavailableFacets,
+  useFilterQuery,
+  useSort,
+  useCreatedRange,
+  useModifiedRange,
+  useSelectedEnvs,
+  useSelectedProviders,
+  useIsDefaultSort,
+} = createSessionFiltersStore(standalonePreferenceStorage);

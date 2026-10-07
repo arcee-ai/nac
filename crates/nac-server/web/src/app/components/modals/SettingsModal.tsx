@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -38,7 +39,7 @@ import {
 } from "@/app/lib/modelConfig";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { useToast } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+
 import { ModelSetupSection } from "@/app/features/setup/ModelSetupSection";
 import { savedModelSelection, sameModelSelection } from "@/app/features/setup/modelSelection";
 import { saveSettings } from "@/app/features/setup/workflow";
@@ -59,7 +60,7 @@ import {
   useUpdatePresentation,
   useUpdateProject,
 } from "@/app/services/queries";
-import { sshTargetFromSummary, useSshConnectionStatus } from "@/app/store/sshConnectionStore";
+
 import type {
   BackendKind,
   LightModelSettings,
@@ -221,6 +222,11 @@ function SettingsForm({
   diagnostics: string[];
   onClose: () => void;
 }) {
+  const { useSshConnectionStatus, sshTargetFromSummary } =
+    useNativeRuntime().stores.sshConnectionStore;
+
+  const { api } = useNativeRuntime();
+
   const isMobile = useIsMobile();
   const toast = useToast();
   const client = useQueryClient();

@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useState } from "react";
 
 import {
@@ -21,7 +22,6 @@ import {
 import { TooltipPosition } from "@/app/atoms/tooltip";
 import { SessionFilters } from "@/app/components/sessions/SessionFilters";
 import { useProjects, useVisibleSessions, useStoreInfo } from "@/app/services/queries";
-import { setQuery as setProjectQuery, useFilterQuery } from "@/app/store/sessionFiltersStore";
 
 import { NewSessionPopover } from "./NewSessionPopover";
 import { SidebarProjectList } from "./SidebarProjectList";
@@ -42,6 +42,9 @@ export function LeftSidebarPanel({
   /** All Projects searches and filters the card grid instead of listing sessions. */
   variant: "session" | "projects";
 }) {
+  const { useFilterQuery, setQuery: setProjectQuery } =
+    useNativeRuntime().stores.sessionFiltersStore;
+
   const projectsPage = variant === "projects";
   const [query, setQuery] = useState("");
   const projectQuery = useFilterQuery();

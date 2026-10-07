@@ -1,3 +1,8 @@
+import {
+  usePresentationPortalTarget,
+  usePresentationInertTarget,
+  usePresentationKeyboardOwner,
+} from "@/app/providers/PresentationBoundary";
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
@@ -107,6 +112,14 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   children,
   footer,
 }) => {
+  const portalTarget = usePresentationPortalTarget();
+  const inertTarget = usePresentationInertTarget();
+
+  const ownsKeyboard = usePresentationKeyboardOwner();
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
   const isMobile = useIsMobile();
   const cardRef = useRef<HTMLDivElement>(null);
   // Identity of this dialog in the shared stack. It is state rather than a ref
@@ -161,12 +174,12 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
     // Keep the app behind out of the tab order; the card is portalled to the
     // body, so it stays reachable. Desktop only: on a phone the panel covers
     // the viewport and inert is unnecessary (matches ArceeFM).
-    const root = document.getElementById("root");
+    const root = inertTarget;
     if (!isMobile) root?.setAttribute("inert", "");
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || !ownsKeyboard(e.target)) return;
       if (!isModalOnTop(self)) return;
-      onClose?.();
+      closeRef.current?.();
     };
     document.addEventListener("keydown", onKey);
     return () => {
@@ -177,7 +190,17 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
         root?.removeAttribute("inert");
       }
     };
-  }, [open, onClose, isMobile, token, pushModal, popModal, isModalOnTop, getStackLength]);
+  }, [
+    open,
+    ownsKeyboard,
+    isMobile,
+    token,
+    pushModal,
+    popModal,
+    isModalOnTop,
+    getStackLength,
+    inertTarget,
+  ]);
 
   // Move focus into the dialog and trap Tab within it. The card itself takes
   // the focus rather than the first field: landing in a text input pops up the
@@ -395,7 +418,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
         </div>
       </div>
     </>,
-    document.body,
+    portalTarget,
   );
 };
 

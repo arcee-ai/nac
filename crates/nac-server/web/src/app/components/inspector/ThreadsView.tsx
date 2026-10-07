@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   memo,
   useEffect,
@@ -56,8 +57,8 @@ import {
   partitionThreadCalls,
 } from "@/app/lib/transcript";
 import { useThreadEventPages } from "@/app/services/queries";
-import { useLiveThreads, useStreamStatus, type RuntimeThread } from "@/app/store/runtimeStore";
-import { setSelectedThreadRunning } from "@/app/store/sessionLayoutStore";
+import { type RuntimeThread } from "@/app/store/runtimeStore";
+
 import type {
   AgentEvent,
   EpisodeSnapshot,
@@ -759,6 +760,10 @@ export function ThreadsView({
   /** True only for the user-owned primary classic orchestrator transcript. */
   canSteerWorkers: boolean;
 }) {
+  const { setSelectedThreadRunning } = useNativeRuntime().stores.sessionLayoutStore;
+
+  const { useStreamStatus, useLiveThreads } = useNativeRuntime().stores.runtimeStore;
+
   const liveThreads = useLiveThreads();
   const streamStatus = useStreamStatus();
   const [view, setView] = useState<ThreadDetailView>("log");
@@ -959,7 +964,7 @@ export function ThreadsView({
   useEffect(() => {
     setSelectedThreadRunning(currentRunning);
     return () => setSelectedThreadRunning(false);
-  }, [currentRunning]);
+  }, [currentRunning, setSelectedThreadRunning]);
 
   if (!snapshot) return <PanelLoading listTitle="Threads" />;
 

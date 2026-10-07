@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 // Managed-host server state. These keys remain byte-for-byte compatible with
 // the historical shared query module so polling, invalidation and cache resume
 // behavior survive the feature extraction.
@@ -14,7 +15,7 @@ import {
   decodeManagedUpgradeOperation,
   decodeManagedUpgradeSnapshot,
 } from "@/app/features/managed/upgradeContract";
-import { api } from "@/app/services/api";
+
 import type {
   BackendKind,
   ManagedAuthList,
@@ -40,6 +41,8 @@ export const managedQueryKeys = {
 };
 
 export function useManagedHostStatus() {
+  const { api } = useNativeRuntime();
+
   return useQuery<ManagedHostStatus>({
     queryKey: managedQueryKeys.hostStatus,
     queryFn: ({ signal }) => api.getManagedStatus(signal),
@@ -50,6 +53,8 @@ export function useManagedHostStatus() {
 }
 
 export function useManagedUpgradeSnapshot(enabled = true) {
+  const { api } = useNativeRuntime();
+
   return useQuery<ManagedUpgradeSnapshot>({
     queryKey: managedQueryKeys.upgrade,
     queryFn: async ({ signal }) =>
@@ -66,6 +71,8 @@ export function useManagedUpgradeSnapshot(enabled = true) {
 }
 
 export function useStartManagedUpgrade() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: async (idempotencyKey: string) =>
@@ -80,6 +87,8 @@ export function useStartManagedUpgrade() {
 }
 
 export function useManagedGitHub(enabled = true) {
+  const { api } = useNativeRuntime();
+
   return useQuery<ManagedGitHubStatus>({
     queryKey: managedQueryKeys.github,
     queryFn: ({ signal }) => api.getManagedGitHub(signal),
@@ -89,6 +98,8 @@ export function useManagedGitHub(enabled = true) {
 }
 
 export function useManagedSecrets(enabled = true) {
+  const { api } = useNativeRuntime();
+
   return useQuery<ManagedSecretList>({
     queryKey: managedQueryKeys.secrets,
     queryFn: ({ signal }) => api.listManagedSecrets(signal),
@@ -98,6 +109,8 @@ export function useManagedSecrets(enabled = true) {
 }
 
 export function usePutManagedSecret() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ name, value }: { name: string; value: string }) =>
@@ -111,6 +124,8 @@ export function usePutManagedSecret() {
 }
 
 export function useDeleteManagedSecret() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => api.deleteManagedSecret(name),
@@ -123,6 +138,8 @@ export function useDeleteManagedSecret() {
 }
 
 export function useManagedAuth(enabled = true) {
+  const { api } = useNativeRuntime();
+
   return useQuery<ManagedAuthList>({
     queryKey: managedQueryKeys.auth,
     queryFn: ({ signal }) => api.listManagedAuth(signal),
@@ -137,6 +154,8 @@ export function useManagedProviderModels(
   enabled: boolean,
   baseUrl: string | null = null,
 ) {
+  const { api } = useNativeRuntime();
+
   return useQuery<ProviderModelList>({
     queryKey: managedQueryKeys.providerModels(backend ?? "", baseUrl),
     queryFn: ({ signal }) =>
@@ -151,6 +170,8 @@ export function useManagedProviderModels(
 }
 
 export function useReadyProviderModels(catalog: ModelCatalog | undefined) {
+  const { api } = useNativeRuntime();
+
   const status = useManagedHostStatus().data ?? null;
   const ready = useMemo(() => readyProviderModelRequests(catalog, status), [catalog, status]);
   const results = useQueries({

@@ -1,22 +1,25 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createNativeRuntime } from "./app/runtime/nativeRuntime";
+import { NativePresentationRoot } from "./app/runtime/NativePresentationRoot";
+import { nacClient } from "./app/services/nacClient";
 import { HashRouter } from "react-router-dom";
-import App from "./App";
+
 import { ThemeProvider } from "./app/providers/ThemeProvider";
 import "./index.css";
 
-// Session data arrives over SSE, so cached REST reads only need to cover the
-// gap between a mount and the first stream event.
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30 * 1000,
-      gcTime: 5 * 60 * 1000,
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
+const runtime = createNativeRuntime({
+  scope: {
+    owner: "standalone",
+    profile: "standalone",
+    organization: "standalone",
+    host: "standalone",
+    incarnation: "standalone",
+    endpoint: "",
+    release: "standalone",
   },
+  client: nacClient,
+  storage: localStorage,
 });
 
 // Alt-click jumps from a rendered element to its source. The import is dynamic
@@ -44,13 +47,11 @@ if (import.meta.env.DEV) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        {/* Hash routing keeps deep links working without a server catch-all. */}
-        <HashRouter>
-          <App />
-        </HashRouter>
-      </ThemeProvider>
-    </QueryClientProvider>
+    <NativePresentationRoot
+      runtime={runtime}
+      globalKeyboard
+      router={(children) => <HashRouter>{children}</HashRouter>}
+      theme={(children) => <ThemeProvider>{children}</ThemeProvider>}
+    />
   </StrictMode>,
 );

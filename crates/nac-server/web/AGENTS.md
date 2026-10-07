@@ -12,6 +12,8 @@ server remains the source of business truth and wire schemas.
   caching, cancellation, invalidation, and polling belong to query owners, not
   presentational components.
 - `packages/nac-client/` owns the runtime-free ALL-121 typed HTTP/SSE boundary.
+  Its full resource facade and generated operation classification share the
+  existing native methods; private control routes stay in the web adapter.
   The standalone service modules are compatibility facades; do not fork its
   transport, replay, reconnect, or command-admission logic back into the app.
 - `src/app/types/openapi.generated.ts` is generated from Rust/OpenAPI. Import
@@ -24,6 +26,11 @@ server remains the source of business truth and wire schemas.
   query invalidation, accessibility labels, and behavior-selection defaults.
 - Generic providers are for genuinely cross-feature browser state. Do not use
   them as a home for one feature's workflow.
+- `src/app/runtime/` owns one immutable consumer binding, private query cache,
+  presentation stores and request/stream lifetime. Production feature owners
+  read that context; compatibility globals are only for legacy hook fixtures.
+  Replace the runtime when any binding changes. Keep caller routing, styles,
+  theme and authenticated stream construction explicit at the presentation root.
 
 ## Starting points
 
@@ -54,6 +61,10 @@ server remains the source of business truth and wire schemas.
 - `components/inspector/ThreadsView.tsx` keeps orchestrator thread/workset
   navigation and episode rendering together. Direct-child and managed-host
   workflows remain separate features.
+- `store/runtimeStore.ts` keeps snapshot hydration and ordered live-event
+  reduction in one store factory. Its activation fence and coupled run/tool/
+  transcript projection must share a lifetime; splitting the reduction across
+  independent stores would obscure ordering and late-event protection.
 
 These existing UI owners may exceed 800 lines because splitting their tightly
 coupled local form/view state would scatter one workflow. Do not add unrelated

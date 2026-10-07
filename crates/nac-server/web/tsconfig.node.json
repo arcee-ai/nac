@@ -17,5 +17,6 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["vite.config.ts", "vite.config.test.ts", "playwright.config.ts", "e2e"]
+  "include": ["vite.config.ts", "vite.config.test.ts", "playwright.config.ts", "e2e"],
+  "exclude": ["e2e/fixtures"]
 }

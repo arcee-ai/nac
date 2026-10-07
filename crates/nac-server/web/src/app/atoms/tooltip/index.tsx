@@ -1,3 +1,4 @@
+import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundary";
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "../../hooks/useMediaQuery";
@@ -94,6 +95,8 @@ const StickyTooltip: React.FC<StickyTooltipProps> = ({
   disabled = false,
   children,
 }) => {
+  const portalTarget = usePresentationPortalTarget();
+
   const isMobile = useIsMobile();
   const [trigger, setTrigger] = useState<DOMRect | null>(null);
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
@@ -225,7 +228,7 @@ const StickyTooltip: React.FC<StickyTooltipProps> = ({
                 top: `${coords?.top ?? 0}px`,
               }}
             />,
-            document.body,
+            portalTarget,
           )
         : null}
     </div>

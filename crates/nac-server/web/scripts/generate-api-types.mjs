@@ -7,16 +7,119 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { clientApiSurface } from "./client-api-surface.mjs";
 import { spawnSync } from "node:child_process";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.resolve(scriptDir, "..");
 const inputPath = path.join(webDir, "openapi.json");
 const webOutputPath = path.join(webDir, "src/app/types/openapi.generated.ts");
+const clientSurfaceOutputPath = path.join(webDir, "packages/nac-client/src/surface.generated.ts");
 const clientOutputPath = path.join(webDir, "packages/nac-client/src/openapi.generated.ts");
 const check = process.argv.slice(2).includes("--check");
 
 const clientSchemaRoots = [
+  "GitIdentityResponse",
+  "UpdateGitIdentityRequest",
+  "McpOAuthStatusResponse",
+  "AuthenticateMcpOAuthRequest",
+  "AuthenticateMcpOAuthResponse",
+  "ConfigureMcpOAuthRequest",
+
+  "HealthResponse",
+  "AssignSessionRequest",
+  "BranchList",
+  "BrowseListing",
+  "CommitOutcome",
+  "CommitWorkspaceRequest",
+  "CompactSessionResponse",
+  "CreateGoalRequest",
+  "CreateMcpServerRequest",
+  "CreateModelConfigurationRequest",
+  "CreateProjectRequest",
+  "CreateSessionRequest",
+  "CreateSshConfigurationRequest",
+  "DeleteProjectResponse",
+  "DeleteProjectSessions",
+  "DeviceLoginStartedResponse",
+  "DeviceLoginStateResponse",
+  "ForkSessionResponse",
+  "GeneratedCredential",
+  "GitHubBranchListResponse",
+  "GitHubLoginStartedResponse",
+  "GitHubLoginStateResponse",
+  "GitHubRepositoryListResponse",
+  "GitHubStatusResponse",
+  "InboxDelivery",
+  "InboxItemResponse",
+  "LaunchModelDefaults",
+  "LaunchModelDefaultsRequest",
+  "ManagedAuthListResponse",
+  "ManagedAuthProvider",
+  "ManagedAuthStatusResponse",
+  "ManagedCloneOperation",
+  "ManagedHostStatusResponse",
+  "ManagedOrchestratorRecord",
+  "ManagedSecretList",
+  "ManagedSecretSummary",
+  "ManagedSessionSummary",
+  "McpLibraryResponse",
+  "McpRuntimeStatus",
+  "McpRuntimeStatusList",
+  "McpServerList",
+  "McpServerView",
+  "MessagesPageResponse",
+  "ModelConfigurationList",
+  "ModelConfigurationRecord",
+  "ModelListing",
+  "OpenLocalPathResult",
+  "OrchestratorSteeringResponse",
+  "PermissionApprovalMode",
+  "PermissionReply",
+  "PermissionStateResponse",
+  "ProjectList",
+  "ProjectRecord",
+  "ProviderModelList",
+  "ProviderModelsRequest",
+  "RawSessionConfig",
+  "ReorderProjectsRequest",
+  "ReorderProjectsResponse",
+  "ReorderSessionsRequest",
+  "ReorderSessionsResponse",
+  "ResolvedModelConfiguration",
+  "RevertSessionResponse",
+  "SandboxActivity",
+  "SandboxAvailability",
+  "SessionGoalRecord",
+  "SessionSummarySnapshot",
+  "SkillCatalogEntry",
+  "SlashCommandDefinition",
+  "SshBrowseRequest",
+  "SshConfigurationList",
+  "SshConfigurationRecord",
+  "StartManagedCloneRequest",
+  "StartManagedOrchestratorRequest",
+  "StartTraditionalChildRequest",
+  "StoreInfo",
+  "StoredCredentialList",
+  "SwitchBranchRequest",
+  "TestMcpServerRequest",
+  "TestMcpServerResponse",
+  "ThreadEventPage",
+  "ThreadSteeringResponse",
+  "TraditionalChildRecord",
+  "UpdateConfigRequest",
+  "UpdateGoalRequest",
+  "UpdateMcpServerRequest",
+  "UpdateModelConfigurationRequest",
+  "UpdateProjectRequest",
+  "UpdateSessionPresentationRequest",
+  "UpdateSshConfigurationRequest",
+  "WorkspaceFileContent",
+  "WorkspaceFileDiff",
+  "WorkspaceFileList",
+  "WorkspaceRevisionChanges",
+  "WorkspaceRevisionRecord",
   "UiConfiguration",
   "AssistantStreamDelta",
   "LaggedEvent",
@@ -38,6 +141,19 @@ if (document.openapi !== "3.1.0") {
 const schemas = document.components?.schemas;
 if (!schemas || typeof schemas !== "object" || Array.isArray(schemas)) {
   throw new Error("OpenAPI document has no components.schemas object");
+}
+
+const operations = Object.entries(document.paths).flatMap(([path, item]) =>
+  Object.entries(item)
+    .filter(([method]) => ["get", "post", "put", "patch", "delete"].includes(method))
+    .map(([method, operation]) => ({ key: `${method.toUpperCase()} ${path}`, operation })),
+);
+const operationKeys = new Set(operations.map(({ key }) => key));
+for (const { key } of operations) {
+  if (!clientApiSurface[key]) throw new Error(`Unclassified client operation ${key}`);
+}
+for (const key of Object.keys(clientApiSurface)) {
+  if (!operationKeys.has(key)) throw new Error(`Client coverage names missing operation ${key}`);
 }
 
 function quote(value) {
@@ -193,6 +309,13 @@ function transitiveSchemas(roots) {
   return [...selected];
 }
 
+// Include every request/response dependency for deliberately supported operations.
+const operationSchemaRoots = new Set(clientSchemaRoots);
+for (const { key, operation } of operations) {
+  if (!clientApiSurface[key].startsWith("private:"))
+    referencedSchemaNames(operation, operationSchemaRoots);
+}
+
 function generatedSource(schemaNames, banner) {
   const entries = schemaNames
     .sort((left, right) => left.localeCompare(right, "en"))
@@ -233,6 +356,13 @@ async function formattedSource(unformatted, filename) {
 
 const outputs = [
   {
+    path: clientSurfaceOutputPath,
+    source: `// @generated by scripts/generate-api-types.mjs.
+// Coverage is not hosted authorization. Run make generate-api-contract.
+export const NAC_API_SURFACE = ${JSON.stringify(clientApiSurface, null, 2)} as const;
+`,
+  },
+  {
     path: webOutputPath,
     source: generatedSource(
       Object.keys(schemas),
@@ -242,7 +372,7 @@ const outputs = [
   {
     path: clientOutputPath,
     source: generatedSource(
-      transitiveSchemas(clientSchemaRoots),
+      transitiveSchemas(operationSchemaRoots),
       "../../../scripts/generate-api-types.mjs from ../../../openapi.json",
     ),
   },

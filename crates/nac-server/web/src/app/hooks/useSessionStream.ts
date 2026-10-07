@@ -1,15 +1,17 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { makeObservationPorts } from "@/app/features/direct-session/browserAdapters";
 import { openSessionObservation } from "@/app/features/direct-session/browserRuntime";
 import { queryKeys } from "@/app/services/queries/keys";
-import { subscribeToSessionEvents } from "@/app/services/eventStream";
-import { resetRuntime, syncRunFromSnapshot } from "@/app/store/runtimeStore";
+
 import type { ActiveRunSnapshot } from "@/app/types/api";
 
 /** Bind React activation to the scoped session observation workflow. */
 export function useSessionStream(sessionId: string | null): void {
+  const { resetRuntime } = useNativeRuntime().stores.runtimeStore;
+
   const client = useQueryClient();
   useEffect(() => {
     if (!sessionId) {
@@ -17,7 +19,7 @@ export function useSessionStream(sessionId: string | null): void {
       return;
     }
     return openSessionObservation(makeObservationPorts(client, sessionId));
-  }, [sessionId, client]);
+  }, [sessionId, client, resetRuntime]);
 }
 
 /**
@@ -25,6 +27,8 @@ export function useSessionStream(sessionId: string | null): void {
  * applying that child's runtime events to the parent's transcript store.
  */
 export function useDelegatedPermissionStream(sessionId: string, enabled: boolean): void {
+  const { subscribeToSessionEvents } = { subscribeToSessionEvents: useNativeRuntime().events };
+
   const client = useQueryClient();
 
   useEffect(() => {
@@ -56,7 +60,7 @@ export function useDelegatedPermissionStream(sessionId: string, enabled: boolean
       onBackpressure: refresh,
     });
     return dispose;
-  }, [client, enabled, sessionId]);
+  }, [client, enabled, sessionId, subscribeToSessionEvents]);
 }
 
 /**
@@ -64,7 +68,9 @@ export function useDelegatedPermissionStream(sessionId: string, enabled: boolean
  * does not show the session as idle until the next event arrives.
  */
 export function useRunStateSync(activeRun: ActiveRunSnapshot | null | undefined): void {
+  const { syncRunFromSnapshot } = useNativeRuntime().stores.runtimeStore;
+
   useEffect(() => {
     syncRunFromSnapshot(activeRun);
-  }, [activeRun]);
+  }, [activeRun, syncRunFromSnapshot]);
 }
