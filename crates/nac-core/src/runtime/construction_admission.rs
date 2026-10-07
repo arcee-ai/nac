@@ -20,6 +20,21 @@ impl ConstructionAdmission {
         self.completed = true;
         Ok(())
     }
+    pub(super) async fn complete_for_run(
+        mut self,
+        path: &Path,
+        session_id: String,
+        lease: sessions::SessionOperationLease,
+    ) -> Result<RuntimeRunAdmission> {
+        let admission = RuntimeRunAdmission {
+            guard: Arc::clone(&self.guard),
+            session_id,
+            operation_lease: Some(lease),
+        };
+        admission.check_initial(path, &admission.session_id).await?;
+        self.completed = true;
+        Ok(admission)
+    }
 }
 impl Drop for ConstructionAdmission {
     fn drop(&mut self) {

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinSet;
 
@@ -1203,6 +1203,16 @@ impl Agent {
         messages: Vec<Message>,
         operation_lease: Option<&crate::sessions::SessionOperationLease>,
     ) -> Result<Option<Vec<Message>>> {
+        self.restore_messages_merging_log_tail_admitted(messages, operation_lease, None)
+            .await
+    }
+
+    pub(crate) async fn restore_messages_merging_log_tail_admitted(
+        &mut self,
+        messages: Vec<Message>,
+        operation_lease: Option<&crate::sessions::SessionOperationLease>,
+        admission: Option<Arc<crate::store::MutationAdmission>>,
+    ) -> Result<Option<Vec<Message>>> {
         self.transcript_recovery_warning = None;
         let Some(sink) = &self.transcript_log else {
             self.restore_messages(messages);
@@ -1210,7 +1220,10 @@ impl Agent {
         };
         let mut blob_len = messages.len() as u64;
         let mut blob_len_usize = messages.len();
-        let writer = Arc::clone(&sink.writer);
+        let writer = match admission {
+            Some(admission) => Arc::new((*sink.writer).clone().with_recovery_admission(admission)),
+            None => Arc::clone(&sink.writer),
+        };
         let session_id = sink.session_id.clone();
         if let Some(operation_lease) = operation_lease {
             operation_lease
@@ -1346,7 +1359,16 @@ impl Agent {
                     })??;
                     refreshed_blob = Some(merged.clone());
                 } else {
-                    self.delete_log_tail(merged.len() as u64).await?;
+                    let from_idx = merged.len() as u64;
+                    let repair_writer = Arc::clone(&writer);
+                    let repair_session_id = session_id.clone();
+                    crate::store::spawn_blocking_store_caller(move || {
+                        repair_writer.delete_from(&repair_session_id, from_idx)
+                    })
+                    .await
+                    .context("transcript admitted tail delete task failed")??;
+                    self.committed_log_len = self.committed_log_len.min(from_idx);
+                    self.pending_log_end = None;
                 }
             }
             // The durable transcript is now exactly `merged`: every row it

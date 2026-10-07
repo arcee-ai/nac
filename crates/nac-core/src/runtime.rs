@@ -52,10 +52,12 @@ mod managed_runtime_lease;
 mod model_resolution;
 mod remote;
 mod resume;
+mod run_admission;
 mod sandboxing;
 
 pub use effect_lease::{RuntimeEffectLease, RuntimeEffectLeaseHandle};
 pub use managed_runtime_lease::{ManagedRuntimeExpiryObservation, ManagedRuntimeLeaseGuard};
+pub use run_admission::RuntimeRunAdmission;
 
 pub use builders::{
     build_managed_worker_config, build_run_config, build_run_config_for_project,
@@ -84,9 +86,9 @@ pub use model_resolution::{
 pub use remote::browse_ssh_directory;
 use remote::{canonical_remote_session_cwd, remote_cwd_or_home, trim_ssh_host};
 pub use resume::{
-    build_resume_config, build_resume_config_for_session,
-    build_resume_config_for_session_attachment, build_resume_config_for_session_with_lease,
-    build_resume_picker_config,
+    build_resume_config, build_resume_config_for_runtime_operation,
+    build_resume_config_for_session, build_resume_config_for_session_attachment,
+    build_resume_config_for_session_with_lease, build_resume_picker_config,
 };
 #[cfg(test)]
 use resume::{build_resume_config_from_snapshot, normalize_snapshot_paths};

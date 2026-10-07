@@ -4,6 +4,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+/// Ephemeral trusted admission carried into a selected mutation transaction.
+/// It must be rechecked after waits and before commit; no row recreates it.
+pub(crate) type MutationAdmission = dyn Fn() -> Result<()> + Send + Sync;
+
 mod blocking_caller;
 pub(crate) mod coordinator;
 pub(crate) use blocking_caller::call_legacy_store;

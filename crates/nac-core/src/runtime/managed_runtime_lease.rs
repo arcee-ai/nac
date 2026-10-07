@@ -165,6 +165,48 @@ impl ManagedRuntimeLeaseGuard {
         self.check().await
     }
 
+    pub(super) fn check_initial_admission_now(&self) -> Result<()> {
+        self.check_now()?;
+        let mut state = self.state()?;
+        let clock = native_clock()?;
+        Self::local(&mut state, clock)?;
+        if !state.active.initial_admission_available_at(clock) {
+            return Err(denied());
+        }
+        Ok(())
+    }
+
+    pub(super) fn mutation_admission(self: &Arc<Self>) -> Arc<crate::store::MutationAdmission> {
+        let guard = Arc::clone(self);
+        Arc::new(move || guard.check_now())
+    }
+
+    pub(super) async fn reconcile_session(
+        self: &Arc<Self>,
+        session_id: &str,
+    ) -> Result<crate::store::ActiveRunReconciliation> {
+        self.check().await?;
+        let result = self
+            .store
+            .reconcile_active_run_admitted(session_id.to_string(), self.mutation_admission())
+            .await?;
+        self.check().await?;
+        Ok(result)
+    }
+
+    pub(super) async fn update_session_config(
+        self: &Arc<Self>,
+        snapshot: crate::sessions::SessionSnapshot,
+    ) -> Result<i64> {
+        self.check().await?;
+        let version = self
+            .store
+            .update_session_config_admitted(snapshot, self.mutation_admission())
+            .await?;
+        self.check().await?;
+        Ok(version)
+    }
+
     pub(super) async fn create_session(
         self: &Arc<Self>,
         snapshot: crate::sessions::SessionSnapshot,

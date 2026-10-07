@@ -39,8 +39,15 @@ It must not own HTTP/React delivery or managed-host product onboarding.
   consume one live guard claim before client/backend/MCP construction. They pin
   captured clients, bound in-flight MCP initialization, and recheck session
   creation on the selected store executor. Missing authority has no standalone
-  fallback. This factory does not admit a run, install startup/receiver policy,
-  fence resumed/worker construction, or qualify active-run continuation.
+  fallback. The guarded existing-session resume factory preserves the UUID,
+  carries the same live original guard and session operation lease in a sealed
+  noncloneable pending-run admission, and fences recovery, config migration and
+  transcript repair inside their store transactions. It bounds MCP startup and
+  caller cancellation without owning destructive cleanup of resumed resources.
+  These factories do not publish a run or install startup/receiver policy or
+  worker IPC. Guarded resume still needs qualification of synchronous Git
+  restoration and selected SSH/Podman effects; active-run continuation remains
+  separate work.
 - `src/sandbox/podman.rs` keeps the selected Podman adapter's container lifecycle,
   creation receipts, process identity/cleanup scripts and rollback together; its
   cohesive ownership explains its size above 800 lines. Fresh durable teardown

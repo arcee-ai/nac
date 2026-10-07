@@ -349,6 +349,35 @@ pub fn update_session_config(
     path: &Path,
     snapshot: &SessionSnapshot,
 ) -> std::result::Result<i64, SessionConfigUpdateError> {
+    update_session_config_inner(path, snapshot, None)
+}
+command UpdateSessionConfigCommand {
+    snapshot: SessionSnapshot = snapshot.clone(),
+}
+call |command| (&command.snapshot)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.snapshot.session_id));
+port public;
+}
+
+coordinated_command! {
+pub(crate) fn update_session_config_admitted(path: &Path, snapshot: &SessionSnapshot,
+    admission: &std::sync::Arc<crate::store::MutationAdmission>) -> std::result::Result<i64, SessionConfigUpdateError> {
+    update_session_config_inner(path, snapshot, Some(admission.as_ref()))
+}
+command UpdateSessionConfigAdmittedCommand {
+    snapshot: SessionSnapshot = snapshot.clone(),
+    admission: std::sync::Arc<crate::store::MutationAdmission> = std::sync::Arc::clone(admission),
+}
+call |command| (&command.snapshot, &command.admission)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.snapshot.session_id));
+port public;
+}
+
+fn update_session_config_inner(
+    path: &Path,
+    snapshot: &SessionSnapshot,
+    admission: Option<&crate::store::MutationAdmission>,
+) -> std::result::Result<i64, SessionConfigUpdateError> {
     let extra_headers_json = if snapshot.extra_headers.is_empty() {
         None
     } else {
@@ -357,7 +386,7 @@ pub fn update_session_config(
                 .context("failed to serialize session extra_headers")?,
         )
     };
-    update_raw_session_config(
+    update_raw_session_config_inner(
         path,
         &RawSessionConfig {
             session_id: snapshot.session_id.clone(),
@@ -375,14 +404,8 @@ pub fn update_session_config(
             config_version: snapshot.config_version,
             diagnostics: Vec::new(),
         },
+        admission,
     )
-}
-command UpdateSessionConfigCommand {
-    snapshot: SessionSnapshot = snapshot.clone(),
-}
-call |command| (&command.snapshot)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.snapshot.session_id));
-port public;
 }
 
 coordinated_command! {
@@ -394,14 +417,35 @@ pub fn update_raw_session_config(
     path: &Path,
     config: &RawSessionConfig,
 ) -> std::result::Result<i64, SessionConfigUpdateError> {
+    update_raw_session_config_inner(path, config, None)
+}
+command UpdateRawSessionConfigCommand {
+    config: RawSessionConfig = config.clone(),
+}
+call |command| (&command.config)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
+
+fn update_raw_session_config_inner(
+    path: &Path,
+    config: &RawSessionConfig,
+    admission: Option<&crate::store::MutationAdmission>,
+) -> std::result::Result<i64, SessionConfigUpdateError> {
     let expected_version = config.config_version;
     let next_version = expected_version.checked_add(1).ok_or_else(|| {
         SessionConfigUpdateError::Store(anyhow!("session configuration version overflow"))
     })?;
 
     let light_model_json = serialize_light_model(config.light_model.as_ref())?;
+    if let Some(admission) = admission {
+        admission()?;
+    }
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if let Some(admission) = admission {
+        admission()?;
+    }
     let updated = tx.execute(
         "UPDATE sessions
          SET model = ?1,
@@ -449,15 +493,11 @@ pub fn update_raw_session_config(
             ))),
         };
     }
+    if let Some(admission) = admission {
+        admission()?;
+    }
     tx.commit()?;
     Ok(next_version)
-}
-command UpdateRawSessionConfigCommand {
-    config: RawSessionConfig = config.clone(),
-}
-call |command| (&command.config)
-correlation |_command| crate::telemetry::Correlation::default();
-port public;
 }
 
 coordinated_command! {

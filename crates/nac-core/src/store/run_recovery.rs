@@ -339,7 +339,7 @@ pub fn reconcile_active_run(path: &Path, session_id: &str) -> Result<ActiveRunRe
     crate::telemetry::observe_store(
         crate::telemetry::StoreOperation::Recovery,
         crate::telemetry::Correlation::session(Some(session_id)),
-        || reconcile_active_run_inner(path, session_id),
+        || reconcile_active_run_inner(path, session_id, None),
     )
 }
 command ReconcileActiveRunCommand {
@@ -350,13 +350,52 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
-fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRunReconciliation> {
+coordinated_command! {
+pub(crate) fn reconcile_active_run_admitted(path: &Path, session_id: &str,
+    admission: &std::sync::Arc<MutationAdmission>) -> Result<ActiveRunReconciliation> {
+    crate::telemetry::observe_store(
+        crate::telemetry::StoreOperation::Recovery,
+        crate::telemetry::Correlation::session(Some(session_id)),
+        || reconcile_active_run_inner(path, session_id, Some(admission.as_ref())),
+    )
+}
+command ReconcileActiveRunAdmittedCommand {
+    session_id: String = session_id.to_owned(),
+    admission: std::sync::Arc<MutationAdmission> = std::sync::Arc::clone(admission),
+}
+call |command| (&command.session_id, &command.admission)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+fn reconcile_active_run_inner(
+    path: &Path,
+    session_id: &str,
+    admission: Option<&MutationAdmission>,
+) -> Result<ActiveRunReconciliation> {
+    if let Some(admission) = admission {
+        admission()?;
+    }
     let mut connection = open_runtime_connection(path)?;
     let transaction =
         connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    super::worker_dispatches::recover_worker_dispatches(&transaction, session_id)?;
-    let Some(record) = load_run_recovery_with_connection(&transaction, session_id)? else {
-        transaction.commit()?;
+    if let Some(admission) = admission {
+        admission()?;
+    }
+    let result = reconcile_active_run_in_transaction(&transaction, session_id)?;
+    if let Some(admission) = admission {
+        admission()?;
+    }
+    transaction.commit()?;
+    Ok(result)
+}
+
+fn reconcile_active_run_in_transaction(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+) -> Result<ActiveRunReconciliation> {
+    super::worker_dispatches::recover_worker_dispatches(transaction, session_id)?;
+    let Some(record) = load_run_recovery_with_connection(transaction, session_id)? else {
         return Ok(ActiveRunReconciliation::None);
     };
     if let Some(disposition) = record.terminal_disposition {
@@ -366,7 +405,7 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
         // so the next generation can replace the row. A still-running
         // relationship retains the marker for its monitor to settle.
         crate::store::reconcile_session_goal_terminal_with_connection(
-            &transaction,
+            transaction,
             session_id,
             &record.run_id,
             match disposition {
@@ -374,12 +413,10 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
                 RunTerminalDisposition::Cancelled => GoalRunDisposition::Cancelled,
             },
         )?;
-        retain_or_clear_terminal_obligation(&transaction, session_id, &record.run_id, disposition)?;
-        transaction.commit()?;
+        retain_or_clear_terminal_obligation(transaction, session_id, &record.run_id, disposition)?;
         return Ok(ActiveRunReconciliation::CanonicalTerminal);
     }
     if record.status != RunRecoveryStatus::Active {
-        transaction.commit()?;
         return Ok(ActiveRunReconciliation::None);
     }
 
@@ -414,7 +451,7 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
         ));
     }
 
-    if let Some(disposition) = canonical_terminal_disposition(&transaction, session_id, &record)? {
+    if let Some(disposition) = canonical_terminal_disposition(transaction, session_id, &record)? {
         match disposition {
             RecoveredRunTerminal::Completed | RecoveredRunTerminal::Cancelled => {
                 let durable = match disposition {
@@ -423,7 +460,7 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
                     RecoveredRunTerminal::Failed => unreachable!(),
                 };
                 crate::store::reconcile_session_goal_terminal_with_connection(
-                    &transaction,
+                    transaction,
                     session_id,
                     &record.run_id,
                     match disposition {
@@ -433,18 +470,16 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
                     },
                 )?;
                 retain_or_clear_terminal_obligation(
-                    &transaction,
+                    transaction,
                     session_id,
                     &record.run_id,
                     durable,
                 )?;
-                transaction.commit()?;
                 return Ok(ActiveRunReconciliation::CanonicalTerminal);
             }
             RecoveredRunTerminal::Failed => {
-                let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
-                mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
-                transaction.commit()?;
+                let failure = reconcile_failed_goal(transaction, session_id, &record)?;
+                mark_active_run_failed(transaction, session_id, &record.run_id, failure.as_ref())?;
                 return Ok(ActiveRunReconciliation::Failed {
                     run_id: record.run_id,
                     failure,
@@ -458,9 +493,8 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
     // the typed staged outcome is still authoritative and must settle the
     // bound goal with the same retry policy as the ordinary run-end path.
     if record.failure.is_some() {
-        let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
-        mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
-        transaction.commit()?;
+        let failure = reconcile_failed_goal(transaction, session_id, &record)?;
+        mark_active_run_failed(transaction, session_id, &record.run_id, failure.as_ref())?;
         return Ok(ActiveRunReconciliation::Failed {
             run_id: record.run_id,
             failure,
@@ -482,7 +516,6 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
             "active run recovery transition expected one row, updated {changed}"
         ));
     }
-    transaction.commit()?;
     Ok(ActiveRunReconciliation::Interrupted {
         run_id: record.run_id,
     })

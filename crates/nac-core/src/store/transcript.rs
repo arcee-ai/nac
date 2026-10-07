@@ -293,6 +293,7 @@ pub struct TranscriptLogWriter {
     #[cfg(test)]
     after_extent_read: std::sync::Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
     pub(super) append_fence: Option<super::transcript_append::RunAppendFence>,
+    recovery_admission: Option<std::sync::Arc<super::MutationAdmission>>,
 }
 
 /// Length of the log tail relative to a snapshot blob of `blob_len`, read from
@@ -442,6 +443,7 @@ impl TranscriptLogWriter {
             operation: std::sync::Arc::new(Mutex::new(())),
             append_scope: uuid::Uuid::new_v4().to_string(),
             append_fence: None,
+            recovery_admission: None,
             #[cfg(test)]
             append_fault: std::sync::Arc::new(Mutex::new(None)),
             #[cfg(test)]
@@ -449,6 +451,16 @@ impl TranscriptLogWriter {
             #[cfg(test)]
             after_extent_read: std::sync::Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Only this ephemeral writer clone carries protected restore authority.
+    /// Readback and terminal cleanup keep their ordinary, separate obligations.
+    pub(crate) fn with_recovery_admission(
+        mut self,
+        admission: std::sync::Arc<super::MutationAdmission>,
+    ) -> Self {
+        self.recovery_admission = Some(admission);
+        self
     }
 
     /// Append one message; the range and replay receipt share its transaction.
@@ -994,6 +1006,9 @@ impl TranscriptLogWriter {
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(admission) = &self.recovery_admission {
+            admission()?;
+        }
         let decoded_rows = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
@@ -1058,6 +1073,9 @@ impl TranscriptLogWriter {
         } else {
             None
         };
+        if let Some(admission) = &self.recovery_admission {
+            admission()?;
+        }
         transaction.commit()?;
         Ok((trusted_tail, recovery))
     }
@@ -1080,6 +1098,9 @@ impl TranscriptLogWriter {
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(admission) = &self.recovery_admission {
+            admission()?;
+        }
         let row_ids = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
@@ -1111,6 +1132,9 @@ impl TranscriptLogWriter {
         if !row_ids.is_empty() {
             refresh_session_summary(&transaction, session_id)?;
         }
+        if let Some(admission) = &self.recovery_admission {
+            admission()?;
+        }
         transaction.commit()?;
         Ok(row_ids.len())
     }
@@ -1141,6 +1165,9 @@ impl TranscriptLogWriter {
         let mut connection = open_runtime_connection(&self.store_path)?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(admission) = &self.recovery_admission {
+            admission()?;
+        }
         let row_ids = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
@@ -1179,6 +1206,9 @@ impl TranscriptLogWriter {
             transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
         }
         refresh_session_summary(&transaction, session_id)?;
+        if let Some(admission) = &self.recovery_admission {
+            admission()?;
+        }
         transaction.commit()?;
         Ok(row_ids.len())
     }

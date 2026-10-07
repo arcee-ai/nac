@@ -7,6 +7,9 @@ use uuid::Uuid;
 #[path = "construction_backend_tests.rs"]
 mod construction_backend_tests;
 
+#[path = "resume_admission_tests.rs"]
+mod resume_admission_tests;
+
 struct Fixture {
     path: PathBuf,
     store: Arc<StoreCoordinator>,

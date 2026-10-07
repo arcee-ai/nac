@@ -237,6 +237,60 @@ pub async fn build_resume_config_for_session_with_lease(
     Ok(run_config)
 }
 
+/// Trusted construction for a new original run of an actual existing session.
+/// The same sealed admission must later be retained in private ActiveRunState;
+/// this factory itself does not publish or acknowledge a run.
+pub async fn build_resume_config_for_runtime_operation(
+    store_path: PathBuf,
+    session_id: &str,
+    config: &NacConfig,
+    resume_base_cwd: PathBuf,
+    worker_executable: Option<PathBuf>,
+    model: ResumeModelOptions,
+    guard: Option<std::sync::Arc<ManagedRuntimeLeaseGuard>>,
+) -> Result<(OrchestratorRunConfig, RuntimeRunAdmission)> {
+    let guard = guard.ok_or_else(|| anyhow::anyhow!("runtime construction admission required"))?;
+    let admission =
+        super::construction_admission::ConstructionAdmission::new(guard, &store_path).await?;
+    let path = store_path.clone();
+    let selected_session = session_id.to_string();
+    let selected_guard = std::sync::Arc::clone(&admission.guard);
+    let lease = store::spawn_blocking_store_caller(move || {
+        selected_guard.check_now()?;
+        let lease = sessions::SessionOperationLease::try_acquire(&path, &selected_session)?;
+        lease.validate(&path, &selected_session)?;
+        selected_guard.check_now()?;
+        Ok::<_, anyhow::Error>(lease)
+    })
+    .await
+    .context("runtime session lease acquisition failed")??;
+    let recovery = admission.guard.reconcile_session(session_id).await?;
+    let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
+    super::construction_admission::check(Some(&admission.guard)).await?;
+    anyhow::ensure!(
+        snapshot.session_id == session_id,
+        "runtime session target mismatch"
+    );
+    let mut built = build_resume_config_from_snapshot_inner(
+        snapshot,
+        store_path.clone(),
+        config,
+        resume_base_cwd,
+        worker_executable,
+        Some(&lease),
+        true,
+        None,
+        model,
+        Some(&admission.guard),
+    )
+    .await?;
+    record_run_failure_recovery(&mut built, recovery);
+    let run_admission = admission
+        .complete_for_run(&store_path, session_id.to_string(), lease)
+        .await?;
+    Ok((built.with_required_runtime_effects(), run_admission))
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "resume composition keeps persisted snapshot, overrides, lease, and executable authority explicit"
@@ -252,6 +306,38 @@ pub(super) async fn build_resume_config_from_snapshot(
     resolved_metadata: Option<ModelMetadata>,
     model: ResumeModelOptions,
 ) -> Result<OrchestratorRunConfig> {
+    build_resume_config_from_snapshot_inner(
+        snapshot,
+        store_path,
+        config,
+        resume_base_cwd,
+        worker_executable,
+        operation_lease,
+        persist_recovery,
+        resolved_metadata,
+        model,
+        None,
+    )
+    .await
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "resume composition keeps persisted snapshot, overrides, lease, and executable authority explicit"
+)]
+async fn build_resume_config_from_snapshot_inner(
+    snapshot: SessionSnapshot,
+    store_path: PathBuf,
+    config: &NacConfig,
+    resume_base_cwd: PathBuf,
+    worker_executable: Option<PathBuf>,
+    operation_lease: Option<&sessions::SessionOperationLease>,
+    persist_recovery: bool,
+    resolved_metadata: Option<ModelMetadata>,
+    model: ResumeModelOptions,
+    construction: Option<&std::sync::Arc<ManagedRuntimeLeaseGuard>>,
+) -> Result<OrchestratorRunConfig> {
+    super::construction_admission::check(construction).await?;
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     let agent_mode = match snapshot.behavior {
         sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
@@ -328,12 +414,15 @@ pub(super) async fn build_resume_config_from_snapshot(
                 sessions::SessionOperationLease::try_acquire(&store_path, &snapshot.session_id)?;
             migration_lease.validate(&store_path, &snapshot.session_id)?;
         }
-        snapshot.config_version = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
+        snapshot.config_version = if let Some(guard) = construction {
+            guard.update_session_config(snapshot.clone()).await?
+        } else if let Some(owner) = store::coordinator::owner_for(&store_path)? {
             owner.update_session_config(snapshot.clone()).await?
         } else {
             sessions::update_session_config(&store_path, &snapshot)?
         };
     }
+    super::construction_admission::check(construction).await?;
     let client = ModelClient::from_effective_settings(snapshot_settings.clone())
         .map_err(|error| {
             if error.downcast_ref::<ModelConfigurationError>().is_some() {
@@ -346,6 +435,7 @@ pub(super) async fn build_resume_config_from_snapshot(
             }
         })?
         .with_cache_ttl(Some("1h"));
+    let client = super::construction_admission::pin_client(client, construction);
     let light_client = if snapshot.behavior == sessions::SessionBehavior::Direct {
         // Keep this symmetric with fresh construction: ALL-36 owns any future
         // direct-session use. The durable selection is retained without
@@ -356,6 +446,9 @@ pub(super) async fn build_resume_config_from_snapshot(
             .light_model
             .as_ref()
             .map(|light| {
+                if let Some(guard) = construction {
+                    guard.check_now().map_err(LightModelError::Other)?;
+                }
                 resolve_light_client_with_http_policy(
                     light,
                     &snapshot.extra_headers,
@@ -379,44 +472,56 @@ pub(super) async fn build_resume_config_from_snapshot(
                 client.with_host_execution_authority(model.host_execution_authority.clone())
             })
             .transpose()?
+            .map(|client| super::construction_admission::pin_client(client, construction))
             .map(std::sync::Arc::new)
     };
-    let sandbox = if ssh.is_some() {
-        None
-    } else {
-        match snapshot.sandbox_spec.clone() {
-            Some(spec) => {
-                let materialize = match &spec.worktree {
-                    Some(worktree) => session_worktree::restore(
-                        worktree,
-                        session_worktree::checkout_in_container(&spec),
-                    )?,
-                    None => false,
-                };
-                let session_key = snapshot.session_id.clone();
-                // A persisted container is owned by the durable session, not
-                // by each process that observes it. Resume attachments must
-                // never acquire destructive Drop authority: multiple servers
-                // can legitimately observe the same stable container.
-                let session = SandboxSession::create_for_durable_resume(
-                    spec,
-                    session_key.clone(),
-                    session_key,
-                )
-                .await?;
-                if materialize {
-                    session.materialize_worktree().await?;
-                    if let Some(worktree) = session.spec().worktree.as_ref() {
-                        session_worktree::mark_materialized(worktree)?;
+    super::construction_admission::check(construction).await?;
+    let sandbox = super::construction_admission::during(construction, async {
+        Ok(if ssh.is_some() {
+            None
+        } else {
+            match snapshot.sandbox_spec.clone() {
+                Some(spec) => {
+                    super::construction_admission::check(construction).await?;
+                    let materialize = match &spec.worktree {
+                        Some(worktree) => session_worktree::restore(
+                            worktree,
+                            session_worktree::checkout_in_container(&spec),
+                        )?,
+                        None => false,
+                    };
+                    super::construction_admission::check(construction).await?;
+                    let session_key = snapshot.session_id.clone();
+                    // A persisted container is owned by the durable session, not
+                    // by each process that observes it. Resume attachments must
+                    // never acquire destructive Drop authority: multiple servers
+                    // can legitimately observe the same stable container.
+                    let session = SandboxSession::create_for_durable_resume(
+                        spec,
+                        session_key.clone(),
+                        session_key,
+                    )
+                    .await?;
+                    super::construction_admission::check(construction).await?;
+                    if materialize {
+                        session.materialize_worktree().await?;
+                        super::construction_admission::check(construction).await?;
+                        if let Some(worktree) = session.spec().worktree.as_ref() {
+                            session_worktree::mark_materialized(worktree)?;
+                            super::construction_admission::check(construction).await?;
+                        }
                     }
+                    Some(session)
                 }
-                Some(session)
+                None => None,
             }
-            None => None,
-        }
-    };
+        })
+    })
+    .await?;
 
-    if let Some(owner) = store::coordinator::owner_for(&store_path)? {
+    if let Some(guard) = construction {
+        guard.initialize_store().await?;
+    } else if let Some(owner) = store::coordinator::owner_for(&store_path)? {
         owner.initialize().await?;
     } else {
         store::initialize(&store_path)?;
@@ -446,7 +551,8 @@ pub(super) async fn build_resume_config_from_snapshot(
         PathContext::new(&workspace_cwd)
     };
     let mcp = if agent_mode == AgentMode::Direct {
-        McpRegistry::load_reporting_skips(
+        super::construction_admission::load_mcp(
+            construction,
             &workspace_cwd,
             sandbox.as_ref(),
             &mcp_paths,
@@ -525,7 +631,9 @@ pub(super) async fn build_resume_config_from_snapshot(
         permission_rules: config.permissions.rules.clone(),
     };
     let agent_client = client.clone();
-    let mut agent = if store::coordinator::owner_for(&store_path)?.is_some() {
+    let mut agent = if construction.is_some() {
+        super::construction_admission::build_agent(construction, agent_client, agent_config).await?
+    } else if store::coordinator::owner_for(&store_path)?.is_some() {
         store::spawn_blocking_store_caller(move || Agent::with_config(agent_client, agent_config))
             .await
             .context("resume agent construction task failed")??
@@ -540,14 +648,25 @@ pub(super) async fn build_resume_config_from_snapshot(
     // out of it): install the repaired blob so store-backed transcript reads
     // do not serve the discarded turn from the stale pre-repair snapshot.
     if let Some(repaired_blob) = agent
-        .restore_messages_merging_log_tail(snapshot.messages.clone(), operation_lease)
+        .restore_messages_merging_log_tail_admitted(
+            snapshot.messages.clone(),
+            operation_lease,
+            construction.map(ManagedRuntimeLeaseGuard::mutation_admission),
+        )
         .await?
     {
         snapshot.messages = repaired_blob;
     }
+    let checkpoint_guard = construction.cloned();
     let agent = if store::coordinator::owner_for(&store_path)?.is_some() {
         store::spawn_blocking_store_caller(move || {
+            if let Some(guard) = &checkpoint_guard {
+                guard.check_now()?;
+            }
             agent.restore_compaction_checkpoint()?;
+            if let Some(guard) = &checkpoint_guard {
+                guard.check_now()?;
+            }
             Ok::<_, anyhow::Error>(agent)
         })
         .await
@@ -557,6 +676,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         agent
     };
 
+    super::construction_admission::check(construction).await?;
     let session_id = snapshot.session_id.clone();
     Ok(OrchestratorRunConfig {
         agent,
