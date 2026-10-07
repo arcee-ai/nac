@@ -50,7 +50,7 @@ impl RuntimeTlsIdentity {
         .build()
         .context("runtime client verification configuration failed")?;
         let mut config = rustls::ServerConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()?
+            .with_protocol_versions(&[&rustls::version::TLS13])?
             .with_client_cert_verifier(verifier)
             .with_single_cert(self.serving_chain, self.serving_key)
             .context("runtime serving identity is invalid")?;

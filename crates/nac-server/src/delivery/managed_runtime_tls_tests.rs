@@ -38,12 +38,20 @@ async fn client(
     addr: SocketAddr,
     peer: Option<&str>,
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>> {
+    client_with_versions(addr, peer, &[&rustls::version::TLS13]).await
+}
+
+async fn client_with_versions(
+    addr: SocketAddr,
+    peer: Option<&str>,
+    versions: &[&'static rustls::SupportedProtocolVersion],
+) -> Result<tokio_rustls::client::TlsStream<TcpStream>> {
     let mut roots = rustls::RootCertStore::empty();
     roots.add(certificate("ca")).unwrap();
     let builder = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::aws_lc_rs::default_provider(),
     ))
-    .with_safe_default_protocol_versions()
+    .with_protocol_versions(versions)
     .unwrap()
     .with_root_certificates(roots);
     let config = match peer {
@@ -58,6 +66,38 @@ async fn client(
             TcpStream::connect(addr).await.unwrap(),
         )
         .await?)
+}
+
+#[tokio::test]
+async fn exact_enrolled_peer_requires_tls13_before_any_http_dispatch() {
+    let listener = RuntimeTlsListener::bind("127.0.0.1:0".parse().unwrap(), identity())
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(serve_denied_runtime(
+        listener,
+        Router::new(),
+        std::future::pending(),
+    ));
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            client_with_versions(addr, Some("nac-api"), &[&rustls::version::TLS12]),
+        )
+        .await
+        .unwrap()
+        .is_err(),
+        "an exact pinned peer using only TLS1.2 must fail the handshake"
+    );
+    let stream = client(addr, Some("nac-api")).await.unwrap();
+    assert_eq!(
+        stream.get_ref().1.protocol_version(),
+        Some(rustls::ProtocolVersion::TLSv1_3),
+        "the dedicated runtime transport negotiates TLS1.3"
+    );
+    drop(stream);
+    server.abort();
+    let _ = server.await;
 }
 
 async fn request(addr: SocketAddr, path: &str) -> String {
