@@ -24,6 +24,9 @@ use tokio_rustls::{
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_HANDSHAKES: usize = 32;
 
+#[path = "managed_runtime_issuer.rs"]
+pub(crate) mod issuer;
+
 /// Explicit construction capability; absent configuration creates no listener.
 /// DER bytes are loaded by trusted composition, never selected by an HTTP request.
 pub struct RuntimeTlsIdentity {
@@ -50,7 +53,7 @@ impl RuntimeTlsIdentity {
         .build()
         .context("runtime client verification configuration failed")?;
         let mut config = rustls::ServerConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()?
+            .with_protocol_versions(&[&rustls::version::TLS13])?
             .with_client_cert_verifier(verifier)
             .with_single_cert(self.serving_chain, self.serving_key)
             .context("runtime serving identity is invalid")?;
@@ -159,6 +162,35 @@ pub fn denied_runtime_router(native: Router) -> Router {
                 .get::<axum::extract::ConnectInfo<AuthenticatedRuntimePeer>>()
                 .map(|peer| peer.0.leaf_sha256);
             axum::http::StatusCode::UNAUTHORIZED
+        },
+    ))
+}
+
+/// Explicit opt-in fence for the ordinary plaintext listener in mediated mode.
+/// Trusted composition applies this only to the public runtime router, never to
+/// the separately authenticated maintenance listener. Headers, local addresses,
+/// peer-marker lookalikes and future routes cannot bypass it. Standalone callers
+/// retain their existing router by omitting this wrapper.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "default-off scaffold awaits host-writer export/startup composition"
+    )
+)]
+pub fn mediated_only_plaintext_router(native: Router) -> Router {
+    native.layer(axum::middleware::from_fn(
+        |request: axum::extract::Request, next: axum::middleware::Next| async move {
+            let diagnostic =
+                matches!(
+                    request.method(),
+                    &axum::http::Method::GET | &axum::http::Method::HEAD
+                ) && matches!(request.uri().path(), "/health" | "/healthz" | "/readyz");
+            if diagnostic {
+                next.run(request).await
+            } else {
+                axum::response::IntoResponse::into_response(axum::http::StatusCode::UNAUTHORIZED)
+            }
         },
     ))
 }

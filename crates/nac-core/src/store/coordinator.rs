@@ -119,6 +119,7 @@ store_failure_identity!(
     [super], ModelConfigurationStoreError;
     [super], SshConfigurationStoreError;
     [super], ManagedMaintenanceError;
+    [super], ManagedRuntimeJournalError;
     [crate::sessions], SessionConfigUpdateError;
     [crate::sessions], SessionPresentationError;
 );

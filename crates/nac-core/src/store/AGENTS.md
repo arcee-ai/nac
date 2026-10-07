@@ -42,6 +42,10 @@ workspace revisions, recovery markers, and cross-process coordination.
   records with stable public values.
 - `../sessions/codec.rs`, `db.rs`, `operation_lease.rs`, `snapshot.rs` — session
   encoding, storage facade, lease, and projection contracts.
+- `managed_runtime_admission.rs` — exact operation/digest uncertainty barrier
+  and retained native session/run acknowledgments. It supplies no authentication,
+  lease, transport wire or dispatch permission. Every duplicate is observational;
+  lost responses and session deletion never reopen a consumed operation.
 
 `schema.rs` is intentionally above 800 lines because it is the ordered,
 transactional migration ledger for every supported database revision; splitting

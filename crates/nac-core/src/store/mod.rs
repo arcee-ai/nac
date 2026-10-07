@@ -12,6 +12,7 @@ pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 pub(crate) mod coordinated_commands;
 mod managed_maintenance;
 mod managed_orchestrators;
+mod managed_runtime_admission;
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
 mod permission_grants;
@@ -43,6 +44,11 @@ pub(crate) use worker_dispatches::{
 pub use coordinator::{PersistenceAdmissionError, PersistenceStats, StoreCoordinator};
 pub use managed_maintenance::*;
 pub use managed_orchestrators::*;
+pub use managed_runtime_admission::{
+    acknowledge_managed_runtime_operation, read_managed_runtime_operation,
+    record_managed_runtime_operation, ManagedRuntimeJournalError, ManagedRuntimeObservation,
+    ManagedRuntimeOperationIdentity, ManagedRuntimeOperationSnapshot, ManagedRuntimeRecordOutcome,
+};
 pub use model_configurations::*;
 pub use permission_grants::*;
 pub use projects::*;
