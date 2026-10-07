@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createNacClient } from "../services/nacClient";
+import { createNacClient, ApiError } from "../services/nacClient";
 import { queryKeys } from "../services/queries/keys";
 import type { SessionEventEnvelope } from "../types/api";
 import { createNativeRuntime, type NativeRuntimeScope } from "./nativeRuntime";
@@ -157,6 +157,36 @@ describe("native runtime lifetime", () => {
     expect(fetch).toHaveBeenCalledOnce();
     expect(await instance.api.submitRun("same", "closed")).toMatchObject({ status: "not-sent" });
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("preserves known HTTP errors from a separately installed client copy", async () => {
+    class InstalledApiError extends Error {
+      override name = "ApiError";
+      status = 409;
+      method = "POST";
+      path = "/projects";
+      requestId = "caller-request";
+    }
+    const foreign = new InstalledApiError("native conflict (HTTP 409)");
+    expect(foreign).not.toBeInstanceOf(ApiError);
+    const source = createNacClient({ endpoint: scope.endpoint });
+    source.transport.request = vi.fn().mockRejectedValue(foreign);
+    source.transport.admit = vi.fn().mockRejectedValue(foreign);
+    const instance = createNativeRuntime({ scope, client: source });
+    opened.push(instance);
+    const failure: unknown = await instance.api
+      .createProject({ cwd: "/repo" })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(failure).toMatchObject({
+      message: foreign.message,
+      status: 409,
+      requestId: "caller-request",
+      cause: foreign,
+    });
+    await expect(instance.api.submitRun("same", "prompt")).rejects.toBeInstanceOf(ApiError);
+    expect(source.transport.request).toHaveBeenCalledOnce();
+    expect(source.transport.admit).toHaveBeenCalledOnce();
   });
 
   it("refreshes caller authorization on reconnect, preserves cursor and closes every stream", async () => {

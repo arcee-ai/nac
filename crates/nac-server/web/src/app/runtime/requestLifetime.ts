@@ -1,5 +1,6 @@
 import {
   NacTransport,
+  ApiError,
   type NacHttpTransport,
   type NacRequestOptions,
   type NacStreamContext,
@@ -29,6 +30,29 @@ export function withinLifetime<T>(signal: AbortSignal, read: () => Promise<T>): 
         },
       );
   });
+}
+
+/** An installed client and native source may have separate error constructors. */
+function nativeHttpError(error: unknown): unknown {
+  if (error instanceof ApiError) return error;
+  if (
+    error instanceof Error &&
+    error.name === "ApiError" &&
+    "status" in error &&
+    typeof error.status === "number" &&
+    "method" in error &&
+    typeof error.method === "string" &&
+    "path" in error &&
+    typeof error.path === "string" &&
+    "requestId" in error &&
+    typeof error.requestId === "string"
+  ) {
+    const local = new ApiError(error.status, error.method, error.path, "", error.requestId);
+    local.message = error.message;
+    local.cause = error;
+    return local;
+  }
+  return error;
 }
 
 /** Uses the existing transport, including fresh headers, error decoding and admission. */
@@ -74,7 +98,7 @@ export class LifetimeTransport extends NacTransport {
       );
     } catch (error) {
       if (signal.aborted) return { status: "uncertain", requestId, error };
-      throw error;
+      throw nativeHttpError(error);
     }
   }
 
@@ -88,6 +112,8 @@ export class LifetimeTransport extends NacTransport {
       : this.lifetime;
     return withinLifetime(signal, () =>
       this.source.request<T>(method, path, { ...options, signal }),
-    );
+    ).catch((error: unknown) => {
+      throw nativeHttpError(error);
+    });
   }
 }

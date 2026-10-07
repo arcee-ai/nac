@@ -171,9 +171,9 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
     if (!open) return undefined;
     const self = token;
     pushModal({ id: self });
-    // Keep the app behind out of the tab order; the card is portalled to the
-    // body, so it stays reachable. Desktop only: on a phone the panel covers
-    // the viewport and inert is unnecessary (matches ArceeFM).
+    // Keep the view background out of the tab order; the overlay target stays
+    // reachable. Desktop only: on a phone the panel covers the view and inert
+    // is unnecessary.
     const root = inertTarget;
     if (!isMobile) root?.setAttribute("inert", "");
     const onKey = (e: KeyboardEvent) => {

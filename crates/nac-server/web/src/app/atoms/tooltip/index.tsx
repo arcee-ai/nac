@@ -76,7 +76,7 @@ interface StickyTooltipProps extends TooltipBoxProps {
 }
 
 /**
- * Portalled variant: the box lives on `document.body`, so an ancestor with
+ * Portalled variant: the box lives in the presentation overlay target, so an ancestor with
  * `overflow: hidden` (session cards) or a scroll container cannot clip it.
  * Coordinates are measured from the trigger on hover, hence the two-pass render
  * — the box is laid out invisibly first so its size is known.

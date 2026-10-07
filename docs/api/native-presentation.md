@@ -19,7 +19,9 @@ publication or backend route change is part of this seam.
 Supply an existing authenticated client's structural `transport`, and copy the
 consumer's opaque owner/profile/organization/host/incarnation/endpoint/release
 bindings into `scope`. These strings fence frontend state; they do not grant
-native admission authority or encode identity. `scope.endpoint` must exactly
+native admission authority or encode identity. Injected transport errors preserve
+native status, message and request identity across separate installed/source
+client constructors. `scope.endpoint` must exactly
 match the client's normalized endpoint.
 
 ```tsx
@@ -70,8 +72,8 @@ the old projection. The frontend lease is a browser lifecycle ceiling; backend
 eligibility and per-tool authorization remain owned by their existing services.
 
 The checked-in contract currently documents 123 operations. The historical
-112-operation inventory omitted nine MCP/OAuth library operations, terminal
-termination and UI configuration. `scripts/client-api-surface.mjs` is the
+112-operation inventory omitted nine MCP/OAuth library operations,
+session commands and UI configuration. `scripts/client-api-surface.mjs` is the
 explicit method/path classification used by the existing generator. The
 generated `NAC_API_SURFACE` maps 118 operations to the resource facade, two to
 client readiness/UI configuration, one to SSE, and two intentionally private
