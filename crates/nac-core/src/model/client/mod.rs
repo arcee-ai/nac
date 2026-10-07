@@ -1225,11 +1225,7 @@ impl ModelClient {
         Fold: StreamFold,
     {
         let mut last_error = None;
-        let attempts = if self.trusted_managed_host_key.is_some() {
-            1
-        } else {
-            10
-        };
+        let attempts = if self.single_managed_attempt() { 1 } else { 10 };
         for attempt in 0..attempts {
             let response = self
                 .send_with_retry_headers(url, body, apply_headers, secrets)
