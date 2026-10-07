@@ -401,3 +401,34 @@ async fn lost_delivery_after_actual_renewal_commit_terminates_without_reconstruc
     ));
     fixture.finish().await;
 }
+
+#[tokio::test]
+async fn expiry_observation_retains_both_clock_ceilings_and_cannot_revive_terminal_owner() {
+    let fixture = Fixture::new();
+    let guard = fixture.guard(1_000).await;
+    let first = guard.observe_expiry().unwrap();
+    assert_eq!(
+        first.operation_id,
+        guard.binding().unwrap().identity.operation_id
+    );
+    assert_eq!(
+        first.serving_lifetime_id,
+        guard.binding().unwrap().serving_lifetime_id
+    );
+    assert_eq!(first.lease, guard.snapshot().unwrap());
+    assert!(first.remaining <= Duration::from_millis(1_000));
+    assert!(
+        first.remaining
+            <= Duration::from_millis((first.lease.expires_ms - first.sampled_at_epoch_ms) as u64)
+    );
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let later = guard.observe_expiry().unwrap();
+    assert!(
+        later.remaining < first.remaining,
+        "reading observations never resets accepted monotonic ceiling"
+    );
+    guard.terminate().await.unwrap();
+    assert!(guard.observe_expiry().is_err());
+    assert!(guard.check_now().is_err());
+    fixture.finish().await;
+}

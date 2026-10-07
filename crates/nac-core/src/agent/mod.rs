@@ -584,6 +584,25 @@ impl Agent {
         self.tool_runtime.goal_runtime.clone()
     }
 
+    /// Pin required mediated mode on this constructed agent and every captured
+    /// client. Trusted factories must separately qualify authority BEFORE initial
+    /// credential/backend/MCP construction; this method is not that admission.
+    pub fn with_required_runtime_effects(mut self) -> Self {
+        self.client = self.client.with_required_effect_lease();
+        self.tool_runtime.runtime_effect_required = true;
+        self.tool_runtime.light_client = self
+            .tool_runtime
+            .light_client
+            .as_ref()
+            .map(|client| Arc::new((**client).clone().with_required_effect_lease()));
+        self.tool_runtime.command_cancellation = crate::tools::ThreadCancellation::for_execution(
+            self.tool_runtime.host_execution_authority.clone(),
+            self.tool_runtime.runtime_effect_lease.clone(),
+            true,
+        );
+        self
+    }
+
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
         self.send_inner(prompt, None).await
     }
@@ -611,6 +630,7 @@ impl Agent {
             Option<i64>,
         )>,
     ) -> Result<String> {
+        self.tool_runtime.check_execution_authority().await?;
         let correlation =
             crate::telemetry::Correlation::session(self.tool_runtime.session_id.as_deref())
                 .with_run(session_run.as_ref().map(|(run_id, _, _)| run_id.as_str()));
@@ -705,7 +725,16 @@ impl Agent {
 
             let call_started = Instant::now();
             self.clear_partial_stream();
+            let output_lease = self.tool_runtime.runtime_effect_lease.clone();
+            let output_lease_required = self.tool_runtime.runtime_effect_required;
             let deltas = CoalescedDeltas::new(|delta: ModelStreamDelta| {
+                if (output_lease_required && output_lease.is_none())
+                    || output_lease
+                        .as_ref()
+                        .is_some_and(|lease| lease.check_available().is_err())
+                {
+                    return;
+                }
                 self.event_sink
                     .emit_assistant_delta(AssistantStreamDelta::from_model(
                         self.thread_name.clone(),
@@ -732,7 +761,12 @@ impl Agent {
             .then_some(&push_delta);
             let turn = self
                 .client
-                .send_turn_streaming(provider_view.messages, request_tool_defs, delta_sink)
+                .send_turn_streaming_with_effect_lease(
+                    provider_view.messages,
+                    request_tool_defs,
+                    delta_sink,
+                    self.tool_runtime.runtime_effect_lease.clone(),
+                )
                 .await;
             // Whatever arrived in the last partial window still belongs on screen.
             deltas.flush();

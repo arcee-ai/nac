@@ -379,6 +379,13 @@ impl ModelClient {
         self
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "legacy buffered native API remains compatible and fails closed in required mode"
+        )
+    )]
     pub async fn send_turn(
         &self,
         messages: Vec<Message>,
@@ -391,6 +398,13 @@ impl ModelClient {
     ///
     /// With no sink every backend keeps its plain buffered request: streaming is
     /// only worth its extra per-chunk parsing when somebody is watching.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "legacy streaming native API remains compatible and fails closed in required mode"
+        )
+    )]
     pub async fn send_turn_streaming(
         &self,
         messages: Vec<Message>,
@@ -402,13 +416,6 @@ impl ModelClient {
     }
 
     /// Trusted per-run selection only. There is no clearing setter or wire flag.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "paired native mediated caller integration remains separately owned and uninstalled"
-        )
-    )]
     pub(crate) fn with_required_effect_lease(mut self) -> Self {
         self.effect_lease_required = true;
         self
@@ -1067,22 +1074,20 @@ impl ModelClient {
             if !self.extra_headers_override_content_type() {
                 request = request.header("Content-Type", "application/json");
             }
+            let request = self
+                .apply_extra_headers(apply_headers(request))
+                .map_err(|error| ModelHttpError {
+                    status: None,
+                    message: error.to_string(),
+                })?
+                .json(body);
             self.effect_scope
                 .check_available()
                 .map_err(|error| ModelHttpError {
                     status: None,
                     message: error.to_string(),
                 })?;
-            let response = match self
-                .apply_extra_headers(apply_headers(request))
-                .map_err(|error| ModelHttpError {
-                    status: None,
-                    message: error.to_string(),
-                })?
-                .json(body)
-                .send()
-                .await
-            {
+            let response = match request.send().await {
                 Ok(resp) => resp,
                 Err(e) => {
                     last_error = ModelHttpError {

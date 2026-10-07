@@ -733,3 +733,56 @@ async fn coordinator_retains_sealed_capabilities_and_loss_of_reservation_ack_is_
         .unwrap());
     owner.shutdown().await.unwrap();
 }
+
+#[test]
+fn fresh_active_renewal_can_cross_original_http_expiry_without_resetting_monotonic_ceiling() {
+    let fixture = Fixture::new();
+    let initial = fixture.active();
+    let native = fixture.native();
+    let pending = challenge_managed_runtime_renewal(
+        &fixture.path,
+        &initial,
+        &native,
+        &fixture.challenge(10_000, 5_000),
+        fixture.at(10_000),
+    )
+    .unwrap();
+    let mut response = fixture.response(&pending, 60_000);
+    response.observed_ms = fixture.at(11_000).wall_ms;
+    let active =
+        consume_managed_runtime_challenge(&fixture.path, pending, &response, fixture.at(11_000))
+            .unwrap();
+    assert!(fixture.at(30_000).wall_ms > fixture.binding.original_expires_ms);
+    let pending = challenge_managed_runtime_renewal(
+        &fixture.path,
+        &active,
+        &native,
+        &fixture.challenge(30_000, 5_000),
+        fixture.at(30_000),
+    )
+    .unwrap();
+    let mut response = fixture.response(&pending, 90_000);
+    response.observed_ms = fixture.at(31_000).wall_ms;
+    let renewed =
+        consume_managed_runtime_challenge(&fixture.path, pending, &response, fixture.at(31_000))
+            .unwrap();
+    let stalled_wall =
+        RuntimeLeaseClock::fixed(fixture.at(31_000).wall_ms, fixture.at(89_000).monotonic);
+    assert_eq!(
+        renewed.remaining_at(stalled_wall),
+        Some(Duration::from_millis(1_000)),
+        "stalled wall cannot restart the accepted native ceiling"
+    );
+    let expired_mono = RuntimeLeaseClock::fixed(stalled_wall.wall_ms, fixture.at(90_000).monotonic);
+    assert_eq!(renewed.remaining_at(expired_mono), None);
+    assert!(!check_managed_runtime_lease(&fixture.path, &renewed, expired_mono).unwrap());
+    assert_eq!(fixture.phase(), "terminal");
+    assert!(
+        matches!(
+            reserve_managed_runtime_lease(&fixture.path, &fixture.binding, fixture.at(30_000))
+                .unwrap(),
+            RuntimeLeaseReservationOutcome::Readback(_)
+        ),
+        "continued original work never permits fresh dispatch/replay"
+    );
+}

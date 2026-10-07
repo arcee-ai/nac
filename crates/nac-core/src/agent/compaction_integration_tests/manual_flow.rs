@@ -398,3 +398,41 @@ async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events(
     assert!(drain_events(&mut events_rx).is_empty());
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[tokio::test]
+async fn required_compaction_client_cannot_fall_back_to_an_unleased_summary_request() {
+    let server = crate::model::test_http::ScriptedServer::start_unexpected_request_server(
+        std::time::Duration::from_millis(80),
+    );
+    let root = crate::tools::runtime_effect_tests::TempRoot::new();
+    let path = root.path().join("store.db");
+    let endpoint = server.base_url.clone();
+    let mut agent = crate::store::spawn_blocking_store_caller(move || {
+        crate::store::initialize(&path).unwrap();
+        crate::store::insert_test_session(&path, "session");
+        compaction_test_agent(
+            ModelClient::new_for_test_server(endpoint),
+            path,
+            Some("session"),
+            None,
+            EventSink::none(),
+        )
+        .with_required_runtime_effects()
+    })
+    .await
+    .unwrap();
+    agent.messages = compactable_messages();
+    let before = serde_json::to_vec(&agent.messages).unwrap();
+    assert!(
+        matches!(
+            agent.compact().await,
+            Err(CompactionError::Failed {
+                failure: crate::events::CompactionFailure::SummaryRequestFailed,
+                ..
+            })
+        ),
+        "the actual summary request is fenced, rather than merely unavailable"
+    );
+    assert_eq!(serde_json::to_vec(&agent.messages).unwrap(), before);
+    assert!(server.finish().is_empty());
+}

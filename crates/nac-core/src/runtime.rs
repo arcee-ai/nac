@@ -54,7 +54,7 @@ mod resume;
 mod sandboxing;
 
 pub use effect_lease::{RuntimeEffectLease, RuntimeEffectLeaseHandle};
-pub use managed_runtime_lease::ManagedRuntimeLeaseGuard;
+pub use managed_runtime_lease::{ManagedRuntimeExpiryObservation, ManagedRuntimeLeaseGuard};
 
 pub use builders::{
     build_managed_worker_config, build_run_config, build_run_config_for_project,

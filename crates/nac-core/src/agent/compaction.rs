@@ -391,7 +391,16 @@ impl super::Agent {
         };
 
         let summary_messages = std::mem::take(&mut candidate.summary_messages);
-        let response = match self.client.send_turn(summary_messages, Vec::new()).await {
+        let response = match self
+            .client
+            .send_turn_streaming_with_effect_lease(
+                summary_messages,
+                Vec::new(),
+                None,
+                self.tool_runtime.runtime_effect_lease.clone(),
+            )
+            .await
+        {
             Ok(response) => response,
             Err(error) => {
                 return (

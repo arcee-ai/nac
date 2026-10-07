@@ -13,6 +13,17 @@ use std::{
     time::Duration,
 };
 
+/// Read-only conservative cutoff from the live owner. Constructing/copying this
+/// observation never creates authority or a guard. IPC must qualify the selected
+/// child and a fresh parent check; request/transport delay cannot reset remaining.
+pub struct ManagedRuntimeExpiryObservation {
+    pub operation_id: uuid::Uuid,
+    pub serving_lifetime_id: uuid::Uuid,
+    pub lease: RuntimeLeaseSnapshot,
+    pub sampled_at_epoch_ms: i64,
+    pub remaining: Duration,
+}
+
 struct State {
     active: ActiveRuntimeLease,
     terminal: bool,
@@ -89,6 +100,31 @@ impl ManagedRuntimeLeaseGuard {
         let result = (|| {
             let mut state = self.state()?;
             Self::local(&mut state, native_clock()?)
+        })();
+        if result.is_err() {
+            self.deny_now();
+        }
+        result
+    }
+
+    /// Both current wall remaining and the retained accepted monotonic ceiling
+    /// bound this observation. Initial HTTP expiry is not a continuation limit.
+    pub fn observe_expiry(&self) -> Result<ManagedRuntimeExpiryObservation> {
+        let result = (|| {
+            let mut state = self.state()?;
+            let clock = native_clock()?;
+            Self::local(&mut state, clock)?;
+            let remaining = state.active.remaining_at(clock).ok_or_else(denied)?;
+            if remaining.is_zero() {
+                return Err(denied());
+            }
+            Ok(ManagedRuntimeExpiryObservation {
+                operation_id: state.active.binding().identity.operation_id,
+                serving_lifetime_id: state.active.binding().serving_lifetime_id,
+                lease: state.active.snapshot().clone(),
+                sampled_at_epoch_ms: clock.wall_ms(),
+                remaining,
+            })
         })();
         if result.is_err() {
             self.deny_now();

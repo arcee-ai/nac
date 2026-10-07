@@ -311,6 +311,15 @@ pub struct OrchestratorRunConfig {
 }
 
 impl OrchestratorRunConfig {
+    /// Trusted selected composition pins required mode on both captured client
+    /// owners. This confers no lease and does not replace pre-construction
+    /// credential/backend/MCP admission or fresh run submission.
+    pub fn with_required_runtime_effects(mut self) -> Self {
+        self.agent = self.agent.with_required_runtime_effects();
+        self.client = self.client.with_required_effect_lease();
+        self
+    }
+
     pub fn resume_base_cwd(&self) -> &Path {
         &self.resume_base_cwd
     }

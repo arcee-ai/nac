@@ -160,3 +160,43 @@ async fn original_operation_lease_denies_prompt_queued_on_store_before_durable_c
     owner.shutdown().await.unwrap();
     drop(session_lease);
 }
+
+#[tokio::test]
+async fn required_agent_without_live_original_lease_denies_before_prompt_and_provider() {
+    let server = crate::model::test_http::ScriptedServer::start_unexpected_request_server(
+        Duration::from_millis(80),
+    );
+    let mut agent = Agent::default(ModelClient::new_for_test_server(server.base_url.clone()))
+        .with_required_runtime_effects();
+    let before = serde_json::to_vec(&agent.messages).unwrap();
+    assert!(agent.send("unleased original operation").await.is_err());
+    assert_eq!(serde_json::to_vec(&agent.messages).unwrap(), before);
+    assert!(server.finish().is_empty());
+}
+
+#[tokio::test]
+async fn required_agent_uses_live_original_lease_and_denial_prevents_successor_prompt() {
+    let server = crate::model::test_http::ScriptedServer::start(vec![crate::model::test_http::ScriptedResponse::json(
+        "200 OK", serde_json::json!({
+            "status":"completed",
+            "output":[{"type":"message","content":[{"type":"output_text","text":"qualified synthetic response"}]}],
+        }).to_string(),
+    )]);
+    let lease = crate::tools::runtime_effect_tests::Lease::new();
+    let mut agent = Agent::default(ModelClient::new_for_test_server(server.base_url.clone()))
+        .with_required_runtime_effects();
+    agent.tool_runtime.runtime_effect_lease = Some(lease.handle());
+    agent.begin_run_cancellation();
+    assert_eq!(
+        agent.send("qualified synthetic operation").await.unwrap(),
+        "qualified synthetic response"
+    );
+    assert_eq!(server.finish().len(), 1);
+    let before = serde_json::to_vec(&agent.messages).unwrap();
+    lease.deny();
+    assert!(agent
+        .send("cannot resume original expired operation")
+        .await
+        .is_err());
+    assert_eq!(serde_json::to_vec(&agent.messages).unwrap(), before);
+}

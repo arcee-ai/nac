@@ -136,6 +136,14 @@ impl ActiveRuntimeLease {
             && clock.wall_ms < self.snapshot.expires_ms
             && clock.monotonic < self.monotonic_deadline
     }
+    pub(crate) fn remaining_at(&self, clock: RuntimeLeaseClock) -> Option<Duration> {
+        self.available_at(clock).then(|| {
+            Duration::from_millis((self.snapshot.expires_ms - clock.wall_ms) as u64).min(
+                self.monotonic_deadline
+                    .saturating_duration_since(clock.monotonic),
+            )
+        })
+    }
     pub(crate) fn same_operation(&self, other: &Self) -> bool {
         self.binding.identity == other.binding.identity
             && self.binding.assignment_sha256 == other.binding.assignment_sha256
