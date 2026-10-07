@@ -4,7 +4,7 @@ use super::tests::issuer_identity;
 use super::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-async fn connected_stream() -> (
+pub(super) async fn connected_stream() -> (
     channel::IssuerControlStream,
     tokio_rustls::client::TlsStream<TcpStream>,
 ) {

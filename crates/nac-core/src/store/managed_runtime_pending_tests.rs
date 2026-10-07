@@ -2,6 +2,53 @@
 use super::*;
 
 #[test]
+fn initial_pending_channel_comparison_is_pure_and_never_supplies_availability() {
+    let fixture = Fixture::new();
+    let pending = fixture.pending();
+    let channel = pending.challenge.channel_id;
+    let anchors = (
+        pending.original_admission_deadline,
+        pending.monotonic_deadline,
+    );
+    assert!(pending.is_initial_for_channel(channel));
+    assert!(!pending.is_initial_for_channel(Uuid::new_v4()));
+    assert_eq!(fixture.phase(), "challenged");
+    assert_eq!(
+        (
+            pending.original_admission_deadline,
+            pending.monotonic_deadline
+        ),
+        anchors
+    );
+    assert!(
+        !check_managed_runtime_initial_pending(&fixture.path, &pending, fixture.at(10_000))
+            .unwrap()
+    );
+    assert!(
+        pending.is_initial_for_channel(channel),
+        "comparison cannot revive a terminal row"
+    );
+    assert_eq!(fixture.phase(), "terminal");
+
+    let live = Fixture::new();
+    let initial = live.pending();
+    let response = live.response(&initial, 20_000);
+    let active =
+        consume_managed_runtime_challenge(&live.path, initial, &response, live.at(1)).unwrap();
+    let challenge = live.challenge(2, 5_000);
+    let renewal = challenge_managed_runtime_renewal(
+        &live.path,
+        &active,
+        &live.native(),
+        &challenge,
+        live.at(2),
+    )
+    .unwrap();
+    assert!(!renewal.is_initial_for_channel(challenge.channel_id));
+    assert_eq!(live.phase(), "active");
+}
+
+#[test]
 fn initial_pending_repeated_observations_keep_exact_challenge_and_original_ceilings() {
     let fixture = Fixture::new();
     let pending = fixture.pending();

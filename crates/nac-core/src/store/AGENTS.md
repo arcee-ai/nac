@@ -73,6 +73,11 @@ workspace revisions, recovery markers, and cross-process coordination.
   private queue view is not a consumable capability; availability supplies no
   assignment provenance, transport authentication, consume, renewal or dispatch.
   Existing original/challenge deadlines and rollback watermarks never reset.
+  `PendingRuntimeChallenge::is_initial_for_channel` is a pure borrowed comparison
+  for the outer retained dialog owner; it supplies no current-row or authority
+  proof. This module keeps the sealed capabilities and their one-use transition
+  algorithms together above 800 lines so observation cannot obscure consume/CAS
+  ownership; it must not acquire transport, product policy or execution logic.
 
 `schema.rs` is intentionally above 800 lines because it is the ordered,
 transactional migration ledger for every supported database revision; splitting

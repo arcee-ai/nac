@@ -20,6 +20,9 @@ use uuid::Uuid;
 mod channel;
 use channel::{IssuerChannel, IssuerControlStream};
 
+#[path = "managed_runtime_pending.rs"]
+mod pending;
+
 /// Trusted operator construction, separate from ordinary runtime enrollment.
 /// There is no request-selected certificate, CA, pin or callback credential.
 pub(crate) struct IssuerControlTlsIdentity {

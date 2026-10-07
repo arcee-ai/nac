@@ -114,6 +114,14 @@ pub struct PendingRuntimeChallenge {
     monotonic_deadline: Instant,
 }
 
+impl PendingRuntimeChallenge {
+    /// Pure comparison on the actual capability; neither current availability
+    /// nor transport/assignment authority. Renewal Pending always compares false.
+    pub fn is_initial_for_channel(&self, channel_id: Uuid) -> bool {
+        self.prior.is_none() && self.challenge.channel_id == channel_id
+    }
+}
+
 // A private queue observation, not a copy of the consumable Pending type.
 // Only borrowing the actual delivered capability constructs this view.
 struct InitialPendingCheck {

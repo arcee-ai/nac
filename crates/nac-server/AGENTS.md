@@ -63,6 +63,12 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   comparison. These helpers still establish no current product authority,
   durable reservation, delivered lease or operation permission. WSS framing,
   bounded queues/exchanges and current-authority composition remain uninstalled.
+  `managed_runtime_pending.rs` borrows that same actual noncloneable dialog,
+  delivered initial Pending and selected store. It compares the private Pending
+  channel before/after the journal observation and races queued waits against
+  actual dialog close. Original native clock ceilings remain store-owned;
+  availability does not supply current product/custody/assignment authority,
+  allocate or consume a reservation, renew a lease, or mount a native handler.
 - `src/delivery/managed_runtime_control.rs` consumes B's exact accepted control
   contract and frozen vectors. It supplies format/digest/current-context comparison,
   not nonce consumption, product policy, TLS purpose or execution permission.
