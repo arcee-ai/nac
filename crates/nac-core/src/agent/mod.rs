@@ -603,6 +603,10 @@ impl Agent {
         self
     }
 
+    pub(crate) fn requires_runtime_effects(&self) -> bool {
+        self.tool_runtime.runtime_effect_required
+    }
+
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
         self.send_inner(prompt, None).await
     }

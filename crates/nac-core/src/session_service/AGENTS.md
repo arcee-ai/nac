@@ -18,6 +18,13 @@ durable records; runtime/tool modules own execution internals.
   a view. Projection failures must preserve canonical durable state.
 - Recovery distinguishes process-local liveness from durable leases and peer
   ownership. Do not present in-memory task tracking as restart-safe.
+- Required runtime-effect intent captured from trusted run construction is
+  immutable for every service clone. Conventional submission, manual compaction,
+  inbox input and automatic inbox/goal wakeups fail before admission or mutation;
+  an old original-run lease cannot authorize a successor prompt. The future
+  qualified ingress producer must separately bind fresh admission to the durable
+  operation barrier. This process-local gate does not install that producer,
+  pre-construction fencing or restart selection of required mode.
 - Orchestrator, direct, traditional-child, and managed-orchestrator paths retain
   their distinct topology invariants even when sharing lifecycle helpers.
 - This layer depends inward on sessions/store/runtime contracts, not HTTP DTOs

@@ -178,7 +178,7 @@ impl SessionService {
                     .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
 
                 let active = service.lock_active_operation();
-                service.check_host_execution_authority()?;
+                service.check_conventional_runtime_admission()?;
                 let target_run_id = match (delivery, active.as_ref()) {
                     (
                         crate::store::InboxDelivery::Steer,
@@ -220,7 +220,7 @@ impl SessionService {
                     .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
 
                 let active = service.lock_active_operation();
-                service.check_host_execution_authority()?;
+                service.check_conventional_runtime_admission()?;
                 let target_run_id = match (delivery, active.as_ref()) {
                     (
                         crate::store::InboxDelivery::Steer,
@@ -299,7 +299,7 @@ impl SessionService {
                     .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
 
                 let active = service.lock_active_operation();
-                service.check_host_execution_authority()?;
+                service.check_conventional_runtime_admission()?;
                 let active_run_id = match active.as_ref() {
                     Some(ActiveSessionOperation::Run(run)) if !run.finishing => {
                         Some(run.snapshot.run_id.clone())
@@ -406,6 +406,7 @@ impl SessionService {
     /// two server processes from promoting the same durable item.
     pub async fn start_next_direct_inbox_item(&self) -> Result<Option<SessionRunHandle>> {
         self.require_direct_behavior()?;
+        self.check_conventional_runtime_admission()?;
         let _wake = self.inbox_wake.lock().await;
         if self
             .stopping_admission
@@ -446,6 +447,7 @@ impl SessionService {
         &self,
         lease: sessions::SessionOperationLease,
     ) -> Result<Option<SessionRunHandle>> {
+        self.check_conventional_runtime_admission()?;
         if self.has_active_operation() {
             return Ok(None);
         }

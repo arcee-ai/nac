@@ -326,6 +326,10 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         supplied_lease: Option<sessions::SessionOperationLease>,
     ) -> std::result::Result<SessionCompactionHandle, SessionCompactionAdmissionError> {
+        self.check_conventional_runtime_admission()
+            .map_err(|error| SessionCompactionAdmissionError::Coordination {
+                message: SessionCoordinationError::store(error.to_string()),
+            })?;
         let Some(_session_id) = self.metadata.session_id.as_deref() else {
             return Err(SessionCompactionAdmissionError::Unavailable);
         };

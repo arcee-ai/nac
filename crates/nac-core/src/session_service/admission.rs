@@ -363,11 +363,10 @@ impl SessionService {
         enforce_coordination: bool,
         admission: RunAdmissionKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
-        self.check_host_execution_authority().map_err(|error| {
-            SessionSubmitError::Coordination {
+        self.check_conventional_runtime_admission()
+            .map_err(|error| SessionSubmitError::Coordination {
                 message: SessionCoordinationError::store(error.to_string()),
-            }
-        })?;
+            })?;
         let _host_admission = (enforce_coordination && self.managed_admission_enabled)
             .then(|| match self.managed_identity.as_deref() {
                 Some(identity) => crate::store::try_admit_managed_work_for_identity(
@@ -493,11 +492,10 @@ impl SessionService {
         let run_id = SessionRunId::new();
         // Admission may have waited for operation/workspace/store ownership.
         // Reject the current serving lifetime before publishing a new run.
-        self.check_host_execution_authority().map_err(|error| {
-            SessionSubmitError::Coordination {
+        self.check_conventional_runtime_admission()
+            .map_err(|error| SessionSubmitError::Coordination {
                 message: SessionCoordinationError::store(error.to_string()),
-            }
-        })?;
+            })?;
         if !self.active_threads.begin_run(run_id.as_str()) {
             return Err(SessionSubmitError::Coordination {
                 message: SessionCoordinationError::local_agent_busy(),

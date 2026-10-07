@@ -40,6 +40,7 @@ mod frontend_projection;
 mod manual_compaction;
 mod operation_state;
 mod recovery;
+mod runtime_admission;
 mod settlement;
 mod transcript_projection;
 
@@ -593,6 +594,9 @@ pub struct SessionService {
     published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
     stopping_admission: Arc<std::sync::atomic::AtomicBool>,
     host_execution_authority: Option<crate::model::ManagedHostExecutionAuthority>,
+    /// Immutable selected intent, retained across every service clone. Ordinary
+    /// admission cannot turn a required agent into an unmediated successor run.
+    runtime_effect_required: bool,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
     /// The session's skill registry, captured from the agent at construction
     /// so `prepare_user_input` can expand top-level `$skillname` references
@@ -811,6 +815,7 @@ impl SessionService {
         instruction: &str,
         expected_run_id: Option<&str>,
     ) -> Result<crate::store::ThreadSteeringRecord> {
+        self.check_conventional_runtime_admission()?;
         let session_id = self
             .metadata
             .session_id
@@ -843,6 +848,7 @@ impl SessionService {
         &self,
         instruction: &str,
     ) -> Result<crate::store::ThreadSteeringRecord> {
+        self.check_conventional_runtime_admission()?;
         let session_id = self
             .metadata
             .session_id
@@ -886,6 +892,7 @@ impl SessionService {
         &self,
         invocation: crate::mcp::McpPromptInvocation,
     ) -> Result<PreparedPrompt> {
+        self.check_conventional_runtime_admission()?;
         let registry = self
             .mcp
             .as_deref()

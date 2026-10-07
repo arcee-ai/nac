@@ -5,6 +5,7 @@ impl SessionService {
         mut run_config: OrchestratorRunConfig,
     ) -> SessionServiceParts {
         let behavior = run_config.session.behavior();
+        let runtime_effect_required = run_config.agent.requires_runtime_effects();
         let store_path = run_config.session.store_path();
         let session_id = run_config.session.session_id().map(str::to_string);
         let restored_messages = run_config.agent.messages.clone();
@@ -114,6 +115,7 @@ impl SessionService {
             published_operation: Arc::new(StdMutex::new(None)),
             stopping_admission: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             host_execution_authority: run_config.client.host_execution_authority(),
+            runtime_effect_required,
             active_threads,
             skills,
             mcp,
