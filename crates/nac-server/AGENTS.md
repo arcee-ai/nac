@@ -43,8 +43,11 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   foundation: trusted DER serving identity, mandatory client CA, exact leaf pin,
   bounded handshake admission and transport-created peer identity. Its router
   always denies native operations pending canonical current-operation admission.
-  It adds no startup listener, config or plaintext bypass. Synthetic DER fixtures
-  are publicly known test identities, never production enrollment or delivery.
+  Its explicit opt-in plaintext fence retains exact GET/HEAD health diagnostics
+  and denies all other public runtime routes before effects. It must never wrap
+  the separate protected maintenance router. Both helpers remain uninstalled;
+  standalone startup is unchanged. Synthetic DER fixtures are publicly known
+  test identities, never production enrollment or delivery.
 - `src/lib.rs` — composition state, remaining cross-use-case lifecycle wiring,
   and public re-exports; new cohesive operations should prefer an owner above.
 - `src/mcp.rs` / `mcp_api.rs` — outgoing session-control MCP and HTTP MCP config.
