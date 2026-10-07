@@ -16,6 +16,7 @@
 //! connection.
 
 use std::path::{Path, PathBuf};
+use std::process::Output;
 
 use anyhow::{anyhow, Context, Result};
 
@@ -45,20 +46,91 @@ pub fn capture(
     session_id: &str,
     previous: Option<&str>,
 ) -> Result<RevisionCapture> {
-    let repo_root = target.repo_root()?;
-    let index = index_path(target, &repo_root, session_id)?;
+    capture_with_executor(target, &LegacyCapture, session_id, previous)
+}
+
+/// Private execution seam: the algorithm remains identical for standalone and
+/// selected protected capture. Checks also follow tolerated HEAD/branch failures.
+pub(crate) trait CaptureExecutor {
+    fn check(&self) -> Result<()>;
+    fn repo_root(&self, target: &GitTarget) -> Result<PathBuf>;
+    fn mkdir(&self, target: &GitTarget, path: &Path) -> Result<()>;
+    fn output(
+        &self,
+        target: &GitTarget,
+        cwd: &Path,
+        envs: &[(&str, &str)],
+        args: &[&str],
+    ) -> Result<Output>;
+}
+
+struct LegacyCapture;
+impl CaptureExecutor for LegacyCapture {
+    fn check(&self) -> Result<()> {
+        Ok(())
+    }
+    fn repo_root(&self, target: &GitTarget) -> Result<PathBuf> {
+        target.repo_root()
+    }
+    fn mkdir(&self, target: &GitTarget, path: &Path) -> Result<()> {
+        target.mkdir_p(path)
+    }
+    fn output(
+        &self,
+        target: &GitTarget,
+        cwd: &Path,
+        envs: &[(&str, &str)],
+        args: &[&str],
+    ) -> Result<Output> {
+        target.output_with_env(cwd, envs, args)
+    }
+}
+
+pub(crate) fn capture_with_executor(
+    target: &GitTarget,
+    executor: &impl CaptureExecutor,
+    session_id: &str,
+    previous: Option<&str>,
+) -> Result<RevisionCapture> {
+    executor.check()?;
+    let repo_root = executor.repo_root(target)?;
+    let index = capture_index_path(target, executor, &repo_root, session_id)?;
 
     // Staging into a private index is the whole safety story here, so it is
     // worth being explicit: the only commands below that write an index get
     // this path, and neither of them can reach the user's own.
-    git_with_index(target, &repo_root, &index, &["add", "--all"])
-        .context("failed to stage the working tree for a workspace revision")?;
-    let tree = git_with_index(target, &repo_root, &index, &["write-tree"])
-        .context("failed to write a workspace revision tree")?;
-
-    let head = git(target, &repo_root, &["rev-parse", "HEAD"], None, false).ok();
-    let branch = git(
+    capture_git(
         target,
+        executor,
+        &repo_root,
+        &["add", "--all"],
+        Some(&index),
+        false,
+    )
+    .context("failed to stage the working tree for a workspace revision")?;
+    let tree = capture_git(
+        target,
+        executor,
+        &repo_root,
+        &["write-tree"],
+        Some(&index),
+        false,
+    )
+    .context("failed to write a workspace revision tree")?;
+
+    let head = capture_git(
+        target,
+        executor,
+        &repo_root,
+        &["rev-parse", "HEAD"],
+        None,
+        false,
+    )
+    .ok();
+    executor.check()?;
+    let branch = capture_git(
+        target,
+        executor,
         &repo_root,
         &["branch", "--show-current"],
         None,
@@ -67,18 +139,20 @@ pub fn capture(
     .ok()
     .filter(|value| !value.is_empty());
 
+    executor.check()?;
     let mut args = vec!["commit-tree", tree.as_str(), "-m", "nac workspace revision"];
     if let Some(previous) = previous {
         args.push("-p");
         args.push(previous);
     }
-    let commit =
-        git_as_nac(target, &repo_root, &args).context("failed to record a workspace revision")?;
+    let commit = capture_git(target, executor, &repo_root, &args, None, true)
+        .context("failed to record a workspace revision")?;
 
     // The ref exists purely so that git's garbage collection leaves the chain
     // alone; moving it to the newest commit keeps every older one reachable.
-    git(
+    capture_git(
         target,
+        executor,
         &repo_root,
         &["update-ref", &ref_name(session_id), &commit],
         None,
@@ -88,10 +162,11 @@ pub fn capture(
 
     let base = previous.map(str::to_string).or_else(|| head.clone());
     let (additions, deletions, changed_files) = match base.as_deref() {
-        Some(base) => diff_totals(target, &repo_root, base, &commit)?,
+        Some(base) => capture_diff_totals(target, executor, &repo_root, base, &commit)?,
         None => (0, 0, 0),
     };
 
+    executor.check()?;
     Ok(RevisionCapture {
         commit,
         base,
@@ -173,14 +248,16 @@ pub fn forget(target: &GitTarget, session_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn diff_totals(
+fn capture_diff_totals(
     target: &GitTarget,
+    executor: &impl CaptureExecutor,
     repo_root: &Path,
     base: &str,
     commit: &str,
 ) -> Result<(u64, u64, u64)> {
-    let raw = git(
+    let raw = capture_git(
         target,
+        executor,
         repo_root,
         &["diff", "--numstat", base, commit],
         None,
@@ -211,15 +288,25 @@ fn parse_count(column: Option<&str>) -> u64 {
 /// captures is what makes them fast: git can trust the recorded stat data and
 /// only rehash the files that actually moved, instead of the whole checkout.
 fn index_path(target: &GitTarget, repo_root: &Path, session_id: &str) -> Result<PathBuf> {
-    let git_dir = git(
+    capture_index_path(target, &LegacyCapture, repo_root, session_id)
+}
+
+fn capture_index_path(
+    target: &GitTarget,
+    executor: &impl CaptureExecutor,
+    repo_root: &Path,
+    session_id: &str,
+) -> Result<PathBuf> {
+    let git_dir = capture_git(
         target,
+        executor,
         repo_root,
         &["rev-parse", "--absolute-git-dir"],
         None,
         false,
     )?;
     let dir = PathBuf::from(git_dir).join("nac-revisions");
-    target.mkdir_p(&dir)?;
+    executor.mkdir(target, &dir)?;
     Ok(dir.join(format!("index-{}", slug(session_id))))
 }
 
@@ -256,10 +343,6 @@ fn git_with_index(
     git(target, repo_root, args, Some(index), false)
 }
 
-fn git_as_nac(target: &GitTarget, repo_root: &Path, args: &[&str]) -> Result<String> {
-    git(target, repo_root, args, None, true)
-}
-
 fn git(
     target: &GitTarget,
     repo_root: &Path,
@@ -267,6 +350,18 @@ fn git(
     index: Option<&Path>,
     identity: bool,
 ) -> Result<String> {
+    capture_git(target, &LegacyCapture, repo_root, args, index, identity)
+}
+
+fn capture_git(
+    target: &GitTarget,
+    executor: &impl CaptureExecutor,
+    repo_root: &Path,
+    args: &[&str],
+    index: Option<&Path>,
+    identity: bool,
+) -> Result<String> {
+    executor.check()?;
     let index = index.map(|index| index.display().to_string());
     let mut envs: Vec<(&str, &str)> = Vec::new();
     if let Some(index) = index.as_deref() {
@@ -283,7 +378,8 @@ fn git(
         ]);
     }
 
-    let output = target.output_with_env(repo_root, &envs, args)?;
+    let output = executor.output(target, repo_root, &envs, args)?;
+    executor.check()?;
     if !output.status.success() {
         if let Some(reason) = target.unavailable_reason(&output) {
             return Err(anyhow!("{reason}"));

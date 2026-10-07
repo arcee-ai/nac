@@ -38,8 +38,19 @@ durable records; runtime/tool modules own execution internals.
   now cover matching starts lost before prompt publication under the actual
   selected OS lease. Later relationship generations and edited goal revisions
   retain their ownership; unanchored predecessor history remains uncertainty.
-  Terminal workspace capture is not yet fenced; do not qualify the complete
-  protected lifecycle or enable a listener from these tests alone.
+  Successful protected completion captures Local Git while the exact active
+  original and selected OS lease remain live, serializes completion ownership,
+  and lets cancellation win independently. Every wait/effect/output boundary
+  rechecks ownership; command denial cleans the supervised owned tree and stops
+  the sequence without Git rollback/readback. Released captures retain their
+  actual run and transcript prefix as terminal bookkeeping. Protected SSH stays
+  closed pending exact remote receipt/cleanup composition; absent targets never
+  fall back. Failed/cancelled/expired originals retain raw files and prior real
+  snapshots without manufacturing a current-run revision. Capturing ordinary
+  requested cancellation after quiescence still needs a separate ownership
+  mechanism: the existing finishing claim immediately denies renewal/effects.
+  Do not qualify that behavior, cleanup uncertainty/retry, the complete protected
+  lifecycle, or listener activation from the Local capture fixtures alone.
 - Orchestrator, direct, traditional-child, and managed-orchestrator paths retain
   their distinct topology invariants even when sharing lifecycle helpers.
 - This layer depends inward on sessions/store/runtime contracts, not HTTP DTOs
@@ -51,6 +62,7 @@ durable records; runtime/tool modules own execution internals.
 - `attachment.rs` — attach/create and ownership gates.
 - `admission.rs` / `settlement.rs` — run generation and durable completion.
 - `runtime_admission.rs` — sealed-original submission and private run observation.
+- `completion_capture.rs` — exact-original Local completion capture and supervised cutoff.
 - `direct_interaction.rs` — steering/queue submission.
 - `cancellation.rs` — abort and cleanup ordering.
 - `recovery.rs` — restart/peer/crash-window reconciliation.

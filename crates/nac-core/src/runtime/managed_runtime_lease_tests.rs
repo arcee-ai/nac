@@ -20,6 +20,10 @@ mod run_input_admission_tests;
 #[path = "mcp_admission_tests.rs"]
 mod mcp_admission_tests;
 
+#[cfg(unix)]
+#[path = "completion_capture_tests.rs"]
+mod completion_capture_tests;
+
 #[path = "lost_start_recovery_tests.rs"]
 mod lost_start_recovery_tests;
 

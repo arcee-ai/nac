@@ -36,6 +36,25 @@ impl SessionService {
                 return false;
             }
         }
+        // Serialize competing completion tasks through capture and finishing.
+        // Cancellation never waits on this mutex and can deny the exact owner.
+        let _capture_owner = if self.runtime_effect_required {
+            Some(Arc::clone(&self.completion_capture).lock_owned().await)
+        } else {
+            None
+        };
+        let completed_revision =
+            if self.runtime_effect_required && matches!(outcome, RunOutcome::Completed(..)) {
+                match self.capture_runtime_completion(run_id).await {
+                    Ok(revision) => revision,
+                    Err(error) => {
+                        eprintln!("nac: protected workspace capture unavailable: {error:#}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
         let id = run_id.clone();
         let finishing = self
             .coordinate_local(move |service| service.mark_run_finishing(&id))
@@ -96,8 +115,14 @@ impl SessionService {
             }
         };
 
-        self.capture_workspace_revision(&finishing_run.snapshot)
-            .await;
+        if let Some(revision) = completed_revision {
+            if let Err(error) = self.retain_completed_revision(revision).await {
+                eprintln!("nac: failed to retain completed workspace revision: {error:#}");
+            }
+        } else if !self.runtime_effect_required {
+            self.capture_workspace_revision(&finishing_run.snapshot)
+                .await;
+        }
 
         let (child_status, child_report, child_failure) = match &outcome {
             RunOutcome::Completed(response, _) => (
@@ -368,6 +393,11 @@ impl SessionService {
     /// failure here is reported and swallowed: a repository nac cannot capture
     /// still gets its run finished normally.
     pub(super) async fn capture_workspace_revision(&self, run: &ActiveRunSnapshot) {
+        // Finishing/cancellation has already denied protected authority. Keep
+        // checkout and prior real revisions untouched; never fabricate a new one.
+        if self.runtime_effect_required {
+            return;
+        }
         let (Some(session_id), Some(target)) =
             (self.metadata.session_id.clone(), self.workspace_git.clone())
         else {

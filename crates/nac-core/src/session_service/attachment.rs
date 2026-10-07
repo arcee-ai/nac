@@ -112,6 +112,7 @@ impl SessionService {
             transcript_scan: Arc::new(StdMutex::new(transcript_scan)),
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
+            completion_capture: Arc::new(Mutex::new(())),
             published_operation: Arc::new(StdMutex::new(None)),
             stopping_admission: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             host_execution_authority: run_config.client.host_execution_authority(),

@@ -35,6 +35,7 @@ use crate::workspace::GitTarget;
 mod admission;
 mod attachment;
 mod cancellation;
+mod completion_capture;
 mod direct_interaction;
 mod frontend_projection;
 mod manual_compaction;
@@ -591,6 +592,7 @@ pub struct SessionService {
     transcript_scan: Arc<StdMutex<TranscriptScanCache>>,
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
+    completion_capture: Arc<Mutex<()>>,
     published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
     stopping_admission: Arc<std::sync::atomic::AtomicBool>,
     host_execution_authority: Option<crate::model::ManagedHostExecutionAuthority>,
