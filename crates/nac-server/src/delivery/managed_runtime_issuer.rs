@@ -16,6 +16,10 @@
 use super::*;
 use uuid::Uuid;
 
+#[path = "managed_runtime_issuer_channel.rs"]
+mod channel;
+use channel::{IssuerChannel, IssuerControlStream};
+
 /// Trusted operator construction, separate from ordinary runtime enrollment.
 /// There is no request-selected certificate, CA, pin or callback credential.
 pub(crate) struct IssuerControlTlsIdentity {
@@ -55,11 +59,12 @@ impl IssuerControlTlsListener {
 }
 
 impl axum::serve::Listener for IssuerControlTlsListener {
-    type Io = TlsStream<TcpStream>;
+    type Io = IssuerControlStream;
     type Addr = SocketAddr;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        axum::serve::Listener::accept(&mut self.transport).await
+        let (stream, address) = axum::serve::Listener::accept(&mut self.transport).await;
+        (IssuerControlStream::from_verified_tls(stream), address)
     }
 
     fn local_addr(&self) -> std::io::Result<Self::Addr> {
@@ -71,37 +76,55 @@ impl axum::serve::Listener for IssuerControlTlsListener {
 /// UUID is only a selector: it cannot manufacture or replace this marker.
 #[derive(Clone, Debug)]
 pub(crate) struct AuthenticatedIssuerControlPeer {
-    channel_id: Uuid,
-    leaf_sha256: [u8; 32],
+    channel: Arc<IssuerChannel>,
 }
 
 impl AuthenticatedIssuerControlPeer {
     pub(crate) fn channel_id(&self) -> Uuid {
-        self.channel_id
+        self.channel.id()
     }
 
     pub(crate) fn leaf_sha256(&self) -> [u8; 32] {
-        self.leaf_sha256
+        self.channel.leaf_sha256()
+    }
+
+    pub(crate) fn check_live(&self) -> Result<()> {
+        self.channel.check_live()
+    }
+
+    pub(crate) async fn wait_for_close(&self) {
+        self.channel.wait_for_close().await;
+    }
+
+    /// The future canonical WSS loop must retain this noncloneable owner.
+    /// Claiming transport ownership establishes no operation or policy grant.
+    pub(crate) fn claim_dialog(&self) -> Result<IssuerControlDialog> {
+        self.channel.claim_dialog()?;
+        Ok(IssuerControlDialog { peer: self.clone() })
+    }
+}
+
+/// Caller abort, completed dialog or a failed upgrade closes the SAME channel.
+/// Retained marker clones cannot restart a dialog on that old connection.
+pub(crate) struct IssuerControlDialog {
+    peer: AuthenticatedIssuerControlPeer,
+}
+
+impl IssuerControlDialog {
+    pub(crate) fn peer(&self) -> &AuthenticatedIssuerControlPeer {
+        &self.peer
+    }
+}
+
+impl Drop for IssuerControlDialog {
+    fn drop(&mut self) {
+        self.peer.channel.close();
     }
 }
 
 impl Connected<IncomingStream<'_, IssuerControlTlsListener>> for AuthenticatedIssuerControlPeer {
-    #[expect(
-        clippy::expect_used,
-        reason = "the purpose listener preserves mandatory CA verification and exact configured nonzero issuer pin"
-    )]
     fn connect_info(stream: IncomingStream<'_, IssuerControlTlsListener>) -> Self {
-        let leaf = stream
-            .io()
-            .get_ref()
-            .1
-            .peer_certificates()
-            .and_then(|chain| chain.first())
-            .expect("issuer listener accepts only verified pinned peers");
-        Self {
-            channel_id: Uuid::new_v4(),
-            leaf_sha256: Sha256::digest(leaf.as_ref()).into(),
-        }
+        stream.io().peer()
     }
 }
 
@@ -118,3 +141,7 @@ pub(crate) fn denied_issuer_router(native: Router) -> Router {
 #[cfg(test)]
 #[path = "managed_runtime_issuer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "managed_runtime_issuer_channel_tests.rs"]
+mod channel_tests;

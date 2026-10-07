@@ -54,6 +54,15 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   current policy/challenge/journal composition exists. A channel UUID is a selector,
   never a grant or liveness proof; close/replacement must invalidate outstanding
   exchanges in the composed channel owner. No loader or listener startup is installed.
+  `managed_runtime_issuer_channel.rs` retains the exact verified TLS stream's
+  native UUID and sticky lifetime. EOF, I/O failure, shutdown or stream drop
+  invalidates every retained peer clone, including a handler awaiting work.
+  One noncloneable dialog claim closes on caller abort or completion; a copied
+  UUID cannot restart it. The accepted hello is generated from that live claim,
+  and preparation comparison checks the same actual claim before and after byte
+  comparison. These helpers still establish no current product authority,
+  durable reservation, delivered lease or operation permission. WSS framing,
+  bounded queues/exchanges and current-authority composition remain uninstalled.
 - `src/delivery/managed_runtime_control.rs` consumes B's exact accepted control
   contract and frozen vectors. It supplies format/digest/current-context comparison,
   not nonce consumption, product policy, TLS purpose or execution permission.

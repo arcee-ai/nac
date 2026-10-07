@@ -2,7 +2,7 @@ use super::super::tests::{certificate, client, identity, key};
 use super::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-fn issuer_identity() -> IssuerControlTlsIdentity {
+pub(super) fn issuer_identity() -> IssuerControlTlsIdentity {
     IssuerControlTlsIdentity {
         serving_chain: vec![certificate("host")],
         serving_key: key("host"),

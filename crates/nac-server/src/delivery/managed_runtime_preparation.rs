@@ -48,6 +48,22 @@ fn text<'a>(fields: &'a Fields, name: &str) -> Result<&'a str> {
 
 pub(super) struct RuntimeChannelHello(Fields);
 impl RuntimeChannelHello {
+    /// Native generates the accepted hello only for the retained actual dialog.
+    /// This identifies its transport; it grants no product/effect authority.
+    pub(super) fn for_live_dialog(dialog: &super::issuer::IssuerControlDialog) -> Result<Self> {
+        let peer = dialog.peer();
+        peer.check_live().map_err(|_| RuntimeControlDenied)?;
+        let fields = Fields::from([
+            ("channel_version".into(), Value::from(1)),
+            (
+                "control_channel_id".into(),
+                Value::String(peer.channel_id().to_string()),
+            ),
+        ]);
+        let hello = Self::decode(&canonical_bounded(&fields, HELLO_MAX_BYTES)?)?;
+        peer.check_live().map_err(|_| RuntimeControlDenied)?;
+        Ok(hello)
+    }
     pub(super) fn decode(raw: &[u8]) -> Result<Self> {
         let fields = decode_bounded(raw, HELLO_MAX_BYTES)?;
         require(fields.len() == 2 && integer(&fields, "channel_version")? == 1)?;
@@ -167,6 +183,22 @@ pub(super) fn compare_preparation(
     .into_iter()
     .min()
     .ok_or(RuntimeControlDenied)
+}
+
+/// Bind the pure comparison to the actual retained, singly owned TLS dialog.
+/// Remaining time is still observational, not a reservation or execution grant.
+pub(super) fn compare_preparation_on_dialog(
+    dialog: &super::issuer::IssuerControlDialog,
+    hello: &RuntimeChannelHello,
+    preparation: &RuntimePreparation,
+    context: &RuntimePreparationContext<'_>,
+) -> Result<i64> {
+    let peer = dialog.peer();
+    peer.check_live().map_err(|_| RuntimeControlDenied)?;
+    require(context.control_channel_id == peer.channel_id().to_string())?;
+    let remaining = compare_preparation(hello, preparation, context)?;
+    peer.check_live().map_err(|_| RuntimeControlDenied)?;
+    Ok(remaining)
 }
 
 #[cfg(test)]
