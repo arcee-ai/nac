@@ -1,6 +1,7 @@
 use super::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::{rustls::pki_types::ServerName, TlsConnector};
+use tower::ServiceExt;
 
 fn certificate(name: &str) -> CertificateDer<'static> {
     let bytes: &[u8] = match name {
@@ -233,4 +234,151 @@ async fn stalled_handshake_does_not_block_correct_peer_and_invalid_config_fails_
         .contains("incomplete"));
     server.abort();
     let _ = server.await;
+}
+
+#[tokio::test]
+#[expect(
+    clippy::await_holding_lock,
+    reason = "native fixture serializes process-global model/config environment"
+)]
+async fn opted_in_plaintext_fence_denies_native_runtime_and_preserves_standalone_and_probes() {
+    use axum::{
+        body::Body,
+        http::{Method, Request, StatusCode},
+    };
+    let _lock = crate::tests::SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!("nac-plaintext-fence-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    nac_core::store::initialize(&root.join("store.db")).unwrap();
+    let _env = crate::tests::ScopedModelEnv::isolated(&root, None);
+    let manager = crate::SessionManager::new(crate::ServerOptions {
+        root_cwd: root.clone(),
+        store_path: Some(root.join("store.db")),
+        worker_executable: None,
+        managed_host: None,
+    })
+    .unwrap();
+    let native = crate::router(manager.clone());
+    let standalone_router = native.clone();
+    let standalone = native
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/sessions")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        standalone.status(),
+        StatusCode::OK,
+        "ordinary standalone native admission is preserved"
+    );
+    let fenced = mediated_only_plaintext_router(native);
+    for (method, path) in [
+        (Method::GET, "/sessions"),
+        (Method::POST, "/sessions"),
+        (Method::POST, "/sessions/fixture/runs"),
+        (Method::GET, "/sessions/fixture/events/stream"),
+        (Method::POST, "/sessions/fixture/terminals"),
+        (Method::GET, "/filesystem/browse"),
+        (Method::POST, "/mcp"),
+        (Method::POST, "/v1/upgrade/prepare"),
+        (Method::GET, "/managed/status"),
+        (Method::OPTIONS, "/sessions"),
+        (Method::POST, "/healthz"),
+        (Method::GET, "/readyz/extra"),
+    ] {
+        let response = fenced
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("authorization", "Bearer fixture-never-authority")
+                    .header(
+                        "x-arcee-managed-operation-id",
+                        uuid::Uuid::new_v4().to_string(),
+                    )
+                    .header("x-arcee-managed-intent-sha256", "a".repeat(64))
+                    .header("x-forwarded-client-cert", "fixture-never-authority")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "plaintext bypass must be denied for {path}"
+        );
+    }
+    for method in [Method::GET, Method::HEAD] {
+        for path in ["/health", "/healthz", "/readyz"] {
+            let request = || {
+                Request::builder()
+                    .method(method.clone())
+                    .uri(path)
+                    .body(Body::empty())
+                    .unwrap()
+            };
+            let before = standalone_router.clone().oneshot(request()).await.unwrap();
+            let after = fenced.clone().oneshot(request()).await.unwrap();
+            assert_eq!(
+                after.status(),
+                before.status(),
+                "existing probe behavior is retained for {method} {path}"
+            );
+        }
+    }
+    drop(fenced);
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn plaintext_fence_blocks_future_routes_before_effect_and_requires_exact_probe_path() {
+    use axum::{
+        body::Body,
+        http::{Method, Request, StatusCode},
+    };
+    let touched = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let handler_touched = Arc::clone(&touched);
+    let app = Router::new().fallback(move || {
+        handler_touched.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        async { "future native effect" }
+    });
+    let fenced = mediated_only_plaintext_router(app);
+    for path in [
+        "/future/effect",
+        "/health%7a",
+        "/healthz/",
+        "//healthz",
+        "/Healthz",
+    ] {
+        for method in [Method::GET, Method::HEAD, Method::POST, Method::DELETE] {
+            let response = fenced
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "only the exact probe path is exempt: {path}"
+            );
+        }
+    }
+    assert_eq!(
+        touched.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "denied requests never invoke a native effect"
+    );
 }

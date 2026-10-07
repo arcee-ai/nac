@@ -163,6 +163,35 @@ pub fn denied_runtime_router(native: Router) -> Router {
     ))
 }
 
+/// Explicit opt-in fence for the ordinary plaintext listener in mediated mode.
+/// Trusted composition applies this only to the public runtime router, never to
+/// the separately authenticated maintenance listener. Headers, local addresses,
+/// peer-marker lookalikes and future routes cannot bypass it. Standalone callers
+/// retain their existing router by omitting this wrapper.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "default-off scaffold awaits host-writer export/startup composition"
+    )
+)]
+pub fn mediated_only_plaintext_router(native: Router) -> Router {
+    native.layer(axum::middleware::from_fn(
+        |request: axum::extract::Request, next: axum::middleware::Next| async move {
+            let diagnostic =
+                matches!(
+                    request.method(),
+                    &axum::http::Method::GET | &axum::http::Method::HEAD
+                ) && matches!(request.uri().path(), "/health" | "/healthz" | "/readyz");
+            if diagnostic {
+                next.run(request).await
+            } else {
+                axum::response::IntoResponse::into_response(axum::http::StatusCode::UNAUTHORIZED)
+            }
+        },
+    ))
+}
+
 /// Serve the denied foundation with transport-created peer information. The
 /// caller owns shutdown coordination with the native session/persistence root.
 pub async fn serve_denied_runtime(
