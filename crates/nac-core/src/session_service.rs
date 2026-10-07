@@ -675,11 +675,13 @@ struct ActiveRunState {
     command_cancellation: crate::tools::ThreadCancellation,
     inbox_item_id: Option<i64>,
     _operation_lease: Option<Arc<sessions::SessionOperationLease>>,
+    runtime_original: Option<Box<crate::runtime::RuntimeRunAdmission>>,
     _workspace_activity_lease: Option<sessions::WorkspaceActivityLease>,
 }
 
 #[derive(Default)]
 struct RunAdmissionKind {
+    runtime_original: Option<crate::runtime::RuntimeRunAdmission>,
     inbox_item_id: Option<i64>,
     goal_continuation: bool,
     child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,

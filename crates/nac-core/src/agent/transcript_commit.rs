@@ -17,6 +17,15 @@ impl Agent {
         Ok(())
     }
 
+    pub(crate) fn install_runtime_transcript_writer(
+        &mut self,
+        writer: crate::store::TranscriptLogWriter,
+    ) {
+        if let Some(sink) = self.transcript_log.as_mut() {
+            sink.writer = Arc::new(writer);
+        }
+    }
+
     /// Append `messages` to the transcript log at absolute positions
     /// `start_idx..` via `spawn_blocking` (steering-claim precedent). A no-op
     /// for agents without a transcript log (workers, picker sessions).

@@ -46,6 +46,12 @@ workspace revisions, recovery markers, and cross-process coordination.
   and retained native session/run acknowledgments. It supplies no authentication,
   lease, transport wire or dispatch permission. Every duplicate is observational;
   lost responses and session deletion never reopen a consumed operation.
+- `runtime_run_start.rs` — one transaction for a selected original's current
+  configuration/behavior, topology or goal generation, run count, leased writer
+  and immutable native Run acknowledgement. It reuses the separate traditional
+  child and managed orchestrator algorithms. Admission callbacks run after the
+  transaction wait and before commit. A retained ack supplies no live owner;
+  start-before-prompt crash reconciliation remains an application obligation.
 - `managed_runtime_leases.rs` — native sealed reservation/challenge capabilities,
   atomic one-use lease advancement, original deadline and serving-lifetime binding,
   terminal expiry/rollback, and retained lease identity. Authentication/current

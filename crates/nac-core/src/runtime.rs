@@ -56,6 +56,7 @@ mod run_admission;
 mod sandboxing;
 
 pub use effect_lease::{RuntimeEffectLease, RuntimeEffectLeaseHandle};
+pub(crate) use managed_runtime_lease::RuntimeRunObserver;
 pub use managed_runtime_lease::{ManagedRuntimeExpiryObservation, ManagedRuntimeLeaseGuard};
 pub use run_admission::RuntimeRunAdmission;
 

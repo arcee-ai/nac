@@ -488,7 +488,23 @@ pub fn bind_session_goal_run(
     baseline: &GoalRunBaseline,
 ) -> Result<Option<SessionGoalRecord>> {
     let connection = open_runtime_connection(path)?;
-    require_direct_session(&connection, session_id)?;
+    bind_session_goal_run_with_connection(&connection, session_id, baseline)
+}
+command BindSessionGoalRunCommand {
+    session_id: String = session_id.to_owned(),
+    baseline: GoalRunBaseline = baseline.clone(),
+}
+call |command| (&command.session_id, &command.baseline)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+pub(super) fn bind_session_goal_run_with_connection(
+    connection: &Connection,
+    session_id: &str,
+    baseline: &GoalRunBaseline,
+) -> Result<Option<SessionGoalRecord>> {
+    require_direct_session(connection, session_id)?;
     let baseline_tokens = checked_integer(baseline.billable_tokens, "run token baseline")?;
     let started_at = checked_integer(baseline.started_at_epoch_ms, "run start time")?;
     let continuation = baseline.continuation.then_some(baseline.run_id.as_str());
@@ -511,15 +527,7 @@ pub fn bind_session_goal_run(
     if changed == 0 {
         return Ok(None);
     }
-    load_with_connection(&connection, session_id)
-}
-command BindSessionGoalRunCommand {
-    session_id: String = session_id.to_owned(),
-    baseline: GoalRunBaseline = baseline.clone(),
-}
-call |command| (&command.session_id, &command.baseline)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port public;
+    load_with_connection(connection, session_id)
 }
 
 coordinated_command! {

@@ -294,6 +294,10 @@ pub struct TranscriptLogWriter {
     after_extent_read: std::sync::Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
     pub(super) append_fence: Option<super::transcript_append::RunAppendFence>,
     recovery_admission: Option<std::sync::Arc<super::MutationAdmission>>,
+    pub(super) runtime_run_admission: Option<(
+        std::sync::Arc<super::MutationAdmission>,
+        std::sync::Arc<super::MutationAdmission>,
+    )>,
 }
 
 /// Length of the log tail relative to a snapshot blob of `blob_len`, read from
@@ -444,6 +448,7 @@ impl TranscriptLogWriter {
             append_scope: uuid::Uuid::new_v4().to_string(),
             append_fence: None,
             recovery_admission: None,
+            runtime_run_admission: None,
             #[cfg(test)]
             append_fault: std::sync::Arc::new(Mutex::new(None)),
             #[cfg(test)]
@@ -460,6 +465,15 @@ impl TranscriptLogWriter {
         admission: std::sync::Arc<super::MutationAdmission>,
     ) -> Self {
         self.recovery_admission = Some(admission);
+        self
+    }
+
+    pub(crate) fn with_runtime_run_admission(
+        mut self,
+        current: std::sync::Arc<super::MutationAdmission>,
+        initial_prompt: std::sync::Arc<super::MutationAdmission>,
+    ) -> Self {
+        self.runtime_run_admission = Some((current, initial_prompt));
         self
     }
 

@@ -1324,6 +1324,7 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
         command_cancellation: crate::tools::ThreadCancellation::default(),
         inbox_item_id: None,
         _operation_lease: None,
+        runtime_original: None,
         _workspace_activity_lease: None,
     }));
     let inactive = service

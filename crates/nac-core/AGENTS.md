@@ -44,10 +44,18 @@ It must not own HTTP/React delivery or managed-host product onboarding.
   noncloneable pending-run admission, and fences recovery, config migration and
   transcript repair inside their store transactions. It bounds MCP startup and
   caller cancellation without owning destructive cleanup of resumed resources.
-  These factories do not publish a run or install startup/receiver policy or
-  worker IPC. Guarded resume still needs qualification of synchronous Git
-  restoration and selected SSH/Podman effects; active-run continuation remains
-  separate work.
+  `SessionService::submit_runtime_original` consumes the paired pending resume
+  admission. Its private active state owns that original and the OS lease;
+  only that matching, non-finishing run supplies renewal liveness. Run count,
+  topology/accounting generation, leased writer and immutable native run ack
+  commit together in `store/runtime_run_start.rs`. Prompt transactions check
+  both current lease and initial admission; later messages use the current
+  lease without turning the initial HTTP deadline into a job deadline.
+  Startup/receiver policy and worker IPC remain separate. Guarded resume still
+  needs qualification of synchronous Git restoration and selected SSH/Podman
+  effects. Terminal workspace capture and reconciliation of an accepted start
+  lost before its first prompt remain open; these primitives do not qualify
+  listener activation or the complete protected execution lifecycle.
 - `src/sandbox/podman.rs` keeps the selected Podman adapter's container lifecycle,
   creation receipts, process identity/cleanup scripts and rollback together; its
   cohesive ownership explains its size above 800 lines. Fresh durable teardown

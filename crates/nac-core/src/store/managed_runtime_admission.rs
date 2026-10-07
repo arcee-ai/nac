@@ -191,26 +191,7 @@ pub fn acknowledge_managed_runtime_operation(
 ) -> std::result::Result<ManagedRuntimeOperationSnapshot, ManagedRuntimeJournalError> {
     let mut connection = open_runtime_connection(path)?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let mut snapshot = read_with_connection(&transaction, identity)?
-        .ok_or(ManagedRuntimeJournalError::MissingOperation)?;
-    if let Some(existing) = &snapshot.observation {
-        if existing != observation {
-            return Err(ManagedRuntimeJournalError::ObservationConflict);
-        }
-    } else {
-        let (kind, session, run) = match observation {
-            ManagedRuntimeObservation::NotAdmitted => ("not_admitted", None, None),
-            ManagedRuntimeObservation::Session { session_id } => ("session", Some(session_id.to_string()), None),
-            ManagedRuntimeObservation::Run { session_id, run_id } => ("run", Some(session_id.to_string()), Some(run_id.to_string())),
-        };
-        let updated = transaction.execute(
-            "UPDATE managed_runtime_operations SET observation_kind = ?2, session_id = ?3, run_id = ?4
-             WHERE operation_id = ?1 AND observation_kind IS NULL",
-            params![identity.operation_id.to_string(), kind, session, run],
-        )?;
-        if updated != 1 { return Err(ManagedRuntimeJournalError::Store(anyhow!("runtime acknowledgment mutation was not singular"))); }
-        snapshot.observation = Some(observation.clone());
-    }
+    let snapshot = acknowledge_with_connection(&transaction, identity, observation)?;
     transaction.commit()?;
     Ok(snapshot)
 }
@@ -221,6 +202,44 @@ command AcknowledgeManagedRuntimeOperationCommand {
 call |command| (&command.identity, &command.observation)
 correlation |_command| crate::telemetry::Correlation::default();
 port public;
+}
+
+pub(super) fn acknowledge_with_connection(
+    connection: &Connection,
+    identity: &ManagedRuntimeOperationIdentity,
+    observation: &ManagedRuntimeObservation,
+) -> std::result::Result<ManagedRuntimeOperationSnapshot, ManagedRuntimeJournalError> {
+    let mut snapshot = read_with_connection(connection, identity)?
+        .ok_or(ManagedRuntimeJournalError::MissingOperation)?;
+    if let Some(existing) = &snapshot.observation {
+        if existing != observation {
+            return Err(ManagedRuntimeJournalError::ObservationConflict);
+        }
+    } else {
+        let (kind, session, run) = match observation {
+            ManagedRuntimeObservation::NotAdmitted => ("not_admitted", None, None),
+            ManagedRuntimeObservation::Session { session_id } => {
+                ("session", Some(session_id.to_string()), None)
+            }
+            ManagedRuntimeObservation::Run { session_id, run_id } => (
+                "run",
+                Some(session_id.to_string()),
+                Some(run_id.to_string()),
+            ),
+        };
+        let updated = connection.execute(
+            "UPDATE managed_runtime_operations SET observation_kind = ?2, session_id = ?3, run_id = ?4
+             WHERE operation_id = ?1 AND observation_kind IS NULL",
+            params![identity.operation_id.to_string(), kind, session, run],
+        )?;
+        if updated != 1 {
+            return Err(ManagedRuntimeJournalError::Store(anyhow!(
+                "runtime acknowledgment mutation was not singular"
+            )));
+        }
+        snapshot.observation = Some(observation.clone());
+    }
+    Ok(snapshot)
 }
 
 pub(super) fn read_with_connection(

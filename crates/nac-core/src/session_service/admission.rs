@@ -8,6 +8,27 @@ impl SessionService {
         Option<sessions::SessionOperationLease>,
         OperationAdmissionPreparationError,
     > {
+        self.prepare_operation_admission_checked(supplied_lease, None)
+    }
+
+    pub(super) fn prepare_operation_admission_checked(
+        &self,
+        supplied_lease: Option<sessions::SessionOperationLease>,
+        admission: Option<&Arc<crate::store::MutationAdmission>>,
+    ) -> std::result::Result<
+        Option<sessions::SessionOperationLease>,
+        OperationAdmissionPreparationError,
+    > {
+        let check = || -> std::result::Result<(), OperationAdmissionPreparationError> {
+            admission
+                .map(|admission| admission())
+                .transpose()
+                .map(|_| ())
+                .map_err(|error| OperationAdmissionPreparationError::Coordination {
+                    message: SessionCoordinationError::store(error.to_string()),
+                })
+        };
+        check()?;
         let operation_lease = match (supplied_lease, self.metadata.session_id.as_deref()) {
             (Some(lease), Some(session_id)) => {
                 lease
@@ -90,13 +111,18 @@ impl SessionService {
                     message: SessionCoordinationError::local_agent_busy(),
                 }
             })?;
-            let durable_blob = agent
-                .refresh_transcript_under_lease(lease)
-                .map_err(|error| OperationAdmissionPreparationError::Coordination {
-                    message: SessionCoordinationError::store(format!(
-                        "failed to refresh the transcript under the operation lease: {error:#}"
-                    )),
-                })?;
+            check()?;
+            let durable_blob = match admission {
+                Some(admission) => agent
+                    .refresh_transcript_under_lease_admitted(lease, Some(Arc::clone(admission))),
+                None => agent.refresh_transcript_under_lease(lease),
+            }
+            .map_err(|error| OperationAdmissionPreparationError::Coordination {
+                message: SessionCoordinationError::store(format!(
+                    "failed to refresh the transcript under the operation lease: {error:#}"
+                )),
+            })?;
+            check()?;
             agent.restore_compaction_checkpoint().map_err(|error| {
                 OperationAdmissionPreparationError::Coordination {
                     message: SessionCoordinationError::store(format!(
@@ -145,6 +171,7 @@ impl SessionService {
             }
         }
 
+        check()?;
         Ok(operation_lease)
     }
 
@@ -363,10 +390,20 @@ impl SessionService {
         enforce_coordination: bool,
         admission: RunAdmissionKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
-        self.check_conventional_runtime_admission()
-            .map_err(|error| SessionSubmitError::Coordination {
-                message: SessionCoordinationError::store(error.to_string()),
-            })?;
+        let RunAdmissionKind {
+            mut runtime_original,
+            inbox_item_id,
+            goal_continuation,
+            child_execution_mode,
+            managed_orchestrator_execution_mode,
+        } = admission;
+        self.check_original_run_admission(runtime_original.as_ref(), None)?;
+        let initial_check = runtime_original.as_ref().map(|original| {
+            let guard = Arc::clone(&original.guard);
+            Arc::new(move || guard.check_initial_admission_now())
+                as Arc<crate::store::MutationAdmission>
+        });
+        let check = || self.check_original_run_admission_guard(initial_check.as_ref());
         let _host_admission = (enforce_coordination && self.managed_admission_enabled)
             .then(|| match self.managed_identity.as_deref() {
                 Some(identity) => crate::store::try_admit_managed_work_for_identity(
@@ -381,13 +418,8 @@ impl SessionService {
                     "failed to acquire managed host run admission: {error:#}"
                 )),
             })?;
-        let RunAdmissionKind {
-            inbox_item_id,
-            goal_continuation,
-            child_execution_mode,
-            managed_orchestrator_execution_mode,
-        } = admission;
         let mut guard = self.lock_active_operation();
+        check()?;
         if self
             .stopping_admission
             .load(std::sync::atomic::Ordering::Acquire)
@@ -421,8 +453,18 @@ impl SessionService {
             None => {}
         }
 
+        let supplied_lease = if let Some(original) = runtime_original.as_mut() {
+            if supplied_lease.is_some() {
+                return Err(SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::invalid_lease(),
+                });
+            }
+            original.operation_lease.take()
+        } else {
+            supplied_lease
+        };
         let operation_lease = if enforce_coordination {
-            self.prepare_operation_admission(supplied_lease)
+            self.prepare_operation_admission_checked(supplied_lease, initial_check.as_ref())
                 .map_err(|error| match error {
                     OperationAdmissionPreparationError::ExternalBusy { session_id } => {
                         SessionSubmitError::ExternalBusy {
@@ -448,15 +490,25 @@ impl SessionService {
             None
         };
 
+        check()?;
         if enforce_coordination {
             if let Some(session_id) = self.metadata.session_id.as_deref() {
-                let recovery =
-                    crate::store::reconcile_active_run(&self.metadata.store_path, session_id)
-                        .map_err(|error| SessionSubmitError::Coordination {
-                            message: SessionCoordinationError::store(format!(
-                                "failed to reconcile interrupted run state: {error:#}"
-                            )),
-                        })?;
+                let recovery = match initial_check.as_ref() {
+                    Some(admission) => crate::store::reconcile_active_run_admitted(
+                        &self.metadata.store_path,
+                        session_id,
+                        admission,
+                    ),
+                    None => {
+                        crate::store::reconcile_active_run(&self.metadata.store_path, session_id)
+                    }
+                }
+                .map_err(|error| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to reconcile interrupted run state: {error:#}"
+                    )),
+                })?;
+                check()?;
                 if let crate::store::ActiveRunReconciliation::Interrupted { run_id } = recovery {
                     self.event_bus.emit_with_context(
                         SessionEvent::RunFailed {
@@ -469,54 +521,46 @@ impl SessionService {
                         None,
                     );
                 }
-                let mut expired =
-                    crate::store::expire_session_steering(&self.metadata.store_path, session_id)
-                        .map_err(|error| SessionSubmitError::Coordination {
-                            message: SessionCoordinationError::store(format!(
-                                "failed to recover stale steering: {error:#}"
-                            )),
-                        })?;
+                let mut expired = match initial_check.as_ref() {
+                    Some(admission) => crate::store::expire_session_steering_admitted(
+                        &self.metadata.store_path,
+                        session_id,
+                        admission,
+                    ),
+                    None => {
+                        crate::store::expire_session_steering(&self.metadata.store_path, session_id)
+                    }
+                }
+                .map_err(|error| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to recover stale steering: {error:#}"
+                    )),
+                })?;
                 expired.extend(
-                    self.active_threads
-                        .close_all(&self.metadata.store_path, session_id)
-                        .map_err(|error| SessionSubmitError::Coordination {
-                            message: SessionCoordinationError::store(format!(
-                                "failed to clear stale worker targets: {error:#}"
-                            )),
-                        })?,
+                    match initial_check.as_ref() {
+                        Some(admission) => self.active_threads.close_all_admitted(
+                            &self.metadata.store_path,
+                            session_id,
+                            Some(admission),
+                        ),
+                        None => self
+                            .active_threads
+                            .close_all(&self.metadata.store_path, session_id),
+                    }
+                    .map_err(|error| SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::store(format!(
+                            "failed to clear stale worker targets: {error:#}"
+                        )),
+                    })?,
                 );
+                check()?;
                 self.emit_steering_expired(expired);
             }
         }
 
+        check()?;
+        self.check_original_run_admission(runtime_original.as_ref(), operation_lease.as_ref())?;
         let run_id = SessionRunId::new();
-        // Admission may have waited for operation/workspace/store ownership.
-        // Reject the current serving lifetime before publishing a new run.
-        self.check_conventional_runtime_admission()
-            .map_err(|error| SessionSubmitError::Coordination {
-                message: SessionCoordinationError::store(error.to_string()),
-            })?;
-        if !self.active_threads.begin_run(run_id.as_str()) {
-            return Err(SessionSubmitError::Coordination {
-                message: SessionCoordinationError::local_agent_busy(),
-            });
-        }
-
-        let command_cancellation =
-            if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-                // Orchestrator cancellation continues through its established
-                // active-thread registry and must not add a new agent-lock
-                // admission requirement.
-                crate::tools::ThreadCancellation::for_host(self.host_execution_authority.clone())
-            } else {
-                self.agent
-                    .try_lock()
-                    .map_err(|_| SessionSubmitError::Coordination {
-                        message: SessionCoordinationError::local_agent_busy(),
-                    })?
-                    .begin_run_cancellation()
-            };
-
         let submitted_at_epoch_ms = now_epoch_ms();
         let submitted_user_message = (!goal_continuation).then(|| SubmittedUserMessageSnapshot {
             run_id: run_id.clone(),
@@ -541,99 +585,203 @@ impl SessionService {
         };
         let (prompt_commit, _prompt_commit_receiver) =
             watch::channel(RunPromptCommitStatus::Pending);
-        if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-            if let (Some(session_id), Some(execution_mode)) = (
-                self.metadata.session_id.as_deref(),
-                managed_orchestrator_execution_mode,
-            ) {
-                crate::store::begin_managed_orchestrator_run(
-                    &self.metadata.store_path,
-                    session_id,
-                    active_run.run_id.as_str(),
-                    execution_mode,
-                )
-                .map_err(|error| SessionSubmitError::Coordination {
-                    message: SessionCoordinationError::store(format!(
-                        "failed to bind managed orchestrator generation to run: {error:#}"
-                    )),
-                })?;
-            }
-        } else {
-            if let Some(session_id) = self.metadata.session_id.as_deref() {
-                if crate::store::load_traditional_child(&self.metadata.store_path, session_id)
-                    .map_err(|error| SessionSubmitError::Coordination {
-                        message: SessionCoordinationError::store(format!(
-                            "failed to inspect traditional child relationship: {error:#}"
-                        )),
-                    })?
-                    .is_some()
-                {
-                    crate::store::begin_traditional_child_run(
-                        &self.metadata.store_path,
-                        session_id,
-                        active_run.run_id.as_str(),
-                        child_execution_mode
-                            .unwrap_or(crate::store::TraditionalChildExecutionMode::Background),
-                    )
-                    .map_err(|error| SessionSubmitError::Coordination {
-                        message: SessionCoordinationError::store(format!(
-                            "failed to bind traditional child generation to run: {error:#}"
-                        )),
-                    })?;
-                } else {
-                    crate::store::bind_session_goal_run(
-                        &self.metadata.store_path,
-                        session_id,
-                        &crate::store::GoalRunBaseline {
-                            run_id: active_run.run_id.to_string(),
-                            billable_tokens: 0,
-                            started_at_epoch_ms: active_run.started_at_epoch_ms,
-                            continuation: goal_continuation,
-                        },
-                    )
-                    .map_err(|error| SessionSubmitError::Coordination {
-                        message: SessionCoordinationError::store(format!(
-                            "failed to bind goal accounting to run: {error:#}"
-                        )),
-                    })?;
-                }
-            }
-        }
         let operation_lease = operation_lease.map(Arc::new);
-        if let Some(lease) = operation_lease.as_ref() {
-            self.agent
-                .try_lock()
-                .map_err(|_| SessionSubmitError::Coordination {
-                    message: SessionCoordinationError::local_agent_busy(),
-                })?
-                .bind_transcript_run(active_run.run_id.as_str(), lease)
-                .map_err(|error| SessionSubmitError::Coordination {
-                    message: SessionCoordinationError::store(format!(
-                        "failed to bind transcript append authority: {error:#}"
-                    )),
-                })?;
-        }
-        *guard = Some(ActiveSessionOperation::Run(ActiveRunState {
+        // The selected private run state owns the same sealed original before
+        // any run registry, cancellation, accounting or publication effects.
+        let mut selected = ActiveRunState {
             snapshot: active_run.clone(),
             started_at: Instant::now(),
             finishing: false,
             task: None,
             prompt_commit,
             transcript_baseline: None,
-            command_cancellation,
+            command_cancellation: crate::tools::ThreadCancellation::for_host(
+                self.host_execution_authority.clone(),
+            ),
             inbox_item_id,
             _operation_lease: operation_lease,
             _workspace_activity_lease: workspace_activity_lease,
-        }));
-        drop(guard);
-
-        if let Some(session_id) = self.metadata.session_id.as_deref() {
-            if let Err(error) = sessions::increment_run_count(&self.metadata.store_path, session_id)
-            {
-                eprintln!("nac: failed to record run count: {error:#}");
+            runtime_original: runtime_original.map(Box::new),
+        };
+        if let Some(original) = selected.runtime_original.as_ref() {
+            let effect: crate::runtime::RuntimeEffectLeaseHandle = Arc::clone(&original.guard) as _;
+            selected.command_cancellation = self
+                .agent
+                .try_lock()
+                .map_err(|_| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::local_agent_busy(),
+                })?
+                .bind_runtime_run_effects(effect)
+                .map_err(|error| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::store(error.to_string()),
+                })?;
+        }
+        check()?;
+        let begun = if selected.runtime_original.is_some() {
+            self.active_threads.begin_run_with_cancellation(
+                active_run.run_id.as_str(),
+                selected.command_cancellation.clone(),
+            )
+        } else {
+            self.active_threads.begin_run(active_run.run_id.as_str())
+        };
+        if !begun {
+            return Err(SessionSubmitError::Coordination {
+                message: SessionCoordinationError::local_agent_busy(),
+            });
+        }
+        if selected.runtime_original.is_none()
+            && self.metadata.behavior != sessions::SessionBehavior::Orchestrator
+        {
+            selected.command_cancellation = self
+                .agent
+                .try_lock()
+                .map_err(|_| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::local_agent_busy(),
+                })?
+                .begin_run_cancellation();
+        }
+        check()?;
+        if selected.runtime_original.is_none() {
+            if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
+                if let (Some(session_id), Some(execution_mode)) = (
+                    self.metadata.session_id.as_deref(),
+                    managed_orchestrator_execution_mode,
+                ) {
+                    crate::store::begin_managed_orchestrator_run(
+                        &self.metadata.store_path,
+                        session_id,
+                        active_run.run_id.as_str(),
+                        execution_mode,
+                    )
+                    .map_err(|error| SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::store(format!(
+                            "failed to bind managed orchestrator generation to run: {error:#}"
+                        )),
+                    })?;
+                }
+            } else {
+                if let Some(session_id) = self.metadata.session_id.as_deref() {
+                    if crate::store::load_traditional_child(&self.metadata.store_path, session_id)
+                        .map_err(|error| SessionSubmitError::Coordination {
+                            message: SessionCoordinationError::store(format!(
+                                "failed to inspect traditional child relationship: {error:#}"
+                            )),
+                        })?
+                        .is_some()
+                    {
+                        crate::store::begin_traditional_child_run(
+                            &self.metadata.store_path,
+                            session_id,
+                            active_run.run_id.as_str(),
+                            child_execution_mode
+                                .unwrap_or(crate::store::TraditionalChildExecutionMode::Background),
+                        )
+                        .map_err(|error| {
+                            SessionSubmitError::Coordination {
+                                message: SessionCoordinationError::store(format!(
+                                    "failed to bind traditional child generation to run: {error:#}"
+                                )),
+                            }
+                        })?;
+                    } else {
+                        crate::store::bind_session_goal_run(
+                            &self.metadata.store_path,
+                            session_id,
+                            &crate::store::GoalRunBaseline {
+                                run_id: active_run.run_id.to_string(),
+                                billable_tokens: 0,
+                                started_at_epoch_ms: active_run.started_at_epoch_ms,
+                                continuation: goal_continuation,
+                            },
+                        )
+                        .map_err(|error| {
+                            SessionSubmitError::Coordination {
+                                message: SessionCoordinationError::store(format!(
+                                    "failed to bind goal accounting to run: {error:#}"
+                                )),
+                            }
+                        })?;
+                    }
+                }
             }
         }
+        check()?;
+        if let Some(lease) = selected._operation_lease.as_ref() {
+            let mut agent =
+                self.agent
+                    .try_lock()
+                    .map_err(|_| SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::local_agent_busy(),
+                    })?;
+            let binding = if let Some(original) = selected.runtime_original.as_ref() {
+                crate::store::commit_runtime_run_start(
+                    &self.metadata.store_path,
+                    &crate::store::RuntimeRunStart {
+                        session_id: original.session_id.clone(),
+                        run_id: active_run.run_id.to_string(),
+                        behavior: self.metadata.behavior,
+                        config_version: self.config_version.ok_or_else(|| {
+                            SessionSubmitError::Coordination {
+                                message: SessionCoordinationError::store(
+                                    "runtime configuration revision unavailable",
+                                ),
+                            }
+                        })?,
+                        managed_execution_mode: managed_orchestrator_execution_mode,
+                        child_execution_mode,
+                        started_at_epoch_ms: active_run.started_at_epoch_ms,
+                        goal_continuation,
+                        identity: original
+                            .guard
+                            .binding()
+                            .map_err(|error| SessionSubmitError::Coordination {
+                                message: SessionCoordinationError::store(error.to_string()),
+                            })?
+                            .identity,
+                    },
+                    lease,
+                    &original.guard.mutation_admission(),
+                    initial_check
+                        .as_ref()
+                        .ok_or_else(|| SessionSubmitError::Coordination {
+                            message: SessionCoordinationError::store(
+                                "runtime initial admission unavailable",
+                            ),
+                        })?,
+                )
+                .map(|writer| agent.install_runtime_transcript_writer(writer))
+            } else {
+                agent.bind_transcript_run(active_run.run_id.as_str(), lease)
+            };
+            binding.map_err(|error| SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store(format!(
+                    "failed to bind transcript append authority: {error:#}"
+                )),
+            })?;
+        }
+        check()?;
+        if let Some(original) = selected.runtime_original.as_ref() {
+            let observer = self.runtime_run_observer(&active_run.run_id, &original.guard);
+            original
+                .guard
+                .bind_run_observer(observer)
+                .map_err(|error| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::store(error.to_string()),
+                })?;
+        }
+        *guard = Some(ActiveSessionOperation::Run(selected));
+        drop(guard);
 
+        if initial_check.is_none() {
+            if let Some(session_id) = self.metadata.session_id.as_deref() {
+                if let Err(error) =
+                    sessions::increment_run_count(&self.metadata.store_path, session_id)
+                {
+                    eprintln!("nac: failed to record run count: {error:#}");
+                }
+            }
+        }
         self.event_bus.emit_with_context(
             SessionEvent::RunStarted {
                 prompt_preview: active_run.prompt_preview.clone(),

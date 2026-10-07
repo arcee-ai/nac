@@ -335,7 +335,27 @@ pub fn begin_managed_orchestrator_run(
     }
     let mut connection = open_runtime_connection(path)?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let current = load_with_connection(&transaction, orchestrator_session_id)?
+    let record = begin_managed_orchestrator_run_in_transaction(&transaction, orchestrator_session_id, run_id, execution_mode)?;
+    transaction.commit()?;
+    Ok(record)
+}
+command BeginManagedOrchestratorRunCommand {
+    orchestrator_session_id: String = orchestrator_session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    execution_mode: ManagedOrchestratorExecutionMode = execution_mode,
+}
+call |command| (&command.orchestrator_session_id, &command.run_id, command.execution_mode)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.orchestrator_session_id)).with_run(Some(&command.run_id));
+port public;
+}
+
+pub(super) fn begin_managed_orchestrator_run_in_transaction(
+    transaction: &Transaction<'_>,
+    orchestrator_session_id: &str,
+    run_id: &str,
+    execution_mode: ManagedOrchestratorExecutionMode,
+) -> Result<ManagedOrchestratorRecord> {
+    let current = load_with_connection(transaction, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator was not found"))?;
     if current.status == ManagedOrchestratorStatus::Running {
         return Err(anyhow!(
@@ -383,19 +403,9 @@ pub fn begin_managed_orchestrator_run(
     if changed != 1 {
         return Err(anyhow!("managed orchestrator changed during run admission"));
     }
-    let record = load_with_connection(&transaction, orchestrator_session_id)?
+    let record = load_with_connection(transaction, orchestrator_session_id)?
         .ok_or_else(|| anyhow!("managed orchestrator disappeared during run admission"))?;
-    transaction.commit()?;
     Ok(record)
-}
-command BeginManagedOrchestratorRunCommand {
-    orchestrator_session_id: String = orchestrator_session_id.to_owned(),
-    run_id: String = run_id.to_owned(),
-    execution_mode: ManagedOrchestratorExecutionMode = execution_mode,
-}
-call |command| (&command.orchestrator_session_id, &command.run_id, command.execution_mode)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.orchestrator_session_id)).with_run(Some(&command.run_id));
-port public;
 }
 
 coordinated_command! {

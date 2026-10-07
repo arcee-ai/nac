@@ -288,6 +288,11 @@ pub async fn build_resume_config_for_runtime_operation(
     let run_admission = admission
         .complete_for_run(&store_path, session_id.to_string(), lease)
         .await?;
+    built
+        .agent
+        .pin_runtime_original_construction(std::sync::Arc::clone(
+            &run_admission.construction_identity,
+        ));
     Ok((built.with_required_runtime_effects(), run_admission))
 }
 

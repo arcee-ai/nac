@@ -25,6 +25,8 @@ mod permission_grants;
 mod projects;
 mod render;
 mod run_recovery;
+mod runtime_run_start;
+pub(crate) use runtime_run_start::{commit_runtime_run_start, RuntimeRunStart};
 mod schema;
 mod session_forks;
 mod session_goals;
@@ -69,7 +71,7 @@ pub use projects::*;
 pub use render::*;
 pub(crate) use run_recovery::{
     clear_active_run, load_run_recovery_with_connection, mark_active_run_failed,
-    replace_with_active_run, stage_active_run_failure,
+    reconcile_active_run_admitted, replace_with_active_run, stage_active_run_failure,
 };
 pub use run_recovery::{
     clear_settled_run_recovery, load_run_recovery, reconcile_active_run, ActiveRunReconciliation,

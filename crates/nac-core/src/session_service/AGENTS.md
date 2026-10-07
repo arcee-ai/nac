@@ -21,10 +21,20 @@ durable records; runtime/tool modules own execution internals.
 - Required runtime-effect intent captured from trusted run construction is
   immutable for every service clone. Conventional submission, manual compaction,
   inbox input and automatic inbox/goal wakeups fail before admission or mutation;
-  an old original-run lease cannot authorize a successor prompt. The future
-  qualified ingress producer must separately bind fresh admission to the durable
-  operation barrier. This process-local gate does not install that producer,
-  pre-construction fencing or restart selection of required mode.
+  an old original-run lease cannot authorize a successor prompt.
+  `submit_runtime_original` requires the sealed admission and matching private
+  construction identity from guarded resume. It retains the same original in
+  canonical private active state before publishing a run. Renewal observation
+  rejects finishing/cancelling state even while a public projection remains.
+  Durable start commits topology/accounting generation, count, leased writer
+  and original Run acknowledgement together. Pending delivery abort denies the
+  guard. The initial HTTP deadline still fences the first prompt transaction;
+  an admitted active continuation uses freshly renewed leases thereafter.
+  This is an opt-in core primitive, not authenticated HTTP delivery or startup
+  selection. Terminal workspace capture is not yet fenced, and a committed
+  start lost before prompt publication needs restart reconciliation; do not
+  qualify the complete protected lifecycle or enable a listener from these
+  tests alone.
 - Orchestrator, direct, traditional-child, and managed-orchestrator paths retain
   their distinct topology invariants even when sharing lifecycle helpers.
 - This layer depends inward on sessions/store/runtime contracts, not HTTP DTOs
@@ -35,6 +45,7 @@ durable records; runtime/tool modules own execution internals.
 - `mod.rs` — service composition and supported facade.
 - `attachment.rs` — attach/create and ownership gates.
 - `admission.rs` / `settlement.rs` — run generation and durable completion.
+- `runtime_admission.rs` — sealed-original submission and private run observation.
 - `direct_interaction.rs` — steering/queue submission.
 - `cancellation.rs` — abort and cleanup ordering.
 - `recovery.rs` — restart/peer/crash-window reconciliation.

@@ -137,6 +137,7 @@ pub struct AgentConfig {
 type McpObservation = Arc<dyn Fn(EventSink, Option<String>) + Send + Sync>;
 
 pub struct Agent {
+    runtime_construction_identity: Option<Arc<()>>,
     client: ModelClient,
     mode: AgentMode,
     pub messages: Vec<Message>,
@@ -391,6 +392,7 @@ impl Agent {
         let committed_log_len = messages.len() as u64;
         let host_execution_authority = client.host_execution_authority();
         Ok(Self {
+            runtime_construction_identity: None,
             client,
             mode,
             messages,
@@ -601,6 +603,29 @@ impl Agent {
             true,
         );
         self
+    }
+
+    pub(crate) fn pin_runtime_original_construction(&mut self, identity: Arc<()>) {
+        self.runtime_construction_identity = Some(identity);
+    }
+
+    pub(crate) fn matches_runtime_original_construction(&self, identity: &Arc<()>) -> bool {
+        self.runtime_construction_identity
+            .as_ref()
+            .is_some_and(|actual| Arc::ptr_eq(actual, identity))
+    }
+
+    pub(crate) fn bind_runtime_run_effects(
+        &mut self,
+        lease: crate::runtime::RuntimeEffectLeaseHandle,
+    ) -> Result<crate::tools::ThreadCancellation> {
+        anyhow::ensure!(
+            self.requires_runtime_effects(),
+            "runtime run requires protected construction"
+        );
+        lease.check_available()?;
+        self.tool_runtime.runtime_effect_lease = Some(lease);
+        Ok(self.begin_run_cancellation())
     }
 
     pub(crate) fn requires_runtime_effects(&self) -> bool {
@@ -1408,6 +1433,14 @@ impl Agent {
         &mut self,
         operation_lease: &crate::sessions::SessionOperationLease,
     ) -> Result<Option<Vec<Message>>> {
+        self.refresh_transcript_under_lease_admitted(operation_lease, None)
+    }
+
+    pub(crate) fn refresh_transcript_under_lease_admitted(
+        &mut self,
+        operation_lease: &crate::sessions::SessionOperationLease,
+        admission: Option<Arc<crate::store::MutationAdmission>>,
+    ) -> Result<Option<Vec<Message>>> {
         self.transcript_recovery_warning = None;
         let Some(sink) = &self.transcript_log else {
             return Ok(None);
@@ -1415,7 +1448,10 @@ impl Agent {
         operation_lease
             .validate(&sink.store_path, &sink.session_id)
             .map_err(anyhow::Error::new)?;
-        let writer = Arc::clone(&sink.writer);
+        let writer = match admission {
+            Some(admission) => Arc::new((*sink.writer).clone().with_recovery_admission(admission)),
+            None => Arc::clone(&sink.writer),
+        };
         let session_id = sink.session_id.clone();
 
         let snapshot_messages = writer.read_snapshot_messages(&session_id)?;

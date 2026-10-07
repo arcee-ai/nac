@@ -24,6 +24,8 @@ pub struct ManagedRuntimeExpiryObservation {
     pub remaining: Duration,
 }
 
+pub(crate) type RuntimeRunObserver = dyn Fn() -> Result<ManagedRuntimeObservation> + Send + Sync;
+
 struct State {
     active: ActiveRuntimeLease,
     terminal: bool,
@@ -40,6 +42,7 @@ pub struct ManagedRuntimeLeaseGuard {
     store: Arc<StoreCoordinator>,
     state: Mutex<State>,
     executor: tokio::runtime::Handle,
+    run_observer: Mutex<Option<Arc<RuntimeRunObserver>>>,
 }
 
 fn denied() -> anyhow::Error {
@@ -71,6 +74,7 @@ impl ManagedRuntimeLeaseGuard {
                 terminal_scheduled: false,
                 construction_started: false,
             }),
+            run_observer: Mutex::new(None),
             executor: tokio::runtime::Handle::try_current().map_err(|_| denied())?,
         });
         guard.check_now()?;
@@ -165,7 +169,7 @@ impl ManagedRuntimeLeaseGuard {
         self.check().await
     }
 
-    pub(super) fn check_initial_admission_now(&self) -> Result<()> {
+    pub(crate) fn check_initial_admission_now(&self) -> Result<()> {
         self.check_now()?;
         let mut state = self.state()?;
         let clock = native_clock()?;
@@ -176,7 +180,7 @@ impl ManagedRuntimeLeaseGuard {
         Ok(())
     }
 
-    pub(super) fn mutation_admission(self: &Arc<Self>) -> Arc<crate::store::MutationAdmission> {
+    pub(crate) fn mutation_admission(self: &Arc<Self>) -> Arc<crate::store::MutationAdmission> {
         let guard = Arc::clone(self);
         Arc::new(move || guard.check_now())
     }
@@ -304,6 +308,32 @@ impl ManagedRuntimeLeaseGuard {
         }
     }
 
+    pub(crate) fn bind_run_observer(&self, observer: Arc<RuntimeRunObserver>) -> Result<()> {
+        self.check_now()?;
+        let mut selected = self.run_observer.lock().map_err(|_| denied())?;
+        anyhow::ensure!(
+            selected.is_none(),
+            "runtime original already has a run owner"
+        );
+        *selected = Some(observer);
+        Ok(())
+    }
+
+    fn check_run_observer(&self, expected: Option<&ManagedRuntimeObservation>) -> Result<()> {
+        let observer = self.run_observer.lock().map_err(|_| denied())?.clone();
+        if observer.is_none() && self.state()?.construction_started {
+            return Err(denied());
+        }
+        if let Some(observer) = observer {
+            let actual = observer()?;
+            anyhow::ensure!(
+                expected.is_none_or(|expected| expected == &actual),
+                "runtime original run mismatch"
+            );
+        }
+        Ok(())
+    }
+
     /// Application must independently corroborate that this exact acknowledged
     /// native session/run is active and current policy before creating its wire.
     pub async fn challenge_renewal(
@@ -311,6 +341,7 @@ impl ManagedRuntimeLeaseGuard {
         native: ManagedRuntimeObservation,
         challenge: RuntimeChallengeSpec,
     ) -> Result<PendingRuntimeChallenge> {
+        self.check_run_observer(Some(&native))?;
         self.check().await?;
         let (clock, view) = {
             let mut state = self.state()?;
@@ -321,11 +352,13 @@ impl ManagedRuntimeLeaseGuard {
             }
             (clock, ActiveRuntimeLeaseCheck::from(&state.active))
         };
+        self.check_run_observer(Some(&native))?;
         let pending = self
             .store
-            .challenge_runtime_lease_view(view, native, challenge, clock)
+            .challenge_runtime_lease_view(view, native.clone(), challenge, clock)
             .await?;
         self.check_now()?;
+        self.check_run_observer(Some(&native))?;
         Ok(pending)
     }
 
@@ -337,6 +370,7 @@ impl ManagedRuntimeLeaseGuard {
         response: RuntimeLeaseResponse,
         receipt_clock: RuntimeLeaseClock,
     ) -> Result<RuntimeLeaseSnapshot> {
+        self.check_run_observer(None)?;
         {
             let mut state = self.state()?;
             Self::local(&mut state, native_clock()?)?;
@@ -353,6 +387,7 @@ impl ManagedRuntimeLeaseGuard {
             .store
             .consume_managed_runtime_challenge(pending, response, receipt_clock)
             .await;
+        self.check_run_observer(None)?;
         let result = {
             let mut state = self.state()?;
             let local = Self::local(&mut state, native_clock()?);

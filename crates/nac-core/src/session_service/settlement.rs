@@ -520,6 +520,9 @@ impl SessionService {
             return None;
         }
         active_run.finishing = true;
+        if let Some(original) = active_run.runtime_original.as_ref() {
+            original.guard.deny_now();
+        }
         active_run.snapshot.submitted_user_message = None;
         Some(FinishingRun {
             snapshot: active_run.snapshot.clone(),
@@ -537,6 +540,9 @@ impl SessionService {
             return None;
         }
         active_run.finishing = true;
+        if let Some(original) = active_run.runtime_original.as_ref() {
+            original.guard.deny_now();
+        }
         active_run.snapshot.submitted_user_message = None;
         Some(CancellingRun {
             service: self.clone(),

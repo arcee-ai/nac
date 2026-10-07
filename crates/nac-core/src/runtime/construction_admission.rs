@@ -27,6 +27,7 @@ impl ConstructionAdmission {
         lease: sessions::SessionOperationLease,
     ) -> Result<RuntimeRunAdmission> {
         let admission = RuntimeRunAdmission {
+            construction_identity: Arc::new(()),
             guard: Arc::clone(&self.guard),
             session_id,
             operation_lease: Some(lease),

@@ -10,6 +10,12 @@ mod construction_backend_tests;
 #[path = "resume_admission_tests.rs"]
 mod resume_admission_tests;
 
+#[path = "run_admission_tests.rs"]
+mod run_admission_tests;
+
+#[path = "run_input_admission_tests.rs"]
+mod run_input_admission_tests;
+
 struct Fixture {
     path: PathBuf,
     store: Arc<StoreCoordinator>,
@@ -24,7 +30,16 @@ impl Fixture {
         Self { path, store }
     }
     async fn active(&self, lifetime_ms: i64) -> ActiveRuntimeLease {
+        self.active_with_original_lifetime(lifetime_ms, 30_000)
+            .await
+    }
+    async fn active_with_original_lifetime(
+        &self,
+        lifetime_ms: i64,
+        original_ms: i64,
+    ) -> ActiveRuntimeLease {
         let clock = native_clock().unwrap();
+        let original_expires_ms = clock.wall_ms() + original_ms;
         let binding = RuntimeLeaseBinding {
             identity: ManagedRuntimeOperationIdentity {
                 operation_id: Uuid::new_v4(),
@@ -32,7 +47,7 @@ impl Fixture {
             },
             assignment_sha256: [8; 32],
             serving_lifetime_id: Uuid::new_v4(),
-            original_expires_ms: clock.wall_ms() + 30_000,
+            original_expires_ms,
         };
         let RuntimeLeaseReservationOutcome::Fresh(fresh) = self
             .store
@@ -45,7 +60,7 @@ impl Fixture {
         let challenge = RuntimeChallengeSpec {
             channel_id: Uuid::new_v4(),
             challenge_sha256: [9; 32],
-            expires_ms: clock.wall_ms() + 5_000,
+            expires_ms: (clock.wall_ms() + 5_000).min(original_expires_ms),
         };
         let pending = self
             .store
@@ -59,7 +74,7 @@ impl Fixture {
             lease: RuntimeLeaseSnapshot {
                 lease_id: Uuid::new_v4(),
                 sequence: 1,
-                expires_ms: clock.wall_ms() + lifetime_ms,
+                expires_ms: (clock.wall_ms() + lifetime_ms).min(original_expires_ms),
             },
             observed_ms: clock.wall_ms(),
         };

@@ -170,7 +170,7 @@ fn row_to_child(row: &rusqlite::Row<'_>) -> rusqlite::Result<TraditionalChildRec
     })
 }
 
-fn load_child_with_connection(
+pub(super) fn load_child_with_connection(
     connection: &rusqlite::Connection,
     child_session_id: &str,
 ) -> Result<Option<TraditionalChildRecord>> {
@@ -430,7 +430,27 @@ pub fn begin_traditional_child_run(
     }
     let mut connection = open_runtime_connection(path)?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let current = load_child_with_connection(&transaction, child_session_id)?
+    let child = begin_traditional_child_run_in_transaction(&transaction, child_session_id, run_id, execution_mode)?;
+    transaction.commit()?;
+    Ok(child)
+}
+command BeginTraditionalChildRunCommand {
+    child_session_id: String = child_session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    execution_mode: TraditionalChildExecutionMode = execution_mode,
+}
+call |command| (&command.child_session_id, &command.run_id, command.execution_mode)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id)).with_run(Some(&command.run_id));
+port public;
+}
+
+pub(super) fn begin_traditional_child_run_in_transaction(
+    transaction: &Transaction<'_>,
+    child_session_id: &str,
+    run_id: &str,
+    execution_mode: TraditionalChildExecutionMode,
+) -> Result<TraditionalChildRecord> {
+    let current = load_child_with_connection(transaction, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child session '{child_session_id}' was not found"))?;
     if current.status == TraditionalChildStatus::Running {
         return Err(anyhow!(
@@ -476,19 +496,9 @@ pub fn begin_traditional_child_run(
             current.version
         ],
     )?;
-    let child = load_child_with_connection(&transaction, child_session_id)?
+    let child = load_child_with_connection(transaction, child_session_id)?
         .ok_or_else(|| anyhow!("traditional child disappeared during run admission"))?;
-    transaction.commit()?;
     Ok(child)
-}
-command BeginTraditionalChildRunCommand {
-    child_session_id: String = child_session_id.to_owned(),
-    run_id: String = run_id.to_owned(),
-    execution_mode: TraditionalChildExecutionMode = execution_mode,
-}
-call |command| (&command.child_session_id, &command.run_id, command.execution_mode)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id)).with_run(Some(&command.run_id));
-port public;
 }
 
 coordinated_command! {

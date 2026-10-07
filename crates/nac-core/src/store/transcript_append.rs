@@ -126,7 +126,17 @@ impl TranscriptLogWriter {
         }
         lease.validate(path, session_id)?;
         let connection = open_runtime_connection(path)?;
-        let relationship = relationship_generation(&connection, session_id)?;
+        Self::for_run_with_connection(path, session_id, run_id, lease, &connection)
+    }
+
+    pub(super) fn for_run_with_connection(
+        path: &Path,
+        session_id: &str,
+        run_id: &str,
+        lease: &Arc<SessionOperationLease>,
+        connection: &Connection,
+    ) -> Result<Self> {
+        let relationship = relationship_generation(connection, session_id)?;
         if relationship.as_ref().is_some_and(|relationship| {
             relationship.run_id.as_deref() != Some(run_id) || relationship.status != "running"
         }) {
@@ -331,9 +341,11 @@ impl TranscriptLogWriter {
                 let mut connection = open_runtime_connection(&self.store_path)?;
                 let transaction = connection
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                self.check_runtime_append_admission(purpose)?;
                 self.validate_append_run(&transaction, session_id, purpose)?;
                 let result = prepare(&transaction)?;
                 self.append_fault(AppendFault::BeforeCommit)?;
+                self.check_runtime_append_admission(purpose)?;
                 let commit_error = transaction.commit().err().map(anyhow::Error::new);
                 if commit_error.is_none() {
                     self.append_fault(AppendFault::AfterCommitBeforeAck)?;
@@ -352,6 +364,19 @@ impl TranscriptLogWriter {
         Err(uncertain
             .unwrap_or_else(|| anyhow!("transcript commit reconciliation exhausted"))
             .context(TranscriptAppendError::CommitUncertain))
+    }
+
+    fn check_runtime_append_admission(&self, purpose: AppendPurpose<'_>) -> Result<()> {
+        // Terminal normalization has its separate durable cleanup obligation.
+        if !matches!(purpose, AppendPurpose::Terminal) {
+            if let Some((current, initial)) = &self.runtime_run_admission {
+                current()?;
+                if matches!(purpose, AppendPurpose::RunPrompt(_)) {
+                    initial()?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn append_fault(&self, phase: AppendFault) -> Result<()> {

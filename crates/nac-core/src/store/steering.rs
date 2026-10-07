@@ -225,7 +225,7 @@ pub fn expire_thread_steering(
 ) -> Result<Vec<ThreadSteeringRecord>> {
     crate::store::retry_busy_correlated(
         crate::telemetry::Correlation::session(Some(session_id)).with_run(Some(dispatch_id)),
-        || expire_thread_steering_once(path, session_id, Some(dispatch_id)),
+        || expire_thread_steering_once(path, session_id, Some(dispatch_id), None),
     )
 }
 command ExpireThreadSteeringCommand {
@@ -241,7 +241,7 @@ coordinated_command! {
 pub fn expire_session_steering(path: &Path, session_id: &str) -> Result<Vec<ThreadSteeringRecord>> {
     crate::store::retry_busy_correlated(
         crate::telemetry::Correlation::session(Some(session_id)),
-        || expire_thread_steering_once(path, session_id, None),
+        || expire_thread_steering_once(path, session_id, None, None),
     )
 }
 command ExpireSessionSteeringCommand {
@@ -252,13 +252,55 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
+coordinated_command! {
+pub(crate) fn expire_session_steering_admitted(path: &Path, session_id: &str,
+    admission: &std::sync::Arc<MutationAdmission>) -> Result<Vec<ThreadSteeringRecord>> {
+    crate::store::retry_busy_correlated(
+        crate::telemetry::Correlation::session(Some(session_id)),
+        || expire_thread_steering_once(path, session_id, None, Some(admission.as_ref())),
+    )
+}
+command ExpireSessionSteeringAdmittedCommand {
+    session_id: String = session_id.to_owned(),
+    admission: std::sync::Arc<MutationAdmission> = std::sync::Arc::clone(admission),
+}
+call |command| (&command.session_id, &command.admission)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
+}
+
+coordinated_command! {
+pub(crate) fn expire_thread_steering_admitted(path: &Path, session_id: &str, dispatch_id: &str,
+    admission: &std::sync::Arc<MutationAdmission>) -> Result<Vec<ThreadSteeringRecord>> {
+    crate::store::retry_busy_correlated(
+        crate::telemetry::Correlation::session(Some(session_id)),
+        || expire_thread_steering_once(path, session_id, Some(dispatch_id), Some(admission.as_ref())),
+    )
+}
+command ExpireThreadSteeringAdmittedCommand {
+    session_id: String = session_id.to_owned(),
+    dispatch_id: String = dispatch_id.to_owned(),
+    admission: std::sync::Arc<MutationAdmission> = std::sync::Arc::clone(admission),
+}
+call |command| (&command.session_id, &command.dispatch_id, &command.admission)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
+}
+
 fn expire_thread_steering_once(
     path: &Path,
     session_id: &str,
     dispatch_id: Option<&str>,
+    admission: Option<&MutationAdmission>,
 ) -> Result<Vec<ThreadSteeringRecord>> {
+    if let Some(admission) = admission {
+        admission()?;
+    }
     let mut conn = open_runtime_connection(path)?;
     let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if let Some(admission) = admission {
+        admission()?;
+    }
     let pending = if let Some(dispatch_id) = dispatch_id {
         let mut statement = transaction.prepare(&format!(
             "SELECT {RECORD_COLUMNS} FROM thread_steering
@@ -277,6 +319,9 @@ fn expire_thread_steering_once(
         mapped.collect::<std::result::Result<Vec<_>, _>>()?
     };
     if pending.is_empty() {
+        if let Some(admission) = admission {
+            admission()?;
+        }
         transaction.commit()?;
         return Ok(Vec::new());
     }
@@ -288,6 +333,9 @@ fn expire_thread_steering_once(
              WHERE id = ?2 AND status IN ('queued', 'claimed')",
             params![expired_at, record.id],
         )?;
+    }
+    if let Some(admission) = admission {
+        admission()?;
     }
     transaction.commit()?;
     Ok(pending

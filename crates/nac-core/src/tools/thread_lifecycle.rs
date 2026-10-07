@@ -243,11 +243,22 @@ impl ActiveThreadRegistry {
     }
 
     pub fn begin_run(&self, run_id: &str) -> bool {
+        self.begin_run_with_cancellation(run_id, ThreadCancellation::default())
+    }
+
+    pub(crate) fn begin_run_with_cancellation(
+        &self,
+        run_id: &str,
+        cancellation: ThreadCancellation,
+    ) -> bool {
         let mut state = self.lock();
         if !state.dispatches.is_empty() {
             return false;
         }
-        state.cancellation = ThreadCancellation::default();
+        if cancellation.is_cancelled() {
+            return false;
+        }
+        state.cancellation = cancellation;
         state.accepting = true;
         state.run_id = Some(run_id.to_string());
         true
@@ -412,7 +423,19 @@ impl ActiveThreadRegistry {
         store_path: &Path,
         session_id: &str,
     ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
+        self.close_all_admitted(store_path, session_id, None)
+    }
+
+    pub(crate) fn close_all_admitted(
+        &self,
+        store_path: &Path,
+        session_id: &str,
+        admission: Option<&Arc<crate::store::MutationAdmission>>,
+    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
         let mut state = self.lock();
+        if let Some(admission) = admission {
+            admission()?;
+        }
         state.accepting = false;
         state.cancellation.cancel();
         let targets = state
@@ -422,11 +445,19 @@ impl ActiveThreadRegistry {
             .collect::<Vec<_>>();
         let mut expired = Vec::new();
         for (name, dispatch_id) in targets {
-            expired.extend(crate::store::expire_thread_steering(
-                store_path,
-                session_id,
-                &dispatch_id,
-            )?);
+            let records = match admission {
+                Some(admission) => crate::store::expire_thread_steering_admitted(
+                    store_path,
+                    session_id,
+                    &dispatch_id,
+                    admission,
+                )?,
+                None => crate::store::expire_thread_steering(store_path, session_id, &dispatch_id)?,
+            };
+            if let Some(admission) = admission {
+                admission()?;
+            }
+            expired.extend(records);
             if state
                 .dispatches
                 .get(&name)
