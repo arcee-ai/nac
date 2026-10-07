@@ -8,12 +8,16 @@ use std::{
 };
 
 #[tokio::test]
-async fn dropped_cleanup_caller_keeps_actual_owner_until_owned_task_finishes() {
+async fn failed_cleanup_and_dropped_caller_retain_both_actual_os_leases_until_owned_retry() {
     let root = std::env::temp_dir().join(format!("nac-capture-cleanup-drop-{}", Uuid::new_v4()));
     let path = root.join("store.db");
     crate::store::initialize(&path).unwrap();
     let session = Uuid::new_v4().to_string();
     let lease = Arc::new(sessions::SessionOperationLease::try_acquire(&path, &session).unwrap());
+    let workspace_identity = root.as_os_str().as_encoded_bytes();
+    let workspace =
+        Arc::new(sessions::WorkspaceActivityLease::try_acquire(&path, workspace_identity).unwrap());
+    let weak_workspace = Arc::downgrade(&workspace);
     let run = SessionRunId::from_stored(Uuid::new_v4().to_string());
     let registry = Arc::new(CaptureCleanups::default());
     let mut command = tokio::process::Command::new("/bin/sleep");
@@ -23,9 +27,30 @@ async fn dropped_cleanup_caller_keeps_actual_owner_until_owned_task_finishes() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    let (child, tree) = ProcessTreeGuard::spawn_supervised(&mut command).unwrap();
-    let (_, owner) = registry.register(run.clone(), lease, None, child, tree);
+    let (child, mut tree) = ProcessTreeGuard::spawn_supervised(&mut command).unwrap();
+    tree.fail_cleanup_attempts_for_test(1);
+    let (_, owner) = registry.register(run.clone(), lease, Some(workspace), child, tree);
     let weak = Arc::downgrade(&owner);
+    assert!(registry.retry_run(&run).await.is_err());
+    assert_eq!(registry.pending(&run), 1);
+    assert!(owner
+        .process
+        .lock()
+        .await
+        .child
+        .try_wait()
+        .unwrap()
+        .is_none());
+    assert!(weak_workspace.upgrade().is_some());
+    assert!(matches!(
+        sessions::SessionOperationLease::try_acquire(&path, &session),
+        Err(sessions::SessionOperationLeaseError::Busy(_))
+    ));
+    // Activity is a shared lock; its exclusive mutation twin is the Busy probe.
+    assert!(matches!(
+        sessions::WorkspaceMutationLease::try_acquire(&path, workspace_identity),
+        Err(sessions::SessionOperationLeaseError::Busy(_))
+    ));
     let locked = owner.process.lock().await;
     let mut caller = Box::pin(registry.retry_run(&run));
     // The first poll dispatches the owned retry and reaches its JoinHandle.
@@ -41,6 +66,11 @@ async fn dropped_cleanup_caller_keeps_actual_owner_until_owned_task_finishes() {
         sessions::SessionOperationLease::try_acquire(&path, &session),
         Err(sessions::SessionOperationLeaseError::Busy(_))
     ));
+    assert!(weak_workspace.upgrade().is_some());
+    assert!(matches!(
+        sessions::WorkspaceMutationLease::try_acquire(&path, workspace_identity),
+        Err(sessions::SessionOperationLeaseError::Busy(_))
+    ));
     drop(locked);
     drop(owner);
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -50,6 +80,8 @@ async fn dropped_cleanup_caller_keeps_actual_owner_until_owned_task_finishes() {
     })
     .await
     .expect("owned cleanup task survives dropped caller");
+    assert!(weak_workspace.upgrade().is_none());
     sessions::SessionOperationLease::try_acquire(&path, &session).unwrap();
+    sessions::WorkspaceMutationLease::try_acquire(&path, workspace_identity).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
