@@ -53,6 +53,10 @@ It must not own HTTP/React delivery or managed-host product onboarding.
   ownership, including lost commit replies. Resume does not acquire that
   destructive ownership. Cancellation during an unsettled write can retain a
   provisional fork; restart reconciliation of that fork remains separate work.
+  Negative cleanup binds the original store's device/inode before backend
+  creation or session commit, not metadata sampled at cleanup. Durable Podman
+  creation records retain that identity for restart; missing, changed or legacy
+  unanchored identity preserves resources instead of adopting a replacement DB.
 - `src/session_service/AGENTS.md` — run admission through durable settlement.
 - `src/store/AGENTS.md` and `src/sessions/` — persisted domain and schema.
 - `src/permissions/AGENTS.md` — policy, binding, grants, approval broker.

@@ -18,6 +18,10 @@ recovery, cancellation, and settlement over these contracts.
   the same session transaction after persistence/SQLite waits and before commit.
   A failed check rolls back the inserted row. The callback is supplied by trusted
   runtime construction; it is not durable permission or restart authority.
+- Negative provisional cleanup retains original store file identity before
+  creation/commit and checks it inside the selected read-only ownership query
+  after waits. Missing/replaced stores are uncertainty, including replacement
+  before cleanup begins; they must not become a false "no session" observation.
 - Operation leases coordinate across processes and retain owner/generation
   identity. Recovery must be able to distinguish an active peer from a stale
   owner.

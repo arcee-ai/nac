@@ -927,6 +927,43 @@ exit 99
     assert!(!committed_cidfile.exists());
     assert!(!arguments.exists());
 
+    // Replacement before restart lookup cannot adopt the replacement's file
+    // identity as evidence that the original committed owner disappeared.
+    let retained =
+        create_creation_record(&committed_session, Some(&store_path), "owned-token").unwrap();
+    let retained_cidfile = retained.cidfile.clone();
+    std::fs::write(&retained_cidfile, format!("{container_id}\n")).unwrap();
+    drop(retained);
+    let original_store = root.join("original-committed.db");
+    let replacement = root.join("empty-replacement.db");
+    crate::store::initialize(&replacement).unwrap();
+    std::fs::rename(&store_path, &original_store).unwrap();
+    std::fs::rename(&replacement, &store_path).unwrap();
+    reconcile_creation_records(&store_path).await.unwrap();
+    assert!(retained_cidfile.exists());
+    assert!(!arguments.exists());
+    std::fs::remove_file(&store_path).unwrap();
+    std::fs::rename(&original_store, &store_path).unwrap();
+    reconcile_creation_records(&store_path).await.unwrap();
+    assert!(!retained_cidfile.exists());
+    assert!(!arguments.exists());
+
+    // Older records without an original-store identity retain uncertainty.
+    let legacy = create_creation_record(
+        &uuid::Uuid::new_v4().to_string(),
+        Some(&store_path),
+        "owned-token",
+    )
+    .unwrap();
+    let legacy_cidfile = legacy.cidfile.clone();
+    std::fs::write(&legacy_cidfile, format!("{container_id}\n")).unwrap();
+    std::fs::remove_file(creation_store_identity_path(&legacy_cidfile)).unwrap();
+    drop(legacy);
+    reconcile_creation_records(&store_path).await.unwrap();
+    assert!(legacy_cidfile.exists());
+    assert!(!arguments.exists());
+    remove_creation_record(&legacy_cidfile);
+
     unsafe {
         for (name, value) in originals {
             match value {

@@ -59,23 +59,56 @@ pub(crate) async fn load_last_session_async(path: PathBuf) -> Result<SessionSnap
 
 /// Negative cleanup must distinguish an absent session from an unavailable
 /// ownership store. This never reconstructs execution or restart authority.
-pub(crate) async fn has_durable_session_owner(path: &Path, session_id: &str) -> Result<bool> {
-    let metadata = std::fs::symlink_metadata(path)
-        .context("session ownership store is unavailable; provisional resources retained")?;
-    if !metadata.file_type().is_file() {
-        anyhow::bail!(
-            "session ownership store is not a regular file; provisional resources retained"
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SessionStoreIdentity {
+    device: u64,
+    inode: u64,
+}
+impl SessionStoreIdentity {
+    pub(crate) fn capture(path: &Path) -> Result<Self> {
+        let metadata = std::fs::symlink_metadata(path)
+            .context("session ownership store is unavailable; resources retained")?;
+        anyhow::ensure!(
+            metadata.file_type().is_file(),
+            "session ownership store is not a regular file"
         );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            Ok(Self {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+            })
+        }
+        #[cfg(not(unix))]
+        anyhow::bail!("stable session store file identity is unavailable; resources retained")
     }
+    pub(crate) fn verify(&self, path: &Path) -> Result<()> {
+        anyhow::ensure!(
+            *self == Self::capture(path)?,
+            "original session ownership store was replaced; resources retained"
+        );
+        Ok(())
+    }
+}
+
+pub(crate) async fn has_durable_session_owner(
+    path: &Path,
+    session_id: &str,
+    expected: &SessionStoreIdentity,
+) -> Result<bool> {
+    expected.verify(path)?;
     if let Some(owner) = crate::store::coordinator::owner_for(path)? {
         owner
-            .durable_session_owner_exists(session_id.to_string(), metadata)
+            .durable_session_owner_exists(session_id.to_string(), expected.clone())
             .await
     } else {
         let path = path.to_path_buf();
         let session_id = session_id.to_string();
+        let expected = expected.clone();
         crate::store::spawn_blocking_store_caller(move || {
-            db::durable_session_owner_exists(&path, &session_id, &metadata)
+            db::durable_session_owner_exists(&path, &session_id, &expected)
         })
         .await?
     }

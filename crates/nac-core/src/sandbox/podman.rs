@@ -318,7 +318,7 @@ struct CreationRecordAuthority {
     lock_file: File,
     /// Live creation remembers its exact selected store/session. Recovered
     /// records are separately checked against durable ownership by startup.
-    durable_binding: Option<(PathBuf, String)>,
+    durable_binding: Option<(PathBuf, String, crate::sessions::SessionStoreIdentity)>,
 }
 
 impl CreationRecordAuthority {
@@ -405,8 +405,8 @@ async fn destroy_created_container_record(record: CreationRecordAuthority) -> Re
 /// A lost session-commit reply cannot turn a durable backend into provisional
 /// rollback. Uncertain ownership checks preserve the record and fail closed.
 async fn settle_created_container(record: &CreationRecordAuthority) -> Result<bool> {
-    if let Some((path, session_id)) = &record.durable_binding {
-        if crate::sessions::has_durable_session_owner(path, session_id).await? {
+    if let Some((path, session_id, identity)) = &record.durable_binding {
+        if crate::sessions::has_durable_session_owner(path, session_id, identity).await? {
             return Ok(true);
         }
     }
@@ -502,6 +502,7 @@ fn remove_creation_record(cidfile: &Path) {
     let _ = std::fs::remove_file(creation_token_path(cidfile));
     let _ = std::fs::remove_file(creation_session_path(cidfile));
     let _ = std::fs::remove_file(creation_store_path(cidfile));
+    let _ = std::fs::remove_file(creation_store_identity_path(cidfile));
     let _ = std::fs::remove_file(creation_lock_path(cidfile));
     if let Some(directory) = cidfile.parent() {
         let _ = std::fs::remove_dir(directory);
@@ -518,6 +519,10 @@ fn creation_session_path(cidfile: &Path) -> PathBuf {
 
 fn creation_store_path(cidfile: &Path) -> PathBuf {
     cidfile.with_file_name("store.path")
+}
+
+fn creation_store_identity_path(cidfile: &Path) -> PathBuf {
+    cidfile.with_file_name("store.identity")
 }
 
 fn creation_lock_path(cidfile: &Path) -> PathBuf {
@@ -583,7 +588,12 @@ fn create_creation_record(
                 &creation_store_path(&cidfile),
                 &serde_json::to_vec(&canonical_store)?,
             )?;
-            Some((canonical_store, session_key.to_string()))
+            let identity = crate::sessions::SessionStoreIdentity::capture(&canonical_store)?;
+            write_private_record(
+                &creation_store_identity_path(&cidfile),
+                &serde_json::to_vec(&identity)?,
+            )?;
+            Some((canonical_store, session_key.to_string(), identity))
         } else {
             None
         };
@@ -681,7 +691,7 @@ pub(crate) async fn reconcile_creation_records(store_path: &Path) -> Result<()> 
                 continue;
             }
         }
-        let record = CreationRecordAuthority {
+        let mut record = CreationRecordAuthority {
             cidfile,
             lock_file,
             durable_binding: None,
@@ -714,19 +724,23 @@ pub(crate) async fn reconcile_creation_records(store_path: &Path) -> Result<()> 
             );
             continue;
         }
-        match crate::sessions::session_exists(store_path, &session_key) {
-            Ok(true) => record.remove(),
-            Ok(false) => {
-                if let Err(error) = destroy_created_container_record(record).await {
-                    eprintln!(
-                        "nac: failed to reconcile abandoned Podman creation: {error:#}"
-                    );
-                }
+        let identity = match std::fs::read(creation_store_identity_path(&record.cidfile))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        {
+            Some(identity) => identity,
+            None => {
+                // Legacy/uncertain records have no proof of original store
+                // identity. Never adopt the currently selected replacement.
+                eprintln!("nac: Podman creation record has no original store identity; resources retained");
+                continue;
             }
-            Err(error) => eprintln!(
-                "nac: failed to check durable ownership for Podman creation record '{}': {error:#}; cleanup authority was preserved",
-                record.cidfile.display()
-            ),
+        };
+        record.durable_binding = Some((recorded_store, session_key, identity));
+        if let Err(error) = destroy_created_container_record(record).await {
+            eprintln!(
+                "nac: failed to reconcile abandoned Podman creation: {error:#}; resources retained"
+            );
         }
     }
     Ok(())

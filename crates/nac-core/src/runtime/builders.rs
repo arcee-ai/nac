@@ -398,7 +398,7 @@ async fn build_run_config_inner(
         session_snapshot.project_id = project_id;
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.light_model = light_model;
-        worktree_rollback.preserve_pending_commit();
+        worktree_rollback.preserve_pending_commit(&store_path)?;
         super::construction_admission::create_session(construction, &store_path, &session_snapshot)
             .await?;
         if let Some(sandbox) = sandbox.as_ref() {

@@ -112,6 +112,7 @@ pub(crate) async fn launch_session(
 pub(crate) struct RollbackGuard {
     worktree: Option<SandboxWorktree>,
     commit_pending: bool,
+    pending_store_identity: Option<crate::sessions::SessionStoreIdentity>,
 }
 
 impl RollbackGuard {
@@ -119,6 +120,7 @@ impl RollbackGuard {
         Self {
             worktree,
             commit_pending: false,
+            pending_store_identity: None,
         }
     }
 
@@ -128,8 +130,13 @@ impl RollbackGuard {
 
     /// Once a session write is submitted, dropped delivery is not evidence that
     /// this fork is unowned. Preserve it until the selected store settles that.
-    pub(crate) fn preserve_pending_commit(&mut self) {
+    pub(crate) fn preserve_pending_commit(&mut self, path: &Path) -> Result<()> {
         self.commit_pending = true;
+        if self.worktree.is_some() {
+            self.pending_store_identity =
+                Some(crate::sessions::SessionStoreIdentity::capture(path)?);
+        }
+        Ok(())
     }
 
     pub(crate) async fn settle_failed_commit(
@@ -137,9 +144,12 @@ impl RollbackGuard {
         path: &Path,
         session_id: &str,
     ) -> Result<()> {
-        if self.commit_pending {
+        if self.commit_pending && self.worktree.is_some() {
+            let identity = self.pending_store_identity.as_ref().context(
+                "original worktree ownership store identity is unavailable; resources retained",
+            )?;
             self.commit_pending =
-                crate::sessions::has_durable_session_owner(path, session_id).await?;
+                crate::sessions::has_durable_session_owner(path, session_id, identity).await?;
         }
         Ok(())
     }

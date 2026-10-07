@@ -499,6 +499,15 @@ async fn runtime_construction_backend_committed_and_resumed_attachments_preserve
 
 #[tokio::test]
 async fn runtime_construction_backend_lost_session_commit_reply_preserves_durable_owner() {
+    lost_session_commit_reply(false).await;
+}
+
+#[tokio::test]
+async fn runtime_construction_backend_store_replaced_before_cleanup_retains_original_owner() {
+    lost_session_commit_reply(true).await;
+}
+
+async fn lost_session_commit_reply(replace_before_cleanup: bool) {
     use crate::store::coordinator::PersistenceCommand;
     struct GatedCreation {
         snapshot: crate::sessions::SessionSnapshot,
@@ -569,7 +578,7 @@ async fn runtime_construction_backend_lost_session_commit_reply_preserves_durabl
     });
     let mut rollback =
         crate::sandbox::session_worktree::RollbackGuard::new(Some(fork.worktree.clone()));
-    rollback.preserve_pending_commit();
+    rollback.preserve_pending_commit(&fixture.path).unwrap();
     let (committed_tx, committed_rx) = std::sync::mpsc::sync_channel(1);
     let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
     let pending = fixture
@@ -586,10 +595,50 @@ async fn runtime_construction_backend_lost_session_commit_reply_preserves_durabl
     // Drop the real acknowledgement only after the actual transaction commits.
     drop(pending);
     release_tx.send(()).unwrap();
-    rollback
-        .settle_failed_commit(&fixture.path, &session_id)
+    // Observe the original committed row before replacing this exact fixture's
+    // database with a separately initialized valid store. No queued capture of
+    // replacement metadata may convert retained original ownership to absence.
+    fixture
+        .store
+        .load_session(session_id.clone())
         .await
         .unwrap();
+    session.disable_drop_cleanup();
+    let original_store = fixture.path.with_extension("original-committed");
+    if replace_before_cleanup {
+        let replacement = fixture.path.with_extension("empty-replacement");
+        crate::store::initialize(&replacement).unwrap();
+        std::fs::rename(&fixture.path, &original_store).unwrap();
+        std::fs::rename(replacement, &fixture.path).unwrap();
+        let connection = rusqlite::Connection::open(&fixture.path).unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM sessions", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+    let settlement = rollback
+        .settle_failed_commit(&fixture.path, &session_id)
+        .await;
+    if replace_before_cleanup {
+        assert!(
+            settlement.is_err(),
+            "replacement is uncertainty, not proof that the original committed owner disappeared"
+        );
+        assert!(session.destroy().await.is_err());
+        assert!(cidfile.exists());
+        assert!(!backend.root.join("removed-arguments").exists());
+        std::fs::remove_file(&fixture.path).unwrap();
+        std::fs::rename(&original_store, &fixture.path).unwrap();
+        rollback
+            .settle_failed_commit(&fixture.path, &session_id)
+            .await
+            .unwrap();
+    } else {
+        settlement.unwrap();
+    }
     drop(rollback);
     assert_eq!(
         std::fs::read_to_string(fork.worktree.path.join("retained-in-fork.txt")).unwrap(),
