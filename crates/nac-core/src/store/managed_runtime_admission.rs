@@ -2,8 +2,9 @@
 //!
 //! This journal authenticates nobody and supplies no lease or dispatch authority.
 //! The receiver checks current authority before recording, commits uncertainty
-//! before any native effect, and dispatches only on `NewlyRecorded`. Every retry,
-//! including after a lost commit/HTTP response or restart, is observational.
+//! before any native effect. `NewlyRecorded` reports a committed barrier, not an
+//! execution capability. Every retry, including after a lost response or restart,
+//! is observational; managed lease transitions are owned by the sibling journal.
 
 use super::*;
 use rusqlite::TransactionBehavior;
@@ -42,6 +43,7 @@ pub enum ManagedRuntimeJournalError {
     BindingConflict,
     ObservationConflict,
     MissingOperation,
+    LeaseDenied,
     Store(anyhow::Error),
 }
 
@@ -51,6 +53,7 @@ impl std::fmt::Display for ManagedRuntimeJournalError {
             Self::BindingConflict => "runtime operation canonical input conflicts",
             Self::ObservationConflict => "runtime operation acknowledgment conflicts",
             Self::MissingOperation => "runtime operation has no retained admission",
+            Self::LeaseDenied => "runtime operation lease is unavailable",
             Self::Store(_) => "runtime operation persistence failed",
         })
     }
@@ -220,7 +223,7 @@ correlation |_command| crate::telemetry::Correlation::default();
 port public;
 }
 
-fn read_with_connection(
+pub(super) fn read_with_connection(
     connection: &Connection,
     identity: &ManagedRuntimeOperationIdentity,
 ) -> std::result::Result<Option<ManagedRuntimeOperationSnapshot>, ManagedRuntimeJournalError> {
@@ -267,7 +270,7 @@ fn read_with_connection(
     }))
 }
 
-fn digest_hex(digest: &[u8; 32]) -> String {
+pub(super) fn digest_hex(digest: &[u8; 32]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

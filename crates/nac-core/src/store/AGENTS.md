@@ -46,6 +46,13 @@ workspace revisions, recovery markers, and cross-process coordination.
   and retained native session/run acknowledgments. It supplies no authentication,
   lease, transport wire or dispatch permission. Every duplicate is observational;
   lost responses and session deletion never reopen a consumed operation.
+- `managed_runtime_leases.rs` — native sealed reservation/challenge capabilities,
+  atomic one-use lease advancement, original deadline and serving-lifetime binding,
+  terminal expiry/rollback, and retained lease identity. Authentication/current
+  product assignment and live native-run evidence remain application obligations;
+  a retained row cannot recreate an execution capability. This state does not
+  revoke the host key or choose an execution backend. `managed_runtime_lease_schema.rs`
+  owns the additive table and monotonic history constraints.
 
 `schema.rs` is intentionally above 800 lines because it is the ordered,
 transactional migration ledger for every supported database revision; splitting

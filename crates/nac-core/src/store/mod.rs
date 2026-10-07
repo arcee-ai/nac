@@ -13,6 +13,8 @@ pub(crate) mod coordinated_commands;
 mod managed_maintenance;
 mod managed_orchestrators;
 mod managed_runtime_admission;
+mod managed_runtime_lease_schema;
+mod managed_runtime_leases;
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
 mod permission_grants;
@@ -48,6 +50,13 @@ pub use managed_runtime_admission::{
     acknowledge_managed_runtime_operation, read_managed_runtime_operation,
     record_managed_runtime_operation, ManagedRuntimeJournalError, ManagedRuntimeObservation,
     ManagedRuntimeOperationIdentity, ManagedRuntimeOperationSnapshot, ManagedRuntimeRecordOutcome,
+};
+pub use managed_runtime_leases::{
+    challenge_managed_runtime_initial, challenge_managed_runtime_renewal,
+    check_managed_runtime_lease, consume_managed_runtime_challenge, reserve_managed_runtime_lease,
+    terminate_managed_runtime_lease, ActiveRuntimeLease, FreshRuntimeReservation,
+    PendingRuntimeChallenge, RuntimeChallengeSpec, RuntimeLeaseBinding, RuntimeLeaseClock,
+    RuntimeLeaseReservationOutcome, RuntimeLeaseResponse, RuntimeLeaseSnapshot,
 };
 pub use model_configurations::*;
 pub use permission_grants::*;

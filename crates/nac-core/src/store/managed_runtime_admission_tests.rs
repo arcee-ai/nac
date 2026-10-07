@@ -229,7 +229,7 @@ fn v32_forward_migration_preserves_existing_sessions_and_adds_empty_journal() {
         connection
             .pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
             .unwrap(),
-        33
+        schema::schema_version()
     );
     assert_eq!(
         connection

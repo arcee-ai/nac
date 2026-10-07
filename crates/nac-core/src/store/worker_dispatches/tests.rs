@@ -444,6 +444,6 @@ fn schema_31_upgrade_preserves_existing_worker_receipt() {
         )
         .unwrap();
     assert_eq!(history, None);
-    assert_eq!(schema_version(), 33);
+    assert_eq!(schema_version(), 34);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
