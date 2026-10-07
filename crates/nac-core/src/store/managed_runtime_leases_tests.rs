@@ -1,6 +1,9 @@
 use super::*;
 use std::sync::{Arc, Barrier};
 
+#[path = "managed_runtime_pending_tests.rs"]
+mod pending_tests;
+
 struct Fixture {
     path: PathBuf,
     binding: RuntimeLeaseBinding,

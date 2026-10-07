@@ -68,6 +68,11 @@ workspace revisions, recovery markers, and cross-process coordination.
   a retained row cannot recreate an execution capability. This state does not
   revoke the host key or choose an execution backend. `managed_runtime_lease_schema.rs`
   owns the additive table and monotonic history constraints.
+  Initial Pending observations borrow the actual delivered noncloneable capability
+  and compare its exact outstanding row after queue/transaction waits. Their
+  private queue view is not a consumable capability; availability supplies no
+  assignment provenance, transport authentication, consume, renewal or dispatch.
+  Existing original/challenge deadlines and rollback watermarks never reset.
 
 `schema.rs` is intentionally above 800 lines because it is the ordered,
 transactional migration ledger for every supported database revision; splitting

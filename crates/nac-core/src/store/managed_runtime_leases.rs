@@ -114,6 +114,43 @@ pub struct PendingRuntimeChallenge {
     monotonic_deadline: Instant,
 }
 
+// A private queue observation, not a copy of the consumable Pending type.
+// Only borrowing the actual delivered capability constructs this view.
+struct InitialPendingCheck {
+    binding: RuntimeLeaseBinding,
+    reservation_id: Uuid,
+    challenge: RuntimeChallengeSpec,
+    issued_ms: i64,
+    original_deadline: Instant,
+    challenge_deadline: Instant,
+    initial: bool,
+}
+
+impl From<&PendingRuntimeChallenge> for InitialPendingCheck {
+    fn from(pending: &PendingRuntimeChallenge) -> Self {
+        Self {
+            binding: pending.binding.clone(),
+            reservation_id: pending.reservation_id,
+            challenge: pending.challenge.clone(),
+            issued_ms: pending.issued_ms,
+            original_deadline: pending.original_admission_deadline,
+            challenge_deadline: pending.monotonic_deadline,
+            initial: pending.prior.is_none(),
+        }
+    }
+}
+
+impl InitialPendingCheck {
+    fn available_at(&self, clock: RuntimeLeaseClock, last_wall_ms: i64) -> bool {
+        self.initial
+            && clock.wall_ms >= self.issued_ms.max(last_wall_ms)
+            && clock.wall_ms < self.binding.original_expires_ms
+            && clock.wall_ms < self.challenge.expires_ms
+            && clock.monotonic < self.original_deadline
+            && clock.monotonic < self.challenge_deadline
+    }
+}
+
 /// Cannot be constructed, deserialized or cloned from observational state.
 /// Later execution hooks must check this capability before each effect and
 /// cancel retained/background command trees when checking returns false.
@@ -264,6 +301,99 @@ command ChallengeManagedRuntimeInitialCommand {
 call |command| (command.fresh, &command.challenge, command.clock)
 correlation |_command| crate::telemetry::Correlation::default();
 port public;
+}
+
+/// Observe the SAME delivered initial Pending, without consuming or renewing it.
+/// This supplies neither policy/current assignment nor transport/dispatch authority.
+/// Native clocks are sampled after transaction waits; original ceilings never move.
+pub fn check_managed_runtime_initial_pending(
+    path: &Path,
+    pending: &PendingRuntimeChallenge,
+    clock: RuntimeLeaseClock,
+) -> LeaseResult<bool> {
+    let checked =
+        check_runtime_initial_pending_view(path, InitialPendingCheck::from(pending), clock)?;
+    let Some(checked) = checked else {
+        return Ok(false);
+    };
+    if pending_observation_available(pending, checked) {
+        return Ok(true);
+    }
+    stop_runtime_initial_pending_view(path, InitialPendingCheck::from(pending))?;
+    Ok(false)
+}
+
+coordinated_command! {
+fn check_runtime_initial_pending_view(path: &Path, pending: InitialPendingCheck, clock: RuntimeLeaseClock)
+    -> LeaseResult<Option<RuntimeLeaseClock>> {
+    if !pending.initial { return Ok(None); }
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let row = read_row(&transaction, &pending.binding)?;
+    let observed = read_with_connection(&transaction, &pending.binding.identity)?
+        .ok_or(ManagedRuntimeJournalError::MissingOperation)?;
+    if row.phase != "challenged" || row.reservation_id != pending.reservation_id {
+        return Ok(None);
+    }
+    if row.lease.is_some() || observed.observation.is_some()
+        || row.channel_id.as_deref() != Some(pending.challenge.channel_id.to_string().as_str())
+        || row.challenge_sha256.as_deref() != Some(digest_hex(&pending.challenge.challenge_sha256).as_str())
+        || row.challenge_expires_ms != Some(pending.challenge.expires_ms) {
+        terminal(&transaction, &pending.binding)?;
+        transaction.commit()?;
+        return Ok(None);
+    }
+    let (transaction, clock) = live_clock_or_terminal(transaction, &pending.binding, clock)?;
+    if !pending.available_at(clock, row.last_wall_ms) {
+        terminal(&transaction, &pending.binding)?;
+        transaction.commit()?;
+        return Ok(None);
+    }
+    // Existing rollback watermark advances; challenge/lease/phase do not.
+    transaction.execute("UPDATE managed_runtime_leases SET last_wall_ms = ?2 WHERE operation_id = ?1",
+        params![pending.binding.identity.operation_id.to_string(), clock.wall_ms])?;
+    transaction.commit()?;
+    if clock.at_execution().is_ok_and(|current| pending.available_at(current, clock.wall_ms)) {
+        return Ok(Some(clock));
+    }
+    // Delayed commit delivery cannot revive the observed initial owner. A
+    // concurrent consume belongs to the active lease and must not be revoked
+    // by this old observation, so terminalize only the same pending row.
+    stop_runtime_initial_pending_view(path, pending)?;
+    Ok(None)
+}
+command CheckManagedRuntimeInitialPendingCommand {
+    pending: InitialPendingCheck = pending, clock: RuntimeLeaseClock = clock,
+}
+call |command| (command.pending, command.clock)
+correlation |_command| crate::telemetry::Correlation::default();
+port internal;
+}
+
+fn pending_observation_available(
+    pending: &PendingRuntimeChallenge,
+    checked: RuntimeLeaseClock,
+) -> bool {
+    checked.at_execution().is_ok_and(|received| {
+        InitialPendingCheck::from(pending).available_at(received, checked.wall_ms)
+    })
+}
+
+coordinated_command! {
+fn stop_runtime_initial_pending_view(path: &Path, pending: InitialPendingCheck) -> LeaseResult<()> {
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current = read_row(&transaction, &pending.binding)?;
+    if current.phase == "challenged" && current.reservation_id == pending.reservation_id {
+        terminal(&transaction, &pending.binding)?;
+    }
+    transaction.commit()?;
+    Ok(())
+}
+command StopRuntimeInitialPendingCommand { pending: InitialPendingCheck = pending, }
+call |command| (command.pending)
+correlation |_command| crate::telemetry::Correlation::default();
+port internal;
 }
 
 coordinated_command! {
@@ -446,6 +576,34 @@ impl From<&ActiveRuntimeLease> for ActiveRuntimeLeaseCheck {
     }
 }
 impl StoreCoordinator {
+    /// Borrowing observation only. The queued view cannot be consumed as Pending,
+    /// and the original capability remains borrowed through delivery/cancellation.
+    pub async fn check_managed_runtime_initial_pending(
+        &self,
+        pending: &PendingRuntimeChallenge,
+        clock: RuntimeLeaseClock,
+    ) -> LeaseResult<bool> {
+        let valid = self
+            .submit(CheckManagedRuntimeInitialPendingCommand {
+                pending: InitialPendingCheck::from(pending),
+                clock,
+            })?
+            .acknowledge()
+            .await??;
+        let Some(checked) = valid else {
+            return Ok(false);
+        };
+        if pending_observation_available(pending, checked) {
+            return Ok(true);
+        }
+        self.submit(StopRuntimeInitialPendingCommand {
+            pending: InitialPendingCheck::from(pending),
+        })?
+        .acknowledge()
+        .await??;
+        Ok(false)
+    }
+
     pub(crate) async fn challenge_runtime_lease_view(
         &self,
         active: ActiveRuntimeLeaseCheck,

@@ -62,7 +62,8 @@ pub use managed_runtime_admission::{
 pub(crate) use managed_runtime_leases::ActiveRuntimeLeaseCheck;
 pub use managed_runtime_leases::{
     challenge_managed_runtime_initial, challenge_managed_runtime_renewal,
-    check_managed_runtime_lease, consume_managed_runtime_challenge, reserve_managed_runtime_lease,
+    check_managed_runtime_initial_pending, check_managed_runtime_lease,
+    consume_managed_runtime_challenge, reserve_managed_runtime_lease,
     terminate_managed_runtime_lease, ActiveRuntimeLease, FreshRuntimeReservation,
     PendingRuntimeChallenge, RuntimeChallengeSpec, RuntimeLeaseBinding, RuntimeLeaseClock,
     RuntimeLeaseReservationOutcome, RuntimeLeaseResponse, RuntimeLeaseSnapshot,
