@@ -1002,7 +1002,7 @@ impl ModelClient {
             }
             #[cfg(all(test, unix))]
             let request = if let Some(sender) = &self.sender_prototype {
-                request.header("X-Nac-Fixture-Grant", &sender.capability)
+                request.header("X-Nac-Fixture-Grant", &sender.connection.capability)
             } else {
                 apply_headers(request)
             };

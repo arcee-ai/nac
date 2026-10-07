@@ -305,6 +305,9 @@ impl ManagedHostExecutionAuthority {
 
     /// Trusted composition only. This constructor is not enrollment or proof;
     /// its observer must meet the full independently authenticated contract.
+    /// Construct once per independently admitted serving lifetime and share
+    /// clones across clients/tools/workers. Reconstructing under an old grant
+    /// cannot reopen a denied lifetime; fresh admission is separately required.
     pub fn from_sender_observer(
         binding: ManagedHostKeyBinding,
         observer: std::sync::Arc<dyn ManagedHostExecutionObserver>,

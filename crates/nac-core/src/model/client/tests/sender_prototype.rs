@@ -21,6 +21,11 @@ struct FixtureProof {
 
 #[derive(Clone)]
 pub(in crate::model::client) struct EnrolledSender {
+    pub(in crate::model::client) connection: Arc<SenderConnection>,
+    authority: ManagedHostExecutionAuthority,
+}
+
+pub(in crate::model::client) struct SenderConnection {
     socket: PathBuf,
     pub(in crate::model::client) capability: String,
     identity: FixtureProof,
@@ -29,7 +34,7 @@ pub(in crate::model::client) struct EnrolledSender {
 impl std::fmt::Debug for EnrolledSender {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FixtureEnrolledSender")
-            .field("binding", &self.identity.binding)
+            .field("binding", &self.connection.identity.binding)
             .finish_non_exhaustive()
     }
 }
@@ -43,7 +48,7 @@ struct Observation {
     revision: [u8; 32],
 }
 
-impl ManagedHostExecutionObserver for EnrolledSender {
+impl ManagedHostExecutionObserver for SenderConnection {
     fn observe(&self, expected: &ManagedHostKeyBinding) -> Result<[u8; 32]> {
         let response = exchange(&self.socket, "GET", "/status", &self.capability, b"")?;
         anyhow::ensure!(response.status == 200, "sender unavailable");
@@ -70,36 +75,39 @@ impl EnrolledSender {
         anyhow::ensure!(response.status == 200, "fixture enrollment denied");
         let capability: String = serde_json::from_slice(&response.body)?;
         anyhow::ensure!(uuid::Uuid::parse_str(&capability).is_ok(), "invalid grant");
-        Ok(Self {
+        let binding = proof.binding.clone();
+        let connection = Arc::new(SenderConnection {
             socket: socket.to_owned(),
             capability,
             identity: proof,
+        });
+        let authority =
+            ManagedHostExecutionAuthority::from_sender_observer(binding, connection.clone())?;
+        Ok(Self {
+            connection,
+            authority,
         })
     }
 
     fn native_client(&self) -> ModelClient {
         let mut client = test_model_client(
             BackendKind::ArceeApi,
-            self.identity.binding.inference_origin.clone(),
+            self.connection.identity.binding.inference_origin.clone(),
             Default::default(),
         );
         client.model = "trinity-large-thinking".into();
         client.resolved_model = catalog::resolve(client.backend, &client.model);
         client.api_key.clear();
         client.client = Client::builder()
-            .unix_socket(self.socket.as_path())
+            .unix_socket(self.connection.socket.as_path())
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(10))
             .build()
             .unwrap();
-        client.host_execution_authority = Some(
-            ManagedHostExecutionAuthority::from_sender_observer(
-                self.identity.binding.clone(),
-                Arc::new(self.clone()),
-            )
-            .unwrap(),
-        );
+        // One guard per enrolled native serving lifetime, shared across every
+        // reconstructed client. A fresh client cannot reopen a denied grant.
+        client.host_execution_authority = Some(self.authority.clone());
         client.sender_prototype = Some(self.clone());
         client
     }
@@ -254,9 +262,9 @@ async fn sender_prototype_fixture_client() {
     assert!(client.api_key.is_empty());
     assert!(client.trusted_managed_host_key.is_none());
     assert!(client.trusted_api_key_file.is_none());
-    assert!(!format!("{client:?}").contains(&grant.capability));
+    assert!(!format!("{client:?}").contains(&grant.connection.capability));
     let args = crate::tools::thread::worker_model_arguments_for_test(&client);
-    assert!(!args.join(" ").contains(&grant.capability));
+    assert!(!args.join(" ").contains(&grant.connection.capability));
     assert!(!args.join(" ").contains("authority"));
     assert!(native_send(&client, "buffered", false).await.is_ok());
     assert!(native_send(&client, "streamed", true).await.is_ok());
@@ -271,7 +279,9 @@ async fn sender_prototype_fixture_client() {
             .await
             .unwrap_err()
             .to_string();
-        assert!(!error.contains("nac-fixture-key-") && !error.contains(&grant.capability));
+        assert!(
+            !error.contains("nac-fixture-key-") && !error.contains(&grant.connection.capability)
+        );
     }
     assert_eq!(
         std::fs::read_to_string(root.join("public/provider-count")).unwrap(),
@@ -308,7 +318,7 @@ async fn sender_prototype_fixture_client() {
     wait_stage(&root, "restore");
     // Synthetic restoration makes the sender slot available, never this guard.
     assert_eq!(
-        exchange(&socket, "GET", "/status", &grant.capability, b"")
+        exchange(&socket, "GET", "/status", &grant.connection.capability, b"")
             .unwrap()
             .status,
         200
@@ -319,10 +329,20 @@ async fn sender_prototype_fixture_client() {
         .unwrap()
         .check_available()
         .is_err());
+    let reconstructed = grant.clone().native_client();
+    assert_eq!(
+        client.host_execution_authority,
+        reconstructed.host_execution_authority
+    );
+    assert!(
+        native_send(&reconstructed, "same-grant-reconstruction", false)
+            .await
+            .is_err()
+    );
     stage(&root, "restart-repair");
     wait_stage(&root, "restart-repair");
     assert_eq!(
-        exchange(&socket, "GET", "/status", &grant.capability, b"")
+        exchange(&socket, "GET", "/status", &grant.connection.capability, b"")
             .unwrap()
             .status,
         403

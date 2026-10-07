@@ -11,7 +11,8 @@ The production source addition is an inward read-only
 `ManagedHostExecutionObserver` port. Trusted composition can provide a separately
 authenticated nonsecret observation for an exact binding. Its unconfigured
 implementation denies. `ManagedHostExecutionAuthority` retains its shared sticky
-denial and observation-revision semantics, including across clones. This
+denial and observation-revision semantics, including across clones and client
+reconstruction under the same enrolled grant. This
 constructor is not authentication, enrollment or proof.
 
 ## Fixture and evidence boundary
