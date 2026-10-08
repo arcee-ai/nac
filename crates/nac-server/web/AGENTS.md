@@ -91,7 +91,12 @@ make test-e2e
   `packages/nac-client/src/`. The generator fails on unsupported schema
   constructs; extend it explicitly rather than widening to `any`.
 - `npm ... run build` writes `../assets/dist` and
-  `packages/nac-client/dist`. Commit source and both outputs together.
+  `packages/nac-client/dist` and `packages/nac-presentation/dist`. Commit
+  source and all outputs together. `vite.presentation.config.ts` reuses the
+  native entry and build pipeline; `scripts/presentation-css.ts` scopes the
+  generated stylesheet, and `scripts/presentation-types.mjs` removes source
+  aliases from emitted declarations. Keep React peers external and CSS/assets
+  opt-in; do not create a second UI or transport implementation.
   Do not edit hashed assets by hand.
 - `scripts/sync-file-icons.mjs` is the writer for synchronized icon assets when
   that source set changes.

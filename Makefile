@@ -127,9 +127,9 @@ test-assets: test-api-contract
 	npm --prefix $(WEB_DIR) run lint
 	npm --prefix $(WEB_DIR) run typecheck
 	npm --prefix $(WEB_DIR) run build
-	@if [ -n "$$(git status --porcelain -- crates/$(PKG)/assets/dist $(WEB_DIR)/packages/nac-client/dist)" ]; then \
+	@if [ -n "$$(git status --porcelain -- crates/$(PKG)/assets/dist $(WEB_DIR)/packages/nac-client/dist $(WEB_DIR)/packages/nac-presentation/dist)" ]; then \
 		printf '%s\n' "error: committed web/client build output is stale; rebuild and commit it"; \
-		git status --porcelain -- crates/$(PKG)/assets/dist $(WEB_DIR)/packages/nac-client/dist; \
+		git status --porcelain -- crates/$(PKG)/assets/dist $(WEB_DIR)/packages/nac-client/dist $(WEB_DIR)/packages/nac-presentation/dist; \
 		exit 1; \
 	fi
 

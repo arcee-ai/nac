@@ -2,7 +2,7 @@ import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import App from "../../App";
 import { PresentationBoundary } from "../providers/PresentationBoundary";
-import { ThemeProvider } from "../providers/ThemeProvider";
+import { ThemeProvider, useTheme } from "../providers/ThemeProvider";
 import { RuntimeContext } from "./RuntimeContext";
 import type { NativeRuntime } from "./nativeRuntime";
 
@@ -34,22 +34,45 @@ function RuntimePresentation({
   useEffect(() => runtime.retain(), [runtime]);
   const closed = useSyncExternalStore(runtime.subscribe, runtime.isClosed, runtime.isClosed);
   if (closed) return null;
-  const presentation = router(<App />);
+  const view = (
+    <ThemedPresentation
+      runtime={runtime}
+      className={className}
+      styles={styles}
+      globalKeyboard={globalKeyboard}
+    >
+      {router(<App />)}
+    </ThemedPresentation>
+  );
+  return (
+    <RuntimeContext.Provider value={runtime}>
+      <QueryClientProvider client={runtime.queryClient}>
+        {theme ? theme(view) : <ThemeProvider local>{view}</ThemeProvider>}
+      </QueryClientProvider>
+    </RuntimeContext.Provider>
+  );
+}
+
+/** Theme classes belong to the same local boundary as content and overlays. */
+function ThemedPresentation({
+  runtime,
+  className,
+  styles,
+  globalKeyboard,
+  children,
+}: Pick<NativePresentationRootProps, "runtime" | "className" | "styles" | "globalKeyboard"> & {
+  children: ReactNode;
+}) {
+  const { resolved } = useTheme();
   return (
     <div
-      className={className ?? "nac-presentation h-full min-h-0"}
+      className={`${className ?? "nac-presentation h-full min-h-0"} ${resolved}`}
       style={{ contain: "layout paint" }}
       data-nac-runtime={runtime.id}
-      data-theme="dark"
+      data-theme={resolved}
     >
       {styles}
-      <PresentationBoundary globalKeyboard={globalKeyboard}>
-        <RuntimeContext.Provider value={runtime}>
-          <QueryClientProvider client={runtime.queryClient}>
-            {theme ? theme(presentation) : <ThemeProvider local>{presentation}</ThemeProvider>}
-          </QueryClientProvider>
-        </RuntimeContext.Provider>
-      </PresentationBoundary>
+      <PresentationBoundary globalKeyboard={globalKeyboard}>{children}</PresentationBoundary>
     </div>
   );
 }

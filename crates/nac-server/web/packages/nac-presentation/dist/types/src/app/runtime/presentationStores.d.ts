@@ -1,0 +1,42 @@
+import * as panelWidth from "../hooks/usePanelListWidth";
+import * as threadLogHeight from "../hooks/useThreadLogHeight";
+import * as lastLight from "../lib/lastLight";
+import * as attentionStore from "../store/attentionStore";
+import * as chatTabsStore from "../store/chatTabsStore";
+import * as composerStore from "../store/composerStore";
+import * as runtimeStore from "../store/runtimeStore";
+import * as sessionFiltersStore from "../store/sessionFiltersStore";
+import * as sessionLayoutStore from "../store/sessionLayoutStore";
+import * as sessionNavigationStore from "../store/sessionNavigationStore";
+import * as sidebarLayoutStore from "../store/sidebarLayoutStore";
+import * as sshConnectionStore from "../store/sshConnectionStore";
+export interface PresentationStores {
+    panelWidth: ReturnType<typeof panelWidth.createPanelWidth>;
+    threadLogHeight: ReturnType<typeof threadLogHeight.createThreadLogHeight>;
+    lastLight: ReturnType<typeof lastLight.createLastLight>;
+    attentionStore: ReturnType<typeof attentionStore.createAttentionStore>;
+    chatTabsStore: ReturnType<typeof chatTabsStore.createChatTabsStore>;
+    composerStore: ReturnType<typeof composerStore.createComposerStore>;
+    runtimeStore: ReturnType<typeof runtimeStore.createRuntimeStore>;
+    sessionFiltersStore: ReturnType<typeof sessionFiltersStore.createSessionFiltersStore>;
+    sessionLayoutStore: ReturnType<typeof sessionLayoutStore.createSessionLayoutStore>;
+    sessionNavigationStore: ReturnType<typeof sessionNavigationStore.createSessionNavigationStore>;
+    sidebarLayoutStore: ReturnType<typeof sidebarLayoutStore.createSidebarLayoutStore>;
+    sshConnectionStore: ReturnType<typeof sshConnectionStore.createSshConnectionStore>;
+}
+export declare function createPresentationStores(storage?: Pick<Storage, "getItem" | "setItem">): PresentationStores;
+export declare const standalonePresentationStores: {
+    panelWidth: typeof panelWidth;
+    threadLogHeight: typeof threadLogHeight;
+    lastLight: typeof lastLight;
+    attentionStore: typeof attentionStore;
+    chatTabsStore: typeof chatTabsStore;
+    composerStore: typeof composerStore;
+    runtimeStore: typeof runtimeStore;
+    sessionFiltersStore: typeof sessionFiltersStore;
+    sessionLayoutStore: typeof sessionLayoutStore;
+    sessionNavigationStore: typeof sessionNavigationStore;
+    sidebarLayoutStore: typeof sidebarLayoutStore;
+    sshConnectionStore: typeof sshConnectionStore;
+};
+export declare function releasePresentationStores(stores: PresentationStores): void;

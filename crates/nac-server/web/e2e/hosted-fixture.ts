@@ -8,26 +8,34 @@ import type { EmbeddedHarness } from "./harness";
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Local mediated proxy; intentionally has no product identity/admission implementation. */
-export async function startHostedFixture(harness: EmbeddedHarness, sessionId: string) {
+export async function startHostedFixture(
+  harness: EmbeddedHarness,
+  sessionId: string,
+  options: { build?: (output: string) => Promise<void> } = {},
+) {
   const output = path.join(harness.runRoot, "hosted-dist");
-  await new Promise<void>((resolve, reject) => {
-    const build = spawn(
-      path.join(web, "node_modules/.bin/vite"),
-      ["build", "--config", "e2e/hosted-vite.config.ts"],
-      {
-        cwd: web,
-        env: { ...process.env, NAC_HOSTED_FIXTURE_OUTPUT: output },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    const logs: string[] = [];
-    build.stdout.on("data", (data) => logs.push(String(data)));
-    build.stderr.on("data", (data) => logs.push(String(data)));
-    build.once("error", reject);
-    build.once("exit", (code) => (code === 0 ? resolve() : reject(new Error(logs.join("")))));
-  });
+  if (options.build) await options.build(output);
+  else
+    await new Promise<void>((resolve, reject) => {
+      const build = spawn(
+        path.join(web, "node_modules/.bin/vite"),
+        ["build", "--config", "e2e/hosted-vite.config.ts"],
+        {
+          cwd: web,
+          env: { ...process.env, NAC_HOSTED_FIXTURE_OUTPUT: output },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const logs: string[] = [];
+      build.stdout.on("data", (data) => logs.push(String(data)));
+      build.stderr.on("data", (data) => logs.push(String(data)));
+      build.once("error", reject);
+      build.once("exit", (code) => (code === 0 ? resolve() : reject(new Error(logs.join("")))));
+    });
   const calls: { method: string; path: string }[] = [];
   const upstream = new Set<http.ClientRequest>();
+  const loseResponses = new Set<string>();
+  const lostResponses: { method: string; path: string; status: number }[] = [];
   const server = http.createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://fixture.invalid");
     if (url.pathname === "/fixture-config") {
@@ -58,6 +66,25 @@ export async function startHostedFixture(harness: EmbeddedHarness, sessionId: st
           headers: { ...request.headers, host: new URL(harness.baseUrl).host },
         },
         (result) => {
+          const key = `${request.method ?? "GET"} ${resource}`;
+          if (loseResponses.delete(key)) {
+            result.resume();
+            result.once("end", () => {
+              lostResponses.push({
+                method: request.method ?? "GET",
+                path: resource,
+                status: result.statusCode ?? 500,
+              });
+              // Deliver headers and a partial body before loss, so the browser cannot
+              // retry an apparently undispatched request at its HTTP transport layer.
+              response.writeHead(result.statusCode ?? 500, {
+                "Content-Type": "application/json",
+                "Content-Length": "1000",
+              });
+              response.write("{", () => response.destroy());
+            });
+            return;
+          }
           response.writeHead(result.statusCode ?? 500, result.headers);
           result.pipe(response);
         },
@@ -106,6 +133,10 @@ export async function startHostedFixture(harness: EmbeddedHarness, sessionId: st
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     calls,
+    lostResponses,
+    /** Lose one actual upstream response after native settlement, without dispatching again. */
+    loseNextResponse: (method: string, resource: string) =>
+      loseResponses.add(`${method} ${resource}`),
     stop: async () => {
       for (const request of upstream) request.destroy();
       server.closeAllConnections();

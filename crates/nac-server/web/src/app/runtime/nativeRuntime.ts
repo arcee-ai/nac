@@ -25,10 +25,16 @@ export interface NativeRuntimeScope {
   release: string;
 }
 
+export interface NativePresentationAssets {
+  /** Caller-served directory from the packed asset manifest, never authority. */
+  mathjaxFontUrl: string;
+}
+
 export interface NativeRuntimeOptions {
   scope: NativeRuntimeScope;
   client: Pick<NacClient, "transport">;
   storage?: Pick<Storage, "getItem" | "setItem">;
+  assets?: NativePresentationAssets;
   eventSource?: SessionStreamOptions["eventSource"];
 }
 
@@ -39,7 +45,8 @@ export class NativeRuntime {
   readonly id = ++nextInstance;
   readonly scope: Readonly<NativeRuntimeScope>;
   readonly client: NacClient;
-  readonly api;
+  readonly assets: Readonly<NativePresentationAssets> | undefined;
+  readonly api: ReturnType<typeof createNativeApi>;
   readonly stores: ReturnType<typeof createPresentationStores>;
   readonly queryClient = new QueryClient({
     defaultOptions: {
@@ -63,6 +70,7 @@ export class NativeRuntime {
   constructor(options: NativeRuntimeOptions) {
     if (options.scope.endpoint !== options.client.transport.endpoint)
       throw new Error("Runtime scope must name the supplied client's endpoint.");
+    this.assets = options.assets ? Object.freeze({ ...options.assets }) : undefined;
     this.stores = createPresentationStores(options.storage);
     this.scope = Object.freeze({ ...options.scope });
     this.client = new NacClient(
@@ -127,13 +135,14 @@ export function createNativeRuntime(options: NativeRuntimeOptions): NativeRuntim
 }
 
 // Compatibility for existing standalone hook fixtures. Production supplies an explicit runtime.
-export const standaloneRuntime = {
+export const standaloneRuntime: RuntimeDependencies = {
   api,
   client: nacClient,
   stores: standalonePresentationStores,
   events: (id: string, handlers: SessionStreamHandlers) => subscribeToSessionEvents(id, handlers),
 };
-export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events">;
+export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> &
+  Partial<Pick<NativeRuntime, "id" | "assets">>;
 export function runtimeForQueryClient(client: QueryClient): RuntimeDependencies {
   return runtimes.get(client) ?? standaloneRuntime;
 }

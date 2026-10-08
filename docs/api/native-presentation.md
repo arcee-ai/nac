@@ -7,12 +7,29 @@ reuses native features, queries, mutations, live projections and providers.
 The standalone entry mounts this same root with its existing HashRouter,
 document theme, stylesheet and persisted browser preferences.
 
-This is a source/module seam. The experimental ALL-121 tarball exposes the full
-typed HTTP/SSE facade but contains no React presentation. ALL-122 must decide
-the eventual UI distribution, name, style delivery and compatibility policy.
-Consuming native source currently requires the web's React dependencies and
-`@/` alias to its `src/`, plus explicit stylesheet/assets handling. No registry
-publication or backend route change is part of this seam.
+The private, revision-pinned experimental ALL-121 artifact now also exports
+`@arcee-ai/nac-client-all-121/presentation`. It contains the native root and
+runtime, compiled declarations, explicitly imported `presentation/styles.css`
+and `presentation/assets.json`. The root HTTP/SSE export remains runtime-free;
+its React peers are optional for SDK-only consumers. This is a local tarball
+handoff, with no registry publication or backend route change.
+
+`npm --prefix crates/nac-server/web run build` is the sole writer for these
+outputs. Pack the repository root after building and pin the resulting tarball
+integrity together with the exact Git revision. Consumers need no native source
+alias or source checkout. The qualified locked peer combinations are NAC's
+React 19.2.8 / router 7.18.2 / Query 5.101.4 and the consumer's installed
+React 19.2.6 / router 7.15.0 / Query 5.100.10. The declared major ranges are
+not a claim that every intermediate release has been exercised.
+
+Copy the manifest's `assets` paths from the packed artifact to caller-controlled
+static storage, preserving their paths. Supply the public URL of the manifest's
+MathJax font directory as `assets.mathjaxFontUrl`; formulas require this URL.
+CSS is opt-in and scoped to `[data-nac-runtime]`. Fonts, animation names and
+Tailwind property registrations are namespaced. Formula sheets remain within
+the instance boundary and use instance-specific font families. The consumer's
+build must preserve modern nested CSS and `@scope`, or compile them for its
+supported browsers.
 
 ## Constructing a view
 
@@ -25,18 +42,27 @@ client constructors. `scope.endpoint` must exactly
 match the client's normalized endpoint.
 
 ```tsx
+import { createNativeRuntime, NativePresentationRoot } from
+  "@arcee-ai/nac-client-all-121/presentation";
+import "@arcee-ai/nac-client-all-121/presentation/styles.css";
+
 const runtime = createNativeRuntime({
   scope: selectedBinding,
   client: authenticatedClient,
   eventSource: authenticatedEventSourceFactory,
+  assets: { mathjaxFontUrl: callerHostedPackedFontDirectory },
 });
 
 <NativePresentationRoot
   runtime={runtime}
   router={(children) => <MemoryRouter>{children}</MemoryRouter>}
-  styles={selectedScopedStyles}
 />
 ```
+
+When the product already has a router, mount this view in a separate
+caller-owned React root and wrap it with MemoryRouter. React Router rejects a
+second router nested in the same React tree. The caller owns both roots and
+must close/unmount the native instance during logout or replacement.
 
 The root imports no global stylesheet and never calls `createRoot`. The caller
 owns DOM mounting, routing and CSS delivery. Its default theme stays local and
@@ -95,3 +121,17 @@ a local mediated proxy. The proxy uses fixture-only headers/cookies and the
 existing isolated scripted NAC harness. It proves frontend injection/lifecycle,
 not production identity/admission, per-tool authorization, or an ArceeFM release.
 The normal production-embedded E2E lane continues to verify standalone behavior.
+
+`e2e/hosted-surfaces.e2e.ts` adds injected desktop/mobile files/revision/Git,
+session settings, outgoing MCP and provider configuration journeys in named
+disposable workspaces. Accepted mutations with lost responses are read back
+after replacement without automatic replay. The outgoing MCP test uses an
+inert local stdio protocol double; providers are scripted.
+
+`e2e/packed-presentation.e2e.ts` installs the actual tarball in a clean consumer,
+strictly compiles its declarations with locked peers, and verifies a separate
+caller BrowserRouter/native MemoryRouter, explicit CSS/assets, formula font
+requests, caller style and keyboard isolation, replacement and closure. Set
+`NAC_PRESENTATION_PEER_ROOT` only to an authorized installed peer directory for
+a compatibility run. This does not qualify an authenticated ArceeFM gateway,
+production identity/custody, machine-to-machine admission or Dev2 readiness.

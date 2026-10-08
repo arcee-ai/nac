@@ -1,9 +1,10 @@
-// Source/module seam pending ALL-122's distribution decision. No global stylesheet or createRoot.
+// Shared native source and revision-pinned presentation export. No stylesheet installation or createRoot.
 export { NativePresentationRoot, type NativePresentationRootProps } from "./NativePresentationRoot";
 export {
   createNativeRuntime,
   NativeRuntime,
   type NativeRuntimeOptions,
+  type NativePresentationAssets,
   type NativeRuntimeScope,
 } from "./nativeRuntime";
 export { RuntimeContext, useNativeRuntime } from "./RuntimeContext";

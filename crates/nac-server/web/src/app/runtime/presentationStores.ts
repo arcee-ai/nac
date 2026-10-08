@@ -11,7 +11,24 @@ import * as sessionNavigationStore from "../store/sessionNavigationStore";
 import * as sidebarLayoutStore from "../store/sidebarLayoutStore";
 import * as sshConnectionStore from "../store/sshConnectionStore";
 
-export function createPresentationStores(storage?: Pick<Storage, "getItem" | "setItem">) {
+export interface PresentationStores {
+  panelWidth: ReturnType<typeof panelWidth.createPanelWidth>;
+  threadLogHeight: ReturnType<typeof threadLogHeight.createThreadLogHeight>;
+  lastLight: ReturnType<typeof lastLight.createLastLight>;
+  attentionStore: ReturnType<typeof attentionStore.createAttentionStore>;
+  chatTabsStore: ReturnType<typeof chatTabsStore.createChatTabsStore>;
+  composerStore: ReturnType<typeof composerStore.createComposerStore>;
+  runtimeStore: ReturnType<typeof runtimeStore.createRuntimeStore>;
+  sessionFiltersStore: ReturnType<typeof sessionFiltersStore.createSessionFiltersStore>;
+  sessionLayoutStore: ReturnType<typeof sessionLayoutStore.createSessionLayoutStore>;
+  sessionNavigationStore: ReturnType<typeof sessionNavigationStore.createSessionNavigationStore>;
+  sidebarLayoutStore: ReturnType<typeof sidebarLayoutStore.createSidebarLayoutStore>;
+  sshConnectionStore: ReturnType<typeof sshConnectionStore.createSshConnectionStore>;
+}
+
+export function createPresentationStores(
+  storage?: Pick<Storage, "getItem" | "setItem">,
+): PresentationStores {
   return {
     panelWidth: panelWidth.createPanelWidth(storage),
     threadLogHeight: threadLogHeight.createThreadLogHeight(storage),
@@ -42,7 +59,6 @@ export const standalonePresentationStores = {
   sidebarLayoutStore: sidebarLayoutStore,
   sshConnectionStore: sshConnectionStore,
 };
-export type PresentationStores = ReturnType<typeof createPresentationStores>;
 
 export function releasePresentationStores(stores: PresentationStores): void {
   stores.runtimeStore.resetRuntime(null);

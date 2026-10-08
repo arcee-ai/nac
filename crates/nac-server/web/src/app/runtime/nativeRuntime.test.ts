@@ -241,3 +241,16 @@ describe("native runtime lifetime", () => {
     expect(authorizations).toHaveLength(3);
   });
 });
+
+it("copies immutable asset URLs without sharing caller-owned mutable options", () => {
+  const assets = { mathjaxFontUrl: "/caller/packed/fonts" };
+  const instance = createNativeRuntime({
+    scope,
+    client: createNacClient({ endpoint: scope.endpoint, fetch: vi.fn() }),
+    assets,
+  });
+  opened.push(instance);
+  assets.mathjaxFontUrl = "/different/fonts";
+  expect(instance.assets?.mathjaxFontUrl).toBe("/caller/packed/fonts");
+  expect(Object.isFrozen(instance.assets)).toBe(true);
+});

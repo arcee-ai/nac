@@ -157,9 +157,13 @@ it("mounts the real presentation under caller routing, keeps overlays local and 
   );
   await waitFor(() => expect(mounted.getByText("No projects yet")).toBeDefined());
   expect(original.runtime.isClosed()).toBe(false);
+  const boundary = mounted.container.querySelector("[data-nac-runtime]");
+  expect(boundary?.classList.contains("dark")).toBe(true);
+  expect(boundary?.getAttribute("data-theme")).toBe("dark");
   fireEvent.click(mounted.getByRole("button", { name: /Get Started/i }));
   await waitFor(() => expect(mounted.getByRole("dialog")).toBeDefined());
   expect(mounted.getByRole("dialog").closest("[data-nac-overlays]")).not.toBeNull();
+  expect(mounted.getByRole("dialog").closest(".dark")).toBe(boundary);
   expect(mounted.container.querySelector("[data-nac-content]")?.hasAttribute("inert")).toBe(true);
   expect(mounted.container.firstElementChild?.hasAttribute("inert")).toBe(false);
   expect(window.location.href).toBe(url);

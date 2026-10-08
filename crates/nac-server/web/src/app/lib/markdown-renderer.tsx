@@ -39,21 +39,25 @@ interface MathPlugins {
   rehype: PluginList;
 }
 
-let mathPlugins: Promise<MathPlugins> | null = null;
+const mathPlugins = new Map<string | undefined, Promise<MathPlugins>>();
 
 /**
  * The pipeline with MathJax in it, assembled once the chunk carrying it lands.
  * The promise is cached so `use` only ever suspends on the first formula in a
  * session, and never again after that.
  */
-function loadMathPlugins(): Promise<MathPlugins> {
-  mathPlugins ??= import("@/app/lib/markdown-mathjax").then(
-    ({ rehypeMathjaxPlugin, remarkMathPlugin }) => ({
-      remark: [...remarkPlugins, remarkMathPlugin],
-      rehype: [rehypeMathjaxPlugin],
-    }),
-  );
-  return mathPlugins;
+function loadMathPlugins(fontURL?: string): Promise<MathPlugins> {
+  let plugins = mathPlugins.get(fontURL);
+  if (!plugins) {
+    plugins = import("@/app/lib/markdown-mathjax").then(
+      ({ createMathjaxPlugin, remarkMathPlugin }) => ({
+        remark: [...remarkPlugins, remarkMathPlugin],
+        rehype: [createMathjaxPlugin(fontURL)],
+      }),
+    );
+    mathPlugins.set(fontURL, plugins);
+  }
+  return plugins;
 }
 
 /** Text of a fenced block, for the clipboard. Nested spans carry the tokens. */
@@ -284,13 +288,32 @@ function ParsedWithMath({
   source: string;
   components: ReturnType<typeof buildComponents>;
 }) {
-  const plugins = use(loadMathPlugins());
+  const runtime = useNativeRuntime();
+  const plugins = use(loadMathPlugins(runtime.assets?.mathjaxFontUrl));
+  const selectedComponents = runtime.assets
+    ? {
+        ...components,
+        // Packed consumers keep formula sheets in their view lifetime. Scope the
+        // generated rules and font families so caller MathJax remains independent.
+        style: ({ children }: ComponentPropsWithoutRef<"style">) => {
+          const css = isString(children) ? children : "";
+          const scoped = css.replace(
+            /(font-family\s*:\s*)([^;}]+)/g,
+            (_match, property, value) =>
+              property + value.replace(/\bMJX[\w-]*/g, (name: string) => `NAC${runtime.id}${name}`),
+          );
+          return css ? (
+            <style>{`@scope ([data-nac-runtime="${runtime.id}"]) { ${scoped} }`}</style>
+          ) : null;
+        },
+      }
+    : components;
   return (
     <ReactMarkdown
       remarkPlugins={plugins.remark}
       rehypePlugins={plugins.rehype}
       urlTransform={markdownUrlTransform}
-      components={components}
+      components={selectedComponents}
     >
       {source}
     </ReactMarkdown>
