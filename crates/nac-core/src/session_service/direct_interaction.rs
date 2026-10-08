@@ -399,8 +399,9 @@ impl SessionService {
     }
 
     /// Idempotently promote the oldest pending item when this direct session
-    /// is idle. The operation lease is acquired before selection, preventing
-    /// two server processes from promoting the same durable item.
+    /// is idle. A read-only preflight avoids leasing an empty wake; selection
+    /// still happens under the operation lease, preventing two server
+    /// processes from promoting the same durable item.
     pub async fn start_next_direct_inbox_item(&self) -> Result<Option<SessionRunHandle>> {
         self.require_direct_behavior()?;
         let _wake = self.inbox_wake.lock().await;
@@ -416,6 +417,22 @@ impl SessionService {
             .session_id
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        let path = self.metadata.store_path.clone();
+        let wake_session_id = session_id.to_owned();
+        let has_durable_work = crate::store::spawn_blocking_store_caller(move || {
+            Ok::<_, anyhow::Error>(
+                crate::store::next_pending_session_inbox_item(&path, &wake_session_id)?.is_some()
+                    || crate::store::load_session_goal(&path, &wake_session_id)?.is_some(),
+            )
+        })
+        .await??;
+        if !has_durable_work {
+            self.cancel_goal_retry_wake();
+            return Ok(None);
+        }
+        // This is only a hint: re-read and reconcile under the lease below.
+        // Any goal, including a paused one, may retain stale run accounting.
+        // Concurrent intent writers retain their own wake after committing.
         let lease = match sessions::SessionOperationLease::try_acquire(
             &self.metadata.store_path,
             session_id,
