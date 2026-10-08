@@ -14,7 +14,8 @@ mod wal_preflight;
 use migration_status::has_migration_observation;
 use migration_status::{begin_migration, finish_migration};
 pub use migration_status::{
-    migration_status, StoreMigrationFailure, StoreMigrationState, StoreMigrationStatus,
+    migration_status, observe_probe_migration_status, StoreMigrationFailure, StoreMigrationState,
+    StoreMigrationStatus,
 };
 
 pub(super) use managed_tables::create_managed_maintenance_tables;
@@ -491,12 +492,22 @@ fn connect_with_capacity_using(
     timeout: Duration,
     open: impl FnOnce(&Path) -> rusqlite::Result<Connection>,
 ) -> Result<StoreConnection> {
+    let path = resolved_store_path(path)?;
+    super::coordinator::require_execution_owner(&path)?;
+    connect_after_authority_check(&path, capacity, timeout, open)
+}
+
+fn connect_after_authority_check(
+    path: &Path,
+    capacity: &Arc<ConnectionCapacity>,
+    timeout: Duration,
+    open: impl FnOnce(&Path) -> rusqlite::Result<Connection>,
+) -> Result<StoreConnection> {
     crate::telemetry::observe_store(
         crate::telemetry::StoreOperation::ConnectionAcquire,
         crate::telemetry::Correlation::default(),
         || {
-            let path = resolved_store_path(path)?;
-            super::coordinator::require_execution_owner(&path)?;
+            let path = path.to_path_buf();
             let permit = capacity.acquire(&path, timeout)?;
             let connection = open(&path)
                 .with_context(|| format!("failed to open SQLite store {}", path.display()))?;
@@ -573,6 +584,35 @@ fn connect_read_only(path: &Path) -> Result<StoreConnection> {
             )
         },
     )
+}
+
+// This narrow observer cannot obtain executor authority or a writable
+// connection. Ordinary opens above continue to require the execution owner.
+fn connect_probe_read_only(path: &Path) -> Result<StoreConnection> {
+    let path = std::fs::canonicalize(path)?;
+    connect_after_authority_check(
+        &path,
+        &CONNECTION_CAPACITY,
+        CONNECTION_WAIT_TIMEOUT,
+        |path| {
+            Connection::open_with_flags(
+                path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+        },
+    )
+}
+
+pub(crate) fn open_probe_read_connection(path: &Path) -> Result<StoreConnection> {
+    reject_future_schema_before_open(path)?;
+    let conn = connect_probe_read_only(path)?;
+    let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    anyhow::ensure!(
+        version == STORE_SCHEMA_VERSION,
+        "probe store is not initialized"
+    );
+    Ok(conn)
 }
 
 /// Opens an already initialized store for read-only runtime observation.

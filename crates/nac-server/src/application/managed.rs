@@ -97,18 +97,28 @@ pub(crate) fn runtime_readiness_checks(
     manager: &SessionManager,
     policy: ManagedReadinessPolicy,
 ) -> Vec<ReadinessCheck> {
-    let mut checks = vec![
-        match nac_core::store::check_readiness(&manager.inner.store_path) {
-            Ok(()) => ReadinessCheck::pass("store", "SQLite store is open and migrated"),
-            Err(_) => {
-                let migration = nac_core::store::migration_status(&manager.inner.store_path);
-                let reason = migration
-                    .failure
-                    .map_or(migration.state.as_str(), |failure| failure.as_str());
-                ReadinessCheck::fail("store", format!("SQLite store is unavailable ({reason})"))
-            }
-        },
-    ];
+    runtime_readiness_checks_with_store(
+        manager,
+        policy,
+        nac_core::store::check_readiness(&manager.inner.store_path),
+    )
+}
+
+pub(crate) fn runtime_readiness_checks_with_store(
+    manager: &SessionManager,
+    policy: ManagedReadinessPolicy,
+    store_check: Result<()>,
+) -> Vec<ReadinessCheck> {
+    let mut checks = vec![match store_check {
+        Ok(()) => ReadinessCheck::pass("store", "SQLite store is open and migrated"),
+        Err(_) => {
+            let migration = nac_core::store::migration_status(&manager.inner.store_path);
+            let reason = migration
+                .failure
+                .map_or(migration.state.as_str(), |failure| failure.as_str());
+            ReadinessCheck::fail("store", format!("SQLite store is unavailable ({reason})"))
+        }
+    }];
 
     if let Some(managed) = manager.managed_host() {
         checks.extend(nac_managed::host_checks(

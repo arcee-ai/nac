@@ -1,6 +1,7 @@
 //! Credential-free liveness, managed readiness, and owner-facing host status.
 
 use std::path::PathBuf;
+use std::sync::{Arc, LazyLock};
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -9,6 +10,47 @@ use nac_managed::ReadinessCheck;
 use serde::Serialize;
 
 use crate::{application::managed::ManagedReadinessPolicy, SessionManager};
+
+// At most two read-only probe snapshots may run independently of the bounded
+// write caller pool. They retain the store's existing connection limits.
+static PROBE_CALLERS: LazyLock<Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
+// Admit at most two additional async waiters so simultaneous native/Kubernetes
+// probes can share those two readers without building an unbounded task queue.
+static PROBE_ADMISSIONS: LazyLock<Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
+
+async fn run_probe<F, R>(operation: F) -> anyhow::Result<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    let admission = Arc::clone(&PROBE_ADMISSIONS)
+        .try_acquire_owned()
+        .map_err(|_| anyhow::anyhow!("readiness probe capacity is full"))?;
+    let permit = Arc::clone(&PROBE_CALLERS).acquire_owned().await?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let _admission = admission;
+        operation()
+    })
+    .await
+    .map_err(Into::into)
+}
+
+async fn probe_snapshot(manager: SessionManager) -> anyhow::Result<ReadinessResponse> {
+    run_probe(move || readiness_snapshot(&manager)).await
+}
+
+pub(crate) async fn validate_probe_identity(manager: &SessionManager) -> anyhow::Result<()> {
+    let Some(identity) = manager.managed_identity().cloned() else {
+        return Ok(());
+    };
+    let path = manager.inner.store_path.clone();
+    run_probe(move || nac_core::store::observe_managed_probe_store_for_identity(&path, &identity))
+        .await??;
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub(crate) struct ReadinessResponse {
@@ -93,8 +135,7 @@ pub(crate) async fn readyz_handler(
     State(manager): State<SessionManager>,
 ) -> (StatusCode, Json<ReadinessResponse>) {
     let managed = manager.managed_host().is_some();
-    let snapshot =
-        nac_core::store::spawn_blocking_store_caller(move || readiness_snapshot(&manager)).await;
+    let snapshot = probe_snapshot(manager).await;
     let response = match snapshot {
         Ok(response) => response,
         Err(error) => {
@@ -164,11 +205,16 @@ pub(crate) async fn managed_status_handler(
 
 fn readiness_snapshot(manager: &SessionManager) -> ReadinessResponse {
     let identity = crate::build_identity::current();
-    let migration = nac_core::store::migration_status(&manager.inner.store_path);
-    let maintenance = (migration.state == nac_core::store::StoreMigrationState::Current)
-        .then(|| nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path))
-        .and_then(Result::ok);
-    let checks = readiness_checks(manager);
+    let migration = nac_core::store::observe_probe_migration_status(&manager.inner.store_path);
+    let store = match manager.managed_identity() {
+        Some(identity) => nac_core::store::observe_managed_probe_store_for_identity(
+            &manager.inner.store_path,
+            identity,
+        ),
+        None => nac_core::store::observe_managed_probe_store(&manager.inner.store_path),
+    };
+    let maintenance = store.as_ref().ok().cloned();
+    let checks = readiness_checks(manager, Some(&store));
     let recovery_only = manager.is_recovery_only();
     ReadinessResponse {
         status: if !recovery_only && checks.iter().all(|check| check.ready) {
@@ -190,7 +236,7 @@ fn readiness_snapshot(manager: &SessionManager) -> ReadinessResponse {
         migration_failure: migration
             .failure
             .map(nac_core::store::StoreMigrationFailure::as_str),
-        maintenance_state: maintenance_state(recovery_only, migration.state, maintenance.as_ref()),
+        maintenance_state: maintenance_state(recovery_only, migration.state, maintenance),
         checks,
     }
 }
@@ -204,7 +250,7 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         .ok_or_else(|| anyhow::anyhow!("managed model profile is unavailable"))?;
     let identity = crate::build_identity::current();
     let migration = nac_core::store::migration_status(&manager.inner.store_path);
-    let checks = readiness_checks(manager);
+    let checks = readiness_checks(manager, None);
     let model_ready = checks
         .iter()
         .find(|check| check.name == "model-credential")
@@ -246,7 +292,11 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
         migration_failure: migration
             .failure
             .map(nac_core::store::StoreMigrationFailure::as_str),
-        maintenance_state: maintenance_state(recovery_only, migration.state, maintenance.as_ref()),
+        maintenance_state: maintenance_state(
+            recovery_only,
+            migration.state,
+            maintenance.as_ref().map(|snapshot| snapshot.state.clone()),
+        ),
         logical_host_id: managed.logical_host_id.clone(),
         owner: managed.owner.clone(),
         public_hostname: managed.public_hostname.clone(),
@@ -270,7 +320,7 @@ fn managed_status_snapshot(manager: &SessionManager) -> anyhow::Result<ManagedHo
 fn maintenance_state(
     recovery_only: bool,
     migration_state: nac_core::store::StoreMigrationState,
-    maintenance: Option<&nac_core::store::ManagedMaintenanceSnapshot>,
+    maintenance: Option<nac_core::store::ManagedMaintenanceState>,
 ) -> &'static str {
     if recovery_only {
         return "recovery-only";
@@ -279,27 +329,42 @@ fn maintenance_state(
         return "unavailable";
     }
     match maintenance {
-        Some(snapshot) if snapshot.state == nac_core::store::ManagedMaintenanceState::Serving => {
-            "serving"
-        }
-        Some(snapshot)
-            if snapshot.state == nac_core::store::ManagedMaintenanceState::Maintenance =>
-        {
-            "maintenance"
-        }
+        Some(nac_core::store::ManagedMaintenanceState::Serving) => "serving",
+        Some(nac_core::store::ManagedMaintenanceState::Maintenance) => "maintenance",
         _ => "unavailable",
     }
 }
 
-fn readiness_checks(manager: &SessionManager) -> Vec<ReadinessCheck> {
-    let mut checks = crate::application::managed::runtime_readiness_checks(
-        manager,
-        ManagedReadinessPolicy::production(),
-    );
+fn readiness_checks(
+    manager: &SessionManager,
+    probe: Option<&anyhow::Result<nac_core::store::ManagedMaintenanceState>>,
+) -> Vec<ReadinessCheck> {
+    let mut checks = match probe {
+        Some(store) => crate::application::managed::runtime_readiness_checks_with_store(
+            manager,
+            ManagedReadinessPolicy::production(),
+            store
+                .as_ref()
+                .map(|_| ())
+                .map_err(|_| anyhow::anyhow!("probe store unavailable")),
+        ),
+        None => crate::application::managed::runtime_readiness_checks(
+            manager,
+            ManagedReadinessPolicy::production(),
+        ),
+    };
+    let maintenance = match probe {
+        Some(store) => store
+            .as_ref()
+            .cloned()
+            .map_err(|_| anyhow::anyhow!("probe store unavailable")),
+        None => nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path)
+            .map(|snapshot| snapshot.state),
+    };
     checks.insert(
         1,
-        match nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path) {
-            Ok(snapshot) if snapshot.state == nac_core::store::ManagedMaintenanceState::Serving => {
+        match maintenance {
+            Ok(nac_core::store::ManagedMaintenanceState::Serving) => {
                 ReadinessCheck::pass("maintenance", "host admission is open")
             }
             Ok(_) => ReadinessCheck::fail(

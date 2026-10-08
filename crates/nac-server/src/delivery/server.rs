@@ -370,11 +370,61 @@ fn register_active_admission(
     }
 }
 
+fn managed_admission_failure(error: anyhow::Error) -> Response {
+    let message = match error.downcast_ref::<nac_core::store::PersistenceAdmissionError>() {
+        Some(
+            error @ (nac_core::store::PersistenceAdmissionError::Overloaded
+            | nac_core::store::PersistenceAdmissionError::CallerOverloaded),
+        ) => error.to_string(),
+        _ => "Managed NAC admission state is unavailable".to_string(),
+    };
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(ApiErrorBody { error: message }),
+    )
+        .into_response()
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn managed_admission_reports_capacity_without_exposing_other_store_errors() {
+    for error in [
+        nac_core::store::PersistenceAdmissionError::Overloaded,
+        nac_core::store::PersistenceAdmissionError::CallerOverloaded,
+    ] {
+        let response = managed_admission_failure(error.into());
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error"], error.to_string());
+    }
+    let response = managed_admission_failure(anyhow::anyhow!("private-store-path-and-data-canary"));
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let bytes = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["error"], "Managed NAC admission state is unavailable");
+}
+
 async fn enforce_managed_admission(
     State(manager): State<SessionManager>,
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
+    // Credential-free probes do not acquire work/completion admission leases.
+    // Readiness checks committed store/maintenance state through its bounded
+    // read-only observer; liveness requires only a responsive event loop.
+    if (request.method() == axum::http::Method::GET || request.method() == axum::http::Method::HEAD)
+        && matches!(request.uri().path(), "/healthz" | "/readyz")
+    {
+        if let Err(error) = crate::managed_status::validate_probe_identity(&manager).await {
+            return managed_admission_failure(error);
+        }
+        return next.run(request).await;
+    }
     if manager.managed_host().is_none() {
         return next.run(request).await;
     }
@@ -382,15 +432,7 @@ async fn enforce_managed_admission(
         let _host_lease = match manager.managed_completion_admission_async().await {
             Ok(Some(lease)) => lease,
             Ok(None) => return next.run(request).await,
-            Err(_) => {
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(ApiErrorBody {
-                        error: "Managed NAC admission state is unavailable".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
+            Err(error) => return managed_admission_failure(error),
         };
         return next.run(request).await;
     }
@@ -400,40 +442,15 @@ async fn enforce_managed_admission(
     let _host_lease = match manager.managed_work_admission_async().await {
         Ok(Some(lease)) => lease,
         Ok(None) => return next.run(request).await,
-        Err(_) => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ApiErrorBody {
-                    error: "Managed NAC admission state is unavailable".to_string(),
-                }),
-            )
-                .into_response();
-        }
+        Err(error) => return managed_admission_failure(error),
     };
-    match nac_core::store::managed_maintenance_snapshot(&manager.inner.store_path) {
-        Ok(snapshot) if snapshot.state == nac_core::store::ManagedMaintenanceState::Maintenance => {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ApiErrorBody {
-                    error: "Managed NAC is in maintenance; new work is unavailable".to_string(),
-                }),
-            )
-                .into_response()
-        }
-        Ok(_) => {
-            let method = request.method().clone();
-            let path = request.uri().path().to_string();
-            let _active = register_active_admission(&manager, &method, &path);
-            next.run(request).await
-        }
-        Err(_) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ApiErrorBody {
-                error: "Managed NAC admission state is unavailable".to_string(),
-            }),
-        )
-            .into_response(),
-    }
+    // Work admission checked maintenance and accepted identity while acquiring
+    // this shared host lease. Exclusive maintenance cannot cross it; a second
+    // synchronous store read here would block an async runtime under load.
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let _active = register_active_admission(&manager, &method, &path);
+    next.run(request).await
 }
 
 fn origin_matches_host(origin: &str, host: &str) -> bool {
