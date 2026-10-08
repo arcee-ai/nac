@@ -27,6 +27,7 @@ pub(super) fn assert_receipt(path: &Path, entry: &PlannedOrchestrator, healthy: 
 
 pub(super) async fn exercise_worker_ack_boundaries(worker: &Path) {
     for outcome in [
+        "large_answer",
         "pipe_closed",
         "wrong_ack",
         "cancel",
@@ -37,12 +38,12 @@ pub(super) async fn exercise_worker_ack_boundaries(worker: &Path) {
         let nac_home = root.join("nac-home");
         std::fs::create_dir_all(&nac_home).unwrap();
         let _env = ScopedModelEnv::isolated(&nac_home, Some("all113-fake-model-key"));
-        let answer = if outcome == "prefix_answer" {
-            "__NAC_COMPLETION_V1__hello"
-        } else {
-            "worker answer"
+        let answer = match outcome {
+            "large_answer" => "worker answer ".repeat(16 * 1024),
+            "prefix_answer" => "__NAC_COMPLETION_V1__hello".to_string(),
+            _ => "worker answer".to_string(),
         };
-        let (base_url, requests) = scripted_direct_responses(&[answer]);
+        let (base_url, requests) = scripted_direct_responses(&[&answer]);
         seed_load_parent(&root, base_url.clone());
         let path = root.join("store.db");
         let mut child = tokio::process::Command::new(worker)
@@ -76,6 +77,14 @@ pub(super) async fn exercise_worker_ack_boundaries(worker: &Path) {
             .kill_on_drop(true)
             .spawn()
             .unwrap();
+        // A worker emits events before its stdout completion. Drain stderr
+        // concurrently so a full pipe cannot block that completion frame.
+        let mut stderr = child.stderr.take().unwrap();
+        let stderr_task = tokio::spawn(async move {
+            let mut output = String::new();
+            stderr.read_to_string(&mut output).await.unwrap();
+            output
+        });
         let mut stdout = BufReader::new(child.stdout.take().unwrap());
         let mut line = String::new();
         tokio::time::timeout(PHASE_TIMEOUT, stdout.read_line(&mut line))
@@ -110,7 +119,7 @@ pub(super) async fn exercise_worker_ack_boundaries(worker: &Path) {
             }
         }
         match outcome {
-            "prefix_answer" => child.stdin.as_mut().unwrap().write_all(b"__NAC_COMMIT_ACK_V1__{\"session_id\":\"all112-parent\",\"thread_name\":\"worker\",\"dispatch_id\":\"ack-boundary\",\"episode_id\":1}\n").await.unwrap(),
+            "prefix_answer" | "large_answer" => child.stdin.as_mut().unwrap().write_all(b"__NAC_COMMIT_ACK_V1__{\"session_id\":\"all112-parent\",\"thread_name\":\"worker\",\"dispatch_id\":\"ack-boundary\",\"episode_id\":1}\n").await.unwrap(),
             "wrong_ack" => child.stdin.as_mut().unwrap().write_all(b"__NAC_COMMIT_ACK_V1__{\"session_id\":\"wrong\",\"thread_name\":\"worker\",\"dispatch_id\":\"ack-boundary\",\"episode_id\":1}\n").await.unwrap(),
             "cancel" => child.stdin.as_mut().unwrap().write_all(b"cancel\n").await.unwrap(),
             "worker_crash" => child.start_kill().unwrap(),
@@ -121,19 +130,16 @@ pub(super) async fn exercise_worker_ack_boundaries(worker: &Path) {
             .unwrap()
             .unwrap();
         assert!(
-            status.success() == (outcome == "prefix_answer"),
+            status.success() == matches!(outcome, "prefix_answer" | "large_answer"),
             "{outcome}: unacknowledged worker must fail"
         );
-        let mut stderr = String::new();
-        child
-            .stderr
-            .take()
-            .unwrap()
-            .read_to_string(&mut stderr)
+        let stderr = tokio::time::timeout(PHASE_TIMEOUT, stderr_task)
             .await
+            .unwrap()
             .unwrap();
         assert!(
-            stderr.contains("\"type\":\"run_finished\"") == (outcome == "prefix_answer"),
+            stderr.contains("\"type\":\"run_finished\"")
+                == matches!(outcome, "prefix_answer" | "large_answer"),
             "no terminal success event before acknowledgement"
         );
         let mut remaining_stdout = String::new();

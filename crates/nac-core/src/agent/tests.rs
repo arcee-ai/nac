@@ -1,5 +1,115 @@
 use super::*;
 
+#[tokio::test]
+async fn managed_worker_cancellation_interrupts_blocked_model_io() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    let root = std::env::temp_dir().join(format!("nac_cancelled_model_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let (arrived_tx, arrived_rx) = tokio::sync::oneshot::channel();
+    let arrived_tx = std::sync::Mutex::new(Some(arrived_tx));
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let server = ScriptedServer::start_observed(
+        vec![ScriptedResponse::json("200 OK", "{}").drop_connection()],
+        move |_, _| {
+            arrived_tx.lock().unwrap().take().unwrap().send(()).unwrap();
+            let _ = release_rx.recv_timeout(std::time::Duration::from_secs(3));
+        },
+    );
+    let mut agent = managed_worker_test_agent(&root, &server.base_url);
+    let cancellation = agent.command_cancellation();
+    let mut task = tokio::spawn(async move { agent.send("wait at the model barrier").await });
+    tokio::time::timeout(std::time::Duration::from_secs(2), arrived_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    cancellation.cancel();
+    let result = tokio::time::timeout(std::time::Duration::from_millis(250), &mut task).await;
+    release_tx.send(()).unwrap();
+    let requests = server.finish();
+    if result.is_err() {
+        task.abort();
+        let _ = task.await;
+    }
+    assert_eq!(requests.len(), 1);
+    let error = result
+        .expect("cancel must interrupt provider I/O before the host cleanup grace")
+        .unwrap()
+        .unwrap_err();
+    assert!(error.to_string().contains("worker command cancelled"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn managed_worker_cancelled_before_model_io_sends_no_request() {
+    use crate::model::test_http::ScriptedServer;
+    let root =
+        std::env::temp_dir().join(format!("nac_pre_cancelled_model_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let server =
+        ScriptedServer::start_unexpected_request_server(std::time::Duration::from_millis(250));
+    let mut agent = managed_worker_test_agent(&root, &server.base_url);
+    agent.command_cancellation().cancel();
+    let error = agent.send("already cancelled").await.unwrap_err();
+    assert!(error.to_string().contains("worker command cancelled"));
+    assert!(server.finish().is_empty());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn managed_worker_model_io_completes_without_cancellation() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    let root = std::env::temp_dir().join(format!("nac_worker_model_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let response = serde_json::json!({
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [
+            {"type": "output_text", "text": "worker completed"}
+        ]}],
+        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+    })
+    .to_string();
+    let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", response)]);
+    let mut agent = managed_worker_test_agent(&root, &server.base_url);
+    assert_eq!(
+        agent.send("complete normally").await.unwrap(),
+        "worker completed"
+    );
+    assert_eq!(server.finish().len(), 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn managed_worker_test_agent(root: &std::path::Path, base_url: &str) -> Agent {
+    Agent::with_config(
+        ModelClient::new_for_test_server(base_url.to_string()),
+        AgentConfig {
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
+            mode: AgentMode::Worker,
+            session_behavior: None,
+            store_path: root.join("store.db"),
+            session_id: None,
+            orchestrator_compaction_threshold: None,
+            initial_messages: Vec::new(),
+            thread_name: Some("worker".to_string()),
+            dispatch_id: Some("dispatch".to_string()),
+            event_sink: EventSink::none(),
+            workspace_cwd: root.to_path_buf(),
+            config_cwd: root.to_path_buf(),
+            working_directory: root.display().to_string(),
+            worker_executable: None,
+            sandbox: None,
+            ssh: None,
+            mcp: None,
+            skills: None,
+            extra_tool_defs: Vec::new(),
+            agents_md_message: None,
+            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
+            light_client: None,
+            permission_rules: Vec::new(),
+        },
+    )
+    .unwrap()
+}
+
 #[test]
 fn test_agent_creation() {
     let client = ModelClient::new_for_test();

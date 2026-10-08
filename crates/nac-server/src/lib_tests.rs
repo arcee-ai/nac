@@ -905,6 +905,23 @@ fn scripted_direct_responses(responses: &[&str]) -> (String, std::sync::mpsc::Re
                     Ok(read) => request.extend_from_slice(&buffer[..read]),
                 }
             }
+            let header_end = request
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .expect("complete direct model request headers")
+                + 4;
+            let content_length = std::str::from_utf8(&request[..header_end])
+                .unwrap()
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                .map(|(_, value)| value.trim().parse::<usize>().unwrap())
+                .unwrap_or(0);
+            while request.len() < header_end + content_length {
+                let read = socket.read(&mut buffer).unwrap();
+                assert!(read > 0, "direct model request body ended early");
+                request.extend_from_slice(&buffer[..read]);
+            }
             let body = serde_json::json!({
                 "status": "completed",
                 "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
