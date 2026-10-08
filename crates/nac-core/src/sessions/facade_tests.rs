@@ -2,6 +2,36 @@ use super::*;
 use crate::types::Message;
 use crate::TEST_ENV_LOCK;
 
+#[test]
+fn point_summary_preserves_catalog_projection_and_isolates_other_rows() {
+    let path = temp_store_path("point_summary");
+    let mut snapshot = test_snapshot("target", "2026-01-01", "2026-01-02");
+    snapshot.behavior = SessionBehavior::DirectWithOrchestrator;
+    snapshot.messages.push(Message::User {
+        content: "hello".into(),
+    });
+    create_session(&path, &snapshot).unwrap();
+    update_session_presentation(&path, "target", "Target title", true, 0).unwrap();
+    let expected = list_sessions(&path).unwrap().remove(0);
+    let actual = load_session_summary(&path, "target").unwrap().unwrap();
+    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    assert!(load_session_summary(&path, "missing").unwrap().is_none());
+
+    create_session(&path, &test_snapshot("other", "2026-01-01", "2026-01-02")).unwrap();
+    let conn = crate::store::open_connection(&path).unwrap();
+    conn.execute(
+        "UPDATE sessions SET token_usages_json = 'invalid' WHERE session_id = 'other'",
+        [],
+    )
+    .unwrap();
+    assert!(list_sessions(&path).is_err());
+    assert!(load_session_summary(&path, "other").is_err());
+    let actual = load_session_summary(&path, "target").unwrap().unwrap();
+    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    drop(conn);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
 fn temp_store_path(label: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
