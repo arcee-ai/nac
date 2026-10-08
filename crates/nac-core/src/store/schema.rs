@@ -241,6 +241,10 @@ impl Drop for StoreConnection {
 impl Deref for StoreConnection {
     type Target = Connection;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "construction installs a connection; only exclusive Drop takes it"
+    )]
     fn deref(&self) -> &Self::Target {
         self.connection
             .as_ref()
@@ -249,6 +253,10 @@ impl Deref for StoreConnection {
 }
 
 impl DerefMut for StoreConnection {
+    #[expect(
+        clippy::expect_used,
+        reason = "construction installs a connection; only exclusive Drop takes it"
+    )]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.connection
             .as_mut()
