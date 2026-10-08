@@ -11,6 +11,16 @@ for (const mobile of [false, true]) {
   }, info) => {
     test.setTimeout(90_000);
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+    // No constructable stylesheet or CSSScopeRule is available in this fixture.
+    // Formula styles must use the legacy, inert, local CSSOM parser instead.
+    await page.addInitScript(() => {
+      Object.defineProperty(globalThis, "CSSScopeRule", { value: undefined, configurable: true });
+      const browser = globalThis as unknown as { CSSStyleSheet: { prototype: object } };
+      Object.defineProperty(browser.CSSStyleSheet.prototype, "replaceSync", {
+        value: undefined,
+        configurable: true,
+      });
+    });
     const project = await createProject(request, harness);
     const id = await createSession(request, harness, "direct", project);
     const fixture = await startPackedPresentation(harness, id);
@@ -93,6 +103,27 @@ for (const mobile of [false, true]) {
       await expect(page.locator("[data-nac-runtime] mjx-container")).toHaveCount(1);
       await expect.poll(() => fontResponses.length).toBeGreaterThan(0);
       expect(fontResponses.every((status) => status === 200)).toBe(true);
+      const formulaStyles = await page.locator("[data-nac-runtime] style").allTextContents();
+      expect(formulaStyles.length).toBeGreaterThan(0);
+      expect(formulaStyles.every((css) => !css.includes("@scope"))).toBe(true);
+      expect(formulaStyles.join("\n")).toContain('[data-nac-runtime="');
+      await expect(page.locator("[data-nac-overlays] style")).toHaveCount(0);
+      const formulaStyle = await page.locator("[data-nac-runtime] mjx-math").evaluate((node) => {
+        const browser = globalThis as unknown as {
+          getComputedStyle: (element: unknown) => { fontFamily: string };
+        };
+        return browser.getComputedStyle(node).fontFamily;
+      });
+      expect(formulaStyle).toMatch(/NAC\d+MJX/);
+      const callerFormulaStyle = () =>
+        page.locator("#caller-math mjx-container").evaluate((node) => {
+          const browser = globalThis as unknown as {
+            getComputedStyle: (element: unknown) => { fontFamily: string; lineHeight: string };
+          };
+          const style = browser.getComputedStyle(node);
+          return { font: style.fontFamily, lineHeight: style.lineHeight };
+        });
+      await expect.poll(callerFormulaStyle).toEqual({ font: "monospace", lineHeight: "19px" });
       await page.getByRole("button", { name: "Session settings", exact: true }).click();
       const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
       await expect(settings).toBeVisible();
@@ -114,7 +145,8 @@ for (const mobile of [false, true]) {
       ).toHaveLength(1);
       await page.getByRole("button", { name: "Close packed runtime", exact: true }).click();
       await expect(page.locator("[data-nac-runtime]")).toHaveCount(0);
-      await expect(page.locator('style[precedence="mathjax"]')).toHaveCount(0);
+      await expect(page.locator('head style[data-precedence="mathjax"]')).toHaveCount(0);
+      await expect.poll(callerFormulaStyle).toEqual({ font: "monospace", lineHeight: "19px" });
       await expect.poll(callerStyles).toEqual(expected);
       expect(errors).toEqual([]);
       harness.provider.assertConsumed();
@@ -124,6 +156,8 @@ for (const mobile of [false, true]) {
           integrity: fixture.integrity,
           peers: fixture.peerVersions,
           fontResponses,
+          formulaStyle,
+          formulaStyles,
           viewport: page.viewportSize(),
           calls: fixture.calls,
           proof:
@@ -135,3 +169,35 @@ for (const mobile of [false, true]) {
     }
   });
 }
+
+test("standalone native formula keeps its existing font and hoisted style behavior", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const project = await createProject(request, harness);
+  const id = await createSession(request, harness, "direct", project);
+  const fontResponses: number[] = [];
+  page.on("response", (response) => {
+    if (response.url().includes("/assets/mathjax-")) fontResponses.push(response.status());
+  });
+  harness.provider.enqueue(
+    "standalone-math",
+    { token: "STANDALONE_NATIVE_MATH" },
+    { kind: "text", text: "Standalone native formula $x^2+1$.", stream: true },
+  );
+  await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
+  await page.getByRole("combobox", { name: "Message" }).fill("STANDALONE_NATIVE_MATH");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await waitForRunIdle(request, harness, id);
+  await expect(page.locator("mjx-container")).toHaveCount(1);
+  await expect.poll(() => fontResponses.length).toBeGreaterThan(0);
+  expect(fontResponses.every((status) => status === 200)).toBe(true);
+  await expect
+    .poll(() => page.locator('head style[data-precedence="mathjax"]').count())
+    .toBeGreaterThan(0);
+  await page.reload();
+  await expect(page.locator("mjx-container")).toHaveCount(1);
+  expect(fontResponses.every((status) => status === 200)).toBe(true);
+  harness.provider.assertConsumed();
+});

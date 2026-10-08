@@ -30,8 +30,9 @@ Tailwind property registrations are namespaced. Formula sheets remain within
 the instance boundary and use instance-specific font families. The packed
 stylesheet contains prefixed selectors, without `@scope`; the consumer must
 support or compile its nested CSS. Formula sheets generated at
-runtime use `@scope` and require browser support; consumer build-time CSS
-compilation does not transform those dynamic sheets.
+runtime use the existing CSSOM parser with a temporary inert style node inside
+the native portal. All style selectors are prefixed and font families are
+instance-specific; no `@scope` or constructable stylesheet support is required.
 
 ## Constructing a view
 

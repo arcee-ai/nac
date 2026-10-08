@@ -21,8 +21,10 @@ on `createNativeRuntime` to the public MathJax font directory. Formula fonts
 are fetched there. The stylesheet is opt-in, scoped to `[data-nac-runtime]`, and
 uses namespaced fonts, animations and Tailwind registrations. The emitted
 stylesheet uses prefixed selectors; the consumer must support or compile its
-nested CSS. Formula sheets are generated at runtime with `@scope`
-and require browser support for that feature.
+nested CSS. Formula sheets use the existing CSSOM parser with a temporary,
+inert style node inside the native portal, then emit prefixed selectors and
+instance-specific font names. They do not require `@scope` or constructable
+stylesheets and are removed with the view.
 
 A product with BrowserRouter must mount the native MemoryRouter in a separate
 caller-owned React root. Close the old runtime before replacement, logout,

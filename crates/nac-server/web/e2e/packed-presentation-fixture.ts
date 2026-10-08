@@ -98,6 +98,7 @@ export async function startPackedPresentation(harness: EmbeddedHarness, id: stri
 body{margin:17px;background:rgb(111,22,33);font-family:monospace;color:rgb(3,4,5)}
 .btn{padding:11px;border-radius:13px;color:rgb(6,7,8)}.title{font:17px monospace}
 :root{--brand-500:caller-brand}@keyframes fade{to{opacity:.2}}
+#caller-math{font-family:monospace;line-height:19px}
 </style></head><body><div id="caller"></div><script type="module" src="/consumer.tsx"></script></body></html>`,
   );
   await fs.writeFile(
@@ -117,7 +118,7 @@ const open=(release:string)=>createNativeRuntime({
 });
 let runtime:NativeRuntime;let view:ReturnType<typeof createRoot>;
 function mount(release:string){runtime=open(release);view.render(<NativePresentationRoot runtime={runtime} router={children=><MemoryRouter initialEntries={['/session/'+configuration.sessionId+'/files']}>{children}</MemoryRouter>}/>);}
-function Caller(){const location=useLocation();return <><div id="sentinel" tabIndex={0} className="btn title">Caller sentinel</div><output aria-label="Product location">{location.pathname}</output><button onClick={()=>{runtime.close();mount('replacement');}}>Replace packed runtime</button><button onClick={()=>{runtime.close();view.render(null);}}>Close packed runtime</button><div id="native-mount" style={{height:'calc(100vh - 95px)'}}/></>;}
+function Caller(){const location=useLocation();return <><div id="sentinel" tabIndex={0} className="btn title">Caller sentinel</div><div id="caller-math" dangerouslySetInnerHTML={{__html:'<mjx-container jax="CHTML">Caller formula sentinel</mjx-container>'}}/><output aria-label="Product location">{location.pathname}</output><button onClick={()=>{runtime.close();mount('replacement');}}>Replace packed runtime</button><button onClick={()=>{runtime.close();view.render(null);}}>Close packed runtime</button><div id="native-mount" style={{height:'calc(100vh - 115px)'}}/></>;}
 // A second caller-owned React root does not inherit the product BrowserRouter.
 flushSync(()=>createRoot(document.getElementById('caller')!).render(<BrowserRouter><Caller/></BrowserRouter>));
 view=createRoot(document.getElementById('native-mount')!);mount('first');

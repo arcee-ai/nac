@@ -16,6 +16,8 @@ import CodeBlock, { CodeBlockSize } from "@/app/atoms/code-block";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { splitMarkdownBlocks } from "@/app/lib/markdown-blocks";
+import { scopeMathjaxStyles } from "@/app/lib/mathjax-styles";
+import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundary";
 import { normalizeMath } from "@/app/lib/math-source";
 import { perfRender } from "@/app/lib/perfDebug";
 import { isNumber, isString } from "@/app/lib/primitive";
@@ -290,6 +292,7 @@ function ParsedWithMath({
 }) {
   const runtime = useNativeRuntime();
   const plugins = use(loadMathPlugins(runtime.assets?.mathjaxFontUrl));
+  const portal = usePresentationPortalTarget();
   const selectedComponents = runtime.assets
     ? {
         ...components,
@@ -297,13 +300,8 @@ function ParsedWithMath({
         // generated rules and font families so caller MathJax remains independent.
         style: ({ children }: ComponentPropsWithoutRef<"style">) => {
           const css = isString(children) ? children : "";
-          const scoped = css.replace(
-            /(font-family\s*:\s*)([^;}]+)/g,
-            (_match, property, value) =>
-              property + value.replace(/\bMJX[\w-]*/g, (name: string) => `NAC${runtime.id}${name}`),
-          );
-          return css ? (
-            <style>{`@scope ([data-nac-runtime="${runtime.id}"]) { ${scoped} }`}</style>
+          return css && runtime.id !== undefined ? (
+            <style>{scopeMathjaxStyles(css, runtime.id, portal)}</style>
           ) : null;
         },
       }
