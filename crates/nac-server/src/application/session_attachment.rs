@@ -351,15 +351,14 @@ impl<'a> SessionAttachmentApplication<'a> {
         session_id: &str,
         operation_lease: Option<&sessions::SessionOperationLease>,
     ) -> Result<SessionService> {
-        let summary = self
-            .manager
-            .session_catalog()
-            .list(false)
-            .await?
-            .into_iter()
-            .find(|entry| entry.summary.session_id == session_id)
-            .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
+        let store_path = self.manager.inner.store_path.clone();
+        let summary_session_id = session_id.to_string();
+        let summary = nac_core::store::spawn_blocking_store_caller(move || {
+            sessions::load_session_summary(&store_path, &summary_session_id)
+        })
+        .await
+        .context("session summary load task failed")??
+        .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
         let resource_lease = summary
             .sandboxed
             .then(|| {
@@ -370,7 +369,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 .map_err(anyhow::Error::new)
             })
             .transpose()?;
-        let config_cwd = if summary.ssh_host.is_some() {
+        let config_cwd = if summary.ssh.is_some() {
             &self.manager.inner.root_cwd
         } else {
             &summary.cwd
@@ -419,15 +418,14 @@ impl<'a> SessionAttachmentApplication<'a> {
         bool,
         Option<sessions::SessionOperationLease>,
     )> {
-        let summary = self
-            .manager
-            .session_catalog()
-            .list(false)
-            .await?
-            .into_iter()
-            .find(|entry| entry.summary.session_id == session_id)
-            .map(|entry| entry.summary)
-            .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
+        let store_path = self.manager.inner.store_path.clone();
+        let summary_session_id = session_id.to_string();
+        let summary = nac_core::store::spawn_blocking_store_caller(move || {
+            sessions::load_session_summary(&store_path, &summary_session_id)
+        })
+        .await
+        .context("session summary load task failed")??
+        .ok_or_else(|| anyhow!("session '{session_id}' was not found"))?;
         // For a sandbox row, shared resource authority must precede snapshot
         // loading and any observer-side Podman inspection/materialization. A
         // concurrent deletion either wins before this acquisition (so the
@@ -443,7 +441,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 .map_err(anyhow::Error::new)
             })
             .transpose()?;
-        let config_cwd = if summary.ssh_host.is_some() {
+        let config_cwd = if summary.ssh.is_some() {
             &self.manager.inner.root_cwd
         } else {
             &summary.cwd
