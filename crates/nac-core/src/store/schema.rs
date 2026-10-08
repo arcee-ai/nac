@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 mod managed_tables;
 mod migration_status;
 mod model_configurations;
+mod transaction_observation;
 mod transcript_tables;
 mod wal_preflight;
 
@@ -220,6 +221,8 @@ static CONNECTION_CAPACITY: std::sync::LazyLock<Arc<ConnectionCapacity>> =
 pub(crate) struct StoreConnection {
     connection: Connection,
     _permit: ConnectionPermit,
+    // Field order keeps SQLite's callback context alive through Connection::drop.
+    _transaction_observation: Option<Box<transaction_observation::TransactionObservation>>,
 }
 
 impl Deref for StoreConnection {
@@ -459,9 +462,11 @@ fn connect_with_capacity_using(
             let permit = capacity.acquire(&path, timeout)?;
             let connection = open(&path)
                 .with_context(|| format!("failed to open SQLite store {}", path.display()))?;
-            let mut conn = StoreConnection {
+            let transaction_observation = transaction_observation::install(&connection);
+            let conn = StoreConnection {
                 connection,
                 _permit: permit,
+                _transaction_observation: transaction_observation,
             };
             #[cfg(test)]
             {
@@ -473,9 +478,6 @@ fn connect_with_capacity_using(
                 }
             }
             conn.busy_timeout(Duration::from_secs(5))?;
-            if crate::telemetry::enabled() {
-                conn.profile(Some(crate::telemetry::sqlite_profile));
-            }
             let (process_count, store_count) = capacity.counts(&path);
             crate::telemetry::emit_connection_counts(
                 process_count,

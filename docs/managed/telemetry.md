@@ -60,10 +60,21 @@ messages. Session, run, and host identifiers are emitted only as fixed
 a diagnostic field, never a metric-series dimension. Route values come from
 Axum's matched route pattern or a fixed route class, never from the raw URI.
 
-SQLite statement profiling classifies only `BEGIN`, `COMMIT`, and
-`PRAGMA wal_checkpoint` prefixes and immediately discards the SQL callback
-value. All other SQL, including expanded bound parameters, is ignored. SQLite
-errors retain numeric primary and extended codes without their messages.
+Each observed SQLite connection times an explicit transaction from the start
+of its opening `BEGIN` (or outer `SAVEPOINT`) until SQLite finishes its closing
+`COMMIT`, `END`, outer `RELEASE`, or rollback. The `transaction` span includes
+the body, lock wait, and closing statement. A failed commit that leaves the
+transaction open does not finish the span; a later rollback or connection close
+finishes it with outcome `error`. Nested savepoints do not add transaction spans.
+The begin-time correlation is retained separately for each connection.
+
+`transaction_begin`, `commit`, and `checkpoint` report individual statement
+durations. The observer inspects unexpanded SQL only to recognize fixed control
+keywords, then discards it; it never retains or exports SQL text or parameters.
+Numeric SQLite error identity remains recorded by the owning store operation,
+without error messages. Rollback/close timing does not invent an error code.
+Disabled telemetry installs no SQLite observer, and observation never changes
+transaction results, schema, connection limits, or shutdown budgets.
 
 ## Names and ownership
 
@@ -79,7 +90,7 @@ errors retain numeric primary and extended codes without their messages.
 
 `nac.store.operation.duration` uses these exact operation values:
 
-- `connection_acquire`, `transaction`, `commit`, `checkpoint`, `retry`, and
+- `connection_acquire`, `transaction`, `transaction_begin`, `commit`, `checkpoint`, `retry`, and
   `readiness` for SQLite access and probes;
 - `transcript_append`, `event_persistence`, and `worker_episode_commit` for
   durable execution history;
