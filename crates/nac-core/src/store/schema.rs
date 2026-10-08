@@ -1,5 +1,5 @@
 use super::*;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -252,15 +252,28 @@ impl Deref for StoreConnection {
     }
 }
 
-impl DerefMut for StoreConnection {
+impl StoreConnection {
+    // Keep the native connection's identity fixed: mutable Deref would permit
+    // replacing it while its raw callbacks still reference this owner's Box.
     #[expect(
         clippy::expect_used,
         reason = "construction installs a connection; only exclusive Drop takes it"
     )]
-    fn deref_mut(&mut self) -> &mut Self::Target {
+    fn connection_mut(&mut self) -> &mut Connection {
         self.connection
             .as_mut()
             .expect("store connection is live until drop")
+    }
+
+    pub(crate) fn transaction(&mut self) -> rusqlite::Result<rusqlite::Transaction<'_>> {
+        self.connection_mut().transaction()
+    }
+
+    pub(crate) fn transaction_with_behavior(
+        &mut self,
+        behavior: rusqlite::TransactionBehavior,
+    ) -> rusqlite::Result<rusqlite::Transaction<'_>> {
+        self.connection_mut().transaction_with_behavior(behavior)
     }
 }
 

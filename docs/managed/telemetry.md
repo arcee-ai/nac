@@ -73,6 +73,8 @@ Rejected native close attempts do not finish the span. Both raw callbacks are
 unregistered before dropping the connection owner; an unfinished span ends as
 an error after that drop, including when outstanding native resources keep the
 SQLite handle alive. This records abandonment, not a successful database close.
+The store owner forwards transaction methods without exposing mutable connection
+dereferencing, so callers cannot replace its native connection beneath the hooks.
 
 `transaction_begin`, `commit`, and `checkpoint` report individual statement
 durations. The observer inspects unexpanded SQL only to recognize fixed control
