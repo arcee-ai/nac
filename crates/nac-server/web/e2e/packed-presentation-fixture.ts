@@ -55,6 +55,12 @@ export async function startPackedPresentation(harness: EmbeddedHarness, id: stri
   // compatibility run can supply its installed locked peer directory read-only.
   const peers = process.env.NAC_PRESENTATION_PEER_ROOT ?? path.join(web, "node_modules");
   const peerVersions: Record<string, string> = {};
+  const toolVersions: Record<string, string> = {};
+  for (const name of ["vite", "typescript"]) {
+    toolVersions[name] = JSON.parse(
+      await fs.readFile(path.join(peers, name, "package.json"), "utf8"),
+    ).version;
+  }
   for (const name of [
     "react",
     "react-dom",
@@ -141,11 +147,9 @@ view=createRoot(document.getElementById('native-mount')!);mount('first');
     }),
   );
   await fs.writeFile(path.join(consumer, "styles.d.ts"), 'declare module "*.css";\n');
-  await execute(
-    path.join(web, "node_modules/.bin/tsc"),
-    ["-p", path.join(consumer, "tsconfig.json")],
-    { cwd: consumer },
-  );
+  await execute(path.join(peers, ".bin/tsc"), ["-p", path.join(consumer, "tsconfig.json")], {
+    cwd: consumer,
+  });
   await fs.writeFile(
     path.join(consumer, "vite.config.mjs"),
     `export default {root:${JSON.stringify(consumer)},base:'/',build:{outDir:process.env.NAC_HOSTED_FIXTURE_OUTPUT,emptyOutDir:true},resolve:{dedupe:['react','react-dom','react-router','react-router-dom','@tanstack/react-query','@tanstack/query-core']}};\n`,
@@ -153,7 +157,7 @@ view=createRoot(document.getElementById('native-mount')!);mount('first');
   const fixture = await startHostedFixture(harness, id, {
     build: async (output) => {
       await execute(
-        path.join(web, "node_modules/.bin/vite"),
+        path.join(peers, ".bin/vite"),
         ["build", "--config", path.join(consumer, "vite.config.mjs")],
         {
           cwd: consumer,
@@ -169,5 +173,5 @@ view=createRoot(document.getElementById('native-mount')!);mount('first');
       );
     },
   });
-  return { ...fixture, peerVersions, integrity: report.integrity };
+  return { ...fixture, peerVersions, toolVersions, integrity: report.integrity };
 }

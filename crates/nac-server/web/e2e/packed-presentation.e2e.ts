@@ -155,6 +155,7 @@ for (const mobile of [false, true]) {
         body: JSON.stringify({
           integrity: fixture.integrity,
           peers: fixture.peerVersions,
+          tools: fixture.toolVersions,
           fontResponses,
           formulaStyle,
           formulaStyles,
