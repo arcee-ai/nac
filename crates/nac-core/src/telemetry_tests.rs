@@ -395,6 +395,142 @@ fn transaction_test_connection(path: &std::path::Path) -> crate::store::StoreCon
     crate::store::open_runtime_connection(path).unwrap()
 }
 
+struct OutstandingNativeStatement {
+    database: *mut rusqlite::ffi::sqlite3,
+    statement: *mut rusqlite::ffi::sqlite3_stmt,
+    owns_database: bool,
+}
+
+impl OutstandingNativeStatement {
+    fn new(connection: &rusqlite::Connection) -> Self {
+        let mut statement = std::ptr::null_mut();
+        // SAFETY: the live connection owns the database. This guard finalizes
+        // its intentionally outstanding native statement before cleanup.
+        let database = unsafe { connection.handle() };
+        let code = unsafe {
+            rusqlite::ffi::sqlite3_prepare_v2(
+                database,
+                c"SELECT 1".as_ptr(),
+                -1,
+                &mut statement,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(code, rusqlite::ffi::SQLITE_OK);
+        Self {
+            database,
+            statement,
+            owns_database: false,
+        }
+    }
+}
+
+impl Drop for OutstandingNativeStatement {
+    fn drop(&mut self) {
+        // SAFETY: the statement prevents native close while outstanding. If
+        // the Rust owner was dropped, this guard now owns the surviving handle.
+        // Defensively clear callbacks before cleanup, including assertion failure.
+        unsafe {
+            if self.owns_database {
+                rusqlite::ffi::sqlite3_trace_v2(self.database, 0, None, std::ptr::null_mut());
+                rusqlite::ffi::sqlite3_rollback_hook(self.database, None, std::ptr::null_mut());
+            }
+            rusqlite::ffi::sqlite3_finalize(self.statement);
+            if self.owns_database {
+                rusqlite::ffi::sqlite3_close(self.database);
+            }
+        }
+    }
+}
+
+#[test]
+fn rejected_native_close_keeps_transaction_observation_open() {
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let path = dir.path().join("store.db");
+    crate::store::initialize(&path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let conn = transaction_test_connection(&path);
+    conn.execute_batch("BEGIN").unwrap();
+    let native = OutstandingNativeStatement::new(&conn);
+    // SAFETY: this close must reject the outstanding statement and leave the
+    // database valid; no successful raw close may bypass the Rust owner.
+    assert_eq!(
+        unsafe { rusqlite::ffi::sqlite3_close(native.database) },
+        rusqlite::ffi::SQLITE_BUSY
+    );
+    assert!(!conn.is_autocommit());
+    let before_commit = wait_for_events(&exporter, recorder.stats().accepted as usize);
+    assert!(!before_commit
+        .iter()
+        .any(|event| event.operation == Some(StoreOperation::Transaction)));
+    conn.execute_batch("COMMIT").unwrap();
+    let events = wait_for_events(&exporter, recorder.stats().accepted as usize);
+    let transactions = events
+        .iter()
+        .filter(|event| event.operation == Some(StoreOperation::Transaction))
+        .collect::<Vec<_>>();
+    assert_eq!(transactions.len(), 1);
+    assert_eq!(transactions[0].outcome, Some(TelemetryOutcome::Ok));
+}
+
+#[test]
+fn connection_owner_drop_detaches_callbacks_when_native_close_is_busy() {
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let path = dir.path().join("store.db");
+    crate::store::initialize(&path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let conn = transaction_test_connection(&path);
+    conn.execute_batch("BEGIN").unwrap();
+    let mut native = OutstandingNativeStatement::new(&conn);
+    native.owns_database = true;
+    drop(conn);
+    let accepted_after_drop = recorder.stats().accepted;
+    let events = wait_for_events(&exporter, accepted_after_drop as usize);
+    let transactions = events
+        .iter()
+        .filter(|event| event.operation == Some(StoreOperation::Transaction))
+        .collect::<Vec<_>>();
+    assert_eq!(transactions.len(), 1);
+    assert_eq!(transactions[0].outcome, Some(TelemetryOutcome::Error));
+    // SAFETY: the outstanding statement kept this database alive when the Rust
+    // owner tried to close it. The hook API returns the prior context without
+    // dereferencing it, so this assertion detects a stale rollback registration.
+    let previous_context = unsafe {
+        rusqlite::ffi::sqlite3_rollback_hook(native.database, None, std::ptr::null_mut())
+    };
+    assert!(previous_context.is_null());
+    // Exercise STMT/PROFILE and rollback after the observation Box was freed.
+    // Neither callback may run or export another event on the surviving handle.
+    unsafe {
+        assert_eq!(
+            rusqlite::ffi::sqlite3_step(native.statement),
+            rusqlite::ffi::SQLITE_ROW
+        );
+        assert_eq!(
+            rusqlite::ffi::sqlite3_step(native.statement),
+            rusqlite::ffi::SQLITE_DONE
+        );
+        assert_eq!(
+            rusqlite::ffi::sqlite3_exec(
+                native.database,
+                c"ROLLBACK".as_ptr(),
+                None,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ),
+            rusqlite::ffi::SQLITE_OK
+        );
+    }
+    drop(native);
+    assert_eq!(recorder.stats().accepted, accepted_after_drop);
+}
+
 #[test]
 fn transaction_lifetime_includes_body_and_commit_once() {
     let _lock = telemetry_test_lock();

@@ -219,23 +219,40 @@ static CONNECTION_CAPACITY: std::sync::LazyLock<Arc<ConnectionCapacity>> =
     });
 
 pub(crate) struct StoreConnection {
-    connection: Connection,
+    connection: Option<Connection>,
     _permit: ConnectionPermit,
-    // Field order keeps SQLite's callback context alive through Connection::drop.
     _transaction_observation: Option<Box<transaction_observation::TransactionObservation>>,
+}
+
+impl Drop for StoreConnection {
+    fn drop(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            if let Some(observation) = &self._transaction_observation {
+                observation.detach(&connection);
+            }
+            drop(connection);
+            if let Some(observation) = &mut self._transaction_observation {
+                observation.finish_abandoned();
+            }
+        }
+    }
 }
 
 impl Deref for StoreConnection {
     type Target = Connection;
 
     fn deref(&self) -> &Self::Target {
-        &self.connection
+        self.connection
+            .as_ref()
+            .expect("store connection is live until drop")
     }
 }
 
 impl DerefMut for StoreConnection {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.connection
+        self.connection
+            .as_mut()
+            .expect("store connection is live until drop")
     }
 }
 
@@ -464,7 +481,7 @@ fn connect_with_capacity_using(
                 .with_context(|| format!("failed to open SQLite store {}", path.display()))?;
             let transaction_observation = transaction_observation::install(&connection);
             let conn = StoreConnection {
-                connection,
+                connection: Some(connection),
                 _permit: permit,
                 _transaction_observation: transaction_observation,
             };

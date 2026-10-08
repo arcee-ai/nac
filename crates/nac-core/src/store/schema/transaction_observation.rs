@@ -25,6 +25,24 @@ pub(super) struct TransactionObservation {
     state: RefCell<State>,
 }
 
+impl TransactionObservation {
+    pub(super) fn detach(&self, connection: &Connection) {
+        // SAFETY: the owning connection is still live and exclusively owned.
+        // Clear both raw contexts before close can reject outstanding native
+        // resources and leave its SQLite handle alive beyond this Rust owner.
+        unsafe {
+            ffi::sqlite3_trace_v2(connection.handle(), 0, None, std::ptr::null_mut());
+            ffi::sqlite3_rollback_hook(connection.handle(), None, std::ptr::null_mut());
+        }
+    }
+
+    pub(super) fn finish_abandoned(&mut self) {
+        // Called after dropping the connection owner, not on a native close
+        // notification: a rejected close does not prove transaction completion.
+        finish(self.state.get_mut(), TelemetryOutcome::Error);
+    }
+}
+
 pub(super) fn install(connection: &Connection) -> Option<Box<TransactionObservation>> {
     if !telemetry::enabled() {
         return None;
@@ -33,15 +51,15 @@ pub(super) fn install(connection: &Connection) -> Option<Box<TransactionObservat
         state: RefCell::new(State::default()),
     });
     let context = std::ptr::from_ref(observation.as_ref()).cast_mut().cast();
-    // SAFETY: the owning StoreConnection drops Connection before this stable Box.
+    // SAFETY: StoreConnection unregisters both callbacks before dropping its
+    // Connection and freeing this stable Box, even if native close is rejected.
     // Connection is not Sync; SQLite invokes this callback synchronously. The
     // callback observes flags/SQL only and never executes SQL or changes results.
     let code = unsafe {
         ffi::sqlite3_rollback_hook(connection.handle(), Some(rollback), context);
         ffi::sqlite3_trace_v2(
             connection.handle(),
-            (ffi::SQLITE_TRACE_STMT | ffi::SQLITE_TRACE_PROFILE | ffi::SQLITE_TRACE_CLOSE)
-                as c_uint,
+            (ffi::SQLITE_TRACE_STMT | ffi::SQLITE_TRACE_PROFILE) as c_uint,
             Some(trace),
             context,
         )
@@ -71,13 +89,9 @@ unsafe extern "C" fn trace(
 ) -> c_int {
     // No Rust panic may cross SQLite's C callback boundary.
     let _ = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: install gives SQLite a live Box context until Connection closes.
+        // SAFETY: install gives SQLite a live Box context until callbacks detach.
         let observation = unsafe { &*context.cast::<TransactionObservation>() };
         let mut state = observation.state.borrow_mut();
-        if event == ffi::SQLITE_TRACE_CLOSE as c_uint {
-            finish(&mut state, TelemetryOutcome::Error);
-            return;
-        }
         // SAFETY: STMT/PROFILE supply a live sqlite3_stmt. SQLite owns its SQL;
         // it is inspected only here, never expanded, retained or exported.
         let (autocommit, sql) = unsafe {
