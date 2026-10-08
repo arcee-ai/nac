@@ -347,7 +347,7 @@ fn sqlite_profile_classifies_only_fixed_statement_kinds() {
             .filter_map(|event| event.operation)
             .collect::<Vec<_>>(),
         vec![
-            StoreOperation::Transaction,
+            StoreOperation::TransactionBegin,
             StoreOperation::Commit,
             StoreOperation::Checkpoint
         ]
@@ -367,4 +367,444 @@ fn sqlite_primary_and_extended_error_identity_are_retained_without_message() {
     assert!(!serde_json::to_string(&identity)
         .unwrap()
         .contains("file truncated"));
+}
+
+struct TransactionTestDirectory(std::path::PathBuf);
+
+impl TransactionTestDirectory {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "nac_transaction_observation_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TransactionTestDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn transaction_test_connection(path: &std::path::Path) -> crate::store::StoreConnection {
+    crate::store::open_runtime_connection(path).unwrap()
+}
+
+struct OutstandingNativeStatement {
+    database: *mut rusqlite::ffi::sqlite3,
+    statement: *mut rusqlite::ffi::sqlite3_stmt,
+    owns_database: bool,
+}
+
+impl OutstandingNativeStatement {
+    fn new(connection: &rusqlite::Connection) -> Self {
+        let mut statement = std::ptr::null_mut();
+        // SAFETY: the live connection owns the database. This guard finalizes
+        // its intentionally outstanding native statement before cleanup.
+        let database = unsafe { connection.handle() };
+        let code = unsafe {
+            rusqlite::ffi::sqlite3_prepare_v2(
+                database,
+                c"SELECT 1".as_ptr(),
+                -1,
+                &mut statement,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(code, rusqlite::ffi::SQLITE_OK);
+        Self {
+            database,
+            statement,
+            owns_database: false,
+        }
+    }
+}
+
+impl Drop for OutstandingNativeStatement {
+    fn drop(&mut self) {
+        // SAFETY: the statement prevents native close while outstanding. If
+        // the Rust owner was dropped, this guard now owns the surviving handle.
+        // Defensively clear callbacks before cleanup, including assertion failure.
+        unsafe {
+            if self.owns_database {
+                rusqlite::ffi::sqlite3_trace_v2(self.database, 0, None, std::ptr::null_mut());
+                rusqlite::ffi::sqlite3_rollback_hook(self.database, None, std::ptr::null_mut());
+            }
+            rusqlite::ffi::sqlite3_finalize(self.statement);
+            if self.owns_database {
+                rusqlite::ffi::sqlite3_close(self.database);
+            }
+        }
+    }
+}
+
+#[test]
+fn rejected_native_close_keeps_transaction_observation_open() {
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let path = dir.path().join("store.db");
+    crate::store::initialize(&path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let conn = transaction_test_connection(&path);
+    conn.execute_batch("BEGIN").unwrap();
+    let native = OutstandingNativeStatement::new(&conn);
+    // SAFETY: this close must reject the outstanding statement and leave the
+    // database valid; no successful raw close may bypass the Rust owner.
+    assert_eq!(
+        unsafe { rusqlite::ffi::sqlite3_close(native.database) },
+        rusqlite::ffi::SQLITE_BUSY
+    );
+    assert!(!conn.is_autocommit());
+    let before_commit = wait_for_events(&exporter, recorder.stats().accepted as usize);
+    assert!(!before_commit
+        .iter()
+        .any(|event| event.operation == Some(StoreOperation::Transaction)));
+    conn.execute_batch("COMMIT").unwrap();
+    let events = wait_for_events(&exporter, recorder.stats().accepted as usize);
+    let transactions = events
+        .iter()
+        .filter(|event| event.operation == Some(StoreOperation::Transaction))
+        .collect::<Vec<_>>();
+    assert_eq!(transactions.len(), 1);
+    assert_eq!(transactions[0].outcome, Some(TelemetryOutcome::Ok));
+}
+
+#[test]
+fn connection_owner_drop_detaches_callbacks_when_native_close_is_busy() {
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let path = dir.path().join("store.db");
+    crate::store::initialize(&path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let conn = transaction_test_connection(&path);
+    conn.execute_batch("BEGIN").unwrap();
+    let mut native = OutstandingNativeStatement::new(&conn);
+    native.owns_database = true;
+    drop(conn);
+    let accepted_after_drop = recorder.stats().accepted;
+    let events = wait_for_events(&exporter, accepted_after_drop as usize);
+    let transactions = events
+        .iter()
+        .filter(|event| event.operation == Some(StoreOperation::Transaction))
+        .collect::<Vec<_>>();
+    assert_eq!(transactions.len(), 1);
+    assert_eq!(transactions[0].outcome, Some(TelemetryOutcome::Error));
+    // SAFETY: the outstanding statement kept this database alive when the Rust
+    // owner tried to close it. The hook API returns the prior context without
+    // dereferencing it, so this assertion detects a stale rollback registration.
+    let previous_context = unsafe {
+        rusqlite::ffi::sqlite3_rollback_hook(native.database, None, std::ptr::null_mut())
+    };
+    assert!(previous_context.is_null());
+    // Exercise STMT/PROFILE and rollback after the observation Box was freed.
+    // Neither callback may run or export another event on the surviving handle.
+    unsafe {
+        assert_eq!(
+            rusqlite::ffi::sqlite3_step(native.statement),
+            rusqlite::ffi::SQLITE_ROW
+        );
+        assert_eq!(
+            rusqlite::ffi::sqlite3_step(native.statement),
+            rusqlite::ffi::SQLITE_DONE
+        );
+        assert_eq!(
+            rusqlite::ffi::sqlite3_exec(
+                native.database,
+                c"ROLLBACK".as_ptr(),
+                None,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ),
+            rusqlite::ffi::SQLITE_OK
+        );
+    }
+    drop(native);
+    assert_eq!(recorder.stats().accepted, accepted_after_drop);
+}
+
+#[test]
+fn transaction_lifetime_includes_body_and_commit_once() {
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let path = dir.path().join("store.db");
+    crate::store::initialize(&path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let mut conn = transaction_test_connection(&path);
+    let correlation = Correlation::session(Some("transaction-session"));
+    in_store_command(correlation.clone(), || {
+        let transaction = conn.transaction().unwrap();
+        transaction
+            .execute_batch("CREATE TABLE observation_test(value TEXT)")
+            .unwrap();
+        transaction
+            .execute("INSERT INTO observation_test VALUES (?1)", ["SQL-CANARY"])
+            .unwrap();
+        // Only a lower bound: scheduler delays cannot make this assertion flaky.
+        std::thread::sleep(Duration::from_millis(20));
+        transaction.commit().unwrap();
+    });
+    let events = wait_for_events(&exporter, recorder.stats().accepted as usize);
+    let transactions = events
+        .iter()
+        .filter(|e| e.operation == Some(StoreOperation::Transaction))
+        .collect::<Vec<_>>();
+    assert_eq!(transactions.len(), 1);
+    assert_eq!(transactions[0].outcome, Some(TelemetryOutcome::Ok));
+    assert_eq!(transactions[0].correlation.session, correlation.session);
+    assert!(transactions[0].duration_us.unwrap() >= 20_000);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.operation == Some(StoreOperation::TransactionBegin))
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.operation == Some(StoreOperation::Commit))
+            .count(),
+        1
+    );
+    assert!(!serde_json::to_string(&events)
+        .unwrap()
+        .contains("SQL-CANARY"));
+}
+
+#[test]
+fn transaction_observation_keeps_interleaved_connections_separate() {
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let a_path = dir.path().join("a.db");
+    let b_path = dir.path().join("b.db");
+    crate::store::initialize(&a_path).unwrap();
+    crate::store::initialize(&b_path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let a = transaction_test_connection(&a_path);
+    let b = transaction_test_connection(&b_path);
+    a.execute_batch("/* leading comment */ BEGIN").unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    b.execute_batch("BEGIN; COMMIT").unwrap();
+    a.execute_batch("END").unwrap();
+    let transactions = wait_for_events(&exporter, recorder.stats().accepted as usize)
+        .into_iter()
+        .filter(|e| e.operation == Some(StoreOperation::Transaction))
+        .collect::<Vec<_>>();
+    assert_eq!(transactions.len(), 2);
+    assert!(transactions[1].duration_us.unwrap() >= 20_000);
+    assert!(transactions[1].duration_us.unwrap() > transactions[0].duration_us.unwrap());
+    assert!(transactions
+        .iter()
+        .all(|e| e.outcome == Some(TelemetryOutcome::Ok)));
+}
+
+#[test]
+fn transaction_observation_distinguishes_commit_failure_rollback_and_close() {
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let path = dir.path().join("store.db");
+    crate::store::initialize(&path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let mut conn = transaction_test_connection(&path);
+    assert!(conn.execute_batch("COMMIT").is_err());
+    conn.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE observation_parent(id INTEGER PRIMARY KEY); CREATE TABLE observation_child(parent INTEGER REFERENCES observation_parent(id) DEFERRABLE INITIALLY DEFERRED)").unwrap();
+    conn.execute_batch("BEGIN; INSERT INTO observation_child VALUES(1)")
+        .unwrap();
+    assert!(conn.execute_batch("COMMIT").is_err());
+    assert!(!conn.is_autocommit());
+    conn.execute_batch("ROLLBACK").unwrap();
+    {
+        let _rollback_on_drop = conn.transaction().unwrap();
+    }
+    conn.execute_batch("BEGIN").unwrap();
+    drop(conn);
+    let events = wait_for_events(&exporter, recorder.stats().accepted as usize);
+    let transactions = events
+        .iter()
+        .filter(|e| e.operation == Some(StoreOperation::Transaction))
+        .collect::<Vec<_>>();
+    assert_eq!(transactions.len(), 3);
+    assert!(transactions
+        .iter()
+        .all(|e| e.outcome == Some(TelemetryOutcome::Error)));
+    assert!(events
+        .iter()
+        .any(|e| e.operation == Some(StoreOperation::Commit)
+            && e.outcome == Some(TelemetryOutcome::Error)));
+}
+
+#[test]
+fn transaction_observation_marks_rejected_commit_as_rollback() {
+    unsafe extern "C" fn reject_commit(_: *mut std::ffi::c_void) -> std::ffi::c_int {
+        1
+    }
+
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let path = dir.path().join("store.db");
+    crate::store::initialize(&path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let conn = transaction_test_connection(&path);
+    conn.execute_batch("CREATE TABLE observation_commit(value INTEGER)")
+        .unwrap();
+
+    for (opening, closing) in [
+        ("BEGIN", "COMMIT"),
+        ("BEGIN", "END"),
+        ("SAVEPOINT outer_transaction", "RELEASE outer_transaction"),
+    ] {
+        // SAFETY: the test-only hook has no context and remains valid until
+        // removed below. It injects an actual SQLite commit rejection.
+        unsafe {
+            rusqlite::ffi::sqlite3_commit_hook(
+                conn.handle(),
+                Some(reject_commit),
+                std::ptr::null_mut(),
+            );
+        }
+        conn.execute_batch(opening).unwrap();
+        conn.execute_batch("INSERT INTO observation_commit VALUES(1)")
+            .unwrap();
+        let error = conn.execute_batch(closing).unwrap_err();
+        assert_eq!(store_error_identity(&error).unwrap().primary_code, 19);
+        if closing == "RELEASE outer_transaction" {
+            // SQLite leaves this rejected savepoint release open. It must not
+            // finish the lifetime until the following explicit rollback.
+            assert!(!conn.is_autocommit());
+            let events = wait_for_events(&exporter, recorder.stats().accepted as usize);
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| event.operation == Some(StoreOperation::Transaction))
+                    .count(),
+                4
+            );
+            conn.execute_batch("ROLLBACK").unwrap();
+        }
+        assert!(conn.is_autocommit(), "{closing} did not restore autocommit");
+        // SAFETY: removing this test's hook leaves the observer's rollback
+        // hook intact. The next transaction must not inherit the failure.
+        unsafe {
+            rusqlite::ffi::sqlite3_commit_hook(conn.handle(), None, std::ptr::null_mut());
+        }
+        conn.execute_batch("BEGIN; COMMIT").unwrap();
+    }
+
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM observation_commit", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap(),
+        0
+    );
+    let events = wait_for_events(&exporter, recorder.stats().accepted as usize);
+    let outcomes = |operation| {
+        events
+            .iter()
+            .filter(|event| event.operation == Some(operation))
+            .map(|event| event.outcome.unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        outcomes(StoreOperation::Transaction),
+        vec![
+            TelemetryOutcome::Error,
+            TelemetryOutcome::Ok,
+            TelemetryOutcome::Error,
+            TelemetryOutcome::Ok,
+            TelemetryOutcome::Error,
+            TelemetryOutcome::Ok,
+        ]
+    );
+    assert_eq!(
+        outcomes(StoreOperation::Commit),
+        vec![
+            TelemetryOutcome::Error,
+            TelemetryOutcome::Ok,
+            TelemetryOutcome::Error,
+            TelemetryOutcome::Ok,
+            TelemetryOutcome::Ok,
+        ]
+    );
+}
+
+#[test]
+fn failed_begin_does_not_create_a_transaction_lifetime() {
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let path = dir.path().join("store.db");
+    crate::store::initialize(&path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let a = transaction_test_connection(&path);
+    let b = transaction_test_connection(&path);
+    a.execute_batch("BEGIN IMMEDIATE").unwrap();
+    b.busy_timeout(Duration::ZERO).unwrap();
+    assert!(b.execute_batch("BEGIN IMMEDIATE").is_err());
+    assert!(b.is_autocommit());
+    a.execute_batch("ROLLBACK").unwrap();
+    let events = wait_for_events(&exporter, recorder.stats().accepted as usize);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.operation == Some(StoreOperation::TransactionBegin))
+            .count(),
+        1
+    );
+    let transactions = events
+        .iter()
+        .filter(|e| e.operation == Some(StoreOperation::Transaction))
+        .collect::<Vec<_>>();
+    assert_eq!(transactions.len(), 1);
+    assert_eq!(transactions[0].outcome, Some(TelemetryOutcome::Error));
+}
+
+#[test]
+fn transaction_observation_keeps_savepoints_inside_one_lifetime() {
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let path = dir.path().join("store.db");
+    crate::store::initialize(&path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let conn = transaction_test_connection(&path);
+    conn.execute_batch("SAVEPOINT outer_transaction; SAVEPOINT nested; ROLLBACK TO nested; RELEASE nested; RELEASE outer_transaction").unwrap();
+    conn.execute_batch("BEGIN").unwrap();
+    assert!(conn.execute_batch("BEGIN").is_err());
+    conn.execute_batch("COMMIT").unwrap();
+    let events = wait_for_events(&exporter, recorder.stats().accepted as usize);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.operation == Some(StoreOperation::TransactionBegin))
+            .count(),
+        2
+    );
+    let transactions = events
+        .iter()
+        .filter(|e| e.operation == Some(StoreOperation::Transaction))
+        .collect::<Vec<_>>();
+    assert_eq!(transactions.len(), 2);
+    assert!(transactions
+        .iter()
+        .all(|e| e.outcome == Some(TelemetryOutcome::Ok)));
 }

@@ -83,6 +83,7 @@ impl TelemetryName {
 pub enum StoreOperation {
     ConnectionAcquire,
     Transaction,
+    TransactionBegin,
     Commit,
     Checkpoint,
     Retry,
@@ -523,7 +524,7 @@ impl Drop for StoreCorrelationScope {
     }
 }
 
-fn current_store_correlation() -> Correlation {
+pub(crate) fn current_store_correlation() -> Correlation {
     STORE_CORRELATION.with(|stack| stack.borrow().last().cloned().unwrap_or_default())
 }
 
@@ -632,7 +633,7 @@ pub fn emit_store_duration(
 pub fn sqlite_profile(sql: &str, duration: Duration) {
     let sql = sql.trim_start();
     let operation = if starts_with_ascii_case(sql, "BEGIN") {
-        Some(StoreOperation::Transaction)
+        Some(StoreOperation::TransactionBegin)
     } else if starts_with_ascii_case(sql, "COMMIT") {
         Some(StoreOperation::Commit)
     } else if starts_with_ascii_case(sql, "PRAGMA WAL_CHECKPOINT") {
