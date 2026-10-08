@@ -8,6 +8,8 @@ pub mod commands;
 pub mod events;
 mod goals;
 pub mod light_model;
+#[cfg(feature = "managed-fault-fixture")]
+pub mod managed_fault_fixture;
 mod mcp;
 pub mod model;
 pub mod orchestration_control;

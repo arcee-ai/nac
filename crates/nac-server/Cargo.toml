@@ -13,6 +13,9 @@ name = "nac_server"
 name = "nac-web"
 path = "src/main.rs"
 
+[features]
+managed-fault-fixture = ["nac-core/managed-fault-fixture"]
+
 [dependencies]
 nac-contracts = { path = "../nac-contracts" }
 nac-core = { path = "../nac-core", features = ["openapi"] }
