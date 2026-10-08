@@ -499,3 +499,7 @@ fn terminal_error(status: StatusCode, bytes: &[u8]) -> OAuthError {
 #[cfg(test)]
 #[path = "clerk_oauth_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "clerk_oauth_probe_tests.rs"]
+mod provider_probes;
