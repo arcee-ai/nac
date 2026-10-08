@@ -112,7 +112,10 @@ pub(crate) fn runtime_readiness_checks_with_store(
     let mut checks = vec![match store_check {
         Ok(()) => ReadinessCheck::pass("store", "SQLite store is open and migrated"),
         Err(_) => {
-            let migration = nac_core::store::migration_status(&manager.inner.store_path);
+            // Failure diagnostics must also avoid the saturated write
+            // queue; otherwise the probe observer could re-enter it here.
+            let migration =
+                nac_core::store::observe_probe_migration_status(&manager.inner.store_path);
             let reason = migration
                 .failure
                 .map_or(migration.state.as_str(), |failure| failure.as_str());
