@@ -18,6 +18,7 @@ struct State {
     // A statement begins before SQLite has changed its autocommit flag.
     beginning: Option<Started>,
     transaction: Option<Started>,
+    rollback_observed: bool,
 }
 
 pub(super) struct TransactionObservation {
@@ -36,6 +37,7 @@ pub(super) fn install(connection: &Connection) -> Option<Box<TransactionObservat
     // Connection is not Sync; SQLite invokes this callback synchronously. The
     // callback observes flags/SQL only and never executes SQL or changes results.
     let code = unsafe {
+        ffi::sqlite3_rollback_hook(connection.handle(), Some(rollback), context);
         ffi::sqlite3_trace_v2(
             connection.handle(),
             (ffi::SQLITE_TRACE_STMT | ffi::SQLITE_TRACE_PROFILE | ffi::SQLITE_TRACE_CLOSE)
@@ -50,6 +52,15 @@ pub(super) fn install(connection: &Connection) -> Option<Box<TransactionObservat
     // Retain the context even on registration failure; telemetry cannot change
     // application results, and a partially installed callback must stay safe.
     Some(observation)
+}
+
+unsafe extern "C" fn rollback(context: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: this callback shares the stable context owned until close.
+        // It only marks observer state; it never calls back into SQLite.
+        let observation = unsafe { &*context.cast::<TransactionObservation>() };
+        observation.state.borrow_mut().rollback_observed = true;
+    }));
 }
 
 unsafe extern "C" fn trace(
@@ -83,6 +94,7 @@ unsafe extern "C" fn trace(
         let kind = keyword(sql);
         if event == ffi::SQLITE_TRACE_STMT as c_uint {
             if autocommit && matches!(kind, "BEGIN" | "SAVEPOINT") {
+                state.rollback_observed = false;
                 state.beginning = Some(Started {
                     at: Instant::now(),
                     correlation: telemetry::current_store_correlation(),
@@ -105,8 +117,11 @@ unsafe extern "C" fn trace(
             }
         }
         let was_transaction = state.transaction.is_some();
+        // A failed COMMIT can restore autocommit by automatically rolling back.
+        // SQLite sets its error code after PROFILE, so use the rollback hook.
+        let committed = was_transaction && autocommit && !state.rollback_observed;
         if was_transaction && autocommit {
-            let outcome = if matches!(kind, "COMMIT" | "END" | "RELEASE") {
+            let outcome = if committed && matches!(kind, "COMMIT" | "END" | "RELEASE") {
                 TelemetryOutcome::Ok
             } else {
                 TelemetryOutcome::Error
@@ -118,7 +133,7 @@ unsafe extern "C" fn trace(
                 StoreOperation::Commit,
                 telemetry::current_store_correlation(),
                 duration,
-                if was_transaction && autocommit {
+                if committed {
                     TelemetryOutcome::Ok
                 } else {
                     TelemetryOutcome::Error

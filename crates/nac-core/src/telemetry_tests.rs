@@ -513,6 +513,103 @@ fn transaction_observation_distinguishes_commit_failure_rollback_and_close() {
 }
 
 #[test]
+fn transaction_observation_marks_rejected_commit_as_rollback() {
+    unsafe extern "C" fn reject_commit(_: *mut std::ffi::c_void) -> std::ffi::c_int {
+        1
+    }
+
+    let _lock = telemetry_test_lock();
+    let dir = TransactionTestDirectory::new();
+    let path = dir.path().join("store.db");
+    crate::store::initialize(&path).unwrap();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 128);
+    let _guard = install_test_recorder(recorder.clone());
+    let conn = transaction_test_connection(&path);
+    conn.execute_batch("CREATE TABLE observation_commit(value INTEGER)")
+        .unwrap();
+
+    for (opening, closing) in [
+        ("BEGIN", "COMMIT"),
+        ("BEGIN", "END"),
+        ("SAVEPOINT outer_transaction", "RELEASE outer_transaction"),
+    ] {
+        // SAFETY: the test-only hook has no context and remains valid until
+        // removed below. It injects an actual SQLite commit rejection.
+        unsafe {
+            rusqlite::ffi::sqlite3_commit_hook(
+                conn.handle(),
+                Some(reject_commit),
+                std::ptr::null_mut(),
+            );
+        }
+        conn.execute_batch(opening).unwrap();
+        conn.execute_batch("INSERT INTO observation_commit VALUES(1)")
+            .unwrap();
+        let error = conn.execute_batch(closing).unwrap_err();
+        assert_eq!(store_error_identity(&error).unwrap().primary_code, 19);
+        if closing == "RELEASE outer_transaction" {
+            // SQLite leaves this rejected savepoint release open. It must not
+            // finish the lifetime until the following explicit rollback.
+            assert!(!conn.is_autocommit());
+            let events = wait_for_events(&exporter, recorder.stats().accepted as usize);
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| event.operation == Some(StoreOperation::Transaction))
+                    .count(),
+                4
+            );
+            conn.execute_batch("ROLLBACK").unwrap();
+        }
+        assert!(conn.is_autocommit(), "{closing} did not restore autocommit");
+        // SAFETY: removing this test's hook leaves the observer's rollback
+        // hook intact. The next transaction must not inherit the failure.
+        unsafe {
+            rusqlite::ffi::sqlite3_commit_hook(conn.handle(), None, std::ptr::null_mut());
+        }
+        conn.execute_batch("BEGIN; COMMIT").unwrap();
+    }
+
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM observation_commit", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap(),
+        0
+    );
+    let events = wait_for_events(&exporter, recorder.stats().accepted as usize);
+    let outcomes = |operation| {
+        events
+            .iter()
+            .filter(|event| event.operation == Some(operation))
+            .map(|event| event.outcome.unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        outcomes(StoreOperation::Transaction),
+        vec![
+            TelemetryOutcome::Error,
+            TelemetryOutcome::Ok,
+            TelemetryOutcome::Error,
+            TelemetryOutcome::Ok,
+            TelemetryOutcome::Error,
+            TelemetryOutcome::Ok,
+        ]
+    );
+    assert_eq!(
+        outcomes(StoreOperation::Commit),
+        vec![
+            TelemetryOutcome::Error,
+            TelemetryOutcome::Ok,
+            TelemetryOutcome::Error,
+            TelemetryOutcome::Ok,
+            TelemetryOutcome::Ok,
+        ]
+    );
+}
+
+#[test]
 fn failed_begin_does_not_create_a_transaction_lifetime() {
     let _lock = telemetry_test_lock();
     let dir = TransactionTestDirectory::new();

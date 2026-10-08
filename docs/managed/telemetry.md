@@ -66,6 +66,8 @@ of its opening `BEGIN` (or outer `SAVEPOINT`) until SQLite finishes its closing
 the body, lock wait, and closing statement. A failed commit that leaves the
 transaction open does not finish the span; a later rollback or connection close
 finishes it with outcome `error`. Nested savepoints do not add transaction spans.
+An automatic rollback during a failed commit also finishes with outcome `error`,
+even when SQLite has already restored autocommit.
 The begin-time correlation is retained separately for each connection.
 
 `transaction_begin`, `commit`, and `checkpoint` report individual statement
