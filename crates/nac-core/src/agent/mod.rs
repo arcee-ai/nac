@@ -724,10 +724,24 @@ impl Agent {
             let delta_sink: DeltaSink<'_> = (self.thread_name.is_none()
                 && self.event_sink.wants_assistant_deltas())
             .then_some(&push_delta);
-            let turn = self
-                .client
-                .send_turn_streaming(provider_view.messages, request_tool_defs, delta_sink)
-                .await;
+            let model_call = self.client.send_turn_streaming(
+                provider_view.messages,
+                request_tool_defs,
+                delta_sink,
+            );
+            let cancellation = self.command_cancellation();
+            let turn = if self.mode == AgentMode::Worker && self.steering_dispatch_id.is_some() {
+                // Native workers acknowledge host cancellation on a separate
+                // stdin thread. Interrupt provider I/O too, so normal cleanup
+                // and the CLI's final telemetry receipt run before host reap.
+                tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => Err(anyhow!("worker command cancelled")),
+                    result = model_call => result,
+                }
+            } else {
+                model_call.await
+            };
             // Whatever arrived in the last partial window still belongs on screen.
             deltas.flush();
             let response = match turn {
