@@ -27,9 +27,11 @@ static storage, preserving their paths. Supply the public URL of the manifest's
 MathJax font directory as `assets.mathjaxFontUrl`; formulas require this URL.
 CSS is opt-in and scoped to `[data-nac-runtime]`. Fonts, animation names and
 Tailwind property registrations are namespaced. Formula sheets remain within
-the instance boundary and use instance-specific font families. The consumer's
-build must preserve modern nested CSS and `@scope`, or compile them for its
-supported browsers.
+the instance boundary and use instance-specific font families. The packed
+stylesheet contains prefixed selectors, without `@scope`; the consumer must
+support or compile its nested CSS. Formula sheets generated at
+runtime use `@scope` and require browser support; consumer build-time CSS
+compilation does not transform those dynamic sheets.
 
 ## Constructing a view
 
@@ -42,8 +44,10 @@ client constructors. `scope.endpoint` must exactly
 match the client's normalized endpoint.
 
 ```tsx
-import { createNativeRuntime, NativePresentationRoot } from
-  "@arcee-ai/nac-client-all-121/presentation";
+import {
+  createNativeRuntime,
+  NativePresentationRoot,
+} from "@arcee-ai/nac-client-all-121/presentation";
 import "@arcee-ai/nac-client-all-121/presentation/styles.css";
 
 const runtime = createNativeRuntime({
@@ -56,7 +60,7 @@ const runtime = createNativeRuntime({
 <NativePresentationRoot
   runtime={runtime}
   router={(children) => <MemoryRouter>{children}</MemoryRouter>}
-/>
+/>;
 ```
 
 When the product already has a router, mount this view in a separate

@@ -19,8 +19,10 @@ asset hosting. Copy the paths in `presentation/assets.json` from the packed
 artifact to static storage preserving their paths; set `assets.mathjaxFontUrl`
 on `createNativeRuntime` to the public MathJax font directory. Formula fonts
 are fetched there. The stylesheet is opt-in, scoped to `[data-nac-runtime]`, and
-uses namespaced fonts, animations and Tailwind registrations. Browser support
-must include nested CSS and `@scope`, or the consumer must compile them.
+uses namespaced fonts, animations and Tailwind registrations. The emitted
+stylesheet uses prefixed selectors; the consumer must support or compile its
+nested CSS. Formula sheets are generated at runtime with `@scope`
+and require browser support for that feature.
 
 A product with BrowserRouter must mount the native MemoryRouter in a separate
 caller-owned React root. Close the old runtime before replacement, logout,
