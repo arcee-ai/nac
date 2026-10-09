@@ -52,6 +52,35 @@ function envelope(sequence_id: number): SessionEventEnvelope {
 }
 
 describe("native runtime lifetime", () => {
+  it.each([
+    { profile: "standalone", queryRetry: 1, attempts: 2 },
+    { profile: "hosted", queryRetry: undefined, attempts: 1 },
+  ] as const)("preserves $profile read retries without replaying mutations", async (policy) => {
+    vi.useFakeTimers();
+    const instance = createNativeRuntime({
+      scope: { ...scope, profile: policy.profile },
+      client: createNacClient({ endpoint: scope.endpoint, fetch: vi.fn() }),
+      queryRetry: policy.queryRetry,
+    });
+    opened.push(instance);
+    const failure = new Error("transient read failure");
+    const queryFn = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue("recovered");
+    const read = instance.queryClient.fetchQuery({ queryKey: ["transient"], queryFn }).then(
+      (value: unknown) => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+    await vi.runAllTimersAsync();
+    expect(await read).toEqual(policy.attempts === 2 ? { value: "recovered" } : { error: failure });
+    expect(queryFn).toHaveBeenCalledTimes(policy.attempts);
+
+    const mutationFn = vi.fn().mockRejectedValue(failure);
+    const mutation = instance.queryClient.getMutationCache().build(instance.queryClient, {
+      mutationFn,
+    });
+    await expect(mutation.execute(undefined)).rejects.toBe(failure);
+    expect(mutationFn).toHaveBeenCalledOnce();
+  });
+
   it("isolates equal IDs and endpoints, including live output and browser presentation", () => {
     const left = runtime();
     const right = runtime();

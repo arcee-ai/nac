@@ -23,6 +23,8 @@ export interface NativeRuntimeOptions {
     storage?: Pick<Storage, "getItem" | "setItem">;
     assets?: NativePresentationAssets;
     eventSource?: SessionStreamOptions["eventSource"];
+    /** Hosted reads default to no replay; standalone retains its one retry. */
+    queryRetry?: false | 1;
 }
 export declare class NativeRuntime {
     readonly id: number;

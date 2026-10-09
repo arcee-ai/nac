@@ -20,6 +20,7 @@ const runtime = createNativeRuntime({
   },
   client: nacClient,
   storage: localStorage,
+  queryRetry: 1,
 });
 
 // Alt-click jumps from a rendered element to its source. The import is dynamic

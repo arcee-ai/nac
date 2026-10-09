@@ -2740,16 +2740,7 @@ var da = class extends se {
 	assets;
 	api;
 	stores;
-	queryClient = new d({ defaultOptions: {
-		queries: {
-			queryKeyHashFn: (e) => f([this.id, ...e]),
-			staleTime: 3e4,
-			gcTime: 3e5,
-			retry: !1,
-			refetchOnWindowFocus: !1
-		},
-		mutations: { retry: !1 }
-	} });
+	queryClient;
 	controller = new AbortController();
 	disposers = /* @__PURE__ */ new Set();
 	listeners = /* @__PURE__ */ new Set();
@@ -2758,7 +2749,16 @@ var da = class extends se {
 	eventSource;
 	constructor(e) {
 		if (e.scope.endpoint !== e.client.transport.endpoint) throw Error("Runtime scope must name the supplied client's endpoint.");
-		this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.stores = oa(e.storage), this.scope = Object.freeze({ ...e.scope }), this.client = new E(new da(e.client.transport, this.controller.signal)), this.api = pe(this.client), this.eventSource = e.eventSource, fa.set(this.queryClient, this);
+		this.queryClient = new d({ defaultOptions: {
+			queries: {
+				queryKeyHashFn: (e) => f([this.id, ...e]),
+				staleTime: 3e4,
+				gcTime: 3e5,
+				retry: e.queryRetry ?? !1,
+				refetchOnWindowFocus: !1
+			},
+			mutations: { retry: !1 }
+		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.stores = oa(e.storage), this.scope = Object.freeze({ ...e.scope }), this.client = new E(new da(e.client.transport, this.controller.signal)), this.api = pe(this.client), this.eventSource = e.eventSource, fa.set(this.queryClient, this);
 	}
 	isClosed = () => this.controller.signal.aborted;
 	subscribe = (e) => (this.listeners.add(e), () => {

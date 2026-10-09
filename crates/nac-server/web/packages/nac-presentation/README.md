@@ -32,6 +32,10 @@ revoked eligibility or host deletion, then unmount its React root. Bindings are
 opaque state partitions and never authorization. Accepted mutations with lost
 responses require authoritative readback without replay.
 
+Hosted query reads default to no retries. The standalone entry explicitly sets
+`queryRetry: 1` to retain its existing transient-read recovery; callers may select
+that same bounded policy. Mutation retries remain disabled in either profile.
+
 Qualified locked peers: React/ReactDOM 19.2.8, React Router 7.18.2, TanStack Query
 5.101.4; and React/ReactDOM 19.2.6, React Router 7.15.0, TanStack Query 5.100.10.
 Peers are optional for SDK-only imports. The declared major ranges do not

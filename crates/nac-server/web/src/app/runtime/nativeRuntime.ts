@@ -36,6 +36,8 @@ export interface NativeRuntimeOptions {
   storage?: Pick<Storage, "getItem" | "setItem">;
   assets?: NativePresentationAssets;
   eventSource?: SessionStreamOptions["eventSource"];
+  /** Hosted reads default to no replay; standalone retains its one retry. */
+  queryRetry?: false | 1;
 }
 
 const runtimes = new WeakMap<QueryClient, NativeRuntime>();
@@ -48,18 +50,7 @@ export class NativeRuntime {
   readonly assets: Readonly<NativePresentationAssets> | undefined;
   readonly api: ReturnType<typeof createNativeApi>;
   readonly stores: ReturnType<typeof createPresentationStores>;
-  readonly queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        queryKeyHashFn: (key) => hashKey([this.id, ...key]),
-        staleTime: 30_000,
-        gcTime: 300_000,
-        retry: false,
-        refetchOnWindowFocus: false,
-      },
-      mutations: { retry: false },
-    },
-  });
+  readonly queryClient: QueryClient;
   private readonly controller = new AbortController();
   private readonly disposers = new Set<() => void>();
   private readonly listeners = new Set<() => void>();
@@ -70,6 +61,18 @@ export class NativeRuntime {
   constructor(options: NativeRuntimeOptions) {
     if (options.scope.endpoint !== options.client.transport.endpoint)
       throw new Error("Runtime scope must name the supplied client's endpoint.");
+    this.queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          queryKeyHashFn: (key) => hashKey([this.id, ...key]),
+          staleTime: 30_000,
+          gcTime: 300_000,
+          retry: options.queryRetry ?? false,
+          refetchOnWindowFocus: false,
+        },
+        mutations: { retry: false },
+      },
+    });
     this.assets = options.assets ? Object.freeze({ ...options.assets }) : undefined;
     this.stores = createPresentationStores(options.storage);
     this.scope = Object.freeze({ ...options.scope });
