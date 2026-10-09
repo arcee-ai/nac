@@ -145,6 +145,7 @@ test-e2e-remote:
 
 ## Run focused deterministic lifecycle and crash-window regressions
 test-durability:
+	$(CARGO) test --locked -p nac-core human_shell_real_process_death_never_repeats_effects
 	$(CARGO) test --locked -p nac-core store::worker_dispatches
 	$(CARGO) test --locked -p nac-core host_completion_protocol
 	$(CARGO) test --locked -p nac-core store_process_lease

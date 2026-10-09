@@ -13,6 +13,7 @@ pub(crate) mod session_lifecycle;
 pub(crate) mod session_runs;
 pub(crate) mod session_terminals;
 pub(crate) mod sessions;
+pub(crate) mod shell_commands;
 pub(crate) mod ssh_configurations;
 pub(crate) mod workspace;
 

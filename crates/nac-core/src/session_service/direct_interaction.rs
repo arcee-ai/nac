@@ -12,7 +12,10 @@ impl SessionService {
             .store(true, std::sync::atomic::Ordering::Release);
         self.cancel_goal_retry_wake();
         self.coordinate_local(|service| {
-            let _operation = service.lock_active_operation();
+            let operation = service.lock_active_operation();
+            if let Some(ActiveSessionOperation::HumanShell(command)) = operation.as_ref() {
+                command.cancel_for_shutdown();
+            }
         })
         .await
     }

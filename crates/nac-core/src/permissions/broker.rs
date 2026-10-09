@@ -213,6 +213,29 @@ impl PermissionBroker {
         context: &crate::tools::kernel::ToolCallContext,
         cancellation: &crate::tools::ThreadCancellation,
     ) -> AuthorizationOutcome {
+        self.authorize_invocation(tool, resources, context, cancellation, false)
+            .await
+    }
+
+    pub(crate) async fn authorize_submitted_shell(
+        self: &Arc<Self>,
+        resources: &[PermissionResource],
+        context: &crate::tools::kernel::ToolCallContext,
+        cancellation: &crate::tools::ThreadCancellation,
+        _submission: &crate::session_service::SubmittedShell,
+    ) -> AuthorizationOutcome {
+        self.authorize_invocation("exec_command", resources, context, cancellation, true)
+            .await
+    }
+
+    async fn authorize_invocation(
+        self: &Arc<Self>,
+        tool: &str,
+        resources: &[PermissionResource],
+        context: &crate::tools::kernel::ToolCallContext,
+        cancellation: &crate::tools::ThreadCancellation,
+        human_submitted: bool,
+    ) -> AuthorizationOutcome {
         if resources.is_empty() {
             return AuthorizationOutcome::Denied(format!(
                 "tool '{tool}' did not declare canonical permission resources"
@@ -279,6 +302,12 @@ impl PermissionBroker {
 
         if cancellation.is_cancelled() {
             return AuthorizationOutcome::Denied("run was cancelled before approval".to_string());
+        }
+
+        // Exact human intent supplies invocation-only approval after policy.
+        // This path neither reads approval mode nor creates a remembered grant.
+        if human_submitted {
+            return AuthorizationOutcome::Allowed;
         }
 
         // The durable mode is consulted only after ordered configured and hard

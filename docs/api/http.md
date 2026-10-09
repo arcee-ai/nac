@@ -123,6 +123,38 @@ Goal creation during a run owned by another NAC process returns `409 Conflict`.
 The server never creates an unbound goal or guesses a cross-process mid-run
 token baseline.
 
+## Human shell commands
+
+In an idle direct-primary chat, `!<command>` runs the exact text after `!` on
+that session's selected backend. `\!` sends a literal leading bang as chat
+text. Commands do not start a model turn; “Ask about this” fills a draft that
+the user submits deliberately. Busy chats, orchestrators, and delegated
+children cannot admit this operation.
+
+`POST /sessions/{session_id}/user-commands` accepts `request_id`, `command`, and
+optional `timeout_ms` (1–3,600,000; default 30,000). It commits intent before
+returning 202. The same identity and exact payload/effective timeout return
+200; a reused identity with different input or a busy session returns 409.
+After a lost response, use `GET /sessions/{session_id}/user-commands/{request_id}`
+or resubmit the identical identity, never a fresh identity for uncertain work.
+
+The result distinguishes accepted, started, completed (including nonzero
+exit), timed out, cancelled, rejected, spawn failed, interrupted, and unknown
+outcomes. Terminal results and their user-attributed transcript entries commit
+atomically. Restart recovery never repeats an effect. Human intent supplies
+invocation-only approval after policy evaluation: hard/configured denials,
+canonical targets, backend confinement, and credential redaction still apply.
+
+`POST /sessions/{session_id}/user-commands/{request_id}/cancel` requests process
+tree cleanup. `GET /sessions/{session_id}/user-commands/{request_id}/output`
+pages settled retained output with `stream=combined|stdout|stderr`, `offset`,
+and `limit` (1–65,536; default 16,384). Cursors address the redacted stream, so
+secrets spanning page boundaries remain masked. Retention is bounded and
+process-local; unavailable output returns 410 while durable previews and
+outcomes survive. Forks preserve settled attribution without inheriting output
+handles. Session snapshots expose `shell_commands`, and snapshot refresh events
+publish command transitions without manufacturing a model run.
+
 ## Session behaviors and direct inbox
 
 `POST /sessions` accepts `behavior` as `orchestrator`, `direct`, or

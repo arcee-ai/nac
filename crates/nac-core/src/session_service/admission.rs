@@ -5,7 +5,7 @@ impl SessionService {
         &self,
         supplied_lease: Option<sessions::SessionOperationLease>,
     ) -> std::result::Result<
-        Option<sessions::SessionOperationLease>,
+        Option<Arc<sessions::SessionOperationLease>>,
         OperationAdmissionPreparationError,
     > {
         let operation_lease = match (supplied_lease, self.metadata.session_id.as_deref()) {
@@ -69,6 +69,16 @@ impl SessionService {
                     message: SessionCoordinationError::stale_configuration(session_id),
                 });
             }
+        }
+
+        let operation_lease = operation_lease.map(Arc::new);
+        if let Some(lease) = operation_lease.as_ref() {
+            self.reconcile_shell_commands_under_lease(lease)
+                .map_err(|error| OperationAdmissionPreparationError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to reconcile interrupted shell commands: {error:#}"
+                    )),
+                })?;
         }
 
         // The caller holds the local operation-state lock and the lease above
@@ -400,6 +410,16 @@ impl SessionService {
                     active_run: active_run.snapshot.clone(),
                 });
             }
+            Some(ActiveSessionOperation::HumanShell(active)) => {
+                return Err(SessionSubmitError::ExternalBusy {
+                    session_id: SessionOperationBusy::Local {
+                        session_id: self.metadata.session_id.clone().unwrap_or_default(),
+                        active_operation: ActiveSessionOperationSnapshot::HumanShell {
+                            command: Box::new(active.snapshot.clone()),
+                        },
+                    },
+                });
+            }
             Some(ActiveSessionOperation::ManualCompaction(active)) => {
                 return Err(SessionSubmitError::ExternalBusy {
                     session_id: SessionOperationBusy::Local {
@@ -589,7 +609,6 @@ impl SessionService {
                 }
             }
         }
-        let operation_lease = operation_lease.map(Arc::new);
         if let Some(lease) = operation_lease.as_ref() {
             self.agent
                 .try_lock()

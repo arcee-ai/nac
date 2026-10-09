@@ -570,6 +570,16 @@ impl Agent {
         self.tool_runtime.mcp.clone()
     }
 
+    pub(crate) fn shell_execution_context(&self) -> Result<(ToolRuntime, ModelClient)> {
+        anyhow::ensure!(
+            self.direct_primary,
+            "human shell commands require a direct primary"
+        );
+        let mut runtime = self.tool_runtime.clone();
+        runtime.command_cancellation = crate::tools::ThreadCancellation::default();
+        Ok((runtime, self.client.clone()))
+    }
+
     pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
         self.tool_runtime.terminal_manager.clone()
     }

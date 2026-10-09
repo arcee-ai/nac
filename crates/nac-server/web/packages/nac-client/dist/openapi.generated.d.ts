@@ -363,6 +363,7 @@ export interface components {
             response_timing: components["schemas"]["ResponseTimingSnapshot"];
             run_failure?: null | components["schemas"]["RunFailure"];
             sessions: components["schemas"]["SessionSummarySnapshot"][];
+            shell_commands?: components["schemas"]["ShellCommandSnapshot"][];
             thread_episodes: Record<string, components["schemas"]["EpisodeSnapshot"][]>;
             thread_event_boundary: components["schemas"]["SessionEventBoundary"];
             thread_event_diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
@@ -430,6 +431,34 @@ export interface components {
             total_tokens?: number | null;
             updated_at: string;
             visible_message_count: number;
+        };
+        ShellCommandRequest: {
+            command: string;
+            request_id: string;
+            timeout_ms?: number | null;
+        };
+        ShellCommandSnapshot: {
+            accepted_at_epoch_ms: number;
+            command: string;
+            diagnostic?: string | null;
+            exit_code?: number | null;
+            finished_at_epoch_ms?: number | null;
+            operation_id: string;
+            output_id?: string | null;
+            request_id: string;
+            state: components["schemas"]["ShellCommandState"];
+            stderr: string;
+            stdout: string;
+            timeout_ms: number;
+            transcript_index?: number | null;
+        };
+        ShellCommandState: "accepted" | "started" | "completed" | "timed_out" | "cancelled" | "rejected" | "spawn_failed" | "interrupted" | "outcome_unknown";
+        ShellOutputPage: {
+            content: string;
+            eof: boolean;
+            next_offset: number;
+            offset: number;
+            overflowed: boolean;
         };
         SubmitPromptResponse: {
             client_id?: string | null;

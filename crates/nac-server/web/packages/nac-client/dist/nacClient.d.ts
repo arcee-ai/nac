@@ -1,4 +1,4 @@
-import type { UiConfiguration, ReadinessResponse, RecentEventsResponse, SessionEventBoundary, SessionEventEnvelope, SessionSnapshotResponse } from "./types.js";
+import type { UiConfiguration, ReadinessResponse, RecentEventsResponse, SessionEventBoundary, SessionEventEnvelope, SessionSnapshotResponse, ShellCommandRequest, ShellCommandSnapshot } from "./types.js";
 export declare const NAC_HTTP_CLIENT_VERSION: 1;
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type NacCredentialPolicy = "same-origin" | "include" | "omit";
@@ -138,6 +138,44 @@ export declare class NacClient {
     }): Promise<RecentEventsResponse>;
     replaySessionEvents(sessionId: string, after: SessionEventBoundary, options?: SessionReplayOptions): Promise<SessionReplayResult>;
     captureSessionSnapshot(sessionId: string, snapshotOptions?: SessionSnapshotOptions, replayOptions?: SessionReplayOptions): Promise<CapturedSessionSnapshot>;
+    submitShellCommand(sessionId: string, request: ShellCommandRequest, signal?: AbortSignal): Promise<ShellCommandSnapshot>;
+    getShellCommand(sessionId: string, requestId: string, signal?: AbortSignal): Promise<{
+        accepted_at_epoch_ms: number;
+        command: string;
+        diagnostic?: string | null;
+        exit_code?: number | null;
+        finished_at_epoch_ms?: number | null;
+        operation_id: string;
+        output_id?: string | null;
+        request_id: string;
+        state: import("./openapi.generated.js").components["schemas"]["ShellCommandState"];
+        stderr: string;
+        stdout: string;
+        timeout_ms: number;
+        transcript_index?: number | null;
+    }>;
+    cancelShellCommand(sessionId: string, requestId: string, signal?: AbortSignal): Promise<{
+        accepted_at_epoch_ms: number;
+        command: string;
+        diagnostic?: string | null;
+        exit_code?: number | null;
+        finished_at_epoch_ms?: number | null;
+        operation_id: string;
+        output_id?: string | null;
+        request_id: string;
+        state: import("./openapi.generated.js").components["schemas"]["ShellCommandState"];
+        stderr: string;
+        stdout: string;
+        timeout_ms: number;
+        transcript_index?: number | null;
+    }>;
+    getShellOutput(sessionId: string, requestId: string, offset?: number, signal?: AbortSignal): Promise<{
+        content: string;
+        eof: boolean;
+        next_offset: number;
+        offset: number;
+        overflowed: boolean;
+    }>;
     submitPrompt(sessionId: string, prompt: string, signal?: AbortSignal): Promise<CommandAdmission<{
         client_id?: string | null;
         display_prompt: string;
