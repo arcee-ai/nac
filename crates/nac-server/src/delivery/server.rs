@@ -242,6 +242,25 @@ fn remains_available_during_maintenance(method: &axum::http::Method, path: &str)
     }
 
     method == axum::http::Method::OPTIONS
+        || ((method == axum::http::Method::GET || method == axum::http::Method::HEAD)
+            && (matches!(parts.as_slice(), ["sessions", _, "user-terminals"])
+                || matches!(parts.as_slice(), ["sessions", _, "user-terminals", _])))
+        || (method == axum::http::Method::POST
+            && (matches!(
+                parts.as_slice(),
+                ["sessions", _, "user-terminals", _, "observers"]
+            ) || matches!(
+                parts.as_slice(),
+                ["sessions", _, "user-terminals", _, "observers", _, "read"]
+            ) || matches!(
+                parts.as_slice(),
+                ["sessions", _, "user-terminals", _, "resize"]
+            )))
+        || (method == axum::http::Method::DELETE
+            && matches!(
+                parts.as_slice(),
+                ["sessions", _, "user-terminals", _, "observers", _]
+            ))
         || (method == axum::http::Method::GET
             && matches!(
                 parts.as_slice(),
@@ -292,6 +311,16 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
         (Method::DELETE, "/sessions/s/inbox/1"),
         (Method::DELETE, "/sessions/s/terminals/t"),
         (Method::POST, "/sessions/s/permissions/request"),
+        (Method::GET, "/sessions/s/user-terminals"),
+        (Method::HEAD, "/sessions/s/user-terminals/t"),
+        (Method::GET, "/sessions/s/user-terminals/t"),
+        (Method::POST, "/sessions/s/user-terminals/t/observers"),
+        (
+            Method::POST,
+            "/sessions/s/user-terminals/t/observers/o/read",
+        ),
+        (Method::DELETE, "/sessions/s/user-terminals/t/observers/o"),
+        (Method::POST, "/sessions/s/user-terminals/t/resize"),
     ] {
         assert!(
             remains_available_during_maintenance(&method, path),
@@ -314,6 +343,14 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
         (Method::DELETE, "/projects/project"),
         (Method::DELETE, "/credentials/key"),
         (Method::POST, "/unrelated/cancel"),
+        (Method::POST, "/sessions/s/user-terminals"),
+        (Method::POST, "/sessions/s/user-terminals/t/input"),
+        (Method::GET, "/sessions/s/user-terminals/t/input"),
+        (
+            Method::POST,
+            "/sessions/s/user-terminals/t/observers/o/read/extra",
+        ),
+        (Method::DELETE, "/sessions/s/user-terminals/t"),
     ] {
         assert!(
             !remains_available_during_maintenance(&method, path),

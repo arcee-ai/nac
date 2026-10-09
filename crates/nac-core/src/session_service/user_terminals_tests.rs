@@ -6,6 +6,9 @@ use nac_contracts::{
     WorkerEnvironment,
 };
 
+#[path = "user_terminals_managed_tests.rs"]
+mod managed;
+
 struct Environment(CommandEnvironmentSnapshot);
 impl CommandEnvironmentProvider for Environment {
     fn snapshot(&self) -> CommandEnvironmentFuture<'_> {

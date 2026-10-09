@@ -54,6 +54,7 @@ impl SessionService {
         cols: u16,
         rows: u16,
     ) -> Result<UserTerminalStatus> {
+        let _host_admission = self.user_terminal_host_admission(false).await?;
         crate::terminal::validate_user_geometry(cols, rows)?;
         self.require_direct_primary_behavior_async().await?;
         let context = self.require_user_terminal_context()?;
@@ -100,6 +101,7 @@ impl SessionService {
     }
 
     pub async fn list_user_terminals(&self) -> Result<Vec<UserTerminalStatus>> {
+        let _host_admission = self.user_terminal_host_admission(true).await?;
         if self.user_terminal_context.is_none() {
             return Ok(Vec::new());
         }
@@ -107,6 +109,7 @@ impl SessionService {
     }
 
     pub async fn user_terminal_status(&self, id: &str) -> Result<UserTerminalStatus> {
+        let _host_admission = self.user_terminal_host_admission(true).await?;
         self.terminal_manager.user_terminal_status(id).await
     }
 
@@ -145,6 +148,7 @@ impl SessionService {
         offset: u64,
         limit: usize,
     ) -> Result<UserTerminalOutputPage> {
+        let _host_admission = self.user_terminal_host_admission(true).await?;
         self.terminal_manager
             .read_user_output(id, offset, limit)
             .await
@@ -158,6 +162,7 @@ impl SessionService {
         observed_end: u64,
         wait_ms: u16,
     ) -> Result<()> {
+        let _host_admission = self.user_terminal_host_admission(true).await?;
         self.terminal_manager
             .wait_user_output(id, observed_end, wait_ms)
             .await
@@ -166,6 +171,7 @@ impl SessionService {
     /// Bytes retain their literal meaning; an Enter does not grant or simulate
     /// per-command authorization. The launch authorized this human capability.
     pub async fn write_user_terminal_input(&self, id: &str, bytes: &[u8]) -> Result<()> {
+        let _host_admission = self.user_terminal_host_admission(false).await?;
         let context = self.require_user_terminal_context()?;
         self.terminal_manager
             .write_user_input(id, bytes, &context.runtime.command_cancellation)
@@ -173,6 +179,7 @@ impl SessionService {
     }
 
     pub async fn resize_user_terminal(&self, id: &str, cols: u16, rows: u16) -> Result<()> {
+        let _host_admission = self.user_terminal_host_admission(true).await?;
         let context = self.require_user_terminal_context()?;
         self.terminal_manager
             .resize_user_terminal(id, cols, rows, &context.runtime.command_cancellation)
@@ -180,15 +187,39 @@ impl SessionService {
     }
 
     pub async fn terminate_user_terminal(&self, id: &str) -> Result<()> {
+        let _host_admission = self.user_terminal_host_admission(true).await?;
         self.terminal_manager.terminate_user_terminal(id).await
     }
 
-    fn require_user_terminal_context(&self) -> Result<&UserTerminalContext> {
-        if self.managed_admission_enabled {
-            return Err(anyhow::anyhow!(
-                "human terminals on managed hosts require managed terminal admission support"
-            ));
+    pub(super) async fn user_terminal_host_admission(
+        &self,
+        completion: bool,
+    ) -> Result<Option<crate::store::ManagedWorkAdmission>> {
+        if !self.managed_admission_enabled {
+            return Ok(None);
         }
+        let service = self.clone();
+        crate::store::call_legacy_store(&self.metadata.store_path, move || {
+            match (completion, service.managed_identity.as_deref()) {
+                (false, Some(identity)) => crate::store::try_admit_managed_work_for_identity(
+                    &service.metadata.store_path,
+                    identity,
+                ),
+                (false, None) => crate::store::try_admit_managed_work(&service.metadata.store_path),
+                (true, Some(identity)) => crate::store::try_admit_managed_completion_for_identity(
+                    &service.metadata.store_path,
+                    identity,
+                ),
+                (true, None) => {
+                    crate::store::try_admit_managed_completion(&service.metadata.store_path)
+                }
+            }
+            .map(Some)
+        })
+        .await?
+    }
+
+    fn require_user_terminal_context(&self) -> Result<&UserTerminalContext> {
         if self
             .stopping_admission
             .load(std::sync::atomic::Ordering::Acquire)

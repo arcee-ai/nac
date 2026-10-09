@@ -318,6 +318,7 @@ impl SessionService {
     /// preserving its bounded retained output tombstone. This is deliberately
     /// an ordinary session operation rather than a maintenance force-clear.
     pub async fn terminate_terminal(&self, terminal_id: &str) -> Result<()> {
+        let _host_admission = self.user_terminal_host_admission(true).await?;
         self.terminal_manager.terminate(terminal_id).await
     }
 

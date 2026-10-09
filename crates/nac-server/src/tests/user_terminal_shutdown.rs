@@ -118,9 +118,10 @@ async fn graceful_shutdown_settles_human_shell_and_descendants_before_store_drai
     let child_after_drain = child_pids.into_iter().any(child_running);
     // Clean the real child even if the ownership assertion regresses.
     service.destroy_terminals().await.unwrap();
-    manager
+    let _ = manager
         .session_terminals()
-        .detach_user("session", &terminal.id, observer_id);
+        .detach_user("session", &terminal.id, observer_id)
+        .await;
     drop(client);
     assert!(
         !retained_after_drain,

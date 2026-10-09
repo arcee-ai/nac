@@ -134,6 +134,32 @@ impl TerminalObservationHub {
         // Detaching an observer never terminates a shell or cancels the agent.
     }
 
+    /// Bind observation to the retained owner, including immutable pending
+    /// replay. The application revalidates cached ownership after output waits.
+    pub(crate) fn require_owner(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        observer_id: Uuid,
+        service: &Arc<SessionService>,
+    ) -> Result<(), TerminalApplicationError> {
+        let seats = self
+            .seats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let valid = seats.get(&observer_id).is_some_and(|seat| {
+            seat.last_used.elapsed() < OBSERVER_IDLE_TTL
+                && seat.observer.session_id == session_id
+                && seat.observer.terminal_id == terminal_id
+                && Arc::ptr_eq(&seat.observer.service, service)
+        });
+        if valid {
+            Ok(())
+        } else {
+            Err(TerminalApplicationError::Unavailable)
+        }
+    }
+
     pub(crate) async fn pull(
         &self,
         session_id: &str,

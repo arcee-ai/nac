@@ -298,7 +298,8 @@ pub(crate) async fn detach(
 ) -> Result<StatusCode, ApiError> {
     manager
         .session_terminals()
-        .detach_user(&session_id, &terminal_id, identifier(&observer_id)?);
+        .detach_user(&session_id, &terminal_id, identifier(&observer_id)?)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
