@@ -34,6 +34,7 @@ pub struct UserTerminalSelectionPreview {
     pub text_scalars: usize,
     pub controls_removed: usize,
     pub line_endings_normalized: usize,
+    pub user_text: Option<String>,
 }
 
 impl TerminalManager {
@@ -41,6 +42,15 @@ impl TerminalManager {
         &self,
         id: &str,
         text: &str,
+    ) -> Result<UserTerminalSelectionPreview, TerminalSelectionError> {
+        self.preview_user_selection_with_text(id, text, None).await
+    }
+
+    pub(crate) async fn preview_user_selection_with_text(
+        &self,
+        id: &str,
+        text: &str,
+        user_text: Option<&str>,
     ) -> Result<UserTerminalSelectionPreview, TerminalSelectionError> {
         if !self.owns_user_terminal_name(id) {
             return Err(TerminalSelectionError::Unavailable);
@@ -63,6 +73,19 @@ impl TerminalManager {
                 .ok_or(TerminalSelectionError::Unavailable)?,
         };
         let mut preview = normalize(text, &policy)?;
+        preview.user_text = user_text
+            .map(|text| {
+                bounds(text)?;
+                let text = policy
+                    .redact_plain_text(text)
+                    .map_err(|_| {
+                        TerminalSelectionError::Invalid("terminal selection normalization failed")
+                    })?
+                    .text;
+                bounds(&text)?;
+                Ok::<_, TerminalSelectionError>(text)
+            })
+            .transpose()?;
         preview.terminal_id = id.to_owned();
         preview.owner_instance_id = self.instance_id.to_string();
         Ok(preview)
@@ -109,6 +132,7 @@ fn normalize(
         text: canonical,
         controls_removed: projected.controls_removed,
         line_endings_normalized: projected.line_endings_normalized,
+        user_text: None,
     })
 }
 

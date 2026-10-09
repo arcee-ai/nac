@@ -447,6 +447,14 @@ var be = class {
 function Ce(e) {
 	let t = e.transport.request.bind(e.transport);
 	return {
+		submitUserTerminalSelection: async (e, n, r, i) => {
+			let a = await t("POST", `${xe(e, n)}/selection-submissions`, {
+				body: r,
+				signal: i
+			});
+			if (a.protocol_version !== 1 || a.admission_id !== r.admission_id.toLowerCase() || a.accepted_intent.protocol_version !== 1 || a.accepted_intent.source_kind !== "user_supplied_rendered_selection" || a.accepted_intent.admission_id !== r.admission_id.toLowerCase() || a.accepted_intent.owner_instance_id !== r.expected_owner_instance_id.toLowerCase() || a.accepted_intent.source_session_id !== e || a.accepted_intent.terminal_id !== n || a.accepted_intent.capture_id !== r.capture_id.toLowerCase() || a.accepted_intent.client_capture_time_ms !== (r.client_capture_time_ms?.replace(/^0+(?=\d)/, "") ?? null) || a.accepted_intent.text !== r.expected_selection_text || a.accepted_intent.user_text !== (r.expected_user_text ?? null) || a.accepted_intent.initial_delivery !== r.delivery || a.accepted_intent.initial_expected_run_id !== (r.expected_run_id?.toLowerCase() ?? null)) throw new D("Terminal selection admission identity/intent changed");
+			return a;
+		},
 		previewUserTerminalSelection: async (e, n, r, i) => {
 			let a = await t("POST", `${xe(e, n)}/selection-preview`, {
 				body: r,

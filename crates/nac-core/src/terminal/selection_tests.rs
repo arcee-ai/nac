@@ -223,3 +223,32 @@ fn rendered_selection_masks_control_bearing_secrets_and_their_projected_forms() 
     assert_eq!(normalize("safe", &source).unwrap().text, "safe");
     assert!(normalize("\0\u{85}", &source).is_err());
 }
+
+#[tokio::test]
+async fn rendered_selection_user_text_uses_same_launch_projection_and_preserves_boundaries() {
+    let manager = TerminalManager::for_direct();
+    let id = launch(&manager, &["a\r\nb", "secret"]).await;
+    let preview = manager
+        .preview_user_selection_with_text(&id, " secret ", Some(" \ta\r\nb\n/compact\n$skill  "))
+        .await
+        .unwrap();
+    assert_eq!(preview.text, " [REDACTED] ");
+    assert_eq!(
+        preview.user_text.as_deref(),
+        Some(" \t[REDACTED]\n/compact\n$skill  ")
+    );
+    assert!(manager
+        .preview_user_selection_with_text(&id, "selected", Some(&"🙂".repeat(8193)))
+        .await
+        .is_err());
+    assert_eq!(
+        manager
+            .preview_user_selection_with_text(&id, "selected", Some(" \t "))
+            .await
+            .unwrap()
+            .user_text
+            .as_deref(),
+        Some(" \t ")
+    );
+    manager.remove_all().await.unwrap();
+}

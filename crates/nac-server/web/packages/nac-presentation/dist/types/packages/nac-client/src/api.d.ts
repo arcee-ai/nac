@@ -1042,6 +1042,18 @@ export declare function createNacApi(nacClient: NacClient): {
         boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         events: import("./openapi.generated.js").components["schemas"]["SessionEventEnvelope"][];
     }>;
+    submitUserTerminalSelection: (session: string, terminal: string, body: import("./types.js").TerminalSelectionSubmissionRequest, signal?: AbortSignal) => Promise<{
+        accepted_intent: import("./openapi.generated.js").components["schemas"]["TerminalSelectionIntent"];
+        admission_id: string;
+        current_delivery: import("./openapi.generated.js").components["schemas"]["InboxDelivery"];
+        current_target_run_id?: string | null;
+        delivered_run_id?: string | null;
+        inbox_id: string;
+        protocol_version: number;
+        replayed: boolean;
+        status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
+        version: number;
+    }>;
     previewUserTerminalSelection: (session: string, terminal: string, body: import("./types.js").TerminalSelectionPreviewRequest, signal?: AbortSignal) => Promise<{
         capture_id: string;
         client_capture_time_ms?: string | null;
@@ -1061,6 +1073,7 @@ export declare function createNacApi(nacClient: NacClient): {
         text_scalars: number;
         text_utf8_bytes: number;
         truncated: boolean;
+        user_text?: string | null;
     }>;
     openUserTerminal: (session: string, body: import("./types.js").OpenUserTerminalRequest, signal?: AbortSignal) => Promise<{
         alive: boolean;

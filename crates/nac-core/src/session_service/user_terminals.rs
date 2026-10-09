@@ -123,6 +123,20 @@ impl SessionService {
         self.terminal_manager.preview_user_selection(id, text).await
     }
 
+    pub async fn preview_user_terminal_selection_with_text(
+        &self,
+        id: &str,
+        text: &str,
+        user_text: Option<&str>,
+    ) -> std::result::Result<UserTerminalSelectionPreview, TerminalSelectionError> {
+        self.require_direct_primary_behavior_async()
+            .await
+            .map_err(|_| TerminalSelectionError::Unavailable)?;
+        self.terminal_manager
+            .preview_user_selection_with_text(id, text, user_text)
+            .await
+    }
+
     /// Read only the sanitized artifact bound to this session-owned handle.
     /// Observer cursors are independent and never advance model previews.
     pub async fn read_user_terminal_output(

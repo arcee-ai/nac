@@ -2,6 +2,7 @@ use super::ui_configuration::{self, UiConfiguration};
 use crate::*;
 use nac_core::commands::{slash_command_definitions, SlashCommandDefinition};
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
+use utoipa_axum::router::UtoipaMethodRouterExt;
 
 pub(crate) fn response_compression_layer() -> CompressionLayer<impl Predicate> {
     CompressionLayer::new()
@@ -823,6 +824,10 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::user_terminals::list
         ))
         .routes(routes!(delivery::terminal_selection::preview))
+        .routes(
+            routes!(delivery::terminal_selection_submission::submit)
+                .layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
+        )
         .routes(routes!(delivery::user_terminals::status))
         .routes(routes!(delivery::user_terminals::attach))
         .routes(routes!(delivery::user_terminals::pull))

@@ -1,9 +1,23 @@
 import type { NacClient } from "./nacClient.js";
-import type { TerminalSelectionPreviewRequest, OpenUserTerminalRequest, AttachUserTerminalRequest, PullUserTerminalRequest, UserTerminalInputRequest, ResizeUserTerminalRequest } from "./types.js";
+import type { TerminalSelectionSubmissionRequest, TerminalSelectionPreviewRequest, OpenUserTerminalRequest, AttachUserTerminalRequest, PullUserTerminalRequest, UserTerminalInputRequest, ResizeUserTerminalRequest } from "./types.js";
 /** Uses exactly the consumer's immutable endpoint, credentials and request lifetime. */
 export declare function createUserTerminalApi(client: NacClient): {
+    /** Explicit durable intent. Freeze admission_id and manually reconcile it
+     * after uncertainty; this method never retries or creates a new identity. */
+    submitUserTerminalSelection: (session: string, terminal: string, body: TerminalSelectionSubmissionRequest, signal?: AbortSignal) => Promise<{
+        accepted_intent: import("./openapi.generated.js").components["schemas"]["TerminalSelectionIntent"];
+        admission_id: string;
+        current_delivery: import("./openapi.generated.js").components["schemas"]["InboxDelivery"];
+        current_target_run_id?: string | null;
+        delivered_run_id?: string | null;
+        inbox_id: string;
+        protocol_version: number;
+        replayed: boolean;
+        status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
+        version: number;
+    }>;
     /** Preview only. Keep the frozen original beside this canonical text locally.
-     * A future submit must normalize the original again and compare the exact
+     * Submission normalizes the original again and compares the exact
      * expected preview, rather than assuming masking is idempotent or trusting
      * a client sanitization flag. This operation never sends agent input.
      */
@@ -26,6 +40,7 @@ export declare function createUserTerminalApi(client: NacClient): {
         text_scalars: number;
         text_utf8_bytes: number;
         truncated: boolean;
+        user_text?: string | null;
     }>;
     openUserTerminal: (session: string, body: OpenUserTerminalRequest, signal?: AbortSignal) => Promise<{
         alive: boolean;

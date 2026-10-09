@@ -121,5 +121,7 @@ export type PullUserTerminalRequest = ApiSchema<"PullUserTerminalRequest">;
 export type UserTerminalFrameResponse = ApiSchema<"UserTerminalFrameResponse">;
 export type UserTerminalInputRequest = ApiSchema<"UserTerminalInputRequest">;
 export type ResizeUserTerminalRequest = ApiSchema<"ResizeUserTerminalRequest">;
+export type TerminalSelectionSubmissionRequest = ApiSchema<"TerminalSelectionSubmissionRequest">;
+export type TerminalSelectionSubmissionResponse = ApiSchema<"TerminalSelectionSubmissionResponse">;
 export type TerminalSelectionPreviewRequest = ApiSchema<"TerminalSelectionPreviewRequest">;
 export type TerminalSelectionPreviewResponse = ApiSchema<"TerminalSelectionPreviewResponse">;

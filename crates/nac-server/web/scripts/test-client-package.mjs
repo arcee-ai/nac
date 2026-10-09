@@ -100,7 +100,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 132);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 133);
 for (const owner of Object.values(NAC_API_SURFACE)) {
   if (owner.startsWith("api.")) assert.equal(typeof api[owner.slice(4)], "function", owner);
   if (owner.startsWith("client.")) assert.equal(typeof client[owner.slice(7)], "function", owner);
@@ -137,6 +137,7 @@ assert.deepEqual(context, {
   type UserTerminalRenderer,
   type UserTerminalResponse,
   type TerminalSelectionPreviewResponse,
+  type TerminalSelectionSubmissionResponse,
 } from ${JSON.stringify(packageName)};
 
 const client = createNacClient({ endpoint: "/nac", credentials: "same-origin" });
@@ -150,7 +151,8 @@ const renderer: UserTerminalRenderer = { write: async (_bytes, signal) => signal
 const observer = new UserTerminalConnection(api, "session", "terminal", renderer);
 const input: Promise<void> = new UserTerminalInputPump(observer).send(Uint8Array.of(3));
 const preview: Promise<TerminalSelectionPreviewResponse> = api.previewUserTerminalSelection("session", "terminal", { protocol_version: 1, capture_id: "capture", selected_text: "selected" });
-void observer; void terminal; void input; void preview;
+const selection: Promise<TerminalSelectionSubmissionResponse> = api.submitUserTerminalSelection("session", "terminal", {protocol_version: 1, admission_id: "admission", capture_id: "capture", expected_owner_instance_id: "owner", original_selected_text: "original", expected_selection_text: "canonical", delivery: "queue"});
+void observer; void terminal; void input; void preview; void selection;
 // @ts-expect-error byte cursors remain decimal strings
 void api.pullUserTerminal("session", "terminal", "observer", { protocol_version: 1, acknowledge_offset: 9007199254740993, acknowledge_reset: false, wait_ms: 1000 });
 // @ts-expect-error expected_version remains required by Rust

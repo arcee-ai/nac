@@ -42,6 +42,7 @@ mod manual_compaction;
 mod operation_state;
 mod recovery;
 mod settlement;
+mod terminal_selection_admission;
 mod transcript_projection;
 mod user_terminals;
 pub use crate::terminal::{

@@ -7420,6 +7420,84 @@
         }
       }
     },
+    "/sessions/{session_id}/user-terminals/{terminal_id}/selection-submissions": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_terminals_terminal_id_selection_submissions",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "terminal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminalSelectionSubmissionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Durable intent receipt; replay never wakes or re-delivers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TerminalSelectionSubmissionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid version, identity, text or delivery contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source, preview, delivery or immutable identity conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Persistence failure; reconcile the same identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/workspace/branches": {
       "get": {
         "tags": [
@@ -15715,6 +15793,78 @@
           }
         }
       },
+      "TerminalSelectionDelivery": {
+        "type": "string",
+        "enum": [
+          "send",
+          "queue",
+          "steer"
+        ]
+      },
+      "TerminalSelectionIntent": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "source_kind",
+          "admission_id",
+          "capture_id",
+          "source_session_id",
+          "terminal_id",
+          "owner_instance_id",
+          "text",
+          "initial_delivery"
+        ],
+        "properties": {
+          "admission_id": {
+            "type": "string"
+          },
+          "capture_id": {
+            "type": "string"
+          },
+          "client_capture_time_ms": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "initial_delivery": {
+            "$ref": "#/components/schemas/TerminalSelectionDelivery"
+          },
+          "initial_expected_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner_instance_id": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/TerminalSelectionSourceKind"
+          },
+          "source_session_id": {
+            "type": "string"
+          },
+          "terminal_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "TerminalSelectionPreviewRequest": {
         "type": "object",
         "required": [
@@ -15743,6 +15893,12 @@
           "selected_text": {
             "type": "string",
             "maxLength": 8192
+          },
+          "user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -15845,6 +16001,12 @@
           "truncated": {
             "type": "boolean",
             "description": "This endpoint rejects over-limit text; it never silently truncates."
+          },
+          "user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -15853,6 +16015,123 @@
         "enum": [
           "user_supplied_rendered_selection"
         ]
+      },
+      "TerminalSelectionSubmissionRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "admission_id",
+          "capture_id",
+          "expected_owner_instance_id",
+          "original_selected_text",
+          "expected_selection_text",
+          "delivery"
+        ],
+        "properties": {
+          "admission_id": {
+            "type": "string"
+          },
+          "capture_id": {
+            "type": "string"
+          },
+          "client_capture_time_ms": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/TerminalSelectionDelivery"
+          },
+          "expected_owner_instance_id": {
+            "type": "string"
+          },
+          "expected_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_selection_text": {
+            "type": "string"
+          },
+          "expected_user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "original_selected_text": {
+            "type": "string"
+          },
+          "original_user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "TerminalSelectionSubmissionResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "admission_id",
+          "replayed",
+          "inbox_id",
+          "status",
+          "version",
+          "current_delivery",
+          "accepted_intent"
+        ],
+        "properties": {
+          "accepted_intent": {
+            "$ref": "#/components/schemas/TerminalSelectionIntent"
+          },
+          "admission_id": {
+            "type": "string"
+          },
+          "current_delivery": {
+            "$ref": "#/components/schemas/InboxDelivery"
+          },
+          "current_target_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivered_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inbox_id": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InboxStatus",
+            "description": "Current mutable inbox state, separate from immutable accepted intent."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
       },
       "TestMcpServerRequest": {
         "type": "object",

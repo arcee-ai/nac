@@ -1328,11 +1328,27 @@ export interface components {
             create?: boolean;
             name: string;
         };
+        TerminalSelectionDelivery: "send" | "queue" | "steer";
+        TerminalSelectionIntent: {
+            admission_id: string;
+            capture_id: string;
+            client_capture_time_ms?: string | null;
+            initial_delivery: components["schemas"]["TerminalSelectionDelivery"];
+            initial_expected_run_id?: string | null;
+            owner_instance_id: string;
+            protocol_version: number;
+            source_kind: components["schemas"]["TerminalSelectionSourceKind"];
+            source_session_id: string;
+            terminal_id: string;
+            text: string;
+            user_text?: string | null;
+        };
         TerminalSelectionPreviewRequest: {
             capture_id: string;
             client_capture_time_ms?: string | null;
             protocol_version: number;
             selected_text: string;
+            user_text?: string | null;
         };
         TerminalSelectionPreviewResponse: {
             capture_id: string;
@@ -1353,8 +1369,34 @@ export interface components {
             text_scalars: number;
             text_utf8_bytes: number;
             truncated: boolean;
+            user_text?: string | null;
         };
         TerminalSelectionSourceKind: "user_supplied_rendered_selection";
+        TerminalSelectionSubmissionRequest: {
+            admission_id: string;
+            capture_id: string;
+            client_capture_time_ms?: string | null;
+            delivery: components["schemas"]["TerminalSelectionDelivery"];
+            expected_owner_instance_id: string;
+            expected_run_id?: string | null;
+            expected_selection_text: string;
+            expected_user_text?: string | null;
+            original_selected_text: string;
+            original_user_text?: string | null;
+            protocol_version: number;
+        };
+        TerminalSelectionSubmissionResponse: {
+            accepted_intent: components["schemas"]["TerminalSelectionIntent"];
+            admission_id: string;
+            current_delivery: components["schemas"]["InboxDelivery"];
+            current_target_run_id?: string | null;
+            delivered_run_id?: string | null;
+            inbox_id: string;
+            protocol_version: number;
+            replayed: boolean;
+            status: components["schemas"]["InboxStatus"];
+            version: number;
+        };
         TestMcpServerRequest: {
             args?: string[] | null;
             bearer_token_env_var?: string | null;

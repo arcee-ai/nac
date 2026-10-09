@@ -30,6 +30,8 @@ mod compaction_integration_tests;
 #[cfg(test)]
 mod live_tests;
 #[cfg(test)]
+mod terminal_selection_delivery_tests;
+#[cfg(test)]
 mod transcript_log_tests;
 
 #[cfg(test)]

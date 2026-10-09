@@ -13,7 +13,7 @@ fn test_store_path(label: &str) -> PathBuf {
         .join("store.db")
 }
 
-fn transcript_test_agent(
+pub(super) fn transcript_test_agent(
     client: ModelClient,
     store_path: PathBuf,
     session_id: Option<&str>,
@@ -104,7 +104,7 @@ fn read_log(store_path: &std::path::Path, session_id: &str) -> Vec<(u64, Message
         .unwrap()
 }
 
-fn store_snapshot_messages(store_path: &std::path::Path, messages: &[Message]) {
+pub(super) fn store_snapshot_messages(store_path: &std::path::Path, messages: &[Message]) {
     let messages_json = serde_json::to_string(messages).unwrap();
     let visible_count = crate::sessions::visible_message_count(messages) as i64;
     let last_user_prompt = crate::sessions::last_user_prompt(messages);

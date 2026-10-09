@@ -1,5 +1,5 @@
 //! A preview is user-supplied rendered text, not an authenticated byte interval.
-//! It is not an admission receipt, and nothing here writes a draft or context.
+//! Preview is distinct from deliberate identified inbox submission; no server drafts.
 use crate::{ApiError, ApiErrorBody, SessionManager};
 use axum::{
     extract::{rejection::JsonRejection, Path, State},
@@ -23,6 +23,7 @@ pub(crate) struct TerminalSelectionPreviewRequest {
     pub client_capture_time_ms: Option<String>,
     #[schema(max_length = 8192)]
     pub selected_text: String,
+    pub user_text: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -43,6 +44,7 @@ pub(crate) struct TerminalSelectionPreviewResponse {
     pub client_capture_time_ms: Option<String>,
     pub previewed_at_ms: String,
     pub text: String,
+    pub user_text: Option<String>,
     pub input_utf8_bytes: u32,
     pub input_scalars: u32,
     pub text_utf8_bytes: u32,
@@ -100,7 +102,12 @@ pub(crate) async fn preview(
         .transpose()?;
     let preview = manager
         .terminal_selection()
-        .preview(&session_id, &terminal_id, &request.selected_text)
+        .preview(
+            &session_id,
+            &terminal_id,
+            &request.selected_text,
+            request.user_text.as_deref(),
+        )
         .await?;
     let previewed_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -117,6 +124,7 @@ pub(crate) async fn preview(
         client_capture_time_ms: client_time,
         previewed_at_ms,
         text: preview.text,
+        user_text: preview.user_text,
         input_utf8_bytes: preview.input_utf8_bytes as u32,
         input_scalars: preview.input_scalars as u32,
         text_utf8_bytes: preview.text_utf8_bytes as u32,
