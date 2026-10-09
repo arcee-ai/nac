@@ -23,6 +23,9 @@ use channel::{IssuerChannel, IssuerControlStream};
 #[path = "managed_runtime_pending.rs"]
 mod pending;
 
+#[path = "managed_runtime_carrier.rs"]
+mod carrier;
+
 /// Trusted operator construction, separate from ordinary runtime enrollment.
 /// There is no request-selected certificate, CA, pin or callback credential.
 pub(crate) struct IssuerControlTlsIdentity {
