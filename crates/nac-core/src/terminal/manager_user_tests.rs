@@ -262,3 +262,37 @@ async fn unread_paste_cannot_block_resize_or_process_cleanup() {
     }
     assert!(!manager.user_terminal_status(&name).await.unwrap().alive);
 }
+
+#[tokio::test]
+async fn unqualified_remote_human_terminals_fail_before_spawn_without_local_fallback() {
+    for selected in [
+        ExecutionBackend::Ssh(crate::sandbox::SshBackend::new(
+            "unqualified.invalid".into(),
+            "/remote/work".into(),
+        )),
+        ExecutionBackend::Sandbox(crate::sandbox::SandboxSession::new_for_test(
+            crate::sandbox::SandboxSpec::default(),
+        )),
+    ] {
+        let manager = TerminalManager::for_direct();
+        let name = manager.user_terminal_name(uuid::Uuid::new_v4());
+        let selected = Arc::new(selected);
+        let error = manager
+            .create_user_terminal(
+                name,
+                "exec bash -i",
+                PathBuf::from("/remote/work"),
+                80,
+                24,
+                &selected,
+                nac_contracts::CommandEnvironmentSnapshot::empty(),
+                None,
+                &ThreadCancellation::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("limited to the Local backend"));
+        assert!(manager.user_terminal_names().await.is_empty());
+        assert!(!matches!(selected.as_ref(), ExecutionBackend::Local { .. }));
+    }
+}

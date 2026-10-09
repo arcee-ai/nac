@@ -120,7 +120,11 @@ impl TerminalSession {
             terminal_env_owned()
         };
         envs.extend(extra_envs.iter().cloned());
-        let (mut cmd, pidfile) = backend.terminal_pty_command(command, cwd.as_deref(), &envs);
+        let (mut cmd, pidfile) = if user_owned {
+            backend.user_terminal_pty_command(command, cwd.as_deref(), &envs)
+        } else {
+            backend.terminal_pty_command(command, cwd.as_deref(), &envs)
+        };
         if user_owned && !extra_envs.iter().any(|(name, _)| name == "NO_COLOR") {
             // Presence-based color consumers must not inherit the model/host
             // NO_COLOR setting; an explicit launch snapshot still wins.

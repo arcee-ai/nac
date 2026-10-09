@@ -490,8 +490,18 @@ impl SandboxSession {
         cwd: Option<&Path>,
         envs: &[(String, String)],
     ) -> (PtyCommandBuilder, String) {
+        self.pty_command(cmd, cwd, envs, false)
+    }
+
+    pub(crate) fn pty_command(
+        &self,
+        cmd: &str,
+        cwd: Option<&Path>,
+        envs: &[(String, String)],
+        human: bool,
+    ) -> (PtyCommandBuilder, String) {
         match self {
-            Self::Podman(inner) => inner.terminal_pty_command(cmd, cwd, envs),
+            Self::Podman(inner) => inner.terminal_pty_command(cmd, cwd, envs, human),
         }
     }
 
@@ -1081,3 +1091,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+
+#[cfg(test)]
+#[path = "remote_pty_tests.rs"]
+mod remote_pty_tests;
