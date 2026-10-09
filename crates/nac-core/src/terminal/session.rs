@@ -30,7 +30,8 @@ pub struct TerminalSession {
     root_start_time: u64,
     #[cfg(unix)]
     process_group_id: Option<libc::pid_t>,
-    pty_pair: portable_pty::PtyPair,
+    _model_slave: Option<Box<dyn portable_pty::SlavePty + Send>>,
+    master: Box<dyn portable_pty::MasterPty + Send>,
     collector_state: CollectorState,
     user_owned: bool,
     _reader_thread: std::thread::JoinHandle<()>,
@@ -165,6 +166,17 @@ impl TerminalSession {
                 return Err(error);
             }
         };
+        let portable_pty::PtyPair { master, slave } = pty_pair;
+        // The child owns its slave descriptors after spawn. Keeping another
+        // slave open in NAC prevents Linux master EOF even after the child
+        // exits, withholding the redactor's safe final suffix and leases.
+        // Preserve the established model PTY lifetime independently.
+        let model_slave = if user_owned {
+            drop(slave);
+            None
+        } else {
+            Some(slave)
+        };
         #[cfg(target_os = "linux")]
         let mut child = child;
         #[cfg(target_os = "linux")]
@@ -222,7 +234,8 @@ impl TerminalSession {
             root_start_time,
             #[cfg(unix)]
             process_group_id,
-            pty_pair,
+            _model_slave: model_slave,
+            master,
             collector_state,
             user_owned,
             _reader_thread: reader_thread,
@@ -275,8 +288,7 @@ impl TerminalSession {
     }
 
     pub(super) fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
-        self.pty_pair
-            .master
+        self.master
             .resize(PtySize {
                 cols,
                 rows,
