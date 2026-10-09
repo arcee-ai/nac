@@ -10,6 +10,7 @@ mod header_policy;
 mod http_contract;
 mod managed_host_key;
 mod s5_wire;
+mod sender_observer;
 
 fn test_model_client(
     backend: BackendKind,
