@@ -17,8 +17,8 @@ use crate::tools::ThreadCancellation;
 use super::keyparse::parse_keys;
 use super::session::{terminal_env_owned, TerminalSession};
 use super::{
-    ArtifactKind, CommandOutput, CommandOutputLimits, CommandStatus, OutputPage, OutputRegistry,
-    OutputStream, TerminalInfo, TerminalOutput,
+    ArtifactKind, CommandOutput, CommandOutputLimits, CommandStatus, OutputBytePage, OutputPage,
+    OutputRegistry, OutputStream, TerminalInfo, TerminalOutput,
 };
 
 #[path = "manager_interactive.rs"]
@@ -27,6 +27,9 @@ mod interactive;
 mod one_shot;
 #[path = "manager_retention.rs"]
 mod retention;
+#[path = "manager_user.rs"]
+mod user;
+pub(crate) use user::validate_geometry as validate_user_geometry;
 
 const PIPE_CHUNK_BYTES: usize = 16 * 1024;
 const PIPE_CHANNEL_CHUNKS: usize = 16;
@@ -66,6 +69,10 @@ struct CompletedTerminal {
     output_id: String,
     preview_cursor: u64,
     exit_code: Option<i32>,
+    user_owned: bool,
+    cols: u16,
+    rows: u16,
+    collector_state: super::collector::CollectorState,
 }
 
 struct PendingRemoteCleanup {

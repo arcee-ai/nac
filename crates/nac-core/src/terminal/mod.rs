@@ -1,13 +1,29 @@
+mod collector;
+mod input;
 mod keyparse;
 mod manager;
 mod output;
 mod session;
 
+pub(crate) use manager::validate_user_geometry;
 pub use manager::TerminalManager;
+
+/// Process-local user terminal state, distinct from output collection completion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserTerminalStatus {
+    pub id: String,
+    pub cols: u16,
+    pub rows: u16,
+    pub alive: bool,
+    pub exit_code: Option<i32>,
+    pub output_complete: bool,
+    pub output_error: Option<String>,
+}
+
 pub use output::{
-    ArtifactKind, CommandOutputLimits, OutputArtifactLease, OutputPage, OutputRegistry,
-    OutputStream, DEFAULT_COMMAND_OUTPUT_MAX_BYTES, DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES,
-    DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
+    ArtifactKind, CommandOutputLimits, OutputArtifactLease, OutputBytePage, OutputPage,
+    OutputRegistry, OutputStream, DEFAULT_COMMAND_OUTPUT_MAX_BYTES,
+    DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
 };
 
 use serde::{Deserialize, Serialize};

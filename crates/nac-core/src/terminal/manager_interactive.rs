@@ -77,6 +77,11 @@ impl TerminalManager {
         // transaction. Cleanup may await a remote backend, so a dedicated
         // gate keeps parallel creates from both consuming the same slot.
         let _create = self.create_gate.lock().await;
+        if name.starts_with("user-shell-") {
+            return Err(anyhow!(
+                "user terminal identities are reserved for the human capability"
+            ));
+        }
         self.completed_sessions
             .lock()
             .await
@@ -95,7 +100,8 @@ impl TerminalManager {
                 .iter_mut()
                 .filter_map(|(name, session)| {
                     session.refresh_status();
-                    (!session.is_alive()).then(|| name.clone())
+                    (!session.is_alive() && (!session.is_user_owned() || session.output_complete()))
+                        .then(|| name.clone())
                 })
                 .collect::<Vec<_>>()
         };
@@ -206,6 +212,11 @@ impl TerminalManager {
                 .map(|(_, terminal)| terminal.clone())
         };
         if let Some(completed) = completed {
+            if completed.user_owned {
+                return Err(anyhow!(
+                    "user-owned terminal is unavailable to model input or preview"
+                ));
+            }
             if !bytes.is_empty() {
                 return Err(anyhow!("terminal session '{name}' has already exited"));
             }
@@ -243,6 +254,11 @@ impl TerminalManager {
                 let session = sessions
                     .get_mut(name)
                     .ok_or_else(|| self.missing_session_error(name))?;
+                if session.is_user_owned() {
+                    return Err(anyhow!(
+                        "user-owned terminal is unavailable to model input or preview"
+                    ));
+                }
                 session.refresh_status();
                 if !session.is_alive() && !bytes.is_empty() {
                     return Err(anyhow!("terminal session '{name}' has already exited"));

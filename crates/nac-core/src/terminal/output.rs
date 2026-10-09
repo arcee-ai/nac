@@ -109,6 +109,23 @@ pub struct OutputPage {
     pub segments: Vec<OutputSegment>,
 }
 
+/// Byte-preserving observation with an independent caller-owned cursor.
+/// A retention gap carries no bytes: the observer must acknowledge a reset
+/// before explicitly requesting the remaining tail at `retained_start`.
+/// Registry bytes are not inherently sanitized; browser owners must sanitize
+/// at collection time before storing anything in their output artifact.
+#[derive(Clone, PartialEq, Eq)]
+pub struct OutputBytePage {
+    pub bytes: Vec<u8>,
+    pub offset: u64,
+    pub next_offset: u64,
+    pub retained_start: u64,
+    pub retained_end: u64,
+    pub gap: bool,
+    /// Caught up to the current retained end, not proof that the process exited.
+    pub caught_up: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArtifactStats {
     pub stdout_bytes: u64,
@@ -428,14 +445,7 @@ impl OutputRegistry {
         offset: u64,
         limit: usize,
     ) -> Result<OutputPage> {
-        if limit == 0 {
-            return Err(anyhow!("limit must be at least 1"));
-        }
-        if limit > MAX_OUTPUT_PAGE_BYTES {
-            return Err(anyhow!(
-                "limit must not exceed {MAX_OUTPUT_PAGE_BYTES} bytes"
-            ));
-        }
+        validate_page_limit(limit)?;
         let inner = self.lock_inner();
         let artifact = inner
             .artifacts
@@ -477,6 +487,45 @@ impl OutputRegistry {
             } else {
                 Vec::new()
             },
+        })
+    }
+
+    pub fn page_bytes(
+        &self,
+        output_id: &str,
+        stream: OutputStream,
+        offset: u64,
+        limit: usize,
+    ) -> Result<OutputBytePage> {
+        validate_page_limit(limit)?;
+        let inner = self.lock_inner();
+        let artifact = inner
+            .artifacts
+            .get(output_id)
+            .ok_or_else(|| anyhow!("command output '{output_id}' not found or expired"))?;
+        validate_stream(artifact, stream)?;
+        let (retained_start, retained_end) = artifact.retained_range(stream);
+        if offset > retained_end {
+            return Err(anyhow!(
+                "offset {offset} is after {stream:?} output end {retained_end}"
+            ));
+        }
+        let gap = offset < retained_start;
+        let actual_offset = offset.max(retained_start);
+        let bytes = if gap {
+            Vec::new()
+        } else {
+            artifact.bytes_from(stream, actual_offset, limit).0
+        };
+        let next_offset = actual_offset + bytes.len() as u64;
+        Ok(OutputBytePage {
+            bytes,
+            offset: actual_offset,
+            next_offset,
+            retained_start,
+            retained_end,
+            gap,
+            caught_up: next_offset == retained_end,
         })
     }
 
@@ -636,6 +685,22 @@ fn validate_stream(artifact: &Artifact, stream: OutputStream) -> Result<()> {
     }
     Ok(())
 }
+
+fn validate_page_limit(limit: usize) -> Result<()> {
+    if limit == 0 {
+        return Err(anyhow!("limit must be at least 1"));
+    }
+    if limit > MAX_OUTPUT_PAGE_BYTES {
+        return Err(anyhow!(
+            "limit must not exceed {MAX_OUTPUT_PAGE_BYTES} bytes"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "output_bytes_tests.rs"]
+mod byte_tests;
 
 fn preview_budgets(total: usize, stdout_bytes: usize, stderr_bytes: usize) -> (usize, usize) {
     if stdout_bytes == 0 {
