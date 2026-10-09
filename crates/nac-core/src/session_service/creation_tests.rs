@@ -110,6 +110,7 @@ async fn creation_summary_failure_rolls_back_insert_in_the_same_transaction() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn creation_cancelled_before_execution_rolls_back_owned_worktree() {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
     let (mut command, path) = command("creation_cancel_before_execution").await;
     let worktree = resource_worktree(&path);
     let checkout = worktree.path.clone();
@@ -139,6 +140,7 @@ async fn creation_cancelled_before_execution_rolls_back_owned_worktree() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn creation_commit_retains_owned_worktree_when_acknowledgement_is_lost() {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
     let (mut command, path) = command("creation_lost_ack_resources").await;
     let worktree = resource_worktree(&path);
     let checkout = worktree.path.clone();
