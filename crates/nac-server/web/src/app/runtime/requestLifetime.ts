@@ -69,6 +69,10 @@ export class LifetimeTransport extends NacTransport {
     });
   }
 
+  override url(path: string): string {
+    return this.source.url(path);
+  }
+
   override eventSourceInit(): EventSourceInit {
     this.lifetime.throwIfAborted();
     return this.source.eventSourceInit();

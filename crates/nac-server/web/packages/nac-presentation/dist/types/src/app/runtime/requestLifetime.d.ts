@@ -6,6 +6,7 @@ export declare class LifetimeTransport extends NacTransport {
     private readonly source;
     private readonly lifetime;
     constructor(source: NacHttpTransport, lifetime: AbortSignal);
+    url(path: string): string;
     eventSourceInit(): EventSourceInit;
     newRequestId(): string;
     streamContext(): Promise<NacStreamContext>;

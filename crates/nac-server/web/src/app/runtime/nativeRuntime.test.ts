@@ -189,6 +189,43 @@ describe("native runtime lifetime", () => {
     expect(source.transport.admit).toHaveBeenCalledOnce();
   });
 
+  it("preserves injected transport routing for HTTP, initial streams and cursor reconnects", async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json([]));
+    const client = createNacClient({ endpoint: scope.endpoint, fetch });
+    client.transport.url = vi.fn((path: string) => `/caller${scope.endpoint}${path}`);
+    const streams: Stream[] = [];
+    const urls: string[] = [];
+    const instance = createNativeRuntime({
+      scope,
+      client,
+      eventSource: (url) => {
+        const stream = new Stream();
+        streams.push(stream);
+        urls.push(url);
+        return stream as unknown as EventSource;
+      },
+    });
+    opened.push(instance);
+    await instance.api.listProjects();
+    expect(fetch).toHaveBeenCalledWith("/caller/runtime/projects", expect.anything());
+    instance.events("same", { onEnvelope: vi.fn() });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls).toEqual(["/caller/runtime/sessions/same/events/stream"]);
+    streams[0].onopen?.();
+    streams[0].emit("session_event", envelope(1));
+    await vi.advanceTimersByTimeAsync(0);
+    streams[0].onerror?.();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(urls[1]).toBe(
+      "/caller/runtime/sessions/same/events/stream?after_epoch_id=epoch&after_sequence_id=1",
+    );
+    instance.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(streams.every((stream) => stream.closed)).toBe(true);
+    expect(urls).toHaveLength(2);
+  });
+
   it("refreshes caller authorization on reconnect, preserves cursor and closes every stream", async () => {
     vi.useFakeTimers();
     const streams: Stream[] = [];

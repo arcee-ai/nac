@@ -2690,6 +2690,9 @@ var da = class extends se {
 			authorization: e.authorization
 		}), this.source = e, this.lifetime = t;
 	}
+	url(e) {
+		return this.source.url(e);
+	}
 	eventSourceInit() {
 		return this.lifetime.throwIfAborted(), this.source.eventSourceInit();
 	}
