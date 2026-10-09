@@ -53,6 +53,29 @@ async fn build_run_config_inner(
     project_id: Option<String>,
     behavior: sessions::SessionBehavior,
 ) -> Result<OrchestratorRunConfig> {
+    prepare_run_config_inner(options, config, project_id, behavior)
+        .await?
+        .persist()
+        .await
+}
+
+/// Resolve a fresh runtime without committing its session. Application creation
+/// retains the resources only after its response and durable row are ready.
+pub async fn prepare_run_config_for_project_with_behavior(
+    options: RunOptions,
+    config: &NacConfig,
+    project_id: Option<String>,
+    behavior: sessions::SessionBehavior,
+) -> Result<PreparedSessionRunConfig> {
+    prepare_run_config_inner(options, config, project_id, behavior).await
+}
+
+async fn prepare_run_config_inner(
+    options: RunOptions,
+    config: &NacConfig,
+    project_id: Option<String>,
+    behavior: sessions::SessionBehavior,
+) -> Result<PreparedSessionRunConfig> {
     let agent_mode = match behavior {
         sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
         sessions::SessionBehavior::Direct | sessions::SessionBehavior::DirectWithOrchestrator => {
@@ -185,28 +208,29 @@ async fn build_run_config_inner(
         session_snapshot.project_id = project_id.clone();
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.light_model = light_model;
-        sessions::create_session(&store_path, &session_snapshot)?;
-
-        return Ok(OrchestratorRunConfig {
-            agent,
-            client,
-            session: OrchestratorSession::Active {
-                session_id,
-                store_path,
-                snapshot: session_snapshot,
+        return Ok(PreparedSessionRunConfig::new(
+            OrchestratorRunConfig {
+                agent,
+                client,
+                session: OrchestratorSession::Active {
+                    session_id,
+                    store_path,
+                    snapshot: session_snapshot,
+                },
+                sandbox_status: "off".to_string(),
+                agents_md_status: "off".to_string(),
+                workspace_display: working_directory,
+                workspace_git: Some(workspace_git),
+                resume_base_cwd: config_cwd,
             },
-            sandbox_status: "off".to_string(),
-            agents_md_status: "off".to_string(),
-            workspace_display: working_directory,
-            workspace_git: Some(workspace_git),
-            resume_base_cwd: config_cwd,
-        });
+            session_worktree::RollbackGuard::new(None),
+        ));
     }
 
     let workspace_cwd = options.workspace_cwd;
     let session_id = Uuid::new_v4().to_string();
     let paths = PathContext::new(&workspace_cwd);
-    let mut worktree_rollback: session_worktree::RollbackGuard;
+    let worktree_rollback: session_worktree::RollbackGuard;
     let sandbox = build_sandbox_session_inner(
         &sandbox_options,
         &workspace_cwd,
@@ -324,12 +348,6 @@ async fn build_run_config_inner(
         session_snapshot.project_id = project_id;
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.light_model = light_model;
-        sessions::create_session(&store_path, &session_snapshot)?;
-        if let Some(sandbox) = sandbox.as_ref() {
-            sandbox.retain_for_durable_session();
-        }
-        worktree_rollback.disarm();
-
         Ok(OrchestratorRunConfig {
             agent,
             client,
@@ -347,7 +365,7 @@ async fn build_run_config_inner(
     })();
 
     match build_result {
-        Ok(run_config) => Ok(run_config),
+        Ok(run_config) => Ok(PreparedSessionRunConfig::new(run_config, worktree_rollback)),
         Err(error) => {
             if let Some(sandbox) = sandbox.as_ref() {
                 // Disable fire-and-forget Drop cleanup before performing the

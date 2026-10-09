@@ -1019,3 +1019,6 @@ mod terminals;
 
 #[path = "tests/owned_serving.rs"]
 mod owned_serving;
+
+#[path = "tests/session_creation_overload.rs"]
+mod session_creation_overload;

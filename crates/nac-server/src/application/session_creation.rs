@@ -239,6 +239,13 @@ pub(crate) struct SessionCreationApplication<'a> {
     manager: &'a SessionManager,
 }
 
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct CreationProjectionGate {
+    pub(crate) reached: tokio::sync::Notify,
+    pub(crate) resume: tokio::sync::Notify,
+}
+
 impl<'a> SessionCreationApplication<'a> {
     pub(crate) fn new(manager: &'a SessionManager) -> Self {
         Self { manager }
@@ -389,7 +396,7 @@ impl<'a> SessionCreationApplication<'a> {
                 )?)
             }
         };
-        let mut run_config = runtime::build_run_config_for_project_with_behavior(
+        let mut prepared = runtime::prepare_run_config_for_project_with_behavior(
             RunOptions {
                 workspace_cwd: location.workspace_cwd,
                 config_cwd: Some(location.config_cwd.clone()),
@@ -418,15 +425,53 @@ impl<'a> SessionCreationApplication<'a> {
                 _ => error,
             }
         })?;
-        self.manager
-            .attach_managed_command_environment(&mut run_config)?;
-        let parts = SessionService::from_orchestrator_run_config(run_config);
-        let mut service = parts.service;
-        if self.manager.managed_host().is_some() {
-            service.enable_managed_admission(self.manager.managed_identity().cloned());
+        if let Err(error) = self
+            .manager
+            .attach_managed_command_environment(prepared.run_config_mut())
+        {
+            if let Err(cleanup) = prepared.rollback().await {
+                return Err(error.context(format!(
+                    "fresh session resource rollback failed: {cleanup:#}"
+                )));
+            }
+            return Err(error);
         }
-        service.acquire_sandbox_resource_lease()?;
-        let snapshot = service.frontend_snapshot().await?;
+        let (run_config, resources) = prepared.into_parts();
+        let creation = async {
+            let mut service = SessionService::from_orchestrator_run_config(run_config).service;
+            if self.manager.managed_host().is_some() {
+                service.enable_managed_admission(self.manager.managed_identity().cloned());
+            }
+            service.acquire_sandbox_resource_lease()?;
+            #[cfg(test)]
+            {
+                let gate = self
+                    .manager
+                    .inner
+                    .session_creation_before_projection
+                    .lock()
+                    .unwrap()
+                    .clone();
+                if let Some(gate) = gate {
+                    gate.reached.notify_one();
+                    gate.resume.notified().await;
+                }
+            }
+            Ok::<_, anyhow::Error>(service)
+        }
+        .await;
+        let service = match creation {
+            Ok(service) => service,
+            Err(error) => {
+                if let Err(cleanup) = resources.rollback().await {
+                    return Err(error.context(format!(
+                        "fresh session resource rollback failed: {cleanup:#}"
+                    )));
+                }
+                return Err(error);
+            }
+        };
+        let snapshot = service.persist_new_session_with_snapshot(resources).await?;
         let session_id = snapshot
             .metadata
             .session_id

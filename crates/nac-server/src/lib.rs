@@ -329,6 +329,9 @@ struct SessionManagerInner {
     pending_forward_start: bool,
     #[cfg(test)]
     managed_monitor_peer_observed: tokio::sync::Notify,
+    #[cfg(test)]
+    session_creation_before_projection:
+        StdMutex<Option<Arc<application::session_creation::CreationProjectionGate>>>,
 }
 
 struct ServerTraditionalChildController {
@@ -582,6 +585,8 @@ impl SessionManager {
                 pending_forward_start,
                 #[cfg(test)]
                 managed_monitor_peer_observed: tokio::sync::Notify::new(),
+                #[cfg(test)]
+                session_creation_before_projection: StdMutex::new(None),
             }),
         };
         if let Err(error) = mcp_api::synchronize_mcp_oauth_redirect_uris(&manager) {
