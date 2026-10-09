@@ -12,6 +12,7 @@ name = "nac_core"
 [features]
 default = []
 test-support = []
+managed-fault-fixture = []
 openapi = ["dep:utoipa", "nac-contracts/openapi"]
 
 [dependencies]

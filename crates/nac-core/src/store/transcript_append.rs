@@ -336,6 +336,19 @@ impl TranscriptLogWriter {
                 self.append_fault(AppendFault::BeforeCommit)?;
                 let commit_error = transaction.commit().err().map(anyhow::Error::new);
                 if commit_error.is_none() {
+                    #[cfg(feature = "managed-fault-fixture")]
+                    if crate::managed_fault_fixture::hit(
+                        crate::managed_fault_fixture::Boundary::CommitAck,
+                        session_id,
+                        self.append_fence
+                            .as_ref()
+                            .map(|fence| fence.run_id.as_str()),
+                        self.append_fence.as_ref().and_then(|fence| {
+                            fence.generation.as_ref().map(|(_, generation)| *generation)
+                        }),
+                    )? {
+                        return Err(TranscriptAppendError::CommitUncertain.into());
+                    }
                     self.append_fault(AppendFault::AfterCommitBeforeAck)?;
                 }
                 let commit_error =

@@ -179,3 +179,18 @@ fn custom_dev_upgrade_refuses_before_network_or_install_mutation() {
     assert_eq!(std::fs::read_dir(&install_dir).unwrap().count(), 0);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[cfg(not(feature = "managed-fault-fixture"))]
+#[test]
+fn normal_binary_rejects_private_fault_controls_before_startup() {
+    let root = temp_root("fault_exclusion");
+    let output = Command::new(BINARY)
+        .arg("--help")
+        .env("NAC_MANAGED_FAULT_ROOT", &root)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("managed fault controls require the private fault-fixture build"));
+    assert!(!root.exists());
+}

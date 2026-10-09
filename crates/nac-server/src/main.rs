@@ -493,6 +493,14 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
+    if std::env::var_os("NAC_MANAGED_FAULT_ROOT").is_some() {
+        #[cfg(not(feature = "managed-fault-fixture"))]
+        return Err(anyhow!(
+            "managed fault controls require the private fault-fixture build"
+        ));
+        #[cfg(feature = "managed-fault-fixture")]
+        nac_core::managed_fault_fixture::validate_environment()?;
+    }
     let invocation_name = current_invocation_name();
     let matches = cli_command(&invocation_name).get_matches();
     let cli = Cli::from_arg_matches(&matches).map_err(|error| anyhow!(error.to_string()))?;
