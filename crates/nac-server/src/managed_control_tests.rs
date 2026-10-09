@@ -269,6 +269,87 @@ impl Drop for Fixture {
     }
 }
 
+#[tokio::test]
+async fn managed_probe_retains_identity_fence_until_response_completes() {
+    for method in [axum::http::Method::GET, axum::http::Method::HEAD] {
+        for path in ["/healthz", "/readyz"] {
+            let fixture = Fixture::new();
+            let replacement = fixture.prepare_running_replacement("probe-response-fence");
+            let identity = replacement.managed_identity().unwrap().clone();
+            let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            let barrier = Arc::new(std::sync::Mutex::new(Some((entered_tx, release_rx))));
+            let app = axum::Router::new()
+                .route(
+                    path,
+                    axum::routing::get(move || {
+                        let barrier = Arc::clone(&barrier);
+                        async move {
+                            let (entered, release) = barrier.lock().unwrap().take().unwrap();
+                            entered.send(()).unwrap();
+                            release.await.unwrap();
+                            StatusCode::OK
+                        }
+                    }),
+                )
+                .layer(axum::middleware::from_fn_with_state(
+                    fixture.manager.clone(),
+                    crate::delivery::server::enforce_managed_admission,
+                ));
+            let request = Request::builder()
+                .method(method.clone())
+                .uri(path)
+                .body(Body::empty())
+                .unwrap();
+            let response = tokio::spawn(app.oneshot(request));
+            tokio::time::timeout(std::time::Duration::from_secs(2), entered_rx)
+                .await
+                .unwrap()
+                .unwrap();
+            // The handler barrier is strictly after middleware validation.
+            // Try the real exclusive OS lock, with no scheduling/sleep oracle.
+            let fenced = matches!(
+                nac_core::sessions::HostMaintenanceLease::try_acquire(
+                    &fixture.manager.inner.store_path,
+                ),
+                Err(nac_core::sessions::SessionOperationLeaseError::Busy(_))
+            );
+            let store = fixture.manager.inner.store_path.clone();
+            let acceptance = tokio::task::spawn_blocking(move || {
+                nac_core::store::accept_managed_forward_start(&store, &identity)
+            });
+            // Release before assertions, including when characterizing the bug.
+            release_tx.send(()).unwrap();
+            let response = response.await.unwrap().unwrap();
+            let accepted = tokio::time::timeout(std::time::Duration::from_secs(2), acceptance)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(
+                fenced,
+                "{method} {path} dropped shared authority before its response"
+            );
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(
+                accepted,
+                "replacement must accept after the response drains"
+            );
+            let stale = crate::router(fixture.manager.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(stale.status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
+}
+
 fn tree_snapshot(root: &std::path::Path) -> BTreeMap<std::path::PathBuf, (u32, Vec<u8>)> {
     fn visit(
         root: &std::path::Path,
