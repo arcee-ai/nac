@@ -410,3 +410,142 @@ async fn natural_exit_archives_output_and_releases_lifetime_leases() {
         .is_ok());
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[tokio::test]
+async fn terminal_output_wait_wakes_multiple_observers_and_checks_output_before_waiting() {
+    let (parts, directory) = fixture();
+    let service = &parts.service;
+    service
+        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
+        .unwrap();
+    let terminal = service
+        .open_user_terminal(Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    // A shell blocked on read gives both observers a stable shared cursor;
+    // octal READY bytes prevent command echo from satisfying the handshake.
+    service
+        .write_user_terminal_input(
+            &terminal.id,
+            b"stty -echo; printf '\\122\\105\\101\\104\\131'; read -r line; printf WAKE-MARKER\r",
+        )
+        .await
+        .unwrap();
+    wait_for(service, &terminal.id, b"READY").await;
+    let cursor = service
+        .read_user_terminal_output(&terminal.id, 0, 65536)
+        .await
+        .unwrap()
+        .retained_end;
+    let first = service.wait_for_user_terminal_output(&terminal.id, cursor, 1000);
+    let second = service.wait_for_user_terminal_output(&terminal.id, cursor, 1000);
+    let trigger = async {
+        tokio::task::yield_now().await;
+        service
+            .write_user_terminal_input(&terminal.id, b"go\r")
+            .await
+            .unwrap();
+    };
+    tokio::time::timeout(Duration::from_millis(700), async {
+        let (first, second, ()) = tokio::join!(first, second, trigger);
+        first.unwrap();
+        second.unwrap();
+    })
+    .await
+    .unwrap();
+    let output = service
+        .read_user_terminal_output(&terminal.id, cursor, 65536)
+        .await
+        .unwrap();
+    assert!(output.retained_end > cursor);
+    // Output arriving between an empty read and waiter registration must not
+    // cost the full polling delay or lose a notification.
+    tokio::time::timeout(
+        Duration::from_millis(100),
+        service.wait_for_user_terminal_output(&terminal.id, cursor, 1000),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(service
+        .wait_for_user_terminal_output(&terminal.id, output.retained_end, 1001)
+        .await
+        .is_err());
+    service.terminate_user_terminal(&terminal.id).await.unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn terminal_output_wait_observes_eof_without_more_bytes_and_remains_owner_scoped() {
+    let (parts, directory) = fixture();
+    let service = &parts.service;
+    service
+        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
+        .unwrap();
+    let terminal = service
+        .open_user_terminal(Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    service
+        .write_user_terminal_input(
+            &terminal.id,
+            b"stty -echo; printf '\\122\\105\\101\\104\\131'; read -r line; exit 7\r",
+        )
+        .await
+        .unwrap();
+    wait_for(service, &terminal.id, b"READY").await;
+    let cursor = service
+        .read_user_terminal_output(&terminal.id, 0, 65536)
+        .await
+        .unwrap()
+        .retained_end;
+    let trigger = async {
+        tokio::task::yield_now().await;
+        service
+            .write_user_terminal_input(&terminal.id, b"go\r")
+            .await
+            .unwrap();
+    };
+    tokio::time::timeout(Duration::from_millis(700), async {
+        let (waited, ()) = tokio::join!(
+            service.wait_for_user_terminal_output(&terminal.id, cursor, 1000),
+            trigger
+        );
+        waited.unwrap();
+    })
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !service
+            .user_terminal_status(&terminal.id)
+            .await
+            .unwrap()
+            .output_complete
+        {
+            service
+                .wait_for_user_terminal_output(&terminal.id, cursor, 1000)
+                .await
+                .unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::timeout(
+        Duration::from_millis(100),
+        service.wait_for_user_terminal_output(&terminal.id, cursor, 1000),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let (foreign, foreign_directory) = fixture();
+    assert!(foreign
+        .service
+        .wait_for_user_terminal_output(&terminal.id, cursor, 0)
+        .await
+        .is_err());
+    service.terminate_user_terminal(&terminal.id).await.unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+    std::fs::remove_dir_all(foreign_directory).unwrap();
+}

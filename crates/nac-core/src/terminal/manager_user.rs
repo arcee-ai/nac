@@ -285,6 +285,39 @@ impl TerminalManager {
         super::super::input::await_receipt(receipt).await
     }
 
+    pub(crate) async fn wait_user_output(
+        &self,
+        name: &str,
+        observed_end: u64,
+        wait_ms: u16,
+    ) -> Result<()> {
+        self.check_user_name(name)?;
+        if wait_ms > 1000 {
+            return Err(anyhow!("terminal output wait exceeds 1000 milliseconds"));
+        }
+        let sessions = self.sessions.lock().await;
+        let Some(session) = sessions.get(name).filter(|session| session.is_user_owned()) else {
+            drop(sessions);
+            self.user_terminal_status(name).await?;
+            return Ok(());
+        };
+        let notify = Arc::clone(session.output_notify());
+        let output_id = session.output_id().to_owned();
+        let state = session.collector_state();
+        drop(sessions);
+        let notified = notify.notified();
+        tokio::pin!(notified);
+        // Register before the current-end check; collection may advance or
+        // finish between a caller's empty page and this observation.
+        notified.as_mut().enable();
+        if state.complete() || self.output_registry.stats(&output_id)?.combined_bytes > observed_end
+        {
+            return Ok(());
+        }
+        let _ = tokio::time::timeout(Duration::from_millis(u64::from(wait_ms)), notified).await;
+        Ok(())
+    }
+
     pub(crate) async fn resize_user_terminal(
         &self,
         name: &str,

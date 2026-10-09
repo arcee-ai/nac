@@ -45,6 +45,21 @@ impl From<JsonRejection> for ApiError {
     }
 }
 
+impl From<application::terminal_observation::TerminalApplicationError> for ApiError {
+    fn from(error: application::terminal_observation::TerminalApplicationError) -> Self {
+        use application::terminal_observation::TerminalApplicationError;
+        match error {
+            TerminalApplicationError::Invalid(message) => Self::bad_request(message.into()),
+            TerminalApplicationError::Unavailable => Self::new(StatusCode::CONFLICT,
+                "terminal or observer is unavailable for this session owner; it may have closed, expired, or its NAC owner restarted".into()),
+            TerminalApplicationError::Busy => Self::new(StatusCode::TOO_MANY_REQUESTS,
+                "terminal observer capacity is full or an observation request is already in flight".into()),
+            TerminalApplicationError::Rejected(message) => Self::new(StatusCode::CONFLICT, message),
+            TerminalApplicationError::Internal(error) => error.into(),
+        }
+    }
+}
+
 impl From<sessions::SessionPresentationError> for ApiError {
     fn from(error: sessions::SessionPresentationError) -> Self {
         let status = match &error {

@@ -109,6 +109,19 @@ impl SessionService {
             .await
     }
 
+    /// Bounded observation wake-up, independently of the agent and its input
+    /// domain. Collection wakes every observer, including on EOF/error.
+    pub async fn wait_for_user_terminal_output(
+        &self,
+        id: &str,
+        observed_end: u64,
+        wait_ms: u16,
+    ) -> Result<()> {
+        self.terminal_manager
+            .wait_user_output(id, observed_end, wait_ms)
+            .await
+    }
+
     /// Bytes retain their literal meaning; an Enter does not grant or simulate
     /// per-command authorization. The launch authorized this human capability.
     pub async fn write_user_terminal_input(&self, id: &str, bytes: &[u8]) -> Result<()> {
