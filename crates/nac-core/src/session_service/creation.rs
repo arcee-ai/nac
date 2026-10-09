@@ -86,12 +86,12 @@ impl PersistenceCommand for CreateSessionWithSnapshot {
             transaction.commit()?;
             Ok(())
         })?;
-        if let Some(resources) = self
+        let resources = self
             .resources
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
+            .take();
+        if let Some(resources) = resources {
             resources.retain();
         }
         #[cfg(test)]
