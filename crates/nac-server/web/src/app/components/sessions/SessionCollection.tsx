@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -10,13 +11,7 @@ import { isActiveRun } from "@/app/lib/format";
 import { buildSessionNavigation, isSessionUnread } from "@/app/lib/sessionNavigation";
 import { routes } from "@/app/lib/routes";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
-import { trackAttention, useAttention } from "@/app/store/attentionStore";
-import {
-  markSessionViewed,
-  toggleSessionNavigationPin,
-  useSessionNavigationPins,
-  useSessionViewedAt,
-} from "@/app/store/sessionNavigationStore";
+
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 function SessionCollectionRow({
@@ -30,6 +25,11 @@ function SessionCollectionRow({
   active: boolean;
   pinned: boolean;
 }) {
+  const { useSessionViewedAt, toggleSessionNavigationPin, markSessionViewed } =
+    useNativeRuntime().stores.sessionNavigationStore;
+
+  const { useAttention } = useNativeRuntime().stores.attentionStore;
+
   const navigate = useNavigate();
   const actions = useSessionActions();
   const sessionTitle = useSessionTitle();
@@ -93,6 +93,11 @@ export function SessionCollection({
   projects: ProjectRecord[];
   activeSessionId: string;
 }) {
+  const { useSessionNavigationPins, markSessionViewed } =
+    useNativeRuntime().stores.sessionNavigationStore;
+
+  const { trackAttention } = useNativeRuntime().stores.attentionStore;
+
   const pinnedIds = useSessionNavigationPins();
   const model = useMemo(
     () => buildSessionNavigation(projects, sessions, pinnedIds),
@@ -101,14 +106,14 @@ export function SessionCollection({
 
   useEffect(() => {
     trackAttention(sessions, activeSessionId);
-  }, [sessions, activeSessionId]);
+  }, [sessions, activeSessionId, trackAttention]);
 
   useEffect(() => {
     const current = sessions.find(
       (entry) => entry.lineage == null && entry.summary.session_id === activeSessionId,
     );
     if (current) markSessionViewed(activeSessionId, current.summary.updated_at);
-  }, [sessions, activeSessionId]);
+  }, [sessions, activeSessionId, markSessionViewed]);
 
   return (
     <nav aria-label="All sessions" className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2">

@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useState } from "react";
 
 import {
@@ -17,7 +18,7 @@ import {
 } from "@/app/atoms";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useBranches, useSwitchBranch } from "@/app/services/queries";
-import { useRunning } from "@/app/store/runtimeStore";
+
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 /** Why the picker will not act right now, or null when it is free to. */
@@ -92,6 +93,8 @@ export function BranchPicker({
   /** Footer chips open upward. A header chip opens downward. */
   placement?: PopoverPlacement;
 }) {
+  const { useRunning } = useNativeRuntime().stores.runtimeStore;
+
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 

@@ -1,9 +1,9 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useLocation } from "react-router-dom";
 
 import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { sessionIdFromPath } from "@/app/lib/routes";
-import { toggleSidePanelExpanded } from "@/app/store/sessionLayoutStore";
 
 /**
  * Phone-only session control in the top bar. The side box has no half of the
@@ -11,6 +11,8 @@ import { toggleSidePanelExpanded } from "@/app/store/sessionLayoutStore";
  * session's own actions are reached from the composer and the list.
  */
 export function SessionHeaderActions() {
+  const { toggleSidePanelExpanded } = useNativeRuntime().stores.sessionLayoutStore;
+
   const { pathname } = useLocation();
   const sessionId = sessionIdFromPath(pathname);
   const isMobile = useIsMobile();

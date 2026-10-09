@@ -58,3 +58,9 @@ export function createStore<S extends object>(
 
   return { getState, setState, subscribe, useStore };
 }
+
+/** Resolve browser preferences at call time (also supports standalone test documents). */
+export const standalonePreferenceStorage: Pick<Storage, "getItem" | "setItem"> = {
+  getItem: (key) => globalThis.localStorage.getItem(key),
+  setItem: (key, value) => globalThis.localStorage.setItem(key, value),
+};

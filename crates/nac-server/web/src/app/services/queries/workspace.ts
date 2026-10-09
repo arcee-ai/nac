@@ -1,6 +1,6 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries/keys";
 import type {
   BranchList,
@@ -36,6 +36,8 @@ export function useWorkspaceDiff(
   context = 3,
   revision: number | null = null,
 ) {
+  const { api } = useNativeRuntime();
+
   return useQuery<WorkspaceFileDiff>({
     queryKey: queryKeys.workspaceDiff(id ?? "", path ?? "", stage, context, revision),
     queryFn: ({ signal }) => api.getWorkspaceDiff(id!, path!, { stage, context, revision, signal }),
@@ -50,6 +52,8 @@ export function useWorkspaceDiff(
  * is frozen and therefore never goes stale.
  */
 export function useWorkspaceFiles(id: string | null, revision: number | null = null) {
+  const { api } = useNativeRuntime();
+
   return useQuery<WorkspaceFileList>({
     queryKey: queryKeys.workspaceFiles(id ?? "", revision),
     queryFn: ({ signal }) => api.getWorkspaceFiles(id!, revision, signal),
@@ -65,6 +69,8 @@ export function useWorkspaceFile(
   path: string | null,
   revision: number | null = null,
 ) {
+  const { api } = useNativeRuntime();
+
   return useQuery<WorkspaceFileContent>({
     queryKey: queryKeys.workspaceFile(id ?? "", path ?? "", revision),
     queryFn: ({ signal }) => api.getWorkspaceFile(id!, path!, revision, signal),
@@ -76,6 +82,8 @@ export function useWorkspaceFile(
 
 /** Revisions captured for this session, newest first. */
 export function useWorkspaceRevisions(id: string | null) {
+  const { api } = useNativeRuntime();
+
   return useQuery<WorkspaceRevision[]>({
     queryKey: queryKeys.workspaceRevisions(id ?? ""),
     queryFn: ({ signal }) => api.getWorkspaceRevisions(id!, signal),
@@ -87,6 +95,8 @@ export function useWorkspaceRevisions(id: string | null) {
 
 /** What the run behind a revision changed. Frozen, so it is cached for good. */
 export function useWorkspaceRevisionChanges(id: string | null, revision: number | null) {
+  const { api } = useNativeRuntime();
+
   return useQuery<WorkspaceRevisionChanges>({
     queryKey: queryKeys.workspaceRevisionChanges(id ?? "", revision ?? 0),
     queryFn: ({ signal }) => api.getWorkspaceRevisionChanges(id!, revision!, signal),
@@ -101,6 +111,8 @@ export function useWorkspaceRevisionChanges(id: string | null, revision: number 
  * open, since it shells out to git on the host.
  */
 export function useBranches(id: string | null, enabled: boolean) {
+  const { api } = useNativeRuntime();
+
   return useQuery<BranchList>({
     queryKey: queryKeys.branches(id ?? ""),
     queryFn: ({ signal }) => api.getBranches(id!, signal),
@@ -111,6 +123,8 @@ export function useBranches(id: string | null, enabled: boolean) {
 }
 
 export function useSwitchBranch(id: string) {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: (payload: SwitchBranchRequest) => api.switchBranch(id, payload),
@@ -125,6 +139,8 @@ export function useSwitchBranch(id: string) {
 }
 
 export function useCommitWorkspace(id: string) {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: (payload: CommitWorkspaceRequest) => api.commitWorkspace(id, payload),

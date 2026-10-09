@@ -23,7 +23,12 @@ export const remarkMathPlugin = [remarkMath, { singleDollarTextMath: true }] as 
  * their contents, which collapses the copies a transcript would otherwise
  * accumulate down to one of each.
  */
-export const rehypeMathjaxPlugin = [
-  rehypeMathjaxChtml,
-  { chtml: { fontURL: __MATHJAX_FONT_URL__ } },
-] as const;
+export function createMathjaxPlugin(
+  fontURL = __MATHJAX_FONT_URL__,
+): readonly [typeof rehypeMathjaxChtml, { chtml: { fontURL: string } }] {
+  if (!fontURL)
+    throw new Error(
+      "Supply native presentation assets.mathjaxFontUrl from the packed asset manifest.",
+    );
+  return [rehypeMathjaxChtml, { chtml: { fontURL } }] as const;
+}

@@ -14,6 +14,7 @@ export function FooterButton({
   disabled,
   onClick,
   children,
+  ariaLabel,
 }: {
   isMobile: boolean;
   variant: ButtonVariant;
@@ -22,6 +23,7 @@ export function FooterButton({
   disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
+  ariaLabel?: string;
 }) {
   if (isMobile) {
     return (
@@ -30,6 +32,7 @@ export function FooterButton({
         content={content ?? ButtonContent.Text}
         className={className}
         disabled={disabled}
+        aria-label={ariaLabel}
         onClick={onClick}
       >
         {children}
@@ -43,6 +46,7 @@ export function FooterButton({
       content={content}
       className={className}
       disabled={disabled}
+      aria-label={ariaLabel}
       onClick={onClick}
     >
       {children}

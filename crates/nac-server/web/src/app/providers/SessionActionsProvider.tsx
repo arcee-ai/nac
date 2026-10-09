@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 import { DeleteModal } from "@/app/components/modals/DeleteModal";
@@ -5,7 +6,7 @@ import { RenameModal } from "@/app/components/modals/RenameModal";
 import { SettingsModal } from "@/app/components/modals/SettingsModal";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useCancelRun, useTogglePin } from "@/app/services/queries";
-import { captureRuntimeActivation, pushLocalEvent } from "@/app/store/runtimeStore";
+
 import type { SessionSummarySnapshot } from "@/app/types/api";
 import { toRunError } from "@/app/lib/providerError";
 
@@ -30,6 +31,8 @@ type ModalKind = "rename" | "delete" | "settings";
  * the two small modals they open, so both surfaces behave identically.
  */
 export function SessionActionsProvider({ children }: { children: React.ReactNode }) {
+  const { pushLocalEvent, captureRuntimeActivation } = useNativeRuntime().stores.runtimeStore;
+
   const toast = useToast();
   const pin = useTogglePin();
   const cancelRun = useCancelRun();
@@ -72,7 +75,7 @@ export function SessionActionsProvider({ children }: { children: React.ReactNode
         }
       },
     }),
-    [openModal, togglePin, cancelRun, toast],
+    [openModal, togglePin, toast, captureRuntimeActivation, cancelRun, pushLocalEvent],
   );
 
   const close = () => setModal(null);

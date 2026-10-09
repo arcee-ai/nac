@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -39,15 +40,7 @@ import {
   useWorkspaceFiles,
   useWorkspaceRevisionChanges,
 } from "@/app/services/queries";
-import {
-  selectFile,
-  selectFileListing,
-  toggleFolder,
-  useFileListing,
-  useSelectedFile,
-  useToggledFolders,
-  type FileListing,
-} from "@/app/store/sessionLayoutStore";
+import { type FileListing } from "@/app/store/sessionLayoutStore";
 import type {
   ChangedFileStat,
   SessionSnapshotResponse,
@@ -202,6 +195,8 @@ function ListToolbar({
   revision: number | null;
   readOnly: boolean;
 }) {
+  const { selectFileListing } = useNativeRuntime().stores.sessionLayoutStore;
+
   const isMobile = useIsMobile();
 
   const listingButtons = (
@@ -558,6 +553,9 @@ export function FilesView({
   revision?: number | null;
   readOnly?: boolean;
 }) {
+  const { useToggledFolders, useSelectedFile, useFileListing, toggleFolder, selectFile } =
+    useNativeRuntime().stores.sessionLayoutStore;
+
   const client = useQueryClient();
   // Shared rather than local: the same panel also renders inside the
   // full-screen dialog, and it has to open on the file you were reading.

@@ -1,3 +1,4 @@
+import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundary";
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
@@ -26,6 +27,8 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
   className = "",
   children,
 }) => {
+  const portalTarget = usePresentationPortalTarget();
+
   const [mounted, setMounted] = useState(open);
   const [down, setDown] = useState(true);
   const [wasOpen, setWasOpen] = useState(open);
@@ -93,7 +96,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
         {children}
       </div>
     </>,
-    document.body,
+    portalTarget,
   );
 };
 

@@ -276,7 +276,9 @@ export class NacTransport {
       requestId = this.newRequestId(),
     }: NacRequestOptions = {},
   ): Promise<T> {
+    signal?.throwIfAborted();
     const requestHeaders = await this.configuredHeaders(requestId, headers);
+    signal?.throwIfAborted();
     if (body !== undefined && !requestHeaders.has("Content-Type")) {
       requestHeaders.set("Content-Type", "application/json");
     }
@@ -330,11 +332,26 @@ function compareCursor(left: SessionEventBoundary, right: SessionEventBoundary):
   return left.sequence_id - right.sequence_id;
 }
 
-export class NacClient {
-  readonly transport: NacTransport;
+/** Public structural port also accepts a consumer's existing authenticated HTTP/SSE transport. */
+export type NacHttpTransport = Pick<
+  NacTransport,
+  | "endpoint"
+  | "credentials"
+  | "authorization"
+  | "versionPolicy"
+  | "url"
+  | "eventSourceInit"
+  | "newRequestId"
+  | "streamContext"
+  | "request"
+  | "admit"
+>;
 
-  constructor(options: NacClientOptions = {}) {
-    this.transport = new NacTransport(options);
+export class NacClient {
+  readonly transport: NacHttpTransport;
+
+  constructor(options: NacClientOptions | NacHttpTransport = {}) {
+    this.transport = "request" in options ? options : new NacTransport(options);
   }
 
   getUiConfiguration(signal?: AbortSignal): Promise<UiConfiguration> {

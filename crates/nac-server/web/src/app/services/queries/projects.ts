@@ -1,7 +1,8 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { placeIdAt } from "@/app/lib/sessionOrder";
-import { api } from "@/app/services/api";
+
 import { useQueryInvalidators } from "@/app/services/queries/invalidation";
 import { queryKeys } from "@/app/services/queries/keys";
 import type {
@@ -17,6 +18,8 @@ import type {
  * session list rather than polling: every project mutation invalidates it.
  */
 export function useProjects() {
+  const { api } = useNativeRuntime();
+
   return useQuery<ProjectList>({
     queryKey: queryKeys.projects,
     queryFn: ({ signal }) => api.listProjects(signal),
@@ -26,6 +29,8 @@ export function useProjects() {
 }
 
 export function useCreateProject() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   return useMutation({
     retry: false,
@@ -40,6 +45,8 @@ export interface UpdateProjectVariables {
 }
 
 export function useUpdateProject() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   return useMutation({
     retry: false,
@@ -70,6 +77,8 @@ export interface DeleteProjectVariables {
 
 /** Either way the project's sessions move, so the session list moves too. */
 export function useDeleteProject() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   return useMutation({
     mutationFn: ({ projectId, sessions }: DeleteProjectVariables) =>
@@ -84,6 +93,8 @@ export interface AssignSessionVariables {
 }
 
 export function useAssignSessionToProject() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   return useMutation({
     mutationFn: ({ projectId, sessionId }: AssignSessionVariables) =>
@@ -107,6 +118,8 @@ export interface MoveProjectOrderVariables {
  * its response before the order request is built.
  */
 export function useMoveProjectOrder() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   return useMutation({
     mutationFn: async ({

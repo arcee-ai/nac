@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Fragment,
@@ -57,32 +58,7 @@ import {
   useUpdateGoal,
   useWorkspaceRevisions,
 } from "@/app/services/queries";
-import {
-  selectFile,
-  selectRevision,
-  selectThread,
-  selectWorkset,
-  useSelectedFile,
-  useSelectedRevision,
-  useSelectedThreadEpisode,
-  useSelectedWorkset,
-} from "@/app/store/sessionLayoutStore";
-import {
-  pushLocalEvent,
-  setOptimisticUserPrompt,
-  useActivity,
-  useFinishedToolCalls,
-  usePrimaryToolEvents,
-  useCancelArmed,
-  useLiveThreads,
-  useOptimisticUserPrompt,
-  useRunError,
-  useRunFailure,
-  useRunning,
-  useModelRetryAttempt,
-  useStreamReasoning,
-  useStreamText,
-} from "@/app/store/runtimeStore";
+
 import type { RunFailure, SessionGoalRecord, SessionSnapshotResponse } from "@/app/types/api";
 
 interface TranscriptProps {
@@ -220,6 +196,34 @@ export function Transcript({
   onFocusPanel,
   errorNotice = null,
 }: TranscriptProps) {
+  const {
+    useStreamText,
+    useStreamReasoning,
+    useModelRetryAttempt,
+    useRunning,
+    useRunFailure,
+    useRunError,
+    useOptimisticUserPrompt,
+    useLiveThreads,
+    useCancelArmed,
+    usePrimaryToolEvents,
+    useFinishedToolCalls,
+    useActivity,
+    setOptimisticUserPrompt,
+    pushLocalEvent,
+  } = useNativeRuntime().stores.runtimeStore;
+
+  const {
+    useSelectedWorkset,
+    useSelectedThreadEpisode,
+    useSelectedRevision,
+    useSelectedFile,
+    selectWorkset,
+    selectThread,
+    selectRevision,
+    selectFile,
+  } = useNativeRuntime().stores.sessionLayoutStore;
+
   const running = useRunning(sessionId);
   const stopping = useCancelArmed(sessionId);
   const activity = useActivity();
@@ -401,7 +405,7 @@ export function Transcript({
         }
       })();
     },
-    [actionsBusy, backend, regenerate, sessionId, toast],
+    [actionsBusy, backend, pushLocalEvent, regenerate, sessionId, toast],
   );
 
   const fork = forkSession.mutateAsync;
@@ -458,7 +462,7 @@ export function Transcript({
     if (!showPending && optimisticPrompt) {
       setOptimisticUserPrompt(null);
     }
-  }, [showPending, optimisticPrompt]);
+  }, [showPending, optimisticPrompt, setOptimisticUserPrompt]);
 
   // Once *this* run has a model message of its own, that message carries the
   // liveness — its pill spins and its header names the activity. A standalone
@@ -478,14 +482,14 @@ export function Transcript({
       selectThread(name, episodeKey);
       onFocusPanel("threads");
     },
-    [onFocusPanel],
+    [onFocusPanel, selectThread],
   );
   const focusWorkset = useCallback(
     (id: string) => {
       selectWorkset(id);
       onFocusPanel("worksets");
     },
-    [onFocusPanel],
+    [onFocusPanel, selectWorkset],
   );
   // Opening a snapshot points the panel at that run's revision rather than at
   // the working tree: the run is what the badge describes, and the tree has
@@ -495,7 +499,7 @@ export function Transcript({
       selectRevision(revision);
       onFocusPanel("files");
     },
-    [onFocusPanel],
+    [onFocusPanel, selectRevision],
   );
   const focusRevisionFile = useCallback(
     (revision: number, path: string) => {
@@ -503,7 +507,7 @@ export function Transcript({
       selectFile(path);
       onFocusPanel("files");
     },
-    [onFocusPanel],
+    [onFocusPanel, selectFile, selectRevision],
   );
 
   // One object for every turn, and stable across stream deltas, so carrying it

@@ -1,7 +1,7 @@
 // Sessions whose run finished while the user was looking elsewhere. The list
 // view renders a dot for them until they are opened.
 
-import { createStore } from "@/app/lib/store";
+import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 import { isActiveRun } from "@/app/lib/format";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
@@ -9,71 +9,95 @@ interface AttentionState {
   flagged: Record<string, boolean>;
 }
 
-export const attentionStore = createStore<AttentionState>({ flagged: {} });
-
-const { getState, setState, useStore } = attentionStore;
-
 // Previous run state per session, kept outside the store because it is only an
 // implementation detail of the transition detection.
 interface ActiveById {
   [id: string]: boolean;
 }
+/** One presentation lifetime; hosted preferences are ephemeral. */
+export function createAttentionStore(_storage?: Pick<Storage, "getItem" | "setItem">) {
+  const attentionStore = createStore<AttentionState>({ flagged: {} });
+  const initial_attentionStore = attentionStore.getState();
 
-let previouslyActive: ActiveById = {};
+  const { getState, setState, useStore } = attentionStore;
 
-/**
- * Flag every session that stopped running since the last call, except the one
- * currently open. Call this whenever a fresh session list arrives.
- */
-export function trackAttention(sessions: ManagedSessionSummary[], selectedId: string | null): void {
-  const nextActive: Record<string, boolean> = {};
-  const flagged = { ...getState().flagged };
-  let changed = false;
+  let previouslyActive: ActiveById = {};
 
-  for (const entry of sessions) {
-    const id = entry.summary.session_id;
-    const active = isActiveRun(entry.active_run);
-    nextActive[id] = active;
-    if (previouslyActive[id] === true && !active && id !== selectedId) {
-      if (!flagged[id]) {
-        flagged[id] = true;
+  /**
+   * Flag every session that stopped running since the last call, except the one
+   * currently open. Call this whenever a fresh session list arrives.
+   */
+  function trackAttention(sessions: ManagedSessionSummary[], selectedId: string | null): void {
+    const nextActive: Record<string, boolean> = {};
+    const flagged = { ...getState().flagged };
+    let changed = false;
+
+    for (const entry of sessions) {
+      const id = entry.summary.session_id;
+      const active = isActiveRun(entry.active_run);
+      nextActive[id] = active;
+      if (previouslyActive[id] === true && !active && id !== selectedId) {
+        if (!flagged[id]) {
+          flagged[id] = true;
+          changed = true;
+        }
+      }
+    }
+
+    previouslyActive = nextActive;
+    if (changed) setState({ flagged });
+  }
+
+  function clearAttention(id: string): void {
+    const flagged = getState().flagged;
+    if (!flagged[id]) return;
+    const next = { ...flagged };
+    delete next[id];
+    setState({ flagged: next });
+  }
+
+  const useAttention = (id: string) => useStore((s) => Boolean(s.flagged[id]));
+
+  /**
+   * A project card stands in for the chats inside it, so it lights up when any of
+   * them finished unseen. The selector reduces to a boolean, so a change to an
+   * unrelated session never re-renders the card.
+   */
+  const useAnyAttention = (ids: string[]) =>
+    useStore((s) => ids.some((id) => Boolean(s.flagged[id])));
+
+  /** Clears every chat of a project at once, when its card is opened. */
+  function clearAttentionAll(ids: string[]): void {
+    const flagged = getState().flagged;
+    const next = { ...flagged };
+    let changed = false;
+    for (const id of ids) {
+      if (next[id]) {
+        delete next[id];
         changed = true;
       }
     }
+    if (changed) setState({ flagged: next });
   }
-
-  previouslyActive = nextActive;
-  if (changed) setState({ flagged });
+  return {
+    release: () => {
+      attentionStore.setState(initial_attentionStore);
+    },
+    attentionStore,
+    trackAttention,
+    clearAttention,
+    useAttention,
+    useAnyAttention,
+    clearAttentionAll,
+  };
 }
 
-export function clearAttention(id: string): void {
-  const flagged = getState().flagged;
-  if (!flagged[id]) return;
-  const next = { ...flagged };
-  delete next[id];
-  setState({ flagged: next });
-}
-
-export const useAttention = (id: string) => useStore((s) => Boolean(s.flagged[id]));
-
-/**
- * A project card stands in for the chats inside it, so it lights up when any of
- * them finished unseen. The selector reduces to a boolean, so a change to an
- * unrelated session never re-renders the card.
- */
-export const useAnyAttention = (ids: string[]) =>
-  useStore((s) => ids.some((id) => Boolean(s.flagged[id])));
-
-/** Clears every chat of a project at once, when its card is opened. */
-export function clearAttentionAll(ids: string[]): void {
-  const flagged = getState().flagged;
-  const next = { ...flagged };
-  let changed = false;
-  for (const id of ids) {
-    if (next[id]) {
-      delete next[id];
-      changed = true;
-    }
-  }
-  if (changed) setState({ flagged: next });
-}
+export const {
+  release,
+  attentionStore,
+  trackAttention,
+  clearAttention,
+  useAttention,
+  useAnyAttention,
+  clearAttentionAll,
+} = createAttentionStore(standalonePreferenceStorage);

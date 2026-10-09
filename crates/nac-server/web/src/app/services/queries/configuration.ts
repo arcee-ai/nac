@@ -1,6 +1,7 @@
+import { useMemo } from "react";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
-import { api } from "@/app/services/api";
 import { queryKeys, type BrowseKind } from "@/app/services/queries/keys";
 import type {
   BackendKind,
@@ -35,6 +36,8 @@ export function useBrowsePath(
   hidden: boolean,
   enabled: boolean,
 ) {
+  const { api } = useNativeRuntime();
+
   return useQuery<BrowseListing>({
     queryKey: queryKeys.browse(path ?? "", kind, hidden),
     queryFn: ({ signal }) => api.browsePath(path, kind, hidden, signal),
@@ -54,6 +57,8 @@ export function useSshBrowsePath(
   hidden: boolean,
   enabled: boolean,
 ) {
+  const { api } = useNativeRuntime();
+
   return useQuery<BrowseListing>({
     queryKey: queryKeys.sshBrowse(target ?? { ssh_host: "" }, path ?? "", hidden),
     queryFn: ({ signal }) => api.browseSshPath(target!, path, hidden, signal),
@@ -72,6 +77,8 @@ export function useSshBrowsePath(
  * session created next reuses.
  */
 export function useSshConnect() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: (target: SshTarget) => api.browseSshPath(target, null),
@@ -84,6 +91,8 @@ export function useSshConnect() {
 }
 
 export function useSshConfigs() {
+  const { api } = useNativeRuntime();
+
   return useQuery<SshConfigurationList>({
     queryKey: queryKeys.sshConfigs,
     queryFn: ({ signal }) => api.listSshConfigs(signal),
@@ -93,6 +102,8 @@ export function useSshConfigs() {
 }
 
 export function useCreateSshConfig() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: (payload: CreateSshConfigurationRequest) => api.createSshConfig(payload),
@@ -103,6 +114,8 @@ export function useCreateSshConfig() {
 }
 
 export function useUpdateSshConfig() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -119,6 +132,8 @@ export function useUpdateSshConfig() {
 }
 
 export function useDeleteSshConfig() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: (configId: string) => api.deleteSshConfig(configId),
@@ -135,6 +150,8 @@ export function useDeleteSshConfig() {
 const MCP_LIBRARY_STALE_MS = 5 * 60 * 1000;
 
 export function useMcpLibrary() {
+  const { api } = useNativeRuntime();
+
   return useQuery<McpLibraryResponse>({
     queryKey: queryKeys.mcpLibrary,
     queryFn: ({ signal }) => api.getMcpLibrary(signal),
@@ -144,6 +161,8 @@ export function useMcpLibrary() {
 }
 
 export function useMcpServers() {
+  const { api } = useNativeRuntime();
+
   return useQuery<McpServerList>({
     queryKey: queryKeys.mcpServers,
     queryFn: ({ signal }) => api.listMcpServers(signal),
@@ -153,6 +172,8 @@ export function useMcpServers() {
 }
 
 export function useCreateMcpServer() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: (payload: CreateMcpServerRequest) => api.createMcpServer(payload),
@@ -164,6 +185,8 @@ export function useCreateMcpServer() {
 }
 
 export function useUpdateMcpServer() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -181,6 +204,8 @@ export function useUpdateMcpServer() {
 }
 
 export function useDeleteMcpServer() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: (serverName: string) => api.deleteMcpServer(serverName),
@@ -192,12 +217,16 @@ export function useDeleteMcpServer() {
 }
 
 export function useTestMcpServer() {
+  const { api } = useNativeRuntime();
+
   return useMutation({
     mutationFn: (payload: TestMcpServerRequest) => api.testMcpServer(payload),
   });
 }
 
 export function useMcpRuntimeStatus() {
+  const { api } = useNativeRuntime();
+
   return useQuery<McpRuntimeStatusList>({
     queryKey: queryKeys.mcpRuntime,
     queryFn: ({ signal }) => api.listMcpRuntimeStatus(signal),
@@ -207,6 +236,8 @@ export function useMcpRuntimeStatus() {
 }
 
 export function useMcpRuntimeAction() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -227,6 +258,8 @@ export function useMcpRuntimeAction() {
 }
 
 export function useModelConfigs(enabled = true) {
+  const { api } = useNativeRuntime();
+
   return useQuery<ModelConfigurationList>({
     queryKey: queryKeys.modelConfigs,
     enabled,
@@ -240,17 +273,27 @@ export function useModelConfigs(enabled = true) {
  * The models an API key can reach, which is also how the key is validated: the
  * provider rejects the very same request when the key is wrong.
  *
- * The key appears in the query key so a corrected key refetches. That cache is
- * in memory for the lifetime of the tab and is never persisted.
+ * An opaque identity changes with the draft key; credentials never appear in cache keys.
  */
+let credentialSequence = 0;
+function draftCredentialIdentity(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `credential-${++credentialSequence}`;
+}
+
 export function useProviderModels(
   backend: BackendKind,
   apiKey: string,
   baseUrl: string | null,
   enabled: boolean,
 ) {
+  const { api } = useNativeRuntime();
+  const credential = useMemo(
+    () => ({ identity: draftCredentialIdentity(), value: apiKey }),
+    [apiKey],
+  );
+
   return useQuery<ProviderModelList>({
-    queryKey: queryKeys.providerModels(backend, apiKey, baseUrl ?? ""),
+    queryKey: queryKeys.providerModels(backend, credential.identity, baseUrl ?? ""),
     queryFn: ({ signal }) =>
       api.listProviderModels({ backend, api_key: apiKey, base_url: baseUrl }, signal),
     enabled: enabled && apiKey.length > 0,
@@ -271,6 +314,8 @@ export function useStoredKeyProviderModels(
   baseUrl: string | null,
   enabled: boolean,
 ) {
+  const { api } = useNativeRuntime();
+
   return useQuery<ProviderModelList>({
     queryKey: queryKeys.storedKeyProviderModels(backend, apiKeyEnv, baseUrl ?? ""),
     queryFn: ({ signal }) =>
@@ -302,6 +347,8 @@ export function useStoredKeyProviderModels(
  * never fatal — every consumer falls back to showing the raw numbers.
  */
 export function useModelCatalog(enabled = true) {
+  const { api } = useNativeRuntime();
+
   return useQuery<ModelCatalog>({
     queryKey: queryKeys.modelCatalog,
     queryFn: ({ signal }) => api.getModelCatalog(signal),
@@ -332,6 +379,8 @@ export async function refreshProviderAuthentication(client: QueryClient): Promis
 
 /** Session-scoped slash commands, including prompts discovered from mounted MCP servers. */
 export function useSlashCommands(sessionId: string) {
+  const { api } = useNativeRuntime();
+
   return useQuery<SlashCommandDefinition[]>({
     queryKey: queryKeys.sessionCommands(sessionId),
     queryFn: ({ signal }) => api.listSessionCommands(sessionId, signal),
@@ -342,6 +391,8 @@ export function useSlashCommands(sessionId: string) {
 
 /** Skills discovered by the service currently attached to this session. */
 export function useSessionSkills(sessionId: string) {
+  const { api } = useNativeRuntime();
+
   return useQuery<SkillCatalogEntry[]>({
     queryKey: queryKeys.sessionSkills(sessionId),
     queryFn: ({ signal }) => api.listSessionSkills(sessionId, signal),
@@ -355,6 +406,8 @@ export function useSessionSkills(sessionId: string) {
  * the credential resolves and the provider answers with its model list.
  */
 export function useResolvedModelConfig(configId: string | null, filePath: string) {
+  const { api } = useNativeRuntime();
+
   const path = filePath.trim();
   return useQuery<ResolvedModelConfiguration>({
     queryKey: configId
@@ -369,6 +422,8 @@ export function useResolvedModelConfig(configId: string | null, filePath: string
 }
 
 export function useCreateModelConfig() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     retry: false,
@@ -385,6 +440,8 @@ export function useCreateModelConfig() {
 }
 
 export function useUpdateModelConfig() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     retry: false,
@@ -407,6 +464,8 @@ export function useUpdateModelConfig() {
 }
 
 export function useDeleteModelConfig() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     retry: false,
