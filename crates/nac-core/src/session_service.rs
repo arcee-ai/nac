@@ -294,6 +294,8 @@ pub struct MessageCycleMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesPageSnapshot {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     pub messages: Vec<Message>,
     /// Transcript-log row times, one per message. `None` where the message
     /// predates the log (the snapshot blob carries no per-message time).
@@ -304,6 +306,8 @@ pub struct MessagesPageSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFrontendSnapshotLoad {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     #[serde(flatten)]
     pub snapshot: SessionFrontendSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -987,6 +991,7 @@ pub struct RevertOutcome {
 }
 
 struct LoadedFrontendMessages {
+    terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     messages: Vec<Message>,
     created_at: Vec<Option<String>>,
     page: Option<MessagePageMetadata>,
@@ -1085,6 +1090,7 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
     MessagesPageSnapshot {
         messages,
         created_at: Vec::new(),
+        terminal_selection_attributions: Vec::new(),
         page: MessagePageMetadata {
             start,
             end,

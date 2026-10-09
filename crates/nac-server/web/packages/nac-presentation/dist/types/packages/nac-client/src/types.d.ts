@@ -125,3 +125,5 @@ export type TerminalSelectionSubmissionRequest = ApiSchema<"TerminalSelectionSub
 export type TerminalSelectionSubmissionResponse = ApiSchema<"TerminalSelectionSubmissionResponse">;
 export type TerminalSelectionPreviewRequest = ApiSchema<"TerminalSelectionPreviewRequest">;
 export type TerminalSelectionPreviewResponse = ApiSchema<"TerminalSelectionPreviewResponse">;
+export type TerminalSelectionAttribution = ApiSchema<"TerminalSelectionAttribution">;
+export type TerminalSelectionReference = ApiSchema<"TerminalSelectionReference">;

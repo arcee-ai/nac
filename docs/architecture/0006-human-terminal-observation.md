@@ -120,3 +120,52 @@ neither approval nor this protocol selects a fallback backend. Managed support
 must compose its own readiness, ownership, maintenance and credential boundaries
 before enabling launch or input. Browser renderer adoption remains a separate
 dependency and license decision.
+
+## Explicit selection evidence
+
+Selection preview accepts bounded user-supplied rendered text, not an
+authenticated retained-output interval. It applies the source's immutable launch
+redaction policy after plain-text normalization, including normalized forms of
+control-bearing secret values. Original and canonical preview text are distinct:
+masking is not assumed idempotent. Preview has no durable draft or model effect;
+submission revalidates the original against the exact expected preview.
+
+An explicitly submitted selection uses the existing identified durable inbox
+admission and literal delivery owners. Its immutable identity binds the exact
+canonical selected text, optional accompanying literal text, source/capture
+metadata and initial send/queue/exact-run steer choice. A receipt-first replay
+checks current session/host access and immutable intent, reports current status,
+and never creates another admission or wakes a model. Only the creator may wake;
+reconciling a lost local acknowledgment preserves that authority only after a
+positively successful commit. A matching receipt after an unknown COMMIT failure
+cannot prove creator ownership, since rolled-back integer allocations can be
+reused. Ordinary inbox input keeps its established preparation behavior.
+
+Genuine identified inbox delivery stamps an optional typed attribution on its
+canonical transcript-log wrapper in the same transaction as the exact User
+message and delivered status. A copied prefix or JSON lookalike receives no
+annotation. Legacy Message variants and canonical User bytes remain unchanged.
+Visible history returns exact typed references by absolute canonical index,
+including the system head. Included fork prefixes copy verified attribution
+without rebinding its original source, copying inbox records, or granting a
+terminal capability. Excluded prefixes carry no references.
+
+Canonical history retains every attribution. Compaction recomputes a streaming
+count/hash over the covered canonical prefix and keeps at most four recent
+exact references in a versioned metadata-only manifest. The manifest is at most
+4 KiB and shares the available replacement budget with the generated summary;
+optional references are removed whole before rejecting an oversized result.
+Selection-only summary requests reserve the exact minimum manifest and wrapper
+before stating the remaining UTF-8 summary budget. A noncompliant oversized
+summary is rejected without truncation. When even minimum framing plus a
+nonempty summary cannot fit, the existing explicit SummaryRejected outcome
+occurs before a model request and the normal run keeps its canonical view.
+The explicit omitted-reference count says older identities remain in canonical
+history; the digest cannot reconstruct them. Model-written narrative cannot
+supply or rebind this deterministic metadata. Checkpoints, source validation and
+context samples bind the typed attribution. Normal no-selection prompts,
+checkpoint versions and provider projections keep their existing defaults.
+
+This foundation does not supply the renderer selection adapter, local preview
+interaction, or explicit submit/cancel presentation. Renderer/dependency adoption
+and end-to-end selection acceptance remain separate work.

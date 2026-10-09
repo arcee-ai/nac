@@ -36,6 +36,12 @@
 //!   guaranteed to match struct field order), so the string embedding is
 //!   deliberate — do not "pretty up" this format.
 //!
+//! An optional `terminal_selection_attribution` annotates a genuine identified
+//! inbox delivery. It is stamped in that same transaction; ordinary User text,
+//! including copied envelope prefixes, never creates authority. Verified forks
+//! copy this annotation without copying admission or terminal capabilities.
+//! Message bytes and legacy rows remain unchanged.
+//!
 //! The payload is deliberately NOT an `AgentEvent`: it carries no `type` tag,
 //! so `AgentEvent` decoding fails on it (defense-in-depth — the event/tile
 //! paths and the AgentEvent sanitize-drop migration must never treat these
@@ -166,6 +172,8 @@ pub struct TranscriptLogEntry {
     pub kind: TranscriptMessageKind,
     #[serde(rename = "message")]
     pub message_json: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_selection_attribution: Option<super::TerminalSelectionAttribution>,
 }
 
 /// Sanitized facts about one repaired non-contiguous transcript-log tail.
@@ -193,6 +201,7 @@ pub fn encode_transcript_log_entry(idx: u64, message: &Message) -> Result<String
             idx,
             kind: TranscriptMessageKind::of(message),
             message_json,
+            terminal_selection_attribution: None,
         },
     })
     .context("failed to encode transcript log payload")
@@ -631,6 +640,13 @@ impl TranscriptLogWriter {
                 let submitted_message_id = transaction.last_insert_rowid();
                 replace_with_active_run(transaction, session_id, run_id, submitted_message_id)?;
                 if let Some(item_id) = inbox_item_id {
+                    super::transcript_selection::stamp_inbox_attribution(
+                        transaction,
+                        session_id,
+                        item_id,
+                        idx,
+                        content,
+                    )?;
                     mark_inbox_item_delivered(transaction, session_id, item_id, run_id, content)?;
                 }
                 Ok(())
@@ -687,7 +703,8 @@ impl TranscriptLogWriter {
         let last_id =
             append_messages_in_transaction(transaction, session_id, start_idx, &messages)?;
         self.append_fault(super::transcript_append::AppendFault::Statements)?;
-        for record in &records {
+        for (offset, record) in records.iter().enumerate() {
+            super::transcript_selection::stamp_inbox_attribution(transaction, session_id, record.id, start_idx + offset as u64, &record.content)?;
             mark_inbox_item_delivered(
                 transaction,
                 session_id,

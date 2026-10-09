@@ -480,52 +480,75 @@ async fn terminal_selection_canonical_history_fork_keeps_source_without_copying_
         nac_core::store::create_terminal_selection_intent(&manager.inner.store_path, &intent)
             .unwrap();
     let writer = nac_core::store::TranscriptLogWriter::new(&manager.inner.store_path).unwrap();
+    let assistant = || nac_core::types::Message::Assistant {
+        content: Some("observed evidence".into()),
+        reasoning_text: None,
+        reasoning_details: None,
+        tool_calls: None,
+        duration_ms: None,
+        model_origin: None,
+        reasoning_field: None,
+    };
     writer
-        .append_inbox_run_prompt(
+        .append(
             "source",
             0,
             &nac_core::types::Message::User {
-                content: admitted.record.content.clone(),
+                content: "before selection".into(),
             },
-            "original-run",
-            admitted.record.id,
         )
         .unwrap();
+    writer.append("source", 1, &assistant()).unwrap();
+    let evidence = nac_core::types::Message::User {
+        content: admitted.record.content.clone(),
+    };
     writer
-        .append_idempotent(
-            "source",
-            "fixture-answer",
-            Some(1),
-            &[nac_core::types::Message::Assistant {
-                content: Some("observed evidence".into()),
-                reasoning_text: None,
-                reasoning_details: None,
-                tool_calls: None,
-                duration_ms: None,
-                model_origin: None,
-                reasoning_field: None,
-            }],
+        .append_inbox_run_prompt("source", 2, &evidence, "original-run", admitted.record.id)
+        .unwrap();
+    writer.append("source", 3, &assistant()).unwrap();
+    writer.append("source", 4, &evidence).unwrap(); // copied prefix does not create typed authority
+    writer.append("source", 5, &assistant()).unwrap();
+    let fork = manager.fork_session("source", 3).await.unwrap();
+    let excluded = manager.fork_session("source", 1).await.unwrap();
+    let grand = manager.fork_session(&fork.session_id, 3).await.unwrap();
+    for id in [&fork.session_id, &grand.session_id] {
+        let references = nac_core::store::load_terminal_selection_references(
+            &manager.inner.store_path,
+            id,
+            0,
+            100,
         )
         .unwrap();
-    let fork = manager.fork_session("source", 1).await.unwrap();
-    let saved = sessions::load_session(&manager.inner.store_path, &fork.session_id).unwrap();
-    let history = writer
-        .read_from(&fork.session_id, saved.messages.len() as u64)
-        .unwrap();
-    assert!(history.iter().any(|(_,message)|matches!(message,nac_core::types::Message::User{content} if content==&admitted.record.content)));
-    assert!(
-        nac_core::store::list_session_inbox(&manager.inner.store_path, &fork.session_id)
-            .unwrap()
-            .is_empty()
-    );
-    let mut fork_intent = intent.clone();
-    fork_intent.source_session_id = fork.session_id;
-    assert!(nac_core::store::load_terminal_selection_receipt(
+        assert_eq!(references.len(), 1);
+        assert_eq!(references[0].message_index, 2);
+        assert_eq!(references[0].attribution.source_session_id, "source");
+        assert_eq!(references[0].attribution.admission_id, intent.admission_id);
+        assert_eq!(
+            references[0].attribution.owner_instance_id,
+            intent.owner_instance_id
+        );
+        assert!(
+            nac_core::store::list_session_inbox(&manager.inner.store_path, id)
+                .unwrap()
+                .is_empty()
+        );
+        let mut derived = intent.clone();
+        derived.source_session_id = id.clone();
+        assert!(nac_core::store::load_terminal_selection_receipt(
+            &manager.inner.store_path,
+            &derived
+        )
+        .unwrap()
+        .is_none());
+    }
+    assert!(nac_core::store::load_terminal_selection_references(
         &manager.inner.store_path,
-        &fork_intent
+        &excluded.session_id,
+        0,
+        100
     )
     .unwrap()
-    .is_none());
+    .is_empty());
     assert_eq!(
         nac_core::store::load_terminal_selection_receipt(&manager.inner.store_path, &intent)
             .unwrap()
@@ -534,6 +557,68 @@ async fn terminal_selection_canonical_history_fork_keeps_source_without_copying_
             .status,
         nac_core::store::InboxStatus::Delivered
     );
+    // A new manager reloads canonical history; no renderer or model is needed.
+    let reloaded = test_manager(&root);
+    let app = router(reloaded);
+    for id in [
+        "source",
+        fork.session_id.as_str(),
+        grand.session_id.as_str(),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/sessions/{id}/messages?before=3&limit=1&include_system=true"
+                    ))
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let page = decode(response).await;
+        assert_eq!(page["messages"][0]["content"], admitted.record.content);
+        assert_eq!(
+            page["terminal_selection_attributions"][0]["message_index"],
+            2
+        );
+        assert_eq!(
+            page["terminal_selection_attributions"][0]["attribution"]["source_session_id"],
+            "source"
+        );
+        let earlier = decode(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/sessions/{id}/messages?before=2&limit=2"))
+                        .header(header::HOST, "localhost")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(earlier.get("terminal_selection_attributions").is_none());
+    }
+    let copied = decode(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/sessions/source/messages?before=5&limit=1")
+                    .header(header::HOST, "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(copied["messages"][0]["content"], admitted.record.content);
+    assert!(copied.get("terminal_selection_attributions").is_none());
 }
 
 #[tokio::test]

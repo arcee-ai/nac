@@ -316,8 +316,10 @@ impl SessionService {
         let loaded_messages = match options.messages {
             FrontendSnapshotMessages::All => {
                 let messages = self.store_backed_transcript().await?;
-                let created_at = self.store_backed_transcript_times(messages.len()).await?;
+                let (created_at, terminal_selection_attributions) =
+                    self.store_backed_transcript_metadata(&messages).await?;
                 LoadedFrontendMessages {
+                    terminal_selection_attributions,
                     messages,
                     created_at,
                     page: None,
@@ -328,6 +330,7 @@ impl SessionService {
                 let page = self.page_store_transcript(request).await?;
                 let cycle = self.message_cycle_from_store().await?;
                 LoadedFrontendMessages {
+                    terminal_selection_attributions: page.terminal_selection_attributions,
                     messages: page.messages,
                     created_at: page.created_at,
                     page: Some(page.page),
@@ -371,6 +374,7 @@ impl SessionService {
             workspace: blocking.workspace,
         };
         Ok(SessionFrontendSnapshotLoad {
+            terminal_selection_attributions: loaded_messages.terminal_selection_attributions,
             snapshot,
             message_page: loaded_messages.page,
             message_cycle: loaded_messages.cycle,

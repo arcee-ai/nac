@@ -574,6 +574,7 @@ export declare function createNacApi(nacClient: NacClient): {
         lineage?: null | import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"];
         message_cycle?: null | import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"];
         message_page?: null | import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
+        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionReference"][];
     }>;
     createSession: (payload: CreateSessionRequest) => Promise<{
         active_compaction?: null | import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"];
@@ -601,6 +602,7 @@ export declare function createNacApi(nacClient: NacClient): {
         lineage?: null | import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"];
         message_cycle?: null | import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"];
         message_page?: null | import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
+        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionReference"][];
     }>;
     deleteSession: (id: string) => Promise<void>;
     launchDefaults: (payload: LaunchModelDefaultsRequest, signal?: AbortSignal) => Promise<{
@@ -925,6 +927,7 @@ export declare function createNacApi(nacClient: NacClient): {
         created_at: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
         page: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
+        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionReference"][];
     }>;
     getThreadEvents: (id: string, threadName: string, options?: ThreadEventsOptions) => Promise<{
         diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];

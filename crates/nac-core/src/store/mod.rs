@@ -599,3 +599,16 @@ mod tests {
 
 #[cfg(test)]
 pub(crate) use blocking_caller::reject_callers_for_test;
+
+mod transcript_selection;
+pub use transcript_selection::{
+    copy_terminal_selection_attributions, load_terminal_selection_references,
+    TerminalSelectionAttribution, TerminalSelectionReference,
+};
+pub(crate) use transcript_selection::{
+    load_terminal_selection_history_metadata, load_terminal_selection_provenance,
+    TerminalSelectionProvenance,
+};
+
+#[cfg(test)]
+pub(crate) use transcript_selection::seed_selection_provenance_history_for_test;

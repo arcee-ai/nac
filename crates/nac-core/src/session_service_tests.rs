@@ -114,6 +114,7 @@ fn legacy_page_messages(messages: &[Message], request: MessagePageRequest) -> Me
     MessagesPageSnapshot {
         messages: visible[start..end].to_vec(),
         created_at: Vec::new(),
+        terminal_selection_attributions: Vec::new(),
         page: MessagePageMetadata {
             start,
             end,

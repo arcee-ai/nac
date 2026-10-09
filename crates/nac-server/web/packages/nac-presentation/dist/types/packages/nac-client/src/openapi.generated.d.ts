@@ -738,6 +738,7 @@ export interface components {
             created_at: (string | null)[];
             messages: components["schemas"]["Message"][];
             page: components["schemas"]["MessagePageMetadata"];
+            terminal_selection_attributions?: components["schemas"]["TerminalSelectionReference"][];
         };
         ModelConfigFromFileRequest: {
             path: string;
@@ -1216,6 +1217,7 @@ export interface components {
             lineage?: null | components["schemas"]["SessionLineageSnapshot"];
             message_cycle?: null | components["schemas"]["MessageCycleMetadata"];
             message_page?: null | components["schemas"]["MessagePageMetadata"];
+            terminal_selection_attributions?: components["schemas"]["TerminalSelectionReference"][];
         };
         SessionSummarySnapshot: {
             backend: string;
@@ -1328,6 +1330,17 @@ export interface components {
             create?: boolean;
             name: string;
         };
+        TerminalSelectionAttribution: {
+            admission_id: string;
+            capture_id: string;
+            client_capture_time_ms?: string | null;
+            intent_sha256: string;
+            owner_instance_id: string;
+            protocol_version: number;
+            source_kind: components["schemas"]["TerminalSelectionSourceKind"];
+            source_session_id: string;
+            terminal_id: string;
+        };
         TerminalSelectionDelivery: "send" | "queue" | "steer";
         TerminalSelectionIntent: {
             admission_id: string;
@@ -1370,6 +1383,10 @@ export interface components {
             text_utf8_bytes: number;
             truncated: boolean;
             user_text?: string | null;
+        };
+        TerminalSelectionReference: {
+            attribution: components["schemas"]["TerminalSelectionAttribution"];
+            message_index: number;
         };
         TerminalSelectionSourceKind: "user_supplied_rendered_selection";
         TerminalSelectionSubmissionRequest: {

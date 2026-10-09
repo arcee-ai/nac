@@ -12524,6 +12524,12 @@
           },
           "page": {
             "$ref": "#/components/schemas/MessagePageMetadata"
+          },
+          "terminal_selection_attributions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TerminalSelectionReference"
+            }
           }
         }
       },
@@ -15270,6 +15276,12 @@
                     "$ref": "#/components/schemas/MessagePageMetadata"
                   }
                 ]
+              },
+              "terminal_selection_attributions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TerminalSelectionReference"
+                }
               }
             }
           }
@@ -15793,6 +15805,54 @@
           }
         }
       },
+      "TerminalSelectionAttribution": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "intent_sha256",
+          "source_kind",
+          "admission_id",
+          "capture_id",
+          "source_session_id",
+          "terminal_id",
+          "owner_instance_id"
+        ],
+        "properties": {
+          "admission_id": {
+            "type": "string"
+          },
+          "capture_id": {
+            "type": "string"
+          },
+          "client_capture_time_ms": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "intent_sha256": {
+            "type": "string"
+          },
+          "owner_instance_id": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/TerminalSelectionSourceKind"
+          },
+          "source_session_id": {
+            "type": "string"
+          },
+          "terminal_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "TerminalSelectionDelivery": {
         "type": "string",
         "enum": [
@@ -16009,6 +16069,25 @@
             ]
           }
         }
+      },
+      "TerminalSelectionReference": {
+        "type": "object",
+        "required": [
+          "message_index",
+          "attribution"
+        ],
+        "properties": {
+          "attribution": {
+            "$ref": "#/components/schemas/TerminalSelectionAttribution"
+          },
+          "message_index": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Absolute canonical transcript index, including any system head.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "TerminalSelectionSourceKind": {
         "type": "string",
