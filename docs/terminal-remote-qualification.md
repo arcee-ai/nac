@@ -40,6 +40,40 @@ descendant; additional identity and cleanup-trace diagnostics distinguish that
 live case from fixture/PID-state uncertainty. Identity revalidation, signaling and
 failed-inspection record retention are unchanged.
 
+## Natural-exit ownership gap
+
+A bounded Darwin real-PTY probe at local head
+`47070673e8aa17134e18ff319a978c57082e2f25` reproduced an additional gap after
+ordinary interactive-shell exit, with and without `disown`. A HUP/TERM-ignoring
+background job in a separate process group was reparented to PID 1 and remained
+live with the same kernel start seconds/microseconds. The supervisor removed its
+pidfile; the existing kill wrapper then returned zero without terminating that
+job. Closing every PTY observer descriptor before reaping did not remove the job.
+The outer wrapper reaped via SIGHUP after descriptor closure, so this is not an
+assertion that the outer transport completed with exit code zero. Fixture cleanup
+used only captured kernel-stamped identities and verified that none remained live.
+
+The foreground and recursion repairs do not establish complete remote settlement.
+This gap also matters for opaque model commands that launch interactive shells.
+A supervisor PID, terminal/channel closure, or an absent pidfile does not prove
+that all separate job groups exited. Periodic descendant snapshots, shell trap
+injection, and SID-wide signaling in an inherited SSH session do not supply the
+required ownership guarantee.
+
+Client-side native process supervision owns the local SSH/Podman CLI process;
+it cannot acquire kernel authority over another host or a Podman VM's processes.
+A remote native owner would need an explicit backend capability and authoritative
+containment/adoption of descendants across parent exit, with stable identity,
+retained cleanup failure and durable retry. A remote helper is not currently an
+installed prerequisite and has not been deployed or provisioned here.
+
+Podman's existing container owner can clean the complete owned container at
+session teardown. That authority belongs to the established sandbox lifecycle;
+per-terminal cleanup cannot destroy a container shared with agent work or sibling
+terminals. Successful eventual container teardown is a separate guarantee from
+successful per-terminal settlement. Remote human admission remains disabled
+until a qualified ownership mechanism and real transport acceptance satisfy both.
+
 ## Reproducible local checks
 
 Run `make setup` in a fresh worktree, then:
