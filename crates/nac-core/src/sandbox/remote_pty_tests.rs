@@ -85,15 +85,17 @@ mod foreground {
     }
 
     impl Fixture {
-        fn new() -> Self {
+        fn new(force_fallback: bool) -> Self {
             let root = std::env::temp_dir()
                 .join(format!("nac-remote-foreground-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir(&root).unwrap();
             // Force the portable fallback on Linux as well as macOS. No VM or
             // external utility installation is required for this regression.
-            let setsid = root.join("setsid");
-            std::fs::write(&setsid, "#!/bin/sh\nexit 1\n").unwrap();
-            std::fs::set_permissions(&setsid, std::fs::Permissions::from_mode(0o700)).unwrap();
+            if force_fallback {
+                let setsid = root.join("setsid");
+                std::fs::write(&setsid, "#!/bin/sh\nexit 1\n").unwrap();
+                std::fs::set_permissions(&setsid, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
             let pidfile = root.join("supervisor.pid");
             let pair = NativePtySystem::default()
                 .openpty(PtySize {
@@ -145,18 +147,24 @@ mod foreground {
         }
 
         fn expect(&mut self, marker: &[u8]) {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            assert!(
+                self.observe(marker, Duration::from_secs(5)),
+                "missing {:?}; output {:?}",
+                String::from_utf8_lossy(marker),
+                String::from_utf8_lossy(&self.output)
+            );
+        }
+
+        fn observe(&mut self, marker: &[u8], limit: Duration) -> bool {
+            let deadline = Instant::now() + limit;
             while !self
                 .output
                 .windows(marker.len())
                 .any(|bytes| bytes == marker)
             {
-                assert!(
-                    Instant::now() < deadline,
-                    "missing {:?}; output {:?}",
-                    String::from_utf8_lossy(marker),
-                    String::from_utf8_lossy(&self.output)
-                );
+                if Instant::now() >= deadline {
+                    return false;
+                }
                 let mut bytes = [0; 1024];
                 match self.reader.as_mut().unwrap().read(&mut bytes) {
                     Ok(0) => panic!("PTY closed before marker {:?}", marker),
@@ -173,6 +181,7 @@ mod foreground {
                 }
                 assert!(self.output.len() <= 1024 * 1024);
             }
+            true
         }
 
         fn cleanup(&self) -> bool {
@@ -238,10 +247,75 @@ mod foreground {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_setsid_pty_has_controlling_terminal_and_foreground_input() {
+        let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
+        let version = Command::new("/usr/bin/setsid")
+            .arg("--version")
+            .output()
+            .unwrap();
+        assert!(
+            version.status.success(),
+            "existing Linux fixture requires util-linux setsid"
+        );
+        eprintln!("setsid: {}", String::from_utf8_lossy(&version.stdout));
+        let mut fixture = Fixture::new(false);
+        fixture.expect(b"__READY__\r\n");
+        fixture.send(b"read sid pg fg <<< \"$(ps -o sid=,pgid=,tpgid= -p $$)\"; printf '__IDENTITY__sid=%s pgid=%s foreground=%s\\n' \"$sid\" \"$pg\" \"$fg\"; if : </dev/tty; then printf '__TTY__yes\\n'; else printf '__TTY__no\\n'; fi; [[ $- = *m* ]] && printf '__MONITOR__on\\n' || printf '__MONITOR__off\\n'; [ \"$pg\" = \"$fg\" ] && printf '__GROUP_OWNED__yes\\n'; printf '__IDENTITY_DONE__\\n'\r");
+        fixture.expect(b"__IDENTITY_DONE__\r\n");
+        let tty = fixture
+            .output
+            .windows(b"__TTY__yes\r\n".len())
+            .any(|w| w == b"__TTY__yes\r\n");
+        let monitor = fixture
+            .output
+            .windows(b"__MONITOR__on\r\n".len())
+            .any(|w| w == b"__MONITOR__on\r\n");
+        let foreground = fixture
+            .output
+            .windows(b"__GROUP_OWNED__yes\r\n".len())
+            .any(|w| w == b"__GROUP_OWNED__yes\r\n");
+        fixture.send(b"printf '__SIZE__'; stty size\r");
+        fixture.expect(b"__SIZE__24 80\r\n");
+        fixture
+            .master
+            .as_ref()
+            .unwrap()
+            .resize(PtySize {
+                rows: 31,
+                cols: 91,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        fixture.send(b"printf '__RESIZED__'; stty size; printf '__SLEEPING__\\n'; sleep 30\r");
+        fixture.expect(b"__RESIZED__31 91\r\n");
+        fixture.expect(b"__SLEEPING__\r\n");
+        fixture.send(b"\x03");
+        std::thread::sleep(Duration::from_millis(20));
+        fixture.send(b"printf '__INTERRUPTED__\\n'\r");
+        let interrupted = fixture.observe(b"__INTERRUPTED__\r\n", Duration::from_secs(2));
+        eprintln!("Linux actual setsid PTY: tty={tty} monitor={monitor} foreground={foreground} interrupted={interrupted}; output {:?}", String::from_utf8_lossy(&fixture.output));
+        let cleaned = fixture.cleanup();
+        if !cleaned {
+            assert!(
+                fixture.pidfile.exists(),
+                "failed cleanup lost retry authority"
+            );
+        }
+        assert!(
+            fixture.close_and_reap(),
+            "Linux fixture child was not reaped promptly"
+        );
+        assert!(tty && monitor && foreground && interrupted,
+            "actual util-linux setsid PTY does not preserve controlling-terminal/foreground input; see recorded identity/output");
+    }
+
     #[test]
     fn pty_fallback_keeps_foreground_geometry_control_bytes_and_cleanup() {
         let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::new(true);
         fixture.expect(b"__READY__\r\n");
         fixture
             .send(b"printf '__SIZE__'; stty size; [[ $- = *m* ]] && printf '__MONITOR__on\\n'\r");
