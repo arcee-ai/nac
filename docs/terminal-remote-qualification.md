@@ -24,9 +24,21 @@ foreground ownership while retaining the stdout redirection that suppresses
 startup job text. This repair also affects existing model PTYs that use this
 fallback; it preserves command construction and pipe invocation behavior.
 
-The `setsid -w` branch is unchanged. Acquiring a new session does not by itself
-prove controlling-terminal/job-control fidelity. A local fixture forcing the
-fallback cannot qualify the Linux branch or either real transport.
+Existing Ubuntu CI at head `2665302efa606a0186de8ea68c11002ad77cecf6`
+reproduced controlling-terminal loss with actual util-linux 2.39.3 and Bash 5.2:
+`/dev/tty` failed, foreground group was -1, monitor mode was off and Ctrl-C did
+not interrupt the job, although geometry changed. PTYs now retain their inherited
+controlling session through the monitor/foreground path even when setsid exists.
+The non-PTY `setsid -w` branch is unchanged. Postrepair Linux CI evidence is still
+pending; neither local nor Linux fixtures qualify a real SSH/Podman transport.
+
+Cleanup traversal now runs each recursive function in a subshell so parent,
+child and proc-stat variables cannot overwrite the caller's state. A deterministic
+snapshot fixture reproduced a missing parent/duplicated grandchild in the previous
+portable function. Earlier Linux fallback CI also reported a surviving background
+descendant; additional identity and cleanup-trace diagnostics distinguish that
+live case from fixture/PID-state uncertainty. Identity revalidation, signaling and
+failed-inspection record retention are unchanged.
 
 ## Reproducible local checks
 
@@ -45,6 +57,8 @@ The real local PTY regression forces the portable fallback using a disposable
 `setsid` fixture in its private temporary directory. It checks monitor mode,
 24x80 to 31x91 geometry, UTF-8 and ANSI output, Ctrl-C, Ctrl-Z/background resume,
 and cleanup of a background descendant in a separate job process group.
+The Linux fixture runs with the actual installed utility available and records `/dev/tty`,
+session/process/foreground group identity, monitor mode, resize and Ctrl-C.
 Reads, cleanup helper lifetime and child reaping are bounded. All PTY descriptors
 close before reaping. Failed process inspection retains its cleanup record and
 does not become a successful cleanup result. Other existing tests characterize
@@ -69,7 +83,8 @@ creating/removing qualification containers require explicit authorization.
 Run the exact supervised adapter on each target, recording kernel, util-linux,
 Bash, SSH client/server and Podman/runtime versions. Capture `/dev/tty`, session,
 process-group and foreground-group identity, initial/changed geometry and
-foreground SIGWINCH. Exercise Ctrl-C, Ctrl-Z, jobs/bg/fg, vim/less redraw,
+foreground SIGWINCH. Exercise Ctrl-C, Ctrl-Z, jobs/bg/fg, natural shell exit with
+disowned jobs in separate groups, vim/less redraw,
 alternate screen, bracketed paste, UTF-8, line-leading `~.` and `~` + Ctrl-Z,
 and bytes 0x10/0x11 in raw mode. Verify high output and split-secret redaction
 across live, replay and retained output.

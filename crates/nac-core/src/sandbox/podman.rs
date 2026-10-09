@@ -143,7 +143,9 @@ for child in $(group_members); do
 done
 rm -f "$pidfile"
 exit "$status"'
-if command -v setsid >/dev/null 2>&1 && setsid -w true >/dev/null 2>&1; then
+# A PTY already has a controlling session. Forking into setsid would lose it;
+# the monitor/foreground path preserves terminal ownership for all PTYs.
+if [ "${3:-}" != pty ] && command -v setsid >/dev/null 2>&1 && setsid -w true >/dev/null 2>&1; then
   exec setsid -w bash -c "$supervisor" nac-supervisor "$1" "$2"
 else
   set -m
@@ -223,7 +225,8 @@ if [ "$root_identity_state" = match ]; then
   if [ ! -r "/proc/$pid/stat" ]; then
     process_table=$(ps -eo pid=,ppid= 2>/dev/null || ps -ax -o pid= -o ppid= 2>/dev/null) || exit 1
   fi
-  descendants() {
+  # Recursion must not overwrite its caller's parent/child/stat variables.
+  descendants() (
     parent=$1
     if [ -r "/proc/$pid/stat" ]; then
       for stat in /proc/[0-9]*/stat; do
@@ -242,7 +245,7 @@ if [ "$root_identity_state" = match ]; then
         printf '%s\n' "$child"
       done
     fi
-  }
+  )
   pids=$(descendants "$pid")
   uncertain=0
   verified_descendants=

@@ -65,6 +65,24 @@ fn human_transport_is_transparent_without_changing_model_invocations() {
     }
 }
 
+#[test]
+fn remote_cleanup_recursion_keeps_every_parent_and_sibling() {
+    let start = SANDBOX_KILL_WRAPPER.find("  descendants() ").unwrap();
+    let end = SANDBOX_KILL_WRAPPER.find("\n  pids=$(descendants").unwrap();
+    // No process is started or signalled for these synthetic identities.
+    // Exercise the actual portable traversal with a fixed process snapshot.
+    let script = format!("pid=2147483647\nprocess_table='2147483646 2147483647\n2147483645 2147483646\n2147483644 2147483646\n2147483643 2147483647'\n{}\ndescendants \"$pid\"", &SANDBOX_KILL_WRAPPER[start..end]);
+    let output = std::process::Command::new("sh")
+        .args(["-c", &script])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "2147483645\n2147483644\n2147483646\n2147483643\n"
+    );
+}
+
 #[cfg(unix)]
 mod foreground {
     use super::*;
@@ -82,6 +100,8 @@ mod foreground {
         reader: Option<Box<dyn Read + Send>>,
         child: Box<dyn portable_pty::Child + Send + Sync>,
         output: Vec<u8>,
+        #[cfg(target_os = "linux")]
+        jobs: Vec<(libc::pid_t, std::os::fd::OwnedFd)>,
     }
 
     impl Fixture {
@@ -137,6 +157,8 @@ mod foreground {
                 reader: Some(reader),
                 child,
                 output: Vec::new(),
+                #[cfg(target_os = "linux")]
+                jobs: Vec::new(),
             }
         }
 
@@ -184,10 +206,34 @@ mod foreground {
             true
         }
 
+        #[cfg(target_os = "linux")]
+        fn retain_job_handles(&mut self, file: &Path) {
+            use std::os::fd::FromRawFd;
+            for pid in std::fs::read_to_string(file).unwrap().split_whitespace() {
+                let pid = pid.parse::<libc::pid_t>().unwrap();
+                let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+                assert!(fd >= 0, "cannot retain exact disposable job identity {pid}");
+                self.jobs
+                    .push((pid, unsafe { std::os::fd::OwnedFd::from_raw_fd(fd as i32) }));
+                eprintln!(
+                    "fixture job {pid} before cleanup: {:?}",
+                    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                );
+            }
+        }
+
         fn cleanup(&self) -> bool {
+            let Ok(trace) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(self.root.join("cleanup.trace"))
+            else {
+                return false;
+            };
             let Ok(mut cleanup) = Command::new("sh")
-                .args(["-c", SANDBOX_KILL_WRAPPER, "nac-kill"])
+                .args(["-x", "-c", SANDBOX_KILL_WRAPPER, "nac-kill"])
                 .arg(&self.pidfile)
+                .stderr(trace)
                 .spawn()
             else {
                 return false;
@@ -235,7 +281,35 @@ mod foreground {
         fn drop(&mut self) {
             let cleaned = self.cleanup();
             let reaped = self.close_and_reap();
-            let cleaned = cleaned || self.cleanup();
+            #[cfg(target_os = "linux")]
+            let mut jobs_settled = true;
+            #[cfg(target_os = "linux")]
+            for (pid, fd) in &self.jobs {
+                use std::os::fd::AsRawFd;
+                // Separate safety teardown, after the production-wrapper
+                // assertion: a pidfd cannot signal a reused process ID.
+                unsafe {
+                    libc::syscall(
+                        libc::SYS_pidfd_send_signal,
+                        fd.as_raw_fd(),
+                        libc::SIGKILL,
+                        std::ptr::null::<libc::siginfo_t>(),
+                        0,
+                    );
+                }
+                let mut descriptor = libc::pollfd {
+                    fd: fd.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                if unsafe { libc::poll(&mut descriptor, 1, 3000) } != 1 {
+                    eprintln!("exact disposable job {pid} did not settle after pidfd teardown");
+                    jobs_settled = false;
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
+            let jobs_settled = true;
+            let cleaned = (cleaned || self.cleanup()) && jobs_settled;
             if cleaned && reaped {
                 let _ = std::fs::remove_dir_all(&self.root);
             } else {
@@ -249,7 +323,7 @@ mod foreground {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn linux_setsid_pty_has_controlling_terminal_and_foreground_input() {
+    fn linux_pty_has_controlling_terminal_with_setsid_available() {
         let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
         let version = Command::new("/usr/bin/setsid")
             .arg("--version")
@@ -289,14 +363,16 @@ mod foreground {
                 pixel_height: 0,
             })
             .unwrap();
-        fixture.send(b"printf '__RESIZED__'; stty size; printf '__SLEEPING__\\n'; sleep 30\r");
+        let sleeping_pidfile = fixture.root.join("sleeping.pid");
+        fixture.send(format!("printf '__RESIZED__'; stty size; sh -c 'printf %s $$ > \"{}\"; printf \"__SLEEPING__\\n\"; exec sleep 30'\r", sleeping_pidfile.display()).as_bytes());
         fixture.expect(b"__RESIZED__31 91\r\n");
         fixture.expect(b"__SLEEPING__\r\n");
+        fixture.retain_job_handles(&sleeping_pidfile);
         fixture.send(b"\x03");
         std::thread::sleep(Duration::from_millis(20));
         fixture.send(b"printf '__INTERRUPTED__\\n'\r");
         let interrupted = fixture.observe(b"__INTERRUPTED__\r\n", Duration::from_secs(2));
-        eprintln!("Linux actual setsid PTY: tty={tty} monitor={monitor} foreground={foreground} interrupted={interrupted}; output {:?}", String::from_utf8_lossy(&fixture.output));
+        eprintln!("Linux PTY with setsid available: tty={tty} monitor={monitor} foreground={foreground} interrupted={interrupted}; output {:?}", String::from_utf8_lossy(&fixture.output));
         let cleaned = fixture.cleanup();
         if !cleaned {
             assert!(
@@ -308,8 +384,12 @@ mod foreground {
             fixture.close_and_reap(),
             "Linux fixture child was not reaped promptly"
         );
+        drop(fixture);
+        // An expected characterization failure must not poison the shared
+        // environment lock and turn unrelated fixtures into secondary failures.
+        drop(_environment);
         assert!(tty && monitor && foreground && interrupted,
-            "actual util-linux setsid PTY does not preserve controlling-terminal/foreground input; see recorded identity/output");
+            "Linux supervised PTY does not preserve controlling-terminal/foreground input; see recorded identity/output");
     }
 
     #[test]
@@ -351,10 +431,12 @@ mod foreground {
         // An interactive shell uses a separate foreground/job process group.
         // Explicit remote cleanup must still find it as a verified descendant.
         let child_pidfile = fixture.root.join("background.pid");
+        let jobs_pidfile = fixture.root.join("jobs.pid");
         fixture.send(
             format!(
-                "sleep 30 & printf %s $! > '{}'; printf '__BACKGROUND__\\n'\r",
-                child_pidfile.display()
+                "sleep 30 & printf %s $! > '{}'; jobs -p > '{}'; printf '__BACKGROUND__\\n'\r",
+                child_pidfile.display(),
+                jobs_pidfile.display()
             )
             .as_bytes(),
         );
@@ -364,6 +446,12 @@ mod foreground {
             .parse::<libc::pid_t>()
             .unwrap();
         assert_eq!(unsafe { libc::kill(pid, 0) }, 0);
+        #[cfg(target_os = "linux")]
+        fixture.retain_job_handles(&jobs_pidfile);
+        eprintln!(
+            "supervisor before cleanup: {:?}",
+            std::fs::read_to_string(&fixture.pidfile)
+        );
         let cleaned = fixture.cleanup();
         if !cleaned {
             // Portable process inspection can be uncertain after a signal;
@@ -387,10 +475,19 @@ mod foreground {
             if !live {
                 break;
             }
-            assert!(
-                Instant::now() < deadline,
-                "verified background descendant survived cleanup"
-            );
+            if Instant::now() >= deadline {
+                eprintln!(
+                    "fixture job {pid} after cleanup: {:?}",
+                    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                );
+                eprintln!(
+                    "wrapper cleanup success={cleaned}; trace {:?}",
+                    std::fs::read_to_string(fixture.root.join("cleanup.trace"))
+                );
+                drop(fixture);
+                drop(_environment);
+                panic!("verified background descendant survived cleanup");
+            }
             std::thread::sleep(Duration::from_millis(10));
         }
     }
