@@ -409,20 +409,21 @@ async fn managed_admission_reports_capacity_without_exposing_other_store_errors(
     assert_eq!(body["error"], "Managed NAC admission state is unavailable");
 }
 
-async fn enforce_managed_admission(
+pub(crate) async fn enforce_managed_admission(
     State(manager): State<SessionManager>,
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    // Credential-free probes do not acquire work/completion admission leases.
-    // Readiness checks committed store/maintenance state through its bounded
-    // read-only observer; liveness requires only a responsive event loop.
+    // Credential-free probes bypass durable command admission. Identity-bound
+    // probes retain shared host authority from read-only validation through the
+    // response, so replacement acceptance cannot cross that boundary.
     if (request.method() == axum::http::Method::GET || request.method() == axum::http::Method::HEAD)
         && matches!(request.uri().path(), "/healthz" | "/readyz")
     {
-        if let Err(error) = crate::managed_status::validate_probe_identity(&manager).await {
-            return managed_admission_failure(error);
-        }
+        let _host_lease = match crate::managed_status::retain_probe_identity(&manager).await {
+            Ok(lease) => lease,
+            Err(error) => return managed_admission_failure(error),
+        };
         return next.run(request).await;
     }
     if manager.managed_host().is_none() {

@@ -44,7 +44,10 @@ pub(crate) use worker_dispatches::{
 pub use coordinator::{PersistenceAdmissionError, PersistenceStats, StoreCoordinator};
 pub use managed_maintenance::*;
 pub use managed_orchestrators::*;
-pub use managed_probe::{observe_managed_probe_store, observe_managed_probe_store_for_identity};
+pub use managed_probe::{
+    observe_managed_probe_store, observe_managed_probe_store_for_identity,
+    retain_managed_probe_identity,
+};
 pub use model_configurations::*;
 pub use permission_grants::*;
 pub use projects::*;

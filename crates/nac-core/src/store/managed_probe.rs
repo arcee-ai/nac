@@ -21,6 +21,19 @@ pub fn observe_managed_probe_store_for_identity(
     observe(path, Some(running))
 }
 
+/// Retain the existing cross-process shared host fence before validating the
+/// committed identity. The caller must keep this guard through its response so
+/// replacement acceptance cannot cross validation and response completion.
+/// This uses only the read-only observer, never durable command admission.
+pub fn retain_managed_probe_identity(
+    path: &Path,
+    running: &super::ManagedAcceptedIdentity,
+) -> Result<crate::sessions::HostAdmissionLease> {
+    let lease = crate::sessions::HostAdmissionLease::try_acquire(path)?;
+    observe(path, Some(running))?;
+    Ok(lease)
+}
+
 fn observe(
     path: &Path,
     running: Option<&super::ManagedAcceptedIdentity>,
@@ -59,6 +72,30 @@ mod tests {
         crate::store::initialize(&path).unwrap();
         let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
         assert!(crate::store::open_runtime_connection(&path).is_err());
+        let identity = super::super::ManagedAcceptedIdentity {
+            managed_host_id: "probe-host".into(),
+            host_incarnation_id: "probe-incarnation".into(),
+            operation_id: "probe-operation".into(),
+            target: super::super::ManagedUpgradeTarget {
+                release_id: "probe-release".into(),
+                source_sha: "a".repeat(40),
+                product_version: "0.1.4".into(),
+                schema_version: crate::store::schema_version(),
+                minimum_schema_version: crate::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+            },
+        };
+        let writer = rusqlite::Connection::open(&path).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let fence = retain_managed_probe_identity(&path, &identity).unwrap();
+        let exclusive_blocked = matches!(
+            crate::sessions::HostMaintenanceLease::try_acquire(&path),
+            Err(crate::sessions::SessionOperationLeaseError::Busy(_))
+        );
+        writer.execute_batch("ROLLBACK").unwrap();
+        drop(writer);
+        drop(fence);
+        assert!(exclusive_blocked);
+        drop(crate::sessions::HostMaintenanceLease::try_acquire(&path).unwrap());
         let conn = open_probe_read_connection(&path).unwrap();
         assert!(conn
             .execute(

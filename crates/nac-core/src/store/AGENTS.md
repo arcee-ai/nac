@@ -26,9 +26,12 @@ workspace revisions, recovery markers, and cross-process coordination.
   execution. Higher layers coordinate effects around store transactions.
 - `managed_probe.rs` and the probe migration observer are narrow read-only
   operational observations of committed WAL state. They retain connection
-  checkout limits and cannot create, migrate, or write a store, acquire work
-  admission, or obtain executor authority. All ordinary connection opens and
-  durable commands retain the serving owner's existing authority checks.
+  checkout limits and cannot create, migrate, or write a store, acquire durable
+  work admission, or obtain executor authority. Identity-bound HTTP probes
+  retain the existing shared host file lease before validation through response
+  completion, excluding replacement acceptance without entering the write queue.
+  All ordinary connection opens and durable commands retain the serving owner's
+  existing authority checks.
 
 ## Starting points
 

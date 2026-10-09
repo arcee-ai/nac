@@ -42,14 +42,16 @@ async fn probe_snapshot(manager: SessionManager) -> anyhow::Result<ReadinessResp
     run_probe(move || readiness_snapshot(&manager)).await
 }
 
-pub(crate) async fn validate_probe_identity(manager: &SessionManager) -> anyhow::Result<()> {
+pub(crate) async fn retain_probe_identity(
+    manager: &SessionManager,
+) -> anyhow::Result<Option<nac_core::sessions::HostAdmissionLease>> {
     let Some(identity) = manager.managed_identity().cloned() else {
-        return Ok(());
+        return Ok(None);
     };
     let path = manager.inner.store_path.clone();
-    run_probe(move || nac_core::store::observe_managed_probe_store_for_identity(&path, &identity))
-        .await??;
-    Ok(())
+    run_probe(move || nac_core::store::retain_managed_probe_identity(&path, &identity))
+        .await?
+        .map(Some)
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
