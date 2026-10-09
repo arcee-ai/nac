@@ -83,8 +83,8 @@ pub(crate) use catalog::{
     Compat, CompletionsThinkingFormat, CompletionsTokenLimit, ModelMetadata, ThinkingLevelMap,
 };
 pub use managed_host_key::{
-    ManagedHostExecutionAuthority, ManagedHostKeyBinding, ManagedHostKeyStore,
-    TrustedManagedHostKey,
+    ManagedHostExecutionAuthority, ManagedHostExecutionObserver, ManagedHostKeyBinding,
+    ManagedHostKeyStore, TrustedManagedHostKey, UnconfiguredManagedHostExecutionObserver,
 };
 pub use providers::{
     list_managed_provider_models, list_provider_models, list_provider_models_with_http_policy,
@@ -473,3 +473,6 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) mod host_execution_test_support;
+
+#[cfg(test)]
+mod sender_observer_test_support;

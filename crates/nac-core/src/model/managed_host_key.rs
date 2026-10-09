@@ -238,11 +238,39 @@ impl TrustedManagedHostKey {
     }
 }
 
+/// Inward read-only observation port for trusted sender composition. The value
+/// is a nonsecret serving-lifetime revision, never key bytes or an auth proof.
+/// Implementations must independently authenticate their sender, bind the full
+/// expected identity and deny expired/revoked/unavailable enrollment. A socket,
+/// UID, caller PID or successful connection alone cannot establish authority.
+/// No production implementation or enrollment factory is installed here.
+pub trait ManagedHostExecutionObserver: Send + Sync {
+    fn observe(&self, expected: &ManagedHostKeyBinding) -> Result<[u8; 32]>;
+}
+
+#[derive(Default)]
+pub struct UnconfiguredManagedHostExecutionObserver;
+
+impl ManagedHostExecutionObserver for UnconfiguredManagedHostExecutionObserver {
+    fn observe(&self, _expected: &ManagedHostKeyBinding) -> Result<[u8; 32]> {
+        bail!("managed sender enrollment is unavailable")
+    }
+}
+
+#[derive(Clone)]
+enum ExecutionObservationSource {
+    Local(TrustedManagedHostKey),
+    Sender {
+        binding: ManagedHostKeyBinding,
+        observer: std::sync::Arc<dyn ManagedHostExecutionObserver>,
+    },
+}
+
 /// Host execution authority is independent of model credentials and selection.
 /// A denial is latched for this trusted binding; file restoration cannot clear it.
 #[derive(Clone)]
 pub struct ManagedHostExecutionAuthority {
-    credential: TrustedManagedHostKey,
+    source: ExecutionObservationSource,
     denied: std::sync::Arc<std::sync::atomic::AtomicBool>,
     observation: std::sync::Arc<std::sync::Mutex<Option<[u8; 32]>>>,
 }
@@ -262,21 +290,41 @@ impl std::fmt::Debug for ManagedHostExecutionAuthority {
 
 impl PartialEq for ManagedHostExecutionAuthority {
     fn eq(&self, other: &Self) -> bool {
-        self.credential == other.credential && std::sync::Arc::ptr_eq(&self.denied, &other.denied)
+        self.binding() == other.binding() && std::sync::Arc::ptr_eq(&self.denied, &other.denied)
     }
 }
 
 impl ManagedHostExecutionAuthority {
     pub fn new(credential: TrustedManagedHostKey) -> Self {
         Self {
-            credential,
+            source: ExecutionObservationSource::Local(credential),
             denied: Default::default(),
             observation: Default::default(),
         }
     }
 
+    /// Trusted composition only. This constructor is not enrollment or proof;
+    /// its observer must meet the full independently authenticated contract.
+    /// Construct once per independently admitted serving lifetime and share
+    /// clones across clients/tools/workers. Reconstructing under an old grant
+    /// cannot reopen a denied lifetime; fresh admission is separately required.
+    pub fn from_sender_observer(
+        binding: ManagedHostKeyBinding,
+        observer: std::sync::Arc<dyn ManagedHostExecutionObserver>,
+    ) -> Result<Self> {
+        binding.validate()?;
+        Ok(Self {
+            source: ExecutionObservationSource::Sender { binding, observer },
+            denied: Default::default(),
+            observation: Default::default(),
+        })
+    }
+
     pub fn binding(&self) -> &ManagedHostKeyBinding {
-        self.credential.binding()
+        match &self.source {
+            ExecutionObservationSource::Local(credential) => credential.binding(),
+            ExecutionObservationSource::Sender { binding, .. } => binding,
+        }
     }
 
     pub fn check_available(&self) -> Result<()> {
@@ -284,27 +332,33 @@ impl ManagedHostExecutionAuthority {
         if self.denied.load(Ordering::Acquire) {
             bail!("managed host execution authority is denied");
         }
-        let available = self
-            .credential
-            .read_available_authority()
-            .and_then(|authority| {
-                use sha2::Digest;
-                let raw = serde_json::to_vec(&authority)
-                    .map_err(|_| anyhow!("managed host execution authority cannot be validated"))?;
-                let digest: [u8; 32] = sha2::Sha256::digest(raw).into();
-                let mut observation = self
-                    .observation
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                match *observation {
-                    Some(previous) if previous != digest => {
-                        bail!("managed host execution authority changed")
-                    }
-                    None => *observation = Some(digest),
-                    _ => {}
+        let available = (|| {
+            let digest = match &self.source {
+                ExecutionObservationSource::Local(credential) => {
+                    use sha2::Digest;
+                    let authority = credential.read_available_authority()?;
+                    let raw = serde_json::to_vec(&authority).map_err(|_| {
+                        anyhow!("managed host execution authority cannot be validated")
+                    })?;
+                    sha2::Sha256::digest(raw).into()
                 }
-                Ok(())
-            });
+                ExecutionObservationSource::Sender { binding, observer } => {
+                    observer.observe(binding)?
+                }
+            };
+            let mut observation = self
+                .observation
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match *observation {
+                Some(previous) if previous != digest => {
+                    bail!("managed host execution authority changed")
+                }
+                None => *observation = Some(digest),
+                _ => {}
+            }
+            Ok(())
+        })();
         if available.is_err() {
             self.denied.store(true, Ordering::Release);
             bail!(
@@ -561,3 +615,7 @@ fn validate_secret(value: &str) -> Result<()> {
 #[cfg(test)]
 #[path = "managed_host_key_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "managed_host_sender_observer_tests.rs"]
+mod sender_observer_tests;
