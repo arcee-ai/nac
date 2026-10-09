@@ -8,6 +8,9 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
+mod command_output_redaction;
+pub use command_output_redaction::CommandOutputRedactor;
+
 /// Canonical public NAC product version sourced from the repository root.
 ///
 /// Internal crate versions are dependency metadata and must not be exposed on
@@ -251,6 +254,12 @@ impl CommandEnvironmentSnapshot {
             redacted = redacted.replace(value, "[REDACTED]");
         }
         redacted
+    }
+
+    /// Owns one byte-preserving output stream's immutable redaction snapshot.
+    /// Sanitize before retaining or publishing any bytes to observers.
+    pub fn stream_redactor(&self) -> CommandOutputRedactor {
+        CommandOutputRedactor::new(&self.redactions)
     }
 }
 

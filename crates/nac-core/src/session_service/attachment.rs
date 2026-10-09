@@ -79,6 +79,12 @@ impl SessionService {
         let skills = run_config.agent.skills();
         let mcp = run_config.agent.mcp_registry();
         let terminal_manager = run_config.agent.terminal_manager();
+        let user_terminal_context = run_config.agent.user_terminal_runtime().map(|runtime| {
+            Arc::new(user_terminals::UserTerminalContext::new(
+                runtime,
+                run_config.client.clone(),
+            ))
+        });
         if let Some(target) = workspace_git.as_ref() {
             terminal_manager.configure_workspace_authority(
                 metadata.store_path.clone(),
@@ -117,6 +123,7 @@ impl SessionService {
             skills,
             mcp,
             terminal_manager,
+            user_terminal_context,
             permission_broker,
             sandbox_resource_lease: Arc::new(StdMutex::new(None)),
             has_sandbox,

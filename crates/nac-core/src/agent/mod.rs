@@ -570,6 +570,15 @@ impl Agent {
         self.tool_runtime.mcp.clone()
     }
 
+    pub(crate) fn user_terminal_runtime(&self) -> Option<ToolRuntime> {
+        self.direct_primary.then(|| {
+            let mut runtime = self.tool_runtime.clone();
+            // Human shell ownership must not observe the model run's cancel token.
+            runtime.command_cancellation = crate::tools::ThreadCancellation::default();
+            runtime
+        })
+    }
+
     pub(crate) fn terminal_manager(&self) -> crate::terminal::TerminalManager {
         self.tool_runtime.terminal_manager.clone()
     }

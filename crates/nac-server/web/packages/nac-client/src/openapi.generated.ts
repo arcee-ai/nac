@@ -135,6 +135,7 @@ export interface components {
       text?: string | null;
       thread_name?: string | null;
     };
+    AttachUserTerminalRequest: { page_limit: number; protocol_version: number };
     AuthenticateMcpOAuthRequest: { additional_scopes?: string[] };
     AuthenticateMcpOAuthResponse: {
       authorization_url: string;
@@ -713,6 +714,12 @@ export interface components {
     ModelOrigin: { backend: components["schemas"]["BackendKind"]; model: string };
     ModelSource: "baseline" | "overlay" | "user_override" | "provider_default" | "fallback";
     OpenLocalPathResult: { fell_back_to_parent: boolean; opened: string };
+    OpenUserTerminalRequest: {
+      cols: number;
+      launch_id: string;
+      protocol_version: number;
+      rows: number;
+    };
     OpenWorkspacePathRequest: { path: string };
     OrchestratorSteeringRequest: { instruction: string };
     OrchestratorSteeringResponse: {
@@ -788,6 +795,12 @@ export interface components {
       api_key_env?: string | null;
       backend: components["schemas"]["BackendKind"];
       base_url?: string | null;
+    };
+    PullUserTerminalRequest: {
+      acknowledge_offset?: string | null;
+      acknowledge_reset: boolean;
+      protocol_version: number;
+      wait_ms: number;
     };
     PutManagedSecretRequest: { value: string };
     RawSessionConfig: {
@@ -897,6 +910,7 @@ export interface components {
       timeout_ms?: number | null;
     };
     RequestField_Vec_Vec_String: null | string[];
+    ResizeUserTerminalRequest: { cols: number; protocol_version: number; rows: number };
     ResolvedModelConfiguration: {
       allow_insecure_http: boolean;
       api_key_env: string | null;
@@ -1376,6 +1390,40 @@ export interface components {
       ssh_host?: components["schemas"]["RequestField_String_String"];
       ssh_identity_file?: components["schemas"]["RequestField_String_String"];
       ssh_port?: components["schemas"]["RequestField_u16_u16"];
+    };
+    UserTerminalFrameResponse: {
+      bytes: number[];
+      caught_up: boolean;
+      gap: boolean;
+      next_offset: string;
+      observer_id: string;
+      offset: string;
+      protocol_version: number;
+      requires_ack: boolean;
+      retained_end: string;
+      retained_start: string;
+      terminal: components["schemas"]["UserTerminalResponse"];
+    };
+    UserTerminalInputRequest: { bytes: number[]; protocol_version: number };
+    UserTerminalListResponse: {
+      protocol_version: number;
+      terminals: components["schemas"]["UserTerminalResponse"][];
+    };
+    UserTerminalObserverResponse: {
+      idle_expiry_ms: number;
+      observer_id: string;
+      protocol_version: number;
+      terminal: components["schemas"]["UserTerminalResponse"];
+    };
+    UserTerminalResponse: {
+      alive: boolean;
+      cols: number;
+      exit_code?: number | null;
+      output_complete: boolean;
+      output_error?: string | null;
+      protocol_version: number;
+      rows: number;
+      terminal_id: string;
     };
     WorksetItemSnapshot: {
       acceptance: string;

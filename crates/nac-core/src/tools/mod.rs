@@ -35,6 +35,7 @@ pub(crate) mod subagent;
 mod terminal_tools;
 pub mod thread;
 mod thread_lifecycle;
+pub(crate) mod user_terminal;
 pub(crate) mod web;
 pub mod workset;
 pub mod write;

@@ -1,4 +1,12 @@
 export declare const NAC_API_SURFACE: {
+    readonly "POST /sessions/{session_id}/user-terminals": "api.openUserTerminal";
+    readonly "GET /sessions/{session_id}/user-terminals": "api.listUserTerminals";
+    readonly "GET /sessions/{session_id}/user-terminals/{terminal_id}": "api.getUserTerminal";
+    readonly "POST /sessions/{session_id}/user-terminals/{terminal_id}/observers": "api.attachUserTerminal";
+    readonly "POST /sessions/{session_id}/user-terminals/{terminal_id}/observers/{observer_id}/read": "api.pullUserTerminal";
+    readonly "DELETE /sessions/{session_id}/user-terminals/{terminal_id}/observers/{observer_id}": "api.detachUserTerminal";
+    readonly "POST /sessions/{session_id}/user-terminals/{terminal_id}/input": "api.inputUserTerminal";
+    readonly "POST /sessions/{session_id}/user-terminals/{terminal_id}/resize": "api.resizeUserTerminal";
     readonly "GET /sessions/{session_id}/messages": "api.getMessages";
     readonly "GET /sessions/{session_id}/threads/{thread_name}/events": "api.getThreadEvents";
     readonly "GET /auth": "api.listManagedAuth";

@@ -1,6 +1,20 @@
 use super::*;
 
 impl TerminalManager {
+    /// Low-level byte observation; unlike model pages it performs no text
+    /// conversion. Browser capabilities must bind this to an output artifact
+    /// sanitized at collection, never expose arbitrary model output IDs.
+    pub(super) fn read_output_bytes(
+        &self,
+        output_id: &str,
+        stream: OutputStream,
+        offset: u64,
+        limit: usize,
+    ) -> Result<OutputBytePage> {
+        self.output_registry
+            .page_bytes(output_id, stream, offset, limit)
+    }
+
     pub fn read_output(
         &self,
         output_id: &str,
@@ -110,7 +124,9 @@ impl TerminalManager {
         // caller has an exact current-instance handle, absence therefore means
         // it is already terminated even if its bounded output tombstone was
         // later evicted. Foreign/pre-restart handles still fail closed below.
-        if name.starts_with(&format!("shell-{}-", self.instance_id)) {
+        if name.starts_with(&format!("shell-{}-", self.instance_id))
+            || self.owns_user_terminal_name(name)
+        {
             return Ok(());
         }
 
@@ -328,7 +344,10 @@ impl TerminalManager {
                 continue;
             };
             session.refresh_status();
-            if session.is_alive() || session.has_backend_cleanup() || session.exit_code().is_none()
+            if session.is_alive()
+                || session.has_backend_cleanup()
+                || session.exit_code().is_none()
+                || (session.is_user_owned() && !session.output_complete())
             {
                 names.push(name);
             } else {
@@ -341,6 +360,10 @@ impl TerminalManager {
                     output_id: session.output_id().to_string(),
                     preview_cursor: session.preview_cursor(),
                     exit_code: session.exit_code(),
+                    user_owned: session.is_user_owned(),
+                    cols: session.cols,
+                    rows: session.rows,
+                    collector_state: session.collector_state(),
                 };
                 tombstones.retain(|(session_name, _)| session_name != &name);
                 tombstones.push_back((name, completed));
@@ -401,6 +424,10 @@ impl TerminalManager {
             output_id: session.output_id().to_string(),
             preview_cursor: session.preview_cursor(),
             exit_code,
+            user_owned: session.is_user_owned(),
+            cols: session.cols,
+            rows: session.rows,
+            collector_state: session.collector_state(),
         };
         let mut tombstones = self.completed_sessions.lock().await;
         tombstones.retain(|(name, _)| name != &session.name);
