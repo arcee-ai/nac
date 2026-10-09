@@ -79,12 +79,13 @@ async fn finish(service: &nac_core::session_service::SessionService, terminal: &
         .await
         .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !service
-            .user_terminal_status(terminal)
-            .await
-            .unwrap()
-            .output_complete
-        {
+        loop {
+            let status = service.user_terminal_status(terminal).await.unwrap();
+            // EOF can precede native cleanup; maintenance requires settled
+            // ownership as well as the collector's committed final append.
+            if status.output_complete && !status.alive && status.exit_code.is_some() {
+                break;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     })
@@ -505,8 +506,12 @@ async fn slow_observers_stay_independent_busy_is_immediate_and_close_remains_res
     })
     .await
     .unwrap();
-    assert!(!first.unwrap().terminal.alive);
-    assert!(!second.unwrap().terminal.alive);
+    // Each immutable frame can capture EOF before native ownership settles.
+    assert!(first.unwrap().terminal.output_complete);
+    assert!(second.unwrap().terminal.output_complete);
+    let status = service.user_terminal_status(&id).await.unwrap();
+    assert!(!status.alive);
+    assert!(status.exit_code.is_some());
 }
 
 #[tokio::test]
