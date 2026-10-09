@@ -4,7 +4,10 @@ use nac_core::{
     events::{
         AssistantStreamDeltaReceiver, SessionEventBoundary, SessionEventEnvelope, SessionReplayGap,
     },
-    session_service::{SessionCancelError, SessionEventReceiver},
+    session_service::{
+        ActiveSessionOperationSnapshot, SessionCancelError, SessionEventReceiver,
+        SessionOperationBusy, SessionSubmitError,
+    },
     sessions,
     store::ManagedOrchestratorExecutionMode,
 };
@@ -93,10 +96,34 @@ impl<'a> SessionRunApplication<'a> {
     ) -> Result<SubmittedRun> {
         let gate = self.manager.lifecycle_gate(session_id);
         let _lifecycle = gate.lock().await;
-        let operation_lease = sessions::SessionOperationLease::try_acquire(
+        let operation_lease = match sessions::SessionOperationLease::try_acquire(
             &self.manager.inner.store_path,
             session_id,
-        )?;
+        ) {
+            Ok(lease) => lease,
+            Err(sessions::SessionOperationLeaseError::Busy(busy)) => {
+                let command = self
+                    .manager
+                    .inner
+                    .active_sessions
+                    .read()
+                    .await
+                    .get(session_id)
+                    .and_then(|service| service.active_user_command());
+                return Err(match command {
+                    Some(command) => anyhow::Error::new(SessionSubmitError::ExternalBusy {
+                        session_id: SessionOperationBusy::Local {
+                            session_id: session_id.to_owned(),
+                            active_operation: ActiveSessionOperationSnapshot::UserCommand {
+                                command: Box::new(command),
+                            },
+                        },
+                    }),
+                    None => anyhow::Error::new(sessions::SessionOperationLeaseError::Busy(busy)),
+                });
+            }
+            Err(error) => return Err(error.into()),
+        };
         if managed_mode.is_some() {
             self.manager
                 .validate_operation_session(

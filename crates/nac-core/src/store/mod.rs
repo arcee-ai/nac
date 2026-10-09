@@ -33,6 +33,7 @@ mod traditional_children;
 mod transcript;
 mod transcript_append;
 use transcript_append::AppendPurpose;
+mod user_commands;
 mod worker_dispatches;
 mod worksets;
 mod workspace_revisions;
@@ -80,6 +81,15 @@ pub use threads::*;
 pub use traditional_children::*;
 pub use transcript::*;
 pub use transcript_append::{TranscriptAppendError, TranscriptAppendReceipt};
+#[cfg(test)]
+pub(crate) use user_commands::fail_next_user_command_start_for_test;
+pub(crate) use user_commands::{
+    admit_user_command, find_user_command, is_user_command_record, list_user_commands,
+    list_user_commands_with_connection, load_unsettled_user_command, mark_user_command_executing,
+    reconcile_unsettled_user_command, user_command_record, StoredUserCommand,
+    UserCommandAdmitOutcome, UserCommandTerminal,
+};
+pub use user_commands::{UserCommandSnapshot, UserCommandState};
 pub use worksets::*;
 pub use workspace_revisions::*;
 

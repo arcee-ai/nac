@@ -670,6 +670,7 @@ export interface components {
       created_at: (string | null)[];
       messages: components["schemas"]["Message"][];
       page: components["schemas"]["MessagePageMetadata"];
+      user_commands?: components["schemas"]["UserCommandSnapshot"][];
     };
     ModelConfigFromFileRequest: { path: string };
     ModelConfigurationList: { configurations: components["schemas"]["ModelConfigurationRecord"][] };
@@ -998,7 +999,8 @@ export interface components {
         }
       | { session_id: string; type: "snapshot_saved" }
       | { transcript_len: number; type: "transcript_appended" }
-      | { transcript_len: number; type: "transcript_reverted" };
+      | { transcript_len: number; type: "transcript_reverted" }
+      | { command: components["schemas"]["UserCommandSnapshot"]; type: "user_command_updated" };
     SessionEventBoundary: { epoch_id: string; sequence_id: number };
     SessionEventEnvelope: {
       client_id?: null | components["schemas"]["SessionClientId"];
@@ -1019,6 +1021,7 @@ export interface components {
       active_compaction?: null | components["schemas"]["ActiveCompactionSnapshot"];
       active_run?: null | components["schemas"]["ActiveRunSnapshot"];
       active_threads?: string[];
+      active_user_command?: null | components["schemas"]["UserCommandSnapshot"];
       covered_orchestrator_steering_ids?: number[];
       forks?: components["schemas"]["SessionForkLink"][];
       message_created_at?: (string | null)[];
@@ -1035,6 +1038,7 @@ export interface components {
       thread_steering?: components["schemas"]["ThreadSteeringRecord"][];
       threads: components["schemas"]["ThreadSnapshot"][];
       transcript_recovery_warning?: string | null;
+      user_commands?: components["schemas"]["UserCommandSnapshot"][];
       worksets: components["schemas"]["WorksetsSnapshot"];
       workspace: components["schemas"]["WorkspaceSnapshot"];
     };
@@ -1171,6 +1175,7 @@ export interface components {
       run_id: components["schemas"]["SessionRunId"];
       submitted_at_epoch_ms: number;
     };
+    SubmitUserCommandRequest: { command: string; request_id: string; timeout_ms?: number | null };
     SwitchBranchRequest: { create?: boolean; name: string };
     TestMcpServerRequest: {
       args?: string[] | null;
@@ -1377,6 +1382,55 @@ export interface components {
       ssh_identity_file?: components["schemas"]["RequestField_String_String"];
       ssh_port?: components["schemas"]["RequestField_u16_u16"];
     };
+    UserCommandOutputPage: {
+      content: string;
+      eof: boolean;
+      next_offset: number;
+      offset: number;
+      output_id: string;
+      overflowed: boolean;
+      retained_end: number;
+      retained_start: number;
+      segments?: components["schemas"]["UserCommandOutputSegment"][];
+      stream: string;
+    };
+    UserCommandOutputSegment: {
+      combined_end: number;
+      combined_start: number;
+      sequence: number;
+      stream: string;
+      stream_end: number;
+      stream_start: number;
+    };
+    UserCommandSnapshot: {
+      command: string;
+      created_at_epoch_ms: number;
+      cwd?: string | null;
+      exit_code?: number | null;
+      finished_at_epoch_ms?: number | null;
+      message_index?: number | null;
+      output_id?: string | null;
+      overflowed?: boolean;
+      process_started: boolean;
+      reason?: string | null;
+      request_id: string;
+      state: components["schemas"]["UserCommandState"];
+      stderr_preview?: string;
+      stdout_preview?: string;
+      timeout_ms: number;
+      truncated?: boolean;
+      wall_time_ms?: number | null;
+    };
+    UserCommandState:
+      | "admitted"
+      | "executing"
+      | "completed"
+      | "timed_out"
+      | "cancelled"
+      | "spawn_failed"
+      | "rejected"
+      | "interrupted"
+      | "outcome_unknown";
     WorksetItemSnapshot: {
       acceptance: string;
       depends_on: string[];

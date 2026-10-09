@@ -191,6 +191,9 @@ export class NacTransport {
 function sessionPath(sessionId) {
     return `/sessions/${encodeURIComponent(sessionId)}`;
 }
+function userCommandPath(sessionId, requestId) {
+    return `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}`;
+}
 function compareCursor(left, right) {
     if (left.epoch_id !== right.epoch_id)
         return null;
@@ -336,6 +339,28 @@ export class NacClient {
             body: { prompt },
             signal,
         });
+    }
+    submitUserCommand(sessionId, command, signal) {
+        const requestId = this.transport.newRequestId();
+        const body = { request_id: requestId, command };
+        return this.transport.admit("POST", `${sessionPath(sessionId)}/user-commands`, { body, signal, requestId });
+    }
+    getUserCommand(sessionId, requestId, signal) {
+        return this.transport.request("GET", userCommandPath(sessionId, requestId), { signal });
+    }
+    cancelUserCommand(sessionId, requestId, signal) {
+        return this.transport.request("POST", `${userCommandPath(sessionId, requestId)}/cancel`, { signal });
+    }
+    readUserCommandOutput(sessionId, requestId, options = {}) {
+        const params = new URLSearchParams();
+        if (options.stream !== undefined)
+            params.set("stream", options.stream);
+        if (options.offset !== undefined)
+            params.set("offset", String(options.offset));
+        if (options.limit !== undefined)
+            params.set("limit", String(options.limit));
+        const query = params.toString();
+        return this.transport.request("GET", `${userCommandPath(sessionId, requestId)}/output${query ? `?${query}` : ""}`, { signal: options.signal });
     }
 }
 export function createNacClient(options = {}) {

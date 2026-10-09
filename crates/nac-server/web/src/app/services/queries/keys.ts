@@ -59,6 +59,10 @@ export const queryKeys = {
   sessionPermissions: (id: string) => ["session", id, "permissions"] as const,
   sessionGoal: (id: string) => ["session", id, "goal"] as const,
   sessionInbox: (id: string) => ["session", id, "inbox"] as const,
+  userCommand: (id: string, requestId: string) =>
+    ["session", id, "user-commands", requestId] as const,
+  userCommandOutput: (id: string, requestId: string) =>
+    ["session", id, "user-commands", requestId, "output"] as const,
   traditionalChildren: (id: string) => ["session", id, "children"] as const,
   managedOrchestrators: (id: string) => ["session", id, "orchestrators"] as const,
   workspaceDiff: (

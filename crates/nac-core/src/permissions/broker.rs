@@ -280,6 +280,9 @@ impl PermissionBroker {
         if cancellation.is_cancelled() {
             return AuthorizationOutcome::Denied("run was cancelled before approval".to_string());
         }
+        if context.authority.is_submitted_user_command() {
+            return AuthorizationOutcome::Allowed;
+        }
 
         // The durable mode is consulted only after ordered configured and hard
         // policy has produced Ask. It is never cached: independent managers and

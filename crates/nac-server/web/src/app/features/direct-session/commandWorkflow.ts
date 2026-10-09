@@ -2,7 +2,7 @@ import { Cause, Data, Effect, Exit, Option } from "effect";
 
 /** Expected command failures retain the transport's error for product recovery UI. */
 export class CommandFailure extends Data.TaggedError("CommandFailure")<{
-  operation: "submit" | "stop" | "create" | "steer" | "queue";
+  operation: "submit" | "stop" | "create" | "steer" | "queue" | "command";
   cause: unknown;
 }> {}
 
@@ -88,6 +88,33 @@ export function deliverPrompt(ports: {
     try: steering ? ports.steer : ports.submit,
     catch: (cause) => new CommandFailure({ operation: steering ? "steer" : "submit", cause }),
   }).pipe(Effect.as(steering ? ("steered" as const) : ("submitted" as const)));
+}
+
+export type UserCommandAdmission<T> =
+  | { kind: "accepted"; value: T }
+  | { kind: "not-sent"; error: unknown }
+  | { kind: "uncertain"; requestId: string; error: unknown };
+
+/** POST once; an uncertain admission is settled by looking up its request id, never by resending. */
+export function runUserCommand<T>(ports: {
+  admit: () => Promise<UserCommandAdmission<T>>;
+  lookup: (requestId: string) => Promise<T>;
+}): Effect.Effect<T, CommandFailure> {
+  return Effect.gen(function* () {
+    const result = yield* Effect.tryPromise({
+      try: ports.admit,
+      catch: (cause) => new CommandFailure({ operation: "command", cause }),
+    });
+    if (result.kind === "accepted") return result.value;
+    if (result.kind === "not-sent") {
+      return yield* Effect.fail(new CommandFailure({ operation: "command", cause: result.error }));
+    }
+    const { requestId, error } = result;
+    return yield* Effect.tryPromise({
+      try: () => ports.lookup(requestId),
+      catch: () => new CommandFailure({ operation: "command", cause: error }),
+    });
+  });
 }
 
 /** Unwrap only expected workflow failures; defects retain Effect's diagnostics. */

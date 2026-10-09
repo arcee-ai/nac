@@ -534,6 +534,7 @@ export function applyEnvelope(envelope: SessionEventEnvelope): RefreshKind {
       pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });
       return "snapshot";
     case "snapshot_saved":
+    case "user_command_updated":
       return "snapshot";
     case "transcript_appended":
       // A message was committed, so the buffers now describe the past.

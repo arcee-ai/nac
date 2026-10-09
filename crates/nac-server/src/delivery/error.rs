@@ -45,6 +45,20 @@ impl From<JsonRejection> for ApiError {
     }
 }
 
+impl From<application::user_commands::UserCommandApplicationError> for ApiError {
+    fn from(error: application::user_commands::UserCommandApplicationError) -> Self {
+        use application::user_commands::UserCommandApplicationError as Error;
+        let status = match &error {
+            Error::NotFound => StatusCode::NOT_FOUND,
+            Error::Invalid(_) | Error::NotDirectPrimary => StatusCode::BAD_REQUEST,
+            Error::Busy(_) | Error::Conflict(_) => StatusCode::CONFLICT,
+            Error::NotRetained => StatusCode::GONE,
+            Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self::new(status, error.to_string())
+    }
+}
+
 impl From<sessions::SessionPresentationError> for ApiError {
     fn from(error: sessions::SessionPresentationError) -> Self {
         let status = match &error {

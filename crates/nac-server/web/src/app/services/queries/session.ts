@@ -1,9 +1,11 @@
 import {
   createChat,
   runCommand,
+  runUserCommand,
   submitPrompt,
   stopRun,
 } from "@/app/features/direct-session/commandWorkflow";
+import { isActiveUserCommand } from "@/app/features/direct-session/userCommand";
 import { makeStopPorts } from "@/app/features/direct-session/commandAdapters";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { visibleSessions } from "@/app/features/ui-policy/policy";
@@ -56,6 +58,7 @@ import type {
   SessionSummarySnapshot,
   ThreadEventPage,
   UpdateConfigRequest,
+  UserCommandSnapshot,
 } from "@/app/types/api";
 
 export function useSessions(pollMs = SESSIONS_POLL_MS) {
@@ -447,6 +450,79 @@ export function useSubmitRun() {
         }),
       );
     },
+  });
+}
+
+export function useSubmitUserCommand() {
+  const invalidate = useQueryInvalidators();
+  const client = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: ({ id, command }: { id: string; command: string }) =>
+      runCommand(
+        runUserCommand({
+          admit: async () => {
+            const admission = await api.submitUserCommand(id, command);
+            if (admission.status === "accepted")
+              return { kind: "accepted", value: admission.response };
+            if (admission.status === "not-sent")
+              return {
+                kind: "not-sent",
+                error: new DOMException("The command was not sent.", "AbortError"),
+              };
+            return {
+              kind: "uncertain",
+              requestId: admission.requestId,
+              error: new UncertainCommandAdmissionError(admission.requestId, admission.error),
+            };
+          },
+          lookup: (requestId) => api.getUserCommand(id, requestId),
+        }),
+      ),
+    onSuccess: (command, { id }) => {
+      client.setQueryData(queryKeys.userCommand(id, command.request_id), command);
+      void invalidate.session(id);
+    },
+  });
+}
+
+/** Polls a command the snapshot still shows as running; a settled command is never fetched. */
+export function useUserCommand(id: string, command: UserCommandSnapshot): UserCommandSnapshot {
+  const active = isActiveUserCommand(command.state);
+  const query = useQuery({
+    queryKey: queryKeys.userCommand(id, command.request_id),
+    queryFn: ({ signal }) => api.getUserCommand(id, command.request_id, signal),
+    enabled: active,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data && !isActiveUserCommand(query.state.data.state) ? false : 1000,
+  });
+  return active ? (query.data ?? command) : command;
+}
+
+export function useCancelUserCommand() {
+  const invalidate = useQueryInvalidators();
+  const client = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: ({ id, requestId }: { id: string; requestId: string }) =>
+      api.cancelUserCommand(id, requestId),
+    onSuccess: (command, { id }) => {
+      client.setQueryData(queryKeys.userCommand(id, command.request_id), command);
+      void invalidate.session(id);
+    },
+  });
+}
+
+export function useUserCommandOutput(id: string, requestId: string, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.userCommandOutput(id, requestId),
+    queryFn: ({ pageParam, signal }) =>
+      api.readUserCommandOutput(id, requestId, { offset: pageParam, signal }),
+    initialPageParam: 0,
+    getNextPageParam: (page) => (page.eof ? undefined : page.next_offset),
+    enabled,
+    retry: false,
   });
 }
 

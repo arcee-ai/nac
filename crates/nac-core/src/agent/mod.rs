@@ -1028,6 +1028,22 @@ impl Agent {
         cancellation
     }
 
+    /// A runtime and client for one submitted user command, cancelled only through its own scope.
+    pub(crate) fn user_command_services(
+        &self,
+    ) -> (ToolRuntime, ModelClient, crate::tools::ThreadCancellation) {
+        let mut runtime = self.tool_runtime.clone();
+        runtime.command_cancellation = crate::tools::ThreadCancellation::default();
+        let cancellation = runtime.command_cancellation.clone();
+        (runtime, self.client.clone(), cancellation)
+    }
+
+    pub(crate) fn command_redactions(
+        &self,
+    ) -> Arc<StdMutex<HashMap<String, nac_contracts::CommandEnvironmentSnapshot>>> {
+        Arc::clone(&self.tool_runtime.command_redactions)
+    }
+
     #[cfg(test)]
     pub(crate) fn provider_messages_for_test(&mut self) -> Vec<Message> {
         match &mut self.compaction {

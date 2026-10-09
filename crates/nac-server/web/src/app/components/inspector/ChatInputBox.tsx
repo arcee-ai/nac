@@ -19,6 +19,7 @@ import {
 } from "@/app/atoms";
 import { AgentSpawnButton } from "@/app/components/inspector/AgentSpawnMenu";
 import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
+import { parseComposerInput } from "@/app/features/direct-session/userCommand";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { GoalControls } from "@/app/components/inspector/GoalControls";
@@ -65,11 +66,12 @@ import {
   useSteerOrchestrator,
   useSessionSkills,
   useSubmitRun,
+  useSubmitUserCommand,
   useSlashCommands,
   useUpdateGoal,
   useUpdateInboxItem,
 } from "@/app/services/queries";
-import { consumePromptRequests } from "@/app/store/composerStore";
+import { consumeDraftRequests, consumePromptRequests } from "@/app/store/composerStore";
 import { openSubagentLaunch, revealSidePanel } from "@/app/store/sessionLayoutStore";
 import {
   captureRuntimeActivation,
@@ -296,6 +298,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const toast = useToast();
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
+  const submitUserCommand = useSubmitUserCommand();
   const steerOrchestrator = useSteerOrchestrator();
   const compactSession = useCompactSession();
   const createInboxItem = useCreateInboxItem();
@@ -369,6 +372,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const runningInteractive = runningDirect || runningClassic;
   const mutationPending =
     submitRun.isPending ||
+    submitUserCommand.isPending ||
     steerOrchestrator.isPending ||
     compactSession.isPending ||
     createInboxItem.isPending ||
@@ -690,7 +694,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
    */
   const submit = useCallback(
     async (text: string = value, requestedDelivery?: InboxDelivery) => {
-      const prompt = text.trim();
+      const input = parseComposerInput(text, direct && !readOnly);
+      const prompt = input.kind === "command" ? input.command : input.prompt;
       if (!prompt || busy || submitInFlight.current) return;
       const fromField = text === value;
       const clearField = () => {
@@ -705,6 +710,17 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       const current = captureRuntimeActivation(sessionId);
 
       try {
+        if (input.kind === "command") {
+          try {
+            await submitUserCommand.mutateAsync({ id: sessionId, command: input.command });
+            if (!current()) return;
+            clearField();
+          } catch (error) {
+            if (!current()) return;
+            toast.error(`Command not run: ${errorMessage(toRunError(error))}`);
+          }
+          return;
+        }
         let definitions = commandDefinitions;
         if (text.trimStart().startsWith("/") && definitions === undefined) {
           const result = await refetchCommands();
@@ -778,6 +794,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       refetchCommands,
       sessionId,
       submitRun,
+      submitUserCommand,
+      direct,
+      readOnly,
       compactSession,
       toast,
       rowPx,
@@ -793,6 +812,16 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   // A starter prompt goes out on its own; it is already a whole instruction,
   // and the field is where it would otherwise have to be confirmed.
   useEffect(() => consumePromptRequests((prompt) => void submit(prompt)), [submit]);
+  useEffect(
+    () =>
+      consumeDraftRequests((draft) => {
+        valueRef.current = draft;
+        setValue(draft);
+        ref.current?.focus();
+      }),
+    [],
+  );
+  const commandMode = parseComposerInput(value, direct && !readOnly).kind === "command";
 
   const stop = useCallback(async () => {
     await actions.stopRun(sessionId);
@@ -1233,6 +1262,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       ) : (
         fieldWithSuggestions
       )}
+
+      {commandMode ? (
+        <p role="status" className="text-small text-basic-secondary">
+          Runs as a shell command. Start with \! to send text.
+        </p>
+      ) : null}
 
       {pendingInbox.length ? (
         <div className="flex flex-col gap-2" aria-label="Pending messages">

@@ -158,6 +158,8 @@ test-durability:
 	$(CARGO) test --locked -p nac-core child_terminal_crash_window_recovers_report_and_delivers_once
 	$(CARGO) test --locked -p nac-core child_pre_prompt_crash_is_interrupted_and_delivered_once_after_restart
 	$(CARGO) test --locked -p nac-core shared_store_recovery_after_peer_crash_preserves_committed_transcript
+	$(CARGO) test --locked -p nac-core reopened_service_reconciles_unsettled_commands_once_without_rerunning
+	$(CARGO) test --locked -p nac-core lost_terminal_ack_replays_the_same_receipt_without_a_second_record
 	$(CARGO) test --locked -p nac-server parent_deletion_excludes_late_child_relationship_commit
 	$(CARGO) test --locked -p nac-server serving_store_ownership_rejects_a_second_manager_and_allows_restart
 	$(CARGO) test --locked -p nac-server serving_managers_can_own_separate_stores_concurrently

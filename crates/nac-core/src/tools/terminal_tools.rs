@@ -73,6 +73,7 @@ impl kernel::NativeTool for ExecCommandTool {
                 &input,
                 services.runtime,
                 cancellation,
+                &context.authority,
             )
             .await
         })

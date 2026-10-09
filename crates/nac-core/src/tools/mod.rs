@@ -307,6 +307,16 @@ pub(crate) fn direct_tool_admission(name: &str) -> Option<kernel::ToolAdmission>
         .admission(name)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the static first-party tool registry is collision-checked during construction"
+)]
+pub(crate) fn exec_command_snapshot() -> kernel::ToolSnapshot {
+    worker_tool_registry(false)
+        .expect("built-in direct tool registration must be collision-free")
+        .snapshot_where(|descriptor| descriptor.name() == "exec_command")
+}
+
 pub fn orchestrator_tool_definitions(
     skills: Option<&SkillRegistry>,
     light: Option<&crate::model::ModelClient>,

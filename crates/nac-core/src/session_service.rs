@@ -42,11 +42,24 @@ mod operation_state;
 mod recovery;
 mod settlement;
 mod transcript_projection;
+mod user_command;
 
 use manual_compaction::ActiveCompactionState;
 pub use manual_compaction::{
     SessionCompactionAdmissionError, SessionCompactionError, SessionCompactionHandle,
     SessionCompactionResult, SessionCoordinationError, SessionOperationBusy,
+};
+
+pub use crate::store::{UserCommandSnapshot, UserCommandState};
+pub use crate::terminal::{
+    OutputPage, OutputSegment, OutputStream, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
+};
+#[cfg(test)]
+pub(crate) use user_command::invoke_submitted_command;
+use user_command::ActiveUserCommandState;
+pub(crate) use user_command::UserCommandAuthority;
+pub use user_command::{
+    UserCommandAdmission, UserCommandOutputError, UserCommandRequest, UserCommandSubmitError,
 };
 
 pub type AgentEventReceiver = mpsc::UnboundedReceiver<AgentEvent>;
@@ -179,6 +192,9 @@ pub enum ActiveSessionOperationSnapshot {
     ManualCompaction {
         compaction: ActiveCompactionSnapshot,
     },
+    UserCommand {
+        command: Box<UserCommandSnapshot>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +223,11 @@ pub struct SessionFrontendSnapshot {
     pub active_run: Option<ActiveRunSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_compaction: Option<ActiveCompactionSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_user_command: Option<UserCommandSnapshot>,
+    /// Commands whose transcript record is among `messages`; `message_index` is its position there.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_commands: Vec<UserCommandSnapshot>,
     pub sessions: Vec<SessionSummarySnapshot>,
     #[serde(default)]
     pub active_threads: Vec<String>,
@@ -293,6 +314,9 @@ pub struct MessagesPageSnapshot {
     #[serde(default)]
     pub created_at: Vec<Option<String>>,
     pub page: MessagePageMetadata,
+    /// Commands whose record is on this page; `message_index` is the visible transcript index.
+    #[serde(default)]
+    pub user_commands: Vec<UserCommandSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -356,6 +380,7 @@ struct FrontendSnapshotBlockingLoad {
     worksets: WorksetsSnapshot,
     run_failure: Option<crate::run_failure::RunFailure>,
     workspace: WorkspaceSnapshot,
+    user_commands: Vec<crate::store::UserCommandSnapshot>,
 }
 
 pub struct SessionServiceParts {
@@ -390,6 +415,13 @@ impl std::fmt::Display for SessionSubmitError {
                 "session is busy with run {} ({})",
                 active_run.run_id, active_run.prompt_preview
             ),
+            Self::ExternalBusy {
+                session_id:
+                    SessionOperationBusy::Local {
+                        active_operation: ActiveSessionOperationSnapshot::UserCommand { .. },
+                        ..
+                    },
+            } => formatter.write_str("session is busy with a user command"),
             Self::ExternalBusy {
                 session_id: SessionOperationBusy::Local { .. },
             } => formatter.write_str("session is busy with a local compaction"),
@@ -601,6 +633,8 @@ pub struct SessionService {
     mcp: Option<Arc<crate::mcp::McpRegistry>>,
     terminal_manager: crate::terminal::TerminalManager,
     permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
+    /// The agent runtime's per-output environment snapshots; user-command output reads redact with them.
+    command_redactions: Arc<StdMutex<HashMap<String, nac_contracts::CommandEnvironmentSnapshot>>>,
     /// A sandbox service owns container-local state even while it has no run
     /// or retained terminal. Keep a shared cross-process resource lease for
     /// the complete attached-service lifetime so peer config/delete mutations
@@ -632,6 +666,7 @@ pub struct SessionService {
 enum ActiveSessionOperation {
     Run(ActiveRunState),
     ManualCompaction(ActiveCompactionState),
+    UserCommand(ActiveUserCommandState),
 }
 
 struct GoalRetryWake {
@@ -651,6 +686,9 @@ impl ActiveSessionOperation {
                     compaction: compaction.snapshot.clone(),
                 }
             }
+            Self::UserCommand(command) => ActiveSessionOperationSnapshot::UserCommand {
+                command: Box::new(command.snapshot.clone()),
+            },
         }
     }
 }
@@ -983,6 +1021,7 @@ struct LoadedFrontendMessages {
     created_at: Vec<Option<String>>,
     page: Option<MessagePageMetadata>,
     cycle: Option<MessageCycleMetadata>,
+    user_commands: Vec<UserCommandSnapshot>,
 }
 
 /// Flags delivered orchestrator steering records whose verbatim user message
@@ -1083,6 +1122,7 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
             total,
             has_older: start > 0,
         },
+        user_commands: Vec::new(),
     }
 }
 

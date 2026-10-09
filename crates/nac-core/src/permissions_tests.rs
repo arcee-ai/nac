@@ -1932,3 +1932,30 @@ async fn losing_the_sole_interactive_subscriber_dismisses_approval_prompt() {
     ));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[tokio::test]
+async fn submitted_user_command_runs_manual_ask_without_prompt_or_grant() {
+    let (path, broker) = broker_fixture();
+    let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
+    let mut events = bus.subscribe();
+    broker.attach_event_bus(bus);
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = path.parent().unwrap().to_path_buf();
+    runtime.backend = Arc::new(local(path.parent().unwrap()));
+    runtime.store_path = path.clone();
+    runtime.permission_broker = Some(Arc::clone(&broker));
+    let client = crate::model::ModelClient::new_for_test();
+    let result =
+        crate::session_service::invoke_submitted_command("printf asked", 5_000, &runtime, &client)
+            .await
+            .unwrap();
+    assert!(!result.is_error, "{}", result.content);
+    assert_eq!(
+        broker.approval_mode().await.unwrap(),
+        PermissionApprovalMode::Manual
+    );
+    assert!(broker.pending().is_empty());
+    assert!(broker.grants().unwrap().is_empty());
+    assert!(events.try_recv().is_err());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

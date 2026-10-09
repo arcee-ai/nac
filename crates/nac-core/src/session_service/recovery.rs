@@ -6,11 +6,9 @@ impl SessionService {
             return Ok(false);
         };
         let record = crate::store::load_run_recovery(&self.metadata.store_path, session_id)?;
-        let reconciled = self
-            .reconciled_recovery_run_id
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Ok(record.is_some_and(|record| reconciled.as_deref() != Some(record.run_id.as_str())))
+        let unsettled =
+            crate::store::load_unsettled_user_command(&self.metadata.store_path, session_id)?;
+        Ok(self.recovery_pending(record, unsettled))
     }
 
     pub async fn has_unreconciled_durable_run_recovery_async(&self) -> Result<bool> {
@@ -21,11 +19,23 @@ impl SessionService {
             return self.has_unreconciled_durable_run_recovery();
         };
         let record = owner.load_run_recovery(session_id.to_owned()).await?;
+        let unsettled = owner
+            .load_unsettled_user_command(session_id.to_owned())
+            .await?;
+        Ok(self.recovery_pending(record, unsettled))
+    }
+
+    fn recovery_pending(
+        &self,
+        record: Option<crate::store::RunRecoveryRecord>,
+        unsettled: Option<UserCommandSnapshot>,
+    ) -> bool {
         let reconciled = self
             .reconciled_recovery_run_id
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Ok(record.is_some_and(|record| reconciled.as_deref() != Some(record.run_id.as_str())))
+        unsettled.is_some()
+            || record.is_some_and(|record| reconciled.as_deref() != Some(record.run_id.as_str()))
     }
 
     /// Reconcile a durable run left by another process and refresh this cached
@@ -53,6 +63,17 @@ impl SessionService {
         let recovery = match &owner {
             Some(owner) => owner.reconcile_active_run(session_id.to_owned()).await?,
             None => crate::store::reconcile_active_run(&self.metadata.store_path, session_id)?,
+        };
+        let reconciled_command = match &owner {
+            Some(owner) => {
+                owner
+                    .reconcile_unsettled_user_command(session_id.to_owned())
+                    .await?
+            }
+            None => crate::store::reconcile_unsettled_user_command(
+                &self.metadata.store_path,
+                session_id,
+            )?,
         };
         let mut snapshot =
             sessions::load_session_async(self.metadata.store_path.clone(), session_id.to_string())
@@ -95,6 +116,17 @@ impl SessionService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = reconciled_run_id;
 
+        if let Some(command) = reconciled_command {
+            self.event_bus
+                .emit_with_context_async(
+                    SessionEvent::UserCommandUpdated {
+                        command: Box::new(command),
+                    },
+                    None,
+                    None,
+                )
+                .await?;
+        }
         match &recovery {
             crate::store::ActiveRunReconciliation::CanonicalTerminal => {
                 if let Some(record) = recovered_record {

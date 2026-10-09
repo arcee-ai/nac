@@ -8,6 +8,7 @@ mod migration_status;
 mod model_configurations;
 mod transaction_observation;
 mod transcript_tables;
+mod user_command_tables;
 mod wal_preflight;
 
 #[cfg(test)]
@@ -24,6 +25,7 @@ use model_configurations::create_model_configurations_table;
 use transcript_tables::{
     create_session_run_recovery_table, create_transcript_append_receipts_table,
 };
+use user_command_tables::create_session_user_commands_table;
 
 #[cfg(test)]
 #[path = "schema/startup_tests.rs"]
@@ -39,6 +41,7 @@ mod future_schema_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 33 adds durable user-submitted command operations.
 // 31 adds host-owned worker dispatch admission and atomic episode receipts.
 // 30 adds transactional transcript append replay receipts.
 // 29 adds the public-HTTP opt-in to reusable configurations and durable sessions.
@@ -63,7 +66,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 32;
+const STORE_SCHEMA_VERSION: i64 = 33;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -756,7 +759,7 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -936,6 +939,7 @@ fn open_connection_with_hooks(
         "history_boundary_id",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    create_session_user_commands_table(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
@@ -1802,6 +1806,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "terminal_remote_cleanups",
         "projects",
         "session_projects",
+        "session_user_commands",
     ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {

@@ -22,6 +22,7 @@ import {
 } from "@/app/atoms";
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
+import { UserCommandCard } from "@/app/components/inspector/UserCommandCard";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { DelegatedCompletionEvent } from "@/app/features/delegation/presentation/DelegatedCompletionEvent";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
@@ -333,6 +334,7 @@ export function Transcript({
   // kind: everything the run produces lands after the prompt it answers, so
   // once that prompt is in the snapshot the copy is a duplicate no matter how
   // many model turns have piled up on top of it.
+  const activeCommand = snapshot?.active_user_command ?? null;
   const showPending = Boolean(pendingText && lastUserText(snapshotTurns) !== pendingText);
   useLayoutEffect(() => {
     hadPending.current = false;
@@ -524,7 +526,9 @@ export function Transcript({
   // Emptiness is measured in turns rather than in the message page: every
   // session opens with a system prompt, which the page counts and the
   // transcript does not show.
-  const showInitialPrompts = Boolean(snapshot && turns.length === 0 && !running && !showPending);
+  const showInitialPrompts = Boolean(
+    snapshot && turns.length === 0 && !running && !showPending && !activeCommand,
+  );
 
   const runError = error && !running ? error : null;
   const durableFailure = !running
@@ -663,6 +667,11 @@ export function Transcript({
                 return <DelegatedCompletionEvent key={turn.key} turn={turn} />;
               }
               if (turn.kind === "user") {
+                if (turn.command) {
+                  return (
+                    <UserCommandCard key={turn.key} sessionId={sessionId} command={turn.command} />
+                  );
+                }
                 return (
                   <UserMessage
                     key={turn.key}
@@ -751,6 +760,8 @@ export function Transcript({
               );
             })}
           </PerfProfiler>
+
+          {activeCommand ? <UserCommandCard sessionId={sessionId} command={activeCommand} /> : null}
 
           {showPending && !streamingTurn ? (
             <UserMessage text={pendingText} invokedSkills={pendingSkills} pending />

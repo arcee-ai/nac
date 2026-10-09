@@ -28,6 +28,7 @@ import type {
   DispatchWeight,
   SessionSnapshotResponse,
   ToolCall,
+  UserCommandSnapshot,
   WorksetSnapshot,
 } from "@/app/types/api";
 
@@ -107,6 +108,8 @@ export interface UserTurn {
   messageIndex: number;
   /** When the message entered the transcript log, if the backend knows. */
   createdAt: string | null;
+  /** Set when this message is the record of a command the user ran with `!`. */
+  command?: UserCommandSnapshot;
 }
 
 export interface ModelTurn {
@@ -616,6 +619,9 @@ export function buildTranscript(
     cancelledNames: cancelledThreadNames(messages),
   };
 
+  const commands = new Map(
+    (snapshot?.user_commands ?? []).map((command) => [command.message_index, command]),
+  );
   const turns: TranscriptTurn[] = [];
   let current: ModelTurn | null = null;
   /**
@@ -651,6 +657,7 @@ export function buildTranscript(
         invokedSkills: invokedSkillNames(message.content),
         messageIndex: absoluteIndex,
         createdAt: createdAt[index] ?? null,
+        command: commands.get(absoluteIndex),
       });
       return;
     }

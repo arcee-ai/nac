@@ -115,6 +115,61 @@ pub struct ToolCallContext {
     pub call_id: Option<String>,
     pub thread_name: Option<String>,
     pub(crate) cancellation: Option<super::ThreadCancellation>,
+    pub(crate) authority: InvocationAuthority,
+}
+
+/// Who authorized the invocation; only the user-command module constructs the submitted variant.
+#[derive(Clone, Debug, Default)]
+pub(crate) enum InvocationAuthority {
+    #[default]
+    Model,
+    SubmittedUserCommand(crate::session_service::UserCommandAuthority),
+}
+
+impl InvocationAuthority {
+    pub(crate) fn is_submitted_user_command(&self) -> bool {
+        matches!(self, Self::SubmittedUserCommand(_))
+    }
+}
+
+/// A pre-execution step refused the invocation; no side effect has started.
+#[derive(Debug)]
+pub(crate) enum ToolInvocationRejection {
+    Prepare(ToolResult),
+    HardDenial(String),
+    Canonicalization(String),
+    Denied(String),
+    Cancelled(String),
+    Revalidation(String),
+    TargetChanged,
+    Bind(ToolResult),
+}
+
+impl ToolInvocationRejection {
+    pub(crate) fn into_tool_result(self, name: &str) -> ToolResult {
+        match self {
+            Self::Prepare(result) | Self::Bind(result) => result,
+            rejection => ToolResult::text(rejection.reason(name), true),
+        }
+    }
+
+    pub(crate) fn reason(&self, name: &str) -> String {
+        match self {
+            Self::Prepare(result) | Self::Bind(result) => result.content.to_string(),
+            Self::HardDenial(reason) | Self::Denied(reason) | Self::Cancelled(reason) => {
+                format!("Error: permission denied for {name}: {reason}")
+            }
+            Self::Canonicalization(error) => {
+                format!("Error: permission target resolution failed for {name}: {error}")
+            }
+            Self::Revalidation(error) => {
+                format!("Error: permission target revalidation failed for {name}: {error}")
+            }
+            Self::TargetChanged => format!(
+                "Error: permission target changed while {name} awaited authorization; retry the tool call"
+            ),
+        }
+    }
 }
 
 impl ToolCallContext {
@@ -343,6 +398,7 @@ impl PreparedToolCall {
             call_id: context.call_id.clone(),
             thread_name: context.thread_name.clone(),
             cancellation: Some(cancellation.clone()),
+            authority: context.authority.clone(),
         };
         let started = Instant::now();
         let mut invocation = Box::pin(self.invoke(services, &call_context));
@@ -710,96 +766,85 @@ impl ToolSnapshot {
         services: ToolServices<'_>,
         context: &ToolCallContext,
     ) -> ToolResult {
-        match self.prepare(name, input, services) {
-            Ok(mut prepared) => {
-                let _admission = prepared.descriptor().admission;
-                if let Some(reason) = prepared
-                    .permission_resources()
-                    .iter()
-                    .find_map(|resource| resource.hard_denial.as_deref())
+        self.invoke_authorized(name, input, services, context)
+            .await
+            .unwrap_or_else(|rejection| rejection.into_tool_result(name))
+    }
+
+    pub(crate) async fn invoke_authorized(
+        &self,
+        name: &str,
+        input: Value,
+        services: ToolServices<'_>,
+        context: &ToolCallContext,
+    ) -> Result<ToolResult, ToolInvocationRejection> {
+        let mut prepared = self
+            .prepare(name, input, services)
+            .map_err(ToolInvocationRejection::Prepare)?;
+        let _admission = prepared.descriptor().admission;
+        if let Some(reason) = prepared
+            .permission_resources()
+            .iter()
+            .find_map(|resource| resource.hard_denial.as_deref())
+        {
+            return Err(ToolInvocationRejection::HardDenial(reason.to_string()));
+        }
+        let resources = crate::permissions::canonicalize_authorization_resources(
+            prepared.permission_resources(),
+            services.runtime.backend.as_ref(),
+            &services.runtime.store_path,
+        )
+        .await
+        .map_err(|error| ToolInvocationRejection::Canonicalization(format!("{error:#}")))?;
+        if let Some(reason) = resources
+            .iter()
+            .find_map(|resource| resource.hard_denial.as_deref())
+        {
+            return Err(ToolInvocationRejection::HardDenial(reason.to_string()));
+        }
+        match &services.runtime.permission_broker {
+            Some(broker) => {
+                match broker
+                    .authorize(
+                        name,
+                        &resources,
+                        context,
+                        &services.runtime.command_cancellation,
+                    )
+                    .await
                 {
-                    return ToolResult::text(
-                        format!("Error: permission denied for {name}: {reason}"),
-                        true,
-                    );
+                    crate::permissions::AuthorizationOutcome::Allowed => {}
+                    crate::permissions::AuthorizationOutcome::Denied(reason)
+                        if services.runtime.command_cancellation.is_cancelled() =>
+                    {
+                        return Err(ToolInvocationRejection::Cancelled(reason));
+                    }
+                    crate::permissions::AuthorizationOutcome::Denied(reason) => {
+                        return Err(ToolInvocationRejection::Denied(reason));
+                    }
                 }
-                let resources = match crate::permissions::canonicalize_authorization_resources(
+                let current = crate::permissions::canonicalize_authorization_resources(
                     prepared.permission_resources(),
                     services.runtime.backend.as_ref(),
                     &services.runtime.store_path,
                 )
                 .await
-                {
-                    Ok(resources) => resources,
-                    Err(error) => {
-                        return ToolResult::text(
-                            format!(
-                                "Error: permission target resolution failed for {name}: {error:#}"
-                            ),
-                            true,
-                        );
-                    }
-                };
-                if let Some(reason) = resources
-                    .iter()
-                    .find_map(|resource| resource.hard_denial.as_deref())
-                {
-                    return ToolResult::text(
-                        format!("Error: permission denied for {name}: {reason}"),
-                        true,
-                    );
+                .map_err(|error| ToolInvocationRejection::Revalidation(format!("{error:#}")))?;
+                if current != resources {
+                    return Err(ToolInvocationRejection::TargetChanged);
                 }
-                if let Some(broker) = &services.runtime.permission_broker {
-                    match broker
-                        .authorize(
-                            name,
-                            &resources,
-                            context,
-                            &services.runtime.command_cancellation,
-                        )
-                        .await
-                    {
-                        crate::permissions::AuthorizationOutcome::Allowed => {}
-                        crate::permissions::AuthorizationOutcome::Denied(reason) => {
-                            return ToolResult::text(
-                                format!("Error: permission denied for {name}: {reason}"),
-                                true,
-                            );
-                        }
-                    }
-                    let current = match crate::permissions::canonicalize_authorization_resources(
-                        prepared.permission_resources(),
-                        services.runtime.backend.as_ref(),
-                        &services.runtime.store_path,
-                    )
-                    .await
-                    {
-                        Ok(current) => current,
-                        Err(error) => {
-                            return ToolResult::text(
-                                format!(
-                                    "Error: permission target revalidation failed for {name}: {error:#}"
-                                ),
-                                true,
-                            );
-                        }
-                    };
-                    if current != resources {
-                        return ToolResult::text(
-                            format!(
-                                "Error: permission target changed while {name} awaited authorization; retry the tool call"
-                            ),
-                            true,
-                        );
-                    }
-                }
-                if let Err(error) = prepared.bind_authorized_resources(&resources, services) {
-                    return error;
-                }
-                prepared.invoke_bounded(name, services, context).await
             }
-            Err(error) => error,
+            None if context.authority.is_submitted_user_command() => {
+                return Err(ToolInvocationRejection::Denied(
+                    "user command authorization requires a permission broker".to_string(),
+                ));
+            }
+            None => {}
         }
+        prepared
+            .bind_authorized_resources(&resources, services)
+            .map_err(ToolInvocationRejection::Bind)?;
+        Ok(prepared.invoke_bounded(name, services, context).await)
     }
 }
 

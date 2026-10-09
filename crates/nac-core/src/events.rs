@@ -584,6 +584,10 @@ pub enum SessionEvent {
     TranscriptReverted {
         transcript_len: u64,
     },
+    /// Every user-command state transition, carrying only redacted fields.
+    UserCommandUpdated {
+        command: Box<crate::store::UserCommandSnapshot>,
+    },
 }
 
 /// A slice of model output as it is being produced. Rides its own channel

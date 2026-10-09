@@ -8,9 +8,11 @@ import { createStore } from "@/app/lib/store";
 interface ComposerState {
   /** Prompt waiting to be sent, or null once the composer has taken it. */
   pending: string | null;
+  /** Text to place in the field for the user to edit and send themselves. */
+  draft: string | null;
 }
 
-const composerStore = createStore<ComposerState>({ pending: null }, "composer");
+const composerStore = createStore<ComposerState>({ pending: null, draft: null }, "composer");
 
 export function sendPrompt(pending: string): void {
   composerStore.setState({ pending });
@@ -26,5 +28,19 @@ export function consumePromptRequests(send: (prompt: string) => void): () => voi
     if (pending === null) return;
     composerStore.setState({ pending: null });
     send(pending);
+  });
+}
+
+export function draftPrompt(draft: string): void {
+  composerStore.setState({ draft });
+}
+
+/** Hands each requested draft to `fill` exactly once without sending it. */
+export function consumeDraftRequests(fill: (draft: string) => void): () => void {
+  return composerStore.subscribe(() => {
+    const { draft } = composerStore.getState();
+    if (draft === null) return;
+    composerStore.setState({ draft: null });
+    fill(draft);
   });
 }

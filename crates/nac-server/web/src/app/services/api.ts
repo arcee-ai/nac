@@ -684,6 +684,20 @@ export const api = {
   submitRun: (id: string, prompt: string, signal?: AbortSignal) =>
     nacClient.submitPrompt(id, prompt, signal),
 
+  submitUserCommand: (id: string, command: string, signal?: AbortSignal) =>
+    nacClient.submitUserCommand(id, command, signal),
+
+  getUserCommand: (id: string, requestId: string, signal?: AbortSignal) =>
+    nacClient.getUserCommand(id, requestId, signal),
+
+  cancelUserCommand: (id: string, requestId: string) => nacClient.cancelUserCommand(id, requestId),
+
+  readUserCommandOutput: (
+    id: string,
+    requestId: string,
+    options: { offset?: number; limit?: number; signal?: AbortSignal } = {},
+  ) => nacClient.readUserCommandOutput(id, requestId, options),
+
   cancelActiveRun: (id: string) => request<void>("POST", `${sessionPath(id)}/cancel-active-run`),
 
   cancelExactRun: (id: string, runId: string) =>

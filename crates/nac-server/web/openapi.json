@@ -6731,6 +6731,368 @@
         }
       }
     },
+    "/sessions/{session_id}/user-commands": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_commands",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitUserCommandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Request ID already admitted with the same command and timeout; current snapshot replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserCommandSnapshot"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Command admitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserCommandSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or session is not a direct primary session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found or delegated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Session busy, or request ID reused with a different command or timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-commands/{request_id}": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_user_commands_request_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current command snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserCommandSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Path extraction failed",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or command not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-commands/{request_id}/cancel": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_commands_request_id_cancel",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancellation requested for an active command, or terminal snapshot returned unchanged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserCommandSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Path extraction failed",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or command not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/user-commands/{request_id}/output": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_user_commands_request_id_output",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stream",
+            "in": "query",
+            "description": "One of `combined` (default), `stdout`, or `stderr`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Redacted page of retained command output",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserCommandOutputPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid stream, offset, or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or command not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Command output is no longer retained",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/workspace/branches": {
       "get": {
         "tags": [
@@ -11736,6 +12098,12 @@
           },
           "page": {
             "$ref": "#/components/schemas/MessagePageMetadata"
+          },
+          "user_commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserCommandSnapshot"
+            }
           }
         }
       },
@@ -13836,6 +14204,25 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "Every user-command state transition, carrying only redacted fields.",
+            "required": [
+              "command",
+              "type"
+            ],
+            "properties": {
+              "command": {
+                "$ref": "#/components/schemas/UserCommandSnapshot"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "user_command_updated"
+                ]
+              }
+            }
           }
         ]
       },
@@ -13991,6 +14378,16 @@
               "type": "string"
             }
           },
+          "active_user_command": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserCommandSnapshot"
+              }
+            ]
+          },
           "covered_orchestrator_steering_ids": {
             "type": "array",
             "items": {
@@ -14101,6 +14498,13 @@
               "string",
               "null"
             ]
+          },
+          "user_commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserCommandSnapshot"
+            },
+            "description": "Commands whose transcript record is among `messages`; `message_index` is its position there."
           },
           "worksets": {
             "$ref": "#/components/schemas/WorksetsSnapshot"
@@ -14864,6 +15268,29 @@
           },
           "run_id": {
             "type": "string"
+          }
+        }
+      },
+      "SubmitUserCommandRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -15970,6 +16397,214 @@
             "$ref": "#/components/schemas/RequestField_u16_u16"
           }
         }
+      },
+      "UserCommandOutputPage": {
+        "type": "object",
+        "required": [
+          "output_id",
+          "stream",
+          "offset",
+          "content",
+          "next_offset",
+          "eof",
+          "overflowed",
+          "retained_start",
+          "retained_end"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "eof": {
+            "type": "boolean"
+          },
+          "next_offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_id": {
+            "type": "string"
+          },
+          "overflowed": {
+            "type": "boolean"
+          },
+          "retained_end": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "retained_start": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserCommandOutputSegment"
+            }
+          },
+          "stream": {
+            "type": "string"
+          }
+        }
+      },
+      "UserCommandOutputSegment": {
+        "type": "object",
+        "required": [
+          "sequence",
+          "stream",
+          "combined_start",
+          "combined_end",
+          "stream_start",
+          "stream_end"
+        ],
+        "properties": {
+          "combined_end": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "combined_start": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stream": {
+            "type": "string"
+          },
+          "stream_end": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stream_start": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "UserCommandSnapshot": {
+        "type": "object",
+        "description": "Redacted projection of one durable user command; `message_index` is its raw transcript index.",
+        "required": [
+          "request_id",
+          "command",
+          "timeout_ms",
+          "state",
+          "process_started",
+          "created_at_epoch_ms"
+        ],
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "created_at_epoch_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "finished_at_epoch_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "message_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "output_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overflowed": {
+            "type": "boolean"
+          },
+          "process_started": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/UserCommandState"
+          },
+          "stderr_preview": {
+            "type": "string"
+          },
+          "stdout_preview": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "wall_time_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "UserCommandState": {
+        "type": "string",
+        "enum": [
+          "admitted",
+          "executing",
+          "completed",
+          "timed_out",
+          "cancelled",
+          "spawn_failed",
+          "rejected",
+          "interrupted",
+          "outcome_unknown"
+        ]
       },
       "WorksetItemSnapshot": {
         "type": "object",

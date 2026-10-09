@@ -6,6 +6,9 @@ import type {
   SessionEventEnvelope,
   SessionSnapshotResponse,
   SubmitPromptResponse,
+  SubmitUserCommandRequest,
+  UserCommandOutputPage,
+  UserCommandSnapshot,
 } from "./types.js";
 
 export const NAC_HTTP_CLIENT_VERSION = 1 as const;
@@ -325,6 +328,10 @@ function sessionPath(sessionId: string): string {
   return `/sessions/${encodeURIComponent(sessionId)}`;
 }
 
+function userCommandPath(sessionId: string, requestId: string): string {
+  return `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}`;
+}
+
 function compareCursor(left: SessionEventBoundary, right: SessionEventBoundary): number | null {
   if (left.epoch_id !== right.epoch_id) return null;
   return left.sequence_id - right.sequence_id;
@@ -509,6 +516,54 @@ export class NacClient {
       body: { prompt },
       signal,
     });
+  }
+
+  submitUserCommand(sessionId: string, command: string, signal?: AbortSignal) {
+    const requestId = this.transport.newRequestId();
+    const body: SubmitUserCommandRequest = { request_id: requestId, command };
+    return this.transport.admit<UserCommandSnapshot>(
+      "POST",
+      `${sessionPath(sessionId)}/user-commands`,
+      { body, signal, requestId },
+    );
+  }
+
+  getUserCommand(sessionId: string, requestId: string, signal?: AbortSignal) {
+    return this.transport.request<UserCommandSnapshot>(
+      "GET",
+      userCommandPath(sessionId, requestId),
+      { signal },
+    );
+  }
+
+  cancelUserCommand(sessionId: string, requestId: string, signal?: AbortSignal) {
+    return this.transport.request<UserCommandSnapshot>(
+      "POST",
+      `${userCommandPath(sessionId, requestId)}/cancel`,
+      { signal },
+    );
+  }
+
+  readUserCommandOutput(
+    sessionId: string,
+    requestId: string,
+    options: {
+      stream?: "combined" | "stdout" | "stderr";
+      offset?: number;
+      limit?: number;
+      signal?: AbortSignal;
+    } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (options.stream !== undefined) params.set("stream", options.stream);
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    const query = params.toString();
+    return this.transport.request<UserCommandOutputPage>(
+      "GET",
+      `${userCommandPath(sessionId, requestId)}/output${query ? `?${query}` : ""}`,
+      { signal: options.signal },
+    );
   }
 }
 

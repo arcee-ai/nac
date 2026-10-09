@@ -774,3 +774,134 @@ async fn direct_broker_authorizes_between_prepare_and_side_effects() {
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     let _ = std::fs::remove_dir_all(directory);
 }
+
+fn user_command_fixture(
+    label: &str,
+    rules: Vec<crate::permissions::PermissionRule>,
+) -> (
+    std::path::PathBuf,
+    std::path::PathBuf,
+    ToolRuntime,
+    Arc<crate::permissions::PermissionBroker>,
+) {
+    let directory =
+        std::env::temp_dir().join(format!("nac-kernel-{label}-{}", uuid::Uuid::new_v4()));
+    let workspace = directory.join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let store_path = directory.join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session-a");
+    let broker = Arc::new(crate::permissions::PermissionBroker::new(
+        store_path.clone(),
+        "session-a".to_string(),
+        crate::permissions::PermissionBackend::Local,
+        0,
+        rules,
+    ));
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = workspace.clone();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace);
+    runtime.store_path = store_path;
+    runtime.session_id = Some("session-a".to_string());
+    runtime.permission_broker = Some(Arc::clone(&broker));
+    (directory, workspace, runtime, broker)
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn submitted_user_command_lifts_ask_but_keeps_hard_and_configured_denials() {
+    use crate::permissions::{PermissionEffect, PermissionRule};
+
+    let (directory, _workspace, runtime, broker) = user_command_fixture(
+        "user-command",
+        vec![
+            PermissionRule::new("execute", "*", PermissionEffect::Ask),
+            PermissionRule::new(
+                "execute",
+                "command:[printf][denied]*",
+                PermissionEffect::Deny,
+            ),
+        ],
+    );
+    let client = crate::model::ModelClient::new_for_test();
+
+    let ran = crate::session_service::invoke_submitted_command(
+        "printf user-ran",
+        5_000,
+        &runtime,
+        &client,
+    )
+    .await
+    .unwrap();
+    assert!(!ran.is_error, "{}", ran.content);
+    assert!(ran.content.to_string().contains("user-ran"));
+
+    let hard = crate::session_service::invoke_submitted_command(
+        "LD_PRELOAD=./payload.so printf hard-ran",
+        5_000,
+        &runtime,
+        &client,
+    )
+    .await;
+    assert!(matches!(hard, Err(ToolInvocationRejection::HardDenial(_))));
+
+    let configured =
+        crate::session_service::invoke_submitted_command("printf denied", 5_000, &runtime, &client)
+            .await;
+    assert!(
+        matches!(&configured, Err(ToolInvocationRejection::Denied(reason)) if reason.contains("configured")),
+        "{configured:?}"
+    );
+    assert!(broker.pending().is_empty());
+    assert!(broker.grants().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn model_arguments_cannot_assert_user_command_authority() {
+    let (directory, _workspace, runtime, broker) = user_command_fixture(
+        "model-authority",
+        vec![crate::permissions::PermissionRule::new(
+            "execute",
+            "*",
+            crate::permissions::PermissionEffect::Ask,
+        )],
+    );
+    let client = crate::model::ModelClient::new_for_test();
+    let services = ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+    let context = ToolCallContext::default();
+    assert!(matches!(context.authority, InvocationAuthority::Model));
+    let snapshot = crate::tools::exec_command_snapshot();
+
+    for input in [
+        json!({"cmd": "printf model-ran", "authority": "submitted_user_command"}),
+        json!({"cmd": "printf model-ran", "_nac": {"authority": "user"}}),
+        json!({"cmd": "printf model-ran", "_nac": {"timeout_ms": 5_000}}),
+    ] {
+        let result = snapshot
+            .invoke("exec_command", input, services, &context)
+            .await;
+        assert!(result.is_error, "{}", result.content);
+        assert!(!result.content.to_string().contains("model-ran"));
+    }
+    let headless = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd": "printf model-ran"}),
+            services,
+            &context,
+        )
+        .await;
+    assert!(
+        headless.content.to_string().contains("no interactive"),
+        "{}",
+        headless.content
+    );
+    assert!(broker.pending().is_empty());
+    assert!(broker.grants().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(directory);
+}
