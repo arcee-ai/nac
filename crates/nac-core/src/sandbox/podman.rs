@@ -150,7 +150,9 @@ else
   bash -c "$supervisor" nac-supervisor "$1" "$2" &
   supervisor_pid=$!
   if [ "${3:-}" = pty ]; then
-    fg %1 >/dev/null 2>/dev/null
+    # Bash uses stderr for foreground terminal ownership. Redirecting it to
+    # /dev/null silently leaves the supervisor stopped in a background group.
+    fg %1 >/dev/null
   else
     wait "$supervisor_pid" 2>/dev/null
   fi
@@ -983,6 +985,7 @@ impl PodmanSession {
         cmd_str: &str,
         cwd: Option<&Path>,
         envs: &[(String, String)],
+        human: bool,
     ) -> (PtyCommandBuilder, String) {
         let pidfile = make_sandbox_pidfile();
         let pty_args = vec![
@@ -994,7 +997,13 @@ impl PodmanSession {
             "pty".to_string(),
         ];
         let mut cmd = PtyCommandBuilder::new("podman");
-        cmd.args(self.exec_args("bash", &pty_args, true, true, cwd, envs));
+        let mut args = self.exec_args("bash", &pty_args, true, true, cwd, envs);
+        if human {
+            // Human control bytes reach the program rather than detaching the
+            // owning transport. Model and non-PTY invocation defaults stay intact.
+            args.insert(1, OsString::from("--detach-keys="));
+        }
+        cmd.args(args);
         (cmd, pidfile)
     }
 

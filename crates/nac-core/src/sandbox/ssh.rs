@@ -254,6 +254,7 @@ impl SshBackend {
         cmd_str: &str,
         cwd: Option<&Path>,
         envs: &[(String, String)],
+        human: bool,
     ) -> (PtyCommandBuilder, Option<String>) {
         let pidfile = make_ssh_pidfile();
         let dir = cwd.unwrap_or(&self.remote_cwd);
@@ -269,6 +270,10 @@ impl SshBackend {
         let remote = self.remote_command_in_dir(dir, envs, &words);
         let mut cmd = PtyCommandBuilder::new("ssh");
         cmd.arg("-tt");
+        if human {
+            // A line-leading ~. or ~Ctrl-Z is literal terminal input.
+            cmd.args(["-e", "none"]);
+        }
         cmd.args(self.ssh_args());
         cmd.arg("--");
         cmd.arg(&self.connection.host);
