@@ -110,6 +110,19 @@ impl SessionService {
         self.terminal_manager.user_terminal_status(id).await
     }
 
+    /// Normalize untrusted rendered text under the exact retained launch policy.
+    /// No output cursor, transcript, durable draft or run is changed.
+    pub async fn preview_user_terminal_selection(
+        &self,
+        id: &str,
+        text: &str,
+    ) -> std::result::Result<UserTerminalSelectionPreview, TerminalSelectionError> {
+        self.require_direct_primary_behavior_async()
+            .await
+            .map_err(|_| TerminalSelectionError::Unavailable)?;
+        self.terminal_manager.preview_user_selection(id, text).await
+    }
+
     /// Read only the sanitized artifact bound to this session-owned handle.
     /// Observer cursors are independent and never advance model previews.
     pub async fn read_user_terminal_output(

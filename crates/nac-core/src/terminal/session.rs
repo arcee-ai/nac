@@ -36,6 +36,8 @@ pub struct TerminalSession {
     master: Box<dyn portable_pty::MasterPty + Send>,
     collector_state: CollectorState,
     user_owned: bool,
+    // Private launch policy, independent of the collector's mutable stream.
+    pub(super) selection_redactor: Option<Arc<nac_contracts::CommandOutputRedactor>>,
     _reader_thread: std::thread::JoinHandle<()>,
     pub created_at: Instant,
     pub last_output_at: Instant,
@@ -104,6 +106,7 @@ impl TerminalSession {
     ) -> Result<Self> {
         let user_owned = user_output.is_some();
         let native_local = user_owned && matches!(backend.as_ref(), ExecutionBackend::Local { .. });
+        let selection_redactor = user_output.as_ref().map(|policy| Arc::new(policy.fresh()));
         let pty_system = NativePtySystem::default();
         let pty_pair = pty_system
             .openpty(PtySize {
@@ -266,6 +269,7 @@ impl TerminalSession {
             master,
             collector_state,
             user_owned,
+            selection_redactor,
             _reader_thread: reader_thread,
             created_at: Instant::now(),
             last_output_at: Instant::now(),

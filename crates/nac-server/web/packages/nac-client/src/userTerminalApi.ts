@@ -1,5 +1,8 @@
+import { TerminalProtocolError } from "./userTerminalConnection.js";
 import type { NacClient } from "./nacClient.js";
 import type {
+  TerminalSelectionPreviewRequest,
+  TerminalSelectionPreviewResponse,
   OpenUserTerminalRequest,
   UserTerminalResponse,
   UserTerminalListResponse,
@@ -20,6 +23,34 @@ const observerPath = (session: string, terminal: string, observer: string) =>
 export function createUserTerminalApi(client: NacClient) {
   const request = client.transport.request.bind(client.transport);
   return {
+    /** Preview only. Keep the frozen original beside this canonical text locally.
+     * A future submit must normalize the original again and compare the exact
+     * expected preview, rather than assuming masking is idempotent or trusting
+     * a client sanitization flag. This operation never sends agent input.
+     */
+    previewUserTerminalSelection: async (
+      session: string,
+      terminal: string,
+      body: TerminalSelectionPreviewRequest,
+      signal?: AbortSignal,
+    ) => {
+      const response = await request<TerminalSelectionPreviewResponse>(
+        "POST",
+        `${path(session, terminal)}/selection-preview`,
+        { body, signal },
+      );
+      if (
+        response.protocol_version !== 1 ||
+        response.source_kind !== "user_supplied_rendered_selection" ||
+        response.source_session_id !== session ||
+        response.terminal_id !== terminal ||
+        response.capture_id !== body.capture_id.toLowerCase() ||
+        response.truncated !== false
+      ) {
+        throw new TerminalProtocolError("Terminal selection preview identity/version changed");
+      }
+      return response;
+    },
     openUserTerminal: (session: string, body: OpenUserTerminalRequest, signal?: AbortSignal) =>
       request<UserTerminalResponse>("POST", path(session), { body, signal }),
     listUserTerminals: (session: string, signal?: AbortSignal) =>

@@ -5,9 +5,11 @@ mod manager;
 mod native_owner;
 mod output;
 mod session;
-
-pub use manager::TerminalManager;
 pub(crate) use manager::{validate_user_geometry, ResolvedUserTerminalLaunch};
+pub use manager::{
+    TerminalManager, TerminalSelectionError, UserTerminalSelectionPreview,
+    MAX_TERMINAL_SELECTION_SCALARS, MAX_TERMINAL_SELECTION_UTF8_BYTES,
+};
 
 /// Process-local terminal ownership, distinct from output collection completion.
 /// `alive` remains true while native cleanup authority is unresolved; final

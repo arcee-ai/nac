@@ -44,7 +44,10 @@ mod recovery;
 mod settlement;
 mod transcript_projection;
 mod user_terminals;
-pub use crate::terminal::{OutputBytePage as UserTerminalOutputPage, UserTerminalStatus};
+pub use crate::terminal::{
+    OutputBytePage as UserTerminalOutputPage, TerminalSelectionError, UserTerminalSelectionPreview,
+    UserTerminalStatus, MAX_TERMINAL_SELECTION_SCALARS, MAX_TERMINAL_SELECTION_UTF8_BYTES,
+};
 
 use manual_compaction::ActiveCompactionState;
 pub use manual_compaction::{

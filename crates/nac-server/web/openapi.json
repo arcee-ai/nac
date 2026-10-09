@@ -7342,6 +7342,84 @@
         }
       }
     },
+    "/sessions/{session_id}/user-terminals/{terminal_id}/selection-preview": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_user_terminals_terminal_id_selection_preview",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "terminal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminalSelectionPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Finite source-bound preview; no durable input or model run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TerminalSelectionPreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed version/identity/time or text exceeds bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source/session unavailable for this process owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/workspace/branches": {
       "get": {
         "tags": [
@@ -15636,6 +15714,145 @@
             "type": "string"
           }
         }
+      },
+      "TerminalSelectionPreviewRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "capture_id",
+          "selected_text"
+        ],
+        "properties": {
+          "capture_id": {
+            "type": "string",
+            "description": "Client-assigned hyphenated UUID for one frozen selection, not execution authority."
+          },
+          "client_capture_time_ms": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Untrusted optional capture-time claim in exact decimal milliseconds."
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 1,
+            "minimum": 1
+          },
+          "selected_text": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "additionalProperties": false
+      },
+      "TerminalSelectionPreviewResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "capture_id",
+          "source_kind",
+          "source_session_id",
+          "terminal_id",
+          "owner_instance_id",
+          "previewed_at_ms",
+          "text",
+          "input_utf8_bytes",
+          "input_scalars",
+          "text_utf8_bytes",
+          "text_scalars",
+          "controls_removed",
+          "line_endings_normalized",
+          "max_utf8_bytes",
+          "max_scalars",
+          "truncated"
+        ],
+        "properties": {
+          "capture_id": {
+            "type": "string"
+          },
+          "client_capture_time_ms": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client claim is retained as a claim, never an authoritative capture time."
+          },
+          "controls_removed": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "input_scalars": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "input_utf8_bytes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "line_endings_normalized": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_scalars": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_utf8_bytes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "owner_instance_id": {
+            "type": "string"
+          },
+          "previewed_at_ms": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/TerminalSelectionSourceKind"
+          },
+          "source_session_id": {
+            "type": "string"
+          },
+          "terminal_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "text_scalars": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "text_utf8_bytes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "This endpoint rejects over-limit text; it never silently truncates."
+          }
+        }
+      },
+      "TerminalSelectionSourceKind": {
+        "type": "string",
+        "enum": [
+          "user_supplied_rendered_selection"
+        ]
       },
       "TestMcpServerRequest": {
         "type": "object",

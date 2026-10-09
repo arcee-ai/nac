@@ -889,6 +889,12 @@ impl SessionManager {
         application::session_runs::SessionRunApplication::new(self)
     }
 
+    pub(crate) fn terminal_selection(
+        &self,
+    ) -> application::terminal_selection::TerminalSelectionApplication<'_> {
+        application::terminal_selection::TerminalSelectionApplication::new(self)
+    }
+
     pub(crate) fn session_terminals(
         &self,
     ) -> application::session_terminals::SessionTerminalApplication<'_> {

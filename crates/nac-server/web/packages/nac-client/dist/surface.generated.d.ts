@@ -1,4 +1,5 @@
 export declare const NAC_API_SURFACE: {
+    readonly "POST /sessions/{session_id}/user-terminals/{terminal_id}/selection-preview": "api.previewUserTerminalSelection";
     readonly "POST /sessions/{session_id}/user-terminals": "api.openUserTerminal";
     readonly "GET /sessions/{session_id}/user-terminals": "api.listUserTerminals";
     readonly "GET /sessions/{session_id}/user-terminals/{terminal_id}": "api.getUserTerminal";

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 mod command_output_redaction;
-pub use command_output_redaction::CommandOutputRedactor;
+pub use command_output_redaction::{CommandOutputRedactor, RedactedCommandPlainText};
 
 /// Canonical public NAC product version sourced from the repository root.
 ///

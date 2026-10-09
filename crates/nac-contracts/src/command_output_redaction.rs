@@ -56,8 +56,9 @@ impl Pattern {
 /// longest secret minus one byte. An idle ambiguous suffix must not be flushed
 /// on a timer: doing so could expose a secret split across future reads.
 ///
-/// Each stream gets its own instance. Live delivery, replay and attachments must
-/// all use the resulting sanitized bytes rather than re-masking raw pages.
+/// Each stream gets its own instance. Live delivery and replay use the resulting
+/// sanitized bytes rather than re-masking raw pages. Rendered text selections
+/// receive an independent finite pass with the exact launch policy.
 /// This type intentionally implements neither Debug nor serialization.
 pub struct CommandOutputRedactor {
     patterns: Vec<Pattern>,
@@ -68,7 +69,88 @@ pub struct CommandOutputRedactor {
     in_redaction: bool,
 }
 
+/// Sanitized finite plain text and the transformations applied before masking.
+/// Counts describe input normalization, including CRLF/CR conversion to LF.
+pub struct RedactedCommandPlainText {
+    pub text: String,
+    pub controls_removed: usize,
+    pub line_endings_normalized: usize,
+}
+
+fn plain_text(text: &str) -> RedactedCommandPlainText {
+    let mut projected = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut controls_removed = 0;
+    let mut line_endings_normalized = 0;
+    while let Some(character) = chars.next() {
+        if character == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            projected.push('\n');
+            line_endings_normalized += 1;
+        } else if character.is_control() && character != '\n' && character != '\t' {
+            controls_removed += 1;
+        } else {
+            projected.push(character);
+        }
+    }
+    RedactedCommandPlainText {
+        text: projected,
+        controls_removed,
+        line_endings_normalized,
+    }
+}
+
 impl CommandOutputRedactor {
+    /// Masks a finite plain-text selection with both exact launch values and
+    /// their identical plain-text projection. Controls removed from a value
+    /// must not make it escape masking when the selected text is normalized.
+    /// This is independent of live stream state and is not idempotent: fixed
+    /// replacement markers may themselves contain a configured secret pattern.
+    pub fn redact_plain_text(
+        &self,
+        text: &str,
+    ) -> Result<RedactedCommandPlainText, std::string::FromUtf8Error> {
+        let mut result = plain_text(text);
+        let mut values = Vec::with_capacity(self.patterns.len() * 2);
+        for pattern in &self.patterns {
+            // Patterns originate exclusively from UTF-8 credential Strings.
+            if let Ok(value) = std::str::from_utf8(&pattern.bytes) {
+                values.push(value.to_owned());
+                values.push(plain_text(value).text);
+            }
+        }
+        let mut sanitizer = Self::new(&values);
+        let mut bytes = sanitizer.push(result.text.as_bytes());
+        bytes.extend(sanitizer.finish());
+        result.text = String::from_utf8(bytes)?;
+        Ok(result)
+    }
+
+    /// Starts an independent finite-text sanitizer with the same immutable
+    /// secret patterns, without copying any pending bytes or stream position.
+    /// Rendered selections need their own pass: screen edits may assemble a
+    /// value that was not contiguous in the original sanitized byte stream.
+    pub fn fresh(&self) -> Self {
+        Self {
+            patterns: self
+                .patterns
+                .iter()
+                .map(|pattern| Pattern {
+                    bytes: pattern.bytes.clone(),
+                    failure: pattern.failure.clone(),
+                    prefix: 0,
+                })
+                .collect(),
+            pending: VecDeque::new(),
+            masked: VecDeque::new(),
+            consumed: 0,
+            emitted: 0,
+            in_redaction: false,
+        }
+    }
+
     pub(crate) fn new(values: &[String]) -> Self {
         let mut values = values
             .iter()

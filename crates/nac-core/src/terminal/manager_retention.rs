@@ -495,6 +495,7 @@ impl TerminalManager {
             cols: session.cols,
             rows: session.rows,
             collector_state: session.collector_state(),
+            selection_redactor: session.selection_redactor.clone(),
         };
         let mut tombstones = self.completed_sessions.lock().await;
         tombstones.retain(|(name, _)| name != &session.name);

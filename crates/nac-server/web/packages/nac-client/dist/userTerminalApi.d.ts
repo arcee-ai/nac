@@ -1,7 +1,32 @@
 import type { NacClient } from "./nacClient.js";
-import type { OpenUserTerminalRequest, AttachUserTerminalRequest, PullUserTerminalRequest, UserTerminalInputRequest, ResizeUserTerminalRequest } from "./types.js";
+import type { TerminalSelectionPreviewRequest, OpenUserTerminalRequest, AttachUserTerminalRequest, PullUserTerminalRequest, UserTerminalInputRequest, ResizeUserTerminalRequest } from "./types.js";
 /** Uses exactly the consumer's immutable endpoint, credentials and request lifetime. */
 export declare function createUserTerminalApi(client: NacClient): {
+    /** Preview only. Keep the frozen original beside this canonical text locally.
+     * A future submit must normalize the original again and compare the exact
+     * expected preview, rather than assuming masking is idempotent or trusting
+     * a client sanitization flag. This operation never sends agent input.
+     */
+    previewUserTerminalSelection: (session: string, terminal: string, body: TerminalSelectionPreviewRequest, signal?: AbortSignal) => Promise<{
+        capture_id: string;
+        client_capture_time_ms?: string | null;
+        controls_removed: number;
+        input_scalars: number;
+        input_utf8_bytes: number;
+        line_endings_normalized: number;
+        max_scalars: number;
+        max_utf8_bytes: number;
+        owner_instance_id: string;
+        previewed_at_ms: string;
+        protocol_version: number;
+        source_kind: import("./openapi.generated.js").components["schemas"]["TerminalSelectionSourceKind"];
+        source_session_id: string;
+        terminal_id: string;
+        text: string;
+        text_scalars: number;
+        text_utf8_bytes: number;
+        truncated: boolean;
+    }>;
     openUserTerminal: (session: string, body: OpenUserTerminalRequest, signal?: AbortSignal) => Promise<{
         alive: boolean;
         cols: number;

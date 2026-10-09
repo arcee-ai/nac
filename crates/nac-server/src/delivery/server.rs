@@ -822,6 +822,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::user_terminals::open,
             delivery::user_terminals::list
         ))
+        .routes(routes!(delivery::terminal_selection::preview))
         .routes(routes!(delivery::user_terminals::status))
         .routes(routes!(delivery::user_terminals::attach))
         .routes(routes!(delivery::user_terminals::pull))

@@ -1,6 +1,8 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "POST /sessions/{session_id}/user-terminals/{terminal_id}/selection-preview":
+    "api.previewUserTerminalSelection",
   "POST /sessions/{session_id}/user-terminals": "api.openUserTerminal",
   "GET /sessions/{session_id}/user-terminals": "api.listUserTerminals",
   "GET /sessions/{session_id}/user-terminals/{terminal_id}": "api.getUserTerminal",

@@ -694,3 +694,37 @@ async fn listing_archives_settled_live_terminal_without_invalidating_its_snapsho
     assert!(statuses.iter().all(|status| !status.alive));
     assert!(retained_count <= 16);
 }
+
+#[tokio::test]
+async fn rendered_selection_preview_remains_independent_of_active_agent_and_workspace_mutation() {
+    let (parts, directory) = fixture();
+    let service = &parts.service;
+    service
+        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
+        .unwrap();
+    let agent = service.agent.lock().await;
+    let shell = service
+        .open_user_terminal(Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    let gate = crate::tools::shared_workspace_gate_for(&directory.join("store.db"), &directory);
+    let mutation = gate.write().await;
+    let before = serde_json::to_value(&agent.messages).unwrap();
+    let preview = tokio::time::timeout(
+        Duration::from_secs(1),
+        service
+            .preview_user_terminal_selection(&shell.id, "synthetic-user-secret\n/compact\n$skill"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(preview.text, "[REDACTED]\n/compact\n$skill");
+    assert_eq!(serde_json::to_value(&agent.messages).unwrap(), before);
+    assert!(!service.has_active_operation());
+    assert!(service.list_direct_inbox().unwrap().is_empty());
+    assert!(service.user_terminal_status(&shell.id).await.unwrap().alive);
+    drop(mutation);
+    drop(agent);
+    service.terminate_user_terminal(&shell.id).await.unwrap();
+}

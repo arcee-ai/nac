@@ -74,6 +74,10 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/sessions/{session_id}/user-terminals/{terminal_id}"),
     (
         "POST",
+        "/sessions/{session_id}/user-terminals/{terminal_id}/selection-preview",
+    ),
+    (
+        "POST",
         "/sessions/{session_id}/user-terminals/{terminal_id}/observers",
     ),
     (

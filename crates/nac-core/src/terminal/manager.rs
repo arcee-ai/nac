@@ -27,6 +27,12 @@ mod interactive;
 mod one_shot;
 #[path = "manager_retention.rs"]
 mod retention;
+#[path = "manager_selection.rs"]
+mod selection;
+pub use selection::{
+    TerminalSelectionError, UserTerminalSelectionPreview, MAX_TERMINAL_SELECTION_SCALARS,
+    MAX_TERMINAL_SELECTION_UTF8_BYTES,
+};
 #[path = "manager_user.rs"]
 mod user;
 pub(crate) use user::{validate_geometry as validate_user_geometry, ResolvedUserTerminalLaunch};
@@ -73,6 +79,7 @@ struct CompletedTerminal {
     cols: u16,
     rows: u16,
     collector_state: super::collector::CollectorState,
+    selection_redactor: Option<Arc<nac_contracts::CommandOutputRedactor>>,
 }
 
 impl CompletedTerminal {
@@ -85,6 +92,7 @@ impl CompletedTerminal {
             cols: session.cols,
             rows: session.rows,
             collector_state: session.collector_state(),
+            selection_redactor: session.selection_redactor.clone(),
         }
     }
 }

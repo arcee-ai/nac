@@ -1042,6 +1042,26 @@ export declare function createNacApi(nacClient: NacClient): {
         boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         events: import("./openapi.generated.js").components["schemas"]["SessionEventEnvelope"][];
     }>;
+    previewUserTerminalSelection: (session: string, terminal: string, body: import("./types.js").TerminalSelectionPreviewRequest, signal?: AbortSignal) => Promise<{
+        capture_id: string;
+        client_capture_time_ms?: string | null;
+        controls_removed: number;
+        input_scalars: number;
+        input_utf8_bytes: number;
+        line_endings_normalized: number;
+        max_scalars: number;
+        max_utf8_bytes: number;
+        owner_instance_id: string;
+        previewed_at_ms: string;
+        protocol_version: number;
+        source_kind: import("./openapi.generated.js").components["schemas"]["TerminalSelectionSourceKind"];
+        source_session_id: string;
+        terminal_id: string;
+        text: string;
+        text_scalars: number;
+        text_utf8_bytes: number;
+        truncated: boolean;
+    }>;
     openUserTerminal: (session: string, body: import("./types.js").OpenUserTerminalRequest, signal?: AbortSignal) => Promise<{
         alive: boolean;
         cols: number;
