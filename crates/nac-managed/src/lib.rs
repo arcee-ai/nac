@@ -13,6 +13,7 @@ mod github_credential_store;
 mod host_key_configuration;
 mod managed_control_assertion;
 mod readiness;
+mod runtime_enrollment_configuration;
 
 pub use clone_process::{ManagedChildProcessLease, ManagedChildProcessObserver};
 
@@ -37,3 +38,8 @@ pub use managed_control_assertion::{
     ManagedControlRequest, ManagedControlTarget, ManagedControlVerifier,
 };
 pub use readiness::{host_checks, ReadinessCheck};
+pub use runtime_enrollment_configuration::{
+    RuntimeEnrollmentConfigurationCandidate, RuntimeEnrollmentCredentialFiles,
+    RuntimeEnrollmentExpectations, RuntimeEnrollmentMountExpectation, RuntimeEnrollmentPeer,
+    RuntimeEnrollmentPurpose, RuntimeEnrollmentReleaseBinding, RuntimeEnrollmentRole,
+};
