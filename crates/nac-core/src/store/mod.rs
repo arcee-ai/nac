@@ -12,6 +12,7 @@ pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 pub(crate) mod coordinated_commands;
 mod managed_maintenance;
 mod managed_orchestrators;
+mod managed_probe;
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
 mod permission_grants;
@@ -43,6 +44,7 @@ pub(crate) use worker_dispatches::{
 pub use coordinator::{PersistenceAdmissionError, PersistenceStats, StoreCoordinator};
 pub use managed_maintenance::*;
 pub use managed_orchestrators::*;
+pub use managed_probe::{observe_managed_probe_store, observe_managed_probe_store_for_identity};
 pub use model_configurations::*;
 pub use permission_grants::*;
 pub use projects::*;
@@ -57,8 +59,8 @@ pub use run_recovery::{
 };
 pub use schema::{
     check_readiness, default_store_path, default_store_path_for_track, initialize,
-    migration_status, schema_version, StoreMigrationFailure, StoreMigrationState,
-    StoreMigrationStatus, StoreTrack, MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+    migration_status, observe_probe_migration_status, schema_version, StoreMigrationFailure,
+    StoreMigrationState, StoreMigrationStatus, StoreTrack, MINIMUM_MIGRATABLE_SCHEMA_VERSION,
 };
 pub use session_forks::{
     clone_session_conversation_artifacts, dismiss_session_fork, insert_session_fork,
@@ -79,7 +81,8 @@ pub use worksets::*;
 pub use workspace_revisions::*;
 
 pub(crate) use schema::{
-    open_connection, open_initialized_read_connection, open_runtime_connection, StoreConnection,
+    open_connection, open_initialized_read_connection, open_probe_read_connection,
+    open_runtime_connection, StoreConnection,
 };
 #[cfg(test)]
 pub(crate) use schema::{track_connection_opens, tracked_connection_opens};
