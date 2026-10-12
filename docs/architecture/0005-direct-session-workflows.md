@@ -119,6 +119,29 @@ persistence baseline is separately held/unavailable; local scripted-provider
 coverage is not evidence that its hosted incident is fixed. Container image
 execution requires container infrastructure and is a separate coverage lane.
 
+## Terminal observation (ALL-141)
+
+`features/terminal/browserRuntime.ts` owns one browser observation activation.
+Its Effect workflow orders renderer acquisition, SDK attachment, initial resize,
+and output observation. A synchronous Scope releases keyboard/binary listeners,
+the ResizeObserver, input pump and renderer before the React bridge acquires a
+replacement activation. Cleanup first aborts the activation, then closes the
+Scope. A dynamic renderer import that finishes after cleanup releases its newly
+acquired renderer without attaching or publishing controls.
+
+Resize effects coalesce pending geometry and release their running marker on
+success, failure or interruption. Resize failure does not stop independent
+retained-output replay. Typed operation failures preserve the original cause for
+the existing connection/input notices; interruption cannot paint a detached view.
+React retains the explicit reconnect, selection, focus and fresh-input controls.
+TanStack retains terminal list/status polling and open/close mutation ownership.
+
+The runtime-free typed SDK remains the sole owner of observer receipts,
+incarnation/cursor validation, parser-before-ACK backpressure, replay/reset and
+bounded literal input. Effect adds no second input queue, transport, retry or
+reconnect loop. Detach releases observation and never terminates a shell or agent.
+Unknown input still requires explicit acknowledgement before fresh typing.
+
 ## Setup and provider workflows (ALL-136)
 
 `features/setup/workflow.ts` owns ordered optional-preset → project → first-chat
