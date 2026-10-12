@@ -146,6 +146,24 @@ impl Drop for Root {
 
 #[test]
 fn active_census_releases_dead_capabilities_after_child_discovery() {
+    // Count this fixture's process FDs without other parallel test owners.
+    // Use the same isolated path on macOS to exercise the wrapper there too;
+    // Linux retains its actual /proc/self/fd bound below.
+    const CHILD: &str = "NAC_PROCESS_TEST_FD_STRESS_CHILD";
+    if std::env::var(CHILD).as_deref() != Ok("1") {
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "native_pty::platform::tests::active_census_releases_dead_capabilities_after_child_discovery",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(status.success(), "isolated FD stress failed: {status}");
+        return;
+    }
     let mut root = Root::new().unwrap();
     #[cfg(target_os = "linux")]
     let fd_baseline = std::fs::read_dir("/proc/self/fd").unwrap().count();
