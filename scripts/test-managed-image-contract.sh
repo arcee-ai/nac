@@ -6,6 +6,7 @@ dockerfile="$repo_root/docker/managed/Dockerfile"
 entrypoint="$repo_root/docker/managed/entrypoint.sh"
 workflow="$repo_root/.github/workflows/managed-image.yml"
 lfs_smoke="$repo_root/scripts/smoke-managed-git-lfs.sh"
+terminal_smoke="$repo_root/scripts/smoke-managed-terminal.py"
 managed_status="$repo_root/crates/nac-server/src/managed_status.rs"
 capability_check="$repo_root/docker/managed/check-process-capabilities.sh"
 capability_fixtures="$repo_root/docker/managed/fixtures"
@@ -73,6 +74,13 @@ require_literal "$repo_root/scripts/smoke-managed-image.sh" 'managed_control_jwk
 require_literal "$repo_root/scripts/smoke-managed-image.sh" '/run/secrets/nac/bootstrap.json'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assert_bootstrap_required'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'smoke-managed-git-lfs.sh'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'python3 - < "$repo_root/scripts/smoke-managed-terminal.py"'
+require_literal "$terminal_smoke" 'os.getuid() == 10001 and os.getgid() == 10001'
+require_literal "$terminal_smoke" '"behavior": "direct"'
+require_literal "$terminal_smoke" 'summary["ssh_host"] is None and not summary["sandboxed"]'
+require_literal "$terminal_smoke" 'b"CTRL-C ENTER\r"'
+require_literal "$terminal_smoke" 'b"SIZE=31 91\n"'
+require_literal "$terminal_smoke" 'settled(api, terminal_path)'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'kill --signal KILL'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'start_container without-bootstrap'
 require_literal "$lfs_smoke" 'git lfs version'
