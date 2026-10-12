@@ -17,6 +17,34 @@ import { SelectionReview, type ReviewAvailability } from "./SelectionReview";
 import { SelectionReviewController, type SelectionCapture } from "./reviewController";
 import { useSelectionReview } from "./useSelectionReview";
 
+import { TerminalWorkspace } from "./TerminalWorkspace";
+
+const context = vi.hoisted(() => ({
+  snapshot: undefined as undefined | { active_run?: { run_id: string } },
+  sourceAlive: true,
+  sourceUnavailable: false,
+}));
+vi.mock("@/app/services/queries", () => ({
+  useSessionSnapshot: () => ({ data: context.snapshot, isError: false }),
+}));
+vi.mock("@/app/features/terminal/queries", () => ({
+  useUserTerminalStatus: () => ({
+    data: { alive: context.sourceAlive },
+    isError: context.sourceUnavailable,
+  }),
+}));
+vi.mock("@/app/features/terminal/TerminalPane", () => ({
+  TerminalPane: ({
+    onReviewSelection,
+  }: {
+    onReviewSelection: (capture: SelectionCapture) => void;
+  }) => (
+    <button type="button" onClick={() => onReviewSelection(capture)}>
+      Review rendered capture
+    </button>
+  ),
+}));
+
 type PreviewRequest = Parameters<NativeApi["previewUserTerminalSelection"]>[2];
 const owner = "721fac4b-8156-4b76-80de-fdb7abe0a122";
 const firstRun = "a914c904-7cc8-4c0f-a2de-a6762bf9ba12";
@@ -148,12 +176,17 @@ function tree(
   value: NativeRuntime,
   availability: ReviewAvailability = { mode: "idle" },
   source = capture,
+  workspace = false,
 ) {
   return (
     <MemoryRouter>
       <QueryClientProvider client={value.queryClient}>
         <RuntimeContext.Provider value={value}>
-          <Harness availability={availability} source={source} />
+          {workspace ? (
+            <TerminalWorkspace sessionId="session" />
+          ) : (
+            <Harness availability={availability} source={source} />
+          )}
         </RuntimeContext.Provider>
       </QueryClientProvider>
     </MemoryRouter>
@@ -172,6 +205,9 @@ function cached(value: NativeRuntime) {
   });
 }
 beforeEach(() => {
+  context.snapshot = {};
+  context.sourceAlive = true;
+  context.sourceUnavailable = false;
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: vi.fn(() => ({
@@ -187,6 +223,48 @@ afterEach(() => {
 });
 
 describe("local terminal selection review through the real typed client", () => {
+  it("mounts review from the pane capture and explicitly freezes a displayed run while runtime is busy", async () => {
+    const net = wire();
+    const value = runtime(net.fetch);
+    context.snapshot = { active_run: { run_id: firstRun } };
+    const view = render(tree(value, undefined, undefined, true));
+    fireEvent.click(screen.getByRole("button", { name: "Review rendered capture" }));
+    await screen.findByLabelText("Reviewed selected text");
+    expect((screen.getByRole("radio", { name: /Queue after/ }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: /Steer the displayed/ }));
+    context.snapshot = { active_run: { run_id: nextRun } };
+    view.rerender(tree(value, undefined, undefined, true));
+    expect(
+      (screen.getByRole("button", { name: "Steer selected run" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("radio", { name: /Queue after/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Queue selection" }));
+    await screen.findByText(/Selection admission accepted/);
+    expect(net.submissions[0].delivery).toBe("queue");
+    expect(net.submissions[0].expected_run_id).toBeUndefined();
+  });
+  it("keeps unknown runtime state conservative and fences unavailable sources before a new send", async () => {
+    const net = wire();
+    const value = runtime(net.fetch);
+    context.snapshot = undefined;
+    const view = render(tree(value, undefined, undefined, true));
+    fireEvent.click(screen.getByRole("button", { name: "Review rendered capture" }));
+    await screen.findByLabelText("Reviewed selected text");
+    expect(
+      (screen.getByRole("radio", { name: /Send as a new turn/ }) as HTMLInputElement).disabled,
+    ).toBe(true);
+    context.sourceUnavailable = true;
+    view.rerender(tree(value, undefined, undefined, true));
+    await screen.findByText(/source is currently unavailable/);
+    expect(
+      (screen.getByRole("button", { name: "Queue selection" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(net.submissions).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection review" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
   it("previews only after capture, shows canonical literal text and never caches raw selection or submits on dismissal", async () => {
     const net = wire();
     const value = runtime(net.fetch);

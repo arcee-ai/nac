@@ -6,14 +6,10 @@ import type {
   TerminalSelectionDelivery,
 } from "@/app/types/api";
 
+import type { TerminalSelectionCapture } from "@/app/features/terminal/TerminalPane";
+
 /** The pane snapshots rendered text only at an explicit user capture point. */
-export interface SelectionCapture {
-  readonly sessionId: string;
-  readonly terminalId: string;
-  readonly selectedText: string;
-  readonly capturedAtMs: string;
-  readonly sourceAlive: boolean;
-}
+export type SelectionCapture = TerminalSelectionCapture;
 export type SelectionSource = Omit<SelectionCapture, "selectedText">;
 export interface DeliveryChoice {
   readonly delivery: TerminalSelectionDelivery;
