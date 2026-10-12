@@ -29,7 +29,7 @@ mod one_shot;
 mod retention;
 #[path = "manager_user.rs"]
 mod user;
-pub(crate) use user::validate_geometry as validate_user_geometry;
+pub(crate) use user::{validate_geometry as validate_user_geometry, ResolvedUserTerminalLaunch};
 
 const PIPE_CHUNK_BYTES: usize = 16 * 1024;
 const PIPE_CHANNEL_CHUNKS: usize = 16;

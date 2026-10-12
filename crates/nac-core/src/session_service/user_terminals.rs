@@ -9,6 +9,8 @@ pub(super) struct UserTerminalContext {
     runtime: crate::tools::ToolRuntime,
     client: crate::model::ModelClient,
     launch_gate: Mutex<()>,
+    #[cfg(test)]
+    resolved_launch_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
 }
 
 impl UserTerminalContext {
@@ -20,6 +22,8 @@ impl UserTerminalContext {
             runtime,
             client,
             launch_gate: Mutex::new(()),
+            #[cfg(test)]
+            resolved_launch_barrier: Mutex::new(None),
         }
     }
 
@@ -29,6 +33,16 @@ impl UserTerminalContext {
 }
 
 impl SessionService {
+    #[cfg(test)]
+    async fn pause_resolved_user_launch_for_test(&self, barrier: Arc<tokio::sync::Barrier>) {
+        *self
+            .require_user_terminal_context()
+            .unwrap()
+            .resolved_launch_barrier
+            .lock()
+            .await = Some(barrier);
+    }
+
     /// A stable launch id retries the same process-local shell rather than
     /// creating another process when a launch reply or observer disappears.
     /// Once bounded launch history expires, a fresh authorized launch gets a
@@ -44,13 +58,19 @@ impl SessionService {
         self.require_direct_primary_behavior_async().await?;
         let context = self.require_user_terminal_context()?;
         let _launch = context.launch_gate.lock().await;
-        let name = self
+        let resolved = self
             .terminal_manager
-            .resolve_user_terminal_launch(launch_id)
+            .resolve_user_terminal_open(launch_id)
             .await;
-        if let Ok(status) = self.terminal_manager.user_terminal_status(&name).await {
-            return Ok(status);
+        #[cfg(test)]
+        if let Some(barrier) = context.resolved_launch_barrier.lock().await.take() {
+            barrier.wait().await;
+            barrier.wait().await;
         }
+        let name = match resolved {
+            crate::terminal::ResolvedUserTerminalLaunch::Existing(status) => return Ok(status),
+            crate::terminal::ResolvedUserTerminalLaunch::Fresh(name) => name,
+        };
         let registry = ToolRegistry::builder()
             .register(UserTerminalLaunchTool {
                 expected_config_version: self
@@ -83,13 +103,7 @@ impl SessionService {
         if self.user_terminal_context.is_none() {
             return Ok(Vec::new());
         }
-        let mut names = self.terminal_manager.user_terminal_names().await;
-        names.sort();
-        let mut statuses = Vec::with_capacity(names.len());
-        for name in names {
-            statuses.push(self.terminal_manager.user_terminal_status(&name).await?);
-        }
-        Ok(statuses)
+        Ok(self.terminal_manager.user_terminal_statuses().await)
     }
 
     pub async fn user_terminal_status(&self, id: &str) -> Result<UserTerminalStatus> {

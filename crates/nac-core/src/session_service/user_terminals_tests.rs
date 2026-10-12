@@ -549,3 +549,148 @@ async fn terminal_output_wait_observes_eof_without_more_bytes_and_remains_owner_
     std::fs::remove_dir_all(directory).unwrap();
     std::fs::remove_dir_all(foreign_directory).unwrap();
 }
+
+async fn wait_for_settled_user_history(service: &SessionService, id: &str) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let status = service.user_terminal_status(id).await.unwrap();
+            if status.output_complete && !status.alive && status.exit_code.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn eviction_after_existing_launch_resolution_never_reanimates_its_handle() {
+    let (parts, directory) = fixture();
+    let service = &parts.service;
+    service
+        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
+        .unwrap();
+    let launch_id = Uuid::new_v4();
+    let old = service.open_user_terminal(launch_id, 80, 24).await.unwrap();
+    service.terminate_user_terminal(&old.id).await.unwrap();
+    wait_for_settled_user_history(service, &old.id).await;
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    service
+        .pause_resolved_user_launch_for_test(barrier.clone())
+        .await;
+    let retry = service.open_user_terminal(launch_id, 80, 24);
+    let evict = async {
+        barrier.wait().await;
+        // Real bounded history eviction while the resolved old capability is
+        // suspended; direct manager admission avoids the facade's launch gate.
+        let backend = crate::sandbox::execution_backend_from_sandbox(None, &directory);
+        for _ in 0..16 {
+            let name = service
+                .terminal_manager
+                .resolve_user_terminal_launch(Uuid::new_v4())
+                .await;
+            service
+                .terminal_manager
+                .create_user_terminal(
+                    name.clone(),
+                    "exit 0",
+                    directory.clone(),
+                    80,
+                    24,
+                    &backend,
+                    CommandEnvironmentSnapshot::empty(),
+                    None,
+                    &crate::tools::ThreadCancellation::default(),
+                )
+                .await
+                .unwrap();
+            wait_for_settled_user_history(service, &name).await;
+        }
+        assert!(service.user_terminal_status(&old.id).await.is_err());
+        barrier.wait().await;
+    };
+    let (result, ()) = tokio::join!(retry, evict);
+    // A cached settled reply, an opaque stale result, or a fresh authorized
+    // capability is valid. Retire all fixture children before any assertion.
+    let reanimated = result
+        .as_ref()
+        .is_ok_and(|status| status.id == old.id && status.alive);
+    let stale_input = service.write_user_terminal_input(&old.id, b"exit\r").await;
+    let stale_resize = service.resize_user_terminal(&old.id, 91, 31).await;
+    service.destroy_terminals().await.unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+    assert!(
+        !reanimated,
+        "history eviction recreated a live process under its old input capability"
+    );
+    assert!(stale_input.is_err());
+    assert!(stale_resize.is_err());
+}
+
+#[tokio::test]
+async fn listing_archives_settled_live_terminal_without_invalidating_its_snapshot() {
+    let (parts, directory) = fixture();
+    let service = &parts.service;
+    service
+        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
+        .unwrap();
+    let mut handles = Vec::new();
+    for _ in 0..16 {
+        handles.push(
+            service
+                .open_user_terminal(Uuid::new_v4(), 80, 24)
+                .await
+                .unwrap()
+                .id,
+        );
+    }
+    handles.sort();
+    let exiting = handles.remove(0);
+    // Archive lexically largest first: the oldest tombstone is guaranteed to
+    // appear later than `exiting` in the old names-then-status listing loop.
+    let oldest = handles.last().unwrap().clone();
+    for id in handles.iter().rev() {
+        service.terminate_user_terminal(id).await.unwrap();
+        wait_for_settled_user_history(service, id).await;
+    }
+    let last = service
+        .open_user_terminal(Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    service.terminate_user_terminal(&last.id).await.unwrap();
+    wait_for_settled_user_history(service, &last.id).await;
+    assert!(service.user_terminal_status(&oldest).await.is_ok());
+    service
+        .write_user_terminal_input(&exiting, b"exit 9\r")
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !service
+            .terminal_manager
+            .user_terminal_settled_without_archive_for_test(&exiting)
+            .await
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    // No separate status call may archive `exiting` before the actual list.
+    let result = service.list_user_terminals().await;
+    let retained_count = service.terminal_manager.user_terminal_names().await.len();
+    service.destroy_terminals().await.unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+    let statuses = result.unwrap();
+    let settled = statuses.iter().find(|status| status.id == exiting).unwrap();
+    assert!(!settled.alive && settled.output_complete);
+    assert_eq!(settled.exit_code, Some(9));
+    let mut unique = std::collections::BTreeSet::new();
+    assert!(statuses
+        .iter()
+        .all(|status| unique.insert(status.id.clone())));
+    assert!(statuses.iter().all(|status| !status.alive));
+    assert!(retained_count <= 16);
+}

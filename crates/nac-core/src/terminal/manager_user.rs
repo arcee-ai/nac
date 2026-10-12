@@ -4,36 +4,67 @@
 
 use super::*;
 
+pub(crate) enum ResolvedUserTerminalLaunch {
+    Existing(super::super::UserTerminalStatus),
+    Fresh(String),
+}
+
 impl TerminalManager {
+    // Fixture observation: prove settlement without triggering archival.
+    #[cfg(test)]
+    pub(crate) async fn user_terminal_settled_without_archive_for_test(&self, name: &str) -> bool {
+        let mut sessions = self.sessions.lock().await;
+        sessions.get_mut(name).is_some_and(|session| {
+            session.refresh_status();
+            session.is_user_owned()
+                && session.output_complete()
+                && session.exit_code().is_some()
+                && !session.native_cleanup_pending()
+        })
+    }
+
     pub(crate) fn user_terminal_name(&self, launch_id: uuid::Uuid) -> String {
         format!("user-{}-{launch_id}", self.next_session_name())
     }
 
-    pub(crate) async fn resolve_user_terminal_launch(&self, launch_id: uuid::Uuid) -> String {
+    pub(crate) async fn resolve_user_terminal_open(
+        &self,
+        launch_id: uuid::Uuid,
+    ) -> ResolvedUserTerminalLaunch {
         let suffix = format!("-{launch_id}");
-        let live = self
-            .sessions
-            .lock()
-            .await
-            .iter()
+        // Existing identity and its status are captured together. An evicted
+        // tombstone can never turn a previously issued name into new work.
+        let mut completed = self.completed_sessions.lock().await;
+        let mut sessions = self.sessions.lock().await;
+        let live = sessions
+            .iter_mut()
             .find(|(name, session)| session.is_user_owned() && name.ends_with(&suffix))
-            .map(|(name, _)| name.clone());
-        if let Some(name) = live {
-            return name;
+            .map(|(name, session)| cached_user_status(name, session));
+        if let Some(status) = live {
+            archive_settled_user(
+                &status.id,
+                &status,
+                &mut sessions,
+                &mut completed,
+                self.max_sessions,
+            );
+            return ResolvedUserTerminalLaunch::Existing(status);
         }
-        let completed = self
-            .completed_sessions
-            .lock()
-            .await
+        if let Some((name, terminal)) = completed
             .iter()
             .find(|(name, session)| session.user_owned && name.ends_with(&suffix))
-            .map(|(name, _)| name.clone());
-        if let Some(name) = completed {
-            return name;
+        {
+            return ResolvedUserTerminalLaunch::Existing(completed_user_status(name, terminal));
         }
-        // Expired bounded history can require a fresh launch, but its process
-        // identity is never reused: old input/resize/close handles stay stale.
-        self.user_terminal_name(launch_id)
+        ResolvedUserTerminalLaunch::Fresh(self.user_terminal_name(launch_id))
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn resolve_user_terminal_launch(&self, launch_id: uuid::Uuid) -> String {
+        match self.resolve_user_terminal_open(launch_id).await {
+            ResolvedUserTerminalLaunch::Existing(status) => status.id,
+            ResolvedUserTerminalLaunch::Fresh(name) => name,
+        }
     }
 
     pub(crate) fn owns_user_terminal_name(&self, name: &str) -> bool {
@@ -181,50 +212,58 @@ impl TerminalManager {
             .get_mut(name)
             .filter(|session| session.is_user_owned())
         {
-            session.refresh_status();
-            let status = super::super::UserTerminalStatus {
-                id: name.to_owned(),
-                cols: session.cols,
-                rows: session.rows,
-                alive: session.is_alive(),
-                exit_code: session.exit_code(),
-                output_complete: session.output_complete(),
-                output_error: session.output_error().map(str::to_owned),
-            };
-            if !status.output_complete
-                || status.exit_code.is_none()
-                || session.native_cleanup_pending()
-            {
-                return Ok(status);
-            }
-            // Native cleanup has already settled in its owner. This cached
-            // projection never performs process-table inspection or waits.
-            let terminal = CompletedTerminal::from_session(session);
-            completed.retain(|(id, _)| id != name);
-            completed.push_back((name.to_owned(), terminal));
-            while completed.len() > self.max_sessions {
-                completed.pop_front();
-            }
-            sessions.remove(name);
+            let status = cached_user_status(name, session);
+            archive_settled_user(
+                name,
+                &status,
+                &mut sessions,
+                &mut completed,
+                self.max_sessions,
+            );
             return Ok(status);
         }
         drop(sessions);
-        let terminal = completed
+        let (name, terminal) = completed
             .iter()
             .find(|(id, terminal)| id == name && terminal.user_owned)
-            .map(|(_, terminal)| terminal)
             .ok_or_else(|| self.missing_user_error())?;
-        Ok(super::super::UserTerminalStatus {
-            id: name.to_owned(),
-            cols: terminal.cols,
-            rows: terminal.rows,
-            alive: false,
-            exit_code: terminal.exit_code,
-            output_complete: terminal.collector_state.complete(),
-            output_error: terminal.collector_state.error().map(str::to_owned),
-        })
+        Ok(completed_user_status(name, terminal))
     }
 
+    pub(crate) async fn user_terminal_statuses(&self) -> Vec<super::super::UserTerminalStatus> {
+        let mut completed = self.completed_sessions.lock().await;
+        let mut sessions = self.sessions.lock().await;
+        let live = sessions
+            .iter_mut()
+            .filter(|(_, session)| session.is_user_owned())
+            .map(|(name, session)| cached_user_status(name, session))
+            .collect::<Vec<_>>();
+        // Complete bounded history transitions before projecting the list.
+        // All inspection is cached; native process work stays in its owner.
+        for status in &live {
+            archive_settled_user(
+                &status.id,
+                status,
+                &mut sessions,
+                &mut completed,
+                self.max_sessions,
+            );
+        }
+        let mut statuses = live
+            .into_iter()
+            .filter(|status| sessions.contains_key(&status.id))
+            .collect::<Vec<_>>();
+        statuses.extend(
+            completed
+                .iter()
+                .filter(|(_, terminal)| terminal.user_owned)
+                .map(|(name, terminal)| completed_user_status(name, terminal)),
+        );
+        statuses.sort_by(|first, second| first.id.cmp(&second.id));
+        statuses
+    }
+
+    #[cfg(test)]
     pub(crate) async fn user_terminal_names(&self) -> Vec<String> {
         let mut names = self
             .sessions
@@ -371,6 +410,59 @@ impl TerminalManager {
     fn missing_user_error(&self) -> anyhow::Error {
         anyhow!("user terminal is unavailable for this session owner; it may have exited or its NAC owner restarted")
     }
+}
+
+fn cached_user_status(
+    name: &str,
+    session: &mut TerminalSession,
+) -> super::super::UserTerminalStatus {
+    session.refresh_status();
+    super::super::UserTerminalStatus {
+        id: name.to_owned(),
+        cols: session.cols,
+        rows: session.rows,
+        alive: session.is_alive(),
+        exit_code: session.exit_code(),
+        output_complete: session.output_complete(),
+        output_error: session.output_error().map(str::to_owned),
+    }
+}
+
+fn completed_user_status(
+    name: &str,
+    terminal: &CompletedTerminal,
+) -> super::super::UserTerminalStatus {
+    super::super::UserTerminalStatus {
+        id: name.to_owned(),
+        cols: terminal.cols,
+        rows: terminal.rows,
+        alive: false,
+        exit_code: terminal.exit_code,
+        output_complete: terminal.collector_state.complete(),
+        output_error: terminal.collector_state.error().map(str::to_owned),
+    }
+}
+
+fn archive_settled_user(
+    name: &str,
+    status: &super::super::UserTerminalStatus,
+    sessions: &mut HashMap<String, TerminalSession>,
+    completed: &mut VecDeque<(String, CompletedTerminal)>,
+    limit: usize,
+) {
+    let Some(session) = sessions.get(name) else {
+        return;
+    };
+    if !status.output_complete || status.exit_code.is_none() || session.native_cleanup_pending() {
+        return;
+    }
+    let terminal = CompletedTerminal::from_session(session);
+    completed.retain(|(id, _)| id != name);
+    completed.push_back((name.to_owned(), terminal));
+    while completed.len() > limit {
+        completed.pop_front();
+    }
+    sessions.remove(name);
 }
 
 pub(crate) fn validate_geometry(cols: u16, rows: u16) -> Result<()> {
