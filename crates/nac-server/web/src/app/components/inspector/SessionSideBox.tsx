@@ -11,6 +11,7 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { TerminalPane } from "@/app/features/terminal/TerminalPane";
 import { FilesView } from "@/app/components/inspector/FilesView";
 import { PanelCountBadge } from "@/app/components/inspector/PanelCountBadge";
 import { panelBadgeCount, PANEL_ICON } from "@/app/components/inspector/sessionPanelIcons";
@@ -126,6 +127,9 @@ export function SessionSideBox({
       ) : null}
       {active === "delegated" && direct && !delegatedTranscript ? (
         <DelegatedWorkView sessionId={sessionId} behavior={behavior} />
+      ) : null}
+      {active === "terminal" && direct && !delegatedTranscript ? (
+        <TerminalPane sessionId={sessionId} />
       ) : null}
       {active === "worksets" ? (
         <WorksetsView snapshot={snapshot} selected={selectedWorkset} onSelect={selectWorkset} />

@@ -13719,6 +13719,7 @@ var EF = [
 	"threads",
 	"delegated",
 	"files",
+	"terminal",
 	"worksets",
 	"history"
 ], DF = {
@@ -13726,6 +13727,7 @@ var EF = [
 	threads: "Threads",
 	delegated: "Subagents",
 	files: "Files",
+	terminal: "Terminal",
 	worksets: "Worksets",
 	history: "History"
 };

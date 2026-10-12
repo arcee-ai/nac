@@ -7,6 +7,7 @@ const TAB = {
   threads: { label: "Threads", iconName: IconName.Flow },
   delegated: { label: "Subagents", iconName: IconName.Robot },
   files: { label: "Files", iconName: IconName.Folders },
+  terminal: { label: "Terminal", iconName: IconName.Terminal },
   worksets: { label: "Worksets", iconName: IconName.Checklist },
   history: { label: "History", iconName: IconName.History },
 } satisfies Record<SessionPanel, { label: string; iconName: IconName }>;

@@ -83,8 +83,8 @@ const ORCHESTRATOR_PANELS: SessionPanelPolicy = {
 };
 
 const DIRECT_PANELS: SessionPanelPolicy = {
-  widePanels: ["delegated", "files"],
-  mobilePanels: ["delegated", "files", "history"],
+  widePanels: ["delegated", "files", "terminal"],
+  mobilePanels: ["delegated", "files", "terminal", "history"],
   defaultPanel: "files",
   readOnly: false,
 };

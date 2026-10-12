@@ -6,6 +6,7 @@ export const PANEL_ICON: Record<SessionPanel, IconName> = {
   threads: IconName.Flow,
   delegated: IconName.Robot,
   files: IconName.Folders,
+  terminal: IconName.Terminal,
   worksets: IconName.Checklist,
   history: IconName.History,
 };

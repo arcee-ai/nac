@@ -9,6 +9,7 @@ export const SESSION_PANELS = [
   "threads",
   "delegated",
   "files",
+  "terminal",
   "worksets",
   "history",
 ] as const;
@@ -22,6 +23,7 @@ export const SESSION_PANEL_LABEL = {
   threads: "Threads",
   delegated: "Subagents",
   files: "Files",
+  terminal: "Terminal",
   worksets: "Worksets",
   history: "History",
 } satisfies Record<SessionPanel, string>;
