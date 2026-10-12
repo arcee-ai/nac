@@ -1,5 +1,8 @@
 //! Synthetic controller/host composition with genuine Local PTYs. These
 //! fixtures do not establish a deployed gateway or an eligible image upgrade.
+#[path = "managed_terminal_pressure_tests.rs"]
+mod pressure;
+
 use super::*;
 use nac_core::permissions::PermissionApprovalMode;
 use serde_json::{json, Value};
