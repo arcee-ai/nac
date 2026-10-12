@@ -372,16 +372,17 @@ async fn two_native_owners_and_slow_observers_keep_cached_status_and_close_respo
     let terminals = [first, second];
     let mut ids = Vec::new();
     for terminal in &terminals {
-        // The marker is absent from echoed input; empty PS1 and disabled echo
-        // leave both observers genuinely waiting on their separate owners.
+        // Finish the entire setup line before observation. Modern Readline
+        // emits bracketed-paste mode bytes even for an empty prompt; turn
+        // those off only in this deliberately quiet fixture.
         service
             .write_user_terminal_input(
                 terminal,
-                b"stty -echo; PS1=; printf '\\121\\125\\111\\105\\124\\055\\122\\105\\101\\104\\131\\n'\r",
+                b"stty -echo -onlcr; PS1=; PROMPT_COMMAND=; bind 'set enable-bracketed-paste off' 2>/dev/null; printf '\\121\\125\\111\\105\\124\\055\\122\\105\\101\\104\\131\\n'\r",
             )
             .await
             .unwrap();
-        await_output(&service, terminal, b"QUIET-READY").await;
+        await_output(&service, terminal, b"QUIET-READY\n").await;
         let id = hub
             .attach("session", terminal, Arc::clone(&service), 64 * 1024)
             .unwrap();
@@ -419,7 +420,19 @@ async fn two_native_owners_and_slow_observers_keep_cached_status_and_close_respo
             {
                 break;
             }
-            assert!(pulls.iter().all(|pull| !pull.is_finished()));
+            if let Some(index) = pulls.iter().position(|pull| pull.is_finished()) {
+                let frame = (&mut pulls[index]).await.unwrap().unwrap();
+                panic!(
+                    "quiet observer {index} completed before both waits: bytes={} gap={} alive={} EOF={} exit={:?} newline_only={} paste_toggle={}",
+                    frame.page.bytes.len(),
+                    frame.page.gap,
+                    frame.terminal.alive,
+                    frame.terminal.output_complete,
+                    frame.terminal.exit_code,
+                    frame.page.bytes.iter().all(|byte| matches!(byte, b'\r' | b'\n')),
+                    frame.page.bytes.windows(7).any(|bytes| bytes == b"\x1b[?2004")
+                );
+            }
             tokio::task::yield_now().await;
         }
     })

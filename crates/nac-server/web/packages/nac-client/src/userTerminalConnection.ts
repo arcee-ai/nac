@@ -164,8 +164,8 @@ export class UserTerminalConnection {
     const next = cursor(frame.next_offset);
     const start = cursor(frame.retained_start);
     const end = cursor(frame.retained_end);
+    const expected = cursor(this.expectedOffset);
     if (
-      offset !== cursor(this.expectedOffset) ||
       start > end ||
       next > end ||
       frame.bytes.length > this.pageLimit ||
@@ -174,10 +174,19 @@ export class UserTerminalConnection {
       throw new TerminalProtocolError("Invalid terminal frame bounds or continuity");
     }
     if (frame.gap) {
-      if (frame.bytes.length !== 0 || !frame.requires_ack || next !== start || offset >= start) {
+      // The server clamps both gap cursors to the retained start. Continuity
+      // is proved against the consumer's prior cursor before acknowledging reset.
+      if (
+        frame.bytes.length !== 0 ||
+        !frame.requires_ack ||
+        next !== start ||
+        offset !== start ||
+        expected >= start
+      ) {
         throw new TerminalProtocolError("Invalid terminal gap frame");
       }
     } else if (
+      offset !== expected ||
       offset < start ||
       next !== offset + BigInt(frame.bytes.length) ||
       frame.requires_ack !== frame.bytes.length > 0

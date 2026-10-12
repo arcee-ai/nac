@@ -121,6 +121,7 @@ describe("finite terminal observation", () => {
     const f = fixture([
       frame({
         bytes: [],
+        offset: cursor,
         next_offset: cursor,
         retained_start: cursor,
         retained_end: "9007199254740994",
@@ -149,6 +150,96 @@ describe("finite terminal observation", () => {
       acknowledge_offset: cursor,
       acknowledge_reset: true,
     });
+  });
+
+  it.each([
+    { offset: "0" },
+    { next_offset: "7" },
+    { bytes: [65] },
+    { requires_ack: false },
+    { retained_start: "0", offset: "0", next_offset: "0" },
+    { caught_up: true },
+  ])("rejects malformed retention gaps before resetting: %j", async (invalid) => {
+    const f = fixture([
+      frame({
+        bytes: [],
+        offset: "8",
+        next_offset: "8",
+        retained_start: "8",
+        retained_end: "9",
+        gap: true,
+        caught_up: false,
+        ...invalid,
+      }),
+    ]);
+    await f.connection.attach();
+    await expect(f.connection.readNext()).rejects.toBeInstanceOf(TerminalProtocolError);
+    expect(f.renderer.reset).toHaveBeenCalledTimes(1); // Only initial attachment.
+    expect(f.renderer.write).not.toHaveBeenCalled();
+  });
+
+  it("resets again if retention advances while the preceding gap is acknowledged", async () => {
+    const f = fixture([
+      frame({
+        bytes: [],
+        offset: "8",
+        next_offset: "8",
+        retained_start: "8",
+        retained_end: "9",
+        gap: true,
+        caught_up: false,
+      }),
+      frame({
+        bytes: [],
+        offset: "16",
+        next_offset: "16",
+        retained_start: "16",
+        retained_end: "17",
+        gap: true,
+        caught_up: false,
+      }),
+      frame({
+        bytes: [90],
+        offset: "16",
+        next_offset: "17",
+        retained_start: "16",
+        retained_end: "17",
+      }),
+    ]);
+    await f.connection.attach();
+    await f.connection.readNext();
+    await f.connection.readNext();
+    expect(f.requests.at(-1)?.body).toMatchObject({
+      acknowledge_offset: "8",
+      acknowledge_reset: true,
+    });
+    await f.connection.readNext();
+    expect(f.requests.at(-1)?.body).toMatchObject({
+      acknowledge_offset: "16",
+      acknowledge_reset: true,
+    });
+    expect(f.renderer.reset).toHaveBeenCalledTimes(3);
+    expect(f.renderer.write).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not acknowledge a retention gap whose renderer reset failed", async () => {
+    const f = fixture([
+      frame({
+        bytes: [],
+        offset: "8",
+        next_offset: "8",
+        retained_start: "8",
+        retained_end: "9",
+        gap: true,
+        caught_up: false,
+      }),
+    ]);
+    await f.connection.attach();
+    f.renderer.reset.mockRejectedValueOnce(new Error("reset failed"));
+    await expect(f.connection.readNext()).rejects.toThrow("reset failed");
+    await expect(f.connection.readNext()).rejects.toThrow("reconnect");
+    expect(f.requests.at(-1)?.body).not.toHaveProperty("acknowledge_offset");
+    expect(f.renderer.write).not.toHaveBeenCalled();
   });
 
   it("leaves the last applied ACK intact after a lost read response and never retries automatically", async () => {
