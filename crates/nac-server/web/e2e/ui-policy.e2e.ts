@@ -223,7 +223,7 @@ test("switches on-off-on after restart with the same binary and seeded store", a
     harness.provider.enqueue(
       `restart-${gate}`,
       { token: "RESTART_DIRECT_TOKEN" },
-      { kind: "text", text: `restart direct response ${gate}`, stream: true },
+      { kind: "text", text: `restart direct response ${gate}`, stream: "request" },
     );
     const submitted = await request.post(`${harness.baseUrl}/sessions/${ids[2]}/runs`, {
       data: { prompt: "RESTART_DIRECT_TOKEN" },

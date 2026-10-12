@@ -1,13 +1,13 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 
 export type ScriptedResponse =
-  | { kind: "text"; text: string; stream?: boolean }
+  | { kind: "text"; text: string; stream?: boolean | "request" }
   | {
       kind: "function_call";
       name: string;
       callId: string;
       arguments: Record<string, unknown>;
-      stream?: boolean;
+      stream?: boolean | "request";
     }
   | { kind: "http_error"; status: number; body: string };
 
@@ -171,13 +171,19 @@ export class ScriptedProvider {
     }
 
     const step = matching[0];
+    // Opt in explicitly when a scenario permits both legitimate transports.
+    // Resolve once so gated headers and the completed body use the same mode.
+    const scripted =
+      step.response.kind !== "http_error" && step.response.stream === "request"
+        ? { ...step.response, stream: this.asRecord(body)?.stream === true }
+        : step.response;
     step.consumed = true;
     record.matchedStep = step.id;
     step.gate?.markAccepted();
     // A barrier models a slow model, not an unreachable one. Flush SSE
     // headers before waiting so the production client does not classify the
     // deliberate body delay as a connection failure and retry the request.
-    if (step.gate != null && step.response.kind !== "http_error" && step.response.stream === true) {
+    if (step.gate != null && scripted.kind !== "http_error" && scripted.stream === true) {
       response.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
@@ -185,7 +191,7 @@ export class ScriptedProvider {
       response.flushHeaders();
     }
     if (step.gate != null) await step.gate.waitForRelease();
-    this.respond(response, step.response);
+    this.respond(response, scripted);
   }
 
   private matches(match: ScriptMatch, body: unknown): boolean {
