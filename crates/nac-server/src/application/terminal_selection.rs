@@ -19,6 +19,16 @@ pub(crate) fn active_admission_jobs_for_test() -> usize {
     32 - ADMISSIONS.available_permits()
 }
 
+// One-shot, admission-scoped postcommit uncertainty for actual HTTP characterization.
+// It grants no creator authority and is absent from production builds.
+#[cfg(test)]
+static UNCERTAIN_ADMISSIONS: LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+#[cfg(test)]
+pub(crate) fn uncertain_after_commit_for_test(id: String) {
+    UNCERTAIN_ADMISSIONS.lock().unwrap().insert(id);
+}
+
 pub(crate) struct TerminalSelectionSubmission {
     pub intent: TerminalSelectionIntent,
     pub original_selected_text: String,
@@ -134,10 +144,19 @@ impl<'a> TerminalSelectionApplication<'a> {
                     TerminalSelectionAdmissionError::PreviewChanged.to_string(),
                 ));
             }
-            service
+            #[cfg(test)]
+            let admission_id = intent.admission_id.clone();
+            let receipt = service
                 .admit_terminal_selection_intent(intent)
                 .await
-                .map_err(admission_error)
+                .map_err(admission_error)?;
+            #[cfg(test)]
+            if UNCERTAIN_ADMISSIONS.lock().unwrap().remove(&admission_id) {
+                return Err(admission_error(
+                    TerminalSelectionAdmissionError::CommitUncertain.into(),
+                ));
+            }
+            Ok(receipt)
         })
         .await
         .map_err(|error| Error::Internal(error.into()))?
@@ -145,6 +164,7 @@ impl<'a> TerminalSelectionApplication<'a> {
 }
 fn admission_error(error: anyhow::Error) -> Error {
     match error.downcast_ref::<TerminalSelectionAdmissionError>() {
+        Some(TerminalSelectionAdmissionError::CommitUncertain) => Error::Internal(error),
         Some(TerminalSelectionAdmissionError::Unavailable) => Error::Unavailable,
         Some(TerminalSelectionAdmissionError::Invalid) => {
             Error::Invalid("invalid terminal selection intent")

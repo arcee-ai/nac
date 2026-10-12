@@ -535,3 +535,84 @@ async fn terminal_selection_canonical_history_fork_keeps_source_without_copying_
         nac_core::store::InboxStatus::Delivered
     );
 }
+
+#[tokio::test]
+async fn terminal_selection_uncertain_commit_is_500_and_same_identity_reconciles_once() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("selection_uncertain_status");
+    let home = root.join("nac-home");
+    let _env =
+        ScopedModelEnv::with_config_home(Some(&home), None, Some(&home), Some("server-test-key"));
+    seed_direct_session(&root, "source");
+    let manager = test_manager(&root);
+    let service = manager.attach_session("source").await.unwrap();
+    service
+        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
+        .unwrap();
+    let shell = service
+        .open_user_terminal(uuid::Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    let path = format!(
+        "/sessions/source/user-terminals/{}/selection-preview",
+        shell.id
+    );
+    let app = router(manager.clone());
+    let preview = decode(
+        app.clone()
+            .oneshot(request(&path, payload("literal $skill /compact")))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let submit = path.replace("selection-preview", "selection-submissions");
+    let packet = submission(&preview, "literal $skill /compact", None, "queue");
+    // Hold the peer operation lease: this real durable queue commit cannot wake a run.
+    let _peer =
+        nac_core::sessions::SessionOperationLease::try_acquire(&manager.inner.store_path, "source")
+            .unwrap();
+    crate::application::terminal_selection::uncertain_after_commit_for_test(
+        packet["admission_id"].as_str().unwrap().to_owned(),
+    );
+    let uncertain = app
+        .clone()
+        .oneshot(request(&submit, packet.clone()))
+        .await
+        .unwrap();
+    assert_eq!(uncertain.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(decode(uncertain).await["error"]
+        .as_str()
+        .unwrap()
+        .contains("same identity"));
+    assert_eq!(service.list_direct_inbox().unwrap().len(), 1);
+    assert!(!service.has_active_operation());
+    service.terminate_user_terminal(&shell.id).await.unwrap();
+    manager.inner.active_sessions.write().await.remove("source");
+    let reconciled = app
+        .clone()
+        .oneshot(request(&submit, packet.clone()))
+        .await
+        .unwrap();
+    assert_eq!(reconciled.status(), StatusCode::OK);
+    assert_eq!(decode(reconciled).await["replayed"], true);
+    assert_eq!(
+        nac_core::store::list_session_inbox(&manager.inner.store_path, "source")
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(!service.has_active_operation());
+    let mut changed = packet;
+    changed["expected_selection_text"] = serde_json::json!("different intent");
+    assert_eq!(
+        app.oneshot(request(&submit, changed))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    drop(service);
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
