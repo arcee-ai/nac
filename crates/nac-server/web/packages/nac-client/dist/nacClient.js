@@ -147,7 +147,9 @@ export class NacTransport {
         };
     }
     async request(method, path, { body, headers, signal, acceptStatuses = [], requestId = this.newRequestId(), } = {}) {
+        signal?.throwIfAborted();
         const requestHeaders = await this.configuredHeaders(requestId, headers);
+        signal?.throwIfAborted();
         if (body !== undefined && !requestHeaders.has("Content-Type")) {
             requestHeaders.set("Content-Type", "application/json");
         }
@@ -199,7 +201,7 @@ function compareCursor(left, right) {
 export class NacClient {
     transport;
     constructor(options = {}) {
-        this.transport = new NacTransport(options);
+        this.transport = "request" in options ? options : new NacTransport(options);
     }
     getUiConfiguration(signal) {
         return this.transport.request("GET", "/ui-config", { signal });

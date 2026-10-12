@@ -252,7 +252,7 @@ correlation |_command| crate::telemetry::Correlation::default();
 port public;
 }
 
-fn validate_accepted_identity(
+pub(super) fn validate_accepted_identity(
     snapshot: &ManagedMaintenanceSnapshot,
     running: &ManagedAcceptedIdentity,
 ) -> Result<()> {
@@ -1477,7 +1477,7 @@ fn persist_serialized_outcome(
     Ok(())
 }
 
-fn snapshot_with_connection(
+pub(super) fn snapshot_with_connection(
     conn: &Connection,
     blockers: Vec<ManagedUpgradeBlocker>,
 ) -> Result<ManagedMaintenanceSnapshot> {

@@ -41,28 +41,38 @@ function initialTheme(): Theme {
   return prefersDark() ? "dark" : "light";
 }
 
-export const ThemeProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<Theme>(initialTheme);
+export const ThemeProvider: React.FC<{ children?: React.ReactNode; local?: boolean }> = ({
+  children,
+  local = false,
+}) => {
+  const [theme, setThemeState] = useState<Theme>(() => (local ? "dark" : initialTheme()));
 
-  const setTheme = useCallback((next: Theme) => {
-    if (!THEMES.includes(next)) return;
-    setThemeState(next);
-    localStorage.setItem(STORAGE_KEY, next);
-    applyToDOM();
-  }, []);
+  const setTheme = useCallback(
+    (next: Theme) => {
+      if (!THEMES.includes(next)) return;
+      setThemeState(next);
+      if (!local) {
+        localStorage.setItem(STORAGE_KEY, next);
+        applyToDOM();
+      }
+    },
+    [local],
+  );
 
   const toggleTheme = useCallback(() => {
     setThemeState((prev) => {
       const next: Theme = prev === "light" ? "dark" : prev === "dark" ? "system" : "light";
-      localStorage.setItem(STORAGE_KEY, next);
-      applyToDOM();
+      if (!local) {
+        localStorage.setItem(STORAGE_KEY, next);
+        applyToDOM();
+      }
       return next;
     });
-  }, []);
+  }, [local]);
 
   useEffect(() => {
-    applyToDOM();
-  }, []);
+    if (!local) applyToDOM();
+  }, [local]);
 
   return (
     <ThemeContext.Provider value={{ theme, resolved: resolve(theme), setTheme, toggleTheme }}>

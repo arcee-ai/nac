@@ -29,6 +29,76 @@ fn receipt_count(path: &Path) -> i64 {
         .unwrap()
 }
 
+#[cfg(feature = "managed-fault-fixture")]
+#[test]
+fn private_fixture_ack_failure_follows_real_commit_and_replay_is_once() {
+    let _lock = crate::TEST_ENV_LOCK.lock().unwrap();
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    struct Environment(Option<std::ffi::OsString>);
+    impl Drop for Environment {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => std::env::set_var("NAC_MANAGED_FAULT_ROOT", value),
+                None => std::env::remove_var("NAC_MANAGED_FAULT_ROOT"),
+            }
+        }
+    }
+    let (_store_directory, path) = setup();
+    let id = uuid::Uuid::new_v4();
+    let session = format!("fixture-{id}");
+    let run = format!("run-{id}");
+    insert_test_session(&path, &session);
+    let control_root = PathBuf::from(format!("/tmp/all117-fault-{id}"));
+    std::fs::create_dir(&control_root).unwrap();
+    std::fs::set_permissions(&control_root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let _control_directory = TestStoreDir(control_root.clone());
+    let _environment = Environment(std::env::var_os("NAC_MANAGED_FAULT_ROOT"));
+    std::env::set_var("NAC_MANAGED_FAULT_ROOT", &control_root);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let control = serde_json::json!({"nonce": nonce, "boundary": "commit-ack", "session_id": session,
+        "run_id": run, "generation": null, "expires_unix_ms": now+10_000});
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(control_root.join("commit-ack.json"))
+        .unwrap();
+    file.write_all(serde_json::to_string(&control).unwrap().as_bytes())
+        .unwrap();
+    drop(file);
+    let lease = Arc::new(SessionOperationLease::try_acquire(&path, &session).unwrap());
+    let writer = TranscriptLogWriter::for_run(&path, &session, &run, &lease).unwrap();
+    let error = writer
+        .append_run_prompt(&session, 0, &message("prompt"), &run)
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<TranscriptAppendError>(),
+        Some(&TranscriptAppendError::CommitUncertain)
+    );
+    assert_eq!(receipt_count(&path), 1);
+    assert_eq!(writer.read_from(&session, 0).unwrap().len(), 1);
+    let recovery = load_run_recovery(&path, &session).unwrap().unwrap();
+    assert_eq!(recovery.run_id, run);
+    let receipt: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(control_root.join(format!("used-{nonce}.json"))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(receipt["after_successful_sqlite_commit"], true);
+    assert_eq!(receipt["session_id"], session);
+    assert_eq!(receipt["run_id"], run);
+    writer
+        .append_run_prompt(&session, 0, &message("prompt"), &run)
+        .unwrap();
+    assert_eq!(receipt_count(&path), 1);
+    assert_eq!(writer.read_from(&session, 0).unwrap().len(), 1);
+    assert_eq!(std::fs::read_dir(&control_root).unwrap().count(), 2);
+}
+
 #[test]
 fn transcript_append_fault_windows_retry_once_and_restart_agrees() {
     for phase in [

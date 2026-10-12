@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   createChat,
   runCommand,
@@ -34,7 +35,7 @@ import {
   sameOrder,
   withUpdatedSummary,
 } from "@/app/lib/sessionOrder";
-import { api } from "@/app/services/api";
+
 import { UncertainCommandAdmissionError } from "@/app/services/nacClient";
 import { useQueryInvalidators } from "@/app/services/queries/invalidation";
 import { queryKeys, SESSIONS_POLL_MS, WORKSPACE_STATS_POLL_MS } from "@/app/services/queries/keys";
@@ -47,7 +48,7 @@ import {
   isCurrentSessionGeneration,
   sessionRefreshKey,
 } from "@/app/services/sessionRefresh";
-import { captureRuntimeActivation, setOptimisticUserPrompt } from "@/app/store/runtimeStore";
+
 import type {
   CreateSessionRequest,
   ManagedSessionSummary,
@@ -59,6 +60,8 @@ import type {
 } from "@/app/types/api";
 
 export function useSessions(pollMs = SESSIONS_POLL_MS) {
+  const { api } = useNativeRuntime();
+
   return useQuery<ManagedSessionSummary[]>({
     queryKey: queryKeys.sessions(false),
     queryFn: ({ signal }) => api.listSessions({}, signal),
@@ -92,6 +95,8 @@ export function useSessionsWithWorkspaceStats(
     statsMs: WORKSPACE_STATS_POLL_MS,
   },
 ) {
+  const { api } = useNativeRuntime();
+
   const base = useSessions(cadence.baseMs);
   const stats = useQuery<ManagedSessionSummary[]>({
     queryKey: queryKeys.sessions(true),
@@ -114,6 +119,8 @@ export function useSessionsWithWorkspaceStats(
  * across a refetch that did not touch it, so the transcript stays put.
  */
 export function useSessionSummary(id: string | null) {
+  const { api } = useNativeRuntime();
+
   const select = useCallback(
     (sessions: ManagedSessionSummary[]) =>
       sessions.find((item) => item.summary.session_id === id) ?? null,
@@ -138,6 +145,8 @@ export function useSessionSnapshot(
   id: string | null,
   options?: Partial<UseQueryOptions<SessionSnapshotResponse>>,
 ) {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useQuery<SessionSnapshotResponse>({
     queryKey: queryKeys.sessionSnapshot(id ?? ""),
@@ -176,6 +185,8 @@ export function useSessionSnapshot(
   });
 }
 export function useLoadOlderMessages(id: string) {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: async (): Promise<boolean> => {
@@ -217,6 +228,8 @@ export function useLoadOlderMessages(id: string) {
   });
 }
 export function useThreadEventPages(id: string | null, threadName: string | null) {
+  const { api } = useNativeRuntime();
+
   return useInfiniteQuery<
     ThreadEventPage,
     Error,
@@ -239,6 +252,8 @@ export function useThreadEventPages(id: string | null, threadName: string | null
 }
 
 export function useSessionConfig(id: string | null) {
+  const { api } = useNativeRuntime();
+
   return useQuery<RawSessionConfig>({
     queryKey: queryKeys.sessionConfig(id ?? ""),
     queryFn: ({ signal }) => api.getConfig(id!, signal),
@@ -247,6 +262,8 @@ export function useSessionConfig(id: string | null) {
 }
 
 export function useCreateSession() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
@@ -290,6 +307,8 @@ function sessionIdsShowingFork(client: QueryClient, forkId: string): string[] {
 }
 
 export function useDeleteSession() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
@@ -313,6 +332,8 @@ export interface RenameSessionVariables {
 }
 
 export function useUpdatePresentation() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   return useMutation({
     retry: false,
@@ -355,6 +376,8 @@ export interface MoveSessionOrderVariables {
  * destination group differs. One invalidation at the end.
  */
 export function useMoveSessionOrder() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   return useMutation({
     mutationFn: async ({
@@ -390,6 +413,8 @@ export function useMoveSessionOrder() {
 }
 
 export function useUpdateConfig() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
@@ -405,6 +430,10 @@ export function useUpdateConfig() {
 }
 
 export function useSubmitRun() {
+  const { api } = useNativeRuntime();
+  const { captureRuntimeActivation, setOptimisticUserPrompt } =
+    useNativeRuntime().stores.runtimeStore;
+
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
@@ -451,6 +480,8 @@ export function useSubmitRun() {
 }
 
 export function useSteerOrchestrator() {
+  const { api } = useNativeRuntime();
+
   return useMutation({
     mutationFn: ({ id, instruction }: { id: string; instruction: string }) =>
       api.steerOrchestrator(id, instruction),
@@ -458,6 +489,8 @@ export function useSteerOrchestrator() {
 }
 
 export function useSteerThread() {
+  const { api } = useNativeRuntime();
+
   return useMutation({
     mutationFn: ({
       id,
@@ -480,6 +513,8 @@ export function useCancelRun() {
 }
 
 export function useCompactSession() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
@@ -497,6 +532,8 @@ export function useCompactSession() {
  * views that the reverted state invalidated.
  */
 export function useRevertSession() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
@@ -515,6 +552,8 @@ export function useRevertSession() {
  * revert does before the new run starts filling them back in.
  */
 export function useRegenerateRun() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
   return useMutation({
@@ -534,6 +573,8 @@ export function useRegenerateRun() {
  * under the turn that was copied.
  */
 export function useForkSession() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   return useMutation({
     mutationFn: ({ id, messageIdx }: { id: string; messageIdx: number }) =>
@@ -546,6 +587,8 @@ export function useForkSession() {
 }
 
 export function useDismissSessionFork() {
+  const { api } = useNativeRuntime();
+
   const invalidate = useQueryInvalidators();
   return useMutation({
     mutationFn: ({ id, forkId }: { id: string; forkId: string }) =>

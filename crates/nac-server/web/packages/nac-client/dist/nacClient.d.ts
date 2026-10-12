@@ -124,9 +124,11 @@ export declare class NacTransport {
     request<T>(method: Method, path: string, { body, headers, signal, acceptStatuses, requestId, }?: NacRequestOptions): Promise<T>;
     admit<T>(method: Extract<Method, "POST" | "PUT" | "PATCH" | "DELETE">, path: string, options?: NacRequestOptions): Promise<CommandAdmission<T>>;
 }
+/** Public structural port also accepts a consumer's existing authenticated HTTP/SSE transport. */
+export type NacHttpTransport = Pick<NacTransport, "endpoint" | "credentials" | "authorization" | "versionPolicy" | "url" | "eventSourceInit" | "newRequestId" | "streamContext" | "request" | "admit">;
 export declare class NacClient {
-    readonly transport: NacTransport;
-    constructor(options?: NacClientOptions);
+    readonly transport: NacHttpTransport;
+    constructor(options?: NacClientOptions | NacHttpTransport);
     getUiConfiguration(signal?: AbortSignal): Promise<UiConfiguration>;
     getReadiness(signal?: AbortSignal): Promise<ReadinessResponse>;
     checkCompatibility(signal?: AbortSignal): Promise<ReadinessResponse>;

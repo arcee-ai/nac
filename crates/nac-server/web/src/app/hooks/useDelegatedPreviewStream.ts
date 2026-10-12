@@ -1,8 +1,9 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "@/app/services/queries";
-import { subscribeToSessionEvents } from "@/app/services/eventStream";
+
 import type { AssistantStreamDelta, SessionEventEnvelope } from "@/app/types/api";
 
 // Same window the open session uses before it reloads canonical messages.
@@ -25,6 +26,8 @@ const EMPTY: DelegatedPreviewStream = { text: "", reasoning: "", running: false 
  * preview can paint as it is produced without rewriting the parent transcript.
  */
 export function useDelegatedPreviewStream(sessionId: string | null): DelegatedPreviewStream {
+  const { subscribeToSessionEvents } = { subscribeToSessionEvents: useNativeRuntime().events };
+
   const client = useQueryClient();
   const [stream, setStream] = useState<DelegatedPreviewStream>(EMPTY);
   const [seenSession, setSeenSession] = useState(sessionId);
@@ -120,7 +123,7 @@ export function useDelegatedPreviewStream(sessionId: string | null): DelegatedPr
       dispose();
       clearTimeout(reloadTimer ?? undefined);
     };
-  }, [client, sessionId]);
+  }, [client, sessionId, subscribeToSessionEvents]);
 
   return stream;
 }

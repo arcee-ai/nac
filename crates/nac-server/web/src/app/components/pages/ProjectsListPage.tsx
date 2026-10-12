@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -46,13 +47,7 @@ import {
   useProjects,
   useSessionsWithWorkspaceStats,
 } from "@/app/services/queries";
-import { clearAttentionAll, trackAttention, useAnyAttention } from "@/app/store/attentionStore";
-import {
-  setQuery,
-  useFilterQuery,
-  useIsDefaultSort,
-  useVisibleProjectItems,
-} from "@/app/store/sessionFiltersStore";
+
 import type { ProjectRecord } from "@/app/types/api";
 
 // Columns are 360px at minimum and stretch to fill the row, so the design's
@@ -139,6 +134,8 @@ function GridCard({
   onMoveDown: () => void;
   onReorderStart: (start: ProjectReorderStart) => void;
 }) {
+  const { useAnyAttention } = useNativeRuntime().stores.attentionStore;
+
   const projectActions = useProjectActions();
   const sessionActions = useSessionActions();
   const attention = useAnyAttention(attentionIds(item));
@@ -220,6 +217,11 @@ function pinnedGroup(projects: ProjectRecord[], pinned: boolean): ProjectRecord[
 }
 
 export default function ProjectsListPage() {
+  const { useVisibleProjectItems, useIsDefaultSort, useFilterQuery, setQuery } =
+    useNativeRuntime().stores.sessionFiltersStore;
+
+  const { trackAttention, clearAttentionAll } = useNativeRuntime().stores.attentionStore;
+
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const projectActions = useProjectActions();
@@ -247,7 +249,7 @@ export default function ProjectsListPage() {
 
   useEffect(() => {
     if (data) trackAttention(data, null);
-  }, [data]);
+  }, [data, trackAttention]);
 
   const open = (item: ProjectListItem) => {
     const id = projectListItemId(item);

@@ -1,9 +1,9 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { perfMark } from "@/app/lib/perfDebug";
 import { queryKeys } from "@/app/services/queries";
-import { useWorkspaceEpoch } from "@/app/store/runtimeStore";
 
 /**
  * Slowest the checkout is reread while a run keeps changing it. Every reread
@@ -23,6 +23,8 @@ const REREAD_INTERVAL_MS = 3000;
  * A revision is a frozen commit and never needs any of this.
  */
 export function useLiveWorkspace(sessionId: string, revision: number | null): void {
+  const { useWorkspaceEpoch } = useNativeRuntime().stores.runtimeStore;
+
   const client = useQueryClient();
   const epoch = useWorkspaceEpoch();
   const timer = useRef<number | null>(null);

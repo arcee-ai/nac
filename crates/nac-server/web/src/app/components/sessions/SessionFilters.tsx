@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useEffect } from "react";
 import type React from "react";
 
@@ -17,27 +18,7 @@ import {
 } from "@/app/atoms";
 import { type SessionEnv } from "@/app/lib/format";
 import { providerLabel } from "@/app/lib/providers";
-import {
-  RANGE_ITEMS,
-  SORT_ITEMS,
-  pruneUnavailableFacets,
-  setCreatedRange,
-  setModifiedRange,
-  setQuery,
-  setSort,
-  toggleEnv,
-  toggleProvider,
-  useCreatedRange,
-  useFilterQuery,
-  useModifiedRange,
-  useSelectedEnvs,
-  useSelectedProviders,
-  useSessionEnvs,
-  useSessionProviders,
-  useSort,
-  type RangeId,
-  type SortId,
-} from "@/app/store/sessionFiltersStore";
+import { type RangeId, type SortId } from "@/app/store/sessionFiltersStore";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
 // Chips are Small/Text buttons; the design's 12px inline padding beats the
@@ -183,6 +164,26 @@ export function SessionFilters({
   /** Runs after any filter moves. The phone's dialog closes on it. */
   onChange?: () => void;
 }) {
+  const {
+    useSort,
+    useSessionProviders,
+    useSessionEnvs,
+    useSelectedProviders,
+    useSelectedEnvs,
+    useModifiedRange,
+    useFilterQuery,
+    useCreatedRange,
+    toggleProvider,
+    toggleEnv,
+    setSort,
+    setQuery,
+    setModifiedRange,
+    setCreatedRange,
+    pruneUnavailableFacets,
+    SORT_ITEMS,
+    RANGE_ITEMS,
+  } = useNativeRuntime().stores.sessionFiltersStore;
+
   const query = useFilterQuery();
   const sort = useSort();
   const createdRange = useCreatedRange();
@@ -197,7 +198,7 @@ export function SessionFilters({
   // no longer on screen.
   useEffect(() => {
     pruneUnavailableFacets(envOptions, providerOptions);
-  }, [envOptions, providerOptions]);
+  }, [envOptions, providerOptions, pruneUnavailableFacets]);
 
   const commit =
     <T,>(apply: (value: T) => void) =>

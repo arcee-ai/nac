@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect, useMemo, useState } from "react";
 
@@ -16,13 +17,7 @@ import { PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useNow } from "@/app/hooks/useNow";
 import { cn } from "@/app/lib/cn";
 import { groupByRecency } from "@/app/lib/projects";
-import {
-  clearSubagentLaunch,
-  openSubagentLaunch,
-  useSubagentLaunchRequest,
-  showSidePanelList,
-  useSubagentLaunch,
-} from "@/app/store/sessionLayoutStore";
+
 import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
 import type {
   ManagedOrchestratorRecord,
@@ -119,6 +114,14 @@ export function DelegatedWorkView({
   sessionId: string;
   behavior: SessionBehavior;
 }) {
+  const {
+    useSubagentLaunch,
+    showSidePanelList,
+    useSubagentLaunchRequest,
+    openSubagentLaunch,
+    clearSubagentLaunch,
+  } = useNativeRuntime().stores.sessionLayoutStore;
+
   const supportsOrchestrators =
     useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
   const children = useTraditionalChildren(sessionId, true);
@@ -152,7 +155,7 @@ export function DelegatedWorkView({
   const resolvedKey = launch ? null : (allowedSelectedKey ?? newestKey);
   useEffect(() => {
     if (!supportsOrchestrators && storedLaunch === "orchestrator") clearSubagentLaunch();
-  }, [supportsOrchestrators, storedLaunch]);
+  }, [supportsOrchestrators, storedLaunch, clearSubagentLaunch]);
   if (!supportsOrchestrators && selectedKey?.startsWith("orchestrator:")) setSelectedKey(null);
   if (!launch && selectedKey == null && newestKey != null) setSelectedKey(newestKey);
 

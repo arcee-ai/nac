@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useMemo, useState } from "react";
 
 import {
@@ -23,7 +24,7 @@ import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { cn } from "@/app/lib/cn";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useCreateSshConfig, useSshConfigs, useSshConnect } from "@/app/services/queries";
-import { markSshConnected, markSshDisconnected } from "@/app/store/sshConnectionStore";
+
 import type { SshConfigurationRecord, SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { toRunError } from "@/app/lib/providerError";
@@ -141,6 +142,8 @@ export function SshConnectionBox({
   locked = false,
   className,
 }: SshConnectionBoxProps) {
+  const { markSshDisconnected, markSshConnected } = useNativeRuntime().stores.sshConnectionStore;
+
   const toast = useToast();
   const { data } = useSshConfigs();
   const configurations = useMemo(() => data?.configurations ?? [], [data]);

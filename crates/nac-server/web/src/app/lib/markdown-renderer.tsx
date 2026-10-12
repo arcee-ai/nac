@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   Suspense,
   isValidElement,
@@ -15,6 +16,8 @@ import CodeBlock, { CodeBlockSize } from "@/app/atoms/code-block";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { splitMarkdownBlocks } from "@/app/lib/markdown-blocks";
+import { scopeMathjaxStyles } from "@/app/lib/mathjax-styles";
+import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundary";
 import { normalizeMath } from "@/app/lib/math-source";
 import { perfRender } from "@/app/lib/perfDebug";
 import { isNumber, isString } from "@/app/lib/primitive";
@@ -22,14 +25,9 @@ import type { RunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { classifyMarkdownHref, markdownUrlTransform } from "@/app/lib/workspaceLink";
 import { useToast } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+
 import { queryKeys } from "@/app/services/queries";
-import {
-  revealSidePanel,
-  selectFile,
-  selectFileListing,
-  selectRevision,
-} from "@/app/store/sessionLayoutStore";
+
 import type { SessionSnapshotResponse } from "@/app/types/api";
 
 const remarkPlugins = [remarkGfm];
@@ -43,21 +41,25 @@ interface MathPlugins {
   rehype: PluginList;
 }
 
-let mathPlugins: Promise<MathPlugins> | null = null;
+const mathPlugins = new Map<string | undefined, Promise<MathPlugins>>();
 
 /**
  * The pipeline with MathJax in it, assembled once the chunk carrying it lands.
  * The promise is cached so `use` only ever suspends on the first formula in a
  * session, and never again after that.
  */
-function loadMathPlugins(): Promise<MathPlugins> {
-  mathPlugins ??= import("@/app/lib/markdown-mathjax").then(
-    ({ rehypeMathjaxPlugin, remarkMathPlugin }) => ({
-      remark: [...remarkPlugins, remarkMathPlugin],
-      rehype: [rehypeMathjaxPlugin],
-    }),
-  );
-  return mathPlugins;
+function loadMathPlugins(fontURL?: string): Promise<MathPlugins> {
+  let plugins = mathPlugins.get(fontURL);
+  if (!plugins) {
+    plugins = import("@/app/lib/markdown-mathjax").then(
+      ({ createMathjaxPlugin, remarkMathPlugin }) => ({
+        remark: [...remarkPlugins, remarkMathPlugin],
+        rehype: [createMathjaxPlugin(fontURL)],
+      }),
+    );
+    mathPlugins.set(fontURL, plugins);
+  }
+  return plugins;
 }
 
 /** Text of a fenced block, for the clipboard. Nested spans carry the tokens. */
@@ -128,6 +130,11 @@ interface MarkdownRendererProps {
  * hash route, and land on the homescreen.
  */
 function MarkdownLink({ href, children, ...props }: ComponentPropsWithoutRef<"a">) {
+  const { selectRevision, selectFileListing, selectFile, revealSidePanel } =
+    useNativeRuntime().stores.sessionLayoutStore;
+
+  const { api } = useNativeRuntime();
+
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
@@ -283,13 +290,28 @@ function ParsedWithMath({
   source: string;
   components: ReturnType<typeof buildComponents>;
 }) {
-  const plugins = use(loadMathPlugins());
+  const runtime = useNativeRuntime();
+  const plugins = use(loadMathPlugins(runtime.assets?.mathjaxFontUrl));
+  const portal = usePresentationPortalTarget();
+  const selectedComponents = runtime.assets
+    ? {
+        ...components,
+        // Packed consumers keep formula sheets in their view lifetime. Scope the
+        // generated rules and font families so caller MathJax remains independent.
+        style: ({ children }: ComponentPropsWithoutRef<"style">) => {
+          const css = isString(children) ? children : "";
+          return css && runtime.id !== undefined ? (
+            <style>{scopeMathjaxStyles(css, runtime.id, portal)}</style>
+          ) : null;
+        },
+      }
+    : components;
   return (
     <ReactMarkdown
       remarkPlugins={plugins.remark}
       rehypePlugins={plugins.rehype}
       urlTransform={markdownUrlTransform}
-      components={components}
+      components={selectedComponents}
     >
       {source}
     </ReactMarkdown>

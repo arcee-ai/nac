@@ -47,13 +47,14 @@ mod builders;
 mod configuration;
 mod contracts;
 mod model_resolution;
+mod prepared_session;
 mod remote;
 mod resume;
 mod sandboxing;
 
 pub use builders::{
     build_managed_worker_config, build_run_config, build_run_config_for_project,
-    build_run_config_for_project_with_behavior,
+    build_run_config_for_project_with_behavior, prepare_run_config_for_project_with_behavior,
 };
 #[cfg(test)]
 use configuration::NonModelNacConfig;
@@ -75,6 +76,7 @@ pub use model_resolution::{
     effective_model_settings, effective_orchestrator_compaction_threshold,
     parse_extra_headers_json, resolve_store_path, resolve_store_path_for_track,
 };
+pub use prepared_session::{PreparedSessionResources, PreparedSessionRunConfig};
 pub use remote::browse_ssh_directory;
 use remote::{canonical_remote_session_cwd, remote_cwd_or_home, trim_ssh_host};
 pub use resume::{

@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -20,7 +21,7 @@ import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
-import { useSidebarOffset } from "@/app/store/sidebarLayoutStore";
+
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 
@@ -31,6 +32,8 @@ const GROUND_FADE =
 const SURFACE_STYLE = { backgroundImage: `${GROUND_FADE}, ${GROUND_FADE}` };
 
 export function TopBar() {
+  const { useSidebarOffset } = useNativeRuntime().stores.sidebarLayoutStore;
+
   const [configuring, setConfiguring] = useState(false);
   const [sshConfigs, setSshConfigs] = useState(false);
   const [mcpServers, setMcpServers] = useState(false);

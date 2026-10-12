@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import {
   Button,
@@ -23,18 +24,7 @@ import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
-import {
-  selectRevision,
-  selectThread,
-  selectWorkset,
-  showSidePanelList,
-  toggleSidePanelCollapsed,
-  toggleSidePanelExpanded,
-  useSelectedRevision,
-  useSelectedThread,
-  useSelectedWorkset,
-  useSidePanelExpanded,
-} from "@/app/store/sessionLayoutStore";
+
 import type { SessionBehavior, SessionSnapshotResponse } from "@/app/types/api";
 
 interface SessionSideBoxProps {
@@ -79,6 +69,19 @@ export function SessionSideBox({
   panel,
   onPanelChange,
 }: SessionSideBoxProps) {
+  const {
+    useSidePanelExpanded,
+    useSelectedWorkset,
+    useSelectedThread,
+    useSelectedRevision,
+    toggleSidePanelExpanded,
+    toggleSidePanelCollapsed,
+    showSidePanelList,
+    selectWorkset,
+    selectThread,
+    selectRevision,
+  } = useNativeRuntime().stores.sessionLayoutStore;
+
   const expanded = useSidePanelExpanded();
   const isMobile = useIsMobile();
   const selectedThread = useSelectedThread();

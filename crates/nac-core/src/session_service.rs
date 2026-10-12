@@ -35,6 +35,7 @@ use crate::workspace::GitTarget;
 mod admission;
 mod attachment;
 mod cancellation;
+mod creation;
 mod direct_interaction;
 mod frontend_projection;
 mod manual_compaction;

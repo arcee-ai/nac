@@ -1,4 +1,4 @@
-.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size test-mcp-conformance generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-image-contract managed-image test-managed-image test-managed-host-key-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size test-mcp-conformance generate-api-contract test-api-contract test-assets test-e2e test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help test-managed-host-key-image
 
 CARGO ?= cargo
 PKG := nac-server
@@ -127,9 +127,9 @@ test-assets: test-api-contract
 	npm --prefix $(WEB_DIR) run lint
 	npm --prefix $(WEB_DIR) run typecheck
 	npm --prefix $(WEB_DIR) run build
-	@if [ -n "$$(git status --porcelain -- crates/$(PKG)/assets/dist $(WEB_DIR)/packages/nac-client/dist)" ]; then \
+	@if [ -n "$$(git status --porcelain -- crates/$(PKG)/assets/dist $(WEB_DIR)/packages/nac-client/dist $(WEB_DIR)/packages/nac-presentation/dist)" ]; then \
 		printf '%s\n' "error: committed web/client build output is stale; rebuild and commit it"; \
-		git status --porcelain -- crates/$(PKG)/assets/dist $(WEB_DIR)/packages/nac-client/dist; \
+		git status --porcelain -- crates/$(PKG)/assets/dist $(WEB_DIR)/packages/nac-client/dist $(WEB_DIR)/packages/nac-presentation/dist; \
 		exit 1; \
 	fi
 
@@ -165,6 +165,13 @@ test-durability:
 	$(CARGO) test --locked -p nac-server managed_binding_failure_precedes_run_and_prompt_execution
 	$(CARGO) test --locked -p nac-server parent_attachment_settles_canonical_managed_terminal_once_after_restart
 	$(CARGO) test --locked -p nac-server wrong_parent_relationship_reads_are_opaque_not_found
+
+## Verify compile-gated one-shot controls for private managed fault images
+test-managed-fault-fixture:
+	$(CARGO) test --locked -p nac-core --features managed-fault-fixture managed_fault_fixture::tests
+	$(CARGO) test --locked -p nac-core --features managed-fault-fixture private_fixture_ack_failure_follows_real_commit_and_replay_is_once
+	$(CARGO) test --locked -p nac-server --features managed-fault-fixture private_monitor_fault_is_generation_scoped_once_and_subsequent_read_recovers
+	$(CARGO) clippy --locked -p nac-server --features managed-fault-fixture --lib --bins -- -D warnings
 
 ## Reproduce the deterministic 1/2/4 Managed NAC orchestration load scenario
 test-managed-load:

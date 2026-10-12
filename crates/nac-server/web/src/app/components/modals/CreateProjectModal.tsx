@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -34,7 +35,7 @@ import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
-import { loadLastLight, storeLastLight } from "@/app/lib/lastLight";
+import {} from "@/app/lib/lastLight";
 import { withoutInheritedCredential, nullable, serializeExtraHeaders } from "@/app/lib/modelConfig";
 import { toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
@@ -140,6 +141,8 @@ function CreateProjectForm({
   defaultCwd: string;
   onClose: () => void;
 }) {
+  const { loadLastLight, storeLastLight } = useNativeRuntime().stores.lastLight;
+
   const navigate = useNavigate();
   const toast = useToast();
   const action = useSetupAction(open);
@@ -272,7 +275,7 @@ function CreateProjectForm({
   // an explicitly single-model one (`null`). Sources with no opinion (catalog
   // and file launches, `undefined`) fall back to the last light model a
   // session launched with. The key remounts the section when the seed changes.
-  const lastLight = useMemo(() => loadLastLight(), []);
+  const lastLight = useMemo(() => loadLastLight(), [loadLastLight]);
   const savedLight =
     selection?.kind === "resolved" && selection.light_model !== undefined
       ? selection.light_model

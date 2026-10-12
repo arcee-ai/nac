@@ -1,3 +1,4 @@
+import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundary";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "../../hooks/useMediaQuery";
@@ -69,6 +70,8 @@ const Popover: React.FC<PopoverProps> & {
   panelClassName = "",
   sheetClassName = "",
 }) => {
+  const portalTarget = usePresentationPortalTarget();
+
   const asSheet = useIsMobile() && sheetOnMobile;
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -160,7 +163,7 @@ const Popover: React.FC<PopoverProps> & {
         </BottomSheet>
       ) : open ? (
         sticky ? (
-          createPortal(panel, document.body)
+          createPortal(panel, portalTarget)
         ) : (
           panel
         )

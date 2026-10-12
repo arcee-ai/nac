@@ -86,7 +86,7 @@ try {
   await writeFile(
     path.join(consumer, "runtime.mjs"),
     `import assert from "node:assert/strict";
-import { NAC_HTTP_CLIENT_VERSION, createNacClient } from ${JSON.stringify(packageName)};
+import { NAC_HTTP_CLIENT_VERSION, createNacClient, createNacApi, NAC_API_SURFACE } from ${JSON.stringify(packageName)};
 
 assert.equal(NAC_HTTP_CLIENT_VERSION, 1);
 const client = createNacClient({
@@ -96,6 +96,13 @@ const client = createNacClient({
   headers: { "X-NAC-Launch": "launch-1" },
   requestId: () => "artifact-contract-request",
 });
+const api = createNacApi(client);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 123);
+for (const owner of Object.values(NAC_API_SURFACE)) {
+  if (owner.startsWith("api.")) assert.equal(typeof api[owner.slice(4)], "function", owner);
+  if (owner.startsWith("client.")) assert.equal(typeof client[owner.slice(7)], "function", owner);
+}
+assert.equal("getManagedUpgrade" in api, false);
 const context = await client.transport.streamContext();
 assert.deepEqual(context, {
   credentials: "omit",
@@ -114,6 +121,10 @@ assert.deepEqual(context, {
     path.join(consumer, "types.ts"),
     `import {
   createNacClient,
+  createNacApi,
+  type ProjectRecord,
+  type SessionGoalRecord,
+  type PermissionStateResponse,
   subscribeToSessionEvents,
   type CommandAdmission,
   type EventSourceFactory,
@@ -121,6 +132,15 @@ assert.deepEqual(context, {
 } from ${JSON.stringify(packageName)};
 
 const client = createNacClient({ endpoint: "/nac", credentials: "same-origin" });
+const api = createNacApi(client);
+const projects: Promise<ProjectRecord> = api.createProject({ name: "typed", cwd: "/repo" });
+const goal: Promise<SessionGoalRecord | null> = api.getGoal("session");
+const permissions: Promise<PermissionStateResponse> = api.getPermissions("session");
+void projects; void goal; void permissions;
+// @ts-expect-error expected_version remains required by Rust
+void api.updateGoal("session", "goal", { status: "paused" });
+// @ts-expect-error immutable public session vocabulary
+void api.createSession({ behavior: "worker" });
 const adapter: EventSourceFactory = (_url, _init, context) => {
   context.headers satisfies Readonly<Record<string, string>>;
   return {} as EventSource;

@@ -1,6 +1,7 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { nacClient, type NacClient } from "@/app/services/nacClient";
+import { type NacClient } from "@/app/services/nacClient";
 import type { UiPolicy } from "./policy";
 import { UiPolicyContext } from "./UiPolicyContext";
 
@@ -19,11 +20,13 @@ function clientId(client: NacClient) {
 /** No creation or orchestration surface mounts until this endpoint's policy settles. */
 export function UiPolicyProvider({
   children,
-  client = nacClient,
+  client: suppliedClient,
 }: {
   children: ReactNode;
   client?: NacClient;
 }) {
+  const runtime = useNativeRuntime();
+  const client = suppliedClient ?? runtime.client;
   const config = useQuery({
     queryKey: ["ui-configuration", client.transport.endpoint, clientId(client)],
     queryFn: async ({ signal }) => {

@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run build:client && tsc -b && vite build",
+    "build": "npm run build:client && tsc -b && vite build && npm run build:presentation",
     "build:client": "tsc -p packages/nac-client/tsconfig.json",
     "typecheck": "tsc -p packages/nac-client/tsconfig.json --noEmit && tsc -b",
-    "lint": "oxlint --deny-warnings --ignore-pattern 'packages/nac-client/dist/**' . && eslint . --max-warnings 0",
+    "lint": "oxlint --deny-warnings --ignore-pattern 'packages/nac-client/dist/**' --ignore-pattern 'packages/nac-presentation/dist/**' . && eslint . --max-warnings 0",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "test": "vitest run && npm run test:client-package",
@@ -18,7 +18,8 @@
     "generate:api": "node scripts/generate-api-types.mjs",
     "check:api": "node scripts/generate-api-types.mjs --check",
     "sync-file-icons": "node scripts/sync-file-icons.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:presentation": "vite build --config vite.presentation.config.ts && tsc -p tsconfig.presentation.json && node scripts/presentation-types.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

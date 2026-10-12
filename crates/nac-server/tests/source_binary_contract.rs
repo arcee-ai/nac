@@ -8,9 +8,15 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_nac-web");
+
+// A concurrent fork can inherit the writable descriptor from fs::copy until
+// exec closes it, causing ETXTBSY when another test executes its new copy.
+// Serialize every test in this process that copies or launches a binary.
+static BINARY_EXECUTION: Mutex<()> = Mutex::new(());
 
 struct ChildGuard(Option<Child>);
 
@@ -73,6 +79,7 @@ fn http_body(address: SocketAddr, path: &str) -> std::io::Result<String> {
 
 #[test]
 fn unset_track_custom_install_reports_dev_identity_and_uses_dev_store() {
+    let _binary_execution = BINARY_EXECUTION.lock().unwrap();
     assert_eq!(env!("NAC_BUILD_TRACK"), "dev");
     assert_eq!(
         env!("NAC_BUILD_ID"),
@@ -155,6 +162,7 @@ fn unset_track_custom_install_reports_dev_identity_and_uses_dev_store() {
 
 #[test]
 fn custom_dev_upgrade_refuses_before_network_or_install_mutation() {
+    let _binary_execution = BINARY_EXECUTION.lock().unwrap();
     assert_eq!(env!("NAC_BUILD_TRACK"), "dev");
     let root = temp_root("upgrade");
     std::fs::create_dir_all(&root).unwrap();
@@ -178,4 +186,20 @@ fn custom_dev_upgrade_refuses_before_network_or_install_mutation() {
     assert!(stderr.contains("make install-dev"), "{stderr}");
     assert_eq!(std::fs::read_dir(&install_dir).unwrap().count(), 0);
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(not(feature = "managed-fault-fixture"))]
+#[test]
+fn normal_binary_rejects_private_fault_controls_before_startup() {
+    let _binary_execution = BINARY_EXECUTION.lock().unwrap();
+    let root = temp_root("fault_exclusion");
+    let output = Command::new(BINARY)
+        .arg("--help")
+        .env("NAC_MANAGED_FAULT_ROOT", &root)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("managed fault controls require the private fault-fixture build"));
+    assert!(!root.exists());
 }

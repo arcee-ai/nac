@@ -31,6 +31,7 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
     const nativeEventSourceInit = createEventSource ? null : client.transport.eventSourceInit();
     const maxPendingEvents = Math.max(1, options.maxPendingEvents ?? DEFAULT_MAX_PENDING_EVENTS);
     let source = null;
+    let connectionTimer = null;
     let retryTimer = null;
     let retryDelay = INITIAL_RETRY_MS;
     let reconnectCursor = null;
@@ -48,6 +49,9 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
     };
     const observedCursor = () => pending.length > 0 ? cursorOf(pending[pending.length - 1]) : deliveredCursor;
     const closeSource = () => {
+        if (connectionTimer)
+            clearTimeout(connectionTimer);
+        connectionTimer = null;
         source?.close();
         source = null;
     };
@@ -130,14 +134,21 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
         else {
             source = new EventSource(url, nativeEventSourceInit ?? undefined);
         }
+        if (options.maxConnectionMs !== undefined) {
+            connectionTimer = setTimeout(scheduleReconnect, Math.max(1, options.maxConnectionMs));
+        }
+        const connection = source;
+        const isCurrentConnection = () => !closed && source === connection;
         source.onopen = () => {
+            if (!isCurrentConnection())
+                return;
             everOpened = true;
             failedAttempts = 0;
             retryDelay = INITIAL_RETRY_MS;
             setStatus("live");
         };
         source.addEventListener("session_event", (event) => {
-            if (!(event instanceof MessageEvent))
+            if (!isCurrentConnection() || !(event instanceof MessageEvent))
                 return;
             const envelope = parseEvent(event);
             if (!envelope)
@@ -171,7 +182,7 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
             void drain();
         });
         source.addEventListener("assistant_delta", (event) => {
-            if (!(event instanceof MessageEvent))
+            if (!isCurrentConnection() || !(event instanceof MessageEvent))
                 return;
             const parsed = parseEvent(event);
             if (!parsed)
@@ -180,7 +191,7 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
             handlers.onAssistantDelta?.(parsed);
         });
         source.addEventListener("replay_boundary", (event) => {
-            if (!(event instanceof MessageEvent))
+            if (!isCurrentConnection() || !(event instanceof MessageEvent))
                 return;
             const parsed = parseEvent(event);
             if (!parsed)
@@ -198,20 +209,22 @@ export function subscribeToSessionEvents(sessionId, handlers, options = {}) {
             handlers.onReplayBoundary?.(parsed);
         });
         source.addEventListener("replay_gap", (event) => {
-            if (!(event instanceof MessageEvent))
+            if (!isCurrentConnection() || !(event instanceof MessageEvent))
                 return;
             const parsed = parseEvent(event);
             if (parsed)
                 handlers.onReplayGap?.(parsed);
         });
         source.addEventListener("lagged", (event) => {
-            if (!(event instanceof MessageEvent))
+            if (!isCurrentConnection() || !(event instanceof MessageEvent))
                 return;
             const parsed = parseEvent(event);
             if (parsed)
                 handlers.onLagged?.(parsed);
         });
         source.onerror = () => {
+            if (!isCurrentConnection())
+                return;
             handleConnectionFailure();
         };
     };

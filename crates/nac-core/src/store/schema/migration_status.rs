@@ -143,6 +143,30 @@ pub fn migration_status(path: &Path) -> StoreMigrationStatus {
         Ok(None) => {}
     }
 
+    migration_status_observation(path, connect_existing, read_opened_schema_version)
+}
+
+/// Read-only probe observation preserves migration reporting without durable
+/// work admission, initialization, or a writable connection outside its owner.
+pub fn observe_probe_migration_status(path: &Path) -> StoreMigrationStatus {
+    migration_status_observation(path, connect_probe_read_only, |path| {
+        if let Ok(Some(version)) = read_schema_version_header(path) {
+            if version > STORE_SCHEMA_VERSION {
+                return Some(version);
+            }
+        }
+        connect_probe_read_only(path)
+            .ok()?
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .ok()
+    })
+}
+
+fn migration_status_observation(
+    path: &Path,
+    open: fn(&Path) -> Result<StoreConnection>,
+    read_version: fn(&Path) -> Option<i64>,
+) -> StoreMigrationStatus {
     let Ok(path) = std::fs::canonicalize(path) else {
         return StoreMigrationStatus {
             supported_schema_version: STORE_SCHEMA_VERSION,
@@ -151,7 +175,7 @@ pub fn migration_status(path: &Path) -> StoreMigrationStatus {
             failure: Some(StoreMigrationFailure::StoreUnavailable),
         };
     };
-    let Some(opened_schema_version) = read_opened_schema_version(&path) else {
+    let Some(opened_schema_version) = read_version(&path) else {
         return StoreMigrationStatus {
             supported_schema_version: STORE_SCHEMA_VERSION,
             opened_schema_version: None,
@@ -192,7 +216,7 @@ pub fn migration_status(path: &Path) -> StoreMigrationStatus {
             failure: None,
         };
     }
-    let schema_valid = connect_existing(&path)
+    let schema_valid = open(&path)
         .and_then(|connection| {
             connection
                 .query_row(

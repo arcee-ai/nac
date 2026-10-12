@@ -34,6 +34,8 @@ export interface SessionStreamOptions {
     eventSource?: EventSourceFactory;
     instrumentation?: SessionStreamInstrumentation;
     maxPendingEvents?: number;
+    /** Finite connection lease; each reconnect obtains a fresh stream context. */
+    maxConnectionMs?: number;
 }
 /**
  * Open a stream for one session. Delivery is ordered and bounded. If a slow

@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   useEffect,
   useRef,
@@ -24,14 +25,7 @@ import {
   clampPanelListWidth,
   PANEL_LIST_MAX_RATIO,
   PANEL_LIST_MIN_WIDTH,
-  setPanelListWidth,
-  usePanelListWidth,
 } from "@/app/hooks/usePanelListWidth";
-import {
-  showSidePanelList,
-  toggleSidePanelList,
-  useSidePanelList,
-} from "@/app/store/sessionLayoutStore";
 
 /**
  * The shape all three side-box panels share: a narrow list of rows on the left
@@ -66,6 +60,11 @@ export function PanelSplit({
   actions?: ReactNode;
   children: ReactNode;
 }) {
+  const { setPanelListWidth, usePanelListWidth } = useNativeRuntime().stores.panelWidth;
+
+  const { useSidePanelList, toggleSidePanelList, showSidePanelList } =
+    useNativeRuntime().stores.sessionLayoutStore;
+
   const storedWidth = usePanelListWidth();
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
@@ -73,6 +72,8 @@ export function PanelSplit({
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const dragging = useRef(false);
+  const releaseDrag = useRef<(() => void) | null>(null);
+  useEffect(() => () => releaseDrag.current?.(), []);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -92,32 +93,37 @@ export function PanelSplit({
     const container = containerRef.current;
     if (!container) return;
     event.preventDefault();
+    releaseDrag.current?.();
     dragging.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    const handle = event.currentTarget;
+    const cursor = container.style.cursor;
+    const userSelect = container.style.userSelect;
+    container.style.cursor = "col-resize";
+    container.style.userSelect = "none";
 
     const onMove = (moveEvent: PointerEvent) => {
-      if (!dragging.current) return;
+      if (!dragging.current || moveEvent.pointerId !== event.pointerId) return;
       const rect = container.getBoundingClientRect();
       const next = moveEvent.clientX - rect.left;
       setPanelListWidth(clampPanelListWidth(next, rect.width * PANEL_LIST_MAX_RATIO));
     };
 
-    const onUp = (upEvent: PointerEvent) => {
+    const onUp = () => {
       dragging.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      container.style.cursor = cursor;
+      container.style.userSelect = userSelect;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
       try {
-        event.currentTarget.releasePointerCapture(upEvent.pointerId);
+        handle.releasePointerCapture(event.pointerId);
       } catch {
         // Already released.
       }
     };
 
+    releaseDrag.current = onUp;
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);

@@ -9,7 +9,8 @@ import {
   type ManagedUpgradeOperation,
   type ManagedUpgradeReleaseIdentity,
 } from "@/app/features/managed/upgrade";
-import { api } from "@/app/services/api";
+import type { NacApi } from "@/app/services/api";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 
 export type UpgradeBlockerSettlement = "requesting" | "settling" | "failed";
 
@@ -22,7 +23,7 @@ function required(value: string | undefined): string {
   return value;
 }
 
-async function settleBlocker(blocker: ManagedUpgradeBlocker): Promise<void> {
+async function settleBlocker(api: NacApi, blocker: ManagedUpgradeBlocker): Promise<void> {
   if (!blocker.actionable || blocker.action === "wait" || !blocker.target) {
     throw new Error("managed upgrade blocker is wait-only");
   }
@@ -78,6 +79,7 @@ function rediscoveredAcceptedStart(
  * the ordinary NAC operations named by the sanitized facade projection.
  */
 export function useManagedUpgrade() {
+  const { api } = useNativeRuntime();
   const snapshot = useManagedUpgradeSnapshot();
   const startMutation = useStartManagedUpgrade();
   const retryKey = useRef<string | null>(null);
@@ -150,14 +152,14 @@ export function useManagedUpgrade() {
     async (blocker: ManagedUpgradeBlocker) => {
       setSettlements((current) => ({ ...current, [blocker.selection_key]: "requesting" }));
       try {
-        await settleBlocker(blocker);
+        await settleBlocker(api, blocker);
         setSettlements((current) => ({ ...current, [blocker.selection_key]: "settling" }));
         await snapshot.refetch();
       } catch {
         setSettlements((current) => ({ ...current, [blocker.selection_key]: "failed" }));
       }
     },
-    [snapshot],
+    [snapshot, api],
   );
 
   return {

@@ -3,6 +3,87 @@ use crate::model::ModelClient;
 use crate::session_service::tests::test_direct_active_service;
 
 #[tokio::test(flavor = "current_thread")]
+async fn idle_direct_wake_waits_for_persistence_without_leasing_mutations() {
+    let (parts, path) =
+        test_direct_active_service("idle_wake_lease", "session", ModelClient::new_for_test());
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let (pending, release, _) = crate::store::coordinator::block_executor(&owner);
+    let service = parts.service.clone();
+    let wake = tokio::spawn(async move { service.start_next_direct_inbox_item().await });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while owner.stats().queued == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    // The executor barrier keeps the wake in flight at its first store call.
+    // A read with no durable work must leave mutation admission available.
+    let mutation = sessions::SessionOperationLease::try_acquire(&path, "session");
+    release.send(()).unwrap();
+    pending.acknowledge().await.unwrap();
+    assert!(wake.await.unwrap().unwrap().is_none());
+    owner.shutdown().await.unwrap();
+    assert!(mutation.is_ok(), "idle wake held the operation lease");
+}
+
+#[tokio::test]
+async fn direct_wake_reconciles_paused_goal_claim_only_under_operation_lease() {
+    let (parts, path) =
+        test_direct_active_service("paused_wake_lease", "session", ModelClient::new_for_test());
+    let goal =
+        crate::store::create_session_goal(&path, "session", "retain goal", None, None).unwrap();
+    let claimed = crate::store::bind_session_goal_run(
+        &path,
+        "session",
+        &crate::store::GoalRunBaseline {
+            run_id: "stale-run".into(),
+            billable_tokens: 0,
+            started_at_epoch_ms: 1,
+            continuation: false,
+        },
+    )
+    .unwrap()
+    .unwrap();
+    let claimed = crate::store::update_session_goal_by_user(
+        &path,
+        "session",
+        &goal.goal_id,
+        claimed.version,
+        crate::store::UserGoalUpdate {
+            status: Some(crate::store::GoalStatus::Paused),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+    assert!(parts
+        .service
+        .start_next_direct_inbox_item()
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        crate::store::load_session_goal(&path, "session").unwrap(),
+        Some(claimed.clone())
+    );
+    drop(lease);
+    assert!(parts
+        .service
+        .start_next_direct_inbox_item()
+        .await
+        .unwrap()
+        .is_none());
+    let reconciled = crate::store::load_session_goal(&path, "session")
+        .unwrap()
+        .unwrap();
+    assert_eq!(reconciled.goal_id, goal.goal_id);
+    assert_eq!(reconciled.status, crate::store::GoalStatus::Paused);
+    assert!(reconciled.accounting_run_id.is_none());
+    assert_eq!(reconciled.version, claimed.version + 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn queued_inbox_and_cancellation_do_not_block_runtime_timers() {
     let (parts, path) =
         test_direct_active_service("owned_cancel_gate", "session", ModelClient::new_for_test());

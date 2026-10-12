@@ -1,11 +1,12 @@
 use super::*;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 mod managed_tables;
 mod migration_status;
 mod model_configurations;
+mod transaction_observation;
 mod transcript_tables;
 mod wal_preflight;
 
@@ -13,7 +14,8 @@ mod wal_preflight;
 use migration_status::has_migration_observation;
 use migration_status::{begin_migration, finish_migration};
 pub use migration_status::{
-    migration_status, StoreMigrationFailure, StoreMigrationState, StoreMigrationStatus,
+    migration_status, observe_probe_migration_status, StoreMigrationFailure, StoreMigrationState,
+    StoreMigrationStatus,
 };
 
 pub(super) use managed_tables::create_managed_maintenance_tables;
@@ -218,21 +220,61 @@ static CONNECTION_CAPACITY: std::sync::LazyLock<Arc<ConnectionCapacity>> =
     });
 
 pub(crate) struct StoreConnection {
-    connection: Connection,
+    connection: Option<Connection>,
     _permit: ConnectionPermit,
+    _transaction_observation: Option<Box<transaction_observation::TransactionObservation>>,
+}
+
+impl Drop for StoreConnection {
+    fn drop(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            if let Some(observation) = &self._transaction_observation {
+                observation.detach(&connection);
+            }
+            drop(connection);
+            if let Some(observation) = &mut self._transaction_observation {
+                observation.finish_abandoned();
+            }
+        }
+    }
 }
 
 impl Deref for StoreConnection {
     type Target = Connection;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "construction installs a connection; only exclusive Drop takes it"
+    )]
     fn deref(&self) -> &Self::Target {
-        &self.connection
+        self.connection
+            .as_ref()
+            .expect("store connection is live until drop")
     }
 }
 
-impl DerefMut for StoreConnection {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.connection
+impl StoreConnection {
+    // Keep the native connection's identity fixed: mutable Deref would permit
+    // replacing it while its raw callbacks still reference this owner's Box.
+    #[expect(
+        clippy::expect_used,
+        reason = "construction installs a connection; only exclusive Drop takes it"
+    )]
+    fn connection_mut(&mut self) -> &mut Connection {
+        self.connection
+            .as_mut()
+            .expect("store connection is live until drop")
+    }
+
+    pub(crate) fn transaction(&mut self) -> rusqlite::Result<rusqlite::Transaction<'_>> {
+        self.connection_mut().transaction()
+    }
+
+    pub(crate) fn transaction_with_behavior(
+        &mut self,
+        behavior: rusqlite::TransactionBehavior,
+    ) -> rusqlite::Result<rusqlite::Transaction<'_>> {
+        self.connection_mut().transaction_with_behavior(behavior)
     }
 }
 
@@ -450,18 +492,30 @@ fn connect_with_capacity_using(
     timeout: Duration,
     open: impl FnOnce(&Path) -> rusqlite::Result<Connection>,
 ) -> Result<StoreConnection> {
+    let path = resolved_store_path(path)?;
+    super::coordinator::require_execution_owner(&path)?;
+    connect_after_authority_check(&path, capacity, timeout, open)
+}
+
+fn connect_after_authority_check(
+    path: &Path,
+    capacity: &Arc<ConnectionCapacity>,
+    timeout: Duration,
+    open: impl FnOnce(&Path) -> rusqlite::Result<Connection>,
+) -> Result<StoreConnection> {
     crate::telemetry::observe_store(
         crate::telemetry::StoreOperation::ConnectionAcquire,
         crate::telemetry::Correlation::default(),
         || {
-            let path = resolved_store_path(path)?;
-            super::coordinator::require_execution_owner(&path)?;
+            let path = path.to_path_buf();
             let permit = capacity.acquire(&path, timeout)?;
             let connection = open(&path)
                 .with_context(|| format!("failed to open SQLite store {}", path.display()))?;
-            let mut conn = StoreConnection {
-                connection,
+            let transaction_observation = transaction_observation::install(&connection);
+            let conn = StoreConnection {
+                connection: Some(connection),
                 _permit: permit,
+                _transaction_observation: transaction_observation,
             };
             #[cfg(test)]
             {
@@ -473,9 +527,6 @@ fn connect_with_capacity_using(
                 }
             }
             conn.busy_timeout(Duration::from_secs(5))?;
-            if crate::telemetry::enabled() {
-                conn.profile(Some(crate::telemetry::sqlite_profile));
-            }
             let (process_count, store_count) = capacity.counts(&path);
             crate::telemetry::emit_connection_counts(
                 process_count,
@@ -533,6 +584,35 @@ fn connect_read_only(path: &Path) -> Result<StoreConnection> {
             )
         },
     )
+}
+
+// This narrow observer cannot obtain executor authority or a writable
+// connection. Ordinary opens above continue to require the execution owner.
+fn connect_probe_read_only(path: &Path) -> Result<StoreConnection> {
+    let path = std::fs::canonicalize(path)?;
+    connect_after_authority_check(
+        &path,
+        &CONNECTION_CAPACITY,
+        CONNECTION_WAIT_TIMEOUT,
+        |path| {
+            Connection::open_with_flags(
+                path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+        },
+    )
+}
+
+pub(crate) fn open_probe_read_connection(path: &Path) -> Result<StoreConnection> {
+    reject_future_schema_before_open(path)?;
+    let conn = connect_probe_read_only(path)?;
+    let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    anyhow::ensure!(
+        version == STORE_SCHEMA_VERSION,
+        "probe store is not initialized"
+    );
+    Ok(conn)
 }
 
 /// Opens an already initialized store for read-only runtime observation.

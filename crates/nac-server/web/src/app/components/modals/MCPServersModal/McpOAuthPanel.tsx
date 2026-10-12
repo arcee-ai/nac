@@ -12,36 +12,10 @@ import {
 import { FieldLabel } from "@/app/components/modals/ConfigRow";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
-type OAuthStatus =
-  | "needs_configuration"
-  | "needs_authorization"
-  | "connecting"
-  | "connected"
-  | "failed";
-
-interface OAuthStatusResponse {
-  status: OAuthStatus;
-  message?: string;
-  authorization_url?: string;
-}
-
-interface AuthenticateResponse {
-  status: OAuthStatus;
-  authorization_url: string;
-}
-
-async function oauthRequest<T>(path: string, method: "GET" | "POST", body?: object): Promise<T> {
-  const response =
-    method === "GET"
-      ? await fetch(path, { method: "GET" })
-      : await fetch(path, {
-          method: "POST",
-          headers: body ? { "content-type": "application/json" } : undefined,
-          body: body ? JSON.stringify(body) : undefined,
-        });
-  if (!response.ok) throw new Error("The OAuth request could not be completed.");
-  return (await response.json()) as T;
-}
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import type { ConfigureMcpOAuthRequest } from "../../../../../packages/nac-client/src/types.js";
+import type { ApiSchema } from "@/app/types/openapi.generated";
+type OAuthStatus = ApiSchema<"McpOAuthPublicStatus">;
 
 function statusLabel(status: OAuthStatus | null): string {
   switch (status) {
@@ -61,6 +35,7 @@ function statusLabel(status: OAuthStatus | null): string {
 }
 
 export function McpOAuthPanel({ serverName }: { serverName: string }) {
+  const { api } = useNativeRuntime();
   const isMobile = useIsMobile();
   const [status, setStatus] = useState<OAuthStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -76,12 +51,11 @@ export function McpOAuthPanel({ serverName }: { serverName: string }) {
   const [clientName, setClientName] = useState("NAC MCP Client");
   const [scopes, setScopes] = useState("channels:history\nchat:write");
   const [metadataOverride, setMetadataOverride] = useState("");
-  const base = `/mcp_library/servers/${encodeURIComponent(serverName)}/oauth`;
 
   const refresh = useCallback(
     async (retrying = false) => {
       try {
-        const response = await oauthRequest<OAuthStatusResponse>(`${base}/status`, "GET");
+        const response = await api.getMcpOAuthStatus(serverName);
         setStatus(response.status);
         setMessage(response.message ?? null);
         setAuthorizationUrl(response.authorization_url ?? null);
@@ -94,7 +68,7 @@ export function McpOAuthPanel({ serverName }: { serverName: string }) {
         );
       }
     },
-    [base],
+    [api, serverName],
   );
 
   useEffect(() => {
@@ -126,16 +100,16 @@ export function McpOAuthPanel({ serverName }: { serverName: string }) {
       setMessage("A client metadata document URL is required.");
       return;
     }
-    let authorizationMetadata: object | undefined;
+    let authorizationMetadata: ConfigureMcpOAuthRequest["authorization_metadata"];
     try {
       authorizationMetadata = metadataOverride.trim()
-        ? (JSON.parse(metadataOverride) as object)
+        ? (JSON.parse(metadataOverride) as ConfigureMcpOAuthRequest["authorization_metadata"])
         : undefined;
     } catch {
       setMessage("The authorization metadata override must be valid JSON.");
       return;
     }
-    const registration =
+    const registration: ConfigureMcpOAuthRequest["registration"] =
       registrationType === "pre_registered"
         ? {
             type: "pre_registered",
@@ -148,7 +122,7 @@ export function McpOAuthPanel({ serverName }: { serverName: string }) {
     setBusy(true);
     setMessage(null);
     try {
-      const response = await oauthRequest<OAuthStatusResponse>(`${base}/configure`, "POST", {
+      const response = await api.configureMcpOAuth(serverName, {
         registration,
         scopes: scopes
           .split("\n")
@@ -173,7 +147,7 @@ export function McpOAuthPanel({ serverName }: { serverName: string }) {
     setMessage(null);
     setAuthorizationUrl(null);
     try {
-      const response = await oauthRequest<AuthenticateResponse>(`${base}/authenticate`, "POST");
+      const response = await api.authenticateMcpOAuth(serverName);
       setStatus(response.status);
       setAuthorizationUrl(response.authorization_url);
     } catch {
@@ -189,7 +163,7 @@ export function McpOAuthPanel({ serverName }: { serverName: string }) {
     setMessage(null);
     setAuthorizationUrl(null);
     try {
-      const response = await oauthRequest<OAuthStatusResponse>(`${base}/logout`, "POST");
+      const response = await api.logoutMcpOAuth(serverName);
       setStatus(response.status);
     } catch {
       setMessage("OAuth logout could not complete.");

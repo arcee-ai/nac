@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import {
   creationBehavior,
@@ -30,7 +31,7 @@ import {
   newestPrimarySessionForProject,
 } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
-import { api } from "@/app/services/api";
+
 import {
   useCreateModelConfig,
   useCreateSession,
@@ -131,6 +132,8 @@ function NewChatForm({
   firstChat: boolean;
   onClose: () => void;
 }) {
+  const { api } = useNativeRuntime();
+
   const navigate = useNavigate();
   const action = useSetupAction();
   const client = useQueryClient();

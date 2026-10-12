@@ -14,6 +14,7 @@ is_machine_written() {
             crates/nac-server/web/src/app/types/openapi.generated.ts | \
             crates/nac-server/web/packages/nac-client/src/openapi.generated.ts | \
             crates/nac-server/web/packages/nac-client/dist/* | \
+            crates/nac-server/web/packages/nac-presentation/dist/* | \
             crates/nac-server/web/src/app/atoms/file-icon/manifest.generated.ts | \
             crates/nac-server/assets/dist/* | \
             crates/nac-core/src/model/catalog/data/catalog.json | \

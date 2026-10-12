@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { visibleSessions } from "@/app/features/ui-policy/policy";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
@@ -14,8 +15,7 @@ import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEW_CHAT_KEYS, NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { pruneChatTabs } from "@/app/store/chatTabsStore";
-import { pruneSessionNavigation } from "@/app/store/sessionNavigationStore";
+
 import {
   useAssignSessionToProject,
   useProjects,
@@ -48,6 +48,10 @@ type ModalKind = "create" | "assign" | "rename" | "delete";
  * share, along with the dialogs they open, so every surface behaves the same.
  */
 export function ProjectActionsProvider({ children }: { children: React.ReactNode }) {
+  const { pruneSessionNavigation } = useNativeRuntime().stores.sessionNavigationStore;
+
+  const { pruneChatTabs } = useNativeRuntime().stores.chatTabsStore;
+
   const toast = useToast();
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -139,7 +143,7 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
     pruneSessionNavigation(
       primarySessions(existingSessions).map((entry) => entry.summary.session_id),
     );
-  }, [sessionsLoaded, sessionsQuery.data, projectList]);
+  }, [sessionsLoaded, sessionsQuery.data, projectList, pruneChatTabs, pruneSessionNavigation]);
 
   // Which project the screen is about, whether it was reached by its own route
   // or through one of its chats. Hidden chats retain their project identity so

@@ -1,19 +1,25 @@
 import type { QueryClient } from "@tanstack/react-query";
 
-import { api } from "@/app/services/api";
+import { runtimeForQueryClient } from "@/app/runtime/nativeRuntime";
 import { queryKeys } from "@/app/services/queries/keys";
-import {
-  captureRuntimeActivation,
-  finishRunCancel,
-  requestRunCancel,
-  restoreRunCancel,
-  runtimeStore,
-} from "@/app/store/runtimeStore";
+
 import type { ManagedSessionSummary, SessionSnapshotResponse } from "@/app/types/api";
 import type { stopRun } from "./commandWorkflow";
 
 /** Restore only optimistic objects still owned by this request; keep newer reads/events. */
 export function makeStopPorts(client: QueryClient, id: string): Parameters<typeof stopRun>[0] {
+  const {
+    api,
+    stores: {
+      runtimeStore: {
+        captureRuntimeActivation,
+        finishRunCancel,
+        requestRunCancel,
+        restoreRunCancel,
+        runtimeStore,
+      },
+    },
+  } = runtimeForQueryClient(client);
   const current = captureRuntimeActivation(id);
   const snapshotKey = queryKeys.sessionSnapshot(id);
   let runtime: ReturnType<typeof requestRunCancel> | undefined;

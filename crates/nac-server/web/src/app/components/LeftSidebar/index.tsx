@@ -1,10 +1,10 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useCallback, useLayoutEffect, useState } from "react";
 
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { cn } from "@/app/lib/cn";
 import { MOD } from "@/app/lib/shortcuts";
-import { setSidebarOffset } from "@/app/store/sidebarLayoutStore";
 
 import { LeftSidebarPanel } from "./LeftSidebarPanel";
 import { LeftSidebarRail } from "./LeftSidebarRail";
@@ -15,19 +15,7 @@ export const SIDEBAR_RAIL_WIDTH = 52;
 /** Expanded panel, matching the Figma sidebar. */
 export const SIDEBAR_PANEL_WIDTH = 320;
 
-const STORAGE_KEY = "nac.sidebar.open";
 const TOGGLE_KEYS = [MOD, "h"];
-
-function storedOpen(): boolean | null {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "0") return false;
-    if (stored === "1") return true;
-  } catch {
-    // A private-mode store that throws is the same as no preference.
-  }
-  return null;
-}
 
 /**
  * Collapsible session navigation, in the ArceeFM arrangement: a 52px rail stays
@@ -35,6 +23,8 @@ function storedOpen(): boolean | null {
  * the row lays out against, so opening the panel pushes the chat aside.
  */
 export function LeftSidebar({ variant = "session" }: { variant?: "session" | "projects" }) {
+  const { setSidebarOffset, storedOpen, storeOpen } = useNativeRuntime().stores.sidebarLayoutStore;
+
   const isMobile = useIsMobile();
   const isDesktop = useIsDesktop();
   // A phone-sized first paint must not freeze a closed value into storage or
@@ -45,23 +35,19 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
   const toggle = useCallback(() => {
     setUserOpen((current) => {
       const next = !(current ?? storedOpen() ?? isDesktop);
-      try {
-        localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
-      } catch {
-        // Preference is convenience; the sidebar still works without it.
-      }
+      storeOpen(next);
       return next;
     });
-  }, [isDesktop]);
+  }, [isDesktop, storedOpen, storeOpen]);
   const commands = useSidebarCommands();
 
   useLayoutEffect(() => {
     setSidebarOffset(isMobile ? 0 : isOpen ? SIDEBAR_PANEL_WIDTH : SIDEBAR_RAIL_WIDTH);
-  }, [isMobile, isOpen]);
+  }, [isMobile, isOpen, setSidebarOffset]);
 
   useLayoutEffect(() => {
     return () => setSidebarOffset(0);
-  }, []);
+  }, [setSidebarOffset]);
 
   useKeyboardShortcuts([{ keys: TOGGLE_KEYS, onTrigger: toggle, enabled: !isMobile }]);
 

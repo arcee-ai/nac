@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { sessionAvailable } from "@/app/features/ui-policy/policy";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
@@ -40,33 +41,6 @@ import {
   useSshConnect,
   useWorkspaceRevisionChanges,
 } from "@/app/services/queries";
-import { clearAttention } from "@/app/store/attentionStore";
-import {
-  bindSidePanelProject,
-  unbindSidePanelProject,
-  resetSessionSelection,
-  setSidePanelAnimate,
-  revealSidePanel,
-  showSidePanelList,
-  toggleSidePanelCollapsed,
-  toggleSidePanelExpanded,
-  toggleSidePanelList,
-  useSelectedFile,
-  useSelectedRevision,
-  useSelectedThread,
-  useSelectedThreadRunning,
-  useSelectedWorkset,
-  useSidePanelAnimate,
-  useSidePanelCollapsed,
-  useSidePanelExpanded,
-} from "@/app/store/sessionLayoutStore";
-import {
-  markSshConnected,
-  markSshDisconnected,
-  sshTargetFromSummary,
-  sshTargetKey,
-  useSshConnectionStatus,
-} from "@/app/store/sshConnectionStore";
 
 /**
  * Opens an SSH browse handshake once when landing on a remote session that is
@@ -84,7 +58,15 @@ function useAutoSshConnect(
     | null
     | undefined,
 ) {
-  const target = useMemo(() => sshTargetFromSummary(summary), [summary]);
+  const {
+    useSshConnectionStatus,
+    sshTargetKey,
+    sshTargetFromSummary,
+    markSshDisconnected,
+    markSshConnected,
+  } = useNativeRuntime().stores.sshConnectionStore;
+
+  const target = useMemo(() => sshTargetFromSummary(summary), [sshTargetFromSummary, summary]);
   const status = useSshConnectionStatus(target);
   const connect = useSshConnect();
   const attemptedKey = useRef<string | null>(null);
@@ -106,11 +88,33 @@ function useAutoSshConnect(
       .mutateAsync(target)
       .then(() => markSshConnected(target))
       .catch(() => markSshDisconnected(target));
-  }, [target, status, connect]);
+  }, [target, status, connect, sshTargetKey, markSshConnected, markSshDisconnected]);
 }
 
 /** Session screen: the Files/Worksets/Threads box beside a permanent chat. */
 export default function SessionPage() {
+  const {
+    useSidePanelExpanded,
+    useSidePanelCollapsed,
+    useSidePanelAnimate,
+    useSelectedWorkset,
+    useSelectedThreadRunning,
+    useSelectedThread,
+    useSelectedRevision,
+    useSelectedFile,
+    toggleSidePanelList,
+    toggleSidePanelExpanded,
+    toggleSidePanelCollapsed,
+    showSidePanelList,
+    revealSidePanel,
+    setSidePanelAnimate,
+    resetSessionSelection,
+    unbindSidePanelProject,
+    bindSidePanelProject,
+  } = useNativeRuntime().stores.sessionLayoutStore;
+
+  const { clearAttention } = useNativeRuntime().stores.attentionStore;
+
   const { sessionId, panel } = useParams<{
     sessionId: string;
     panel?: string;
@@ -172,14 +176,14 @@ export default function SessionPage() {
   useEffect(() => {
     if (id) clearAttention(id);
     resetSessionSelection();
-  }, [id]);
+  }, [clearAttention, id, resetSessionSelection]);
 
   const projectKey = entry ? (entry.summary.project_id ?? "") : null;
   useLayoutEffect(() => {
     unbindSidePanelProject();
     if (projectKey == null) return;
     bindSidePanelProject(projectKey);
-  }, [id, projectKey]);
+  }, [bindSidePanelProject, id, projectKey, unbindSidePanelProject]);
 
   // Restored after paint, so the launch open has already landed at full width
   // and putting the tween back does not replay it.
@@ -187,7 +191,7 @@ export default function SessionPage() {
     if (animateSidePanel) return undefined;
     const frame = requestAnimationFrame(() => setSidePanelAnimate(true));
     return () => cancelAnimationFrame(frame);
-  }, [animateSidePanel]);
+  }, [animateSidePanel, setSidePanelAnimate]);
 
   if (behaviorKnown && !available)
     return (

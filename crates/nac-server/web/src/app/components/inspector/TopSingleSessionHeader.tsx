@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { RunDetails } from "@/app/features/direct-session/RunDetails";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect } from "react";
@@ -34,16 +35,7 @@ import {
   useVisibleSessions,
   useWorkspaceRevisionChanges,
 } from "@/app/services/queries";
-import { selectRevision, useSelectedRevision } from "@/app/store/sessionLayoutStore";
-import {
-  liftSessionSpend,
-  useCancelArmed,
-  useLastElapsedMs,
-  useRunStartedAt,
-  useRunUsage,
-  useRunning,
-  useSessionSpend,
-} from "@/app/store/runtimeStore";
+
 import type {
   ManagedSessionSummary,
   SessionBehavior,
@@ -112,6 +104,18 @@ export function TopSingleSessionHeader({
   /** Restores the side panel while it is slid away. */
   onShowPanel?: () => void;
 }) {
+  const {
+    useSessionSpend,
+    useRunning,
+    useRunUsage,
+    useRunStartedAt,
+    useLastElapsedMs,
+    useCancelArmed,
+    liftSessionSpend,
+  } = useNativeRuntime().stores.runtimeStore;
+
+  const { useSelectedRevision, selectRevision } = useNativeRuntime().stores.sessionLayoutStore;
+
   const navigate = useNavigate();
   const sessionTitle = useSessionTitle();
   const { data: sessions = [] } = useVisibleSessions();
@@ -121,7 +125,7 @@ export function TopSingleSessionHeader({
   const sessionSpend = useSessionSpend();
   useEffect(() => {
     liftSessionSpend(tokenUsage(snapshot));
-  }, [snapshot]);
+  }, [liftSessionSpend, snapshot]);
   const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
   const catalog = useModelCatalog();
   const persistedUsage = tokenUsage(snapshot);

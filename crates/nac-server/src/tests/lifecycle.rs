@@ -1,5 +1,65 @@
 use super::*;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cold_attachment_and_resume_do_not_read_unrelated_session_lineage() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("point_attachment");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("synthetic-key"));
+    seed_direct_session(&root, "target");
+    for index in 0..48 {
+        seed_direct_session(&root, &format!("other-{index}"));
+    }
+    let exporter = Arc::new(nac_core::telemetry::InMemoryExporter::default());
+    let recorder = nac_core::telemetry::TelemetryRecorder::bounded(
+        exporter.clone(),
+        nac_core::telemetry::RuntimeMetadata::sqlite(
+            "test",
+            "test",
+            nac_core::store::schema_version(),
+            None,
+            None,
+        ),
+        nac_core::telemetry::MAX_EXPORT_QUEUE_CAPACITY,
+    );
+    let _telemetry = nac_core::telemetry::install_test_recorder(recorder.clone());
+    let manager = owned_test_manager(&root).unwrap();
+    let app = router(manager.clone());
+    let response = get_response(app, "/sessions/target?include_sessions=false", None).await;
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let snapshot: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(snapshot["metadata"]["session_id"], "target");
+    assert_eq!(snapshot["sessions"], serde_json::json!([]));
+    manager.inner.active_sessions.write().await.clear();
+    let service = manager.resume_session("target", None).await.unwrap();
+    drop(service);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while recorder.stats().exported < recorder.stats().accepted {
+        assert!(Instant::now() < deadline, "telemetry did not drain");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let target = nac_core::telemetry::Correlation::session(Some("target")).session;
+    let commands = exporter
+        .events()
+        .into_iter()
+        .filter(|event| {
+            event.operation == Some(nac_core::telemetry::StoreOperation::QueueExecution)
+        })
+        .collect::<Vec<_>>();
+    assert!(commands
+        .iter()
+        .any(|event| event.correlation.session == target));
+    assert!(
+        commands.iter().all(|event| {
+            event.correlation.session.is_none() || event.correlation.session == target
+        }),
+        "point attachment must not query unrelated durable sessions"
+    );
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[tokio::test]
 async fn steering_routes_reject_blank_before_lookup_and_keep_inactive_conflicts() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();

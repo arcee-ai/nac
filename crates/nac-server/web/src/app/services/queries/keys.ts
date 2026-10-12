@@ -33,8 +33,8 @@ export const queryKeys = {
         hidden,
       },
     ] as const,
-  providerModels: (backend: string, apiKey: string, baseUrl: string) =>
-    ["provider-models", { backend, apiKey, baseUrl }] as const,
+  providerModels: (backend: string, credentialIdentity: string, baseUrl: string) =>
+    ["provider-models", { backend, credentialIdentity, baseUrl }] as const,
   storedKeyProviderModels: (backend: string, apiKeyEnv: string, baseUrl: string) =>
     ["stored-key-provider-models", { backend, apiKeyEnv, baseUrl }] as const,
   managedProviderModels: (backend: string) => ["managed-provider-models", backend] as const,

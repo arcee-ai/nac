@@ -24,10 +24,26 @@ workspace revisions, recovery markers, and cross-process coordination.
   canonical resource and scope semantics.
 - Store modules do not depend on Axum, provider clients, React, or process
   execution. Higher layers coordinate effects around store transactions.
+- `managed_probe.rs` and the probe migration observer are narrow read-only
+  operational observations of committed WAL state. They retain connection
+  checkout limits and cannot create, migrate, or write a store, acquire durable
+  work admission, or obtain executor authority. Identity-bound HTTP probes
+  retain the existing shared host file lease before validation through response
+  completion, excluding replacement acceptance without entering the write queue.
+  All ordinary connection opens and durable commands retain the serving owner's
+  existing authority checks.
+- `managed-fault-fixture` is an explicitly selected private test-image feature.
+  Its one-shot commit-ack hook runs only after a successful real commit and
+  grants no store or executor authority. Controls and reached receipts bind to
+  one nonce/session/run/generation in an owner-only ephemeral capability root;
+  they never live in the durable store. Normal builds exclude the hook and
+  reject its control setting. Never enable it in shared release images.
 
 ## Starting points
 
 - `schema.rs` / `schema_tests.rs` — migrations and complete schema contract.
+- `managed_probe.rs` — committed store/maintenance readiness observations that
+  remain available while durable write admission is saturated.
 - `transcript.rs`, `thread_events.rs`, `threads.rs`, `worksets.rs` — durable
   execution history.
 - `transcript_append.rs` — identified transcript transactions, run/generation

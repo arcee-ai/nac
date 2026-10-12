@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
-import { modalStackDepth } from "@/app/hooks/useModalStack";
+import { usePresentationKeyboardOwner } from "@/app/providers/PresentationBoundary";
+import { useModalStack } from "@/app/hooks/useModalStack";
 import { hasModifier, matchesShortcut } from "@/app/lib/shortcuts";
 
 export interface KeyboardShortcutBinding {
@@ -30,6 +31,8 @@ function isTyping(target: EventTarget | null): boolean {
 export function useKeyboardShortcuts(bindings: KeyboardShortcutBinding[]): void {
   // Read through a ref, so a caller may pass a fresh array each render without
   // the listener being torn down and rebuilt along with it.
+  const { getStackLength: modalStackDepth } = useModalStack();
+  const ownsKeyboard = usePresentationKeyboardOwner();
   const latest = useRef(bindings);
   useEffect(() => {
     latest.current = bindings;
@@ -38,7 +41,7 @@ export function useKeyboardShortcuts(bindings: KeyboardShortcutBinding[]): void 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       // A held key repeats; opening one modal per repeat is not the intent.
-      if (event.repeat) return;
+      if (event.repeat || !ownsKeyboard(event.target)) return;
       for (const binding of latest.current) {
         if (binding.enabled === false) continue;
         if (!matchesShortcut(event, binding.keys)) continue;
@@ -51,5 +54,5 @@ export function useKeyboardShortcuts(bindings: KeyboardShortcutBinding[]): void 
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [modalStackDepth, ownsKeyboard]);
 }

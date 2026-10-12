@@ -1,3 +1,4 @@
+import { runtimeForQueryClient } from "@/app/runtime/nativeRuntime";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { SNAPSHOT_MESSAGE_LIMIT, mergeMessageTail } from "@/app/lib/messageWindow";
@@ -13,15 +14,7 @@ import {
   isCurrentSessionGeneration,
   sessionRefreshKey,
 } from "@/app/services/sessionRefresh";
-import {
-  applyAssistantDelta,
-  applyEnvelope,
-  captureRuntimeActivation,
-  clearRuntimeThreads,
-  resetRuntime,
-  setStreamStatus,
-  syncRunFromSnapshot,
-} from "@/app/store/runtimeStore";
+
 import type { SessionSnapshotResponse } from "@/app/types/api";
 import type { ObservationPorts } from "./streamReconciliation";
 
@@ -32,8 +25,20 @@ export function makeObservationPorts(
   adapters: {
     readMessages: typeof api.getMessages;
     subscribe: typeof subscribeToSessionEvents;
-  } = { readMessages: api.getMessages, subscribe: subscribeToSessionEvents },
+  } = {
+    readMessages: runtimeForQueryClient(client).api.getMessages,
+    subscribe: runtimeForQueryClient(client).events,
+  },
 ): ObservationPorts {
+  const {
+    applyAssistantDelta,
+    applyEnvelope,
+    captureRuntimeActivation,
+    clearRuntimeThreads,
+    resetRuntime,
+    setStreamStatus,
+    syncRunFromSnapshot,
+  } = runtimeForQueryClient(client).stores.runtimeStore;
   const refreshKey = sessionRefreshKey(client, id);
   let active = false;
   let ownsRuntime = () => false;

@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -25,7 +26,7 @@ import {
 } from "@/app/features/managed/queries";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+
 import { queryKeys } from "@/app/services/queries";
 import type { ManagedCloneOperation, ManagedGitHubRepository } from "@/app/types/api";
 
@@ -38,6 +39,8 @@ export function ManagedRepositoryModal({
   onClose: () => void;
   onConnect: () => void;
 }) {
+  const { api } = useNativeRuntime();
+
   const navigate = useNavigate();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -99,7 +102,7 @@ export function ManagedRepositoryModal({
       stopped = true;
       controller.abort();
     };
-  }, [operation, navigate, onClose, queryClient, toast]);
+  }, [operation, navigate, onClose, queryClient, toast, api]);
 
   const visibleRepositories = useMemo(() => {
     const needle = search.trim().toLowerCase();

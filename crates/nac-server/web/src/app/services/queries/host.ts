@@ -1,10 +1,11 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   authenticationCommand,
   runAuthentication,
 } from "@/app/features/managed/controller/authenticationWorkflow";
-import { api } from "@/app/services/api";
+
 import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
 import { queryKeys } from "@/app/services/queries/keys";
 import type {
@@ -16,6 +17,8 @@ import type {
 } from "@/app/types/api";
 
 export function useStoreInfo() {
+  const { api } = useNativeRuntime();
+
   return useQuery<StoreInfo>({
     queryKey: queryKeys.storeInfo,
     queryFn: ({ signal }) => api.getStore(signal),
@@ -29,6 +32,8 @@ export function useStoreInfo() {
  * the launch form with sandbox mode selected.
  */
 export function useSandboxAvailability(enabled: boolean) {
+  const { api } = useNativeRuntime();
+
   return useQuery<SandboxAvailability>({
     queryKey: queryKeys.sandboxAvailability,
     queryFn: ({ signal }) => api.getSandboxAvailability(signal),
@@ -45,6 +50,8 @@ export function useSandboxAvailability(enabled: boolean) {
  * with the create request, so concurrent launches stay independent.
  */
 export function useSandboxActivity(enabled: boolean, key: string | null) {
+  const { api } = useNativeRuntime();
+
   return useQuery<SandboxActivity | null>({
     queryKey: [...queryKeys.sandboxActivity, key],
     queryFn: ({ signal }) => api.getSandboxActivity(key as string, signal),
@@ -61,6 +68,8 @@ export function useSandboxActivity(enabled: boolean, key: string | null) {
  * set; failures are non-fatal because the environment may well supply the key.
  */
 export function useStoredCredentials(enabled = true) {
+  const { api } = useNativeRuntime();
+
   return useQuery<StoredCredentialList>({
     queryKey: queryKeys.credentials,
     queryFn: ({ signal }) => api.listCredentials(signal),
@@ -71,6 +80,8 @@ export function useStoredCredentials(enabled = true) {
 }
 
 export function useStoreCredential() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ name, value }: { name: string; value: string }) =>
@@ -84,6 +95,8 @@ export function useStoreCredential() {
  * thing the user supplies and the selector is an implementation detail.
  */
 export function useStoreGeneratedCredential() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: (value: string) => api.storeGeneratedCredential(value),
@@ -92,6 +105,8 @@ export function useStoreGeneratedCredential() {
 }
 
 export function useDeleteCredential() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => api.deleteCredential(name),
@@ -105,6 +120,8 @@ export function useDeleteCredential() {
  * file in NAC home that every session using that backend shares.
  */
 export function useManagedLogout() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     retry: false,

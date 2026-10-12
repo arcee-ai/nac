@@ -946,6 +946,20 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
 }
 
 coordinated_command! {
+/// Load one session's summary without enumerating unrelated durable sessions.
+pub fn load_session_summary(path: &Path, session_id: &str) -> Result<Option<SessionSummary>> {
+    let conn = crate::store::open_runtime_connection(path)?;
+    query_session_summary(&conn, session_id)
+}
+command LoadSessionSummaryCommand {
+    session_id: String = session_id.to_string(),
+}
+call |command| (&command.session_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+coordinated_command! {
 pub fn list_sessions(path: &Path) -> Result<Vec<SessionSummary>> {
     let conn = crate::store::open_runtime_connection(path)?;
     list_sessions_with_connection(&conn)

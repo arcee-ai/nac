@@ -1,5 +1,5 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { InitialPromptBox, IconName } from "@/app/atoms";
-import { sendPrompt } from "@/app/store/composerStore";
 
 interface Prompt {
   icon: IconName;
@@ -40,6 +40,8 @@ const PROMPTS: Prompt[] = [
  * the prompt itself rather than a summary of it.
  */
 export function InitialPrompts() {
+  const { sendPrompt } = useNativeRuntime().stores.composerStore;
+
   return (
     <div className="flex flex-1 flex-col justify-center gap-2">
       <p className="text-[10px] leading-[12px] font-medium uppercase text-input-placeholder">

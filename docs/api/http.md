@@ -25,14 +25,17 @@ temporary package is deliberately registry-free and cannot be published:
 Commit the consumer's `package-lock.json`; npm records the exact source URL and
 archive integrity. Installing the package requires no local NAC checkout,
 lifecycle script, or runtime dependency. The checked-in package exposes `NacClient`,
-`NacTransport`, explicit command-admission and error contracts,
+`NacTransport`, `createNacApi` for the full native resource facade, explicit
+command-admission and error contracts,
 snapshot/cursor replay, `subscribeToSessionEvents`, and the auth-capable SSE
 adapter seam. Its OpenAPI type subset is generated from the same Rust-owned
 contract as the standalone client, and NAC's web app imports the same source
 rather than maintaining a second transport.
 
-This artifact is evidence for the one hosted journey, not a registry release or
-the final package name, ownership, compatibility, or transport decision.
+The [native presentation seam](native-presentation.md) reuses the React client
+with a private runtime and caller-owned routing/styles. It is separate from
+this runtime-free tarball. ALL-122 still owns the final package name, ownership,
+compatibility and distribution decision.
 
 ## Health and SQLite capacity
 

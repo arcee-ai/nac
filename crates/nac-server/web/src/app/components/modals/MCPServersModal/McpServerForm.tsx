@@ -360,6 +360,7 @@ export function McpServerForm({
             variant={ButtonVariant.SecondaryDestructive}
             content={ButtonContent.Icon}
             className="mr-auto"
+            ariaLabel="Delete server"
             disabled={operationBusy}
             onClick={() => void removeRef.current()}
           >

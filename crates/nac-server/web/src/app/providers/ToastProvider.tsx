@@ -1,3 +1,4 @@
+import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundary";
 import React, {
   createContext,
   useCallback,
@@ -55,6 +56,8 @@ function ToastContainer({
   toasts: ToastRecord[];
   removeToast: (id: string) => void;
 }) {
+  const portalTarget = usePresentationPortalTarget();
+
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
@@ -96,7 +99,7 @@ function ToastContainer({
         </div>
       ))}
     </div>,
-    document.body,
+    portalTarget,
   );
 }
 

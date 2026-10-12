@@ -384,6 +384,7 @@ function ConfigurationForm({
               variant={ButtonVariant.SecondaryDestructive}
               content={ButtonContent.Icon}
               className="mr-auto"
+              aria-label="Delete configuration"
               disabled={busy}
               loading={deleteConfig.isPending}
               onClick={() => void removeRef.current()}
@@ -396,6 +397,7 @@ function ConfigurationForm({
               size={ButtonSize.Large}
               content={ButtonContent.Icon}
               className="mr-auto"
+              aria-label="Delete configuration"
               disabled={busy}
               loading={deleteConfig.isPending}
               onClick={() => void removeRef.current()}
@@ -492,6 +494,7 @@ function ConfigurationForm({
               <Input
                 inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                 className="w-full md:w-[280px]"
+                aria-label="Configuration name"
                 value={name}
                 onChange={(event) => edit(setNameDraft)(event.target.value)}
               />

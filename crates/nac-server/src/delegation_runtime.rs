@@ -42,6 +42,17 @@ pub(crate) fn load_managed_monitor_record(
     orchestrator_session_id: &str,
     generation: u64,
 ) -> anyhow::Result<Option<ManagedOrchestratorRecord>> {
+    #[cfg(feature = "managed-fault-fixture")]
+    if nac_core::managed_fault_fixture::hit(
+        nac_core::managed_fault_fixture::Boundary::MonitorRead,
+        orchestrator_session_id,
+        None,
+        Some(generation),
+    )? {
+        return Err(anyhow!(
+            "private fixture injected managed monitor read failure"
+        ));
+    }
     #[cfg(test)]
     if INJECTED_MANAGED_MONITOR_FAILURES
         .fetch_update(

@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -69,25 +70,7 @@ import {
   useUpdateGoal,
   useUpdateInboxItem,
 } from "@/app/services/queries";
-import { consumePromptRequests } from "@/app/store/composerStore";
-import { openSubagentLaunch, revealSidePanel } from "@/app/store/sessionLayoutStore";
-import {
-  captureRuntimeActivation,
-  liftSessionSpend,
-  pushLocalEvent,
-  useCancelArmed,
-  useLastElapsedMs,
-  useRunStartedAt,
-  useRunUsage,
-  useRunning,
-  useSessionSpend,
-} from "@/app/store/runtimeStore";
-import {
-  markSshConnected,
-  markSshDisconnected,
-  sshTargetFromSummary,
-  useSshConnectionStatus,
-} from "@/app/store/sshConnectionStore";
+
 import type {
   SkillCatalogEntry,
   SlashCommandDefinition,
@@ -265,6 +248,25 @@ function contextGauge(used: number | null, resolved: ResolvedCatalogModel) {
  * model, environment, cumulative token usage and the run timer.
  */
 export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) {
+  const { useSshConnectionStatus, sshTargetFromSummary, markSshDisconnected, markSshConnected } =
+    useNativeRuntime().stores.sshConnectionStore;
+
+  const {
+    useSessionSpend,
+    useRunning,
+    useRunUsage,
+    useRunStartedAt,
+    useLastElapsedMs,
+    useCancelArmed,
+    pushLocalEvent,
+    liftSessionSpend,
+    captureRuntimeActivation,
+  } = useNativeRuntime().stores.runtimeStore;
+
+  const { revealSidePanel, openSubagentLaunch } = useNativeRuntime().stores.sessionLayoutStore;
+
+  const { consumePromptRequests } = useNativeRuntime().stores.composerStore;
+
   const navigate = useNavigate();
   perfRender("ChatInputBox");
   const [value, setValue] = useState("");
@@ -340,7 +342,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const sessionSpend = useSessionSpend();
   useEffect(() => {
     liftSessionSpend(tokenUsage(snapshot));
-  }, [snapshot]);
+  }, [liftSessionSpend, snapshot]);
   const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
   const catalog = useModelCatalog();
@@ -632,7 +634,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       markSshDisconnected(sshTarget);
       toast.error(`SSH reconnect failed: ${errorMessage(toRunError(error))}`);
     }
-  }, [sshTarget, connectSsh, toast]);
+  }, [sshTarget, connectSsh, markSshConnected, markSshDisconnected, toast]);
 
   const runGoalCommand = useCallback(
     async (text: string) => {
@@ -680,7 +682,16 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       }
       await createGoal.mutateAsync({ sessionId, payload: { objective: argument } });
     },
-    [clearGoal, createGoal, direct, goalQuery, isMobile, sessionId, updateGoal],
+    [
+      captureRuntimeActivation,
+      clearGoal,
+      createGoal,
+      direct,
+      goalQuery,
+      isMobile,
+      sessionId,
+      updateGoal,
+    ],
   );
 
   /**
@@ -772,27 +783,32 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     },
     [
       value,
-      backend,
       busy,
+      captureRuntimeActivation,
+      sessionId,
+      resetHistory,
+      rowPx,
       commandDefinitions,
       refetchCommands,
-      sessionId,
-      submitRun,
-      compactSession,
       toast,
-      rowPx,
-      resetHistory,
+      compactSession,
+      pushLocalEvent,
+      backend,
+      runGoalCommand,
+      runningDirect,
+      runningClassic,
       createInboxItem,
       steerOrchestrator,
-      runGoalCommand,
-      runningClassic,
-      runningDirect,
+      submitRun,
     ],
   );
 
   // A starter prompt goes out on its own; it is already a whole instruction,
   // and the field is where it would otherwise have to be confirmed.
-  useEffect(() => consumePromptRequests((prompt) => void submit(prompt)), [submit]);
+  useEffect(
+    () => consumePromptRequests((prompt) => void submit(prompt)),
+    [consumePromptRequests, submit],
+  );
 
   const stop = useCallback(async () => {
     await actions.stopRun(sessionId);

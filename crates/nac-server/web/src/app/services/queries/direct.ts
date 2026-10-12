@@ -1,7 +1,7 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries/keys";
 import type {
   CreateGoalRequest,
@@ -19,6 +19,8 @@ import type {
 } from "@/app/types/api";
 
 export function useSessionPermissions(sessionId: string, enabled: boolean) {
+  const { api } = useNativeRuntime();
+
   return useQuery<PermissionStateResponse>({
     queryKey: queryKeys.sessionPermissions(sessionId),
     queryFn: ({ signal }) => api.getPermissions(sessionId, signal),
@@ -30,6 +32,8 @@ export function useSessionPermissions(sessionId: string, enabled: boolean) {
 }
 
 export function useReplyPermission() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -47,6 +51,8 @@ export function useReplyPermission() {
 }
 
 export function useSetPermissionApprovalMode() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ sessionId, mode }: { sessionId: string; mode: PermissionApprovalMode }) =>
@@ -68,6 +74,8 @@ export function useSetPermissionApprovalMode() {
 }
 
 export function useDeletePermissionGrant() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ sessionId, grantId }: { sessionId: string; grantId: string }) =>
@@ -78,6 +86,8 @@ export function useDeletePermissionGrant() {
 }
 
 export function useSessionGoal(sessionId: string, enabled: boolean) {
+  const { api } = useNativeRuntime();
+
   return useQuery<SessionGoalRecord | null>({
     queryKey: queryKeys.sessionGoal(sessionId),
     queryFn: ({ signal }) => api.getGoal(sessionId, signal),
@@ -88,6 +98,8 @@ export function useSessionGoal(sessionId: string, enabled: boolean) {
 }
 
 export function useCreateGoal() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ sessionId, payload }: { sessionId: string; payload: CreateGoalRequest }) =>
@@ -98,6 +110,8 @@ export function useCreateGoal() {
 }
 
 export function useUpdateGoal() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -115,6 +129,8 @@ export function useUpdateGoal() {
 }
 
 export function useClearGoal() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -132,6 +148,8 @@ export function useClearGoal() {
 }
 
 export function useTraditionalChildren(sessionId: string, enabled: boolean) {
+  const { api } = useNativeRuntime();
+
   return useQuery<TraditionalChildRecord[]>({
     queryKey: queryKeys.traditionalChildren(sessionId),
     queryFn: ({ signal }) => api.listTraditionalChildren(sessionId, signal),
@@ -142,6 +160,8 @@ export function useTraditionalChildren(sessionId: string, enabled: boolean) {
 }
 
 export function useStartTraditionalChild() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -166,6 +186,8 @@ export function useStartTraditionalChild() {
 }
 
 export function useCancelTraditionalChild() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ sessionId, childId }: { sessionId: string; childId: string }) =>
@@ -183,6 +205,8 @@ export function useCancelTraditionalChild() {
 }
 
 export function useManagedOrchestrators(sessionId: string, enabled: boolean) {
+  const { api } = useNativeRuntime();
+
   const policy = useUiPolicy();
   enabled = enabled && policy.orchestrationEnabled;
   return useQuery<ManagedOrchestratorRecord[]>({
@@ -195,6 +219,8 @@ export function useManagedOrchestrators(sessionId: string, enabled: boolean) {
 }
 
 export function useStartManagedOrchestrator() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -220,6 +246,8 @@ export function useStartManagedOrchestrator() {
 }
 
 export function useCancelManagedOrchestrator() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ sessionId, orchestratorId }: { sessionId: string; orchestratorId: string }) =>
@@ -239,6 +267,8 @@ export function useCancelManagedOrchestrator() {
 }
 
 export function useSessionInbox(sessionId: string, enabled: boolean) {
+  const { api } = useNativeRuntime();
+
   return useQuery<InboxItem[]>({
     queryKey: queryKeys.sessionInbox(sessionId),
     queryFn: ({ signal }) => api.listInbox(sessionId, signal),
@@ -249,6 +279,8 @@ export function useSessionInbox(sessionId: string, enabled: boolean) {
 }
 
 export function useCreateInboxItem() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -270,6 +302,8 @@ export function useCreateInboxItem() {
 }
 
 export function useUpdateInboxItem() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -292,6 +326,8 @@ export function useUpdateInboxItem() {
 }
 
 export function useCancelInboxItem() {
+  const { api } = useNativeRuntime();
+
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({

@@ -92,6 +92,9 @@ jobs:
       - name: Run the repository acceptance gates
         run: make ci
 
+      - name: Verify the private managed fault fixture
+        run: make test-managed-fault-fixture
+
   build-smoke:
     needs: [prepare, contract, quality]
     runs-on: ubuntu-latest

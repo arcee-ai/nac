@@ -54,6 +54,8 @@ export interface SessionStreamOptions {
   eventSource?: EventSourceFactory;
   instrumentation?: SessionStreamInstrumentation;
   maxPendingEvents?: number;
+  /** Finite connection lease; each reconnect obtains a fresh stream context. */
+  maxConnectionMs?: number;
 }
 
 const INITIAL_RETRY_MS = 500;
@@ -99,6 +101,7 @@ export function subscribeToSessionEvents(
   const nativeEventSourceInit = createEventSource ? null : client.transport.eventSourceInit();
   const maxPendingEvents = Math.max(1, options.maxPendingEvents ?? DEFAULT_MAX_PENDING_EVENTS);
   let source: EventSource | null = null;
+  let connectionTimer: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retryDelay = INITIAL_RETRY_MS;
   let reconnectCursor: SessionEventBoundary | null = null;
@@ -119,6 +122,8 @@ export function subscribeToSessionEvents(
     pending.length > 0 ? cursorOf(pending[pending.length - 1]) : deliveredCursor;
 
   const closeSource = () => {
+    if (connectionTimer) clearTimeout(connectionTimer);
+    connectionTimer = null;
     source?.close();
     source = null;
   };
@@ -201,7 +206,14 @@ export function subscribeToSessionEvents(
       source = new EventSource(url, nativeEventSourceInit ?? undefined);
     }
 
+    if (options.maxConnectionMs !== undefined) {
+      connectionTimer = setTimeout(scheduleReconnect, Math.max(1, options.maxConnectionMs));
+    }
+    const connection = source;
+    const isCurrentConnection = () => !closed && source === connection;
+
     source.onopen = () => {
+      if (!isCurrentConnection()) return;
       everOpened = true;
       failedAttempts = 0;
       retryDelay = INITIAL_RETRY_MS;
@@ -209,7 +221,7 @@ export function subscribeToSessionEvents(
     };
 
     source.addEventListener("session_event", (event) => {
-      if (!(event instanceof MessageEvent)) return;
+      if (!isCurrentConnection() || !(event instanceof MessageEvent)) return;
       const envelope = parseEvent<SessionEventEnvelope>(event);
       if (!envelope) return;
       const cursor = cursorOf(envelope);
@@ -244,7 +256,7 @@ export function subscribeToSessionEvents(
     });
 
     source.addEventListener("assistant_delta", (event) => {
-      if (!(event instanceof MessageEvent)) return;
+      if (!isCurrentConnection() || !(event instanceof MessageEvent)) return;
       const parsed = parseEvent<AssistantStreamDelta>(event);
       if (!parsed) return;
       options.instrumentation?.onAssistantDelta?.(parsed);
@@ -252,7 +264,7 @@ export function subscribeToSessionEvents(
     });
 
     source.addEventListener("replay_boundary", (event) => {
-      if (!(event instanceof MessageEvent)) return;
+      if (!isCurrentConnection() || !(event instanceof MessageEvent)) return;
       const parsed = parseEvent<ReplayBoundaryEvent>(event);
       if (!parsed) return;
       replayBoundary = {
@@ -269,18 +281,19 @@ export function subscribeToSessionEvents(
     });
 
     source.addEventListener("replay_gap", (event) => {
-      if (!(event instanceof MessageEvent)) return;
+      if (!isCurrentConnection() || !(event instanceof MessageEvent)) return;
       const parsed = parseEvent<ReplayGapEvent>(event);
       if (parsed) handlers.onReplayGap?.(parsed);
     });
 
     source.addEventListener("lagged", (event) => {
-      if (!(event instanceof MessageEvent)) return;
+      if (!isCurrentConnection() || !(event instanceof MessageEvent)) return;
       const parsed = parseEvent<LaggedEvent>(event);
       if (parsed) handlers.onLagged?.(parsed);
     });
 
     source.onerror = () => {
+      if (!isCurrentConnection()) return;
       handleConnectionFailure();
     };
   };

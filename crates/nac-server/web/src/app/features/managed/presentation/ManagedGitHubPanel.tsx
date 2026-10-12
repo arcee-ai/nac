@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -14,10 +15,12 @@ import {
 import { managedQueryKeys, useManagedGitHub } from "@/app/features/managed/queries";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { api } from "@/app/services/api";
+
 import type { ManagedGitHubLoginStarted } from "@/app/types/api";
 
 export function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }) {
+  const { api } = useNativeRuntime();
+
   const toast = useToast();
   const client = useQueryClient();
   const github = useManagedGitHub();
@@ -64,7 +67,7 @@ export function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }
       stopped = true;
       controller.abort();
     };
-  }, [login, client, onConnected, toast]);
+  }, [login, client, onConnected, toast, api]);
 
   const connect = async () => {
     setBusy(true);
