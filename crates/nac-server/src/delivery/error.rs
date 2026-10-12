@@ -231,6 +231,11 @@ impl From<anyhow::Error> for ApiError {
                 sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
                 sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
             }
+        } else if error
+            .downcast_ref::<application::session_terminals::TerminalOwnerMismatch>()
+            .is_some()
+        {
+            StatusCode::CONFLICT
         } else if let Some(error) = error.downcast_ref::<SessionSubmitError>() {
             match error {
                 SessionSubmitError::Busy { .. } | SessionSubmitError::ExternalBusy { .. } => {
@@ -322,5 +327,26 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_owner_fence_maps_to_conflict_through_error_context() {
+        let owner = application::session_terminals::TerminalOwnerMismatch;
+        let error = anyhow::Error::new(owner).context("terminal completion fence");
+        assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn genuine_terminal_cleanup_failure_remains_internal() {
+        let error = anyhow::anyhow!("terminal descendant inspection failed");
+        assert_eq!(
+            ApiError::from(error).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 }

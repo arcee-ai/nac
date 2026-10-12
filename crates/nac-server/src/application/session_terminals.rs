@@ -6,6 +6,18 @@ use nac_core::session_service::{SessionService, UserTerminalStatus};
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Definite ownership fence, distinct from a failed cleanup attempt.
+#[derive(Debug)]
+pub(crate) struct TerminalOwnerMismatch;
+
+impl std::fmt::Display for TerminalOwnerMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("terminal belongs to another or previous service owner")
+    }
+}
+
+impl std::error::Error for TerminalOwnerMismatch {}
+
 /// Explicit terminal lifecycle operations scoped to one persisted session.
 ///
 /// Termination intentionally does not acquire the session operation or
@@ -334,16 +346,12 @@ impl<'a> SessionTerminalApplication<'a> {
                 .await?
                 .config_version;
             if service.config_version() != Some(config_version) {
-                return Err(anyhow!(
-                    "terminal belongs to another or previous service owner"
-                ));
+                return Err(TerminalOwnerMismatch.into());
             }
             service
         } else {
             if self.manager.managed_host().is_some() && terminal_id.starts_with("user-shell-") {
-                return Err(anyhow!(
-                    "terminal belongs to another or previous service owner"
-                ));
+                return Err(TerminalOwnerMismatch.into());
             }
             // Legacy model/durable cleanup recovery can rebuild only while
             // ordinary work admission is open, never during maintenance.

@@ -562,3 +562,96 @@ async fn managed_terminal_secret_rotation_preserves_each_launch_snapshot_and_ret
         assert!(!text.contains(expected));
     }
 }
+
+#[tokio::test]
+async fn uncached_human_terminate_fence_is_conflict_without_reattachment() {
+    let fixture = Fixture::new();
+    seed(&fixture, "uncached");
+    assert!(fixture
+        .manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .is_empty());
+    let app = crate::router(fixture.manager.clone());
+    let (status, body) = call_public(
+        &app,
+        "DELETE",
+        "/sessions/uncached/terminals/user-shell-previous-owner",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        body["error"],
+        "terminal belongs to another or previous service owner"
+    );
+    assert!(fixture
+        .manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .is_empty());
+}
+
+#[tokio::test]
+async fn cached_previous_config_terminate_is_conflict_after_actual_revisioned_patch() {
+    let fixture = Fixture::new();
+    let (original, id) = launch(&fixture, "session").await;
+    finish(&original, &id).await;
+    let prior_version = original.config_version().unwrap();
+    let app = crate::router(fixture.manager.clone());
+    let (status, _) = call_public(
+        &app,
+        "PATCH",
+        "/sessions/session/config",
+        json!({"orchestrator_compaction_threshold": 1}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let current = fixture
+        .manager
+        .session_state()
+        .config_async("session")
+        .await
+        .unwrap();
+    assert!(current.config_version > prior_version);
+    assert!(fixture
+        .manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .is_empty());
+    // An accepted observer/request can retain an old service after the public
+    // revisioned update evicts it. Exercise the stale cached-owner branch.
+    fixture
+        .manager
+        .inner
+        .active_sessions
+        .write()
+        .await
+        .insert("session".into(), std::sync::Arc::clone(&original));
+    let (status, body) = call_public(
+        &app,
+        "DELETE",
+        &format!("/sessions/session/terminals/{id}"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        body["error"],
+        "terminal belongs to another or previous service owner"
+    );
+    let active = fixture.manager.inner.active_sessions.read().await;
+    assert!(std::sync::Arc::ptr_eq(
+        active.get("session").unwrap(),
+        &original
+    ));
+    assert_eq!(original.config_version(), Some(prior_version));
+    drop(active);
+    assert!(!original.user_terminal_status(&id).await.unwrap().alive);
+}
