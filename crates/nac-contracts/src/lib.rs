@@ -195,10 +195,20 @@ pub struct NewProject {
 /// The type intentionally has no serialization implementation: environment
 /// values are process-local capability data, not a persistence or transport
 /// contract.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CommandEnvironmentSnapshot {
     values: BTreeMap<String, String>,
     redactions: Vec<String>,
+}
+
+impl std::fmt::Debug for CommandEnvironmentSnapshot {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CommandEnvironmentSnapshot")
+            .field("environment_names", &self.values.keys().collect::<Vec<_>>())
+            .field("redaction_count", &self.redactions.len())
+            .finish()
+    }
 }
 
 impl CommandEnvironmentSnapshot {
@@ -211,6 +221,13 @@ impl CommandEnvironmentSnapshot {
 
     pub fn from_parts(values: BTreeMap<String, String>, redactions: Vec<String>) -> Self {
         Self { values, redactions }
+    }
+
+    /// Add exact private output-masking values without granting environment
+    /// access. These values never become visible through `get` or `iter`.
+    pub fn extend_redactions(&mut self, values: impl IntoIterator<Item = String>) {
+        self.redactions
+            .extend(values.into_iter().filter(|value| !value.is_empty()));
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
@@ -339,6 +356,26 @@ mod tests {
             compare_product_versions("1.2.3-rc.1", "1.2.3"),
             Some(std::cmp::Ordering::Less)
         );
+    }
+
+    #[test]
+    fn redaction_only_values_do_not_become_environment_or_debug_capabilities() {
+        let mut snapshot = CommandEnvironmentSnapshot::empty();
+        let secret = "native-redaction-only-canary";
+        snapshot.extend_redactions([secret.to_string(), String::new()]);
+        assert!(snapshot.is_empty());
+        assert_eq!(snapshot.iter().count(), 0);
+        assert_eq!(snapshot.get("EXA_API_KEY"), None);
+        assert_eq!(snapshot.redact(secret), "[REDACTED]");
+        let mut stream = snapshot.stream_redactor();
+        assert!(stream.push(b"native-redaction-only-").is_empty());
+        assert_eq!(stream.push(b"canary!"), b"[REDACTED]!");
+        assert!(stream.finish().is_empty());
+        snapshot.insert_dedicated("APP_TOKEN", "private-environment-canary", true);
+        let debug = format!("{snapshot:?}");
+        assert!(debug.contains("APP_TOKEN") && debug.contains("redaction_count"));
+        assert!(!debug.contains(secret));
+        assert!(!debug.contains("private-environment-canary"));
     }
 
     #[test]

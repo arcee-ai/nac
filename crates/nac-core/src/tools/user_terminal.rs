@@ -124,7 +124,7 @@ impl NativeTool for UserTerminalLaunchTool {
             let Some(cwd) = input.cwd else {
                 return error("terminal launch was not bound by authorization");
             };
-            let environment = match runtime.command_environment_snapshot().await {
+            let environment = match runtime.user_terminal_environment_snapshot().await {
                 Ok(environment) => environment,
                 Err(_) => return error("terminal environment snapshot is unavailable"),
             };

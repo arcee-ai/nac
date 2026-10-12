@@ -91,6 +91,19 @@ impl ToolRuntime {
         }
     }
 
+    /// Human output retains the managed launch policy plus native private
+    /// masking patterns. Environment/model snapshots keep their existing values.
+    pub(crate) async fn user_terminal_environment_snapshot(
+        &self,
+    ) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
+        let mut snapshot = self.command_environment_snapshot().await?;
+        if self.command_environment.is_some() {
+            snapshot
+                .extend_redactions(crate::worker_credentials::captured_managed_native_redactions());
+        }
+        Ok(snapshot)
+    }
+
     pub(crate) fn remember_output_environment(
         &self,
         output_id: impl Into<String>,

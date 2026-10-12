@@ -9,6 +9,10 @@ use nac_contracts::{
 #[path = "user_terminals_managed_tests.rs"]
 mod managed;
 
+#[cfg(unix)]
+#[path = "user_terminals_native_redaction_tests.rs"]
+mod native_redaction;
+
 struct Environment(CommandEnvironmentSnapshot);
 impl CommandEnvironmentProvider for Environment {
     fn snapshot(&self) -> CommandEnvironmentFuture<'_> {
@@ -23,6 +27,12 @@ impl CommandEnvironmentProvider for Environment {
 }
 
 fn fixture() -> (SessionServiceParts, PathBuf) {
+    fixture_with_provider(None)
+}
+
+fn fixture_with_provider(
+    provider: Option<Arc<dyn CommandEnvironmentProvider>>,
+) -> (SessionServiceParts, PathBuf) {
     let directory = std::env::temp_dir().join(format!("nac-user-terminal-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&directory).unwrap();
     let store_path = directory.join("store.db");
@@ -56,14 +66,16 @@ fn fixture() -> (SessionServiceParts, PathBuf) {
         },
     )
     .unwrap();
-    let environment = CommandEnvironmentSnapshot::from_parts(
-        BTreeMap::from([
-            ("HOME".into(), directory.display().to_string()),
-            ("NAC_TEST_SECRET".into(), "synthetic-user-secret".into()),
-        ]),
-        vec!["synthetic-user-secret".into()],
-    );
-    agent.set_command_environment_provider(Some(Arc::new(Environment(environment))));
+    let provider = provider.unwrap_or_else(|| {
+        Arc::new(Environment(CommandEnvironmentSnapshot::from_parts(
+            BTreeMap::from([
+                ("HOME".into(), directory.display().to_string()),
+                ("NAC_TEST_SECRET".into(), "synthetic-user-secret".into()),
+            ]),
+            vec!["synthetic-user-secret".into()],
+        )))
+    });
+    agent.set_command_environment_provider(Some(provider));
     let mut snapshot = sessions::new_snapshot(
         "direct-terminal".into(),
         directory.clone(),
