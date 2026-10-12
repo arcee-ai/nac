@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   useCloseUserTerminal,
@@ -31,6 +32,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
   const list = useUserTerminals(sessionId);
   const open = useOpenUserTerminal(sessionId);
   const [selected, setSelected] = useState<string | null>(null);
+  const [newlyOpenedId, setNewlyOpenedId] = useState<string | null>(null);
   const launchId = useRef<string | null>(null);
   const terminals = list.data?.terminals ?? [];
   const id = selected ?? terminals[0]?.terminal_id;
@@ -38,6 +40,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
     launchId.current ??= crypto.randomUUID();
     open.mutate(launchId.current, {
       onSuccess: (result) => {
+        setNewlyOpenedId(result.terminal_id);
         setSelected(result.terminal_id);
         launchId.current = null;
       },
@@ -53,8 +56,11 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
           id={`terminal-${sessionId}`}
           aria-label="Shell"
           value={id ?? ""}
-          onChange={(event) => setSelected(event.target.value)}
-          className="min-w-0 max-w-full"
+          onChange={(event) => {
+            setNewlyOpenedId(null);
+            setSelected(event.target.value);
+          }}
+          className="min-w-0 max-w-full rounded-md border border-muted bg-elevation-level-2 px-2 py-1 text-sm"
         >
           {!id ? <option value="">No shell</option> : null}
           {id && !terminals.some((item) => item.terminal_id === id) ? (
@@ -67,9 +73,10 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
             </option>
           ))}
         </select>
-        <button
+        <Button
+          size={ButtonSize.Small}
           type="button"
-          className="btn btn-secondary"
+          variant={ButtonVariant.Secondary}
           disabled={open.isPending}
           onClick={launch}
         >
@@ -78,7 +85,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
             : open.isError
               ? "Retry opening same shell"
               : "New shell"}
-        </button>
+        </Button>
       </div>
       <p className="text-sm text-basic-secondary">
         This shell uses the agent’s execution environment and can change the same files.
@@ -86,14 +93,15 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
       {list.isError ? (
         <p role="alert">
           Shell list unavailable.{" "}
-          <button
+          <Button
+            size={ButtonSize.Small}
             type="button"
             onClick={() => {
               void list.refetch();
             }}
           >
             Refresh
-          </button>
+          </Button>
         </p>
       ) : null}
       {open.isError ? (
@@ -106,6 +114,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
           key={id}
           sessionId={sessionId}
           terminalId={id}
+          newlyOpened={newlyOpenedId === id}
           onReviewSelection={onReviewSelection}
         />
       ) : (
@@ -123,11 +132,12 @@ function TerminalDisplay({
   sessionId,
   terminalId,
   onReviewSelection,
-}: TerminalPaneProps & { terminalId: string }) {
+  newlyOpened,
+}: TerminalPaneProps & { terminalId: string; newlyOpened: boolean }) {
   const status = useUserTerminalStatus(sessionId, terminalId);
   const close = useCloseUserTerminal(sessionId, terminalId);
   const element = useRef<HTMLDivElement>(null);
-  const controller = useTerminalController(sessionId, terminalId, element);
+  const controller = useTerminalController(sessionId, terminalId, element, newlyOpened);
   const review = () => {
     const text = controller.selection();
     if (!text || !onReviewSelection) return;
@@ -150,36 +160,55 @@ function TerminalDisplay({
             ? ` · Exited${status.data.exit_code == null ? "" : ` (${status.data.exit_code})`}`
             : ""}
         </span>
-        <button type="button" className="btn btn-ghost" onClick={controller.focus}>
-          Focus terminal
-        </button>
-        <button
+        <Button
+          size={ButtonSize.Small}
           type="button"
-          className="btn btn-ghost"
+          variant={ButtonVariant.Ghost}
+          onClick={controller.focus}
+        >
+          Focus terminal
+        </Button>
+        <Button
+          size={ButtonSize.Small}
+          type="button"
+          variant={ButtonVariant.Ghost}
           disabled={controller.phase === "Connecting"}
           onClick={controller.reconnect}
         >
           Reconnect
-        </button>
-        <button
+        </Button>
+        <Button
+          size={ButtonSize.Small}
           type="button"
-          className="btn btn-ghost"
+          variant={ButtonVariant.Ghost}
           disabled={!status.data?.alive || close.isPending}
           onClick={() => close.mutate()}
         >
           {close.isPending ? "Closing…" : "Close shell"}
-        </button>
+        </Button>
         {onReviewSelection ? (
-          <button type="button" className="btn btn-ghost" onClick={review}>
+          <Button
+            size={ButtonSize.Small}
+            type="button"
+            variant={ButtonVariant.Ghost}
+            onClick={review}
+          >
             Review selected text
-          </button>
+          </Button>
         ) : null}
       </div>
       {controller.notice ? <p role="alert">{controller.notice}</p> : null}
-      {controller.inputFailure ? (
-        <button type="button" className="btn btn-secondary" onClick={controller.acknowledgeInput}>
-          Acknowledge failure and enable fresh input
-        </button>
+      {controller.inputFailure || controller.needsInputEnable ? (
+        <Button
+          size={ButtonSize.Small}
+          type="button"
+          variant={ButtonVariant.Secondary}
+          onClick={controller.acknowledgeInput}
+        >
+          {controller.inputFailure
+            ? "Acknowledge failure and enable fresh input"
+            : "Enable terminal input"}
+        </Button>
       ) : null}
       {close.isError ? (
         <p role="alert">{close.error.message} Shell closure was not confirmed; check its status.</p>

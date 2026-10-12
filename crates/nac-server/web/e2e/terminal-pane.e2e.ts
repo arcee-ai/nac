@@ -66,6 +66,10 @@ for (const mobile of [false, true]) {
     expect(
       (await api.listUserTerminals(session)).terminals.map((item) => item.terminal_id),
     ).toEqual([shell.terminal_id]);
+    await pane.getByRole("button", { name: "Enable terminal input", exact: true }).click();
+    await page.keyboard.type("printf '\\122\\105\\101\\124\\124\\101\\103\\110\\055\\117\\113\\n'");
+    await page.keyboard.press("Enter");
+    await expect(accessible).toContainText("REATTACH-OK");
     const viewport = pane.getByRole("region", { name: "Interactive terminal" });
     await expect
       .poll(async () => {

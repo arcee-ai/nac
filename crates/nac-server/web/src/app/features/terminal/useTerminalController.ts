@@ -10,6 +10,7 @@ export function useTerminalController(
   sessionId: string,
   terminalId: string,
   element: RefObject<HTMLDivElement | null>,
+  newlyOpened: boolean,
 ) {
   const { api } = useNativeRuntime();
   const current = useRef<{
@@ -20,6 +21,9 @@ export function useTerminalController(
   const [phase, setPhase] = useState("Connecting");
   const [notice, setNotice] = useState("");
   const [inputFailure, setInputFailure] = useState(false);
+  const [needsInputEnable, setNeedsInputEnable] = useState(false);
+  const initialTyping = useRef(newlyOpened);
+  const previousFailure = useRef(false);
 
   useEffect(() => {
     const host = element.current;
@@ -65,11 +69,12 @@ export function useTerminalController(
         }
       };
       const send = (bytes: Uint8Array) => {
-        if (!connected) return;
+        if (!connected || adapter.terminal.options.disableStdin) return;
         void pump.send(bytes).catch((error: unknown) => {
           if (!active()) return;
           setNotice(error instanceof Error ? error.message : "Terminal input failed");
           if (pump.needsAcknowledgement) {
+            previousFailure.current = true;
             adapter.terminal.options.disableStdin = true;
             setInputFailure(true);
           }
@@ -85,6 +90,7 @@ export function useTerminalController(
       observer.observe(host);
       if (adapter.terminal.element) observer.observe(adapter.terminal.element);
       release = () => {
+        if (pump.hasActiveInput || pump.needsAcknowledgement) previousFailure.current = true;
         connected = false;
         current.current = null;
         observer.disconnect();
@@ -97,11 +103,18 @@ export function useTerminalController(
       };
       setPhase("Connecting");
       setNotice("");
-      setInputFailure(false);
+      setInputFailure(previousFailure.current);
       const status = await connection.attach(abort.signal, attempt ? "reconnect" : "attach");
       if (!active()) return;
       connected = true;
-      adapter.terminal.options.disableStdin = !status.alive;
+      // Reattaching never silently resumes input after a lost consumer or
+      // receipt. Only a newly opened shell can start typing immediately.
+      const enable =
+        status.alive && initialTyping.current && attempt === 0 && !previousFailure.current;
+      adapter.terminal.options.disableStdin = !enable;
+      setNeedsInputEnable(status.alive && !enable);
+      if (previousFailure.current)
+        setNotice("Input delivery was not confirmed. Check the shell before enabling fresh input.");
       setPhase(status.alive ? "Connected" : "Retained output");
       await resize();
       // Font loading may change measured columns after the first visible frame.
@@ -129,6 +142,7 @@ export function useTerminalController(
     phase,
     notice,
     inputFailure,
+    needsInputEnable,
     reconnect: () => setAttempt((value) => value + 1),
     selection: () => {
       const text = current.current?.adapter.terminal.getSelection() ?? "";
@@ -141,8 +155,10 @@ export function useTerminalController(
       if (!value || value.pump.hasActiveInput || phase !== "Connected") return;
       value.pump.acknowledgeFailure();
       value.adapter.terminal.options.disableStdin = false;
+      previousFailure.current = false;
       setInputFailure(false);
-      setNotice("Previous input was discarded. Only new typing will be sent.");
+      setNeedsInputEnable(false);
+      setNotice("Previous input will not be retried. Only fresh typing will be sent.");
       value.adapter.terminal.focus();
     },
   };

@@ -15731,78 +15731,82 @@ function bg(e, t) {
 }
 //#endregion
 //#region src/app/features/terminal/useTerminalController.ts
-function xg(e, t, n) {
-	let { api: r } = P(), i = G(null), [a, o] = K(0), [s, c] = K("Connecting"), [l, u] = K(""), [d, f] = K(!1);
+function xg(e, t, n, r) {
+	let { api: i } = P(), a = G(null), [o, s] = K(0), [c, l] = K("Connecting"), [u, d] = K(""), [f, p] = K(!1), [m, h] = K(!1), g = G(r), _ = G(!1);
 	return U(() => {
-		let o = n.current;
-		if (!o) return;
-		let s = new AbortController(), l, d = () => !s.signal.aborted, p = (e) => {
-			d() && (c("Disconnected"), u(e instanceof Error ? e.message : "Terminal observation failed"), i.current && (i.current.adapter.terminal.options.disableStdin = !0));
+		let r = n.current;
+		if (!r) return;
+		let s = new AbortController(), c, u = () => !s.signal.aborted, f = (e) => {
+			u() && (l("Disconnected"), d(e instanceof Error ? e.message : "Terminal observation failed"), a.current && (a.current.adapter.terminal.options.disableStdin = !0));
 		};
 		return (async () => {
-			let n = await yg(o);
-			if (!d()) {
+			let n = await yg(r);
+			if (!u()) {
 				n.dispose();
 				return;
 			}
-			let m = new fg(r, e, t, n.renderer, { pageLimit: 32768 }), h = new hg(m, s.signal);
-			i.current = {
+			let m = new fg(i, e, t, n.renderer, { pageLimit: 32768 }), v = new hg(m, s.signal);
+			a.current = {
 				adapter: n,
-				pump: h
+				pump: v
 			};
-			let g = !1, _ = null, v = !1, y = async () => {
+			let y = !1, b = null, x = !1, S = async () => {
 				let e = n.fit();
-				if (e && (_ = e), !(g || !v)) {
-					g = !0;
+				if (e && (b = e), !(y || !x)) {
+					y = !0;
 					try {
-						for (; _ && d();) {
-							let e = _;
-							_ = null, await m.resize(e.cols, e.rows, s.signal);
+						for (; b && u();) {
+							let e = b;
+							b = null, await m.resize(e.cols, e.rows, s.signal);
 						}
 					} catch (e) {
-						p(e);
+						f(e);
 					} finally {
-						g = !1;
+						y = !1;
 					}
 				}
-			}, b = (e) => {
-				v && h.send(e).catch((e) => {
-					d() && (u(e instanceof Error ? e.message : "Terminal input failed"), h.needsAcknowledgement && (n.terminal.options.disableStdin = !0, f(!0)));
+			}, C = (e) => {
+				!x || n.terminal.options.disableStdin || v.send(e).catch((e) => {
+					u() && (d(e instanceof Error ? e.message : "Terminal input failed"), v.needsAcknowledgement && (_.current = !0, n.terminal.options.disableStdin = !0, p(!0)));
 				});
-			}, x = n.terminal.onData((e) => b(new TextEncoder().encode(e))), S = n.terminal.onBinary((e) => b(Uint8Array.from(e, (e) => e.charCodeAt(0)))), C = new ResizeObserver(() => {
-				y();
+			}, w = n.terminal.onData((e) => C(new TextEncoder().encode(e))), T = n.terminal.onBinary((e) => C(Uint8Array.from(e, (e) => e.charCodeAt(0)))), E = new ResizeObserver(() => {
+				S();
 			});
-			C.observe(o), n.terminal.element && C.observe(n.terminal.element), l = () => {
-				v = !1, i.current = null, C.disconnect(), x.dispose(), S.dispose(), h.dispose(), m.detach().catch(() => {}), n.dispose();
-			}, c("Connecting"), u(""), f(!1);
-			let w = await m.attach(s.signal, a ? "reconnect" : "attach");
-			d() && (v = !0, n.terminal.options.disableStdin = !w.alive, c(w.alive ? "Connected" : "Retained output"), await y(), document.fonts.ready.then(() => {
-				d() && y();
+			E.observe(r), n.terminal.element && E.observe(n.terminal.element), c = () => {
+				(v.hasActiveInput || v.needsAcknowledgement) && (_.current = !0), x = !1, a.current = null, E.disconnect(), w.dispose(), T.dispose(), v.dispose(), m.detach().catch(() => {}), n.dispose();
+			}, l("Connecting"), d(""), p(_.current);
+			let D = await m.attach(s.signal, o ? "reconnect" : "attach");
+			if (!u()) return;
+			x = !0;
+			let O = D.alive && g.current && o === 0 && !_.current;
+			n.terminal.options.disableStdin = !O, h(D.alive && !O), _.current && d("Input delivery was not confirmed. Check the shell before enabling fresh input."), l(D.alive ? "Connected" : "Retained output"), await S(), document.fonts.ready.then(() => {
+				u() && S();
 			}), await m.run(s.signal, (e) => {
-				e.gap && d() && u("Earlier output was discarded. The display was reset before retained output was replayed.");
-			}), d() && (n.terminal.options.disableStdin = !0, c("Output complete")));
-		})().catch(p), () => {
-			s.abort(), l?.();
+				e.gap && u() && d("Earlier output was discarded. The display was reset before retained output was replayed.");
+			}), u() && (n.terminal.options.disableStdin = !0, l("Output complete"));
+		})().catch(f), () => {
+			s.abort(), c?.();
 		};
 	}, [
-		r,
+		i,
 		e,
 		t,
-		a,
+		o,
 		n
 	]), {
-		phase: s,
-		notice: l,
-		inputFailure: d,
-		reconnect: () => o((e) => e + 1),
+		phase: c,
+		notice: u,
+		inputFailure: f,
+		needsInputEnable: m,
+		reconnect: () => s((e) => e + 1),
 		selection: () => {
-			let e = i.current?.adapter.terminal.getSelection() ?? "";
-			return e || u("Select text in the terminal before reviewing it."), e;
+			let e = a.current?.adapter.terminal.getSelection() ?? "";
+			return e || d("Select text in the terminal before reviewing it."), e;
 		},
-		focus: () => i.current?.adapter.terminal.focus(),
+		focus: () => a.current?.adapter.terminal.focus(),
 		acknowledgeInput: () => {
-			let e = i.current;
-			!e || e.pump.hasActiveInput || s !== "Connected" || (e.pump.acknowledgeFailure(), e.adapter.terminal.options.disableStdin = !1, f(!1), u("Previous input was discarded. Only new typing will be sent."), e.adapter.terminal.focus());
+			let e = a.current;
+			!e || e.pump.hasActiveInput || c !== "Connected" || (e.pump.acknowledgeFailure(), e.adapter.terminal.options.disableStdin = !1, _.current = !1, p(!1), h(!1), d("Previous input will not be retried. Only fresh typing will be sent."), e.adapter.terminal.focus());
 		}
 	};
 }
@@ -15816,7 +15820,7 @@ function Sg(e) {
 	return /* @__PURE__ */ J(Cg, { ...e }, `${n.id}:${e.sessionId}`);
 }
 function Cg({ sessionId: e, onReviewSelection: t }) {
-	let n = Qh(e), r = eg(e), [i, a] = K(null), o = G(null), s = n.data?.terminals ?? [], c = i ?? s[0]?.terminal_id;
+	let n = Qh(e), r = eg(e), [i, a] = K(null), [o, s] = K(null), c = G(null), l = n.data?.terminals ?? [], u = i ?? l[0]?.terminal_id;
 	return /* @__PURE__ */ Y("section", {
 		"aria-label": "Session terminal",
 		className: "flex flex-col flex-1 min-h-0 gap-2 p-3",
@@ -15832,19 +15836,21 @@ function Cg({ sessionId: e, onReviewSelection: t }) {
 					/* @__PURE__ */ Y("select", {
 						id: `terminal-${e}`,
 						"aria-label": "Shell",
-						value: c ?? "",
-						onChange: (e) => a(e.target.value),
-						className: "min-w-0 max-w-full",
+						value: u ?? "",
+						onChange: (e) => {
+							s(null), a(e.target.value);
+						},
+						className: "min-w-0 max-w-full rounded-md border border-muted bg-elevation-level-2 px-2 py-1 text-sm",
 						children: [
-							c ? null : /* @__PURE__ */ J("option", {
+							u ? null : /* @__PURE__ */ J("option", {
 								value: "",
 								children: "No shell"
 							}),
-							c && !s.some((e) => e.terminal_id === c) ? /* @__PURE__ */ J("option", {
-								value: c,
+							u && !l.some((e) => e.terminal_id === u) ? /* @__PURE__ */ J("option", {
+								value: u,
 								children: "Selected shell unavailable"
 							}) : null,
-							s.map((e, t) => /* @__PURE__ */ Y("option", {
+							l.map((e, t) => /* @__PURE__ */ Y("option", {
 								value: e.terminal_id,
 								children: [
 									"Shell ",
@@ -15854,13 +15860,14 @@ function Cg({ sessionId: e, onReviewSelection: t }) {
 							}, e.terminal_id))
 						]
 					}),
-					/* @__PURE__ */ J("button", {
+					/* @__PURE__ */ J(V, {
+						size: B.Small,
 						type: "button",
-						className: "btn btn-secondary",
+						variant: L.Secondary,
 						disabled: r.isPending,
 						onClick: () => {
-							o.current ??= crypto.randomUUID(), r.mutate(o.current, { onSuccess: (e) => {
-								a(e.terminal_id), o.current = null;
+							c.current ??= crypto.randomUUID(), r.mutate(c.current, { onSuccess: (e) => {
+								s(e.terminal_id), a(e.terminal_id), c.current = null;
 							} });
 						},
 						children: r.isPending ? "Opening shell…" : r.isError ? "Retry opening same shell" : "New shell"
@@ -15876,7 +15883,8 @@ function Cg({ sessionId: e, onReviewSelection: t }) {
 				children: [
 					"Shell list unavailable.",
 					" ",
-					/* @__PURE__ */ J("button", {
+					/* @__PURE__ */ J(V, {
+						size: B.Small,
 						type: "button",
 						onClick: () => {
 							n.refetch();
@@ -15889,88 +15897,94 @@ function Cg({ sessionId: e, onReviewSelection: t }) {
 				role: "alert",
 				children: [r.error.message, " Opening was not confirmed; retry uses the same launch identity."]
 			}) : null,
-			c ? /* @__PURE__ */ J(wg, {
+			u ? /* @__PURE__ */ J(wg, {
 				sessionId: e,
-				terminalId: c,
+				terminalId: u,
+				newlyOpened: o === u,
 				onReviewSelection: t
-			}, c) : /* @__PURE__ */ J("p", {
+			}, u) : /* @__PURE__ */ J("p", {
 				role: "status",
 				children: n.isPending ? "Loading shells…" : "Open a shell to start typing. Terminal output stays separate from the conversation."
 			})
 		]
 	});
 }
-function wg({ sessionId: e, terminalId: t, onReviewSelection: n }) {
-	let r = $h(e, t), i = tg(e, t), a = G(null), o = xg(e, t, a);
+function wg({ sessionId: e, terminalId: t, onReviewSelection: n, newlyOpened: r }) {
+	let i = $h(e, t), a = tg(e, t), o = G(null), s = xg(e, t, o, r);
 	return /* @__PURE__ */ Y(q, { children: [
 		/* @__PURE__ */ Y("div", {
 			className: "flex flex-wrap items-center gap-2",
 			children: [
 				/* @__PURE__ */ Y("span", {
 					role: "status",
-					children: [o.phase, r.data && !r.data.alive ? ` · Exited${r.data.exit_code == null ? "" : ` (${r.data.exit_code})`}` : ""]
+					children: [s.phase, i.data && !i.data.alive ? ` · Exited${i.data.exit_code == null ? "" : ` (${i.data.exit_code})`}` : ""]
 				}),
-				/* @__PURE__ */ J("button", {
+				/* @__PURE__ */ J(V, {
+					size: B.Small,
 					type: "button",
-					className: "btn btn-ghost",
-					onClick: o.focus,
+					variant: L.Ghost,
+					onClick: s.focus,
 					children: "Focus terminal"
 				}),
-				/* @__PURE__ */ J("button", {
+				/* @__PURE__ */ J(V, {
+					size: B.Small,
 					type: "button",
-					className: "btn btn-ghost",
-					disabled: o.phase === "Connecting",
-					onClick: o.reconnect,
+					variant: L.Ghost,
+					disabled: s.phase === "Connecting",
+					onClick: s.reconnect,
 					children: "Reconnect"
 				}),
-				/* @__PURE__ */ J("button", {
+				/* @__PURE__ */ J(V, {
+					size: B.Small,
 					type: "button",
-					className: "btn btn-ghost",
-					disabled: !r.data?.alive || i.isPending,
-					onClick: () => i.mutate(),
-					children: i.isPending ? "Closing…" : "Close shell"
+					variant: L.Ghost,
+					disabled: !i.data?.alive || a.isPending,
+					onClick: () => a.mutate(),
+					children: a.isPending ? "Closing…" : "Close shell"
 				}),
-				n ? /* @__PURE__ */ J("button", {
+				n ? /* @__PURE__ */ J(V, {
+					size: B.Small,
 					type: "button",
-					className: "btn btn-ghost",
+					variant: L.Ghost,
 					onClick: () => {
-						let i = o.selection();
-						!i || !n || n(Object.freeze({
+						let r = s.selection();
+						!r || !n || n(Object.freeze({
 							sessionId: e,
 							terminalId: t,
-							selectedText: i,
+							selectedText: r,
 							capturedAtMs: String(Date.now()),
-							sourceAlive: r.data?.alive ?? !1
+							sourceAlive: i.data?.alive ?? !1
 						}));
 					},
 					children: "Review selected text"
 				}) : null
 			]
 		}),
-		o.notice ? /* @__PURE__ */ J("p", {
+		s.notice ? /* @__PURE__ */ J("p", {
 			role: "alert",
-			children: o.notice
+			children: s.notice
 		}) : null,
-		o.inputFailure ? /* @__PURE__ */ J("button", {
+		s.inputFailure || s.needsInputEnable ? /* @__PURE__ */ J(V, {
+			size: B.Small,
 			type: "button",
-			className: "btn btn-secondary",
-			onClick: o.acknowledgeInput,
-			children: "Acknowledge failure and enable fresh input"
+			variant: L.Secondary,
+			onClick: s.acknowledgeInput,
+			children: s.inputFailure ? "Acknowledge failure and enable fresh input" : "Enable terminal input"
 		}) : null,
-		i.isError ? /* @__PURE__ */ Y("p", {
+		a.isError ? /* @__PURE__ */ Y("p", {
 			role: "alert",
-			children: [i.error.message, " Shell closure was not confirmed; check its status."]
+			children: [a.error.message, " Shell closure was not confirmed; check its status."]
 		}) : null,
-		r.isError ? /* @__PURE__ */ J("p", {
+		i.isError ? /* @__PURE__ */ J("p", {
 			role: "alert",
 			children: "Shell status unavailable; reconnect to refresh observation."
 		}) : null,
-		r.data?.output_error ? /* @__PURE__ */ J("p", {
+		i.data?.output_error ? /* @__PURE__ */ J("p", {
 			role: "alert",
-			children: r.data.output_error
+			children: i.data.output_error
 		}) : null,
 		/* @__PURE__ */ J("div", {
-			ref: a,
+			ref: o,
 			role: "region",
 			"aria-label": "Interactive terminal",
 			className: "flex-1 min-h-32 overflow-hidden",
