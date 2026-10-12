@@ -34,8 +34,10 @@ async function command(page: Page, text: string) {
 async function show(page: Page, base: string, session: string) {
   await page.goto(base + "/#/session/" + session + "/terminal");
   const button = page.getByRole("button", { name: "Show panel", exact: true });
-  if (await button.isVisible()) await button.click();
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
+  // Document load can precede the session query and React's panel controls.
+  await expect(button.or(pane)).toBeVisible();
+  if (await button.isVisible()) await button.click();
   await expect(pane).toBeVisible();
   return pane;
 }
