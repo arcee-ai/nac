@@ -8,6 +8,8 @@ import { createDirectSession, expect, test } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
 const evidence = "literal $skill /compact";
+const accompanyingOriginal = " /goal literal\u0001\n$skill ";
+const accompanyingCanonical = " /goal literal\n$skill ";
 function octal(text: string) {
   return Array.from(
     new TextEncoder().encode(text),
@@ -70,17 +72,12 @@ for (const mobile of [false, true]) {
     expect(await api.listInbox(session)).toHaveLength(0);
     dialog = await selectRenderedLine(page, pane, geometry.cols, geometry.rows);
     await dialog.getByRole("button", { name: "Edit accompanying text", exact: true }).click();
-    await dialog
-      .getByLabel("Accompanying literal text (optional)")
-      .fill(" /goal nac-e2e-dummy-only\n$skill ");
+    await dialog.getByLabel("Accompanying literal text (optional)").fill(accompanyingOriginal);
     await expect(
       dialog.getByRole("button", { name: "Send selection", exact: true }),
     ).toBeDisabled();
     await dialog.getByRole("button", { name: "Update preview", exact: true }).click();
-    await expect(dialog.getByLabel("Reviewed accompanying text")).toHaveText(
-      " /goal [REDACTED]\n$skill ",
-    );
-    await expect(dialog).not.toContainText("nac-e2e-dummy-only");
+    await expect(dialog.getByLabel("Reviewed accompanying text")).toHaveText(accompanyingCanonical);
     await api.terminateTerminal(session, shell.terminal_id);
     await expect(dialog.getByRole("status")).toContainText("source shell has exited");
     const submissions: TerminalSelectionSubmissionRequest[] = [];
@@ -95,7 +92,7 @@ for (const mobile of [false, true]) {
     harness.provider.enqueue(
       "selected-send",
       { token: evidence },
-      { kind: "text", text: "selection accepted once", stream: true },
+      { kind: "text", text: "selection accepted once" },
     );
     await page.screenshot({
       path: testInfo.outputPath(`selection-review-${mobile ? "mobile" : "desktop"}.png`),
@@ -111,14 +108,15 @@ for (const mobile of [false, true]) {
     expect(submissions[1]).toEqual(submissions[0]);
     expect(submissions[0].original_selected_text).toBe(evidence);
     expect(submissions[0].expected_selection_text).toBe(evidence);
-    expect(submissions[0].expected_user_text).toBe(" /goal [REDACTED]\n$skill ");
+    expect(submissions[0].original_user_text).toBe(accompanyingOriginal);
+    expect(submissions[0].expected_user_text).toBe(accompanyingCanonical);
     await expect.poll(async () => (await api.listInbox(session))[0]?.status).toBe("delivered");
     expect(await api.listInbox(session)).toHaveLength(1);
     expect(harness.provider.requests).toHaveLength(1);
     const delivered = JSON.stringify(harness.provider.requests[0].body);
     expect(delivered).toContain(evidence);
     expect(delivered).toContain("user_supplied_rendered_selection");
-    expect(delivered).not.toContain("nac-e2e-dummy-only");
+    expect(delivered).not.toContain("\\u0001");
     await dialog.getByRole("button", { name: "Dismiss review", exact: true }).click();
     if (mobile)
       expect(await page.locator("html").evaluate((node) => node.scrollWidth)).toBeLessThanOrEqual(
@@ -146,7 +144,6 @@ test("real selection offers explicit busy queue and exact displayed-run steer wi
       name: "read",
       callId: "selection-read",
       arguments: { path: "selection.txt" },
-      stream: true,
     },
     boundary,
   );

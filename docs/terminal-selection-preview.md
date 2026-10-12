@@ -1,10 +1,12 @@
-# Terminal selection preview foundation
+# Reviewed terminal selections
 
 The version-1 preview API validates a finite, user-supplied rendered selection.
 It does not authenticate a process-log interval or ingest retained scrollback.
 An explicit identified submission endpoint admits reviewed evidence to the
-existing durable inbox. The actual renderer selection adapter and selection UI
-remain unfinished ALL-142 work.
+existing durable inbox. In a direct primary chat, open the Terminal panel, select
+visible text, and choose **Review selected text**. The pane captures the actual
+xterm selection at that explicit action; it never reads the clipboard or shares
+the rest of the output.
 
 `POST /sessions/{session_id}/user-terminals/{terminal_id}/selection-preview`
 uses the existing authenticated HTTP client and mutation Origin admission. The
@@ -71,11 +73,36 @@ admission jobs retain lifecycle/host/work guards through commit and creator-only
 wake even if the HTTP request disconnects. The request wire body is limited to
 256 KiB; original and canonical fields each retain the stated text bounds.
 
-Canonical history and included fork prefixes preserve the literal source
-provenance; forks do not copy pending inbox work or admission receipts. Current
-compaction retains canonical history, but its summarized provider projection may
-omit exact selection provenance. That limitation is characterized, not changed.
+The review is a local, immutable capture. Its original selected text stays in the
+private controller until submission or dismissal; it is not stored in a browser
+cache, server draft or parallel context store. Only the server-normalized preview
+is displayed. Optional accompanying literal text requires **Update preview**
+before sending. **Dismiss review** and **Clear selection review** discard an
+unsent draft without waking an agent. Changing the terminal display or receiving
+more output does not replace a capture already being reviewed.
 
-Actual renderer selection, accessible local preview/dismiss/clear/Send controls,
-visible idle/busy delivery choice, and model-visible compaction provenance remain
-required before full ALL-142 acceptance.
+The dialog offers idle Send, FIFO Queue and an explicit displayed-run Steer.
+Choosing Steer freezes that exact run ID. A changed run disables that choice until
+the user explicitly selects the displayed run or another delivery option. An
+exited source can remain valid in bounded history; a currently unavailable source
+disables a new send. An unconfirmed submission freezes the identity and full
+reviewed intent. **Retry same submission** performs deliberate reconciliation;
+there is no automatic retry or silent retargeting. Dismissing an unconfirmed
+submission does not cancel work the server may have accepted.
+
+Canonical history retains every exact attribution verified by the identified
+inbox-delivery transaction. Included fork prefixes copy those annotations with
+the original source identities; forks do not copy pending inbox work, receipts or
+terminal capabilities. Plain or copied lookalike evidence text grants no typed
+attribution. The message bytes and old unannotated records keep their existing
+shape.
+
+Compaction keeps a metadata-only manifest with at most four exact recent source
+references, a streaming count/digest and an explicit omitted-reference notice.
+The digest cannot reconstruct older identities. Canonical history retains them;
+the finite model context does not promise that every old identity remains visible.
+Summary and manifest share the available budget, optional references are omitted
+whole, and checkpoint/source validation binds the manifest to genuine canonical
+annotations. Ordinary chats with no selection keep their existing defaults.
+Selected terminal output and accompanying text remain untrusted user evidence,
+never tool authorization or automatic approval.
