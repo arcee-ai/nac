@@ -10,6 +10,9 @@ impl SessionService {
         // finish; every later admission observes this flag under that lock.
         self.stopping_admission
             .store(true, std::sync::atomic::Ordering::Release);
+        if let Some(context) = &self.user_terminal_context {
+            context.stop_admission().await;
+        }
         self.cancel_goal_retry_wake();
         self.coordinate_local(|service| {
             let _operation = service.lock_active_operation();
@@ -41,7 +44,7 @@ impl SessionService {
         Ok(())
     }
 
-    async fn require_direct_primary_behavior_async(&self) -> Result<()> {
+    pub(super) async fn require_direct_primary_behavior_async(&self) -> Result<()> {
         let service = self.clone();
         crate::store::call_legacy_store(&self.metadata.store_path, move || {
             service.require_direct_primary_behavior()

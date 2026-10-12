@@ -43,6 +43,8 @@ mod operation_state;
 mod recovery;
 mod settlement;
 mod transcript_projection;
+mod user_terminals;
+pub use crate::terminal::{OutputBytePage as UserTerminalOutputPage, UserTerminalStatus};
 
 use manual_compaction::ActiveCompactionState;
 pub use manual_compaction::{
@@ -601,6 +603,7 @@ pub struct SessionService {
     /// MCP capability and prompt inventory captured at session construction.
     mcp: Option<Arc<crate::mcp::McpRegistry>>,
     terminal_manager: crate::terminal::TerminalManager,
+    user_terminal_context: Option<Arc<user_terminals::UserTerminalContext>>,
     permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
     /// A sandbox service owns container-local state even while it has no run
     /// or retained terminal. Keep a shared cross-process resource lease for
