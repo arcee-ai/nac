@@ -195,3 +195,6 @@ async fn static_host_key_profile_has_no_device_repair_capability() {
     let profile = ManagedModelProfile::from_config(&managed).unwrap();
     assert!(profile.begin_interactive_repair(&managed).await.is_err());
 }
+
+#[path = "managed_startup_tests.rs"]
+mod startup;

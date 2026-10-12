@@ -198,9 +198,12 @@ pub(crate) fn managed_startup_plan(
     managed: Option<&ManagedHostConfig>,
     running: &nac_core::store::ManagedUpgradeTarget,
 ) -> Result<ManagedStartupPlan> {
-    let Some(managed) =
-        managed.filter(|managed| managed.version == nac_managed::MANAGED_CONFIG_VERSION)
-    else {
+    let Some(managed) = managed.filter(|managed| {
+        matches!(
+            managed.version,
+            nac_managed::MANAGED_CONFIG_VERSION | nac_managed::HOST_KEY_MANAGED_CONFIG_VERSION
+        )
+    }) else {
         return Ok(ManagedStartupPlan {
             preflight: nac_core::store::ManagedStartupPreflight {
                 accepted_identity: None,
