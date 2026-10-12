@@ -1,3 +1,4 @@
+import { createUserTerminalApi } from "./userTerminalApi.js";
 import { ApiError, type NacClient } from "./nacClient.js";
 import type {
   HealthResponse,
@@ -163,6 +164,7 @@ export function createNacApi(nacClient: NacClient) {
   }
 
   return {
+    ...createUserTerminalApi(nacClient),
     health: (signal?: AbortSignal) => request<HealthResponse>("GET", "/health", { signal }),
 
     getStore: (signal?: AbortSignal) => request<StoreInfo>("GET", "/store", { signal }),

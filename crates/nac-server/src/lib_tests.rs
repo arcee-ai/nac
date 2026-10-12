@@ -76,7 +76,7 @@ impl ScopedModelEnv {
         Self::with_config_home(Some(nac_home), None, None, openai_api_key)
     }
 
-    fn with_config_home(
+    pub(crate) fn with_config_home(
         nac_home: Option<&std::path::Path>,
         xdg_config_home: Option<&std::path::Path>,
         home: Option<&std::path::Path>,
@@ -302,7 +302,7 @@ fn managed_library_startup_captures_and_hardens_native_credentials() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-fn test_manager(root: &std::path::Path) -> SessionManager {
+pub(crate) fn test_manager(root: &std::path::Path) -> SessionManager {
     SessionManager::new_unowned_fixture(ServerOptions {
         root_cwd: root.to_path_buf(),
         store_path: Some(root.join("store.db")),
@@ -805,7 +805,7 @@ fn seed_editable_session(root: &std::path::Path, session_id: &str) {
     sessions::create_session(&root.join("store.db"), &snapshot).expect("seed editable session");
 }
 
-fn seed_direct_session(root: &std::path::Path, session_id: &str) {
+pub(crate) fn seed_direct_session(root: &std::path::Path, session_id: &str) {
     seed_direct_session_with_base_url(root, session_id, "https://api.openai.com/v1".to_string());
 }
 
@@ -1016,6 +1016,11 @@ mod project_routes;
 mod recovery;
 #[path = "tests/terminals.rs"]
 mod terminals;
+
+#[path = "tests/user_terminal_shutdown.rs"]
+mod user_terminal_shutdown;
+#[path = "tests/user_terminals.rs"]
+mod user_terminals;
 
 #[path = "tests/owned_serving.rs"]
 mod owned_serving;

@@ -818,6 +818,16 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::session_runs::cancel_active_run))
         .routes(routes!(delivery::session_runs::cancel_exact_run))
         .routes(routes!(delivery::session_terminals::terminate_handler))
+        .routes(routes!(
+            delivery::user_terminals::open,
+            delivery::user_terminals::list
+        ))
+        .routes(routes!(delivery::user_terminals::status))
+        .routes(routes!(delivery::user_terminals::attach))
+        .routes(routes!(delivery::user_terminals::pull))
+        .routes(routes!(delivery::user_terminals::detach))
+        .routes(routes!(delivery::user_terminals::input))
+        .routes(routes!(delivery::user_terminals::resize))
 }
 
 /// Return the exact OpenAPI document assembled for the running HTTP router.
