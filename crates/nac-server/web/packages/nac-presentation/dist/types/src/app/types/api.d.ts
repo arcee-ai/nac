@@ -287,3 +287,7 @@ export type ForkSessionResponse = ApiSchema<"ForkSessionResponse">;
 export type OrchestratorSteeringResponse = ApiSchema<"OrchestratorSteeringResponse">;
 export type ThreadSteeringResponse = ApiSchema<"ThreadSteeringResponse">;
 export type RecentEventsResponse = ApiSchema<"RecentEventsResponse">;
+export type TerminalSelectionPreviewResponse = ApiSchema<"TerminalSelectionPreviewResponse">;
+export type TerminalSelectionSubmissionRequest = ApiSchema<"TerminalSelectionSubmissionRequest">;
+export type TerminalSelectionSubmissionResponse = ApiSchema<"TerminalSelectionSubmissionResponse">;
+export type TerminalSelectionDelivery = ApiSchema<"TerminalSelectionDelivery">;
