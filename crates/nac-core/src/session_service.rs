@@ -42,11 +42,11 @@ mod manual_compaction;
 mod operation_state;
 mod recovery;
 mod settlement;
-mod terminal_selection_admission;
 mod shell_command_types;
 mod shell_commands;
 mod shell_output;
 mod shell_settlement;
+mod terminal_selection_admission;
 pub(crate) use shell_command_types::SubmittedShell;
 pub use shell_command_types::{
     ShellCommandError, ShellCommandRequest, ShellCommandSnapshot, ShellCommandState,

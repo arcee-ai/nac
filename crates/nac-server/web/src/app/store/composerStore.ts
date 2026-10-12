@@ -3,6 +3,7 @@
 // submit does — slash commands, compaction, the optimistic bubble, the run
 // events — so the card only names the prompt and the composer sends it.
 
+import { createShellIntents } from "@/app/features/human-shell/intents";
 import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 
 interface ComposerState {
@@ -14,6 +15,7 @@ interface ComposerState {
 export function createComposerStore(_storage?: Pick<Storage, "getItem" | "setItem">) {
   const composerStore = createStore<ComposerState>({ pending: null, draft: null }, "composer");
   const initial_composerStore = composerStore.getState();
+  const shellIntents = createShellIntents();
 
   function sendPrompt(pending: string): void {
     composerStore.setState({ pending });
@@ -35,17 +37,22 @@ export function createComposerStore(_storage?: Pick<Storage, "getItem" | "setIte
     composerStore.setState({ draft: { sessionId, text } });
   }
   function consumeDraftRequests(sessionId: string, receive: (text: string) => void): () => void {
-    return composerStore.subscribe(() => {
+    const consume = () => {
       const { draft } = composerStore.getState();
       if (!draft || draft.sessionId !== sessionId) return;
       composerStore.setState({ draft: null });
       receive(draft.text);
-    });
+    };
+    const unsubscribe = composerStore.subscribe(consume);
+    consume();
+    return unsubscribe;
   }
   return {
     release: () => {
+      shellIntents.release();
       composerStore.setState(initial_composerStore);
     },
+    shellIntents,
     sendPrompt,
     consumePromptRequests,
     draftPrompt,
@@ -53,6 +60,11 @@ export function createComposerStore(_storage?: Pick<Storage, "getItem" | "setIte
   };
 }
 
-export const { release, sendPrompt, consumePromptRequests, draftPrompt, consumeDraftRequests } = createComposerStore(
-  standalonePreferenceStorage,
-);
+export const {
+  release,
+  sendPrompt,
+  consumePromptRequests,
+  draftPrompt,
+  consumeDraftRequests,
+  shellIntents,
+} = createComposerStore(standalonePreferenceStorage);

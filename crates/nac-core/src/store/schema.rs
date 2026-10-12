@@ -34,6 +34,10 @@ mod startup_tests;
 mod terminal_selection_migration_tests;
 
 #[cfg(test)]
+#[path = "schema/terminal_union_migration_tests.rs"]
+mod terminal_union_migration_tests;
+
+#[cfg(test)]
 #[path = "schema/connection_capacity_tests.rs"]
 mod connection_capacity_tests;
 
@@ -43,7 +47,9 @@ mod future_schema_tests;
 
 use wal_preflight::read_schema_version_header;
 
-// 33 adds immutable identified terminal-selection inbox admission.
+// 34 unifies both historical v33 shapes without rewriting their durable facts:
+// identified terminal-selection inbox admission and the human shell journal.
+// 33 independently introduced each of those additions on its owning branch.
 // 32 adds retained remote terminal cleanup ownership.
 // 31 adds host-owned worker dispatch admission and atomic episode receipts.
 // 30 adds transactional transcript append replay receipts.
@@ -69,7 +75,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 33;
+const STORE_SCHEMA_VERSION: i64 = 34;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -762,7 +768,8 @@ fn open_connection_with_hooks(
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | STORE_SCHEMA_VERSION => {}
+        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | STORE_SCHEMA_VERSION => {
+        }
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -1810,6 +1817,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "workspace_revisions",
         "session_run_recovery",
         "session_inbox",
+        "human_shell_operations",
         "permission_grants",
         "traditional_children",
         "managed_orchestrators",

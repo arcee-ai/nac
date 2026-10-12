@@ -19,7 +19,15 @@ function WorkspaceOwner({ sessionId }: { sessionId: string }) {
   const snapshot = useSessionSnapshot(sessionId);
   const running = useNativeRuntime().stores.runtimeStore.useRunning(sessionId);
   const runId = snapshot.data?.active_run?.run_id;
-  const mode = running || runId ? "busy" : snapshot.data && !snapshot.isError ? "idle" : "unknown";
+  const commandActive = snapshot.data?.shell_commands?.some(
+    (command) => command.state === "accepted" || command.state === "started",
+  );
+  const mode =
+    running || runId || commandActive
+      ? "busy"
+      : snapshot.data && !snapshot.isError
+        ? "idle"
+        : "unknown";
   return (
     <>
       <TerminalPane

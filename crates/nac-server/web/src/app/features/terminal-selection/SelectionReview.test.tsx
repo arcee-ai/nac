@@ -20,7 +20,9 @@ import { useSelectionReview } from "./useSelectionReview";
 import { TerminalWorkspace } from "./TerminalWorkspace";
 
 const context = vi.hoisted(() => ({
-  snapshot: undefined as undefined | { active_run?: { run_id: string } },
+  snapshot: undefined as
+    | undefined
+    | { active_run?: { run_id: string }; shell_commands?: { state: "accepted" | "started" }[] },
   sourceAlive: true,
   sourceUnavailable: false,
 }));
@@ -247,6 +249,25 @@ describe("local terminal selection review through the real typed client", () => 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(net.submissions).toHaveLength(0);
+  });
+  it("treats an active human command as busy but permits explicit durable Queue without inventing a run", async () => {
+    const net = wire();
+    const value = runtime(net.fetch);
+    context.snapshot = { shell_commands: [{ state: "started" }] };
+    render(tree(value, undefined, undefined, true));
+    fireEvent.click(screen.getByRole("button", { name: "Review rendered capture" }));
+    await screen.findByLabelText("Reviewed selected text");
+    expect(
+      (screen.getByRole("radio", { name: /Send as a new turn/ }) as HTMLInputElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("radio", { name: /Steer the displayed/ }) as HTMLInputElement).disabled,
+    ).toBe(true);
+    expect(net.submissions).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Queue selection" }));
+    await screen.findByText(/Selection admission accepted/);
+    expect(net.submissions[0].delivery).toBe("queue");
+    expect(net.submissions[0].expected_run_id).toBeUndefined();
   });
   it("mounts review from the pane capture and explicitly freezes a displayed run while runtime is busy", async () => {
     const net = wire();

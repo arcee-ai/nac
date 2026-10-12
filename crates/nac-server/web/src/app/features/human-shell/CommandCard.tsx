@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { useCancelShellCommand, useShellOutput } from "./queries";
-import { draftPrompt } from "@/app/store/composerStore";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type { ShellCommandSnapshot } from "@/app/types/api";
 
 export function CommandCard({
@@ -12,6 +13,7 @@ export function CommandCard({
   command: ShellCommandSnapshot;
   readOnly?: boolean;
 }) {
+  const { draftPrompt } = useNativeRuntime().stores.composerStore;
   const [showOutput, setShowOutput] = useState(false);
   const [offset, setOffset] = useState(0);
   const output = useShellOutput(sessionId, command.request_id, offset, showOutput);
@@ -20,7 +22,7 @@ export function CommandCard({
   return (
     <article
       aria-label="User command"
-      className="my-3 rounded-xl border border-white/10 bg-white/5 p-4"
+      className="my-3 rounded-xl border border-border-primary bg-bg-elevation-level-1 p-4"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <strong>Run by you</strong>
@@ -43,22 +45,31 @@ export function CommandCard({
       {command.diagnostic ? <p className="mt-2 text-sm">{command.diagnostic}</p> : null}
       <div className="mt-3 flex flex-wrap gap-4 text-sm">
         {active && !readOnly ? (
-          <button
+          <Button
             type="button"
+            size={ButtonSize.Small}
+            variant={ButtonVariant.Ghost}
             disabled={cancel.isPending}
             onClick={() => cancel.mutate(command.request_id)}
           >
             Cancel command
-          </button>
+          </Button>
         ) : null}
         {!active && command.output_id ? (
-          <button type="button" onClick={() => setShowOutput((shown) => !shown)}>
+          <Button
+            type="button"
+            size={ButtonSize.Small}
+            variant={ButtonVariant.Ghost}
+            onClick={() => setShowOutput((shown) => !shown)}
+          >
             {showOutput ? "Hide output" : "Full output"}
-          </button>
+          </Button>
         ) : null}
         {!active && !readOnly ? (
-          <button
+          <Button
             type="button"
+            size={ButtonSize.Small}
+            variant={ButtonVariant.Ghost}
             onClick={() =>
               draftPrompt(
                 sessionId,
@@ -67,7 +78,7 @@ export function CommandCard({
             }
           >
             Ask about this
-          </button>
+          </Button>
         ) : null}
       </div>
       {cancel.error ? <p role="alert">Unable to cancel this command.</p> : null}
@@ -83,14 +94,24 @@ export function CommandCard({
               </pre>
               <div className="mt-2 flex gap-4">
                 {offset > 0 ? (
-                  <button type="button" onClick={() => setOffset(0)}>
+                  <Button
+                    type="button"
+                    size={ButtonSize.Small}
+                    variant={ButtonVariant.Ghost}
+                    onClick={() => setOffset(0)}
+                  >
                     Start
-                  </button>
+                  </Button>
                 ) : null}
                 {!output.data.eof ? (
-                  <button type="button" onClick={() => setOffset(output.data.next_offset)}>
+                  <Button
+                    type="button"
+                    size={ButtonSize.Small}
+                    variant={ButtonVariant.Ghost}
+                    onClick={() => setOffset(output.data.next_offset)}
+                  >
                     Next page
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             </>

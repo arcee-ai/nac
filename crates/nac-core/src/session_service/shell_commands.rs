@@ -23,13 +23,25 @@ struct ShellTaskGuard {
 impl Drop for ShellTaskGuard {
     fn drop(&mut self) {
         let mut operation = self.service.lock_active_operation();
-        if matches!(operation.as_ref(), Some(ActiveSessionOperation::HumanShell(active))
-            if active.snapshot.operation_id == self.operation_id)
-        {
+        let owned = matches!(operation.as_ref(), Some(ActiveSessionOperation::HumanShell(active))
+            if active.snapshot.operation_id == self.operation_id);
+        if owned {
             *operation = None;
         }
         drop(operation);
         self.service.publish_shell_snapshot();
+        if owned {
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                let service = self.service.clone();
+                runtime.spawn(async move {
+                    if let Err(error) = service.wake_queued_after_shell().await {
+                        eprintln!(
+                            "nac: queued input remains pending after shell settlement: {error:#}"
+                        );
+                    }
+                });
+            }
+        }
     }
 }
 
@@ -38,6 +50,28 @@ fn store_error(error: impl std::fmt::Display) -> ShellCommandError {
 }
 
 impl SessionService {
+    /// Command completion alone never asks the model to respond. Explicitly
+    /// queued input uses the existing inbox owner after operation/lease release.
+    async fn wake_queued_after_shell(&self) -> Result<()> {
+        if self.stopping_admission.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let Some(session_id) = self.metadata.session_id.clone() else {
+            return Ok(());
+        };
+        let path = self.metadata.store_path.clone();
+        let pending = crate::store::spawn_blocking_store_caller(move || {
+            Ok::<_, anyhow::Error>(
+                crate::store::next_pending_session_inbox_item(&path, &session_id)?.is_some(),
+            )
+        })
+        .await??;
+        if pending {
+            self.start_next_direct_inbox_item().await?;
+        }
+        Ok(())
+    }
+
     fn publish_shell_snapshot(&self) {
         if let Some(session_id) = self.metadata.session_id.as_ref() {
             self.event_bus.emit(SessionEvent::SnapshotSaved {

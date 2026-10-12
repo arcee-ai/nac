@@ -1,4 +1,6 @@
 struct TestEnvironment;
+#[path = "shell_terminal_integration_tests.rs"]
+mod terminal_integration;
 impl nac_contracts::CommandEnvironmentProvider for TestEnvironment {
     fn snapshot(&self) -> nac_contracts::CommandEnvironmentFuture<'_> {
         Box::pin(async { Ok(test_environment()) })

@@ -1,5 +1,6 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { shellInput } from "@/app/features/human-shell/input";
+import { useShellPresentation } from "@/app/features/human-shell/presentationLifetime";
 import { useSubmitShellCommand } from "@/app/features/human-shell/queries";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -250,6 +251,8 @@ function contextGauge(used: number | null, resolved: ResolvedCatalogModel) {
  * model, environment, cumulative token usage and the run timer.
  */
 export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) {
+  const runtime = useNativeRuntime();
+  const shellPresentation = useShellPresentation(runtime, sessionId);
   const { useSshConnectionStatus, sshTargetFromSummary, markSshDisconnected, markSshConnected } =
     useNativeRuntime().stores.sshConnectionStore;
 
@@ -267,7 +270,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   const { revealSidePanel, openSubagentLaunch } = useNativeRuntime().stores.sessionLayoutStore;
 
-  const { consumePromptRequests } = useNativeRuntime().stores.composerStore;
+  const { consumePromptRequests, consumeDraftRequests, shellIntents } =
+    useNativeRuntime().stores.composerStore;
 
   const navigate = useNavigate();
   perfRender("ChatInputBox");
@@ -301,11 +305,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
   const submitShell = useSubmitShellCommand(sessionId);
-  const pendingShellRequest = useRef<{
-    sessionId: string;
-    command: string;
-    requestId: string;
-  } | null>(null);
   const steerOrchestrator = useSteerOrchestrator();
   const compactSession = useCompactSession();
   const createInboxItem = useCreateInboxItem();
@@ -727,13 +726,19 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
       try {
         if (input.kind === "command") {
+          const lease = shellPresentation.current;
+          const shellCurrent = () => current() && !!lease?.current();
+          const retrying =
+            shellIntents.get(sessionId)?.phase === "uncertain" &&
+            shellIntents.get(sessionId)?.request.command === input.command;
           if (
             !direct ||
             readOnly ||
-            running ||
-            (snapshot?.shell_commands ?? []).some(
-              (command) => command.state === "accepted" || command.state === "started",
-            )
+            (!retrying &&
+              (running ||
+                (snapshot?.shell_commands ?? []).some(
+                  (command) => command.state === "accepted" || command.state === "started",
+                )))
           ) {
             toast.error("Shell commands require an idle direct-primary chat");
             return;
@@ -743,18 +748,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             return;
           }
           try {
-            const previous = pendingShellRequest.current;
-            const requestId =
-              previous?.sessionId === sessionId && previous.command === input.command
-                ? previous.requestId
-                : crypto.randomUUID();
-            pendingShellRequest.current = { sessionId, command: input.command, requestId };
-            await submitShell.mutateAsync({ request_id: requestId, command: input.command });
-            if (pendingShellRequest.current?.requestId === requestId)
-              pendingShellRequest.current = null;
-            if (current()) clearField();
+            await submitShell.mutateAsync(input.command);
+            if (shellCurrent()) clearField();
           } catch (error) {
-            if (current()) toast.error(`Command outcome: ${errorMessage(toRunError(error))}`);
+            if (shellCurrent()) toast.error(`Command outcome: ${errorMessage(toRunError(error))}`);
           }
           return;
         }
@@ -833,6 +830,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       commandDefinitions,
       refetchCommands,
       submitShell,
+      shellIntents,
+      shellPresentation,
+      direct,
+      readOnly,
+      running,
+      snapshot?.shell_commands,
       toast,
       compactSession,
       pushLocalEvent,
@@ -852,14 +855,19 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     () => consumePromptRequests((prompt) => void submit(prompt)),
     [consumePromptRequests, submit],
   );
-  useEffect(
-    () => consumeDraftRequests(sessionId, (text) => {
+  useEffect(() => {
+    let focusFrame: number | undefined;
+    const unsubscribe = consumeDraftRequests(sessionId, (text) => {
       setValue(text);
       valueRef.current = text;
-      requestAnimationFrame(() => ref.current?.focus());
-    }),
-    [sessionId, consumeDraftRequests],
-  );
+      if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
+      focusFrame = requestAnimationFrame(() => ref.current?.focus());
+    });
+    return () => {
+      unsubscribe();
+      if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
+    };
+  }, [sessionId, consumeDraftRequests]);
 
   const stop = useCallback(async () => {
     await actions.stopRun(sessionId);

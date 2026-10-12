@@ -1,6 +1,6 @@
 use super::*;
 #[test]
-fn terminal_selection_migration_33_rolls_back_before_commit_and_restarts() {
+fn terminal_selection_migration_34_rolls_back_before_commit_and_restarts() {
     let path = std::env::temp_dir()
         .join(format!("nac-selection-migration-{}", uuid::Uuid::new_v4()))
         .join("store.db");
@@ -52,6 +52,6 @@ fn terminal_selection_migration_33_rolls_back_before_commit_and_restarts() {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        33
+        34
     );
 }

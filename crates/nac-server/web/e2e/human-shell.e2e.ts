@@ -102,3 +102,35 @@ test("human shell uncertain response keeps the same identity for an explicit ret
   expect((await snapshot.json()).shell_commands).toHaveLength(1);
   expect(harness.provider.requests).toHaveLength(0);
 });
+
+test("escaped leading bang remains literal model input and never invokes a user command", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const project = await createProject(request, harness);
+  const session = await createSession(request, harness, "direct", project);
+  const commands: string[] = [];
+  page.on("request", (event) => {
+    if (event.method() === "POST" && event.url().endsWith(`/sessions/${session}/user-commands`))
+      commands.push(event.url());
+  });
+  harness.provider.enqueue(
+    "literal-bang",
+    { token: "!literal" },
+    { kind: "text", text: "Literal bang received.", stream: true },
+  );
+  await page.goto(`${harness.baseUrl}/#/session/${session}/files`);
+  const composer = page.getByRole("combobox", { name: "Message" });
+  await composer.fill("\\!literal");
+  await page
+    .locator("form")
+    .filter({ has: composer })
+    .getByRole("button", { name: "Send", exact: true })
+    .click();
+  await expect(page.getByText("Literal bang received.", { exact: true })).toBeVisible();
+  expect(commands).toHaveLength(0);
+  expect(harness.provider.requests).toHaveLength(1);
+  const snapshot = await request.get(`${harness.baseUrl}/sessions/${session}`);
+  expect((await snapshot.json()).shell_commands ?? []).toHaveLength(0);
+});

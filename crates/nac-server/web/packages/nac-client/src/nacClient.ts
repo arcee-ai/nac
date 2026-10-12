@@ -526,36 +526,46 @@ export class NacClient {
 
   async submitShellCommand(
     sessionId: string,
-    request: ShellCommandRequest,
+    request: Readonly<ShellCommandRequest>,
     signal?: AbortSignal,
   ): Promise<ShellCommandSnapshot> {
+    const frozen = Object.freeze({ ...request });
     const admission = await this.transport.admit<ShellCommandSnapshot>(
       "POST",
       `${sessionPath(sessionId)}/user-commands`,
       {
-        body: request,
-        requestId: request.request_id,
+        body: frozen,
+        requestId: frozen.request_id,
         signal,
       },
     );
-    if (admission.status === "accepted") return admission.response;
+    if (admission.status === "accepted" && admission.response.request_id === frozen.request_id)
+      return admission.response;
     if (admission.status === "not-sent")
       throw new DOMException("Command was not sent", "AbortError");
-    // A lost admission response never triggers another submission. Read the
-    // same durable identity once; failure leaves the outcome explicitly unknown.
+    const cause =
+      admission.status === "uncertain"
+        ? admission.error
+        : new Error("Human command response changed request identity");
+    // Canonical command text may be redacted. Request identity, never masked
+    // display text, binds readback to the immutable submitted intent.
+    // A lost admission response triggers one lookup, never another submission.
     try {
-      return await this.getShellCommand(sessionId, request.request_id, signal);
+      return await this.getShellCommand(sessionId, frozen.request_id, signal);
     } catch {
-      throw new UncertainCommandAdmissionError(request.request_id, admission.error);
+      throw new UncertainCommandAdmissionError(frozen.request_id, cause);
     }
   }
 
-  getShellCommand(sessionId: string, requestId: string, signal?: AbortSignal) {
-    return this.transport.request<ShellCommandSnapshot>(
+  async getShellCommand(sessionId: string, requestId: string, signal?: AbortSignal) {
+    const snapshot = await this.transport.request<ShellCommandSnapshot>(
       "GET",
       `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}`,
       { signal },
     );
+    if (snapshot.request_id !== requestId)
+      throw new Error("Human command lookup changed request identity");
+    return snapshot;
   }
 
   cancelShellCommand(sessionId: string, requestId: string, signal?: AbortSignal) {

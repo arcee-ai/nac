@@ -158,6 +158,29 @@ activation capability fence local publication; there is no second generation
 counter in Effect. Scope finalization aborts the request, including when replaced,
 cleared or detached. StrictMode cleanup closes request resources synchronously;
 the retain bridge defers only final draft disposal for a replacement retain.
+
+## Human shell command admission (ALL-140)
+
+The composer recognizes an unescaped `!` at byte zero before trimming and sends
+the exact suffix through the runtime-bound client. `features/human-shell/workflow.ts`
+owns the scoped admission claim, typed outcome classification and originating
+cache settlement. The typed client remains the sole owner of one POST and
+same-request-ID readback after uncertain transport; explicit retry keeps that
+identity. Mutation variables contain opaque attempt handles rather than drafts.
+
+Each runtime's composer store owns private immutable pending intents by session.
+An unknown admission survives composer remount. Changing its command first
+requires canonical readback; the bounded owner refuses new capacity rather than
+evicting unknown identities. Runtime disposal releases these transient intents.
+A separate presentation Scope fences late local callbacks without cancelling
+durable execution. Output/cancel queries and polling remain TanStack owners;
+“Ask about this” only fills a draft until the user submits it.
+
+A human command, a user terminal and a model run have distinct authorities and
+lifetimes. Active human commands disable selection Send; explicit Queue remains
+available, while Steer requires an actual run. After command result settlement
+and operation/lease release, the existing inbox owner wakes explicitly pending
+input. Command completion alone never creates a model turn.
 TanStack owns originating-cache invalidation; neither original selections nor
 request variables enter its caches. React renders the canonical review and owns
 the explicit Send, retry, edit and clear controls.

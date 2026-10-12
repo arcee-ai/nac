@@ -1,4 +1,8 @@
 export declare const NAC_API_SURFACE: {
+    readonly "POST /sessions/{session_id}/user-commands": "api.submitShellCommand";
+    readonly "GET /sessions/{session_id}/user-commands/{request_id}": "api.getShellCommand";
+    readonly "POST /sessions/{session_id}/user-commands/{request_id}/cancel": "api.cancelShellCommand";
+    readonly "GET /sessions/{session_id}/user-commands/{request_id}/output": "api.getShellOutput";
     readonly "POST /sessions/{session_id}/user-terminals/{terminal_id}/selection-submissions": "api.submitUserTerminalSelection";
     readonly "POST /sessions/{session_id}/user-terminals/{terminal_id}/selection-preview": "api.previewUserTerminalSelection";
     readonly "POST /sessions/{session_id}/user-terminals": "api.openUserTerminal";

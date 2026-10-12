@@ -1,5 +1,5 @@
 import { ApiError, type NacClient } from "./nacClient.js";
-import type { UpdateGitIdentityRequest, AuthenticateMcpOAuthRequest, ConfigureMcpOAuthRequest, AssignSessionRequest, CommitWorkspaceRequest, CreateModelConfigurationRequest, CreateGoalRequest, CreateProjectRequest, CreateSessionRequest, DeleteProjectSessions, LaunchModelDefaultsRequest, InboxDelivery, ManagedAuthProvider, StartManagedCloneRequest, CreateMcpServerRequest, UpdateMcpServerRequest, TestMcpServerRequest, PermissionApprovalMode, PermissionReply, StartTraditionalChildRequest, StartManagedOrchestratorRequest, ProviderModelsRequest, ReorderProjectsRequest, ReorderSessionsRequest, SessionEventBoundary, CreateSshConfigurationRequest, UpdateSshConfigurationRequest, SshTarget, SwitchBranchRequest, UpdateConfigRequest, UpdateGoalRequest, UpdateModelConfigurationRequest, UpdateProjectRequest, UpdateSessionPresentationRequest, WorkspaceDiffStage } from "./types.js";
+import type { UpdateGitIdentityRequest, AuthenticateMcpOAuthRequest, ConfigureMcpOAuthRequest, AssignSessionRequest, CommitWorkspaceRequest, CreateModelConfigurationRequest, CreateGoalRequest, CreateProjectRequest, CreateSessionRequest, DeleteProjectSessions, LaunchModelDefaultsRequest, InboxDelivery, ManagedAuthProvider, StartManagedCloneRequest, CreateMcpServerRequest, UpdateMcpServerRequest, TestMcpServerRequest, PermissionApprovalMode, PermissionReply, StartTraditionalChildRequest, StartManagedOrchestratorRequest, ProviderModelsRequest, ReorderProjectsRequest, ReorderSessionsRequest, SessionEventBoundary, CreateSshConfigurationRequest, UpdateSshConfigurationRequest, SshTarget, ShellCommandRequest, SwitchBranchRequest, UpdateConfigRequest, UpdateGoalRequest, UpdateModelConfigurationRequest, UpdateProjectRequest, UpdateSessionPresentationRequest, WorkspaceDiffStage } from "./types.js";
 export { ApiError };
 export interface WorkspaceDiffOptions {
     stage?: WorkspaceDiffStage | "all";
@@ -32,6 +32,58 @@ export interface ThreadEventsOptions {
     signal?: AbortSignal;
 }
 export declare function createNacApi(nacClient: NacClient): {
+    submitShellCommand: (id: string, body: ShellCommandRequest, signal?: AbortSignal) => Promise<{
+        accepted_at_epoch_ms: number;
+        command: string;
+        diagnostic?: string | null;
+        exit_code?: number | null;
+        finished_at_epoch_ms?: number | null;
+        operation_id: string;
+        output_id?: string | null;
+        request_id: string;
+        state: import("./openapi.generated.js").components["schemas"]["ShellCommandState"];
+        stderr: string;
+        stdout: string;
+        timeout_ms: number;
+        transcript_index?: number | null;
+    }>;
+    getShellCommand: (id: string, requestId: string, signal?: AbortSignal) => Promise<{
+        accepted_at_epoch_ms: number;
+        command: string;
+        diagnostic?: string | null;
+        exit_code?: number | null;
+        finished_at_epoch_ms?: number | null;
+        operation_id: string;
+        output_id?: string | null;
+        request_id: string;
+        state: import("./openapi.generated.js").components["schemas"]["ShellCommandState"];
+        stderr: string;
+        stdout: string;
+        timeout_ms: number;
+        transcript_index?: number | null;
+    }>;
+    cancelShellCommand: (id: string, requestId: string, signal?: AbortSignal) => Promise<{
+        accepted_at_epoch_ms: number;
+        command: string;
+        diagnostic?: string | null;
+        exit_code?: number | null;
+        finished_at_epoch_ms?: number | null;
+        operation_id: string;
+        output_id?: string | null;
+        request_id: string;
+        state: import("./openapi.generated.js").components["schemas"]["ShellCommandState"];
+        stderr: string;
+        stdout: string;
+        timeout_ms: number;
+        transcript_index?: number | null;
+    }>;
+    getShellOutput: (id: string, requestId: string, offset?: number, signal?: AbortSignal) => Promise<{
+        content: string;
+        eof: boolean;
+        next_offset: number;
+        offset: number;
+        overflowed: boolean;
+    }>;
     health: (signal?: AbortSignal) => Promise<{
         status: string;
     }>;
@@ -561,6 +613,7 @@ export declare function createNacApi(nacClient: NacClient): {
         response_timing: import("./openapi.generated.js").components["schemas"]["ResponseTimingSnapshot"];
         run_failure?: null | import("./openapi.generated.js").components["schemas"]["RunFailure"];
         sessions: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
+        shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
         thread_episodes: Record<string, import("./openapi.generated.js").components["schemas"]["EpisodeSnapshot"][]>;
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
@@ -589,6 +642,7 @@ export declare function createNacApi(nacClient: NacClient): {
         response_timing: import("./openapi.generated.js").components["schemas"]["ResponseTimingSnapshot"];
         run_failure?: null | import("./openapi.generated.js").components["schemas"]["RunFailure"];
         sessions: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
+        shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
         thread_episodes: Record<string, import("./openapi.generated.js").components["schemas"]["EpisodeSnapshot"][]>;
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];

@@ -333,6 +333,42 @@ export class NacClient {
         });
         return { snapshot, baseline, replay };
     }
+    async submitShellCommand(sessionId, request, signal) {
+        const frozen = Object.freeze({ ...request });
+        const admission = await this.transport.admit("POST", `${sessionPath(sessionId)}/user-commands`, {
+            body: frozen,
+            requestId: frozen.request_id,
+            signal,
+        });
+        if (admission.status === "accepted" && admission.response.request_id === frozen.request_id)
+            return admission.response;
+        if (admission.status === "not-sent")
+            throw new DOMException("Command was not sent", "AbortError");
+        const cause = admission.status === "uncertain"
+            ? admission.error
+            : new Error("Human command response changed request identity");
+        // Canonical command text may be redacted. Request identity, never masked
+        // display text, binds readback to the immutable submitted intent.
+        // A lost admission response triggers one lookup, never another submission.
+        try {
+            return await this.getShellCommand(sessionId, frozen.request_id, signal);
+        }
+        catch {
+            throw new UncertainCommandAdmissionError(frozen.request_id, cause);
+        }
+    }
+    async getShellCommand(sessionId, requestId, signal) {
+        const snapshot = await this.transport.request("GET", `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}`, { signal });
+        if (snapshot.request_id !== requestId)
+            throw new Error("Human command lookup changed request identity");
+        return snapshot;
+    }
+    cancelShellCommand(sessionId, requestId, signal) {
+        return this.transport.request("POST", `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}/cancel`, { signal });
+    }
+    getShellOutput(sessionId, requestId, offset = 0, signal) {
+        return this.transport.request("GET", `${sessionPath(sessionId)}/user-commands/${encodeURIComponent(requestId)}/output?offset=${offset}`, { signal });
+    }
     submitPrompt(sessionId, prompt, signal) {
         return this.transport.admit("POST", `${sessionPath(sessionId)}/runs`, {
             body: { prompt },

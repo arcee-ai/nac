@@ -1028,7 +1028,7 @@ mod owned_serving;
 #[path = "tests/session_creation_overload.rs"]
 mod session_creation_overload;
 
-#[path = "tests/terminal_selection.rs"]
-mod terminal_selection;
 #[path = "tests/shell_commands.rs"]
 mod shell_commands;
+#[path = "tests/terminal_selection.rs"]
+mod terminal_selection;

@@ -107,6 +107,7 @@
     --radius-sm: .25rem;
     --radius-md: .375rem;
     --radius-lg: .5rem;
+    --radius-xl: .75rem;
     --radius-3xl: 1.5rem;
     --ease-out: cubic-bezier(0, 0, .2, 1);
     --ease-in-out: cubic-bezier(.4, 0, .2, 1);
@@ -2152,6 +2153,10 @@
 
 [data-nac-runtime]:is(.rounded-sm), [data-nac-runtime] .rounded-sm {
     border-radius: var(--radius-sm);
+  }
+
+[data-nac-runtime]:is(.rounded-xl), [data-nac-runtime] .rounded-xl {
+    border-radius: var(--radius-xl);
   }
 
 [data-nac-runtime]:is(.rounded-s), [data-nac-runtime] .rounded-s {

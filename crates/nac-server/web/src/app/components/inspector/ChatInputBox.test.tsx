@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +19,7 @@ import type {
   SessionSnapshotResponse,
   SkillCatalogEntry,
   SlashCommandDefinition,
+  ShellCommandSnapshot,
 } from "@/app/types/api";
 
 // The component runs against the real providers, stores, and api object; the
@@ -28,6 +29,8 @@ const fakes = {
   listSessionCommands: vi.fn(),
   listSessionSkills: vi.fn(),
   submitRun: vi.fn(),
+  submitShellCommand: vi.fn(),
+  getShellCommand: vi.fn(),
   steerOrchestrator: vi.fn(),
   compactSession: vi.fn(),
   createInboxItem: vi.fn(),
@@ -48,6 +51,10 @@ vi.spyOn(api, "listSessionCommands").mockImplementation((...args) =>
 vi.spyOn(api, "listSessionSkills").mockImplementation((...args) =>
   fakes.listSessionSkills(...args),
 );
+vi.spyOn(api, "submitShellCommand").mockImplementation((...args) =>
+  fakes.submitShellCommand(...args),
+);
+vi.spyOn(api, "getShellCommand").mockImplementation((...args) => fakes.getShellCommand(...args));
 vi.spyOn(api, "submitRun").mockImplementation((...args) => fakes.submitRun(...args));
 vi.spyOn(api, "steerOrchestrator").mockImplementation((...args) =>
   fakes.steerOrchestrator(...args),
@@ -131,6 +138,7 @@ function composer(
     lineage = null,
     entryAvailable = true,
     snapshotAvailable = false,
+    shellCommands = [],
   }: {
     behavior?: SessionBehavior | null;
     goalState?: SessionGoalRecord | null;
@@ -138,6 +146,7 @@ function composer(
     lineage?: ManagedSessionSummary["lineage"];
     entryAvailable?: boolean;
     snapshotAvailable?: boolean;
+    shellCommands?: ShellCommandSnapshot[];
   } = {},
   expectInput = true,
 ) {
@@ -194,6 +203,7 @@ function composer(
           agents_md_status: "off",
         },
         messages: [],
+        shell_commands: shellCommands,
         response_timing: {
           last_response_duration_ms: null,
           previous_response_duration_ms: null,
@@ -247,6 +257,17 @@ beforeEach(() => {
   // module mocks' `data: undefined`.
   fakes.listSessionCommands.mockReset().mockImplementation(() => pending());
   fakes.listSessionSkills.mockReset().mockImplementation(() => pending());
+  fakes.submitShellCommand.mockReset().mockImplementation(async (_session, request) => ({
+    request_id: request.request_id,
+    operation_id: "operation",
+    command: request.command,
+    state: "completed",
+    timeout_ms: 30000,
+    accepted_at_epoch_ms: 1,
+    stdout: "result",
+    stderr: "",
+  }));
+  fakes.getShellCommand.mockReset();
   fakes.submitRun.mockReset().mockResolvedValue({
     status: "accepted",
     requestId: "request-run",
@@ -1017,5 +1038,70 @@ describe("skill suggestions", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     await waitFor(() => expect(fakes.submitRun).toHaveBeenCalledWith("session", "$"));
+  });
+});
+
+describe("human command composer integration", () => {
+  it("preserves command bytes and bypasses slash/model/inbox delivery", async () => {
+    const textarea = composer({ behavior: "direct" });
+    type(textarea, "!  printf exact\n\t");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(fakes.submitShellCommand).toHaveBeenCalledOnce());
+    expect(fakes.submitShellCommand.mock.calls[0][1].command).toBe("  printf exact\n\t");
+    await waitFor(() => expect(textarea.value).toBe(""));
+    expect(fakes.submitRun).not.toHaveBeenCalled();
+    expect(fakes.createInboxItem).not.toHaveBeenCalled();
+    expect(fakes.steerOrchestrator).not.toHaveBeenCalled();
+  });
+  it("sends escaped bang as literal prompt rather than a human command", async () => {
+    const textarea = composer({ behavior: "direct" });
+    type(textarea, "\\!literal");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(fakes.submitRun).toHaveBeenCalled());
+    expect(fakes.submitRun.mock.calls[0][1]).toBe("!literal");
+    expect(fakes.submitShellCommand).not.toHaveBeenCalled();
+  });
+  it("rejects bang execution in a classic chat or while a human command is active", async () => {
+    for (const behavior of ["orchestrator", "direct"] as const) {
+      const textarea = composer({
+        behavior,
+        snapshotAvailable: true,
+        shellCommands: [
+          {
+            request_id: "active",
+            operation_id: "operation",
+            command: "sleep",
+            state: "started",
+            timeout_ms: 30000,
+            accepted_at_epoch_ms: 1,
+            stdout: "",
+            stderr: "",
+          },
+        ],
+      });
+      type(textarea, "!echo must-not-run");
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await screen.findByText("Shell commands require an idle direct-primary chat");
+      expect(fakes.submitShellCommand).not.toHaveBeenCalled();
+      expect(fakes.submitRun).not.toHaveBeenCalled();
+      cleanup();
+    }
+  });
+  it("does not clear a newer draft when the command admission settles", async () => {
+    let accept!: (value: unknown) => void;
+    fakes.submitShellCommand.mockImplementation(
+      (_session, request) =>
+        new Promise((resolve) => {
+          accept = () => resolve({ request_id: request.request_id, state: "completed" });
+        }),
+    );
+    const textarea = composer({ behavior: "direct" });
+    type(textarea, "!first");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(fakes.submitShellCommand).toHaveBeenCalledOnce());
+    type(textarea, "next draft");
+    await act(async () => accept(undefined));
+    await waitFor(() => expect(textarea.value).toBe("next draft"));
+    expect(fakes.submitRun).not.toHaveBeenCalled();
   });
 });
