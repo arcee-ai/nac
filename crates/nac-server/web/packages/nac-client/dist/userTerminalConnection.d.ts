@@ -28,6 +28,7 @@ export declare class UserTerminalConnection {
     private readonly waitMs;
     private lifetime;
     private observer;
+    private readonly cleanupReceipts;
     private acknowledgement;
     private expectedOffset;
     private reading;
@@ -79,6 +80,7 @@ export declare class UserTerminalConnection {
     }>;
     /** Detaches observation only. Closing the process uses the separate terminateTerminal API. */
     detach(signal?: AbortSignal): Promise<void>;
+    private cleanupObservers;
     input(bytes: Uint8Array, signal?: AbortSignal): Promise<void>;
     /** Explicit consumer acknowledgement enables fresh input; previously sent bytes are never replayed. */
     acknowledgeInputUncertainty(): void;

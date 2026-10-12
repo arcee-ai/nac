@@ -39,6 +39,11 @@ accepted delivery whose completion could not be confirmed. Neither outcome
 authorizes automatically replaying input. Launch authorizes continuing human
 interaction, rather than treating Enter as a per-command permission decision.
 
+Human artifacts share the session's bounded output budget, but are excluded
+from model text paging and previews at artifact creation. That exclusion
+survives shell exit and terminal-history eviction; knowing an artifact ID does
+not admit its output to the model. Explicit selection admission is separate.
+
 ## Observation and lifetime
 
 Observers bind a session, a current process handle and a negotiated page size

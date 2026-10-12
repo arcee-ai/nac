@@ -79,6 +79,7 @@ export class UserTerminalConnection {
   private readonly waitMs: number;
   private lifetime = new AbortController();
   private observer: string | undefined;
+  private readonly cleanupReceipts = new Set<string>();
   private acknowledgement: { offset: string; reset: boolean } | undefined;
   private expectedOffset = "0";
   private reading = false;
@@ -124,6 +125,8 @@ export class UserTerminalConnection {
     const active = this.signal(signal);
     try {
       cancelled(active);
+      // Failed DELETE receipts stay owned; clear them before allocating another seat.
+      await this.cleanupObservers();
       await rendered(this.renderer.reset(reason, active), active);
       const result = await this.api.attachUserTerminal(
         this.sessionId,
@@ -134,16 +137,25 @@ export class UserTerminalConnection {
         },
         active,
       );
+      // Retain the decoded seat receipt before local cancellation or validation
+      // can reject this attachment. A lost HTTP receipt still relies on server TTL.
+      if (typeof result.observer_id === "string" && result.observer_id)
+        this.observer = result.observer_id;
       cancelled(active);
       requireVersion(result.protocol_version);
       this.status(result.terminal);
-      if (!result.observer_id)
+      if (typeof result.observer_id !== "string" || !result.observer_id)
         throw new TerminalProtocolError("Missing terminal observer identity");
       this.observer = result.observer_id;
       this.acknowledgement = undefined;
       this.expectedOffset = "0";
       this.needsReset = false;
       return result.terminal;
+    } catch (error) {
+      // Cleanup uses the immutable source binding and no already-aborted signal.
+      // Preserve the original attach error; failed cleanup remains retryable.
+      await this.detach().catch(() => {});
+      throw error;
     } finally {
       this.attaching = false;
     }
@@ -253,11 +265,17 @@ export class UserTerminalConnection {
 
   /** Detaches observation only. Closing the process uses the separate terminateTerminal API. */
   async detach(signal?: AbortSignal) {
-    const observer = this.observer;
+    if (this.observer) this.cleanupReceipts.add(this.observer);
     this.observer = undefined;
     this.lifetime.abort(new DOMException("Terminal observation detached", "AbortError"));
-    if (observer)
+    await this.cleanupObservers(signal);
+  }
+
+  private async cleanupObservers(signal?: AbortSignal) {
+    for (const observer of this.cleanupReceipts) {
       await this.api.detachUserTerminal(this.sessionId, this.terminalId, observer, signal);
+      this.cleanupReceipts.delete(observer);
+    }
   }
 
   async input(bytes: Uint8Array, signal?: AbortSignal) {

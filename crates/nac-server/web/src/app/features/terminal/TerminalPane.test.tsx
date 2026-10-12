@@ -13,6 +13,7 @@ const renderer = vi.hoisted(() => ({
   reset: vi.fn(async () => {}),
   selection: vi.fn(() => "selected private output"),
   dispose: vi.fn(),
+  fit: vi.fn<() => { cols: number; rows: number } | null>(() => null),
   options: { disableStdin: true },
 }));
 vi.mock("./xtermAdapter", () => ({
@@ -32,7 +33,7 @@ vi.mock("./xtermAdapter", () => ({
       focus: vi.fn(),
       getSelection: renderer.selection,
     },
-    fit: () => null,
+    fit: renderer.fit,
     dispose: renderer.dispose,
   }),
 }));
@@ -52,17 +53,17 @@ function pending(signal?: AbortSignal): Promise<never> {
     else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
 }
-function fixture() {
+function fixture(status = terminal) {
   const api = {
     ...standaloneRuntime.api,
-    listUserTerminals: vi.fn(async () => ({ protocol_version: 1, terminals: [terminal] })),
-    getUserTerminal: vi.fn(async () => terminal),
-    openUserTerminal: vi.fn(async () => terminal),
+    listUserTerminals: vi.fn(async () => ({ protocol_version: 1, terminals: [status] })),
+    getUserTerminal: vi.fn(async () => status),
+    openUserTerminal: vi.fn(async () => status),
     attachUserTerminal: vi.fn(async () => ({
       protocol_version: 1,
       observer_id: "observer",
       idle_expiry_ms: 30_000,
-      terminal,
+      terminal: status,
     })),
     pullUserTerminal: vi.fn<typeof standaloneRuntime.api.pullUserTerminal>(
       async (_session, _id, _observer, _body, signal) => pending(signal),
@@ -90,6 +91,7 @@ function fixture() {
 beforeEach(() => {
   vi.clearAllMocks();
   renderer.options.disableStdin = true;
+  renderer.fit.mockReturnValue(null);
   renderer.write.mockImplementation(async () => {});
   renderer.selection.mockReturnValue("selected private output");
   Object.defineProperty(document, "fonts", {
@@ -153,6 +155,58 @@ describe("terminal pane lifetime and explicit user actions", () => {
     );
     expect(f.api.terminateTerminal).not.toHaveBeenCalled();
     expect(renderer.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("fits exited history locally and replays its final bytes without process resize", async () => {
+    renderer.fit.mockReturnValue({ cols: 91, rows: 31 });
+    const exited = { ...terminal, alive: false, output_complete: true, exit_code: 7 };
+    const f = fixture(exited);
+    f.api.resizeUserTerminal.mockRejectedValue(new Error("user terminal has exited"));
+    f.api.pullUserTerminal
+      .mockResolvedValueOnce({
+        protocol_version: 1,
+        observer_id: "observer",
+        terminal: exited,
+        bytes: [65],
+        offset: "0",
+        next_offset: "1",
+        retained_start: "0",
+        retained_end: "1",
+        gap: false,
+        caught_up: true,
+        requires_ack: true,
+      })
+      .mockResolvedValueOnce({
+        protocol_version: 1,
+        observer_id: "observer",
+        terminal: exited,
+        bytes: [],
+        offset: "1",
+        next_offset: "1",
+        retained_start: "0",
+        retained_end: "1",
+        gap: false,
+        caught_up: true,
+        requires_ack: false,
+      });
+    await screen.findByText("Output complete · Exited (7)");
+    expect(renderer.fit).toHaveBeenCalled();
+    expect(renderer.write).toHaveBeenCalledWith(Uint8Array.of(65), expect.any(AbortSignal));
+    expect(f.api.pullUserTerminal.mock.calls[1][3]).toMatchObject({ acknowledge_offset: "1" });
+    expect(f.api.resizeUserTerminal).not.toHaveBeenCalled();
+    expect(renderer.options.disableStdin).toBe(true);
+    expect(screen.queryByText("Disconnected")).toBeNull();
+  });
+
+  it("reports a live process resize failure without disconnecting independent observation", async () => {
+    renderer.fit.mockReturnValue({ cols: 91, rows: 31 });
+    const f = fixture();
+    f.api.resizeUserTerminal.mockRejectedValue(new Error("geometry control failed"));
+    await screen.findByText("Connected");
+    await screen.findByText(/Terminal resize failed: geometry control failed/);
+    await waitFor(() => expect(f.api.pullUserTerminal).toHaveBeenCalled());
+    expect(screen.queryByText("Disconnected")).toBeNull();
+    expect(f.api.terminateTerminal).not.toHaveBeenCalled();
   });
 
   it("does not replay uncertain input and requires acknowledgement before fresh typing", async () => {

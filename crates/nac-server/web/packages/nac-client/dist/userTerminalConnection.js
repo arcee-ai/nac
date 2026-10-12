@@ -67,6 +67,7 @@ export class UserTerminalConnection {
     waitMs;
     lifetime = new AbortController();
     observer;
+    cleanupReceipts = new Set();
     acknowledgement;
     expectedOffset = "0";
     reading = false;
@@ -107,21 +108,33 @@ export class UserTerminalConnection {
         const active = this.signal(signal);
         try {
             cancelled(active);
+            // Failed DELETE receipts stay owned; clear them before allocating another seat.
+            await this.cleanupObservers();
             await rendered(this.renderer.reset(reason, active), active);
             const result = await this.api.attachUserTerminal(this.sessionId, this.terminalId, {
                 protocol_version: NAC_TERMINAL_PROTOCOL_VERSION,
                 page_limit: this.pageLimit,
             }, active);
+            // Retain the decoded seat receipt before local cancellation or validation
+            // can reject this attachment. A lost HTTP receipt still relies on server TTL.
+            if (typeof result.observer_id === "string" && result.observer_id)
+                this.observer = result.observer_id;
             cancelled(active);
             requireVersion(result.protocol_version);
             this.status(result.terminal);
-            if (!result.observer_id)
+            if (typeof result.observer_id !== "string" || !result.observer_id)
                 throw new TerminalProtocolError("Missing terminal observer identity");
             this.observer = result.observer_id;
             this.acknowledgement = undefined;
             this.expectedOffset = "0";
             this.needsReset = false;
             return result.terminal;
+        }
+        catch (error) {
+            // Cleanup uses the immutable source binding and no already-aborted signal.
+            // Preserve the original attach error; failed cleanup remains retryable.
+            await this.detach().catch(() => { });
+            throw error;
         }
         finally {
             this.attaching = false;
@@ -219,11 +232,17 @@ export class UserTerminalConnection {
     }
     /** Detaches observation only. Closing the process uses the separate terminateTerminal API. */
     async detach(signal) {
-        const observer = this.observer;
+        if (this.observer)
+            this.cleanupReceipts.add(this.observer);
         this.observer = undefined;
         this.lifetime.abort(new DOMException("Terminal observation detached", "AbortError"));
-        if (observer)
+        await this.cleanupObservers(signal);
+    }
+    async cleanupObservers(signal) {
+        for (const observer of this.cleanupReceipts) {
             await this.api.detachUserTerminal(this.sessionId, this.terminalId, observer, signal);
+            this.cleanupReceipts.delete(observer);
+        }
     }
     async input(bytes, signal) {
         bounded(bytes.length, 1, MAX_INPUT, "terminal input length");

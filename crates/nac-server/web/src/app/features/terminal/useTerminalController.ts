@@ -51,19 +51,24 @@ export function useTerminalController(
       let resizeRunning = false;
       let latestGeometry: { cols: number; rows: number } | null = null;
       let connected = false;
+      let processAlive = false;
       const resize = async () => {
         const geometry = adapter.fit();
         if (geometry) latestGeometry = geometry;
-        if (resizeRunning || !connected) return;
+        if (resizeRunning || !connected || !processAlive) return;
         resizeRunning = true;
         try {
-          while (latestGeometry && active()) {
+          while (latestGeometry && active() && processAlive) {
             const next = latestGeometry;
             latestGeometry = null;
             await connection.resize(next.cols, next.rows, abort.signal);
           }
         } catch (error) {
-          fail(error);
+          // Process control can fail after exit while retained replay is healthy.
+          if (active())
+            setNotice(
+              `Terminal resize failed: ${error instanceof Error ? error.message : "geometry control unavailable"}`,
+            );
         } finally {
           resizeRunning = false;
         }
@@ -107,6 +112,7 @@ export function useTerminalController(
       const status = await connection.attach(abort.signal, attempt ? "reconnect" : "attach");
       if (!active()) return;
       connected = true;
+      processAlive = status.alive;
       // Reattaching never silently resumes input after a lost consumer or
       // receipt. Only a newly opened shell can start typing immediately.
       const enable =
@@ -122,6 +128,8 @@ export function useTerminalController(
         if (active()) void resize();
       });
       await connection.run(abort.signal, (frame) => {
+        processAlive = frame.terminal.alive;
+        if (!processAlive) latestGeometry = null;
         if (frame.gap && active())
           setNotice(
             "Earlier output was discarded. The display was reset before retained output was replayed.",

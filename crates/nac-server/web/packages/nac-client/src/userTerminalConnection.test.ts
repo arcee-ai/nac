@@ -370,6 +370,123 @@ describe("finite terminal observation", () => {
   });
 });
 
+describe("observer receipt cleanup", () => {
+  it("releases each received post-attach cancellation before a four-seat quota can fill", async () => {
+    const f = fixture([]);
+    const seats = new Set<string>();
+    let abort = new AbortController();
+    let issued = 0;
+    vi.spyOn(f.api, "attachUserTerminal").mockImplementation(async () => {
+      if (seats.size >= 4) throw new Error("observer quota full");
+      const observer = `received-${++issued}`;
+      seats.add(observer);
+      abort.abort(); // The decoded receipt is available despite a late local abort.
+      return { protocol_version: 1, observer_id: observer, idle_expiry_ms: 30_000, terminal };
+    });
+    const detach = vi
+      .spyOn(f.api, "detachUserTerminal")
+      .mockImplementation(async (_session, _terminal, observer, signal) => {
+        signal?.throwIfAborted();
+        seats.delete(observer);
+      });
+    for (let index = 0; index < 6; index++) {
+      abort = new AbortController();
+      await expect(f.connection.attach(abort.signal)).rejects.toMatchObject({ name: "AbortError" });
+      expect(seats.size).toBe(0);
+      expect(f.connection.observerId).toBeUndefined();
+    }
+    expect(issued).toBe(6);
+    expect(detach).toHaveBeenCalledTimes(6);
+    expect(f.requests).toHaveLength(0); // No read, input or process termination.
+  });
+
+  it.each([{ protocol_version: 2 }, { terminal: { ...terminal, terminal_id: "other" } }])(
+    "detaches a known receipt before rejecting its terminal/version and retains immutable routing: %j",
+    async (invalid) => {
+      const f = fixture([]);
+      f.fetch.mockResolvedValueOnce(
+        Response.json({ protocol_version: 1, observer_id: "received/id", terminal, ...invalid }),
+      );
+      await expect(f.connection.attach()).rejects.toBeInstanceOf(TerminalProtocolError);
+      expect(f.connection.observerId).toBeUndefined();
+      expect(f.requests).toHaveLength(1); // Mocked attachment bypassed the fixture recorder.
+      const cleanup = f.requests[0];
+      expect(cleanup.method).toBe("DELETE");
+      expect(cleanup.path).toBe(
+        "https://example.test/nac/v1/sessions/session%2Fid/user-terminals/shell%2Fid/observers/received%2Fid",
+      );
+      expect(cleanup.init?.signal).toBeUndefined();
+      const headers = new Headers(cleanup.init?.headers);
+      expect(headers.get("authorization")).toBe("Bearer token");
+      expect(headers.get("x-consumer")).toBe("immutable");
+      expect(cleanup.init?.credentials).toBe("omit");
+    },
+  );
+
+  it("cleans a late receipt after detach and does not apply it to a new lifetime", async () => {
+    const f = fixture([]);
+    const arrived = deferred();
+    const release = deferred();
+    vi.spyOn(f.api, "attachUserTerminal").mockImplementationOnce(async () => {
+      arrived.resolve();
+      await release.promise;
+      return { protocol_version: 1, observer_id: "late/id", idle_expiry_ms: 30_000, terminal };
+    });
+    const attach = f.connection.attach();
+    const rejected = expect(attach).rejects.toMatchObject({ name: "AbortError" });
+    await arrived.promise;
+    await f.connection.detach();
+    release.resolve();
+    await rejected;
+    expect(f.requests.map((request) => request.method)).toEqual(["DELETE"]);
+    expect(f.requests[0].path).toMatch(/late%2Fid$/);
+    expect(f.connection.observerId).toBeUndefined();
+    await f.connection.attach();
+    expect(f.connection.observerId).toBe("observer/id");
+    await f.connection.detach();
+  });
+
+  it("retains failed cleanup receipts and clears them before accepting another observer", async () => {
+    const f = fixture([]);
+    const events: string[] = [];
+    vi.spyOn(f.api, "attachUserTerminal").mockImplementation(async () => {
+      events.push("attach");
+      return { protocol_version: 2, observer_id: "retained/id", idle_expiry_ms: 30_000, terminal };
+    });
+    const detach = vi
+      .spyOn(f.api, "detachUserTerminal")
+      .mockRejectedValueOnce(new Error("cleanup response lost"))
+      .mockImplementation(async () => {
+        events.push("cleanup");
+      });
+    await expect(f.connection.attach()).rejects.toBeInstanceOf(TerminalProtocolError);
+    expect(detach).toHaveBeenCalledTimes(1);
+    await expect(f.connection.attach()).rejects.toBeInstanceOf(TerminalProtocolError);
+    expect(events).toEqual(["attach", "cleanup", "attach", "cleanup"]);
+    expect(detach).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not invent a cleanup identity when the HTTP attachment receipt is lost", async () => {
+    const f = fixture([]);
+    f.fetch.mockRejectedValueOnce(new TypeError("attach receipt lost"));
+    await expect(f.connection.attach()).rejects.toThrow("attach receipt lost");
+    expect(f.connection.observerId).toBeUndefined();
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+    expect(f.requests.filter((request) => request.method === "DELETE")).toHaveLength(0);
+    // No decoded identity was received: only the server's existing idle TTL can retire that seat.
+  });
+
+  it("a reconnect reset failure releases the old seat without creating a new one", async () => {
+    const f = fixture([]);
+    await f.connection.attach();
+    f.renderer.reset.mockRejectedValueOnce(new Error("reset failed"));
+    await expect(f.connection.reconnect()).rejects.toThrow("reset failed");
+    expect(f.requests.filter((request) => request.path.endsWith("/observers"))).toHaveLength(1);
+    expect(f.requests.filter((request) => request.method === "DELETE")).toHaveLength(1);
+    expect(f.connection.observerId).toBeUndefined();
+  });
+});
+
 describe("typed user terminal resource facade", () => {
   it("owns launch/list/status requests and keeps observation detach separate from process termination", async () => {
     const f = fixture([]);

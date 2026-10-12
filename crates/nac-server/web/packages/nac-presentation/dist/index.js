@@ -15478,6 +15478,7 @@ var fg = class {
 	waitMs;
 	lifetime = new AbortController();
 	observer;
+	cleanupReceipts = /* @__PURE__ */ new Set();
 	acknowledgement;
 	expectedOffset = "0";
 	reading = !1;
@@ -15505,13 +15506,15 @@ var fg = class {
 		this.attaching = !0, this.lifetime.signal.aborted && (this.lifetime = new AbortController());
 		let n = this.signal(e);
 		try {
-			ug(n), await dg(this.renderer.reset(t, n), n);
+			ug(n), await this.cleanupObservers(), await dg(this.renderer.reset(t, n), n);
 			let e = await this.api.attachUserTerminal(this.sessionId, this.terminalId, {
 				protocol_version: 1,
 				page_limit: this.pageLimit
 			}, n);
-			if (ug(n), sg(e.protocol_version), this.status(e.terminal), !e.observer_id) throw new ag("Missing terminal observer identity");
+			if (typeof e.observer_id == "string" && e.observer_id && (this.observer = e.observer_id), ug(n), sg(e.protocol_version), this.status(e.terminal), typeof e.observer_id != "string" || !e.observer_id) throw new ag("Missing terminal observer identity");
 			return this.observer = e.observer_id, this.acknowledgement = void 0, this.expectedOffset = "0", this.needsReset = !1, e.terminal;
+		} catch (e) {
+			throw await this.detach().catch(() => {}), e;
 		} finally {
 			this.attaching = !1;
 		}
@@ -15562,8 +15565,10 @@ var fg = class {
 		}
 	}
 	async detach(e) {
-		let t = this.observer;
-		this.observer = void 0, this.lifetime.abort(new DOMException("Terminal observation detached", "AbortError")), t && await this.api.detachUserTerminal(this.sessionId, this.terminalId, t, e);
+		this.observer && this.cleanupReceipts.add(this.observer), this.observer = void 0, this.lifetime.abort(new DOMException("Terminal observation detached", "AbortError")), await this.cleanupObservers(e);
+	}
+	async cleanupObservers(e) {
+		for (let t of this.cleanupReceipts) await this.api.detachUserTerminal(this.sessionId, this.terminalId, t, e), this.cleanupReceipts.delete(t);
 	}
 	async input(e, t) {
 		if (lg(e.length, 1, rg, "terminal input length"), this.inputUncertain) throw new og(void 0);
@@ -15736,55 +15741,55 @@ function xg(e, t, n, r) {
 	return U(() => {
 		let r = n.current;
 		if (!r) return;
-		let s = new AbortController(), c, u = () => !s.signal.aborted, f = (e) => {
-			u() && (l("Disconnected"), d(e instanceof Error ? e.message : "Terminal observation failed"), a.current && (a.current.adapter.terminal.options.disableStdin = !0));
-		};
+		let s = new AbortController(), c, u = () => !s.signal.aborted;
 		return (async () => {
 			let n = await yg(r);
 			if (!u()) {
 				n.dispose();
 				return;
 			}
-			let m = new fg(i, e, t, n.renderer, { pageLimit: 32768 }), v = new hg(m, s.signal);
+			let f = new fg(i, e, t, n.renderer, { pageLimit: 32768 }), m = new hg(f, s.signal);
 			a.current = {
 				adapter: n,
-				pump: v
+				pump: m
 			};
-			let y = !1, b = null, x = !1, S = async () => {
+			let v = !1, y = null, b = !1, x = !1, S = async () => {
 				let e = n.fit();
-				if (e && (b = e), !(y || !x)) {
-					y = !0;
+				if (e && (y = e), !(v || !b || !x)) {
+					v = !0;
 					try {
-						for (; b && u();) {
-							let e = b;
-							b = null, await m.resize(e.cols, e.rows, s.signal);
+						for (; y && u() && x;) {
+							let e = y;
+							y = null, await f.resize(e.cols, e.rows, s.signal);
 						}
 					} catch (e) {
-						f(e);
+						u() && d(`Terminal resize failed: ${e instanceof Error ? e.message : "geometry control unavailable"}`);
 					} finally {
-						y = !1;
+						v = !1;
 					}
 				}
 			}, C = (e) => {
-				!x || n.terminal.options.disableStdin || v.send(e).catch((e) => {
-					u() && (d(e instanceof Error ? e.message : "Terminal input failed"), v.needsAcknowledgement && (_.current = !0, n.terminal.options.disableStdin = !0, p(!0)));
+				!b || n.terminal.options.disableStdin || m.send(e).catch((e) => {
+					u() && (d(e instanceof Error ? e.message : "Terminal input failed"), m.needsAcknowledgement && (_.current = !0, n.terminal.options.disableStdin = !0, p(!0)));
 				});
 			}, w = n.terminal.onData((e) => C(new TextEncoder().encode(e))), T = n.terminal.onBinary((e) => C(Uint8Array.from(e, (e) => e.charCodeAt(0)))), E = new ResizeObserver(() => {
 				S();
 			});
 			E.observe(r), n.terminal.element && E.observe(n.terminal.element), c = () => {
-				(v.hasActiveInput || v.needsAcknowledgement) && (_.current = !0), x = !1, a.current = null, E.disconnect(), w.dispose(), T.dispose(), v.dispose(), m.detach().catch(() => {}), n.dispose();
+				(m.hasActiveInput || m.needsAcknowledgement) && (_.current = !0), b = !1, a.current = null, E.disconnect(), w.dispose(), T.dispose(), m.dispose(), f.detach().catch(() => {}), n.dispose();
 			}, l("Connecting"), d(""), p(_.current);
-			let D = await m.attach(s.signal, o ? "reconnect" : "attach");
+			let D = await f.attach(s.signal, o ? "reconnect" : "attach");
 			if (!u()) return;
-			x = !0;
+			b = !0, x = D.alive;
 			let O = D.alive && g.current && o === 0 && !_.current;
 			n.terminal.options.disableStdin = !O, h(D.alive && !O), _.current && d("Input delivery was not confirmed. Check the shell before enabling fresh input."), l(D.alive ? "Connected" : "Retained output"), await S(), document.fonts.ready.then(() => {
 				u() && S();
-			}), await m.run(s.signal, (e) => {
-				e.gap && u() && d("Earlier output was discarded. The display was reset before retained output was replayed.");
+			}), await f.run(s.signal, (e) => {
+				x = e.terminal.alive, x || (y = null), e.gap && u() && d("Earlier output was discarded. The display was reset before retained output was replayed.");
 			}), u() && (n.terminal.options.disableStdin = !0, l("Output complete"));
-		})().catch(f), () => {
+		})().catch((e) => {
+			u() && (l("Disconnected"), d(e instanceof Error ? e.message : "Terminal observation failed"), a.current && (a.current.adapter.terminal.options.disableStdin = !0));
+		}), () => {
 			s.abort(), c?.();
 		};
 	}, [
