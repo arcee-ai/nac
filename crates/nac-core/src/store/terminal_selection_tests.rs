@@ -342,3 +342,32 @@ fn identified_selection_rollback_reused_row_id_is_not_creator_authority() {
     assert!(later.replayed);
     assert_eq!(later.record.id, rolled_back_id);
 }
+
+#[test]
+fn identified_selection_failed_commit_retains_uncertainty_and_sqlite_cause() {
+    let path = fixture();
+    let original = intent();
+    let connection = open_runtime_connection(&path).unwrap();
+    // A deferred constraint allows INSERT but rejects the actual COMMIT.
+    connection.execute_batch("CREATE TABLE selection_commit_parent(id INTEGER PRIMARY KEY);
+        CREATE TABLE selection_commit_child(parent_id INTEGER REFERENCES selection_commit_parent(id) DEFERRABLE INITIALLY DEFERRED);
+        CREATE TRIGGER selection_commit_failure AFTER INSERT ON session_inbox BEGIN
+            INSERT INTO selection_commit_child(parent_id) VALUES(1);
+        END;").unwrap();
+    let error = create_terminal_selection_intent(&path, &original).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<TerminalSelectionAdmissionError>(),
+        Some(&TerminalSelectionAdmissionError::CommitUncertain)
+    );
+    assert!(error.chain().any(|cause| matches!(cause.downcast_ref::<rusqlite::Error>(), Some(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::ConstraintViolation)));
+    assert!(list_session_inbox(&path, "session").unwrap().is_empty());
+    connection
+        .execute_batch("DROP TRIGGER selection_commit_failure;")
+        .unwrap();
+    let creator = create_terminal_selection_intent(&path, &original).unwrap();
+    assert!(!creator.replayed);
+    let replay = create_terminal_selection_intent(&path, &original).unwrap();
+    assert!(replay.replayed);
+    assert_eq!(creator.record.id, replay.record.id);
+    assert_eq!(list_session_inbox(&path, "session").unwrap().len(), 1);
+}

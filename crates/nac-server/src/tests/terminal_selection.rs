@@ -616,3 +616,183 @@ async fn terminal_selection_uncertain_commit_is_500_and_same_identity_reconciles
     drop(manager);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn terminal_selection_precommit_sqlite_contention_is_409_without_admission_or_wake() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("selection_busy_status");
+    let home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&home, Some("server-test-key"));
+    seed_direct_session(&root, "source");
+    let manager = owned_test_manager(&root).unwrap();
+    let service = manager.attach_session("source").await.unwrap();
+    service
+        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
+        .unwrap();
+    let shell = service
+        .open_user_terminal(uuid::Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    let app = router(manager.clone());
+    let path = format!(
+        "/sessions/source/user-terminals/{}/selection-preview",
+        shell.id
+    );
+    let preview = decode(
+        app.clone()
+            .oneshot(request(&path, payload("selected")))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let submit = path.replace("selection-preview", "selection-submissions");
+    let packet = submission(&preview, "selected", None, "queue");
+    let _peer =
+        nac_core::sessions::SessionOperationLease::try_acquire(&manager.inner.store_path, "source")
+            .unwrap();
+    // A real foreign writer exhausts the serving connection's finite busy wait.
+    // WAL readers can still validate the session and find no admission receipt.
+    let blocker = rusqlite::Connection::open(&manager.inner.store_path).unwrap();
+    blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let response = app
+        .clone()
+        .oneshot(request(&submit, packet.clone()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        decode(response).await["error"],
+        "selection admission store is busy; retry the same identity"
+    );
+    assert!(manager
+        .inner
+        ._store_ownership
+        .coordinator()
+        .unwrap()
+        .list_session_inbox("source".to_owned())
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(!service.has_active_operation());
+    blocker.execute_batch("ROLLBACK").unwrap();
+    let accepted = decode(
+        app.clone()
+            .oneshot(request(&submit, packet.clone()))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(accepted["replayed"], false);
+    let replay = decode(app.oneshot(request(&submit, packet)).await.unwrap()).await;
+    assert_eq!(replay["replayed"], true);
+    assert_eq!(accepted["inbox_id"], replay["inbox_id"]);
+    assert_eq!(
+        manager
+            .inner
+            ._store_ownership
+            .coordinator()
+            .unwrap()
+            .list_session_inbox("source".to_owned())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(!service.has_active_operation());
+    service.terminate_user_terminal(&shell.id).await.unwrap();
+}
+
+#[tokio::test]
+async fn terminal_selection_expected_text_bounds_are_specific_and_precede_admission() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("selection_expected_bounds");
+    let home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&home, Some("server-test-key"));
+    seed_direct_session(&root, "source");
+    let manager = owned_test_manager(&root).unwrap();
+    let service = manager.attach_session("source").await.unwrap();
+    service
+        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
+        .await
+        .unwrap();
+    let shell = service
+        .open_user_terminal(uuid::Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    let app = router(manager.clone());
+    let path = format!(
+        "/sessions/source/user-terminals/{}/selection-preview",
+        shell.id
+    );
+    let preview = decode(
+        app.clone()
+            .oneshot(request(&path, payload("selected")))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let submit = path.replace("selection-preview", "selection-submissions");
+    for oversized in ["x".repeat(8193), "中".repeat(8193), "🙂".repeat(8193)] {
+        let mut packet = submission(&preview, "selected", None, "queue");
+        packet["expected_selection_text"] = serde_json::json!(oversized);
+        // Field bounds precede even UUID validation, cached-source checks and the owned job.
+        packet["admission_id"] = serde_json::json!("invalid");
+        let response = app.clone().oneshot(request(&submit, packet)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            decode(response).await["error"],
+            "expected_selection_text exceeds limits: 32768 UTF-8 bytes or 8192 Unicode scalars"
+        );
+        assert_eq!(
+            crate::application::terminal_selection::active_admission_jobs_for_test(),
+            0
+        );
+        assert!(manager
+            .inner
+            ._store_ownership
+            .coordinator()
+            .unwrap()
+            .list_session_inbox("source".to_owned())
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(!service.has_active_operation());
+    }
+    // The inclusive boundary is exactly 8192 scalars and 32768 UTF-8 bytes.
+    let boundary = "🙂".repeat(8192);
+    let preview = decode(
+        app.clone()
+            .oneshot(request(&path, payload(&boundary)))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(preview["text"], boundary);
+    let _peer =
+        nac_core::sessions::SessionOperationLease::try_acquire(&manager.inner.store_path, "source")
+            .unwrap();
+    let response = app
+        .oneshot(request(
+            &submit,
+            submission(&preview, &boundary, None, "queue"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(decode(response).await["accepted_intent"]["text"], boundary);
+    assert_eq!(
+        manager
+            .inner
+            ._store_ownership
+            .coordinator()
+            .unwrap()
+            .list_session_inbox("source".to_owned())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(!service.has_active_operation());
+    service.terminate_user_terminal(&shell.id).await.unwrap();
+}

@@ -71,6 +71,12 @@ pub(crate) async fn submit(
 ) -> Result<Json<TerminalSelectionSubmissionResponse>, ApiError> {
     let Json(request) = payload?;
     bounded(&request.original_selected_text)?;
+    bounded(&request.expected_selection_text).map_err(|_| {
+        ApiError::bad_request(
+            "expected_selection_text exceeds limits: 32768 UTF-8 bytes or 8192 Unicode scalars"
+                .into(),
+        )
+    })?;
     for value in request
         .original_user_text
         .iter()

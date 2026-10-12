@@ -181,7 +181,8 @@ pub fn create_terminal_selection_intent(path: &Path, intent: &TerminalSelectionI
     // Only a positively successful commit establishes creator authority.
     // An unknown COMMIT failure must NOT infer ownership from a later matching
     // row: a rolled-back allocation can be reused by another creator.
-    transaction.commit()?;
+    transaction.commit().map_err(|error| anyhow::Error::from(error)
+        .context(TerminalSelectionAdmissionError::CommitUncertain))?;
     let acknowledged = true;
     #[cfg(test)]
     let acknowledged = acknowledged && !LOSE_ACK.with(|fault| fault.replace(false));
@@ -193,7 +194,8 @@ pub fn create_terminal_selection_intent(path: &Path, intent: &TerminalSelectionI
     // Reconcile this successful transaction's lost local acknowledgement/load
     // while the caller still holds its work/idle lease. Ordinary receipt-first
     // replay never reaches here and never acquires creator wake authority.
-    let mut found = receipt(&connection, intent)?
+    let mut found = receipt(&connection, intent)
+        .map_err(|error| error.context(TerminalSelectionAdmissionError::CommitUncertain))?
         .filter(|found| found.record.id == id)
         .ok_or(TerminalSelectionAdmissionError::CommitUncertain)?;
     found.replayed = false;

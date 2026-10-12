@@ -218,8 +218,14 @@ impl From<RequestConfigurationError> for ApiError {
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         let message = error.to_string();
-        let status = if let Some(error) = error.downcast_ref::<sessions::SessionConfigUpdateError>()
-        {
+        // A typed uncertain admission remains a reconciliation failure even when
+        // its retained SQLite cause is BUSY/LOCKED. Only precommit contention is 409.
+        let status = if matches!(
+            error.downcast_ref::<nac_core::store::TerminalSelectionAdmissionError>(),
+            Some(nac_core::store::TerminalSelectionAdmissionError::CommitUncertain)
+        ) {
+            StatusCode::INTERNAL_SERVER_ERROR
+        } else if let Some(error) = error.downcast_ref::<sessions::SessionConfigUpdateError>() {
             match error {
                 sessions::SessionConfigUpdateError::NotFound(_) => StatusCode::NOT_FOUND,
                 sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,

@@ -19,7 +19,7 @@ pub(crate) fn active_admission_jobs_for_test() -> usize {
     32 - ADMISSIONS.available_permits()
 }
 
-// One-shot, admission-scoped postcommit uncertainty for actual HTTP characterization.
+// One-shot, admission-scoped postcommit BUSY uncertainty for actual HTTP characterization.
 // It grants no creator authority and is absent from production builds.
 #[cfg(test)]
 static UNCERTAIN_ADMISSIONS: LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
@@ -153,7 +153,11 @@ impl<'a> TerminalSelectionApplication<'a> {
             #[cfg(test)]
             if UNCERTAIN_ADMISSIONS.lock().unwrap().remove(&admission_id) {
                 return Err(admission_error(
-                    TerminalSelectionAdmissionError::CommitUncertain.into(),
+                    anyhow::Error::from(rusqlite::Error::SqliteFailure(
+                        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                        None,
+                    ))
+                    .context(TerminalSelectionAdmissionError::CommitUncertain),
                 ));
             }
             Ok(receipt)
@@ -164,11 +168,41 @@ impl<'a> TerminalSelectionApplication<'a> {
 }
 fn admission_error(error: anyhow::Error) -> Error {
     match error.downcast_ref::<TerminalSelectionAdmissionError>() {
+        None if nac_core::store::is_sqlite_busy(&error) => {
+            Error::Rejected("selection admission store is busy; retry the same identity".into())
+        }
         Some(TerminalSelectionAdmissionError::CommitUncertain) | None => Error::Internal(error),
         Some(TerminalSelectionAdmissionError::Unavailable) => Error::Unavailable,
         Some(TerminalSelectionAdmissionError::Invalid) => {
             Error::Invalid("invalid terminal selection intent")
         }
         Some(error) => Error::Rejected(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_selection_commit_uncertainty_precedes_nested_sqlite_contention() {
+        for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+            let sqlite = || {
+                anyhow::Error::from(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(code),
+                    None,
+                ))
+            };
+            let retryable: crate::ApiError = admission_error(sqlite()).into();
+            assert_eq!(retryable.status, axum::http::StatusCode::CONFLICT);
+            let uncertain = sqlite().context(TerminalSelectionAdmissionError::CommitUncertain);
+            assert!(nac_core::store::is_sqlite_busy(&uncertain));
+            let uncertain: crate::ApiError = admission_error(uncertain).into();
+            assert_eq!(
+                uncertain.status,
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            );
+            assert!(uncertain.message.contains("reconcile the same identity"));
+        }
     }
 }
