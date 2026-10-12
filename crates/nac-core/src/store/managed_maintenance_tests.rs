@@ -462,6 +462,17 @@ fn maintenance_survives_restart_and_only_exact_forward_start_clears_it() {
         ManagedMaintenanceState::Maintenance
     );
     let accepted = accepted_identity(&binding);
+    for rejected in [
+        try_admit_managed_work(&path),
+        try_admit_managed_work_for_identity(&path, &accepted),
+    ] {
+        let error = rejected.err().expect("maintenance must reject new work");
+        assert_eq!(
+            error.downcast_ref::<ManagedWorkAdmissionError>(),
+            Some(&ManagedWorkAdmissionError::Maintenance),
+        );
+        assert_eq!(error.to_string(), "managed host is in maintenance");
+    }
     assert!(accept_managed_forward_start(&path, &accepted).unwrap());
     let snapshot = managed_maintenance_snapshot(&path).unwrap();
     assert_eq!(snapshot.state, ManagedMaintenanceState::Serving);

@@ -236,6 +236,16 @@ impl From<anyhow::Error> for ApiError {
             .is_some()
         {
             StatusCode::CONFLICT
+        } else if error
+            .downcast_ref::<nac_core::store::ManagedWorkAdmissionError>()
+            .is_some_and(|error| {
+                matches!(
+                    error,
+                    nac_core::store::ManagedWorkAdmissionError::Maintenance
+                )
+            })
+        {
+            StatusCode::SERVICE_UNAVAILABLE
         } else if let Some(error) = error.downcast_ref::<SessionSubmitError>() {
             match error {
                 SessionSubmitError::Busy { .. } | SessionSubmitError::ExternalBusy { .. } => {
@@ -339,6 +349,26 @@ mod tests {
         let owner = application::session_terminals::TerminalOwnerMismatch;
         let error = anyhow::Error::new(owner).context("terminal completion fence");
         assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn deliberate_managed_maintenance_rejection_maps_through_error_context() {
+        let error = anyhow::Error::new(nac_core::store::ManagedWorkAdmissionError::Maintenance)
+            .context("terminal recovery admission");
+        assert_eq!(
+            ApiError::from(error).status,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[test]
+    fn untyped_admission_store_failure_remains_internal() {
+        let error = anyhow::anyhow!("managed admission ledger read failed")
+            .context("terminal recovery admission");
+        assert_eq!(
+            ApiError::from(error).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[test]

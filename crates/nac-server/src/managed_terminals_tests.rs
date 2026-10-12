@@ -655,3 +655,95 @@ async fn cached_previous_config_terminate_is_conflict_after_actual_revisioned_pa
     drop(active);
     assert!(!original.user_terminal_status(&id).await.unwrap().alive);
 }
+
+#[tokio::test]
+async fn uncached_legacy_termination_recovers_only_before_managed_maintenance() {
+    let fixture = Fixture::new();
+    seed(&fixture, "legacy-recovery");
+    seed(&fixture, "maintenance-cache-miss");
+    nac_core::store::record_terminal_remote_cleanup(
+        &fixture.manager.inner.store_path,
+        "legacy-recovery",
+        "durable-legacy-cleanup",
+    )
+    .unwrap();
+    let app = crate::router(fixture.manager.clone());
+    assert!(fixture
+        .manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .is_empty());
+    assert_eq!(
+        call_public(
+            &app,
+            "DELETE",
+            "/sessions/legacy-recovery/terminals/durable-legacy-cleanup",
+            Value::Null,
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT,
+    );
+    assert!(fixture
+        .manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("legacy-recovery"));
+    assert!(nac_core::store::list_terminal_remote_cleanups(
+        &fixture.manager.inner.store_path,
+        "legacy-recovery",
+    )
+    .unwrap()
+    .is_empty());
+
+    let control = fixture.running_request();
+    let assertion = fixture.assertion(
+        ManagedControlAction::Prepare,
+        &control,
+        "legacy-maintenance",
+    );
+    let (status, body) = call(
+        super::super::router(fixture.manager.clone()),
+        "/v1/upgrade/prepare",
+        &control,
+        &assertion,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).unwrap()["result"],
+        "safe_to_stop"
+    );
+    // The cached owner's completion remains idempotent during maintenance.
+    assert_eq!(
+        call_public(
+            &app,
+            "DELETE",
+            "/sessions/legacy-recovery/terminals/durable-legacy-cleanup",
+            Value::Null,
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT,
+    );
+    let (status, body) = call_public(
+        &app,
+        "DELETE",
+        "/sessions/maintenance-cache-miss/terminals/legacy-cleanup",
+        Value::Null,
+    )
+    .await;
+    assert!(!fixture
+        .manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("maintenance-cache-miss"));
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["error"], "managed host is in maintenance");
+}
