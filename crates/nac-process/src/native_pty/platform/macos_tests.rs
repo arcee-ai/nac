@@ -203,7 +203,6 @@ fn captured_child() -> Row {
             uniqueid: 7,
             parent_uniqueid: 9,
             version: 1,
-            ..Unique::default()
         },
     }
 }

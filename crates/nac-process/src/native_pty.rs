@@ -39,6 +39,8 @@ struct Shared {
     inspection_failure: AtomicBool,
     #[cfg(any(test, feature = "test-support"))]
     worker_start_failure: AtomicBool,
+    #[cfg(all(test, target_os = "macos"))]
+    observed: Mutex<std::collections::HashMap<(libc::pid_t, u64), std::time::Instant>>,
 }
 
 struct Control(Arc<Shared>);
@@ -120,6 +122,8 @@ impl NativePtyOwner {
             inspection_failure: AtomicBool::new(false),
             #[cfg(any(test, feature = "test-support"))]
             worker_start_failure: AtomicBool::new(false),
+            #[cfg(all(test, target_os = "macos"))]
+            observed: Mutex::new(std::collections::HashMap::new()),
         });
         Self(Arc::new(Control(shared)))
     }
@@ -261,8 +265,22 @@ fn supervise(shared: Arc<Shared>) {
             }
             Err(failure) => error = Some(failure.to_string()),
         }
-        if let Err(failure) = authority.observe() {
+        let observation = if shared.terminate.load(Ordering::SeqCst) {
+            authority.observe_cleanup()
+        } else {
+            authority.observe()
+        };
+        if let Err(failure) = observation {
             error = Some(failure.to_string());
+        }
+        #[cfg(all(test, target_os = "macos"))]
+        for key in authority.observed_keys_for_test() {
+            shared
+                .observed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(key)
+                .or_insert_with(std::time::Instant::now);
         }
         if shared.terminate.load(Ordering::SeqCst) {
             // Preserve terminal close's immediate SIGKILL policy. Stop the
@@ -312,11 +330,14 @@ fn supervise(shared: Arc<Shared>) {
                 error: error.clone(),
             },
         );
-        std::thread::sleep(if error.is_some() {
+        let period = if error.is_some() {
             Duration::from_millis(250)
         } else {
             Duration::from_millis(50)
-        });
+        };
+        #[cfg(target_os = "macos")]
+        let period = platform::aligned_delay(period);
+        std::thread::sleep(period);
     }
 }
 

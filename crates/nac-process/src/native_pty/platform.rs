@@ -12,6 +12,8 @@ mod macos;
 use linux as os;
 #[cfg(target_os = "macos")]
 use macos as os;
+#[cfg(target_os = "macos")]
+pub(super) use macos::aligned_delay;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) fn preflight() -> io::Result<()> {
@@ -45,13 +47,17 @@ pub(super) struct Authority {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 impl Authority {
+    #[cfg(all(test, target_os = "macos"))]
+    pub(super) fn observed_keys_for_test(&self) -> Vec<os::Key> {
+        self.members.keys().copied().collect()
+    }
     pub(super) fn new(pid: Option<u32>) -> Self {
         Self {
             root: pid.map(|pid| pid as libc::pid_t),
             members: HashMap::new(),
             pending_capture: HashMap::new(),
             #[cfg(target_os = "macos")]
-            discovery: macos::Discovery::default(),
+            discovery: macos::Discovery::new(pid.map(|pid| pid as libc::pid_t)),
         }
     }
 
@@ -78,6 +84,14 @@ impl Authority {
     }
 
     pub(super) fn observe(&mut self) -> io::Result<()> {
+        self.observe_with(false)
+    }
+
+    pub(super) fn observe_cleanup(&mut self) -> io::Result<()> {
+        self.observe_with(true)
+    }
+
+    fn observe_with(&mut self, _fresh: bool) -> io::Result<()> {
         // No fresh SID/parent adoption after losing direct-child ownership.
         self.leader_exited()?;
         let root = self
@@ -86,7 +100,7 @@ impl Authority {
         #[cfg(target_os = "linux")]
         let rows = os::rows(Some(root))?;
         #[cfg(target_os = "macos")]
-        let census = self.discovery.rows(root, &self.members)?;
+        let census = self.discovery.rows(root, &self.members, _fresh)?;
         #[cfg(target_os = "macos")]
         let rows = census.rows;
         // Bookend census with the original exclusive direct-child fence.
@@ -105,45 +119,54 @@ impl Authority {
         if let Err(error) = self.retry_pending_capture_with(os::Identity::capture_owned) {
             first_error.get_or_insert(error);
         }
-        loop {
-            let previous = self.members.len();
-            // Derivation uses exact current parent identity, never a retained
-            // numeric PID. Each OS proves the relationship before acceptance.
-            let owned = rows
+        // With no retained parent and no live session/direct-child seed, the
+        // ancestry closure cannot adopt anything. Full census and pending
+        // retries above still run; this only avoids an empty derivation pass.
+        let seeded = !self.members.is_empty()
+            || rows
                 .iter()
-                .filter(|row| self.members.contains_key(&row.key()))
-                .map(|row| (row.pid, Arc::clone(&self.members[&row.key()])))
-                .collect::<HashMap<_, _>>();
-            for row in &rows {
-                let key = row.key();
-                if !row.live || self.members.contains_key(&key) {
-                    continue;
+                .any(|row| row.live && (row.sid == root || row.ppid == root));
+        if seeded {
+            loop {
+                let previous = self.members.len();
+                // Derivation uses exact current parent identity, never a retained
+                // numeric PID. Each OS proves the relationship before acceptance.
+                let owned = rows
+                    .iter()
+                    .filter(|row| self.members.contains_key(&row.key()))
+                    .map(|row| (row.pid, Arc::clone(&self.members[&row.key()])))
+                    .collect::<HashMap<_, _>>();
+                for row in &rows {
+                    let key = row.key();
+                    if !row.live || self.members.contains_key(&key) {
+                        continue;
+                    }
+                    let evidence = if row.sid == root {
+                        Evidence::Session
+                    } else if row.ppid == root {
+                        Evidence::DirectChild
+                    } else if let Some(parent) = owned.get(&row.ppid) {
+                        Evidence::Parent(Arc::clone(parent))
+                    } else {
+                        continue;
+                    };
+                    match os::Identity::capture_owned(row.clone(), evidence.clone()) {
+                        Ok(Some(identity)) => {
+                            self.members.insert(key, Arc::new(identity));
+                            self.pending_capture.remove(&key);
+                        }
+                        Ok(None) => {
+                            self.pending_capture.remove(&key);
+                        }
+                        Err(error) => {
+                            self.pending_capture.insert(key, (row.clone(), evidence));
+                            first_error.get_or_insert(error);
+                        }
+                    }
                 }
-                let evidence = if row.sid == root {
-                    Evidence::Session
-                } else if row.ppid == root {
-                    Evidence::DirectChild
-                } else if let Some(parent) = owned.get(&row.ppid) {
-                    Evidence::Parent(Arc::clone(parent))
-                } else {
-                    continue;
-                };
-                match os::Identity::capture_owned(row.clone(), evidence.clone()) {
-                    Ok(Some(identity)) => {
-                        self.members.insert(key, Arc::new(identity));
-                        self.pending_capture.remove(&key);
-                    }
-                    Ok(None) => {
-                        self.pending_capture.remove(&key);
-                    }
-                    Err(error) => {
-                        self.pending_capture.insert(key, (row.clone(), evidence));
-                        first_error.get_or_insert(error);
-                    }
+                if self.members.len() == previous {
+                    break;
                 }
-            }
-            if self.members.len() == previous {
-                break;
             }
         }
         // Discover children before releasing their parents. A failed capture
@@ -234,9 +257,16 @@ impl Authority {
     pub(super) fn settled(&mut self) -> io::Result<bool> {
         // Re-census after signaling; never interpret an inspection error as an
         // empty session. Retain identities until death is positively observed.
-        self.observe()?;
+        self.observe_cleanup()?;
         Ok(self.members.is_empty() && self.pending_capture.is_empty())
     }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+pub(super) fn observed_key_for_test(pid: u32) -> io::Result<os::Key> {
+    macos::inspect(pid as libc::pid_t)?
+        .map(|row| row.key())
+        .ok_or_else(|| io::Error::other("live latency fixture disappeared"))
 }
 
 #[cfg(all(
@@ -280,6 +310,9 @@ impl Authority {
         preflight().map(|_| false)
     }
     pub(super) fn observe(&mut self) -> io::Result<()> {
+        preflight()
+    }
+    pub(super) fn observe_cleanup(&mut self) -> io::Result<()> {
         preflight()
     }
     pub(super) fn terminate_members(&mut self) -> io::Result<()> {

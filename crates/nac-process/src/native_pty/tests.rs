@@ -2,6 +2,10 @@ use super::*;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 
+#[cfg(target_os = "macos")]
+#[path = "latency_tests.rs"]
+mod latency;
+
 static OWNER_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 struct Adapter {

@@ -11,19 +11,19 @@
 use std::io;
 use std::sync::OnceLock;
 
+mod census;
 mod discovery;
 mod inspection;
+pub(in crate::native_pty) use census::aligned_delay;
 pub(super) use discovery::Discovery;
 
-#[repr(C)]
+// Keep only the fields used by ownership and exec-version validation in
+// census rows. The complete installed ABI record stays in inspection.rs.
 #[derive(Clone, Copy, Default)]
 struct Unique {
-    uuid: [u8; 16],
     uniqueid: u64,
     parent_uniqueid: u64,
     version: i32,
-    original_parent_version: i32,
-    reserved: [u64; 2],
 }
 
 type AuditSignal = unsafe extern "C" fn(*const [u32; 8], i32) -> i32;
@@ -39,6 +39,7 @@ pub(super) struct Row {
 }
 
 impl Row {
+    #[inline(always)]
     pub fn key(&self) -> Key {
         (self.pid, self.unique.uniqueid)
     }
@@ -56,10 +57,14 @@ impl Identity {
     }
 
     fn capture_with(row: Row, probe: &impl inspection::Probe) -> io::Result<Option<Self>> {
-        let Some(current) = inspection::snapshot(row.pid, probe)?
-            .map(inspection::Snapshot::row)
-            .transpose()?
-        else {
+        Self::capture_snapshot(row.clone(), inspection::snapshot(row.pid, probe)?)
+    }
+
+    fn capture_snapshot(
+        row: Row,
+        current: Option<inspection::Snapshot>,
+    ) -> io::Result<Option<Self>> {
+        let Some(current) = current.map(inspection::Snapshot::row).transpose()? else {
             return Ok(None);
         };
         if current.unique.uniqueid != row.unique.uniqueid {
@@ -188,7 +193,9 @@ mod tests;
 
 pub(super) fn preflight() -> io::Result<()> {
     signal_function()?;
-    if std::mem::size_of::<Unique>() != 56 || std::mem::size_of::<inspection::BsdShort>() != 64 {
+    if std::mem::size_of::<inspection::UniqueRecord>() != 56
+        || std::mem::size_of::<inspection::BsdShort>() != 64
+    {
         return Err(io::Error::other("unsupported native process identity ABI"));
     }
     // Check the runtime discovery and identity seams before any new child.

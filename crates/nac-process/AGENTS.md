@@ -47,6 +47,17 @@ explicitly separate from same-UID/fault tests. Retain unique ID across exec
 before refreshing its identity version. No
 raw descendant PID signal fallback is allowed when those capabilities fail.
 Private ABI/runtime qualification is explicit, not a claimed stable OS floor.
+macOS census generations may share complete acquisitions only for roots registered
+before acquisition and verified with unreaped-child/private unique-ID bookends.
+Each root consumes a generation once in the same polling epoch; cleanup always
+requests fresh acquisition. Enumeration stays fresh and pending/error
+interpretation, pruning and signaling remain owner-local. Positive rows retain
+the original immediate capture metadata before a short-lived parent can be
+reaped during batching; owners alone turn that witness into authority. Never
+substitute a TTL or negative PID/SID/PPID hint for the root/identity proof.
+Aligned polling only shortens the existing 50/250 ms sleep. Keep the
+permission-neutral unique-ID/short-BSD/SID inspection sequence and its identity,
+exec-version, birth-parent, PPID and SID bookends intact.
 Active census releases only conclusively dead exact members after discovering
 children; failed capture retains the original parent capability independently.
 No finite live-member cap may forget ownership. Session census reaches observed

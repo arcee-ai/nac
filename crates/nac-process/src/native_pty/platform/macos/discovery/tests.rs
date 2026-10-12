@@ -15,6 +15,7 @@ struct Fake {
     identities: RefCell<Vec<u64>>,
     sessions: RefCell<Vec<libc::pid_t>>,
     versions: RefCell<Vec<i32>>,
+    parents: RefCell<Vec<libc::pid_t>>,
 }
 impl Fake {
     fn new(sid: libc::pid_t) -> Self {
@@ -30,6 +31,7 @@ impl Fake {
             identities: RefCell::new(Vec::new()),
             sessions: RefCell::new(Vec::new()),
             versions: RefCell::new(Vec::new()),
+            parents: RefCell::new(Vec::new()),
         }
     }
 }
@@ -52,7 +54,6 @@ impl Probe for Fake {
             uniqueid: next(&self.identities, self.unique.get()),
             version: next(&self.versions, 1),
             parent_uniqueid: self.parent.get(),
-            ..Unique::default()
         }))
     }
     fn short(&self, pid: libc::pid_t) -> io::Result<Option<Short>> {
@@ -64,7 +65,7 @@ impl Probe for Fake {
         }
         Ok(Some(Short {
             pid,
-            ppid: self.ppid.get(),
+            ppid: next(&self.parents, self.ppid.get()),
             status: self.status.get(),
         }))
     }
@@ -189,4 +190,150 @@ fn identity_exec_and_sid_bookends_never_mix_process_records() {
             io::ErrorKind::WouldBlock
         );
     }
+}
+
+#[test]
+fn foreign_sid_does_not_skip_replacement_identity_or_reparent_in_this_scan() {
+    // Both rejected negative-hint schedules still require a FULL inspection.
+    let fake = Fake::new(100);
+    fake.unique.set(8);
+    *fake.identities.borrow_mut() = vec![7, 8];
+    *fake.sessions.borrow_mut() = vec![900, 900, 100];
+    let census = scan(&mut Discovery::default(), &fake);
+    assert!(census.error.is_none());
+    assert_eq!(census.identities[0].0, (200, 8));
+
+    let fake = Fake::new(900);
+    fake.ppid.set(100);
+    *fake.parents.borrow_mut() = vec![50, 100];
+    let census = scan(&mut Discovery::default(), &fake);
+    assert!(census.error.is_none());
+    assert_eq!(census.identities[0].0, (200, 7));
+}
+
+#[test]
+fn denied_neutral_inspection_retains_exact_witness_across_uid_parent_and_sid_change() {
+    let fake = Fake::new(100);
+    fake.status.set(9);
+    let mut discovery = Discovery::default();
+    assert!(scan(&mut discovery, &fake).error.is_some());
+    fake.sid.set(900);
+    fake.ppid.set(1);
+    fake.denied.set(true);
+    let census = scan(&mut discovery, &fake);
+    assert!(census.error.is_some());
+    assert!(census.identities.is_empty());
+    assert_eq!(discovery.pending[&200].uniqueid, Some(7));
+    fake.denied.set(false);
+    fake.status.set(3);
+    let census = scan(&mut discovery, &fake);
+    assert!(census.error.is_none());
+    assert_eq!(census.identities[0].0, (200, 7));
+}
+
+#[test]
+fn shared_denial_and_exact_rows_have_independent_owner_interpretation() {
+    let fake = Fake::new(100);
+    fake.denied.set(true);
+    let denied = Arc::new(Observation::acquire(200, &fake));
+    let mut owned = Discovery::default();
+    let mut foreign = Discovery::default();
+    let scan_shared = |discovery: &mut Discovery, root, observation: &Arc<Observation>| {
+        discovery
+            .scan_with(root, &HashMap::new(), vec![200], &fake, |_| {
+                Arc::clone(observation)
+            })
+            .unwrap()
+    };
+    assert!(scan_shared(&mut owned, 100, &denied).error.is_some());
+    assert!(scan_shared(&mut foreign, 900, &denied).error.is_none());
+    assert!(owned.pending.contains_key(&200));
+    assert!(foreign.pending.is_empty());
+    fake.denied.set(false);
+    let exact = Arc::new(Observation::acquire(200, &fake));
+    assert_eq!(
+        scan_shared(&mut owned, 100, &exact).identities[0].0,
+        (200, 7)
+    );
+    let unrelated = scan_shared(&mut foreign, 900, &exact);
+    assert!(unrelated.identities.is_empty());
+    assert!(foreign.pending.is_empty());
+}
+
+#[test]
+fn shared_inventory_omission_never_discards_pending_exact_witness() {
+    let fake = Fake::new(100);
+    fake.status.set(9);
+    let mut discovery = Discovery::default();
+    assert!(scan(&mut discovery, &fake).error.is_some());
+    fake.sid.set(900);
+    fake.ppid.set(1);
+    fake.status.set(3);
+    let census = discovery
+        .scan(100, &HashMap::new(), Vec::new(), &fake)
+        .unwrap();
+    assert_eq!(census.identities[0].0, (200, 7));
+    assert!(discovery.pending.is_empty());
+}
+
+#[test]
+fn positive_parent_capture_witness_survives_reap_before_shared_consumption() {
+    let fake = Fake::new(100);
+    let observation = Arc::new(Observation::acquire_for_roots(200, &fake, &[100]));
+    // The original per-PID scan captured this parent immediately after its
+    // positive row. Batched acquisition must preserve that exact witness even
+    // if the parent's own shell reaps it before another owner consumes rows.
+    fake.gone.set(true);
+    let mut discovery = Discovery::default();
+    let census = discovery
+        .scan_with(100, &HashMap::new(), vec![200], &fake, |_| {
+            Arc::clone(&observation)
+        })
+        .unwrap();
+    assert!(census.error.is_none());
+    assert_eq!(census.identities[0].0, (200, 7));
+    assert_eq!(census.rows[0].key(), (200, 7));
+    // Authority can bind a child's immutable birth parent to this capability
+    // before its ordinary positive-death prune. No current numeric parent or
+    // replacement PID is used to reacquire it.
+}
+
+#[test]
+fn denied_early_capture_keeps_exact_pending_witness_for_later_owner_retry() {
+    let fake = Fake::new(100);
+    let mut observation = Observation::acquire(200, &fake);
+    observation.capture = Some(Arc::new(Err(Arc::new(io::Error::from_raw_os_error(
+        libc::EPERM,
+    )))));
+    let observation = Arc::new(observation);
+    let mut discovery = Discovery::default();
+    let census = discovery
+        .scan_with(100, &HashMap::new(), vec![200], &fake, |_| {
+            Arc::clone(&observation)
+        })
+        .unwrap();
+    assert!(census.identities.is_empty());
+    assert_eq!(census.error.unwrap().raw_os_error(), Some(libc::EPERM));
+    assert_eq!(discovery.pending[&200].uniqueid, Some(7));
+    fake.ppid.set(1);
+    fake.sid.set(900);
+    let census = discovery
+        .scan(100, &HashMap::new(), Vec::new(), &fake)
+        .unwrap();
+    assert_eq!(census.identities[0].0, (200, 7));
+}
+
+#[test]
+fn early_capture_replacement_does_not_turn_original_row_into_new_pid_authority() {
+    let fake = Fake::new(100);
+    let mut observation = Observation::acquire(200, &fake);
+    fake.unique.set(8);
+    observation.capture = Some(Arc::new(Ok(snapshot(200, &fake).unwrap())));
+    let observation = Arc::new(observation);
+    let census = Discovery::default()
+        .scan_with(100, &HashMap::new(), vec![200], &fake, |_| {
+            Arc::clone(&observation)
+        })
+        .unwrap();
+    assert!(census.identities.is_empty());
 }
