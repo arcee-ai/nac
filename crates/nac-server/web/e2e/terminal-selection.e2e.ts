@@ -92,7 +92,7 @@ for (const mobile of [false, true]) {
     harness.provider.enqueue(
       "selected-send",
       { token: evidence },
-      { kind: "text", text: "selection accepted once" },
+      { kind: "text", text: "selection accepted once", stream: true },
     );
     await page.screenshot({
       path: testInfo.outputPath(`selection-review-${mobile ? "mobile" : "desktop"}.png`),
@@ -101,6 +101,8 @@ for (const mobile of [false, true]) {
     await dialog.getByRole("button", { name: "Send selection", exact: true }).click();
     await expect(dialog).toContainText("Submission was not confirmed");
     await harness.provider.waitForRequestCount(1);
+    await expect.poll(async () => (await api.getSession(session)).active_run == null).toBe(true);
+    expect(harness.provider.requests).toHaveLength(1);
     expect(submissions).toHaveLength(1);
     await dialog.getByRole("button", { name: "Retry same submission", exact: true }).click();
     await expect(dialog).toContainText("Existing admission reconciled.");
@@ -112,9 +114,23 @@ for (const mobile of [false, true]) {
     expect(submissions[0].expected_user_text).toBe(accompanyingCanonical);
     await expect.poll(async () => (await api.listInbox(session))[0]?.status).toBe("delivered");
     expect(await api.listInbox(session)).toHaveLength(1);
+    await expect.poll(async () => (await api.getSession(session)).active_run == null).toBe(true);
     expect(harness.provider.requests).toHaveLength(1);
     const delivered = JSON.stringify(harness.provider.requests[0].body);
     expect(delivered).toContain(evidence);
+    const providerBody = harness.provider.requests[0].body as {
+      input: Array<{ role?: string; content?: unknown }>;
+    };
+    const shared = providerBody.input.find(
+      (item) =>
+        item.role === "user" &&
+        typeof item.content === "string" &&
+        item.content.includes('"source_kind":"user_supplied_rendered_selection"'),
+    )!;
+    const content = shared.content as string;
+    const envelope = JSON.parse(content.slice(content.indexOf("\n") + 1));
+    expect(envelope.text).toBe(evidence);
+    expect(envelope.user_text).toBe(accompanyingCanonical);
     expect(delivered).toContain("user_supplied_rendered_selection");
     expect(delivered).not.toContain("\\u0001");
     await dialog.getByRole("button", { name: "Dismiss review", exact: true }).click();
