@@ -119,7 +119,46 @@ fn v2_and_v3_startup_cas_replays_and_requires_exact_accept_before_serving() {
         for maintenance in [false, true] {
             let fixture = StartupFixture::new(version, maintenance);
             let conn = rusqlite::Connection::open(&fixture.path).unwrap();
-            conn.execute_batch("CREATE TABLE startup_retention_sentinel (id TEXT, history TEXT, billing INTEGER, metadata TEXT); INSERT INTO startup_retention_sentinel VALUES ('21856443-8ed8-40ab-9036-72e837c99f27', 'retained history', 42, 'retained metadata');").unwrap();
+            let session_id = "21856443-8ed8-40ab-9036-72e837c99f27";
+            let mut session = nac_core::sessions::new_snapshot(
+                session_id.into(),
+                fixture.root.clone(),
+                "trinity-large-thinking".into(),
+                "https://api.arcee.ai".into(),
+                BackendKind::ArceeApi,
+                None,
+                None,
+                None,
+                vec![nac_core::types::Message::User {
+                    content: "retained history".into(),
+                }],
+                None,
+                Default::default(),
+            );
+            session.unattributed_token_usage = Some(
+                serde_json::from_value(serde_json::json!({
+                    "input_tokens": 42,
+                    "output_tokens": 7,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "total_tokens": 49,
+                    "cost": { "input": 123, "output": 456, "total": 579 }
+                }))
+                .unwrap(),
+            );
+            nac_core::sessions::create_session(&fixture.path, &session).unwrap();
+            nac_core::sessions::update_session_presentation(
+                &fixture.path,
+                session_id,
+                "Retained metadata",
+                true,
+                0,
+            )
+            .unwrap();
+            let before = format!(
+                "{:?}",
+                nac_core::sessions::load_session(&fixture.path, session_id).unwrap()
+            );
             let plan = managed_startup_plan(&fixture.path, Some(&fixture.config), &fixture.running)
                 .unwrap();
             assert!(!plan.recovery_only);
@@ -181,29 +220,19 @@ fn v2_and_v3_startup_cas_replays_and_requires_exact_accept_before_serving() {
                     .unwrap(),
                 "wal"
             );
-            let retained = conn
-                .query_row(
-                    "SELECT id, history, billing, metadata FROM startup_retention_sentinel",
-                    [],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, i64>(2)?,
-                            row.get::<_, String>(3)?,
-                        ))
-                    },
-                )
-                .unwrap();
-            assert_eq!(
-                retained,
-                (
-                    "21856443-8ed8-40ab-9036-72e837c99f27".into(),
-                    "retained history".into(),
-                    42,
-                    "retained metadata".into()
-                )
-            );
+            drop(conn);
+            // Reopen through the real durable facade after the startup/accept commits.
+            let retained = nac_core::sessions::load_session(&fixture.path, session_id).unwrap();
+            assert_eq!(format!("{retained:?}"), before);
+            assert_eq!(retained.session_id, session_id);
+            assert_eq!(retained.unattributed_token_usage.unwrap().cost.total, 579);
+            let reopened = rusqlite::Connection::open(&fixture.path).unwrap();
+            let presentation = reopened.query_row(
+                "SELECT title, pinned, version FROM session_presentations WHERE session_id = ?1",
+                [session_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+            ).unwrap();
+            assert_eq!(presentation, ("Retained metadata".into(), 1, 1));
         }
     }
 }
