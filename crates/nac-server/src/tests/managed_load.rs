@@ -798,7 +798,8 @@ async fn managed_load_scenario() {
         "worker binary does not exist: {}",
         worker.display()
     );
-    worker_completion::exercise_worker_ack_boundaries(&worker).await;
+    // Keep the large scenario and fault futures off the debug test thread's stack.
+    Box::pin(worker_completion::exercise_worker_ack_boundaries(&worker)).await;
     let seed = std::env::var("NAC_MANAGED_LOAD_SEED")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -809,29 +810,41 @@ async fn managed_load_scenario() {
         .join("target/managed-load");
     std::fs::create_dir_all(&artifact_root).unwrap();
     for count in VARIANTS {
-        let evidence =
-            run_variant(&adapter, &worker, seed, count, Duration::from_millis(100)).await;
+        let evidence = Box::pin(run_variant(
+            &adapter,
+            &worker,
+            seed,
+            count,
+            Duration::from_millis(100),
+        ))
+        .await;
         let artifact =
             artifact_root.join(format!("all-112-seed-{seed}-orchestrators-{count}.json"));
         write_secret_safe_artifact(&artifact, &evidence);
         eprintln!("ALL-112 artifact: {}", artifact.display());
     }
     let slow_seed = seed ^ 0x510;
-    let slow_evidence =
-        run_variant(&adapter, &worker, slow_seed, 1, Duration::from_millis(100)).await;
+    let slow_evidence = Box::pin(run_variant(
+        &adapter,
+        &worker,
+        slow_seed,
+        1,
+        Duration::from_millis(100),
+    ))
+    .await;
     let slow_artifact = artifact_root.join(format!("all-112-seed-{slow_seed}-fault-slow-io.json"));
     write_secret_safe_artifact(&slow_artifact, &slow_evidence);
     eprintln!("ALL-112 artifact: {}", slow_artifact.display());
 
     let concurrent_seed = seed ^ 0xC011;
-    let concurrent_evidence = run_variant_with_mode(
+    let concurrent_evidence = Box::pin(run_variant_with_mode(
         &adapter,
         &worker,
         concurrent_seed,
         4,
         Duration::ZERO,
         LoadMode::ConcurrentSettlementProbe,
-    )
+    ))
     .await;
     let concurrent_artifact = artifact_root.join(format!(
         "all-112-seed-{concurrent_seed}-concurrent-settlement-probe.json"
@@ -874,10 +887,11 @@ async fn managed_load_scenario() {
             },
         ],
         busy_conflict: exercise_busy_conflict(&adapter, seed),
-        append_failure: exercise_append_failure(&adapter, &worker, seed).await,
-        monitor_failure: exercise_monitor_failure(&adapter, &worker, seed).await,
-        worker_interruption: exercise_worker_interruption(&adapter, &worker, seed).await,
-        host_interruption_restart: exercise_restart_recovery(&adapter, &worker, seed).await,
+        append_failure: Box::pin(exercise_append_failure(&adapter, &worker, seed)).await,
+        monitor_failure: Box::pin(exercise_monitor_failure(&adapter, &worker, seed)).await,
+        worker_interruption: Box::pin(exercise_worker_interruption(&adapter, &worker, seed)).await,
+        host_interruption_restart: Box::pin(exercise_restart_recovery(&adapter, &worker, seed))
+            .await,
     };
     let fault_evidence = FaultEvidence {
         elapsed_ms: fault_started.elapsed().as_millis(),
