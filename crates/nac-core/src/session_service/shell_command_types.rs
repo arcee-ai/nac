@@ -100,19 +100,20 @@ impl SubmittedShell {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum ShellCommandError {
     Invalid(String),
     Unsupported,
     Busy,
     Conflict,
-    Store(String),
+    Store(std::sync::Arc<anyhow::Error>),
 }
 
 impl std::fmt::Display for ShellCommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Invalid(detail) | Self::Store(detail) => f.write_str(detail),
+            Self::Invalid(detail) => f.write_str(detail),
+            Self::Store(error) => std::fmt::Display::fmt(error, f),
             Self::Unsupported => {
                 f.write_str("shell commands require an idle direct-primary session")
             }
@@ -121,4 +122,27 @@ impl std::fmt::Display for ShellCommandError {
         }
     }
 }
-impl std::error::Error for ShellCommandError {}
+impl std::error::Error for ShellCommandError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Store(error) => Some(error.as_ref().as_ref()),
+            _ => None,
+        }
+    }
+}
+
+// Keep value equality for policy/admission failures. Retained store errors are
+// equal only when they share the same source; diagnostic text is not identity.
+impl PartialEq for ShellCommandError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Invalid(left), Self::Invalid(right)) => left == right,
+            (Self::Store(left), Self::Store(right)) => std::sync::Arc::ptr_eq(left, right),
+            (Self::Unsupported, Self::Unsupported)
+            | (Self::Busy, Self::Busy)
+            | (Self::Conflict, Self::Conflict) => true,
+            _ => false,
+        }
+    }
+}
+impl Eq for ShellCommandError {}

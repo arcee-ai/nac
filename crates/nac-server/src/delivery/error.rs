@@ -36,6 +36,25 @@ impl ApiError {
     }
 }
 
+/// Only known precommit contention permits a conflict response. An uncertain
+/// commit/acknowledgement wrapper takes precedence over any retained SQLite cause.
+fn is_precommit_contention(error: &anyhow::Error) -> bool {
+    use nac_core::store::{PersistenceAdmissionError, TerminalSelectionAdmissionError};
+    if matches!(
+        error.downcast_ref::<TerminalSelectionAdmissionError>(),
+        Some(TerminalSelectionAdmissionError::CommitUncertain)
+    ) {
+        return false;
+    }
+    match error.downcast_ref::<PersistenceAdmissionError>() {
+        Some(
+            PersistenceAdmissionError::Overloaded | PersistenceAdmissionError::CallerOverloaded,
+        ) => true,
+        Some(_) => false,
+        None => nac_core::store::is_sqlite_busy(error),
+    }
+}
+
 impl From<nac_core::session_service::ShellCommandError> for ApiError {
     fn from(error: nac_core::session_service::ShellCommandError) -> Self {
         use nac_core::session_service::ShellCommandError;
@@ -44,6 +63,9 @@ impl From<nac_core::session_service::ShellCommandError> for ApiError {
                 StatusCode::BAD_REQUEST
             }
             ShellCommandError::Busy | ShellCommandError::Conflict => StatusCode::CONFLICT,
+            ShellCommandError::Store(error) if is_precommit_contention(error) => {
+                StatusCode::CONFLICT
+            }
             ShellCommandError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self::new(status, error.to_string())
@@ -233,7 +255,25 @@ impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         if let Some(command) = error.downcast_ref::<nac_core::session_service::ShellCommandError>()
         {
-            return command.clone().into();
+            // Context outside the shell wrapper can itself identify an unknown
+            // commit/acknowledgement. Do not turn its retained BUSY into a retry.
+            if matches!(
+                error.downcast_ref::<nac_core::store::TerminalSelectionAdmissionError>(),
+                Some(nac_core::store::TerminalSelectionAdmissionError::CommitUncertain)
+            ) || error
+                .downcast_ref::<nac_core::store::PersistenceAdmissionError>()
+                .is_some_and(|cause| {
+                    !matches!(
+                        cause,
+                        nac_core::store::PersistenceAdmissionError::Overloaded
+                            | nac_core::store::PersistenceAdmissionError::CallerOverloaded
+                    )
+                })
+            {
+                return Self::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+            }
+            let mapped: Self = command.clone().into();
+            return Self::new(mapped.status, error.to_string());
         }
 
         let message = error.to_string();
@@ -360,42 +400,5 @@ impl IntoResponse for ApiError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn terminal_owner_fence_maps_to_conflict_through_error_context() {
-        let owner = application::session_terminals::TerminalOwnerMismatch;
-        let error = anyhow::Error::new(owner).context("terminal completion fence");
-        assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
-    }
-
-    #[test]
-    fn deliberate_managed_maintenance_rejection_maps_through_error_context() {
-        let error = anyhow::Error::new(nac_core::store::ManagedWorkAdmissionError::Maintenance)
-            .context("terminal recovery admission");
-        assert_eq!(
-            ApiError::from(error).status,
-            StatusCode::SERVICE_UNAVAILABLE
-        );
-    }
-
-    #[test]
-    fn untyped_admission_store_failure_remains_internal() {
-        let error = anyhow::anyhow!("managed admission ledger read failed")
-            .context("terminal recovery admission");
-        assert_eq!(
-            ApiError::from(error).status,
-            StatusCode::INTERNAL_SERVER_ERROR
-        );
-    }
-
-    #[test]
-    fn genuine_terminal_cleanup_failure_remains_internal() {
-        let error = anyhow::anyhow!("terminal descendant inspection failed");
-        assert_eq!(
-            ApiError::from(error).status,
-            StatusCode::INTERNAL_SERVER_ERROR
-        );
-    }
-}
+#[path = "error_tests.rs"]
+mod tests;

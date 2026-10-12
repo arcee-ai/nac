@@ -4,6 +4,9 @@
 use super::*;
 use crate::terminal::OutputStream;
 
+const OUTPUT_UNAVAILABLE: &str =
+    "Full retained output is unavailable; only safely redacted previews are recorded.";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ShellOutputPage {
@@ -15,6 +18,82 @@ pub struct ShellOutputPage {
 }
 
 impl SessionService {
+    pub(super) async fn enrich_shell_result_output(
+        &self,
+        command: &mut ShellCommandSnapshot,
+        runtime: &crate::tools::ToolRuntime,
+    ) {
+        // Native tool results are JSON. Decode first, then apply the captured
+        // output policy to the actual fields: escaped credential controls can
+        // otherwise become literal again on decoding. Never fall back to raw
+        // artifact bytes or to a failed preview sanitizer.
+        let output_id = command.output_id.as_deref().unwrap_or("");
+        let mut preview_unavailable = false;
+        for preview in [&mut command.stdout, &mut command.stderr] {
+            match runtime.redact_output(output_id, preview) {
+                Ok(text) => *preview = text.chars().take(4_000).collect(),
+                Err(_) => {
+                    preview.clear();
+                    preview_unavailable = true;
+                }
+            }
+        }
+        let Some(output_id) = command.output_id.clone() else {
+            if preview_unavailable && command.diagnostic.is_none() {
+                command.diagnostic = Some(OUTPUT_UNAVAILABLE.into());
+            }
+            return;
+        };
+        let runtime = runtime.clone();
+        #[cfg(test)]
+        let mut runtime = runtime;
+        #[cfg(test)]
+        let fault = take_enrichment_fault(&command.request_id);
+        #[cfg(test)]
+        match fault {
+            Some(EnrichmentFault::Missing) => runtime.terminal_manager.remove_all().await.unwrap(),
+            Some(EnrichmentFault::Redaction) => {
+                runtime
+                    .command_redactions
+                    .lock()
+                    .unwrap()
+                    .remove(&output_id);
+                runtime.command_environment = Some(Arc::new(UnavailableRedaction));
+            }
+            _ => {}
+        }
+        let output = tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            if matches!(fault, Some(EnrichmentFault::Join)) {
+                panic!("artifact enrichment join fault");
+            }
+            (
+                redacted_artifact(&runtime, &output_id, OutputStream::Stdout),
+                redacted_artifact(&runtime, &output_id, OutputStream::Stderr),
+            )
+        })
+        .await;
+        let mut unavailable = false;
+        match output {
+            Ok((stdout, stderr)) => {
+                for (result, preview) in
+                    [(stdout, &mut command.stdout), (stderr, &mut command.stderr)]
+                {
+                    match result {
+                        Ok(Some((text, _))) => *preview = text.chars().take(4_000).collect(),
+                        Ok(None) | Err(_) => unavailable = true,
+                    }
+                }
+            }
+            Err(_) => unavailable = true,
+        }
+        if unavailable {
+            // Error details may themselves contain secrets or private paths.
+            // State/exit/previews retain the known native result and its lease.
+            command.diagnostic = Some(OUTPUT_UNAVAILABLE.into());
+        }
+    }
+
     pub async fn shell_command_output(
         &self,
         request_id: &str,
@@ -65,6 +144,40 @@ impl SessionService {
             }))
         })
         .await?
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(super) enum EnrichmentFault {
+    Missing,
+    Redaction,
+    Join,
+}
+#[cfg(test)]
+static ENRICHMENT_FAULTS: std::sync::LazyLock<
+    StdMutex<std::collections::HashMap<String, EnrichmentFault>>,
+> = std::sync::LazyLock::new(|| StdMutex::new(std::collections::HashMap::new()));
+#[cfg(test)]
+pub(super) fn fail_enrichment_for_test(request_id: String, fault: EnrichmentFault) {
+    ENRICHMENT_FAULTS.lock().unwrap().insert(request_id, fault);
+}
+#[cfg(test)]
+fn take_enrichment_fault(request_id: &str) -> Option<EnrichmentFault> {
+    ENRICHMENT_FAULTS.lock().unwrap().remove(request_id)
+}
+#[cfg(test)]
+struct UnavailableRedaction;
+#[cfg(test)]
+impl nac_contracts::CommandEnvironmentProvider for UnavailableRedaction {
+    fn snapshot(&self) -> nac_contracts::CommandEnvironmentFuture<'_> {
+        Box::pin(async { anyhow::bail!("artifact-enrichment-private-error-canary") })
+    }
+    fn redaction_snapshot(&self) -> Result<nac_contracts::CommandEnvironmentSnapshot> {
+        anyhow::bail!("artifact-enrichment-private-error-canary")
+    }
+    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
+        Default::default()
     }
 }
 

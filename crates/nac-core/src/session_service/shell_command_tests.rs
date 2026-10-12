@@ -1,4 +1,6 @@
 struct TestEnvironment;
+#[path = "shell_output_failure_tests.rs"]
+mod output_failures;
 #[path = "shell_terminal_integration_tests.rs"]
 mod terminal_integration;
 impl nac_contracts::CommandEnvironmentProvider for TestEnvironment {
@@ -32,6 +34,15 @@ fn test_direct_active_service(
     let path = std::env::var_os("NAC_HUMAN_CRASH_STORE")
         .map(PathBuf::from)
         .unwrap_or_else(|| test_store_path(label));
+    test_direct_active_service_at(label, session_id, client, path)
+}
+
+fn test_direct_active_service_at(
+    label: &str,
+    session_id: &str,
+    client: ModelClient,
+    path: PathBuf,
+) -> (SessionServiceParts, PathBuf) {
     let cwd = path.parent().unwrap().join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
     let mut agent = Agent::with_config(

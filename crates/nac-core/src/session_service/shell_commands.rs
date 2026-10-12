@@ -45,8 +45,8 @@ impl Drop for ShellTaskGuard {
     }
 }
 
-fn store_error(error: impl std::fmt::Display) -> ShellCommandError {
-    ShellCommandError::Store(error.to_string())
+fn store_error(error: impl Into<anyhow::Error>) -> ShellCommandError {
+    ShellCommandError::Store(Arc::new(error.into()))
 }
 
 impl SessionService {
@@ -135,7 +135,7 @@ impl SessionService {
                         &request.request_id,
                     )
                     .map_err(store_error)?
-                    .ok_or_else(|| store_error("accepted command disappeared"))?;
+                    .ok_or_else(|| store_error(anyhow::anyhow!("accepted command disappeared")))?;
                     return Ok((recovered, true));
                 }
             }
@@ -336,32 +336,14 @@ impl SessionService {
             } else {
                 ShellCommandState::Rejected
             };
-            snapshot.diagnostic = Some(runtime.redact_output("", text)?);
+            snapshot.diagnostic = Some(runtime.redact_output("", text).unwrap_or_else(|_| {
+                "Command diagnostic is unavailable because it could not be safely redacted.".into()
+            }));
         }
-        if let Some(output_id) = snapshot.output_id.as_deref() {
-            let runtime = runtime.clone();
-            let output_id = output_id.to_owned();
-            let (stdout, stderr) = tokio::task::spawn_blocking(move || -> Result<_> {
-                let stdout = super::shell_output::redacted_artifact(
-                    &runtime,
-                    &output_id,
-                    crate::terminal::OutputStream::Stdout,
-                )?;
-                let stderr = super::shell_output::redacted_artifact(
-                    &runtime,
-                    &output_id,
-                    crate::terminal::OutputStream::Stderr,
-                )?;
-                Ok((stdout, stderr))
-            })
-            .await??;
-            snapshot.stdout = stdout
-                .map(|(text, _)| text.chars().take(4_000).collect())
-                .unwrap_or_default();
-            snapshot.stderr = stderr
-                .map(|(text, _)| text.chars().take(4_000).collect())
-                .unwrap_or_default();
-        }
+        // Artifact availability enriches a known result; it cannot undo the
+        // outcome or release its lease before durable idempotent settlement.
+        self.enrich_shell_result_output(&mut snapshot, &runtime)
+            .await;
         snapshot.finished_at_epoch_ms = Some(now_epoch_ms());
         #[cfg(test)]
         test_crash_barrier("result");
