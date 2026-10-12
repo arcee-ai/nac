@@ -192,7 +192,20 @@ test.describe("full-screen terminal at browser scale 1.25", () => {
     // The file marker is absent from echoed input, so only real editor output
     // can satisfy this assertion.
     await expect(accessible).toContainText("SCREEN-ONLY-FIRST");
-    await page.keyboard.type("iEDIT-Ω中");
+    await page.keyboard.type("iEDIT-");
+    // Non-ASCII keyboard.type uses insertText without composition. Drive the
+    // browser's composition path instead; this does not qualify a host OS IME.
+    const input = await page.context().newCDPSession(page);
+    try {
+      await input.send("Input.imeSetComposition", {
+        text: "Ω中",
+        selectionStart: 2,
+        selectionEnd: 2,
+      });
+      await input.send("Input.insertText", { text: "Ω中" });
+    } finally {
+      await input.detach();
+    }
     const before = await api.getUserTerminal(session, shell.terminal_id);
     await page.setViewportSize({ width: 960, height: 620 });
     await expect
