@@ -22,6 +22,10 @@ export function useSelectionReview(sessionId: string) {
     [sessionId, runtime, queryClient],
   );
   useEffect(() => controller.retain(), [controller]);
+  useEffect(
+    () => runtime.stores.runtimeStore.runtimeStore.subscribe(controller.checkActivation),
+    [runtime, controller],
+  );
   const state = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,

@@ -16072,32 +16072,44 @@ var xg = class {
 	#i;
 	#a;
 	#o = 0;
-	#s = !1;
-	#c = 0;
+	#s;
+	#c = !1;
 	#l = 0;
-	#u = /* @__PURE__ */ new Set();
+	#u = 0;
+	#d = /* @__PURE__ */ new Set();
 	constructor(e) {
 		this.ports = e;
 	}
 	getSnapshot = () => this.#e;
-	subscribe = (e) => (this.#u.add(e), () => this.#u.delete(e));
-	retain = () => (this.#c += 1, this.#l += 1, () => {
-		--this.#c;
-		let e = ++this.#l;
+	subscribe = (e) => (this.#d.add(e), () => this.#d.delete(e));
+	checkActivation = () => {
+		!this.#s || this.#s() || (this.#s = void 0, this.#a?.abort(), this.#o += 1, this.#e.phase === "sending" && this.#i ? this.#f({
+			...this.#e,
+			phase: "uncertain",
+			error: "The chat view was reset before submission was confirmed. It may already be accepted. Retry keeps the exact reviewed intent and submission identity."
+		}) : this.#e.phase === "previewing" && this.#f({
+			...this.#e,
+			phase: "error",
+			error: "The chat view was reset before preview was confirmed. Retry the preview explicitly; nothing was sent."
+		}));
+	};
+	retain = () => (this.#l += 1, this.#u += 1, () => {
+		--this.#l;
+		let e = ++this.#u;
 		queueMicrotask(() => {
-			!this.#c && this.#l === e && this.dispose();
+			!this.#l && this.#u === e && this.dispose();
 		});
 	});
-	#d(e) {
-		if (!this.#s) {
+	#f(e) {
+		if (!this.#c) {
 			this.#e = Object.freeze(e);
-			for (let e of this.#u) e();
+			for (let e of this.#d) e();
 		}
 	}
 	capture(e, t) {
-		if (this.#s) return;
+		if (this.#c) return;
 		if (this.#e.phase !== "empty" && this.#e.phase !== "accepted") {
-			this.#d({
+			this.#f({
 				...this.#e,
 				error: "Finish or clear the current selection review before capturing another."
 			});
@@ -16111,7 +16123,7 @@ var xg = class {
 			sourceAlive: e.sourceAlive
 		});
 		if (e.sessionId !== this.ports.sessionId || !n.trim() || !bg(n)) {
-			this.#d({
+			this.#f({
 				..._g,
 				source: r,
 				phase: "error",
@@ -16122,7 +16134,7 @@ var xg = class {
 		this.#t = Object.freeze({
 			...r,
 			selectedText: n
-		}), this.#n = crypto.randomUUID(), this.#d({
+		}), this.#n = crypto.randomUUID(), this.#f({
 			source: Object.freeze(r),
 			phase: "editing",
 			canPreview: !0,
@@ -16137,13 +16149,13 @@ var xg = class {
 			"accepted"
 		].includes(this.#e.phase))) {
 			if (!bg(e)) {
-				this.#d({
+				this.#f({
 					...this.#e,
 					error: "Accompanying text exceeds 32 KiB or 8,192 characters. That edit was rejected without truncation."
 				});
 				return;
 			}
-			this.#a?.abort(), this.#o += 1, this.#r = e === "" ? void 0 : e, this.#d({
+			this.#a?.abort(), this.#o += 1, this.#r = e === "" ? void 0 : e, this.#f({
 				...this.#e,
 				phase: "editing",
 				editorText: e,
@@ -16156,7 +16168,7 @@ var xg = class {
 			"sending",
 			"uncertain",
 			"accepted"
-		].includes(this.#e.phase) || (this.#a?.abort(), this.#o += 1, this.#d({
+		].includes(this.#e.phase) || (this.#a?.abort(), this.#o += 1, this.#f({
 			...this.#e,
 			phase: "editing",
 			editorText: this.#r ?? "",
@@ -16168,7 +16180,7 @@ var xg = class {
 			"sending",
 			"uncertain",
 			"accepted"
-		].includes(this.#e.phase) || this.#d({
+		].includes(this.#e.phase) || this.#f({
 			...this.#e,
 			choice: Object.freeze({ ...e }),
 			error: void 0
@@ -16185,7 +16197,7 @@ var xg = class {
 		let t = new AbortController();
 		this.#a = t;
 		let n = ++this.#o, r = this.ports.captureActivation();
-		this.#d({
+		this.#s = r, this.#f({
 			...this.#e,
 			phase: "previewing",
 			editorText: "",
@@ -16199,20 +16211,32 @@ var xg = class {
 				selected_text: e.selectedText,
 				user_text: this.#r
 			}, t.signal);
-			!this.#s && n === this.#o && r() && this.#d({
-				...this.#e,
-				phase: "reviewed",
-				preview: Object.freeze(i),
-				editorText: "",
-				error: void 0
-			});
+			if (!this.#c && n === this.#o) {
+				if (!r()) {
+					this.checkActivation();
+					return;
+				}
+				this.#s = void 0, this.#f({
+					...this.#e,
+					phase: "reviewed",
+					preview: Object.freeze(i),
+					editorText: "",
+					error: void 0
+				});
+			}
 		} catch {
-			!this.#s && n === this.#o && r() && this.#d({
-				...this.#e,
-				phase: "error",
-				editorText: "",
-				error: "This source could not provide a valid selection preview. It may be unavailable or the text may exceed its bounds. Nothing was sent."
-			});
+			if (!this.#c && n === this.#o) {
+				if (!r()) {
+					this.checkActivation();
+					return;
+				}
+				this.#s = void 0, this.#f({
+					...this.#e,
+					phase: "error",
+					editorText: "",
+					error: "This source could not provide a valid selection preview. It may be unavailable or the text may exceed its bounds. Nothing was sent."
+				});
+			}
 		}
 	}
 	async send() {
@@ -16231,43 +16255,55 @@ var xg = class {
 			expected_user_text: t.user_text,
 			delivery: n.delivery,
 			expected_run_id: n.delivery === "steer" ? n.runId : void 0
-		}), await this.#f(this.#i, e));
+		}), await this.#p(this.#i, e));
 	}
 	async retry() {
-		this.#e.phase !== "uncertain" || !this.#i || !this.#t || await this.#f(this.#i, this.#t);
+		this.#e.phase !== "uncertain" || !this.#i || !this.#t || await this.#p(this.#i, this.#t);
 	}
-	async #f(e, t) {
+	async #p(e, t) {
 		this.#a?.abort();
 		let n = new AbortController();
 		this.#a = n;
 		let r = ++this.#o, i = this.ports.captureActivation();
-		this.#d({
+		this.#s = i, this.#f({
 			...this.#e,
 			phase: "sending",
 			error: void 0
 		});
 		try {
 			let a = await this.ports.api.submitUserTerminalSelection(t.sessionId, t.terminalId, e, n.signal);
-			this.ports.accepted(), !this.#s && r === this.#o && i() && (this.#t = void 0, this.#r = void 0, this.#i = void 0, this.#d({
-				...this.#e,
-				phase: "accepted",
-				receipt: Object.freeze(a),
-				editorText: "",
-				error: void 0
-			}));
+			if (!this.#c && r === this.#o) {
+				if (!i()) {
+					this.checkActivation();
+					return;
+				}
+				this.#s = void 0, this.ports.accepted(), this.#t = void 0, this.#r = void 0, this.#i = void 0, this.#f({
+					...this.#e,
+					phase: "accepted",
+					receipt: Object.freeze(a),
+					editorText: "",
+					error: void 0
+				});
+			}
 		} catch {
-			!this.#s && r === this.#o && i() && this.#d({
-				...this.#e,
-				phase: "uncertain",
-				error: "Submission was not confirmed and may already be accepted. Retry uses this exact reviewed text, delivery choice and submission identity."
-			});
+			if (!this.#c && r === this.#o) {
+				if (!i()) {
+					this.checkActivation();
+					return;
+				}
+				this.#s = void 0, this.#f({
+					...this.#e,
+					phase: "uncertain",
+					error: "Submission was not confirmed and may already be accepted. Retry uses this exact reviewed text, delivery choice and submission identity."
+				});
+			}
 		}
 	}
 	clear() {
-		this.#a?.abort(), this.#o += 1, this.#t = void 0, this.#n = void 0, this.#r = void 0, this.#i = void 0, this.#d(_g);
+		this.#s = void 0, this.#a?.abort(), this.#o += 1, this.#t = void 0, this.#n = void 0, this.#r = void 0, this.#i = void 0, this.#f(_g);
 	}
 	dispose() {
-		this.clear(), this.#s = !0, this.#u.clear();
+		this.clear(), this.#c = !0, this.#d.clear();
 	}
 };
 //#endregion
@@ -16285,7 +16321,7 @@ function Sg(e) {
 		t,
 		n
 	]);
-	return U(() => r.retain(), [r]), {
+	return U(() => r.retain(), [r]), U(() => t.stores.runtimeStore.runtimeStore.subscribe(r.checkActivation), [t, r]), {
 		controller: r,
 		state: Qr(r.subscribe, r.getSnapshot, r.getSnapshot)
 	};

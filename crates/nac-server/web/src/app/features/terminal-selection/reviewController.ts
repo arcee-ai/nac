@@ -64,6 +64,7 @@ export class SelectionReviewController {
   #submission?: Readonly<TerminalSelectionSubmissionRequest>;
   #request?: AbortController;
   #version = 0;
+  #pendingActivation?: () => boolean;
   #disposed = false;
   #retained = 0;
   #detachVersion = 0;
@@ -73,6 +74,28 @@ export class SelectionReviewController {
   readonly subscribe = (listener: () => void) => {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  };
+  /** A same-chat reset settles local request state without applying old results. */
+  readonly checkActivation = () => {
+    if (!this.#pendingActivation || this.#pendingActivation()) return;
+    this.#pendingActivation = undefined;
+    this.#request?.abort();
+    this.#version += 1;
+    if (this.#snapshot.phase === "sending" && this.#submission) {
+      this.#set({
+        ...this.#snapshot,
+        phase: "uncertain",
+        error:
+          "The chat view was reset before submission was confirmed. It may already be accepted. Retry keeps the exact reviewed intent and submission identity.",
+      });
+    } else if (this.#snapshot.phase === "previewing") {
+      this.#set({
+        ...this.#snapshot,
+        phase: "error",
+        error:
+          "The chat view was reset before preview was confirmed. Retry the preview explicitly; nothing was sent.",
+      });
+    }
   };
   readonly retain = () => {
     this.#retained += 1;
@@ -177,6 +200,7 @@ export class SelectionReviewController {
     this.#request = request;
     const version = ++this.#version;
     const current = this.ports.captureActivation();
+    this.#pendingActivation = current;
     this.#set({ ...this.#snapshot, phase: "previewing", editorText: "", error: undefined });
     try {
       const preview = await this.ports.api.previewUserTerminalSelection(
@@ -191,7 +215,12 @@ export class SelectionReviewController {
         },
         request.signal,
       );
-      if (!this.#disposed && version === this.#version && current()) {
+      if (!this.#disposed && version === this.#version) {
+        if (!current()) {
+          this.checkActivation();
+          return;
+        }
+        this.#pendingActivation = undefined;
         this.#set({
           ...this.#snapshot,
           phase: "reviewed",
@@ -201,7 +230,12 @@ export class SelectionReviewController {
         });
       }
     } catch {
-      if (!this.#disposed && version === this.#version && current()) {
+      if (!this.#disposed && version === this.#version) {
+        if (!current()) {
+          this.checkActivation();
+          return;
+        }
+        this.#pendingActivation = undefined;
         this.#set({
           ...this.#snapshot,
           phase: "error",
@@ -246,6 +280,7 @@ export class SelectionReviewController {
     this.#request = request;
     const version = ++this.#version;
     const current = this.ports.captureActivation();
+    this.#pendingActivation = current;
     this.#set({ ...this.#snapshot, phase: "sending", error: undefined });
     try {
       const receipt = await this.ports.api.submitUserTerminalSelection(
@@ -254,8 +289,13 @@ export class SelectionReviewController {
         body,
         request.signal,
       );
-      this.ports.accepted();
-      if (!this.#disposed && version === this.#version && current()) {
+      if (!this.#disposed && version === this.#version) {
+        if (!current()) {
+          this.checkActivation();
+          return;
+        }
+        this.#pendingActivation = undefined;
+        this.ports.accepted();
         this.#capture = undefined;
         this.#question = undefined;
         this.#submission = undefined;
@@ -268,7 +308,12 @@ export class SelectionReviewController {
         });
       }
     } catch {
-      if (!this.#disposed && version === this.#version && current()) {
+      if (!this.#disposed && version === this.#version) {
+        if (!current()) {
+          this.checkActivation();
+          return;
+        }
+        this.#pendingActivation = undefined;
         this.#set({
           ...this.#snapshot,
           phase: "uncertain",
@@ -279,6 +324,7 @@ export class SelectionReviewController {
     }
   }
   clear() {
+    this.#pendingActivation = undefined;
     this.#request?.abort();
     this.#version += 1;
     this.#capture = undefined;

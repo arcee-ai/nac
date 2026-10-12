@@ -411,6 +411,114 @@ describe("local terminal selection review through the real typed client", () => 
     expect(net.submissions[1]).toEqual(net.submissions[0]);
     expect(net.submissions[1].expected_run_id).toBe(firstRun);
   });
+  for (const outcome of ["accepted", "rejected"] as const) {
+    it(`settles same-chat activation reset truthfully before a late ${outcome} submission and retries its exact intent`, async () => {
+      const net = wire();
+      const submissions: TerminalSelectionSubmissionRequest[] = [];
+      let complete!: (response: Response) => void;
+      let reject!: (error: Error) => void;
+      let firstSignal: AbortSignal | undefined;
+      const fetch = vi.fn<typeof globalThis.fetch>((url, init) => {
+        if (!String(url).endsWith("selection-submissions")) return net.fetch(url, init);
+        const body = JSON.parse(String(init?.body));
+        submissions.push(body);
+        if (submissions.length > 1) return Promise.resolve(receipt(body, outcome === "accepted"));
+        firstSignal = init?.signal ?? undefined;
+        return new Promise((resolve, fail) => {
+          complete = resolve;
+          reject = fail;
+        });
+      });
+      const value = runtime(fetch);
+      render(tree(value, { mode: "busy", runId: firstRun }));
+      fireEvent.click(screen.getByRole("button", { name: "Capture review" }));
+      await screen.findByLabelText("Reviewed selected text");
+      fireEvent.click(screen.getByRole("radio", { name: /Steer the displayed/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Steer selected run" }));
+      await waitFor(() => expect(submissions).toHaveLength(1));
+      expect(
+        (screen.getByRole("button", { name: "Dismiss review" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      act(() => value.stores.runtimeStore.resetRuntime("session"));
+      await screen.findByText(/view was reset before submission was confirmed/);
+      expect(firstSignal?.aborted).toBe(true);
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Dismiss unconfirmed submission",
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(false);
+      await act(async () => {
+        if (outcome === "accepted") complete(receipt(submissions[0]));
+        else reject(new TypeError("late transport rejection"));
+      });
+      expect(screen.queryByText(/Selection admission accepted/)).toBeNull();
+      expect(submissions).toHaveLength(1);
+      fireEvent.click(screen.getByRole("button", { name: "Retry same submission" }));
+      await screen.findByText(
+        outcome === "accepted" ? /Existing admission reconciled/ : /Selection admission accepted/,
+      );
+      expect(submissions).toHaveLength(2);
+      expect(submissions[1]).toEqual(submissions[0]);
+      expect(submissions[1].expected_run_id).toBe(firstRun);
+    });
+  }
+  it("allows dismissal after same-chat activation reset and never reopens the modal on a late committed receipt", async () => {
+    const net = wire();
+    let complete!: (response: Response) => void;
+    let submission!: TerminalSelectionSubmissionRequest;
+    const fetch = vi.fn<typeof globalThis.fetch>((url, init) => {
+      if (!String(url).endsWith("selection-submissions")) return net.fetch(url, init);
+      submission = JSON.parse(String(init?.body));
+      return new Promise((resolve) => {
+        complete = resolve;
+      });
+    });
+    const value = runtime(fetch);
+    render(tree(value));
+    fireEvent.click(screen.getByRole("button", { name: "Capture review" }));
+    await screen.findByLabelText("Reviewed selected text");
+    fireEvent.click(screen.getByRole("button", { name: "Send selection" }));
+    await waitFor(() => expect(submission).toBeDefined());
+    act(() => value.stores.runtimeStore.resetRuntime("session"));
+    await screen.findByText(/view was reset before submission was confirmed/);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss unconfirmed submission" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await act(async () => {
+      complete(receipt(submission));
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(2); // One explicit preview and one Send.
+    expect(cached(value)).not.toContain("SECRET_VALUE");
+  });
+  it("settles an interrupted preview on same-chat reset and requires an explicit preview retry", async () => {
+    let complete!: (response: Response) => void;
+    let first!: PreviewRequest;
+    const net = wire();
+    const fetch = vi.fn<typeof globalThis.fetch>((url, init) => {
+      if (fetch.mock.calls.length > 1) return net.fetch(url, init);
+      first = JSON.parse(String(init?.body));
+      return new Promise((resolve) => {
+        complete = resolve;
+      });
+    });
+    const value = runtime(fetch);
+    render(tree(value));
+    fireEvent.click(screen.getByRole("button", { name: "Capture review" }));
+    await screen.findByText(/Preparing the server-normalized preview/);
+    act(() => value.stores.runtimeStore.resetRuntime("session"));
+    await screen.findByText(/view was reset before preview was confirmed/);
+    await act(async () => {
+      complete(preview(first));
+    });
+    expect(screen.queryByLabelText("Reviewed selected text")).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Retry preview" }));
+    await screen.findByLabelText("Reviewed selected text");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(net.submissions).toHaveLength(0);
+  });
   it("keeps failed/opaque previews local with no send or automatic preview retry", async () => {
     const net = wire({ previewFailure: true });
     const value = runtime(net.fetch);

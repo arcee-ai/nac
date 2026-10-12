@@ -33,6 +33,8 @@ export declare class SelectionReviewController {
     constructor(ports: ReviewPorts);
     readonly getSnapshot: () => ReviewSnapshot;
     readonly subscribe: (listener: () => void) => () => boolean;
+    /** A same-chat reset settles local request state without applying old results. */
+    readonly checkActivation: () => void;
     readonly retain: () => () => void;
     capture(capture: Readonly<SelectionCapture>, choice: DeliveryChoice): void;
     setUserText(text: string): void;
