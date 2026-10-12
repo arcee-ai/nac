@@ -7,9 +7,11 @@ This document records the remaining qualification boundary, not support acceptan
 
 ## Implemented preparation
 
-The common lifecycle/protocol contract is ALL-141 at
-`a87fd5d3f22c892723d0e6eb4e3492147ede380f`. The existing CLI adapters still own
-remote cwd, command environment, connection/container identity and cleanup pidfile.
+The common lifecycle/protocol contract is ALL-141 / PR #352, with the
+current selected-backend and observation decisions in
+`docs/architecture/0006-human-terminal-observation.md`. The existing CLI adapters
+still own remote cwd, command environment, connection/container identity and
+cleanup pidfile.
 The human PTY construction path adds `ssh -e none` and
 `podman exec --detach-keys=` so OpenSSH escapes and Podman detach keys cannot
 consume human input. Model PTY construction retains its existing flags, TERM,
@@ -29,8 +31,10 @@ reproduced controlling-terminal loss with actual util-linux 2.39.3 and Bash 5.2:
 `/dev/tty` failed, foreground group was -1, monitor mode was off and Ctrl-C did
 not interrupt the job, although geometry changed. PTYs now retain their inherited
 controlling session through the monitor/foreground path even when setsid exists.
-The non-PTY `setsid -w` branch is unchanged. Postrepair Linux CI evidence is still
-pending; neither local nor Linux fixtures qualify a real SSH/Podman transport.
+The non-PTY `setsid -w` branch is unchanged. Earlier Linux core/process
+qualification at `e3d35bd336f706d97fe32ef01506c4582e17ffad` passed after
+these repairs. Current-head CI remains a separate gate. Neither
+local nor Linux fixtures qualify a real SSH/Podman transport.
 
 Cleanup traversal now runs each recursive function in a subshell so parent,
 child and proc-stat variables cannot overwrite the caller's state. A deterministic
@@ -111,8 +115,11 @@ external host was provisioned or modified.
 Before enabling either remote human backend, assign a disposable Linux SSH
 host with explicit host/port, user, identity, known-host trust, writable cwd and
 process-cleanup authority; separately assign a running disposable Podman runtime
-and an immutable container image digest. Starting the existing user VM and
-creating/removing qualification containers require explicit authorization.
+and its existing immutable runtime image digest. Use the session
+backend environment and existing managed runtime where applicable; no
+terminal-specific image is required. The proposed extra Debian SSH fixture
+was cancelled before creation. Starting the existing user VM or provisioning
+qualification services has not been authorized.
 
 Run the exact supervised adapter on each target, recording kernel, util-linux,
 Bash, SSH client/server and Podman/runtime versions. Capture `/dev/tty`, session,
