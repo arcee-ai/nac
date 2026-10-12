@@ -335,19 +335,12 @@ impl super::Agent {
         &mut self,
         accumulated_usage: &mut TokenUsage,
         tool_defs: &[crate::types::ToolDefinition],
-    ) -> PreparedProviderView {
+    ) -> anyhow::Result<PreparedProviderView> {
         let state = self.compaction.as_mut().expect("compaction state exists");
-        if state
-            .refresh_provenance_async(&self.messages)
-            .await
-            .is_err()
-        {
-            // Corrupt/unavailable attribution cannot authorize a synthetic
-            // projection. Keep canonical untrusted history and fail softly.
-            state.reset_for_transcript_replacement();
-            eprintln!("nac: compaction attribution unavailable; retaining canonical history");
-            return state.prepare(&self.messages, tool_defs);
-        }
+        // Verification failure proves neither replacement nor a safe projection.
+        // Keep the last checkpoint/sample, but block this provider request until
+        // a later explicit turn can complete authoritative verification.
+        state.refresh_provenance_async(&self.messages).await?;
         let plan = self
             .compaction
             .as_mut()
@@ -355,7 +348,7 @@ impl super::Agent {
             .plan(&self.messages, tool_defs, CompactionReason::Auto);
         let CompactionPlan { prepared, decision } = plan;
         if matches!(decision, CompactionDecision::NotTriggered) {
-            return prepared;
+            return Ok(prepared);
         }
 
         let compaction_id = Uuid::new_v4();
@@ -381,7 +374,7 @@ impl super::Agent {
         if let Err(error) = result {
             eprintln!("nac: orchestrator compaction failed softly: {error}");
         }
-        prepared
+        Ok(prepared)
     }
 
     #[expect(

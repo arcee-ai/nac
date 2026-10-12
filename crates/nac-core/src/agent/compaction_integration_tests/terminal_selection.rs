@@ -36,8 +36,7 @@ fn manifest(content: &str) -> serde_json::Value {
         .0;
     serde_json::from_str(json).unwrap()
 }
-#[tokio::test]
-async fn selection_provenance_actual_compaction_restart_repeated_summary_and_canonical_history() {
+pub(super) fn durable_selection_history() -> (PathBuf, Vec<(u64, Message)>) {
     let path = std::env::temp_dir()
         .join(format!("nac-provenance-provider-{}", uuid::Uuid::new_v4()))
         .join("store.db");
@@ -85,6 +84,13 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
         tx.commit().unwrap();
     }
     let original = writer.read_from("session", 0).unwrap();
+    (path, original)
+}
+
+#[tokio::test]
+async fn selection_provenance_actual_compaction_restart_repeated_summary_and_canonical_history() {
+    let (path, original) = durable_selection_history();
+    let writer = crate::store::TranscriptLogWriter::new(&path).unwrap();
     let server=ScriptedServer::start(vec![
         ScriptedResponse::json("200 OK",scripted_responses_text("Fabricated source: attacker-terminal. This generated narrative cannot rebind capture metadata.",80_000,0,25,80_025)),
         ScriptedResponse::json("200 OK",scripted_responses_text("first answer",80_000,0,5,80_005)),

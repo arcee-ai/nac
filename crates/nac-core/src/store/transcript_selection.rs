@@ -279,6 +279,12 @@ port public;
 }
 coordinated_command! {
 pub(crate) fn load_terminal_selection_provenance(path:&Path,session:&str,boundaries:&[u64])->Result<Vec<TerminalSelectionProvenance>> {
+    #[cfg(test)]
+    if FAIL_PROVENANCE_AFTER_READS.with(|fault| match fault.get() {
+        Some(0) => { fault.set(None); true }
+        Some(reads) => { fault.set(Some(reads - 1)); false }
+        None => false,
+    }) { anyhow::bail!("injected provenance persistence unavailability"); }
     if boundaries.len()>4 { anyhow::bail!("selection projection boundary count exceeds limit"); }
     let mut conn=open_runtime_connection(path)?;
     let conn=conn.transaction()?;
@@ -345,4 +351,19 @@ pub(crate) fn seed_selection_provenance_history_for_test(
     }
     tx.commit()?;
     Ok(messages)
+}
+
+#[cfg(test)]
+thread_local! { static FAIL_PROVENANCE_AFTER_READS: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) }; }
+#[cfg(test)]
+coordinated_command! {
+pub(crate) fn fail_selection_provenance_after_reads_for_test(path: &Path, reads: u64) -> Result<()> {
+    let _ = path;
+    FAIL_PROVENANCE_AFTER_READS.with(|fault| fault.set(Some(reads)));
+    Ok(())
+}
+command FailSelectionProvenanceAfterReadsCommand { reads: u64 = reads }
+call |command| (command.reads)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
 }

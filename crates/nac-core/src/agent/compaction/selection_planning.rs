@@ -2,6 +2,15 @@
 use super::*;
 impl CompactionState {
     pub async fn refresh_provenance_async(&mut self, messages: &[Message]) -> Result<()> {
+        // Stage only existing bounded metadata and checkpoint state. Canonical
+        // message bodies are borrowed; no second transcript collection is made.
+        // A later read failure cannot partially invalidate the prior checkpoint.
+        let mut verified = self.clone();
+        verified.refresh_selection_sources_async(messages).await?;
+        *self = verified;
+        Ok(())
+    }
+    async fn refresh_selection_sources_async(&mut self, messages: &[Message]) -> Result<()> {
         let source_start = self
             .active_checkpoint
             .as_ref()

@@ -98,7 +98,7 @@ pub(in crate::agent) struct CompactionCandidate {
     pub old_context_estimate: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(in crate::agent) struct CompactionState {
     store_path: PathBuf,
     session_id: String,

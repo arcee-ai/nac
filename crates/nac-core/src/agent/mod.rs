@@ -692,8 +692,22 @@ impl Agent {
                 .as_mut()
                 .is_some_and(|compaction| !compaction.is_passthrough(&self.messages));
             let provider_view = if needs_compaction_view {
-                self.prepare_provider_view(&mut accumulated_usage, &request_tool_defs)
+                match self
+                    .prepare_provider_view(&mut accumulated_usage, &request_tool_defs)
                     .await
+                {
+                    Ok(view) => view,
+                    Err(error) => {
+                        self.last_usage = Some(accumulated_usage.clone());
+                        self.emit(AgentEvent::Error {
+                            thread_name: self.thread_name.clone(),
+                            message: error.to_string(),
+                        })
+                        .await;
+                        self.record_terminal_cleanup_error().await;
+                        return Err(error);
+                    }
+                }
             } else {
                 PreparedProviderView {
                     messages: self.messages.clone(),

@@ -134,3 +134,5 @@ mod projection_durability;
 mod terminal_selection;
 
 mod terminal_selection_budget;
+
+mod terminal_selection_failures;
