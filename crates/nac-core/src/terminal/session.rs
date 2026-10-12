@@ -116,7 +116,11 @@ impl TerminalSession {
         // Reserve bounded output metadata before the command can exist. If
         // every slot belongs to a live command, fail without spawning a PTY
         // process whose output could not be retained.
-        let output_lease = output_registry.create(ArtifactKind::Pty)?;
+        let output_lease = if user_owned {
+            output_registry.create_user_pty()?
+        } else {
+            output_registry.create(ArtifactKind::Pty)?
+        };
         let output_id = output_lease.output_id().to_string();
 
         let mut envs = if user_owned {

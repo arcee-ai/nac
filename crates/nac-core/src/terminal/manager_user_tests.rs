@@ -49,6 +49,60 @@ async fn wait_for(manager: &TerminalManager, name: &str, needle: &[u8]) -> Vec<u
 }
 
 #[tokio::test]
+async fn model_output_tool_cannot_read_live_completed_or_pruned_human_artifacts() {
+    use crate::tools::exec_command::{execute_exec_command, execute_read_command_output};
+    use serde_json::json;
+
+    let manager = TerminalManager::for_direct();
+    let name = launch(
+        &manager,
+        uuid::Uuid::new_v4(),
+        "printf HUMAN-PRIVATE; sleep 30",
+    )
+    .await;
+    let expected = wait_for(&manager, &name, b"HUMAN-PRIVATE").await;
+    // Exercise the actual model tool with the real artifact identity, rather
+    // than relying on the handle being omitted from model-visible metadata.
+    let output_id = manager.sessions.lock().await[&name].output_id().to_owned();
+    let mut runtime = crate::tools::test_runtime();
+    runtime.terminal_manager = manager.clone();
+    let args = json!({ "output_id": output_id });
+    let live = execute_read_command_output(&args, &runtime);
+    let model = execute_exec_command(&json!({ "cmd": "printf MODEL-CONTROL" }), &runtime).await;
+    let model_value: serde_json::Value =
+        serde_json::from_str(model.content.as_text().unwrap()).unwrap();
+    let model_page =
+        execute_read_command_output(&json!({ "output_id": model_value["output_id"] }), &runtime);
+    manager.terminate_user_terminal(&name).await.unwrap();
+    let completed = execute_read_command_output(&args, &runtime);
+    let retained = manager
+        .read_user_output(&name, 0, 65536)
+        .await
+        .unwrap()
+        .bytes;
+    for _ in 0..manager.max_sessions {
+        let replacement = launch(&manager, uuid::Uuid::new_v4(), "true").await;
+        manager.terminate_user_terminal(&replacement).await.unwrap();
+    }
+    let pruned = manager.user_terminal_status(&name).await.is_err();
+    let after_history_prune = execute_read_command_output(&args, &runtime);
+    manager.remove_all().await.unwrap();
+
+    assert!(!model.is_error && !model_page.is_error);
+    assert!(model_page
+        .content
+        .as_text()
+        .unwrap()
+        .contains("MODEL-CONTROL"));
+    assert_eq!(retained, expected);
+    assert!(pruned);
+    for denied in [live, completed, after_history_prune] {
+        assert!(denied.is_error, "model reader accessed human output");
+        assert!(!denied.content.as_text().unwrap().contains("HUMAN-PRIVATE"));
+    }
+}
+
+#[tokio::test]
 async fn user_output_is_sanitized_and_independent_of_model_run_settlement() {
     let manager = TerminalManager::for_direct();
     let name = launch(

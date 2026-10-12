@@ -182,6 +182,7 @@ struct Artifact {
     created_sequence: u64,
     active: bool,
     kind: ArtifactKind,
+    model_visible: bool,
     chunks: VecDeque<OutputChunk>,
     stdout_bytes: u64,
     stderr_bytes: u64,
@@ -258,6 +259,20 @@ impl OutputRegistry {
     }
 
     pub fn create(&self, kind: ArtifactKind) -> Result<OutputArtifactLease> {
+        self.create_artifact(kind, true)
+    }
+
+    /// Human output shares the same bounded retention budget, but its artifact
+    /// never grants the model's text-paging or preview capability.
+    pub(super) fn create_user_pty(&self) -> Result<OutputArtifactLease> {
+        self.create_artifact(ArtifactKind::Pty, false)
+    }
+
+    fn create_artifact(
+        &self,
+        kind: ArtifactKind,
+        model_visible: bool,
+    ) -> Result<OutputArtifactLease> {
         let number = NEXT_OUTPUT_ID.fetch_add(1, Ordering::Relaxed);
         let prefix = match kind {
             ArtifactKind::Command => "cmdout",
@@ -288,6 +303,7 @@ impl OutputRegistry {
             created_sequence,
             active: true,
             kind,
+            model_visible,
             chunks: VecDeque::new(),
             stdout_bytes: 0,
             stderr_bytes: 0,
@@ -450,6 +466,7 @@ impl OutputRegistry {
         let artifact = inner
             .artifacts
             .get(output_id)
+            .filter(|artifact| artifact.model_visible)
             .ok_or_else(|| anyhow!("command output '{output_id}' not found or expired"))?;
         if artifact.kind == ArtifactKind::Pty && stream != OutputStream::Combined {
             return Err(anyhow!("PTY output only supports stream=combined"));
@@ -538,6 +555,7 @@ impl OutputRegistry {
         let artifact = inner
             .artifacts
             .get(output_id)
+            .filter(|artifact| artifact.model_visible)
             .ok_or_else(|| anyhow!("command output '{output_id}' not found or expired"))?;
         validate_stream(artifact, OutputStream::Stdout)?;
         let (stdout_start, stdout_end) = artifact.retained_range(OutputStream::Stdout);
@@ -576,6 +594,7 @@ impl OutputRegistry {
         let artifact = inner
             .artifacts
             .get(output_id)
+            .filter(|artifact| artifact.model_visible)
             .ok_or_else(|| anyhow!("command output '{output_id}' not found or expired"))?;
         validate_stream(artifact, stream)?;
         let (retained_start, end_offset) = artifact.retained_range(stream);

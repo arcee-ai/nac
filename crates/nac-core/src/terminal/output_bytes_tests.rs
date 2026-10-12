@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn human_output_keeps_shared_quotas_without_granting_model_previews() {
+    let registry = OutputRegistry::with_artifact_limit_for_test(
+        CommandOutputLimits {
+            per_command_bytes: 8,
+            per_session_bytes: 16,
+        },
+        2,
+    )
+    .unwrap();
+    let model = registry.create(ArtifactKind::Pty).unwrap();
+    let human = registry.create_user_pty().unwrap();
+    let id = human.output_id().to_owned();
+    registry
+        .append(
+            model.output_id(),
+            OutputStream::Combined,
+            b"MODEL123".to_vec(),
+        )
+        .unwrap();
+    registry
+        .append(&id, OutputStream::Combined, b"HUMAN-OUTPUT".to_vec())
+        .unwrap();
+    assert_eq!(registry.retained_bytes(), 16);
+    assert!(registry.create(ArtifactKind::Pty).is_err());
+    assert_eq!(
+        registry
+            .page(model.output_id(), OutputStream::Combined, 0, 8)
+            .unwrap()
+            .content,
+        "MODEL123"
+    );
+    let gap = registry
+        .page_bytes(&id, OutputStream::Combined, 0, 8)
+        .unwrap();
+    assert!(gap.gap && gap.bytes.is_empty());
+    assert_eq!(
+        registry
+            .page_bytes(&id, OutputStream::Combined, gap.retained_start, 8)
+            .unwrap()
+            .bytes,
+        b"N-OUTPUT"
+    );
+    drop(human);
+    assert!(registry.page(&id, OutputStream::Combined, 0, 8).is_err());
+    assert!(registry
+        .preview_since(&id, OutputStream::Combined, 0, 8)
+        .is_err());
+    assert!(registry.command_previews(&id, 8).is_err());
+    assert_eq!(registry.retained_bytes(), 16);
+}
+
+#[test]
 fn byte_pages_preserve_split_unicode_controls_and_invalid_bytes() {
     let registry = OutputRegistry::new(CommandOutputLimits::default()).unwrap();
     let artifact = registry.create(ArtifactKind::Pty).unwrap();
