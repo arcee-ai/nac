@@ -27,12 +27,14 @@ impl Identity {
         let Some(current) = read(row.pid)? else {
             return Ok(None);
         };
-        if current.key() != row.key() {
+        if current.key() != row.key() || !current.live {
             return Ok(None);
         }
         if matches!(evidence, super::Evidence::Session) {
             if current.sid != row.sid {
-                return Ok(None);
+                return Err(io::Error::other(
+                    "PTY original child session changed before capture; retained for retry",
+                ));
             }
             let Some(identity) = Self::capture(row.clone())? else {
                 return Ok(None);
@@ -43,8 +45,13 @@ impl Identity {
             let Some(after) = read(row.pid)? else {
                 return Ok(None);
             };
-            if after.sid != row.sid || after.key() != row.key() {
+            if after.key() != row.key() || !after.live {
                 return Ok(None);
+            }
+            if after.sid != row.sid {
+                return Err(io::Error::other(
+                    "PTY original child session changed during capture; retained for retry",
+                ));
             }
             if !identity.capability_live()? {
                 return Ok(None);
@@ -66,9 +73,7 @@ impl Identity {
                         "PTY parent identity unavailable during discovery",
                     ));
                 };
-                if now.metadata.start_time != parent.0.metadata.start_time {
-                    return Ok(None);
-                }
+                parent.require_original_start(now.metadata.start_time)?;
                 Some(parent)
             }
             super::Evidence::DirectChild => None,
@@ -83,7 +88,7 @@ impl Identity {
         let Some(after) = read(row.pid)? else {
             return Ok(None);
         };
-        if after.key() != row.key() {
+        if after.key() != row.key() || !after.live {
             return Ok(None);
         }
         if after.ppid != row.ppid {
@@ -98,16 +103,21 @@ impl Identity {
                     "PTY parent exited during ownership capture",
                 ));
             };
-            if after.metadata.start_time != parent.0.metadata.start_time {
-                return Err(io::Error::other(
-                    "PTY parent identity changed during ownership capture",
-                ));
-            }
+            parent.require_original_start(after.metadata.start_time)?;
         }
         if !identity.capability_live()? {
             return Ok(None);
         }
         Ok(Some(identity))
+    }
+
+    fn require_original_start(&self, current: u64) -> io::Result<()> {
+        if current != self.0.metadata.start_time {
+            return Err(io::Error::other(
+                "PTY parent identity changed during ownership capture; retained for retry",
+            ));
+        }
+        Ok(())
     }
 
     fn capability_live(&self) -> io::Result<bool> {
@@ -249,5 +259,37 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(identity.live().unwrap());
+    }
+    #[test]
+    fn changed_original_parent_stamp_retains_child_capture_uncertainty() {
+        let fixture = Fixture(Command::new("/bin/sleep").arg("30").spawn().unwrap());
+        let row = read(fixture.0.id() as libc::pid_t).unwrap().unwrap();
+        let parent = Identity::capture(read(row.ppid).unwrap().unwrap())
+            .unwrap()
+            .unwrap();
+        let error = parent.require_original_start(parent.0.metadata.start_time.wrapping_add(1));
+        assert!(error.is_err());
+        assert!(parent.capability_live().unwrap());
+        assert!(read(row.pid).unwrap().unwrap().live);
+    }
+    #[test]
+    fn conclusive_original_child_death_resolves_pending_capture() {
+        let mut fixture = Fixture(Command::new("/bin/sleep").arg("30").spawn().unwrap());
+        let row = read(fixture.0.id() as libc::pid_t).unwrap().unwrap();
+        let parent = Identity::capture(read(row.ppid).unwrap().unwrap())
+            .unwrap()
+            .unwrap();
+        fixture.0.kill().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while read(row.pid).unwrap().is_some_and(|current| current.live) {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(Identity::capture_owned(
+            row,
+            super::super::Evidence::Parent(std::sync::Arc::new(parent))
+        )
+        .unwrap()
+        .is_none());
     }
 }

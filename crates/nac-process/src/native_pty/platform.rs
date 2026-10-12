@@ -102,19 +102,9 @@ impl Authority {
                 .or_insert_with(|| Arc::new(identity));
         }
         // Failed captures keep their original identity/ownership obligation.
-        self.pending_capture.retain(|key, (row, evidence)| {
-            match os::Identity::capture_owned(row.clone(), evidence.clone()) {
-                Ok(Some(identity)) => {
-                    self.members.insert(*key, Arc::new(identity));
-                    false
-                }
-                Ok(None) => false,
-                Err(error) => {
-                    first_error.get_or_insert(error);
-                    true
-                }
-            }
-        });
+        if let Err(error) = self.retry_pending_capture_with(os::Identity::capture_owned) {
+            first_error.get_or_insert(error);
+        }
         loop {
             let previous = self.members.len();
             // Derivation uses exact current parent identity, never a retained
@@ -166,6 +156,30 @@ impl Authority {
         } else {
             Ok(())
         }
+    }
+
+    // Retained ownership and its original parent capability must survive any
+    // retry ambiguity. The inward closure also permits deterministic races in
+    // tests without replacing the production identity/signal primitive.
+    fn retry_pending_capture_with(
+        &mut self,
+        mut capture: impl FnMut(os::Row, Evidence) -> io::Result<Option<os::Identity>>,
+    ) -> io::Result<()> {
+        let mut first_error = None;
+        self.pending_capture.retain(|key, (row, evidence)| {
+            match capture(row.clone(), evidence.clone()) {
+                Ok(Some(identity)) => {
+                    self.members.insert(*key, Arc::new(identity));
+                    false
+                }
+                Ok(None) => false,
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                    true
+                }
+            }
+        });
+        first_error.map_or(Ok(()), Err)
     }
 
     fn prune_dead(&mut self) -> io::Result<()> {

@@ -170,3 +170,143 @@ fn atomic_signal_permission_failure_retains_exact_live_identity() {
     );
     assert!(identity.live().unwrap());
 }
+
+struct CaptureProbe {
+    child: std::cell::RefCell<Row>,
+    denied: std::cell::Cell<bool>,
+}
+impl inspection::Probe for CaptureProbe {
+    fn unique(&self, _: libc::pid_t) -> io::Result<Option<Unique>> {
+        if self.denied.get() {
+            return Err(io::Error::from_raw_os_error(libc::EPERM));
+        }
+        Ok(Some(self.child.borrow().unique))
+    }
+    fn short(&self, pid: libc::pid_t) -> io::Result<Option<inspection::Short>> {
+        Ok(Some(inspection::Short {
+            pid,
+            ppid: self.child.borrow().ppid,
+            status: if self.child.borrow().live { 3 } else { 5 },
+        }))
+    }
+    fn sid(&self, _: libc::pid_t) -> io::Result<Option<libc::pid_t>> {
+        Ok(Some(self.child.borrow().sid))
+    }
+}
+fn captured_child() -> Row {
+    Row {
+        pid: 200,
+        ppid: 50,
+        sid: 900,
+        live: true,
+        unique: Unique {
+            uniqueid: 7,
+            parent_uniqueid: 9,
+            version: 1,
+            ..Unique::default()
+        },
+    }
+}
+#[test]
+fn pending_capture_reparents_after_failure_and_original_parent_prune() {
+    use super::super::{Authority, Evidence};
+    use std::sync::Arc;
+    let row = captured_child();
+    let key = row.key();
+    let parent = Arc::new(Identity {
+        pid: 50,
+        uniqueid: 9,
+    });
+    let weak = Arc::downgrade(&parent);
+    let probe = CaptureProbe {
+        child: std::cell::RefCell::new(row.clone()),
+        denied: std::cell::Cell::new(true),
+    };
+    let evidence = Evidence::Parent(Arc::clone(&parent));
+    assert_eq!(
+        Identity::capture_owned_with(row.clone(), evidence.clone(), &probe)
+            .err()
+            .unwrap()
+            .raw_os_error(),
+        Some(libc::EPERM)
+    );
+    let mut authority = Authority::new(None);
+    authority.members.insert((50, 9), Arc::clone(&parent));
+    authority.pending_capture.insert(key, (row, evidence));
+    drop(parent);
+    assert!(authority
+        .retry_pending_capture_with(|row, evidence| Identity::capture_owned_with(
+            row, evidence, &probe
+        ))
+        .is_err());
+    assert!(authority.pending_capture.contains_key(&key));
+    // Deterministic positive-parent-prune transition; original child witness
+    // remains independent. Existing real active-prune test covers OS pruning.
+    authority.members.remove(&(50, 9));
+    assert!(weak.upgrade().is_some());
+    probe.child.borrow_mut().ppid = 1;
+    probe.child.borrow_mut().sid = 901;
+    probe.denied.set(false);
+    authority
+        .retry_pending_capture_with(|row, evidence| {
+            Identity::capture_owned_with(row, evidence, &probe)
+        })
+        .unwrap();
+    assert!(authority.pending_capture.is_empty());
+    assert!(authority.members.contains_key(&key));
+    assert!(weak.upgrade().is_none());
+}
+#[test]
+fn pending_same_identity_session_and_direct_child_witness_survive_movement() {
+    use super::super::Evidence;
+    let row = captured_child();
+    let mut moved = row.clone();
+    moved.ppid = 1;
+    moved.sid = 901;
+    let probe = CaptureProbe {
+        child: std::cell::RefCell::new(moved),
+        denied: std::cell::Cell::new(false),
+    };
+    for evidence in [Evidence::Session, Evidence::DirectChild] {
+        let id = Identity::capture_owned_with(row.clone(), evidence, &probe)
+            .unwrap()
+            .unwrap();
+        assert_eq!(id.uniqueid, row.unique.uniqueid);
+    }
+}
+#[test]
+fn pending_private_identity_replacement_or_death_resolves_but_birth_inconsistency_retains() {
+    use super::super::Evidence;
+    use std::sync::Arc;
+    let row = captured_child();
+    let evidence = Evidence::Parent(Arc::new(Identity {
+        pid: 50,
+        uniqueid: 9,
+    }));
+    let probe = CaptureProbe {
+        child: std::cell::RefCell::new(row.clone()),
+        denied: std::cell::Cell::new(false),
+    };
+    probe.child.borrow_mut().unique.uniqueid = 8;
+    assert!(
+        Identity::capture_owned_with(row.clone(), evidence.clone(), &probe)
+            .unwrap()
+            .is_none()
+    );
+    *probe.child.borrow_mut() = row.clone();
+    probe.child.borrow_mut().live = false;
+    assert!(
+        Identity::capture_owned_with(row.clone(), evidence.clone(), &probe)
+            .unwrap()
+            .is_none()
+    );
+    *probe.child.borrow_mut() = row.clone();
+    probe.child.borrow_mut().unique.parent_uniqueid = 10;
+    assert_eq!(
+        Identity::capture_owned_with(row, evidence, &probe)
+            .err()
+            .unwrap()
+            .kind(),
+        io::ErrorKind::InvalidData
+    );
+}

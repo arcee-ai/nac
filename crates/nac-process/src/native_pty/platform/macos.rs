@@ -72,33 +72,42 @@ impl Identity {
     }
 
     pub fn capture_owned(row: Row, evidence: super::Evidence) -> io::Result<Option<Self>> {
+        Self::capture_owned_with(row, evidence, &inspection::Native)
+    }
+
+    fn capture_owned_with(
+        row: Row,
+        evidence: super::Evidence,
+        probe: &impl inspection::Probe,
+    ) -> io::Result<Option<Self>> {
         if let super::Evidence::Parent(ref parent) = evidence {
-            // Kernel parent_uniqueid identifies the birth parent and survives
-            // reparenting. Require BOTH current PPID and the original parent's
-            // retained uniqueid; numeric PPID alone cannot establish ownership.
+            // Reject an unbound fresh candidate. A retained pending witness
+            // already passed this immutable birth-parent/PPID check.
             if row.ppid != parent.pid || row.unique.parent_uniqueid != parent.uniqueid {
                 return Ok(None);
             }
         }
-        let Some(current) = inspect(row.pid)? else {
+        let Some(current) = inspection::snapshot(row.pid, probe)?
+            .map(inspection::Snapshot::row)
+            .transpose()?
+        else {
             return Ok(None);
         };
-        if current.key() != row.key() {
-            return Ok(None);
-        }
-        if matches!(evidence, super::Evidence::Session) && current.sid != row.sid {
+        if current.key() != row.key() || !current.live {
             return Ok(None);
         }
         if let super::Evidence::Parent(ref parent) = evidence {
-            if current.ppid != parent.pid || current.unique.parent_uniqueid != parent.uniqueid {
-                return Ok(None);
+            if current.unique.parent_uniqueid != parent.uniqueid {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "PTY original child birth identity changed during capture; retained for retry",
+                ));
             }
         }
-        if matches!(evidence, super::Evidence::DirectChild) && current.ppid != row.ppid {
-            return Err(io::Error::other(
-                "PTY direct child parent changed before ownership capture",
-            ));
-        }
+        // The original bookended row established ownership under the root's
+        // unreaped fence (or an exact parent's birth identity). Same uniqueid
+        // retains that witness through reparenting, exec, UID and SID changes.
+        // Current PPID/SID changes are not proof that this child disappeared.
         Ok(Some(Self {
             pid: row.pid,
             uniqueid: row.unique.uniqueid,
