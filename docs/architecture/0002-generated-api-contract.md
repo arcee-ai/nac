@@ -40,6 +40,10 @@ must not reintroduce handwritten wire DTOs that exist in OpenAPI.
   and regression coverage.
 - The generated files and production bundle are committed so release and local
   builds can detect drift without network access.
+- `.gitattributes` identifies only sole-writer API and web build outputs as
+  generated. GitHub collapses these diffs by default; reviewers can expand them.
+  Authored source, generator/build scripts, and license notices remain visible.
+  This classification does not replace contract and asset drift verification.
 
 ## Maintenance
 

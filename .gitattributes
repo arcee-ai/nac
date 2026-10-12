@@ -1,0 +1,9 @@
+# Sole-writer artifacts remain committed and reproducibility-checked. GitHub
+# collapses their generated diffs; authored sources and build scripts stay visible.
+crates/nac-server/assets/dist/** linguist-generated=true
+crates/nac-server/web/packages/nac-client/dist/** linguist-generated=true
+crates/nac-server/web/packages/nac-presentation/dist/** linguist-generated=true
+crates/nac-server/web/openapi.json linguist-generated=true
+crates/nac-server/web/src/app/types/openapi.generated.ts linguist-generated=true
+crates/nac-server/web/packages/nac-client/src/openapi.generated.ts linguist-generated=true
+crates/nac-server/web/packages/nac-client/src/surface.generated.ts linguist-generated=true
