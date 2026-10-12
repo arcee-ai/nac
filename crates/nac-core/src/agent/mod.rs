@@ -864,10 +864,9 @@ impl Agent {
             }
             self.clear_partial_stream();
             if let Some(compaction) = &mut self.compaction {
-                compaction.record_ordinary_context(
+                compaction.record_committed_assistant_context(
                     &self.messages,
                     ordinary_context_tokens.unwrap_or(0),
-                    self.messages.len(),
                     provider_view.checkpoint_id,
                 );
             }

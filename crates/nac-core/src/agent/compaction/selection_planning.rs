@@ -1,6 +1,48 @@
 //! Typed selection provenance loading, checkpoint validation, and finite budgeting.
 use super::*;
 impl CompactionState {
+    pub fn record_committed_assistant_context(
+        &mut self,
+        messages: &[Message],
+        reported_context_tokens: u64,
+        checkpoint_id: Option<i64>,
+    ) {
+        // The caller just committed this typed Assistant through the canonical
+        // append owner. Only identified User delivery can add attribution, so
+        // its verified predecessor metadata remains exact without another scan.
+        let boundary = messages.len();
+        if matches!(messages.last(), Some(Message::Assistant { .. })) {
+            if let Some(source) = boundary
+                .checked_sub(1)
+                .and_then(|previous| self.selection_sources.get(&previous))
+                .cloned()
+            {
+                self.selection_sources.insert(boundary, source);
+            }
+        }
+        self.record_ordinary_context(messages, reported_context_tokens, boundary, checkpoint_id);
+    }
+
+    pub(super) async fn ensure_selection_source_async(&mut self, boundary: usize) -> Result<()> {
+        if self.selection_sources.contains_key(&boundary) {
+            return Ok(());
+        }
+        let path = self.store_path.clone();
+        let session = self.session_id.clone();
+        let values = vec![boundary as u64];
+        let mut sources = if let Some(owner) = crate::store::coordinator::owner_for(&path)? {
+            owner
+                .load_terminal_selection_provenance(session, values)
+                .await?
+        } else {
+            crate::store::spawn_blocking_store_caller(move || {
+                crate::store::load_terminal_selection_provenance(&path, &session, &values)
+            })
+            .await??
+        };
+        self.selection_sources.insert(boundary, sources.remove(0));
+        Ok(())
+    }
     pub async fn refresh_provenance_async(&mut self, messages: &[Message]) -> Result<()> {
         // Stage only existing bounded metadata and checkpoint state. Canonical
         // message bodies are borrowed; no second transcript collection is made.

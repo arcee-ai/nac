@@ -128,10 +128,35 @@ impl CompactionState {
     }
 
     pub fn restore_newest_valid_checkpoint(&mut self, messages: &[Message]) -> Result<()> {
+        let mut verified = self.clone();
+        verified.restore_checkpoint_and_sources(messages)?;
+        *self = verified;
+        Ok(())
+    }
+
+    fn restore_checkpoint_and_sources(&mut self, messages: &[Message]) -> Result<()> {
         let checkpoints =
             load_orchestrator_compaction_checkpoints(&self.store_path, &self.session_id)?;
         let mut restored_checkpoint = None;
         self.selection_sources.clear();
+        let mut boundaries = vec![messages.len()];
+        if let Some(sample) = &self.context_sample {
+            if sample.canonical_message_len <= messages.len()
+                && !boundaries.contains(&sample.canonical_message_len)
+            {
+                boundaries.push(sample.canonical_message_len);
+            }
+        }
+        let sources = crate::store::load_terminal_selection_provenance(
+            &self.store_path,
+            &self.session_id,
+            &boundaries
+                .iter()
+                .map(|boundary| *boundary as u64)
+                .collect::<Vec<_>>(),
+        )?;
+        self.selection_sources
+            .extend(boundaries.into_iter().zip(sources));
         for checkpoint in checkpoints {
             let boundary = checkpoint.tail_start_message_index;
             let source = crate::store::load_terminal_selection_provenance(
@@ -149,7 +174,7 @@ impl CompactionState {
         let restored_checkpoint_id = restored_checkpoint.as_ref().map(|checkpoint| checkpoint.id);
         let preserve_context_sample = self.context_sample.as_ref().is_some_and(|sample| {
             sample.checkpoint_id == restored_checkpoint_id
-                && sample.selection_source_sha256
+                && Some(sample.selection_source_sha256)
                     == self.selection_sample_digest(sample.canonical_message_len)
                 && sampled_projection_digest(
                     messages,
@@ -322,6 +347,9 @@ impl CompactionState {
         summary_completion_tokens: Option<u64>,
         new_context_estimate: u64,
     ) -> Result<()> {
+        // Normal preparation already verified this boundary. Explicit private
+        // callers must establish the same metadata before recording an estimate.
+        self.ensure_selection_source_async(messages.len()).await?;
         let record = NewOrchestratorCompactionCheckpoint {
             session_id: self.session_id.clone(),
             previous_checkpoint_id: candidate.previous_checkpoint_id,
@@ -352,13 +380,16 @@ impl CompactionState {
             .map(|checkpoint| checkpoint.id);
         self.context_sample =
             sampled_projection_digest(messages, messages.len(), self.active_checkpoint.as_ref())
-                .map(|sampled_projection_sha256| ContextSample {
-                    base_context_units: new_context_estimate,
-                    canonical_message_len: messages.len(),
-                    checkpoint_id,
-                    sampled_projection_sha256,
-                    selection_source_sha256: self.selection_sample_digest(messages.len()),
-                });
+                .zip(self.selection_sample_digest(messages.len()))
+                .map(
+                    |(sampled_projection_sha256, selection_source_sha256)| ContextSample {
+                        base_context_units: new_context_estimate,
+                        canonical_message_len: messages.len(),
+                        checkpoint_id,
+                        sampled_projection_sha256,
+                        selection_source_sha256,
+                    },
+                );
         Ok(())
     }
 
@@ -380,6 +411,12 @@ impl CompactionState {
             self.context_sample = None;
             return;
         }
+        let Some(selection_source_sha256) = self.selection_sample_digest(canonical_message_len)
+        else {
+            // Unavailable metadata is not proof of a plain/no-selection prefix.
+            self.context_sample = None;
+            return;
+        };
         self.context_sample = sampled_projection_digest(
             messages,
             canonical_message_len,
@@ -390,7 +427,7 @@ impl CompactionState {
             canonical_message_len,
             checkpoint_id,
             sampled_projection_sha256,
-            selection_source_sha256: self.selection_sample_digest(canonical_message_len),
+            selection_source_sha256,
         });
     }
 
@@ -419,8 +456,10 @@ impl CompactionState {
         }
     }
 
-    fn selection_sample_digest(&self, boundary: usize) -> [u8; 32] {
-        super::provenance::source_digest([0; 32], self.selection_sources.get(&boundary))
+    fn selection_sample_digest(&self, boundary: usize) -> Option<[u8; 32]> {
+        self.selection_sources
+            .get(&boundary)
+            .map(|source| super::provenance::source_digest([0; 32], Some(source)))
     }
 
     fn current_context_estimate(
@@ -435,7 +474,7 @@ impl CompactionState {
             .map(|checkpoint| checkpoint.id);
         let sample_is_current = self.context_sample.as_ref().is_some_and(|sample| {
             sample.checkpoint_id == active_id
-                && sample.selection_source_sha256
+                && Some(sample.selection_source_sha256)
                     == self.selection_sample_digest(sample.canonical_message_len)
                 && sampled_projection_digest(
                     canonical_messages,
