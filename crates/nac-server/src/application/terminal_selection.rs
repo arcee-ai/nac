@@ -164,12 +164,11 @@ impl<'a> TerminalSelectionApplication<'a> {
 }
 fn admission_error(error: anyhow::Error) -> Error {
     match error.downcast_ref::<TerminalSelectionAdmissionError>() {
-        Some(TerminalSelectionAdmissionError::CommitUncertain) => Error::Internal(error),
+        Some(TerminalSelectionAdmissionError::CommitUncertain) | None => Error::Internal(error),
         Some(TerminalSelectionAdmissionError::Unavailable) => Error::Unavailable,
         Some(TerminalSelectionAdmissionError::Invalid) => {
             Error::Invalid("invalid terminal selection intent")
         }
         Some(error) => Error::Rejected(error.to_string()),
-        None => Error::Internal(error),
     }
 }
