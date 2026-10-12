@@ -91,6 +91,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   renderer.options.disableStdin = true;
   renderer.write.mockImplementation(async () => {});
+  renderer.selection.mockReturnValue("selected private output");
   Object.defineProperty(document, "fonts", {
     configurable: true,
     value: { ready: Promise.resolve() },
@@ -200,6 +201,15 @@ describe("terminal pane lifetime and explicit user actions", () => {
       ),
     ).not.toContain("selected private output");
     expect(f.container.innerHTML).not.toContain("selected private output");
+  });
+
+  it("explains an empty explicit selection without creating a draft", async () => {
+    const f = fixture();
+    await screen.findByText("Connected");
+    renderer.selection.mockReturnValueOnce("");
+    fireEvent.click(screen.getByRole("button", { name: "Review selected text" }));
+    await screen.findByText("Select text in the terminal before reviewing it.");
+    expect(f.review).not.toHaveBeenCalled();
   });
 
   it("stops a failed observer and reconnects only when explicitly requested", async () => {

@@ -15521,11 +15521,11 @@ var fg = class {
 	}
 	validate(e, t) {
 		if (sg(e.protocol_version), this.status(e.terminal), e.observer_id !== t) throw new ag("Observer identity changed");
-		let n = cg(e.offset), r = cg(e.next_offset), i = cg(e.retained_start), a = cg(e.retained_end);
-		if (n !== cg(this.expectedOffset) || i > a || r > a || e.bytes.length > this.pageLimit || e.bytes.some((e) => !Number.isInteger(e) || e < 0 || e > 255)) throw new ag("Invalid terminal frame bounds or continuity");
+		let n = cg(e.offset), r = cg(e.next_offset), i = cg(e.retained_start), a = cg(e.retained_end), o = cg(this.expectedOffset);
+		if (i > a || r > a || e.bytes.length > this.pageLimit || e.bytes.some((e) => !Number.isInteger(e) || e < 0 || e > 255)) throw new ag("Invalid terminal frame bounds or continuity");
 		if (e.gap) {
-			if (e.bytes.length !== 0 || !e.requires_ack || r !== i || n >= i) throw new ag("Invalid terminal gap frame");
-		} else if (n < i || r !== n + BigInt(e.bytes.length) || e.requires_ack !== e.bytes.length > 0) throw new ag("Invalid terminal byte frame");
+			if (e.bytes.length !== 0 || !e.requires_ack || r !== i || n !== i || o >= i) throw new ag("Invalid terminal gap frame");
+		} else if (n !== o || n < i || r !== n + BigInt(e.bytes.length) || e.requires_ack !== e.bytes.length > 0) throw new ag("Invalid terminal byte frame");
 		if (e.caught_up !== (r === a)) throw new ag("Invalid terminal completion cursor");
 	}
 	async readNext(e) {
@@ -15723,10 +15723,10 @@ function bg(e, t) {
 	n.font = `${gg}px ${vg}`;
 	let r = n.measureText("W").width;
 	if (r <= 0) return null;
-	let i = Math.max(2, Math.min(500, Math.floor((t.clientWidth - 18) / r))), a = Math.max(1, Math.min(300, Math.floor(t.clientHeight / (gg * _g))));
-	return e.cols === i && e.rows === a ? null : (e.resize(i, a), {
+	let i = Math.max(2, Math.min(500, Math.floor((t.clientWidth - 18) / r))), a = e.element ? e.element.clientHeight / e.rows : 0, o = a > 0 ? a : gg * _g, s = Math.max(1, Math.min(300, Math.floor(t.clientHeight / o)));
+	return e.cols === i && e.rows === s ? null : (e.resize(i, s), {
 		cols: i,
-		rows: a
+		rows: s
 	});
 }
 //#endregion
@@ -15772,7 +15772,7 @@ function xg(e, t, n) {
 			}, x = n.terminal.onData((e) => b(new TextEncoder().encode(e))), S = n.terminal.onBinary((e) => b(Uint8Array.from(e, (e) => e.charCodeAt(0)))), C = new ResizeObserver(() => {
 				y();
 			});
-			C.observe(o), l = () => {
+			C.observe(o), n.terminal.element && C.observe(n.terminal.element), l = () => {
 				v = !1, i.current = null, C.disconnect(), x.dispose(), S.dispose(), h.dispose(), m.detach().catch(() => {}), n.dispose();
 			}, c("Connecting"), u(""), f(!1);
 			let w = await m.attach(s.signal, a ? "reconnect" : "attach");
@@ -15795,7 +15795,10 @@ function xg(e, t, n) {
 		notice: l,
 		inputFailure: d,
 		reconnect: () => o((e) => e + 1),
-		selection: () => i.current?.adapter.terminal.getSelection() ?? "",
+		selection: () => {
+			let e = i.current?.adapter.terminal.getSelection() ?? "";
+			return e || u("Select text in the terminal before reviewing it."), e;
+		},
 		focus: () => i.current?.adapter.terminal.focus(),
 		acknowledgeInput: () => {
 			let e = i.current;

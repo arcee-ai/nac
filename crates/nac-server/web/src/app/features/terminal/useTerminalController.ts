@@ -83,6 +83,7 @@ export function useTerminalController(
         void resize();
       });
       observer.observe(host);
+      if (adapter.terminal.element) observer.observe(adapter.terminal.element);
       release = () => {
         connected = false;
         current.current = null;
@@ -129,7 +130,11 @@ export function useTerminalController(
     notice,
     inputFailure,
     reconnect: () => setAttempt((value) => value + 1),
-    selection: () => current.current?.adapter.terminal.getSelection() ?? "",
+    selection: () => {
+      const text = current.current?.adapter.terminal.getSelection() ?? "";
+      if (!text) setNotice("Select text in the terminal before reviewing it.");
+      return text;
+    },
     focus: () => current.current?.adapter.terminal.focus(),
     acknowledgeInput: () => {
       const value = current.current;

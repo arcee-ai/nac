@@ -78,10 +78,9 @@ function fitTerminal(terminal: Terminal, element: HTMLElement) {
   const width = context.measureText("W").width;
   if (width <= 0) return null;
   const cols = Math.max(2, Math.min(500, Math.floor((element.clientWidth - 18) / width)));
-  const rows = Math.max(
-    1,
-    Math.min(300, Math.floor(element.clientHeight / (FONT_SIZE * LINE_HEIGHT))),
-  );
+  const renderedRowHeight = terminal.element ? terminal.element.clientHeight / terminal.rows : 0;
+  const rowHeight = renderedRowHeight > 0 ? renderedRowHeight : FONT_SIZE * LINE_HEIGHT;
+  const rows = Math.max(1, Math.min(300, Math.floor(element.clientHeight / rowHeight)));
   if (terminal.cols === cols && terminal.rows === rows) return null;
   terminal.resize(cols, rows);
   return { cols, rows };
