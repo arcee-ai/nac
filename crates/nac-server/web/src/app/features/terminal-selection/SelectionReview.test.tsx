@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { useSyncExternalStore } from "react";
+import { StrictMode, useSyncExternalStore } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -223,6 +223,31 @@ afterEach(() => {
 });
 
 describe("local terminal selection review through the real typed client", () => {
+  it("does not replay capture under StrictMode and aborts its pending preview synchronously on detach", async () => {
+    const net = wire();
+    let first!: PreviewRequest;
+    let signal!: AbortSignal;
+    let resolve!: (response: Response) => void;
+    const fetch = vi.fn<typeof globalThis.fetch>((_url, init) => {
+      first = JSON.parse(String(init?.body));
+      signal = init?.signal as AbortSignal;
+      return new Promise((done) => {
+        resolve = done;
+      });
+    });
+    const value = runtime(fetch);
+    const view = render(<StrictMode>{tree(value)}</StrictMode>);
+    expect(fetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Capture review" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    view.unmount();
+    expect(signal.aborted).toBe(true);
+    render(<StrictMode>{tree(value)}</StrictMode>);
+    await act(async () => resolve(preview(first)));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(net.submissions).toHaveLength(0);
+  });
   it("mounts review from the pane capture and explicitly freezes a displayed run while runtime is busy", async () => {
     const net = wire();
     const value = runtime(net.fetch);
@@ -430,6 +455,7 @@ describe("local terminal selection review through the real typed client", () => 
         });
       });
       const value = runtime(fetch);
+      const invalidate = vi.spyOn(value.queryClient, "invalidateQueries");
       render(tree(value, { mode: "busy", runId: firstRun }));
       fireEvent.click(screen.getByRole("button", { name: "Capture review" }));
       await screen.findByLabelText("Reviewed selected text");
@@ -454,6 +480,7 @@ describe("local terminal selection review through the real typed client", () => 
         else reject(new TypeError("late transport rejection"));
       });
       expect(screen.queryByText(/Selection admission accepted/)).toBeNull();
+      await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2));
       expect(submissions).toHaveLength(1);
       fireEvent.click(screen.getByRole("button", { name: "Retry same submission" }));
       await screen.findByText(
@@ -532,6 +559,37 @@ describe("local terminal selection review through the real typed client", () => 
     ).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Clear selection review" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+  it("reconciles unconfirmed admission at the originating cache after consumer replacement without repainting or replay", async () => {
+    const net = wire();
+    let resolve!: (response: Response) => void;
+    let submission!: TerminalSelectionSubmissionRequest;
+    const fetch = vi.fn<typeof globalThis.fetch>((url, init) => {
+      if (!String(url).endsWith("selection-submissions")) return net.fetch(url, init);
+      submission = JSON.parse(String(init?.body));
+      return new Promise((done) => {
+        resolve = done;
+      });
+    });
+    const origin = runtime(fetch);
+    const nextNet = wire();
+    const replacement = runtime(nextNet.fetch, "two");
+    const originInvalidation = vi.spyOn(origin.queryClient, "invalidateQueries");
+    const replacementInvalidation = vi.spyOn(replacement.queryClient, "invalidateQueries");
+    const view = render(tree(origin));
+    fireEvent.click(screen.getByRole("button", { name: "Capture review" }));
+    await screen.findByLabelText("Reviewed selected text");
+    fireEvent.click(screen.getByRole("button", { name: "Send selection" }));
+    await waitFor(() => expect(submission).toBeDefined());
+    view.rerender(tree(replacement));
+    await act(async () => resolve(receipt(submission)));
+    await waitFor(() => expect(originInvalidation).toHaveBeenCalledTimes(2));
+    expect(replacementInvalidation).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(nextNet.fetch).not.toHaveBeenCalled();
+    expect(cached(origin)).not.toContain("SECRET_VALUE");
+    expect(cached(replacement)).not.toContain("SECRET_VALUE");
   });
   it("discards a pending raw draft on consumer replacement and ignores the old preview even if transport resolves late", async () => {
     let resolve!: (value: Response) => void;

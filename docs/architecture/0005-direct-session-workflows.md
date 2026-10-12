@@ -142,6 +142,26 @@ bounded literal input. Effect adds no second input queue, transport, retry or
 reconnect loop. Detach releases observation and never terminates a shell or agent.
 Unknown input still requires explicit acknowledgement before fresh typing.
 
+## Terminal selection review (ALL-142)
+
+`features/terminal-selection/reviewWorkflow.ts` owns preview/submission sequencing
+and one scoped request signal per operation. Preview failure stays local; a
+submission settles its originating cache before applying a locally fenced
+receipt. Both accepted and unconfirmed submission outcomes reconcile the origin,
+including after disclosure detach, same-chat activation reset or consumer
+replacement. Abort cannot establish that a dispatched command was not accepted.
+It never authorizes an automatic retry or durable cancellation.
+
+The controller retains private ephemeral originals, editing, immutable reviewed
+submission identity and explicit retry. Request identity and the existing runtime
+activation capability fence local publication; there is no second generation
+counter in Effect. Scope finalization aborts the request, including when replaced,
+cleared or detached. StrictMode cleanup closes request resources synchronously;
+the retain bridge defers only final draft disposal for a replacement retain.
+TanStack owns originating-cache invalidation; neither original selections nor
+request variables enter its caches. React renders the canonical review and owns
+the explicit Send, retry, edit and clear controls.
+
 ## Setup and provider workflows (ALL-136)
 
 `features/setup/workflow.ts` owns ordered optional-preset → project → first-chat

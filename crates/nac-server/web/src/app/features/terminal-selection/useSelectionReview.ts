@@ -8,19 +8,19 @@ import { SelectionReviewController } from "./reviewController";
 export function useSelectionReview(sessionId: string) {
   const runtime = useNativeRuntime();
   const queryClient = useQueryClient();
-  const controller = useMemo(
-    () =>
-      new SelectionReviewController({
-        sessionId,
-        api: runtime.api,
-        captureActivation: () => runtime.stores.runtimeStore.captureRuntimeActivation(sessionId),
-        accepted: () => {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.sessionRoot(sessionId) });
-          void queryClient.invalidateQueries({ queryKey: queryKeys.sessionsAll });
-        },
-      }),
-    [sessionId, runtime, queryClient],
-  );
+  const controller = useMemo(() => {
+    const reconcileOrigin = () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessionRoot(sessionId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessionsAll });
+    };
+    return new SelectionReviewController({
+      sessionId,
+      api: runtime.api,
+      captureActivation: () => runtime.stores.runtimeStore.captureRuntimeActivation(sessionId),
+      accepted: reconcileOrigin,
+      unconfirmed: reconcileOrigin,
+    });
+  }, [sessionId, runtime, queryClient]);
   useEffect(() => controller.retain(), [controller]);
   useEffect(
     () => runtime.stores.runtimeStore.runtimeStore.subscribe(controller.checkActivation),

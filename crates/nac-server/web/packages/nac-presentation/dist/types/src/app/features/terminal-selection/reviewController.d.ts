@@ -23,6 +23,7 @@ interface ReviewPorts {
     readonly api: Pick<NativeApi, "previewUserTerminalSelection" | "submitUserTerminalSelection">;
     readonly captureActivation: () => () => boolean;
     readonly accepted: () => void;
+    readonly unconfirmed?: () => void;
 }
 /** Private ephemeral originals; only canonical previews enter the public snapshot.
  * No request variables or draft text are retained in a query/mutation cache.

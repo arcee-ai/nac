@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import type { NativeApi } from "@/app/services/api";
 import type {
   TerminalSelectionPreviewResponse,
@@ -7,6 +8,12 @@ import type {
 } from "@/app/types/api";
 
 import type { TerminalSelectionCapture } from "@/app/features/terminal/TerminalPane";
+import {
+  openSelectionOperation,
+  previewSelection,
+  submitSelection,
+  type SelectionOperation,
+} from "./reviewWorkflow";
 
 /** The pane snapshots rendered text only at an explicit user capture point. */
 export type SelectionCapture = TerminalSelectionCapture;
@@ -38,6 +45,7 @@ interface ReviewPorts {
   readonly api: Pick<NativeApi, "previewUserTerminalSelection" | "submitUserTerminalSelection">;
   readonly captureActivation: () => () => boolean;
   readonly accepted: () => void;
+  readonly unconfirmed?: () => void;
 }
 const EMPTY = Object.freeze<ReviewSnapshot>({
   phase: "empty",
@@ -62,9 +70,7 @@ export class SelectionReviewController {
   #captureId?: string;
   #question?: string;
   #submission?: Readonly<TerminalSelectionSubmissionRequest>;
-  #request?: AbortController;
-  #version = 0;
-  #pendingActivation?: () => boolean;
+  #request?: SelectionOperation;
   #disposed = false;
   #retained = 0;
   #detachVersion = 0;
@@ -77,10 +83,11 @@ export class SelectionReviewController {
   };
   /** A same-chat reset settles local request state without applying old results. */
   readonly checkActivation = () => {
-    if (!this.#pendingActivation || this.#pendingActivation()) return;
-    this.#pendingActivation = undefined;
-    this.#request?.abort();
-    this.#version += 1;
+    if (!this.#request || this.#request.activationCurrent()) return;
+    this.#interrupt();
+  };
+  #interrupt() {
+    this.#closeRequest();
     if (this.#snapshot.phase === "sending" && this.#submission) {
       this.#set({
         ...this.#snapshot,
@@ -96,12 +103,14 @@ export class SelectionReviewController {
           "The chat view was reset before preview was confirmed. Retry the preview explicitly; nothing was sent.",
       });
     }
-  };
+  }
   readonly retain = () => {
     this.#retained += 1;
     this.#detachVersion += 1;
     return () => {
       this.#retained -= 1;
+      // StrictMode cleanup closes request resources before replacement activation.
+      if (!this.#retained) this.#interrupt();
       const version = ++this.#detachVersion;
       queueMicrotask(() => {
         if (!this.#retained && this.#detachVersion === version) this.dispose();
@@ -166,16 +175,14 @@ export class SelectionReviewController {
       });
       return;
     }
-    this.#request?.abort();
-    this.#version += 1;
+    this.#closeRequest();
     this.#question = text === "" ? undefined : text;
     this.#set({ ...this.#snapshot, phase: "editing", editorText: text, error: undefined });
   }
   editUserText() {
     if (!this.#capture || ["sending", "uncertain", "accepted"].includes(this.#snapshot.phase))
       return;
-    this.#request?.abort();
-    this.#version += 1;
+    this.#closeRequest();
     this.#set({
       ...this.#snapshot,
       phase: "editing",
@@ -187,64 +194,77 @@ export class SelectionReviewController {
     if (["sending", "uncertain", "accepted"].includes(this.#snapshot.phase)) return;
     this.#set({ ...this.#snapshot, choice: Object.freeze({ ...choice }), error: undefined });
   }
+  #closeRequest() {
+    const request = this.#request;
+    this.#request = undefined;
+    request?.close();
+  }
+  #openRequest() {
+    this.#closeRequest();
+    const operation = openSelectionOperation(this.ports.captureActivation());
+    this.#request = operation;
+    return operation;
+  }
+  #apply(operation: SelectionOperation, update: () => void) {
+    if (this.#disposed || this.#request !== operation) return;
+    if (!operation.current()) {
+      this.checkActivation();
+      return;
+    }
+    this.#request = undefined;
+    update();
+  }
   async preview() {
     const capture = this.#capture;
+    const captureId = this.#captureId;
     if (
       !capture ||
-      !this.#captureId ||
+      !captureId ||
       ["sending", "uncertain", "accepted"].includes(this.#snapshot.phase)
     )
       return;
-    this.#request?.abort();
-    const request = new AbortController();
-    this.#request = request;
-    const version = ++this.#version;
-    const current = this.ports.captureActivation();
-    this.#pendingActivation = current;
-    this.#set({ ...this.#snapshot, phase: "previewing", editorText: "", error: undefined });
-    try {
-      const preview = await this.ports.api.previewUserTerminalSelection(
-        capture.sessionId,
-        capture.terminalId,
-        {
-          protocol_version: 1,
-          capture_id: this.#captureId,
-          client_capture_time_ms: capture.capturedAtMs,
-          selected_text: capture.selectedText,
-          user_text: this.#question,
-        },
-        request.signal,
-      );
-      if (!this.#disposed && version === this.#version) {
-        if (!current()) {
-          this.checkActivation();
-          return;
-        }
-        this.#pendingActivation = undefined;
-        this.#set({
-          ...this.#snapshot,
-          phase: "reviewed",
-          preview: Object.freeze(preview),
-          editorText: "",
-          error: undefined,
-        });
-      }
-    } catch {
-      if (!this.#disposed && version === this.#version) {
-        if (!current()) {
-          this.checkActivation();
-          return;
-        }
-        this.#pendingActivation = undefined;
-        this.#set({
-          ...this.#snapshot,
-          phase: "error",
-          editorText: "",
-          error:
-            "This source could not provide a valid selection preview. It may be unavailable or the text may exceed its bounds. Nothing was sent.",
-        });
-      }
-    }
+    const operation = this.#openRequest();
+    const body = {
+      protocol_version: 1 as const,
+      capture_id: captureId,
+      client_capture_time_ms: capture.capturedAtMs,
+      selected_text: capture.selectedText,
+      user_text: this.#question,
+    };
+    await Effect.runPromise(
+      previewSelection({
+        operation,
+        started: () =>
+          this.#set({ ...this.#snapshot, phase: "previewing", editorText: "", error: undefined }),
+        request: (signal) =>
+          this.ports.api.previewUserTerminalSelection(
+            capture.sessionId,
+            capture.terminalId,
+            body,
+            signal,
+          ),
+        confirmed: (preview) =>
+          this.#apply(operation, () =>
+            this.#set({
+              ...this.#snapshot,
+              phase: "reviewed",
+              preview: Object.freeze(preview),
+              editorText: "",
+              error: undefined,
+            }),
+          ),
+        failed: () =>
+          this.#apply(operation, () =>
+            this.#set({
+              ...this.#snapshot,
+              phase: "error",
+              editorText: "",
+              error:
+                "This source could not provide a valid selection preview. It may be unavailable or the text may exceed its bounds. Nothing was sent.",
+            }),
+          ),
+      }),
+    );
   }
   async send() {
     const capture = this.#capture;
@@ -275,58 +295,47 @@ export class SelectionReviewController {
     body: Readonly<TerminalSelectionSubmissionRequest>,
     capture: Readonly<SelectionCapture>,
   ) {
-    this.#request?.abort();
-    const request = new AbortController();
-    this.#request = request;
-    const version = ++this.#version;
-    const current = this.ports.captureActivation();
-    this.#pendingActivation = current;
-    this.#set({ ...this.#snapshot, phase: "sending", error: undefined });
-    try {
-      const receipt = await this.ports.api.submitUserTerminalSelection(
-        capture.sessionId,
-        capture.terminalId,
-        body,
-        request.signal,
-      );
-      if (!this.#disposed && version === this.#version) {
-        if (!current()) {
-          this.checkActivation();
-          return;
-        }
-        this.#pendingActivation = undefined;
-        this.ports.accepted();
-        this.#capture = undefined;
-        this.#question = undefined;
-        this.#submission = undefined;
-        this.#set({
-          ...this.#snapshot,
-          phase: "accepted",
-          receipt: Object.freeze(receipt),
-          editorText: "",
-          error: undefined,
-        });
-      }
-    } catch {
-      if (!this.#disposed && version === this.#version) {
-        if (!current()) {
-          this.checkActivation();
-          return;
-        }
-        this.#pendingActivation = undefined;
-        this.#set({
-          ...this.#snapshot,
-          phase: "uncertain",
-          error:
-            "Submission was not confirmed and may already be accepted. Retry uses this exact reviewed text, delivery choice and submission identity.",
-        });
-      }
-    }
+    const operation = this.#openRequest();
+    await Effect.runPromise(
+      submitSelection({
+        operation,
+        started: () => this.#set({ ...this.#snapshot, phase: "sending", error: undefined }),
+        request: (signal) =>
+          this.ports.api.submitUserTerminalSelection(
+            capture.sessionId,
+            capture.terminalId,
+            body,
+            signal,
+          ),
+        accepted: this.ports.accepted,
+        unconfirmed: () => this.ports.unconfirmed?.(),
+        confirmed: (receipt) =>
+          this.#apply(operation, () => {
+            this.#capture = undefined;
+            this.#question = undefined;
+            this.#submission = undefined;
+            this.#set({
+              ...this.#snapshot,
+              phase: "accepted",
+              receipt: Object.freeze(receipt),
+              editorText: "",
+              error: undefined,
+            });
+          }),
+        failed: () =>
+          this.#apply(operation, () =>
+            this.#set({
+              ...this.#snapshot,
+              phase: "uncertain",
+              error:
+                "Submission was not confirmed and may already be accepted. Retry uses this exact reviewed text, delivery choice and submission identity.",
+            }),
+          ),
+      }),
+    );
   }
   clear() {
-    this.#pendingActivation = undefined;
-    this.#request?.abort();
-    this.#version += 1;
+    this.#closeRequest();
     this.#capture = undefined;
     this.#captureId = undefined;
     this.#question = undefined;
@@ -334,6 +343,7 @@ export class SelectionReviewController {
     this.#set(EMPTY);
   }
   dispose() {
+    if (this.#disposed) return;
     this.clear();
     this.#disposed = true;
     this.#listeners.clear();
