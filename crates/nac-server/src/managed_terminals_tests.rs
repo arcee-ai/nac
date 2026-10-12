@@ -1,5 +1,7 @@
 //! Synthetic controller/host composition with genuine Local PTYs. These
 //! fixtures do not establish a deployed gateway or an eligible image upgrade.
+#[path = "managed_terminal_configuration_tests.rs"]
+mod configuration;
 #[path = "managed_terminal_pressure_tests.rs"]
 mod pressure;
 
