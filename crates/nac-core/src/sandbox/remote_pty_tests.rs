@@ -67,6 +67,7 @@ fn human_transport_is_transparent_without_changing_model_invocations() {
 
 #[test]
 fn remote_cleanup_recursion_keeps_every_parent_and_sibling() {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
     let start = SANDBOX_KILL_WRAPPER.find("  descendants() ").unwrap();
     let end = SANDBOX_KILL_WRAPPER.find("\n  pids=$(descendants").unwrap();
     // No process is started or signalled for these synthetic identities.
