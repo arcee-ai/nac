@@ -17,6 +17,7 @@ impl StartupFixture {
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("store.db");
         store::initialize(&path).unwrap();
+        Self::seed_retained_session(&path, &root);
         let mut config = static_config();
         config.version = version;
         config.state_root = root.join("state");
@@ -99,6 +100,105 @@ impl StartupFixture {
         }
     }
 
+    fn seed_retained_session(path: &Path, root: &Path) {
+        let session_id = "21856443-8ed8-40ab-9036-72e837c99f27";
+        let mut session = nac_core::sessions::new_snapshot(
+            session_id.into(),
+            root.to_path_buf(),
+            "trinity-large-thinking".into(),
+            "https://api.arcee.ai".into(),
+            BackendKind::ArceeApi,
+            None,
+            None,
+            None,
+            vec![nac_core::types::Message::User {
+                content: "retained history".into(),
+            }],
+            None,
+            Default::default(),
+        );
+        session.unattributed_token_usage = Some(
+            serde_json::from_value(serde_json::json!({
+                "input_tokens": 42,
+                "output_tokens": 7,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "total_tokens": 49,
+                "cost": { "input": 123, "output": 456, "total": 579 }
+            }))
+            .unwrap(),
+        );
+        nac_core::sessions::create_session(path, &session).unwrap();
+        nac_core::sessions::update_session_presentation(
+            path,
+            session_id,
+            "Retained metadata",
+            true,
+            0,
+        )
+        .unwrap();
+        store::TranscriptLogWriter::new(path)
+            .unwrap()
+            .append(
+                session_id,
+                1,
+                &nac_core::types::Message::User {
+                    content: "retained logged history".into(),
+                },
+            )
+            .unwrap();
+    }
+
+    fn retained_data(&self) -> serde_json::Value {
+        let session_id = "21856443-8ed8-40ab-9036-72e837c99f27";
+        let connection = rusqlite::Connection::open(&self.path).unwrap();
+        let presentation = connection.query_row(
+            "SELECT title, pinned, sort_order, version FROM session_presentations WHERE session_id = ?1",
+            [session_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?)),
+        ).unwrap();
+        let mut statement = connection.prepare(
+            "SELECT id, thread_name, event_json, created_at FROM thread_events WHERE session_id = ?1 ORDER BY id",
+        ).unwrap();
+        let events = statement
+            .query_map([session_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let schema: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let journal: String = connection
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .unwrap();
+        assert_eq!(schema, 32);
+        assert_eq!(store::MINIMUM_MIGRATABLE_SCHEMA_VERSION, 0);
+        assert_eq!(journal, "wal");
+        let session = nac_core::sessions::load_session(&self.path, session_id).unwrap();
+        assert_eq!(session.session_id, session_id);
+        // The durable facade returns the retained blob; the growable log is separate.
+        assert_eq!(session.messages.len(), 1);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].2.contains("retained logged history"));
+        assert_eq!(
+            session
+                .unattributed_token_usage
+                .as_ref()
+                .unwrap()
+                .cost
+                .total,
+            579
+        );
+        serde_json::json!({ "session": format!("{session:?}"), "presentation": presentation, "events": events, "schema": schema, "journal": journal })
+    }
+
     fn retained_state(&self) -> serde_json::Value {
         serde_json::to_value(store::managed_maintenance_snapshot(&self.path).unwrap()).unwrap()
     }
@@ -120,41 +220,7 @@ fn v2_and_v3_startup_cas_replays_and_requires_exact_accept_before_serving() {
             let fixture = StartupFixture::new(version, maintenance);
             let conn = rusqlite::Connection::open(&fixture.path).unwrap();
             let session_id = "21856443-8ed8-40ab-9036-72e837c99f27";
-            let mut session = nac_core::sessions::new_snapshot(
-                session_id.into(),
-                fixture.root.clone(),
-                "trinity-large-thinking".into(),
-                "https://api.arcee.ai".into(),
-                BackendKind::ArceeApi,
-                None,
-                None,
-                None,
-                vec![nac_core::types::Message::User {
-                    content: "retained history".into(),
-                }],
-                None,
-                Default::default(),
-            );
-            session.unattributed_token_usage = Some(
-                serde_json::from_value(serde_json::json!({
-                    "input_tokens": 42,
-                    "output_tokens": 7,
-                    "cache_read_tokens": 0,
-                    "cache_write_tokens": 0,
-                    "total_tokens": 49,
-                    "cost": { "input": 123, "output": 456, "total": 579 }
-                }))
-                .unwrap(),
-            );
-            nac_core::sessions::create_session(&fixture.path, &session).unwrap();
-            nac_core::sessions::update_session_presentation(
-                &fixture.path,
-                session_id,
-                "Retained metadata",
-                true,
-                0,
-            )
-            .unwrap();
+            let retained_before = fixture.retained_data();
             let before = format!(
                 "{:?}",
                 nac_core::sessions::load_session(&fixture.path, session_id).unwrap()
@@ -224,6 +290,7 @@ fn v2_and_v3_startup_cas_replays_and_requires_exact_accept_before_serving() {
             // Reopen through the real durable facade after the startup/accept commits.
             let retained = nac_core::sessions::load_session(&fixture.path, session_id).unwrap();
             assert_eq!(format!("{retained:?}"), before);
+            assert_eq!(fixture.retained_data(), retained_before);
             assert_eq!(retained.session_id, session_id);
             assert_eq!(retained.unattributed_token_usage.unwrap().cost.total, 579);
             let reopened = rusqlite::Connection::open(&fixture.path).unwrap();
@@ -276,6 +343,7 @@ fn v2_and_v3_startup_cas_denies_mismatch_before_model_import_and_retains_history
         for maintenance in [false, true] {
             let fixture = StartupFixture::new(version, maintenance);
             let before = fixture.retained_state();
+            let retained_before = fixture.retained_data();
             let environment_lock = crate::tests::SERVER_MODEL_ENV_LOCK.lock().unwrap();
             let environment = crate::tests::ScopedModelEnv::isolated(&fixture.root, None);
             for change in changes {
@@ -299,6 +367,7 @@ fn v2_and_v3_startup_cas_denies_mismatch_before_model_import_and_retains_history
                     .is_err()
                 );
                 assert_eq!(fixture.retained_state(), before);
+                assert_eq!(fixture.retained_data(), retained_before);
                 assert!(!fixture.config.state_root.join("auth").exists());
             }
             drop(environment);
@@ -310,6 +379,7 @@ fn v2_and_v3_startup_cas_denies_mismatch_before_model_import_and_retains_history
                     .is_err()
             );
             assert_eq!(fixture.retained_state(), before);
+            assert_eq!(fixture.retained_data(), retained_before);
         }
     }
 }
