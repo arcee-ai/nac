@@ -17,9 +17,25 @@ declare class ClipboardEvent {
     options: { clipboardData: DataTransfer; bubbles: boolean; cancelable: boolean },
   );
 }
-declare const window: { open: (url?: string | URL) => null };
+interface RenderedMarkerTiming {
+  domMs: number;
+  renderedMs: number;
+}
+declare const window: {
+  open: (url?: string | URL) => null;
+  terminalRenderedMarker?: {
+    result: Promise<RenderedMarkerTiming>;
+    dispose: () => void;
+  };
+};
+declare class MutationObserver {
+  constructor(callback: () => void);
+  observe(target: unknown, options: Record<string, boolean>): void;
+  disconnect(): void;
+}
 declare const navigator: { clipboard: { writeText: (text: string) => Promise<void> } };
 declare function requestAnimationFrame(callback: (timestamp: number) => void): number;
+declare function cancelAnimationFrame(handle: number): void;
 
 function octal(text: string) {
   return Array.from(
@@ -44,6 +60,63 @@ async function show(page: Page, base: string, session: string) {
 async function focus(pane: Locator) {
   await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
 }
+/**
+ * Arm the actual visual DOM renderer before input. The screen-reader mirror is
+ * intentionally throttled by xterm and assertion polling is not a render clock.
+ * Record DOM arrival plus the next animation-frame paint opportunity in-browser.
+ */
+async function armRenderedMarker(pane: Locator, marker: string) {
+  await pane.locator(".xterm-rows").evaluate((rows, marker) => {
+    window.terminalRenderedMarker?.dispose();
+    if (rows.textContent?.includes(marker))
+      throw new Error("Terminal latency marker must be absent before measurement");
+    let resolve!: (timing: RenderedMarkerTiming) => void;
+    let reject!: (error: Error) => void;
+    const result = new Promise<RenderedMarkerTiming>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    // Cleanup can precede the reader when another journey assertion fails.
+    void result.catch(() => {});
+    let settled = false;
+    let frame: number | undefined;
+    let startedAt = 0;
+    const release = () => {
+      observer.disconnect();
+      clearTimeout(deadline);
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      release();
+      reject(new Error(message));
+    };
+    const observer = new MutationObserver(() => {
+      if (settled || frame !== undefined || !rows.textContent?.includes(marker)) return;
+      const domAt = performance.now();
+      observer.disconnect();
+      frame = requestAnimationFrame(() => {
+        if (settled) return;
+        const renderedAt = performance.now();
+        settled = true;
+        release();
+        resolve({ domMs: domAt - startedAt, renderedMs: renderedAt - startedAt });
+      });
+    });
+    observer.observe(rows, { childList: true, characterData: true, subtree: true });
+    startedAt = performance.now();
+    const deadline = setTimeout(
+      () => fail("Terminal visual marker did not arrive within 10 seconds"),
+      10_000,
+    );
+    window.terminalRenderedMarker = {
+      result,
+      dispose: () => fail("Terminal latency measurement disposed"),
+    };
+  }, marker);
+}
+
 async function copyRow(page: Page, pane: Locator, line: string, cols: number, rows: number) {
   const texts = await pane.locator(".xterm-accessibility-tree > div").allTextContents();
   const row = texts.findIndex((text) => text.trimEnd() === line);
@@ -408,11 +481,19 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       .toBe(true);
     measurements.resizeMs = performance.now() - resizedAt;
     await focus(pane);
-    const inputAt = performance.now();
+    await armRenderedMarker(pane, "NOISE-INTERRUPTED");
     await page.keyboard.press("Control+c");
     await command(page, "printf '" + octal("NOISE-INTERRUPTED\n") + "'");
+    const timing = await page.evaluate(() => {
+      if (!window.terminalRenderedMarker)
+        throw new Error("Terminal render measurement was not armed");
+      return window.terminalRenderedMarker.result;
+    });
+    measurements.interruptToDomMarkerMs = timing.domMs;
+    measurements.interruptToRenderedMarkerMs = timing.renderedMs;
+    // Accessibility correctness remains required, with its own throttled update
+    // lifetime. Its assertion polling never contributes to the recorded latency.
     await expect(accessible).toContainText("NOISE-INTERRUPTED");
-    measurements.interruptToRenderedMarkerMs = performance.now() - inputAt;
     expect(measurements.interruptToRenderedMarkerMs).toBeLessThan(1500);
     expect(measurements.resizeMs).toBeLessThan(1500);
     const closeAt = performance.now();
@@ -426,6 +507,10 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     measurements.closeSettledMs = performance.now() - closeAt;
     expect(measurements.closeSettledMs).toBeLessThan(1500);
   } finally {
+    await page.evaluate(() => {
+      window.terminalRenderedMarker?.dispose();
+      delete window.terminalRenderedMarker;
+    });
     await api.terminateTerminal(session, terminal);
     await Promise.allSettled(pending);
     const heartbeat = await page.evaluate(() => {
