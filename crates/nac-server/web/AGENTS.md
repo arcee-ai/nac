@@ -109,3 +109,25 @@ make test-e2e
   to preserve cancellation/polling/invalidation semantics.
 - Do not scatter one managed workflow across generic modal/provider folders.
 - Do not edit generated API types or committed production chunks manually.
+
+## E2E invocation ownership
+
+Run `npm run test:e2e -- <Playwright flags>` (or `make test-e2e`); the remote
+npm script uses the same stdlib runner. It allocates one artifact root before
+config evaluation and prints its absolute path and run ID. Workers and native
+fixture subprocesses inherit the same root; config reloads never allocate one.
+Direct Playwright invocation without this owner handoff fails before cleanup.
+
+An explicit `NAC_E2E_ARTIFACTS` remains caller-owned and retained on every exit,
+including successful CI runs for artifact upload. A sidecar lease rejects a
+competing invocation before Playwright clears that path. A lease left by a
+forced kill fails closed; inspect its owner before removing that one lease.
+
+Default roots live in a checkout-specific temporary namespace. Successful runs
+remove only their own root after Playwright/reporters exit. Failure/interruption
+retains and prints evidence; at most three completed/dead default runs remain.
+Pruning never selects active runners, explicit roots, unmarked paths or
+`KEEP_E2E=1` evidence. Use an explicit destination or `KEEP_E2E=1` to retain a
+run beyond that bounded local history. The harness still owns native process
+and descendant cleanup before artifact cleanup; its workload, deadlines,
+retry count and remote artifact policy are unchanged.

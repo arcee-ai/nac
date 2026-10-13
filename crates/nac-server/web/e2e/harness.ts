@@ -355,6 +355,12 @@ async function startHarness(
         RUST_BACKTRACE: "1",
         ...(orchestration === null ? {} : { NAC_ORCHESTRATION: orchestration }),
         NAC_E2E_API_KEY: "nac-e2e-dummy-only",
+        NAC_E2E_ARTIFACTS: process.env.NAC_E2E_ARTIFACTS,
+        NAC_E2E_RUN_ARTIFACT_ROOT: process.env.NAC_E2E_RUN_ARTIFACT_ROOT,
+        NAC_E2E_RUN_ID: process.env.NAC_E2E_RUN_ID,
+        NAC_E2E_RUN_WRAPPER_PID: process.env.NAC_E2E_RUN_WRAPPER_PID,
+        NAC_E2E_RUN_CONFIG_PID: process.env.NAC_E2E_RUN_CONFIG_PID,
+        NAC_E2E_INTERNAL_DEFAULT_ARTIFACTS: process.env.NAC_E2E_INTERNAL_DEFAULT_ARTIFACTS,
         // Conventional selectors make two independent provider routes
         // available to the unified model picker without placing either value
         // in browser state. The scripted tests never send model traffic to
@@ -439,7 +445,14 @@ async function startHarness(
       fs.writeFile(
         path.join(runRoot, "process.json"),
         JSON.stringify(
-          { pid: server.pid, binaryPath, baseUrl, provider: provider.baseUrl },
+          {
+            pid: server.pid,
+            binaryPath,
+            baseUrl,
+            provider: provider.baseUrl,
+            artifactRoot: process.env.NAC_E2E_RUN_ARTIFACT_ROOT,
+            artifactRunId: process.env.NAC_E2E_RUN_ID,
+          },
           null,
           2,
         ),
@@ -481,6 +494,8 @@ async function startHarness(
         JSON.stringify(
           {
             pid,
+            artifactRoot: process.env.NAC_E2E_RUN_ARTIFACT_ROOT,
+            artifactRunId: process.env.NAC_E2E_RUN_ID,
             binaryPath,
             baseUrl,
             provider: provider.baseUrl,
