@@ -159,6 +159,72 @@ async fn explicit_handoff_preserves_configured_input_deny() {
 }
 
 #[tokio::test]
+async fn configured_input_deny_cannot_make_allowed_human_handoff_one_way() {
+    for allow_human_target in [false, true] {
+        let mut rules = vec![PermissionRule::new(
+            "terminal_input",
+            "*",
+            PermissionEffect::Deny,
+        )];
+        if allow_human_target {
+            // The last matching rule applies to launch, native input and
+            // reclaim using the same immutable terminal resource identity.
+            rules.push(PermissionRule::new(
+                "terminal_input",
+                "user-shell-*",
+                PermissionEffect::Allow,
+            ));
+        }
+        let (parts, directory) = fixture_with_policy(None, rules);
+        let service = &parts.service;
+        let launch = service.open_user_terminal(Uuid::new_v4(), 80, 24).await;
+        if !allow_human_target {
+            assert!(launch
+                .unwrap_err()
+                .to_string()
+                .contains("permission denied"));
+            assert!(service.list_user_terminals().await.unwrap().is_empty());
+        } else {
+            let terminal = launch.unwrap();
+            let context = service.require_user_terminal_context().unwrap();
+            let manager = &context.runtime.terminal_manager;
+            let pid = manager.get(&terminal.id).await.unwrap().pid;
+            let agent = service
+                .transfer_terminal_input_control(&terminal.id, 1, InputController::Agent, false)
+                .await
+                .unwrap();
+            assert_eq!(agent.controller, InputController::Agent);
+            assert_eq!(agent.revision, "2");
+            let result = crate::tools::execute_tool(
+                "write_stdin",
+                serde_json::json!({"session_id": terminal.id, "chars": "printf 'POLICY-AGENT\\n'<RET>", "yield_time_ms": 1}),
+                &context.runtime,
+                &context.client,
+            )
+            .await;
+            assert!(!result.is_error, "{}", result.content);
+            wait_for(service, &terminal.id, b"POLICY-AGENT\r\n").await;
+            let human = service
+                .transfer_terminal_input_control(&terminal.id, 2, InputController::Human, false)
+                .await
+                .unwrap();
+            assert_eq!(human.controller, InputController::Human);
+            assert_eq!(human.revision, "3");
+            service
+                .write_controlled_terminal_input(&terminal.id, 3, b"printf 'POLICY-HUMAN\\n'\n")
+                .await
+                .unwrap();
+            wait_for(service, &terminal.id, b"POLICY-HUMAN\r\n").await;
+            assert_eq!(manager.get(&terminal.id).await.unwrap().pid, pid);
+            service.terminate_user_terminal(&terminal.id).await.unwrap();
+        }
+        assert!(service.list_permission_requests().unwrap().is_empty());
+        assert!(service.list_permission_grants().unwrap().is_empty());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[tokio::test]
 async fn configuration_replacement_during_ask_fences_native_input_and_human_control() {
     let (parts, directory) = fixture();
     let service = &parts.service;
@@ -198,10 +264,27 @@ async fn configuration_replacement_during_ask_fences_native_input_and_human_cont
         .as_text()
         .unwrap()
         .contains("configuration changed"));
+    let before = service
+        .terminal_manager
+        .control_snapshot_for_test(&terminal.id)
+        .await;
+    assert!(service
+        .transfer_terminal_input_control(&terminal.id, 2, InputController::Agent, false)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("configuration changed"));
     assert!(service
         .transfer_terminal_input_control(&terminal.id, 2, InputController::Human, false)
         .await
         .is_err());
+    assert_eq!(
+        service
+            .terminal_manager
+            .control_snapshot_for_test(&terminal.id)
+            .await,
+        before
+    );
     assert!(service
         .write_controlled_terminal_input(&terminal.id, 2, b"wrong\n")
         .await
