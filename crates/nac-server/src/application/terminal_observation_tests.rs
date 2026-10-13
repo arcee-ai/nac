@@ -491,3 +491,158 @@ async fn two_native_owners_and_slow_observers_keep_cached_status_and_close_respo
     eprintln!("two native owners: cached snapshots={snapshot_elapsed:?}, close={close_elapsed:?}");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn execution_pending_receipt_replays_after_source_expiry_but_new_pages_remain_opaque() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!("nac-pending-execution-{}", Uuid::new_v4()));
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("server-test-key"));
+    std::fs::create_dir_all(&root).unwrap();
+    seed_direct_session(&root, "session");
+    let manager = test_manager(&root);
+    let service = manager.attach_session("session").await.unwrap();
+    let terminal = service
+        .open_user_terminal(Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    service
+        .write_user_terminal_input(&terminal.id, b"printf pending\\n\n")
+        .await
+        .unwrap();
+    let (observer, _) = manager
+        .session_terminals()
+        .attach_execution("session", &terminal.id, 2)
+        .await
+        .unwrap();
+    let hub = &manager.inner.terminal_observations;
+    let frame = hub
+        .pull("session", &terminal.id, observer, None, 1000)
+        .await
+        .unwrap();
+    assert!(frame.requires_ack);
+    service.terminate_user_terminal(&terminal.id).await.unwrap();
+    // Expire the exact source handle through existing bounded completed-PTY
+    // history, without altering observer seats or creating any model runs.
+    for _ in 0..16 {
+        let shell = service
+            .open_user_terminal(Uuid::new_v4(), 80, 24)
+            .await
+            .unwrap();
+        service.terminate_user_terminal(&shell.id).await.unwrap();
+    }
+    assert!(service.execution_status(&terminal.id).await.is_err());
+    assert!(matches!(
+        manager
+            .session_terminals()
+            .attach_execution("session", &terminal.id, 2)
+            .await,
+        Err(TerminalApplicationError::Unavailable)
+    ));
+    let replay = manager
+        .session_terminals()
+        .pull_execution("session", &terminal.id, observer, None, 0)
+        .await
+        .unwrap();
+    same_frame(&frame, &replay);
+    let ack = RenderAcknowledgement {
+        offset: frame.page.next_offset,
+        reset: frame.page.gap,
+    };
+    assert!(matches!(
+        hub.pull("session", &terminal.id, observer, Some(ack), 0)
+            .await,
+        Err(TerminalApplicationError::Unavailable)
+    ));
+    assert!(matches!(
+        hub.pull("session", &terminal.id, observer, Some(ack), 0)
+            .await,
+        Err(TerminalApplicationError::Unavailable)
+    ));
+    let seat = hub
+        .seats
+        .lock()
+        .unwrap()
+        .get(&observer)
+        .unwrap()
+        .observer
+        .clone();
+    let state = seat.state.lock().await;
+    assert!(state.pending.is_none());
+    assert_eq!(state.cursor, ack.offset);
+    assert!(state.last_ack == Some(ack));
+    drop(state);
+    hub.detach("session", &terminal.id, observer);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn execution_pending_frame_is_rejected_when_cached_owner_is_replaced() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!("nac-replaced-execution-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("server-test-key"));
+    seed_direct_session(&root, "session");
+    let manager = test_manager(&root);
+    let original = manager.attach_session("session").await.unwrap();
+    let terminal = original
+        .open_user_terminal(Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    original
+        .write_user_terminal_input(&terminal.id, b"printf replacement\\n\n")
+        .await
+        .unwrap();
+    let (observer, _) = manager
+        .session_terminals()
+        .attach_execution("session", &terminal.id, 2)
+        .await
+        .unwrap();
+    let frame = manager
+        .session_terminals()
+        .pull_execution("session", &terminal.id, observer, None, 1000)
+        .await
+        .unwrap();
+    assert!(frame.requires_ack);
+    original
+        .terminate_user_terminal(&terminal.id)
+        .await
+        .unwrap();
+    // Rebuild through ordinary construction while the old observer still owns
+    // its immutable page and service clone. The view itself never reconstructs.
+    manager
+        .inner
+        .active_sessions
+        .write()
+        .await
+        .remove("session");
+    let replacement = manager.attach_session("session").await.unwrap();
+    assert!(!Arc::ptr_eq(&original, &replacement));
+    assert!(matches!(
+        manager
+            .session_terminals()
+            .pull_execution("session", &terminal.id, observer, None, 0)
+            .await,
+        Err(TerminalApplicationError::Unavailable)
+    ));
+    assert!(matches!(
+        manager
+            .session_terminals()
+            .pull_execution(
+                "session",
+                &terminal.id,
+                observer,
+                Some(RenderAcknowledgement {
+                    offset: frame.page.next_offset,
+                    reset: frame.page.gap
+                }),
+                0
+            )
+            .await,
+        Err(TerminalApplicationError::Unavailable)
+    ));
+    manager
+        .inner
+        .terminal_observations
+        .detach("session", &terminal.id, observer);
+    std::fs::remove_dir_all(root).unwrap();
+}

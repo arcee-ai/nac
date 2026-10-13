@@ -225,6 +225,23 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
         "GET",
         "/sessions/{session_id}/user-commands/{request_id}/output",
     ),
+    ("GET", "/sessions/{session_id}/executions"),
+    (
+        "POST",
+        "/sessions/{session_id}/executions/{execution_id}/observers",
+    ),
+    (
+        "POST",
+        "/sessions/{session_id}/executions/{execution_id}/observers/{observer_id}/read",
+    ),
+    (
+        "DELETE",
+        "/sessions/{session_id}/executions/{execution_id}/observers/{observer_id}",
+    ),
+    (
+        "POST",
+        "/sessions/{session_id}/executions/{execution_id}/stop",
+    ),
     ("POST", "/sessions/{session_id}/runs"),
     ("POST", "/sessions/{session_id}/steering"),
     (
@@ -294,6 +311,7 @@ fn concrete_api_path(path: &str) -> String {
         .replace("{thread_name}", "missing-thread")
         .replace("{revision_id}", "1")
         .replace("{terminal_id}", "missing-terminal")
+        .replace("{execution_id}", "missing-execution")
         .replace("{observer_id}", "00000000-0000-4000-8000-000000000000")
 }
 

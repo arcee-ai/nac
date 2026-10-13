@@ -448,7 +448,11 @@ impl TerminalSession {
     }
 
     pub fn exit_code(&self) -> Option<i32> {
-        self.exit_code
+        // Native human ownership publishes cached settlement independently of
+        // model polling. Observation must not call refresh_status/reap to see it.
+        self.native_owner
+            .as_ref()
+            .map_or(self.exit_code, |owner| owner.snapshot().exit_code)
     }
 
     pub fn retain(

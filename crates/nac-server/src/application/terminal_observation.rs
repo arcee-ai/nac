@@ -239,13 +239,9 @@ impl TerminalObservationHub {
                 state.pending = None;
             }
         }
-        if observer.execution {
-            observer
-                .service
-                .execution_status(&observer.terminal_id)
-                .await
-                .map_err(|_| TerminalApplicationError::Unavailable)?;
-        }
+        // A valid seat owns its one already-delivered immutable page through
+        // ACK/expiry. Source pruning forbids new pages, not receipt recovery;
+        // cached owner/session fences are still enforced by the application.
         if let Some(frame) = &state.pending {
             return Ok(frame.clone());
         }

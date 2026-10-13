@@ -196,7 +196,7 @@ impl TerminalManager {
                         self.remote_cleanup_persistence(),
                         None,
                         None,
-                        environment.stream_redactor(),
+                        environment.pty_redactor(),
                     )?;
                     session.attach_child_telemetry(self.telemetry_correlation());
                     let info = self.session_info(&name, &session);
@@ -217,7 +217,7 @@ impl TerminalManager {
                     self.remote_cleanup_persistence(),
                     None,
                     None,
-                    environment.stream_redactor(),
+                    environment.pty_redactor(),
                 )?;
                 session.attach_child_telemetry(self.telemetry_correlation());
                 let info = self.session_info(&name, &session);

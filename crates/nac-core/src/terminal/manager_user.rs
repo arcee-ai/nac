@@ -189,7 +189,7 @@ impl TerminalManager {
                     self.output_registry.clone(),
                     &envs,
                     self.remote_cleanup_persistence(),
-                    Some(environment.stream_redactor()),
+                    Some(environment.pty_redactor()),
                     Some(lifetime),
                     nac_contracts::CommandEnvironmentSnapshot::empty().stream_redactor(),
                 )?;

@@ -281,6 +281,19 @@ impl CommandEnvironmentSnapshot {
         CommandOutputRedactor::new(&self.redactions)
     }
 
+    /// PTYs may expand LF to CRLF before collection. Keep the original launch
+    /// values and their standard cooked-output form in the same finite policy;
+    /// neither replay nor a rendered page needs a second masking pass.
+    pub fn pty_redactor(&self) -> CommandOutputRedactor {
+        let mut values = self.redactions.clone();
+        values.extend(
+            self.redactions
+                .iter()
+                .map(|value| value.replace('\n', "\r\n")),
+        );
+        CommandOutputRedactor::new(&values)
+    }
+
     /// Masks both stream-local and observed combined pipe bytes exactly once.
     pub fn pipe_redactor(&self) -> CommandPipeRedactor {
         CommandPipeRedactor::new(&self.redactions)

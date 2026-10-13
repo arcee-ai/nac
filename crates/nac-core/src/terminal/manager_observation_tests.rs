@@ -233,3 +233,114 @@ async fn observing_pipes_does_not_apply_the_pty_session_admission_limit() {
     }
     manager.remove_all().await.unwrap();
 }
+
+#[tokio::test]
+async fn natural_human_exit_is_observed_without_archival_or_process_refresh() {
+    let manager = TerminalManager::for_direct();
+    let backend = backend();
+    let id = manager.user_terminal_name(uuid::Uuid::new_v4());
+    manager
+        .create_user_terminal(
+            id.clone(),
+            "printf completed; exit 7",
+            backend.default_terminal_cwd(),
+            80,
+            24,
+            &backend,
+            nac_contracts::CommandEnvironmentSnapshot::empty(),
+            None,
+            &ThreadCancellation::default(),
+        )
+        .await
+        .unwrap();
+    let status = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let status = manager.execution_status(&id).await.unwrap();
+            if !status.alive && status.output_complete {
+                break status;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(status.exit_code, Some(7));
+    assert_eq!(status.process_state, ExecutionProcessState::Settled);
+    assert!(!status.stop && !status.input && !status.resize);
+    assert!(manager.sessions.lock().await.contains_key(&id));
+    assert!(manager.completed_sessions.lock().await.is_empty());
+    manager.remove_all().await.unwrap();
+}
+
+#[tokio::test]
+async fn ordinary_pty_line_endings_do_not_expose_control_bearing_launch_secrets() {
+    let manager = TerminalManager::for_direct();
+    let backend = backend();
+    let environment = nac_contracts::CommandEnvironmentSnapshot::from_parts(
+        std::collections::BTreeMap::from([(
+            "NAC_MULTILINE_SECRET".into(),
+            "synthetic-private\nsecond-line".into(),
+        )]),
+        vec!["synthetic-private\nsecond-line".into()],
+    );
+    let envs = environment
+        .iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect::<Vec<_>>();
+    let agent = manager.next_session_name();
+    manager
+        .create_sanitized(
+            agent.clone(),
+            "printf '%s' \"$NAC_MULTILINE_SECRET\"",
+            None,
+            80,
+            24,
+            &backend,
+            None,
+            &envs,
+            environment.clone(),
+        )
+        .await
+        .unwrap();
+    let output = manager
+        .write_stdin(&agent, "", 1000, 1000, None)
+        .await
+        .unwrap();
+    assert_eq!(output.content_preview, "[REDACTED]");
+    let human = manager.user_terminal_name(uuid::Uuid::new_v4());
+    manager
+        .create_user_terminal(
+            human.clone(),
+            "printf '%s' \"$NAC_MULTILINE_SECRET\"",
+            backend.default_terminal_cwd(),
+            80,
+            24,
+            &backend,
+            environment,
+            None,
+            &ThreadCancellation::default(),
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !manager
+            .execution_status(&human)
+            .await
+            .unwrap()
+            .output_complete
+        {
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        manager
+            .read_execution_output(&human, 0, 1000)
+            .await
+            .unwrap()
+            .bytes,
+        b"[REDACTED]"
+    );
+    manager.remove_all().await.unwrap();
+}

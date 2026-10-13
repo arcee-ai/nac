@@ -86,11 +86,12 @@ try {
   await writeFile(
     path.join(consumer, "runtime.mjs"),
     `import assert from "node:assert/strict";
-import { NAC_HTTP_CLIENT_VERSION, createNacClient, createNacApi, NAC_API_SURFACE, UserTerminalConnection, UserTerminalInputPump, NAC_TERMINAL_PROTOCOL_VERSION } from ${JSON.stringify(packageName)};
+import { NAC_HTTP_CLIENT_VERSION, createNacClient, createNacApi, NAC_API_SURFACE, UserTerminalConnection, UserTerminalInputPump, NAC_TERMINAL_PROTOCOL_VERSION, createExecutionConnection } from ${JSON.stringify(packageName)};
 
 assert.equal(NAC_HTTP_CLIENT_VERSION, 1);
 assert.equal(NAC_TERMINAL_PROTOCOL_VERSION, 1);
 assert.equal(typeof UserTerminalConnection, "function");
+assert.equal(typeof createExecutionConnection, "function");
 assert.equal(typeof UserTerminalInputPump, "function");
 const client = createNacClient({
   endpoint: "https://nac.example/runtime/v1",
@@ -100,7 +101,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 137);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 142);
 for (const owner of Object.values(NAC_API_SURFACE)) {
   if (owner.startsWith("api.")) assert.equal(typeof api[owner.slice(4)], "function", owner);
   if (owner.startsWith("client.")) assert.equal(typeof client[owner.slice(7)], "function", owner);
