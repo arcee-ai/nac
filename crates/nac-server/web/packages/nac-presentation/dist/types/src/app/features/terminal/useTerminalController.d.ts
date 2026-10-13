@@ -12,5 +12,5 @@ export declare function useTerminalController(sessionId: string, terminalId: str
     selection: () => string;
     focus: () => void | undefined;
     hasActiveInput: () => boolean;
-    acknowledgeInput: () => boolean;
+    acknowledgeInput: (confirmed?: InputControlStatus) => boolean;
 };

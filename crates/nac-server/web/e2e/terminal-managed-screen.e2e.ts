@@ -54,7 +54,9 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
   const inputs: number[][] = [];
   page.on("request", (sent) => {
     if (
-      sent.url() === `${harness.baseUrl}/sessions/${session}/user-terminals/${terminal}/input` &&
+      ["user-terminals", "executions"].some(
+        (kind) => sent.url() === `${harness.baseUrl}/sessions/${session}/${kind}/${terminal}/input`,
+      ) &&
       sent.method() === "POST"
     )
       inputs.push(sent.postDataJSON().bytes);

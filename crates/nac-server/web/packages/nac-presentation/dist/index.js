@@ -16077,7 +16077,7 @@ function Ug(e) {
 			restoreFreshInput: g,
 			hasActiveInput: h,
 			updateInput: (i, a) => {
-				if (d?.controller !== i?.controller || d?.revision !== i?.revision || d?.frozen !== i?.frozen || d === void 0 != (i === void 0) || d === null != (i === null) || f !== a) {
+				if (!(d && i && BigInt(i.revision) < BigInt(d.revision)) && (d?.controller !== i?.controller || d?.revision !== i?.revision || d?.frozen !== i?.frozen || d === void 0 != (i === void 0) || d === null != (i === null) || f !== a)) {
 					_?.(), t.terminal.options.disableStdin = !0, (u.hasActiveInput || u.needsAcknowledgement) && (e.previousFailure.current = !0), u.hasActiveInput && p.add(u), u.dispose(), d = i, f = a, e.source && n.replaceInputTransport(ye(e.api, e.source, i, e.readonly)), u = new Dg(n, r.signal);
 					for (let e of p) e.hasActiveInput || p.delete(e);
 					e.inputFailure(e.previousFailure.current), g();
@@ -16137,40 +16137,44 @@ function Wg(e, t, n, r, i = {}) {
 		v,
 		y,
 		b
-	]), w = K({
+	]), w = K(r);
+	ai(() => {
+		w.current = r;
+	}, [r]);
+	let T = r !== void 0, E = K({
 		binding: C,
 		paused: i.inputPaused ?? !1
 	});
 	return ai(() => {
-		w.current = {
+		E.current = {
 			binding: C,
 			paused: i.inputPaused ?? !1
 		}, s.current?.updateInput(C, i.inputPaused ?? !1);
 	}, [C, i.inputPaused]), W(() => {
-		let l = n.current;
-		if (!l) return;
-		let u = Qt(a).acquire(e, t);
-		g.current = u;
-		let f = Ug({
+		let r = n.current;
+		if (!r) return;
+		let l = Qt(a).acquire(e, t);
+		g.current = l;
+		let u = Ug({
 			api: o,
-			source: r,
+			source: w.current,
 			readonly: i.readonly,
-			inputControl: w.current.binding,
-			inputPaused: w.current.paused,
+			inputControl: E.current.binding,
+			inputPaused: E.current.paused,
 			sessionId: e,
 			terminalId: t,
-			host: l,
+			host: r,
 			reconnect: c !== 0,
-			previousFailure: u,
+			previousFailure: l,
 			controls: (e) => {
-				s.current = e, e?.updateInput(w.current.binding, w.current.paused);
+				s.current = e, e?.updateInput(E.current.binding, E.current.paused);
 			},
 			phase: d,
 			notice: p,
 			inputFailure: h
 		});
 		return () => {
-			f(), u.release(), g.current === u && (g.current = null);
+			u(), l.release(), g.current === l && (g.current = null);
 		};
 	}, [
 		a,
@@ -16179,7 +16183,14 @@ function Wg(e, t, n, r, i = {}) {
 		t,
 		c,
 		n,
-		r,
+		T,
+		r?.id,
+		r?.origin,
+		r?.representation,
+		r?.backend,
+		r?.retained,
+		r?.input,
+		r?.resize,
 		i.readonly
 	]), {
 		phase: u,
@@ -16192,12 +16203,12 @@ function Wg(e, t, n, r, i = {}) {
 		},
 		focus: () => s.current?.adapter.terminal.focus(),
 		hasActiveInput: () => s.current?.hasActiveInput() === !0,
-		acknowledgeInput: () => {
-			let e = s.current;
-			if (!e || e.hasActiveInput() || !g.current?.available) return !1;
-			e.pump.acknowledgeFailure(), g.current.acknowledge();
-			let t = e.restoreFreshInput();
-			return h(!1), p(t ? "Previous input will not be retried. Only fresh typing will be sent." : "Previous input will not be retried. This source has no connected live input."), t && e.adapter.terminal.focus(), !0;
+		acknowledgeInput: (e) => {
+			let t = s.current;
+			if (!t || t.hasActiveInput() || !g.current?.available) return !1;
+			e && t.updateInput(e, !1), t.pump.acknowledgeFailure(), g.current.acknowledge();
+			let n = t.restoreFreshInput();
+			return h(!1), p(n ? "Previous input will not be retried. Only fresh typing will be sent." : "Previous input will not be retried. This source has no connected live input."), n && t.adapter.terminal.focus(), !0;
 		}
 	};
 }
@@ -16357,16 +16368,16 @@ function qg({ sessionId: e, source: t, onReviewSelection: n, historical: r = !1 
 	] });
 }
 function Jg({ sessionId: e, source: t, onReviewSelection: n, historical: r = !1 }) {
-	let i = t.id, a = { data: t }, o = t, s = Ng(e, t, r), c = K(null), l = Wg(e, i, c, o, {
+	let i = t.id, a = { data: t }, o = Ng(e, t, r), s = K(null), c = Wg(e, i, s, t, {
 		readonly: r,
-		inputControl: s.state ?? null,
-		inputPaused: s.pending
-	}), u = (e, t = !1) => {
-		s.change({
+		inputControl: o.state ?? null,
+		inputPaused: o.pending
+	}), l = (e, t = !1) => {
+		o.change({
 			controller: e,
 			acknowledge: t
-		}).then(() => {
-			t && l.acknowledgeInput();
+		}).then((e) => {
+			t && c.acknowledgeInput(e);
 		}).catch(() => {});
 	};
 	return /* @__PURE__ */ X(J, { children: [
@@ -16375,21 +16386,21 @@ function Jg({ sessionId: e, source: t, onReviewSelection: n, historical: r = !1 
 			children: [
 				/* @__PURE__ */ X("span", {
 					role: "status",
-					children: [l.phase, a.data && !a.data.alive ? ` · Exited${a.data.exit_code == null ? "" : ` (${a.data.exit_code})`}` : ""]
+					children: [c.phase, a.data && !a.data.alive ? ` · Exited${a.data.exit_code == null ? "" : ` (${a.data.exit_code})`}` : ""]
 				}),
 				/* @__PURE__ */ Y(R, {
 					size: A.Small,
 					type: "button",
 					variant: P.Ghost,
-					onClick: l.focus,
+					onClick: c.focus,
 					children: "Focus terminal"
 				}),
 				/* @__PURE__ */ Y(R, {
 					size: A.Small,
 					type: "button",
 					variant: P.Ghost,
-					disabled: l.phase === "Connecting",
-					onClick: l.reconnect,
+					disabled: c.phase === "Connecting",
+					onClick: c.reconnect,
 					children: "Reconnect"
 				}),
 				n ? /* @__PURE__ */ Y(R, {
@@ -16397,7 +16408,7 @@ function Jg({ sessionId: e, source: t, onReviewSelection: n, historical: r = !1 
 					type: "button",
 					variant: P.Ghost,
 					onClick: () => {
-						let t = l.selection();
+						let t = c.selection();
 						!t || !n || n(Object.freeze({
 							sessionId: e,
 							terminalId: i,
@@ -16410,60 +16421,60 @@ function Jg({ sessionId: e, source: t, onReviewSelection: n, historical: r = !1 
 				}) : null
 			]
 		}),
-		l.notice ? /* @__PURE__ */ Y("p", {
+		c.notice ? /* @__PURE__ */ Y("p", {
 			role: "alert",
-			children: l.notice
+			children: c.notice
 		}) : null,
-		!r && s.offered ? /* @__PURE__ */ X("div", {
+		!r && o.offered ? /* @__PURE__ */ X("div", {
 			className: "flex flex-wrap items-center gap-2",
 			"aria-label": "Terminal input ownership",
 			children: [
 				/* @__PURE__ */ Y("span", {
 					role: "status",
 					"aria-label": "Input controller",
-					children: s.loading ? "Checking input control…" : s.state ? `Input: ${s.state.controller === "human" ? "Human" : "Agent"}${s.state.frozen ? " · Frozen" : ""}` : "Input unavailable"
+					children: o.loading ? "Checking input control…" : o.state ? `Input: ${o.state.controller === "human" ? "Human" : "Agent"}${o.state.frozen ? " · Frozen" : ""}` : "Input unavailable"
 				}),
-				s.state?.controller === "agent" ? /* @__PURE__ */ Y(R, {
+				o.state?.controller === "agent" ? /* @__PURE__ */ Y(R, {
 					size: A.Small,
 					type: "button",
 					variant: P.Secondary,
-					disabled: s.pending,
-					onClick: () => u("human"),
+					disabled: o.pending,
+					onClick: () => l("human"),
 					children: t.origin === "human" ? "Reclaim input" : "Take control"
-				}) : s.state?.controller === "human" ? /* @__PURE__ */ Y(R, {
+				}) : o.state?.controller === "human" ? /* @__PURE__ */ Y(R, {
 					size: A.Small,
 					type: "button",
 					variant: P.Ghost,
-					disabled: s.pending || s.state.frozen || l.inputFailure || l.hasActiveInput(),
-					onClick: () => u("agent"),
+					disabled: o.pending || o.state.frozen || c.inputFailure || c.hasActiveInput(),
+					onClick: () => l("agent"),
 					children: "Give agent control"
 				}) : null,
-				s.state?.controller === "human" && s.state.frozen || l.inputFailure ? /* @__PURE__ */ Y(R, {
+				o.state?.controller === "human" && o.state.frozen || c.inputFailure ? /* @__PURE__ */ Y(R, {
 					size: A.Small,
 					type: "button",
 					variant: P.Secondary,
-					disabled: s.pending || s.state?.in_flight || l.hasActiveInput(),
+					disabled: o.pending || o.state?.in_flight || c.hasActiveInput(),
 					onClick: () => {
-						s.state ? u("human", !0) : l.acknowledgeInput();
+						o.state ? l("human", !0) : c.acknowledgeInput();
 					},
 					children: "Acknowledge failure and enable fresh input"
 				}) : null,
-				s.unavailable ? /* @__PURE__ */ Y(R, {
+				o.unavailable ? /* @__PURE__ */ Y(R, {
 					type: "button",
 					size: A.Small,
 					onClick: () => {
-						s.refresh();
+						o.refresh();
 					},
 					children: "Refresh input control"
 				}) : null
 			]
 		}) : null,
-		!r && s.error ? /* @__PURE__ */ X("p", {
+		!r && o.error ? /* @__PURE__ */ X("p", {
 			role: "alert",
-			children: [s.error.message, " Input ownership was not confirmed; refresh before another action."]
+			children: [o.error.message, " Input ownership was not confirmed; refresh before another action."]
 		}) : null,
 		/* @__PURE__ */ Y("div", {
-			ref: c,
+			ref: s,
 			role: "region",
 			"aria-label": "Interactive terminal",
 			className: "flex-1 min-h-32 overflow-auto",

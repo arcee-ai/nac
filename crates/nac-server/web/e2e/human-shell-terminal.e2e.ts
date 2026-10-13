@@ -162,10 +162,15 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
   await pane.getByRole("button", { name: "New shell", exact: true }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const shell = (await api.listUserTerminals(session)).terminals[0];
-  const inputUrl = `${harness.baseUrl}/sessions/${session}/user-terminals/${shell.terminal_id}/input`;
+  const legacyInputUrl = `${harness.baseUrl}/sessions/${session}/user-terminals/${shell.terminal_id}/input`;
+  const executionInputUrl = `${harness.baseUrl}/sessions/${session}/executions/${shell.terminal_id}/input`;
+  const inputUrls = new Set([legacyInputUrl, executionInputUrl]);
   const inputs: number[][] = [];
+  let controlledInputUsed = false;
   page.on("request", (sent) => {
-    if (sent.url() === inputUrl && sent.method() === "POST") inputs.push(sent.postDataJSON().bytes);
+    if (inputUrls.has(sent.url()) && sent.method() === "POST")
+      inputs.push(sent.postDataJSON().bytes);
+    if (sent.url() === executionInputUrl && sent.method() === "POST") controlledInputUsed = true;
   });
   await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
   const command = "printf accepted >> uncertain-effects.txt";
@@ -173,11 +178,17 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
   await expect(pane.locator(".xterm-accessibility")).toContainText(command);
   // The Enter reaches the real process. Only its reply is replaced, proving
   // accepted-but-uncertain delivery instead of a pre-dispatch failure.
+  let injectedReceiptLoss = false;
   await page.route(
-    inputUrl,
+    (url) => inputUrls.has(url.href),
     async (route) => {
       const response = await route.fetch();
-      expect(response.status()).toBe(204);
+      if (route.request().url() === legacyInputUrl) expect(response.status()).toBe(204);
+      else {
+        expect(response.status()).toBe(200);
+        expect((await response.json()).outcome).toBe("written");
+      }
+      injectedReceiptLoss = true;
       await route.fulfill({ status: 500, json: { error: "Input receipt lost" } });
     },
     { times: 1 },
@@ -185,6 +196,7 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
   await page.keyboard.press("Enter");
   const file = path.join(harness.runRoot, "workspace/uncertain-effects.txt");
   await expect.poll(() => fs.readFile(file, "utf8").catch(() => "")).toBe("accepted");
+  expect(injectedReceiptLoss).toBe(true);
   const acknowledge = pane.getByRole("button", {
     name: "Acknowledge failure and enable fresh input",
     exact: true,
@@ -211,7 +223,31 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
   await page.keyboard.type("still-frozen");
   expect(inputs).toHaveLength(count);
   expect(await fs.readFile(file, "utf8")).toBe("accepted");
+  const controlUrl = `${harness.baseUrl}/sessions/${session}/executions/${shell.terminal_id}/input-control`;
+  const beforeControl = controlledInputUsed
+    ? await api.getTerminalInputControl(session, shell.terminal_id)
+    : undefined;
+  const confirmed = beforeControl
+    ? page.waitForResponse((response) => {
+        if (response.url() !== controlUrl || response.request().method() !== "POST") return false;
+        const body = response.request().postDataJSON();
+        return (
+          body.expected_revision === beforeControl.revision && body.acknowledge_uncertainty === true
+        );
+      })
+    : undefined;
   await acknowledge.click();
+  if (confirmed && beforeControl) {
+    const response = await confirmed;
+    expect(response.status()).toBe(200);
+    const afterControl = await response.json();
+    expect(afterControl.controller).toBe("human");
+    expect(afterControl.frozen).toBe(false);
+    expect(BigInt(afterControl.revision)).toBe(BigInt(beforeControl.revision) + 1n);
+  }
+  await expect(acknowledge).toHaveCount(0);
+  // Confirm the existing public terminal focus behavior after server acceptance.
+  await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
   await page.keyboard.type("printf fresh >> uncertain-effects.txt");
   await page.keyboard.press("Enter");
   await expect.poll(() => fs.readFile(file, "utf8").catch(() => "")).toBe("acceptedfresh");
@@ -251,10 +287,15 @@ test("reattach observation sends no retained terminal-query replies before focus
       fs.readFile(path.join(harness.runRoot, "workspace/query-ready"), "utf8").catch(() => ""),
     )
     .toBe("ready");
-  const inputUrl = `${harness.baseUrl}/sessions/${session}/user-terminals/${shell.terminal_id}/input`;
+  const inputUrls = new Set(
+    ["user-terminals", "executions"].map(
+      (kind) => `${harness.baseUrl}/sessions/${session}/${kind}/${shell.terminal_id}/input`,
+    ),
+  );
   const inputs: number[][] = [];
   page.on("request", (sent) => {
-    if (sent.url() === inputUrl && sent.method() === "POST") inputs.push(sent.postDataJSON().bytes);
+    if (inputUrls.has(sent.url()) && sent.method() === "POST")
+      inputs.push(sent.postDataJSON().bytes);
   });
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
   const show = page.getByRole("button", { name: "Show panel", exact: true });

@@ -195,7 +195,13 @@ test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste retu
     await expect(accessible).toContainText("PASTE-RAW-READY");
     const pasteInputs: number[][] = [];
     page.on("request", (sent) => {
-      if (sent.url().endsWith(`/user-terminals/${terminal}/input`) && sent.method() === "POST")
+      if (
+        ["user-terminals", "executions"].some(
+          (kind) =>
+            sent.url() === `${harness.baseUrl}/sessions/${session}/${kind}/${terminal}/input`,
+        ) &&
+        sent.method() === "POST"
+      )
         pasteInputs.push(sent.postDataJSON().bytes);
     });
     // A script-generated paste grants no human input intent.
