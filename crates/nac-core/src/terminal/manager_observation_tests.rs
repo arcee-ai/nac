@@ -287,7 +287,9 @@ async fn sanitized_pipe_and_pty_pages_never_expose_split_launch_secrets_or_remas
     manager
         .create_sanitized(
             agent.clone(),
-            "printf sec; sleep .03; printf ret",
+            // portable-pty's writer Drop sends LF + VEOF. Suppress terminal
+            // echo so cleanup input cannot add bytes to this redaction fixture.
+            "stty -echo; printf sec; sleep .03; printf ret",
             None,
             80,
             24,
