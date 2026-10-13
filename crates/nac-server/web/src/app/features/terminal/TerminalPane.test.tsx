@@ -690,4 +690,49 @@ describe("terminal pane lifetime and explicit user actions", () => {
       Array.from(new TextEncoder().encode("fresh\r")),
     );
   });
+  it("binds confirmed recovery revision and focuses only fresh input after asynchronous ACK", async () => {
+    const f = fixture();
+    await screen.findByText("Connected");
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    f.api.inputUserTerminal.mockRejectedValueOnce(new Error("receipt lost"));
+    await act(async () => renderer.keyboard?.("old\r"));
+    const acknowledge = await screen.findByRole("button", {
+      name: "Acknowledge failure and enable fresh input",
+    });
+    let confirm!: () => void;
+    f.api.transferTerminalInputControl.mockImplementationOnce(async (_session, _id, body) => {
+      await new Promise<void>((resolve) => {
+        confirm = resolve;
+      });
+      return {
+        controller: "human",
+        revision: String(BigInt(body.expected_revision) + 1n),
+        frozen: false,
+        in_flight: false,
+      };
+    });
+    acknowledge.focus();
+    fireEvent.click(acknowledge);
+    await waitFor(() => expect(acknowledge.hasAttribute("disabled")).toBe(true));
+    await act(async () => renderer.keyboard?.("premature\r"));
+    expect(f.api.inputControlledTerminal).toHaveBeenCalledOnce();
+    await act(async () => confirm());
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Acknowledge failure and enable fresh input" }),
+      ).toBeNull(),
+    );
+    expect(renderer.options.disableStdin).toBe(false);
+    expect(document.activeElement).toBe(
+      screen.getByRole("region", { name: "Interactive terminal" }).querySelector("textarea"),
+    );
+    await act(async () => renderer.keyboard?.("fresh\r"));
+    expect(f.api.transferTerminalInputControl).toHaveBeenCalledOnce();
+    expect(f.api.inputControlledTerminal).toHaveBeenCalledTimes(2);
+    expect(f.api.inputControlledTerminal.mock.calls[1][2]).toMatchObject({
+      expected_revision: "2",
+      bytes: Array.from(new TextEncoder().encode("fresh\r")),
+    });
+    expect(f.api.attachUserTerminal).toHaveBeenCalledOnce();
+  });
 });

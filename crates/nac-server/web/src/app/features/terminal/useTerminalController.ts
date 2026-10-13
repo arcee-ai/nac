@@ -101,9 +101,12 @@ export function useTerminalController(
     },
     focus: () => current.current?.adapter.terminal.focus(),
     hasActiveInput: () => current.current?.hasActiveInput() === true,
-    acknowledgeInput: () => {
+    acknowledgeInput: (confirmed?: InputControlStatus) => {
       const value = current.current;
       if (!value || value.hasActiveInput() || !recovery.current?.available) return false;
+      // Bind the accepted CAS result before clearing local delivery facts.
+      // React's pending/query render may still trail the mutation promise.
+      if (confirmed) value.updateInput(confirmed, false);
       value.pump.acknowledgeFailure();
       recovery.current.acknowledge();
       const enabled = value.restoreFreshInput();

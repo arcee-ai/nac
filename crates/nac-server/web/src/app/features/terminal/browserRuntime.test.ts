@@ -296,6 +296,7 @@ describe("scoped terminal observation", () => {
     expect(controls.hasActiveInput()).toBe(true);
     expect(f.view.terminal.options.disableStdin).toBe(true);
     controls.updateInput({ controller: "human", revision: "3", frozen: false }, false);
+    controls.updateInput({ controller: "human", revision: "1", frozen: false }, false);
     expect(controls.restoreFreshInput()).toBe(false);
     expect(input).toHaveBeenCalledOnce();
     active.resolve({ outcome: "written", error: null });

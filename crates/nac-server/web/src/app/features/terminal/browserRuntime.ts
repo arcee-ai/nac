@@ -150,6 +150,8 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
     };
     let rebindInput: (() => void) | undefined;
     const updateInput: TerminalControls["updateInput"] = (next, paused) => {
+      // A confirmed response can trail a newer observed ownership transition.
+      if (inputControl && next && BigInt(next.revision) < BigInt(inputControl.revision)) return;
       const changed =
         inputControl?.controller !== next?.controller ||
         inputControl?.revision !== next?.revision ||

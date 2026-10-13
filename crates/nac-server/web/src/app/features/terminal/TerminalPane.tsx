@@ -241,8 +241,8 @@ function TerminalDisplay({
   const change = (target: "human" | "agent", acknowledge = false) => {
     void ownership
       .change({ controller: target, acknowledge })
-      .then(() => {
-        if (acknowledge) controller.acknowledgeInput();
+      .then((confirmed) => {
+        if (acknowledge) controller.acknowledgeInput(confirmed);
       })
       .catch(() => {});
   };
