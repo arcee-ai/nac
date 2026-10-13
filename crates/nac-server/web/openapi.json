@@ -4424,6 +4424,56 @@
         }
       }
     },
+    "/sessions/{session_id}/executions/history": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_executions_history",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded existing activity and canonical command previews without recovery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionHistoryResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Owner unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/executions/{execution_id}/observers": {
       "post": {
         "tags": [
@@ -11158,6 +11208,122 @@
           }
         }
       },
+      "ExecutionHistory": {
+        "type": "object",
+        "required": [
+          "entries",
+          "limit",
+          "older_entries_omitted"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionHistoryEntry"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "older_entries_omitted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ExecutionHistoryEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "output",
+          "started_at_epoch_ms"
+        ],
+        "properties": {
+          "command": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ShellCommandSnapshot",
+                "description": "Canonical durable result/preview; private output artifact ids are omitted."
+              }
+            ]
+          },
+          "execution": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ExecutionStatus"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Canonical session-scoped human command request identity, or the existing local\nexecution identity. This is a view key, never an execution capability."
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CommandStatus",
+                "description": "Pipe process result, independent of collector completion/error. PTY\nexit codes remain in the existing execution status; absent is unknown."
+              }
+            ]
+          },
+          "output": {
+            "$ref": "#/components/schemas/ExecutionHistoryOutput"
+          },
+          "started_at_epoch_ms": {
+            "type": "string"
+          }
+        }
+      },
+      "ExecutionHistoryOutput": {
+        "type": "object",
+        "required": [
+          "availability"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ExecutionOutputAvailability"
+          },
+          "retained_end": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retained_start": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Decimal byte cursors have the same exact wire contract as observation."
+          }
+        }
+      },
+      "ExecutionHistoryResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "history"
+        ],
+        "properties": {
+          "history": {
+            "$ref": "#/components/schemas/ExecutionHistory"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "ExecutionListResponse": {
         "type": "object",
         "required": [
@@ -11184,6 +11350,16 @@
           "human",
           "agent",
           "human_command"
+        ]
+      },
+      "ExecutionOutputAvailability": {
+        "type": "string",
+        "enum": [
+          "retained",
+          "tail_gap",
+          "expired",
+          "process_local_unavailable",
+          "not_recorded"
         ]
       },
       "ExecutionOutputSegment": {

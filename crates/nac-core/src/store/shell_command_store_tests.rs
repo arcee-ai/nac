@@ -1,5 +1,33 @@
 use super::*;
 
+#[test]
+fn recent_shell_history_is_bounded_read_only_and_session_scoped() {
+    let (path, lease, mut command) = fixture("recent_history");
+    for index in 0..5 {
+        command.request_id = format!("request-{index}");
+        command.operation_id = uuid::Uuid::new_v4().to_string();
+        accept_shell_command(&path, "session", "digest", &command, &lease).unwrap();
+    }
+    drop(lease);
+    let before = std::fs::read(&path).unwrap();
+    let recent = recent_shell_commands(&path, "session", 2).unwrap();
+    assert_eq!(recent.len(), 2);
+    assert_eq!(recent[0].request_id, "request-4");
+    assert_eq!(recent[1].request_id, "request-3");
+    assert!(recent
+        .iter()
+        .all(|command| command.state == ShellCommandState::Accepted));
+    assert!(recent_shell_commands(&path, "other", 2).unwrap().is_empty());
+    assert!(recent_shell_commands(&path, "session", 0).is_err());
+    assert!(recent_shell_commands(&path, "session", 65).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(TranscriptLogWriter::new(&path)
+        .unwrap()
+        .read_from("session", 0)
+        .unwrap()
+        .is_empty());
+}
+
 fn fixture(label: &str) -> (PathBuf, Arc<SessionOperationLease>, ShellCommandSnapshot) {
     let path = std::env::temp_dir()
         .join(format!(

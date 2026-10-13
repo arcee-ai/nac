@@ -69,7 +69,10 @@ impl TerminalManager {
         clippy::too_many_arguments,
         reason = "pipe launch binds immutable output policy"
     )]
-    #[expect(clippy::expect_used, reason = "spawn configured both output pipes")]
+    #[expect(
+        clippy::expect_used,
+        reason = "spawn configures both pipes; only open readers retain the sanitizer"
+    )]
     pub(crate) async fn exec_one_shot_sanitized(
         &self,
         cmd: &str,
@@ -159,7 +162,7 @@ impl TerminalManager {
                 }
             }
         };
-        let mut sanitizer = environment.pipe_redactor();
+        let mut sanitizer = Some(environment.pipe_redactor());
         let append = |chunks: Vec<(bool, Vec<u8>)>| -> Result<()> {
             for (stderr, bytes) in chunks {
                 self.output_registry.append(
@@ -255,13 +258,13 @@ impl TerminalManager {
         let stderr = child.stderr.take().expect("piped stderr is present");
         let (sender, mut receiver) = mpsc::channel(PIPE_CHANNEL_CHUNKS);
         let reader_shutdown = ThreadCancellation::default();
-        let stdout_reader = tokio::spawn(read_chunks(
+        let mut stdout_reader = tokio::spawn(read_chunks(
             stdout,
             OutputStream::Stdout,
             sender.clone(),
             reader_shutdown.clone(),
         ));
-        let stderr_reader = tokio::spawn(read_chunks(
+        let mut stderr_reader = tokio::spawn(read_chunks(
             stderr,
             OutputStream::Stderr,
             sender,
@@ -275,6 +278,8 @@ impl TerminalManager {
         let mut process_exited = false;
         let mut cleanup_pending = false;
         let mut readers_open = true;
+        let mut reader_results = None;
+        let mut append_failed = false;
 
         while !process_exited {
             match child.try_wait() {
@@ -304,13 +309,35 @@ impl TerminalManager {
                 chunk = receiver.recv(), if readers_open => {
                     match chunk {
                         Some(chunk) => {
-                            if let Err(error) = append(sanitizer.push(chunk.stream == OutputStream::Stderr, &chunk.bytes)) {
+                            if let Err(error) = append(sanitizer.as_mut().expect("open readers retain sanitizer").push(chunk.stream == OutputStream::Stderr, &chunk.bytes)) {
+                                append_failed = true;
                                 status = CommandStatus::SpawnError;
                                 runtime_error = Some(error.to_string());
                                 break;
                             }
                         }
-                        None => readers_open = false,
+                        None => {
+                            readers_open = false;
+                            // Both sender owners ended and the queue is drained.
+                            // Confirm actual EOF before flushing an incomplete
+                            // secret prefix; process ownership can remain live.
+                            let results = tokio::join!(&mut stdout_reader, &mut stderr_reader);
+                            let confirmed = matches!(&results.0, Ok(Ok(true))) && matches!(&results.1, Ok(Ok(true)));
+                            if confirmed {
+                                if let Some(policy) = sanitizer.take() {
+                                    if let Err(error) = append(policy.finish()) {
+                                        append_failed = true;
+                                        status = CommandStatus::SpawnError;
+                                        runtime_error = Some(error.to_string());
+                                    }
+                                }
+                            } else {
+                                sanitizer.take(); // Never flush an unconfirmed suffix.
+                            }
+                            execution.finish((!confirmed || runtime_error.is_some()).then(|| "command output collection interrupted".into()));
+                            reader_results = Some([results.0, results.1]);
+                            if runtime_error.is_some() { break; }
+                        },
                     }
                 }
                 _ = sleep(PROCESS_POLL_INTERVAL) => {}
@@ -399,6 +426,7 @@ impl TerminalManager {
                 None
             },
             cleanup_pending,
+            status,
         );
         let preserve_status = !process_exited;
         let record_output_error =
@@ -423,7 +451,6 @@ impl TerminalManager {
         };
         tokio::pin!(reader_shutdown_timer);
         let mut reader_shutdown_pending = force_reader_shutdown;
-        let mut append_failed = false;
         loop {
             tokio::select! {
                 biased;
@@ -435,10 +462,10 @@ impl TerminalManager {
                     let Some(chunk) = chunk else {
                         break;
                     };
-                    if append_failed {
+                    if append_failed || sanitizer.is_none() {
                         continue;
                     }
-                    if let Err(error) = append(sanitizer.push(chunk.stream == OutputStream::Stderr, &chunk.bytes)) {
+                    if let Err(error) = append(sanitizer.as_mut().expect("open readers retain sanitizer").push(chunk.stream == OutputStream::Stderr, &chunk.bytes)) {
                         record_output_error(error.to_string(), &mut status, &mut runtime_error);
                         append_failed = true;
                     }
@@ -447,8 +474,15 @@ impl TerminalManager {
         }
 
         let mut confirmed_eof = !append_failed;
-        for reader in [stdout_reader, stderr_reader] {
-            let message = match reader.await {
+        let results = match reader_results {
+            Some(results) => results,
+            None => {
+                let results = tokio::join!(&mut stdout_reader, &mut stderr_reader);
+                [results.0, results.1]
+            }
+        };
+        for result in results {
+            let message = match result {
                 Ok(Ok(true)) => None,
                 Ok(Ok(false)) => {
                     confirmed_eof = false;
@@ -464,9 +498,11 @@ impl TerminalManager {
         }
 
         if confirmed_eof {
-            if let Err(error) = append(sanitizer.finish()) {
-                confirmed_eof = false;
-                record_output_error(error.to_string(), &mut status, &mut runtime_error);
+            if let Some(policy) = sanitizer.take() {
+                if let Err(error) = append(policy.finish()) {
+                    confirmed_eof = false;
+                    record_output_error(error.to_string(), &mut status, &mut runtime_error);
+                }
             }
         }
         execution.finish((!confirmed_eof).then(|| "command output collection interrupted".into()));

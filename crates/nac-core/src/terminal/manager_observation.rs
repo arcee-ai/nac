@@ -54,14 +54,18 @@ pub struct ExecutionStatus {
 }
 
 pub(super) struct PipeExecution {
-    status: StdMutex<ExecutionStatus>,
-    output_id: String,
+    pub(super) status: StdMutex<ExecutionStatus>,
+    pub(super) output_id: String,
+    pub(super) created_at: Instant,
+    pub(super) outcome: StdMutex<Option<super::super::CommandStatus>>,
     cancellation: ThreadCancellation,
     started: AtomicBool,
 }
 
 pub(super) struct PipeExecutionGuard {
     execution: Arc<PipeExecution>,
+    executions: Arc<StdMutex<VecDeque<Arc<PipeExecution>>>>,
+    history_limit: usize,
 }
 
 impl PipeExecutionGuard {
@@ -71,7 +75,12 @@ impl PipeExecutionGuard {
     pub(super) fn cancelled(&self) -> bool {
         self.execution.cancellation.is_cancelled()
     }
-    pub(super) fn settle_process(&self, exit_code: Option<i32>, cleanup_pending: bool) {
+    pub(super) fn settle_process(
+        &self,
+        exit_code: Option<i32>,
+        cleanup_pending: bool,
+        outcome: super::super::CommandStatus,
+    ) {
         let mut status = self
             .execution
             .status
@@ -85,6 +94,11 @@ impl PipeExecutionGuard {
         };
         status.stop = false;
         status.exit_code = if cleanup_pending { None } else { exit_code };
+        *self
+            .execution
+            .outcome
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(outcome);
     }
     pub(super) fn finish(&self, error: Option<String>) {
         let mut status = self
@@ -104,13 +118,40 @@ impl Drop for PipeExecutionGuard {
             .status
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if status.alive {
+            status.process_state = ExecutionProcessState::CleanupPending;
+        }
+        status.stop = false;
         if !status.output_complete {
-            if status.alive {
-                status.process_state = ExecutionProcessState::CleanupPending;
-            }
-            status.stop = false;
             status.output_error =
                 Some("execution owner ended before collection was confirmed".into());
+        }
+        drop(status);
+        let mut executions = self
+            .executions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        prune_settled_pipes(&mut executions, self.history_limit);
+    }
+}
+
+fn prune_settled_pipes(executions: &mut VecDeque<Arc<PipeExecution>>, limit: usize) {
+    let mut settled = 0;
+    // Newest settled metadata survives independently of the output artifact.
+    // Pending cleanup/collection owners are never removed by view eviction.
+    for index in (0..executions.len()).rev() {
+        let removable = {
+            let status = executions[index]
+                .status
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            status.process_state == ExecutionProcessState::Settled && status.output_complete
+        };
+        if removable {
+            settled += 1;
+            if settled > limit {
+                executions.remove(index);
+            }
         }
     }
 }
@@ -141,11 +182,17 @@ impl TerminalManager {
             .pipe_executions
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        executions.retain(|execution| self.output_registry.stats(&execution.output_id).is_ok());
+        prune_settled_pipes(&mut executions, self.max_sessions);
+        anyhow::ensure!(
+            executions.len() < super::super::output::MAX_RETAINED_ARTIFACTS_PER_SESSION,
+            "execution observation ownership capacity exhausted"
+        );
         // Command admission already reserves a bounded output artifact. The
         // observation registry cannot impose the separate PTY slot limit or
         // change whether an otherwise admitted pipe command can run.
         let execution = Arc::new(PipeExecution {
+            created_at: Instant::now(),
+            outcome: StdMutex::new(None),
             status: StdMutex::new(ExecutionStatus {
                 id: format!("execution-{}-{}", self.instance_id, uuid::Uuid::new_v4()),
                 origin: if self.human_command.is_some() {
@@ -174,7 +221,11 @@ impl TerminalManager {
             cancellation: ThreadCancellation::default(),
         });
         executions.push_back(Arc::clone(&execution));
-        Ok(PipeExecutionGuard { execution })
+        Ok(PipeExecutionGuard {
+            execution,
+            executions: Arc::clone(&self.pipe_executions),
+            history_limit: self.max_sessions,
+        })
     }
 
     pub fn output_is_sanitized(&self, output_id: &str) -> bool {
@@ -182,6 +233,13 @@ impl TerminalManager {
     }
 
     pub async fn execution_catalog(&self) -> Vec<ExecutionStatus> {
+        self.execution_catalog_with_expired(false).await
+    }
+
+    pub(super) async fn execution_catalog_with_expired(
+        &self,
+        include_expired: bool,
+    ) -> Vec<ExecutionStatus> {
         let completed = self.completed_sessions.lock().await;
         let sessions = self.sessions.lock().await;
         let mut statuses = sessions
@@ -227,7 +285,9 @@ impl TerminalManager {
         statuses.extend(
             completed
                 .iter()
-                .filter(|(_, terminal)| self.output_registry.stats(&terminal.output_id).is_ok())
+                .filter(|(_, terminal)| {
+                    include_expired || self.output_registry.stats(&terminal.output_id).is_ok()
+                })
                 .map(|(id, terminal)| ExecutionStatus {
                     id: id.clone(),
                     origin: if terminal.user_owned {
@@ -261,7 +321,8 @@ impl TerminalManager {
                 .iter()
                 .filter(|execution| {
                     execution.started.load(Ordering::Acquire)
-                        && self.output_registry.stats(&execution.output_id).is_ok()
+                        && (include_expired
+                            || self.output_registry.stats(&execution.output_id).is_ok())
                 })
                 .map(|execution| {
                     execution
@@ -342,6 +403,9 @@ impl TerminalManager {
     }
 
     pub async fn stop_execution(&self, id: &str) -> Result<()> {
+        // Retained metadata is not current observation/control authority.
+        // This read validates the exact owner without recovering any journal.
+        self.execution_status(id).await?;
         let pipe = self
             .pipe_executions
             .lock()
@@ -360,7 +424,6 @@ impl TerminalManager {
             pipe.cancellation.cancel();
             return Ok(());
         }
-        self.execution_status(id).await?;
         self.terminate(id).await
     }
 }

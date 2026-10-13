@@ -2,6 +2,7 @@
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
   "GET /sessions/{session_id}/executions": "api.listExecutions",
+  "GET /sessions/{session_id}/executions/history": "api.listExecutionHistory",
   "POST /sessions/{session_id}/executions/{execution_id}/observers": "api.attachExecution",
   "POST /sessions/{session_id}/executions/{execution_id}/observers/{observer_id}/read":
     "api.pullExecution",

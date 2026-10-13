@@ -24,6 +24,7 @@ mod session_forks;
 mod session_goals;
 mod session_inbox;
 mod shell_commands;
+pub use shell_commands::recent_shell_commands;
 pub(crate) use shell_commands::{
     accept_shell_command, list_shell_commands, lookup_shell_command, start_shell_command,
 };

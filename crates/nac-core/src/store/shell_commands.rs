@@ -52,6 +52,23 @@ coordinated_command! {
 }
 
 coordinated_command! {
+    /// Bounded observation of the committed journal. This never acquires an
+    /// operation lease or reconciles an abandoned accepted/started command.
+    pub fn recent_shell_commands(path: &Path, session_id: &str, limit: usize)
+        -> Result<Vec<ShellCommandSnapshot>> {
+        anyhow::ensure!((1..=64).contains(&limit), "recent command limit must be between 1 and 64");
+        let conn = open_initialized_read_connection(path)?;
+        let mut statement = conn.prepare("SELECT snapshot_json FROM human_shell_operations WHERE session_id=?1 ORDER BY rowid DESC LIMIT ?2")?;
+        let rows = statement.query_map(params![session_id, limit], |r| r.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+    command RecentShellCommands { session_id: String = session_id.to_owned(), limit: usize = limit }
+    call |c| (&c.session_id, c.limit)
+    correlation |c| crate::telemetry::Correlation::session(Some(&c.session_id));
+    port public;
+}
+
+coordinated_command! {
     pub(crate) fn accept_shell_command(path: &Path, session_id: &str, fingerprint: &str,
         snapshot: &ShellCommandSnapshot, lease: &Arc<SessionOperationLease>) -> Result<()> {
         lease.validate(path, session_id)?;

@@ -488,6 +488,7 @@ impl TerminalManager {
             .await
             .or_else(|| session.exit_code());
         let completed = CompletedTerminal {
+            created_at: session.created_at,
             output_id: session.output_id().to_string(),
             preview_cursor: session.preview_cursor(),
             exit_code,

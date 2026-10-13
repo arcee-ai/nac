@@ -330,11 +330,39 @@ export interface components {
       segments: components["schemas"]["ExecutionOutputSegment"][];
       terminal: components["schemas"]["UserTerminalResponse"];
     };
+    ExecutionHistory: {
+      entries: components["schemas"]["ExecutionHistoryEntry"][];
+      limit: number;
+      older_entries_omitted: boolean;
+    };
+    ExecutionHistoryEntry: {
+      command?: null | components["schemas"]["ShellCommandSnapshot"];
+      execution?: null | components["schemas"]["ExecutionStatus"];
+      id: string;
+      outcome?: null | components["schemas"]["CommandStatus"];
+      output: components["schemas"]["ExecutionHistoryOutput"];
+      started_at_epoch_ms: string;
+    };
+    ExecutionHistoryOutput: {
+      availability: components["schemas"]["ExecutionOutputAvailability"];
+      retained_end?: string | null;
+      retained_start?: string | null;
+    };
+    ExecutionHistoryResponse: {
+      history: components["schemas"]["ExecutionHistory"];
+      protocol_version: number;
+    };
     ExecutionListResponse: {
       executions: components["schemas"]["ExecutionStatus"][];
       protocol_version: number;
     };
     ExecutionOrigin: "human" | "agent" | "human_command";
+    ExecutionOutputAvailability:
+      | "retained"
+      | "tail_gap"
+      | "expired"
+      | "process_local_unavailable"
+      | "not_recorded";
     ExecutionOutputSegment: {
       combined_end: string;
       combined_start: string;

@@ -69,6 +69,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("DELETE", "/sessions/{session_id}/goal/{goal_id}"),
     ("DELETE", "/sessions/{session_id}/inbox/{item_id}"),
     ("DELETE", "/sessions/{session_id}/terminals/{terminal_id}"),
+    ("GET", "/sessions/{session_id}/executions/history"),
     ("POST", "/sessions/{session_id}/user-terminals"),
     ("GET", "/sessions/{session_id}/user-terminals"),
     ("GET", "/sessions/{session_id}/user-terminals/{terminal_id}"),

@@ -21,6 +21,8 @@ use super::{
     OutputRegistry, OutputStream, TerminalInfo, TerminalOutput,
 };
 
+#[path = "manager_history.rs"]
+mod history;
 #[path = "manager_observation.rs"]
 pub(super) mod observation;
 pub use observation::{
@@ -83,6 +85,7 @@ pub struct TerminalManager {
 
 #[derive(Clone)]
 struct CompletedTerminal {
+    created_at: Instant,
     output_id: String,
     preview_cursor: u64,
     exit_code: Option<i32>,
@@ -98,6 +101,7 @@ struct CompletedTerminal {
 impl CompletedTerminal {
     fn from_session(session: &TerminalSession) -> Self {
         Self {
+            created_at: session.created_at,
             output_id: session.output_id().to_owned(),
             preview_cursor: session.preview_cursor(),
             exit_code: session.exit_code(),

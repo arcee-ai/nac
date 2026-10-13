@@ -1,0 +1,24 @@
+import type { ExecutionHistoryEntry } from "../../../../packages/nac-client/src/types";
+export declare function historySourceLabel(entry: ExecutionHistoryEntry): string;
+export declare function historyOutcome(entry: ExecutionHistoryEntry): string;
+export declare function historyOutputCopy(entry: ExecutionHistoryEntry): string;
+export declare function canReopenHistory(entry: ExecutionHistoryEntry): boolean;
+export declare function readOnlyHistorySource(entry: ExecutionHistoryEntry): {
+    input: boolean;
+    resize: boolean;
+    stop: boolean;
+    alive: boolean;
+    backend: string;
+    cols: number;
+    cwd: string;
+    exit_code?: number | null;
+    id: string;
+    origin: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ExecutionOrigin"];
+    output_complete: boolean;
+    output_error?: string | null;
+    process_state: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ExecutionProcessState"];
+    representation: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ExecutionRepresentation"];
+    request_id?: string | null;
+    retained: boolean;
+    rows: number;
+} | null;

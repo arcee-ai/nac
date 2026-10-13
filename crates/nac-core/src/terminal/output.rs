@@ -14,7 +14,7 @@ const MAX_RETAINED_CHUNKS_PER_ARTIFACT: usize = 16 * 1024;
 // Artifact records have fixed metadata even when a command emits no bytes.
 // Bound their cardinality independently of the byte quotas so a production-
 // lived direct session cannot grow forever by running zero-output commands.
-const MAX_RETAINED_ARTIFACTS_PER_SESSION: usize = 16 * 1024;
+pub(super) const MAX_RETAINED_ARTIFACTS_PER_SESSION: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandOutputLimits {

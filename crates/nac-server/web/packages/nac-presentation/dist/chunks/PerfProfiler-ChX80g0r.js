@@ -483,6 +483,7 @@ function xe(e) {
 	let t = e.transport.request.bind(e.transport), n = (e, t) => `/sessions/${encodeURIComponent(e)}/executions${t ? `/${encodeURIComponent(t)}` : ""}`, r = (e, t, r) => `${n(e, t)}/observers/${encodeURIComponent(r)}`;
 	return {
 		listExecutions: (e, r) => t("GET", n(e), { signal: r }),
+		listExecutionHistory: (e, r) => t("GET", `${n(e)}/history`, { signal: r }),
 		attachExecution: (e, r, i, a) => t("POST", `${n(e, r)}/observers`, {
 			body: i,
 			signal: a

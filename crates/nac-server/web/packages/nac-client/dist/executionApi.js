@@ -5,6 +5,7 @@ export function createExecutionApi(client) {
     const observerPath = (session, id, observer) => `${path(session, id)}/observers/${encodeURIComponent(observer)}`;
     return {
         listExecutions: (session, signal) => request("GET", path(session), { signal }),
+        listExecutionHistory: (session, signal) => request("GET", `${path(session)}/history`, { signal }),
         attachExecution: (session, id, body, signal) => request("POST", `${path(session, id)}/observers`, {
             body,
             signal,

@@ -870,6 +870,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
                 .layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
         )
         .routes(routes!(delivery::executions::list))
+        .routes(routes!(delivery::execution_history::list))
         .routes(routes!(delivery::executions::attach))
         .routes(routes!(delivery::executions::pull))
         .routes(routes!(delivery::executions::detach))

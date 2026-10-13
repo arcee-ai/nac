@@ -5,6 +5,7 @@ import type {
   UserTerminalObserverResponse,
   ExecutionFrameResponse,
   ExecutionListResponse,
+  ExecutionHistoryResponse,
   ExecutionStatus,
 } from "./types.js";
 import {
@@ -24,6 +25,8 @@ export function createExecutionApi(client: NacClient) {
   return {
     listExecutions: (session: string, signal?: AbortSignal) =>
       request<ExecutionListResponse>("GET", path(session), { signal }),
+    listExecutionHistory: (session: string, signal?: AbortSignal) =>
+      request<ExecutionHistoryResponse>("GET", `${path(session)}/history`, { signal }),
     attachExecution: (
       session: string,
       id: string,

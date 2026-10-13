@@ -1167,6 +1167,10 @@
     max-height: calc(var(--spacing) * 40);
   }
 
+[data-nac-runtime]:is(.max-h-56), [data-nac-runtime] .max-h-56 {
+    max-height: calc(var(--spacing) * 56);
+  }
+
 [data-nac-runtime]:is(.max-h-60), [data-nac-runtime] .max-h-60 {
     max-height: calc(var(--spacing) * 60);
   }

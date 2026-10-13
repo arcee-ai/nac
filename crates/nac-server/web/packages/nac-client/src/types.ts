@@ -140,4 +140,6 @@ export type ShellOutputPage = ApiSchema<"ShellOutputPage">;
 
 export type ExecutionStatus = ApiSchema<"ExecutionStatus">;
 export type ExecutionListResponse = ApiSchema<"ExecutionListResponse">;
+export type ExecutionHistoryResponse = ApiSchema<"ExecutionHistoryResponse">;
+export type ExecutionHistoryEntry = ApiSchema<"ExecutionHistoryEntry">;
 export type ExecutionFrameResponse = ApiSchema<"ExecutionFrameResponse">;

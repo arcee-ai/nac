@@ -462,3 +462,60 @@ async fn ordinary_pty_line_endings_do_not_expose_control_bearing_launch_secrets(
     );
     manager.remove_all().await.unwrap();
 }
+
+#[tokio::test]
+async fn pipe_collector_eof_flushes_safe_prefix_while_process_remains_running() {
+    let manager = TerminalManager::for_direct();
+    let owner = manager.clone();
+    let command = tokio::spawn(async move {
+        owner
+            .exec_one_shot_sanitized(
+                "printf sec; exec 1>&- 2>&-; sleep 60",
+                None,
+                80,
+                24,
+                60_000,
+                100,
+                &backend(),
+                None,
+                &[],
+                nac_contracts::CommandEnvironmentSnapshot::from_parts(
+                    Default::default(),
+                    vec!["secret".into()],
+                ),
+            )
+            .await
+    });
+    let status = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(status) = manager
+                .execution_catalog()
+                .await
+                .into_iter()
+                .find(|status| status.output_complete)
+            {
+                break status;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(status.alive && status.stop);
+    assert_eq!(status.process_state, ExecutionProcessState::Running);
+    assert_eq!(status.exit_code, None);
+    assert_eq!(status.output_error, None);
+    assert_eq!(
+        manager
+            .read_execution_output(&status.id, 0, 100)
+            .await
+            .unwrap()
+            .bytes,
+        b"sec"
+    );
+    manager.stop_execution(&status.id).await.unwrap();
+    let output = command.await.unwrap();
+    assert_eq!(output.status, CommandStatus::Cancelled);
+    assert_eq!(output.stdout_preview, "sec");
+    manager.remove_all().await.unwrap();
+}

@@ -7,6 +7,10 @@ export declare function createExecutionApi(client: NacClient): {
         executions: import("./openapi.generated.js").components["schemas"]["ExecutionStatus"][];
         protocol_version: number;
     }>;
+    listExecutionHistory: (session: string, signal?: AbortSignal) => Promise<{
+        history: import("./openapi.generated.js").components["schemas"]["ExecutionHistory"];
+        protocol_version: number;
+    }>;
     attachExecution: (session: string, id: string, body: AttachUserTerminalRequest, signal?: AbortSignal) => Promise<{
         idle_expiry_ms: number;
         observer_id: string;

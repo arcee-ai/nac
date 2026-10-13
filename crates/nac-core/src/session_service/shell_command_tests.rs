@@ -1,4 +1,6 @@
 struct TestEnvironment;
+#[path = "execution_history_tests.rs"]
+mod history;
 #[path = "shell_output_failure_tests.rs"]
 mod output_failures;
 #[path = "shell_terminal_integration_tests.rs"]

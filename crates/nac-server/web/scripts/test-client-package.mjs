@@ -101,7 +101,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 142);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 143);
 for (const owner of Object.values(NAC_API_SURFACE)) {
   if (owner.startsWith("api.")) assert.equal(typeof api[owner.slice(4)], "function", owner);
   if (owner.startsWith("client.")) assert.equal(typeof client[owner.slice(7)], "function", owner);
@@ -140,6 +140,7 @@ assert.deepEqual(context, {
   type TerminalSelectionPreviewResponse,
   type TerminalSelectionSubmissionResponse,
   type ShellCommandSnapshot,
+  type ExecutionHistoryResponse,
 } from ${JSON.stringify(packageName)};
 
 const client = createNacClient({ endpoint: "/nac", credentials: "same-origin" });
@@ -149,6 +150,8 @@ const goal: Promise<SessionGoalRecord | null> = api.getGoal("session");
 const permissions: Promise<PermissionStateResponse> = api.getPermissions("session");
 const command: Promise<ShellCommandSnapshot> = api.submitShellCommand("session", { request_id: "command", command: "printf evidence" });
 void command;
+const history: Promise<ExecutionHistoryResponse> = api.listExecutionHistory("session");
+void history;
 void projects; void goal; void permissions;
 const terminal: Promise<UserTerminalResponse> = api.openUserTerminal("session", { protocol_version: 1, launch_id: "launch", cols: 80, rows: 24 });
 const renderer: UserTerminalRenderer = { write: async (_bytes, signal) => signal.throwIfAborted(), reset: async (_reason, signal) => signal.throwIfAborted() };

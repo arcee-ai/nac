@@ -2,6 +2,7 @@
 // Coverage is not hosted authorization. Run make generate-api-contract.
 export const NAC_API_SURFACE = {
     "GET /sessions/{session_id}/executions": "api.listExecutions",
+    "GET /sessions/{session_id}/executions/history": "api.listExecutionHistory",
     "POST /sessions/{session_id}/executions/{execution_id}/observers": "api.attachExecution",
     "POST /sessions/{session_id}/executions/{execution_id}/observers/{observer_id}/read": "api.pullExecution",
     "DELETE /sessions/{session_id}/executions/{execution_id}/observers/{observer_id}": "api.detachExecution",

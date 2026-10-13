@@ -19,4 +19,5 @@ pub(crate) mod ui_configuration;
 pub(crate) mod user_terminals;
 pub(crate) mod workspace;
 
+pub(crate) mod execution_history;
 pub(crate) mod executions;

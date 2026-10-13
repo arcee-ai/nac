@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useSessionSnapshot } from "@/app/services/queries";
 import { TerminalPane } from "@/app/features/terminal/TerminalPane";
+import { RecentExecutionHistory } from "@/app/features/terminal/RecentExecutionHistory";
 import { useUserTerminalStatus } from "@/app/features/terminal/queries";
 import { SelectionReview, type ReviewAvailability } from "./SelectionReview";
 import type { ReviewSnapshot, SelectionReviewController } from "./reviewController";
@@ -34,6 +35,7 @@ function WorkspaceOwner({ sessionId }: { sessionId: string }) {
     <>
       <TerminalPane
         sessionId={sessionId}
+        history={(observe) => <RecentExecutionHistory sessionId={sessionId} onReopen={observe} />}
         onReviewSelection={(capture) =>
           controller.capture(capture, { delivery: mode === "idle" ? "send" : "queue" })
         }
