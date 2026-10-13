@@ -229,6 +229,15 @@ test.describe("full-screen terminal at browser scale 1.25", () => {
     await expect
       .poll(() => fs.readFile(file, "utf8"))
       .toBe("EDIT-Ω中SCREEN-ONLY-FIRST\n" + "screen body\n".repeat(40));
+    // Saving the file precedes Vim exit. Wait for the actual shell prompt so
+    // the next command cannot race the still-foreground editor.
+    await expect
+      .poll(async () =>
+        (await pane.locator(".xterm-accessibility-tree > div").allTextContents()).some((row) =>
+          /[$#]\s*$/.test(row),
+        ),
+      )
+      .toBe(true);
     await page.keyboard.type("printf '\\123\\110\\105\\114\\114\\055\\102\\101\\103\\113\\n'");
     await page.keyboard.press("Enter");
     await expect(accessible).toContainText("SHELL-BACK");

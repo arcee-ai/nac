@@ -4,6 +4,7 @@ type Adapter = Awaited<ReturnType<typeof createTerminalRenderer>>;
 export interface TerminalControls {
     adapter: Adapter;
     pump: UserTerminalInputPump;
+    restoreFreshInput: () => boolean;
 }
 interface TerminalPorts {
     api: UserTerminalApi;
@@ -13,6 +14,8 @@ interface TerminalPorts {
     reconnect: boolean;
     previousFailure: {
         current: boolean;
+        readonly available?: boolean;
+        subscribe?: (listener: () => void) => () => void;
     };
     controls: (value: TerminalControls | null) => void;
     phase: (value: string) => void;

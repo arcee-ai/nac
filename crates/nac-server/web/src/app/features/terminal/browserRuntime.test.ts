@@ -28,6 +28,8 @@ function adapter() {
   return {
     terminal: {
       options: { disableStdin: true },
+      textarea: document.createElement("textarea"),
+      onKey: vi.fn(() => ({ dispose: vi.fn() })),
       onData: vi.fn(() => ({ dispose: vi.fn() })),
       onBinary: vi.fn(() => ({ dispose: vi.fn() })),
     },

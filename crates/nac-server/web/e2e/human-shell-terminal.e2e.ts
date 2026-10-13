@@ -99,6 +99,55 @@ test("user commands, live terminal and explicit queued selection share one sessi
   await api.terminateTerminal(session, shell.terminal_id);
 });
 
+test("trusted pointer reports retain the public renderer's literal PTY encoding", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const session = await createDirectSession(request, harness);
+  const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
+  const workspace = path.join(harness.runRoot, "workspace");
+  await fs.writeFile(
+    path.join(workspace, "capture_pointer.py"),
+    [
+      "import os,sys,termios,tty,time,select,json",
+      "saved=termios.tcgetattr(0); data=b''; end=time.monotonic()+6",
+      "try:",
+      " tty.setraw(0); sys.stdout.write('\\x1b[?1000h\\x1b[?1006hPOINTER-RAW-READY\\r\\n'); sys.stdout.flush()",
+      " while data.count(b'\\x1b[<')<2 and time.monotonic()<end:",
+      "  if select.select([0],[],[],0.1)[0]: data+=os.read(0,4096)",
+      "finally:",
+      " termios.tcsetattr(0,termios.TCSANOW,saved); sys.stdout.write('\\x1b[?1000l\\x1b[?1006l'); sys.stdout.flush()",
+      "open('pointer_bytes.json','w').write(json.dumps(list(data)))",
+    ].join("\n") + "\n",
+  );
+  await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
+  const show = page.getByRole("button", { name: "Show panel", exact: true });
+  if (await show.isVisible()) await show.click();
+  const pane = page.getByRole("region", { name: "Session terminal", exact: true });
+  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+  const shell = (await api.listUserTerminals(session)).terminals[0];
+  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await page.keyboard.type("python3 capture_pointer.py");
+  await page.keyboard.press("Enter");
+  await expect(pane.locator(".xterm-accessibility")).toContainText("POINTER-RAW-READY");
+  const grid = await pane.locator(".xterm-screen").boundingBox();
+  expect(grid).not.toBeNull();
+  await page.mouse.click(grid!.x + 20, grid!.y + 20);
+  await expect
+    .poll(async () => {
+      const bytes = JSON.parse(
+        await fs.readFile(path.join(workspace, "pointer_bytes.json"), "utf8").catch(() => "null"),
+      );
+      return bytes == null
+        ? null
+        : new TextDecoder().decode(Uint8Array.from(bytes)).replaceAll("\x1b", "<ESC>");
+    })
+    .toMatch(/^<ESC>\[<0;\d+;\d+M<ESC>\[<0;\d+;\d+m$/);
+  await api.terminateTerminal(session, shell.terminal_id);
+});
+
 test("manual human terminal freezes accepted uncertain input until acknowledgement without replay", async ({
   harness,
   page,
@@ -143,6 +192,18 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
   await expect(acknowledge).toBeVisible();
   const count = inputs.length;
   await page.keyboard.type("must-not-send");
+  await page.evaluate((hash) => {
+    (globalThis as unknown as { location: { hash: string } }).location.hash = hash;
+  }, `/session/${session}/files`);
+  await expect(pane).toHaveCount(0);
+  await page.evaluate((hash) => {
+    (globalThis as unknown as { location: { hash: string } }).location.hash = hash;
+  }, `/session/${session}/terminal`);
+  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+  await expect(acknowledge).toBeVisible();
+  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await page.keyboard.type("source-switch-must-stay-frozen");
+  expect(inputs).toHaveLength(count);
   await pane.getByRole("button", { name: "Reconnect", exact: true }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await expect(acknowledge).toBeVisible();
@@ -164,4 +225,78 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
   await expect
     .poll(async () => (await api.getUserTerminal(session, shell.terminal_id)).alive)
     .toBe(false);
+});
+
+test("reattach observation sends no retained terminal-query replies before focused input", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const session = await createDirectSession(request, harness);
+  const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
+  const shell = await api.openUserTerminal(session, {
+    protocol_version: 1,
+    launch_id: crypto.randomUUID(),
+    cols: 80,
+    rows: 24,
+  });
+  await api.inputUserTerminal(session, shell.terminal_id, {
+    protocol_version: 1,
+    bytes: Array.from(
+      new TextEncoder().encode("printf '\\033[6nREPLAY-QUERY-END'; printf ready > query-ready\r"),
+    ),
+  });
+  await expect
+    .poll(() =>
+      fs.readFile(path.join(harness.runRoot, "workspace/query-ready"), "utf8").catch(() => ""),
+    )
+    .toBe("ready");
+  const inputUrl = `${harness.baseUrl}/sessions/${session}/user-terminals/${shell.terminal_id}/input`;
+  const inputs: number[][] = [];
+  page.on("request", (sent) => {
+    if (sent.url() === inputUrl && sent.method() === "POST") inputs.push(sent.postDataJSON().bytes);
+  });
+  await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
+  const show = page.getByRole("button", { name: "Show panel", exact: true });
+  if (await show.isVisible()) await show.click();
+  const pane = page.getByRole("region", { name: "Session terminal", exact: true });
+  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+  await expect(pane.locator(".xterm-accessibility")).toContainText("REPLAY-QUERY-END");
+  expect(inputs).toHaveLength(0);
+  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await api.inputUserTerminal(session, shell.terminal_id, {
+    protocol_version: 1,
+    bytes: Array.from(new TextEncoder().encode("printf '\\033[6nFOCUSED-QUERY-END'\r")),
+  });
+  await expect(pane.locator(".xterm-accessibility")).toContainText("FOCUSED-QUERY-END");
+  expect(inputs).toHaveLength(0);
+  await pane.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+  await expect(pane.locator(".xterm-accessibility")).toContainText("REPLAY-QUERY-END");
+  expect(inputs).toHaveLength(0);
+  await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
+  await page.keyboard.type("printf fresh > query-fresh");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() =>
+      fs.readFile(path.join(harness.runRoot, "workspace/query-fresh"), "utf8").catch(() => ""),
+    )
+    .toBe("fresh");
+  expect(inputs.length).toBeGreaterThan(0);
+  await page
+    .context()
+    .grantPermissions(["clipboard-read", "clipboard-write"], { origin: harness.baseUrl });
+  await page.evaluate(async () =>
+    (
+      navigator as unknown as { clipboard: { writeText(text: string): Promise<void> } }
+    ).clipboard.writeText("printf 'paste Ω中' > query-paste"),
+  );
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() =>
+      fs.readFile(path.join(harness.runRoot, "workspace/query-paste"), "utf8").catch(() => ""),
+    )
+    .toBe("paste Ω中");
+  await api.terminateTerminal(session, shell.terminal_id);
 });

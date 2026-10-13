@@ -81,6 +81,24 @@ describe("native runtime lifetime", () => {
     expect(mutationFn).toHaveBeenCalledOnce();
   });
 
+  it("releases scoped terminal recovery on close without transferring it to a replacement", () => {
+    const first = runtime();
+    const lease = first.terminalInputRecovery.acquire("session", "incarnation:execution");
+    lease.current = true;
+    lease.release();
+    expect(first.terminalInputRecovery.acquire("session", "incarnation:execution").current).toBe(
+      true,
+    );
+    first.close();
+    expect(first.terminalInputRecovery.acquire("session", "incarnation:execution").available).toBe(
+      false,
+    );
+    const replacement = runtime();
+    expect(
+      replacement.terminalInputRecovery.acquire("session", "incarnation:execution").current,
+    ).toBe(false);
+  });
+
   it("isolates equal IDs and endpoints, including live output and browser presentation", () => {
     const left = runtime();
     const right = runtime();

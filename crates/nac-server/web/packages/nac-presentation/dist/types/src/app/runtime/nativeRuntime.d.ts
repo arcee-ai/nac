@@ -3,6 +3,7 @@ import { NacClient } from "../services/nacClient";
 import { createNativeApi } from "../services/api";
 import { type SessionStreamHandlers, type SessionStreamOptions } from "../services/eventStream";
 import { createPresentationStores } from "./presentationStores";
+import { TerminalInputRecovery } from "../features/terminal/inputRecovery";
 /** Opaque consumer bindings, never credentials or native admission authority. */
 export interface NativeRuntimeScope {
     owner: string;
@@ -34,6 +35,7 @@ export declare class NativeRuntime {
     readonly api: ReturnType<typeof createNativeApi>;
     readonly stores: ReturnType<typeof createPresentationStores>;
     readonly queryClient: QueryClient;
+    readonly terminalInputRecovery: TerminalInputRecovery;
     private readonly controller;
     private readonly disposers;
     private readonly listeners;
@@ -51,5 +53,5 @@ export declare class NativeRuntime {
 }
 export declare function createNativeRuntime(options: NativeRuntimeOptions): NativeRuntime;
 export declare const standaloneRuntime: RuntimeDependencies;
-export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets">>;
+export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery">>;
 export declare function runtimeForQueryClient(client: QueryClient): RuntimeDependencies;

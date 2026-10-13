@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeContext } from "@/app/runtime/RuntimeContext";
 import { standaloneRuntime } from "@/app/runtime/nativeRuntime";
 import { TerminalPane } from "./TerminalPane";
+import { recoveryForRuntime } from "./inputRecovery";
 import type { UserTerminalFrameResponse } from "../../../../packages/nac-client/src/index";
 
 const renderer = vi.hoisted(() => ({
   keyboard: undefined as undefined | ((data: string) => void),
+  generatedData: undefined as undefined | ((data: string) => void),
   write: vi.fn(async (_bytes: Uint8Array, _signal: AbortSignal) => {}),
   reset: vi.fn(async () => {}),
   selection: vi.fn(() => "selected private output"),
@@ -17,25 +19,39 @@ const renderer = vi.hoisted(() => ({
   options: { disableStdin: true },
 }));
 vi.mock("./xtermAdapter", () => ({
-  createTerminalRenderer: async () => ({
-    renderer: { write: renderer.write, reset: renderer.reset },
-    terminal: {
-      options: renderer.options,
-      onData: (callback: (data: string) => void) => {
-        renderer.keyboard = callback;
-        return {
-          dispose: () => {
-            renderer.keyboard = undefined;
-          },
-        };
+  createTerminalRenderer: async (host: HTMLElement) => {
+    const textarea = document.createElement("textarea");
+    host.append(textarea);
+    return {
+      renderer: { write: renderer.write, reset: renderer.reset },
+      terminal: {
+        options: renderer.options,
+        textarea,
+        onKey: (callback: (event: { key: string; domEvent: KeyboardEvent }) => void) => {
+          renderer.keyboard = (key) =>
+            callback({ key, domEvent: { isTrusted: true } as KeyboardEvent });
+          return {
+            dispose: () => {
+              renderer.keyboard = undefined;
+            },
+          };
+        },
+        onData: (callback: (data: string) => void) => {
+          renderer.generatedData = callback;
+          return {
+            dispose: () => {
+              renderer.generatedData = undefined;
+            },
+          };
+        },
+        onBinary: () => ({ dispose: () => {} }),
+        focus: () => textarea.focus(),
+        getSelection: renderer.selection,
       },
-      onBinary: () => ({ dispose: () => {} }),
-      focus: vi.fn(),
-      getSelection: renderer.selection,
-    },
-    fit: renderer.fit,
-    dispose: renderer.dispose,
-  }),
+      fit: renderer.fit,
+      dispose: renderer.dispose,
+    };
+  },
 }));
 
 const terminal = {
@@ -86,7 +102,7 @@ function fixture(status = terminal) {
       </QueryClientProvider>
     </RuntimeContext.Provider>,
   );
-  return { ...view, api, client, review };
+  return { ...view, api, client, review, runtime };
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -138,6 +154,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     f.api.pullUserTerminal.mockResolvedValueOnce(frame);
     await waitFor(() => expect(renderer.write).toHaveBeenCalledTimes(1));
     expect(f.api.pullUserTerminal).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
     await act(async () => {
       renderer.keyboard?.("\u0003");
     });
@@ -197,6 +214,23 @@ describe("terminal pane lifetime and explicit user actions", () => {
     expect(screen.queryByText("Disconnected")).toBeNull();
   });
 
+  it("acknowledges retained-source uncertainty without enabling ended input", async () => {
+    const exited = { ...terminal, alive: false, output_complete: true, exit_code: 0 };
+    const f = fixture(exited);
+    const lease = recoveryForRuntime(f.runtime).acquire("session", terminal.terminal_id);
+    lease.current = true;
+    lease.release();
+    await screen.findByText("Retained output · Exited (0)");
+    await screen.findByRole("button", { name: "Acknowledge failure and enable fresh input" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acknowledge failure and enable fresh input" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    await act(async () => renderer.keyboard?.("must not send\r"));
+    expect(renderer.options.disableStdin).toBe(true);
+    expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
+  });
+
   it("reports a live process resize failure without disconnecting independent observation", async () => {
     renderer.fit.mockReturnValue({ cols: 91, rows: 31 });
     const f = fixture();
@@ -212,6 +246,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     const f = fixture();
     await screen.findByText("Connected");
     f.api.inputUserTerminal.mockRejectedValueOnce(new Error("reply lost"));
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
     await act(async () => {
       renderer.keyboard?.("old command\r");
     });
@@ -221,6 +256,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
     await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
     await screen.findByText("Connected");
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
     await act(async () => {
       renderer.keyboard?.("must not send\r");
     });
@@ -229,6 +265,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Acknowledge failure and enable fresh input" }),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
     await act(async () => {
       renderer.keyboard?.("new\r");
     });
@@ -239,12 +276,43 @@ describe("terminal pane lifetime and explicit user actions", () => {
     });
   });
 
+  it("retains unconfirmed delivery across source-view remount without replay", async () => {
+    const f = fixture();
+    await screen.findByText("Connected");
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    f.api.inputUserTerminal.mockRejectedValueOnce(new Error("receipt lost"));
+    await act(async () => renderer.keyboard?.("old\r"));
+    await screen.findByRole("button", { name: "Acknowledge failure and enable fresh input" });
+    f.unmount();
+    const remounted = render(
+      <RuntimeContext.Provider value={f.runtime}>
+        <QueryClientProvider client={f.client}>
+          <TerminalPane sessionId="session" onReviewSelection={f.review} />
+        </QueryClientProvider>
+      </RuntimeContext.Provider>,
+    );
+    await screen.findByText("Connected");
+    await screen.findByRole("button", { name: "Acknowledge failure and enable fresh input" });
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    await act(async () => renderer.keyboard?.("must not send\r"));
+    expect(f.api.inputUserTerminal).toHaveBeenCalledOnce();
+    expect(renderer.options.disableStdin).toBe(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acknowledge failure and enable fresh input" }),
+    );
+    await act(async () => renderer.keyboard?.("fresh\r"));
+    expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(2);
+    expect(f.api.inputUserTerminal.mock.calls[1][2].bytes).toEqual([102, 114, 101, 115, 104, 13]);
+    remounted.unmount();
+  });
+
   it("accepts fresh input on attach and reconnect without sending automatic bytes", async () => {
     const f = fixture();
     await screen.findByText("Connected");
     expect(renderer.options.disableStdin).toBe(false);
     expect(screen.queryByRole("button", { name: "Enable terminal input" })).toBeNull();
     expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
     await act(async () => {
       renderer.keyboard?.("fresh\r");
     });
@@ -254,6 +322,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     await screen.findByText("Connected");
     expect(renderer.options.disableStdin).toBe(false);
     expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
     await act(async () => {
       renderer.keyboard?.("new\r");
     });
@@ -261,6 +330,18 @@ describe("terminal pane lifetime and explicit user actions", () => {
       [102, 114, 101, 115, 104, 13],
       [110, 101, 119, 13],
     ]);
+  });
+
+  it("does not forward renderer device-query replies while observation is unfocused", async () => {
+    const f = fixture();
+    await screen.findByText("Connected");
+    await act(async () => renderer.generatedData?.("\u001b[9;1R"));
+    expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    await act(async () => renderer.generatedData?.("\u001b[9;1R"));
+    expect(f.api.inputUserTerminal).not.toHaveBeenCalled();
+    await act(async () => renderer.keyboard?.("fresh\r"));
+    expect(f.api.inputUserTerminal).toHaveBeenCalledOnce();
   });
 
   it("captures selection only on Review and keeps it out of query caches and DOM attributes", async () => {

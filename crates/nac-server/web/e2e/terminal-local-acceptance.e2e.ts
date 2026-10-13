@@ -138,7 +138,7 @@ async function copyRow(page: Page, pane: Locator, line: string, cols: number, ro
   });
 }
 
-test("connected Zsh, less resize, and synthetic bracketed UTF-8 paste return to the same shell", async ({
+test("connected Zsh, less resize, and trusted browser bracketed UTF-8 paste return to the same shell", async ({
   harness,
   request,
   page,
@@ -193,7 +193,12 @@ test("connected Zsh, less resize, and synthetic bracketed UTF-8 paste return to 
     await page.keyboard.press("q");
     await command(page, "printf '" + octal("LESS-SHELL-BACK\n") + "'; python3 capture_paste.py");
     await expect(accessible).toContainText("PASTE-RAW-READY");
-    // This exercises the DOM clipboard path, not the OS clipboard or physical IME.
+    const pasteInputs: number[][] = [];
+    page.on("request", (sent) => {
+      if (sent.url().endsWith(`/user-terminals/${terminal}/input`) && sent.method() === "POST")
+        pasteInputs.push(sent.postDataJSON().bytes);
+    });
+    // A script-generated paste grants no human input intent.
     await pane.locator(".xterm-helper-textarea").evaluate((textarea) => {
       const data = new DataTransfer();
       data.setData("text/plain", "Ω中\nliteral paste");
@@ -201,6 +206,16 @@ test("connected Zsh, less resize, and synthetic bracketed UTF-8 paste return to 
         new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
       );
     });
+    await page
+      .context()
+      .grantPermissions(["clipboard-read", "clipboard-write"], { origin: harness.baseUrl });
+    await page.evaluate(async () =>
+      (
+        navigator as unknown as { clipboard: { writeText(text: string): Promise<void> } }
+      ).clipboard.writeText("Ω中\nliteral paste"),
+    );
+    expect(pasteInputs).toHaveLength(0);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
     await expect
       .poll(async () =>
         JSON.parse(

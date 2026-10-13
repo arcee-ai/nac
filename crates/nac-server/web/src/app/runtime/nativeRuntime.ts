@@ -13,6 +13,7 @@ import {
   standalonePresentationStores,
 } from "./presentationStores";
 import { LifetimeTransport } from "./requestLifetime";
+import { TerminalInputRecovery } from "../features/terminal/inputRecovery";
 
 /** Opaque consumer bindings, never credentials or native admission authority. */
 export interface NativeRuntimeScope {
@@ -51,6 +52,7 @@ export class NativeRuntime {
   readonly api: ReturnType<typeof createNativeApi>;
   readonly stores: ReturnType<typeof createPresentationStores>;
   readonly queryClient: QueryClient;
+  readonly terminalInputRecovery = new TerminalInputRecovery();
   private readonly controller = new AbortController();
   private readonly disposers = new Set<() => void>();
   private readonly listeners = new Set<() => void>();
@@ -124,6 +126,7 @@ export class NativeRuntime {
   close(): void {
     if (this.isClosed()) return;
     this.controller.abort(new DOMException("Native runtime was closed.", "AbortError"));
+    this.terminalInputRecovery.close();
     for (const dispose of this.disposers) dispose();
     this.disposers.clear();
     void this.queryClient.cancelQueries();
@@ -145,7 +148,7 @@ export const standaloneRuntime: RuntimeDependencies = {
   events: (id: string, handlers: SessionStreamHandlers) => subscribeToSessionEvents(id, handlers),
 };
 export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> &
-  Partial<Pick<NativeRuntime, "id" | "assets">>;
+  Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery">>;
 export function runtimeForQueryClient(client: QueryClient): RuntimeDependencies {
   return runtimes.get(client) ?? standaloneRuntime;
 }
