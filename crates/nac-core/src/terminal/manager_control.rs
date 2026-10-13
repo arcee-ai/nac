@@ -12,15 +12,14 @@ impl TerminalManager {
     /// Synchronous native preparation fails before policy if the process map
     /// is busy. No approval can later capture a newer controller implicitly.
     pub(crate) fn prepare_model_input(&self, name: &str) -> Result<InputTicket> {
-        let mut sessions = self
+        let sessions = self
             .sessions
             .try_lock()
             .map_err(|_| anyhow!("terminal input owner is busy; retry preparation"))?;
         let session = sessions
-            .get_mut(name)
+            .get(name)
             .ok_or_else(|| self.missing_session_error(name))?;
-        session.refresh_status();
-        if !session.accepts_user_input() {
+        if !session.accepts_user_input() || !session.input_control().root_alive() {
             return Err(anyhow!("terminal has exited"));
         }
         if session.is_user_owned() && !self.shared_input_eligible(session) {
