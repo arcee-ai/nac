@@ -36,14 +36,24 @@ impl ApiError {
     }
 }
 
+/// Both selection admission and the human transcript writer can lose a commit
+/// acknowledgement. That semantic identity supersedes the retained SQLite code.
+fn is_commit_uncertain(error: &anyhow::Error) -> bool {
+    use nac_core::store::{TerminalSelectionAdmissionError, TranscriptAppendError};
+    matches!(
+        error.downcast_ref::<TerminalSelectionAdmissionError>(),
+        Some(TerminalSelectionAdmissionError::CommitUncertain)
+    ) || matches!(
+        error.downcast_ref::<TranscriptAppendError>(),
+        Some(TranscriptAppendError::CommitUncertain)
+    )
+}
+
 /// Only known precommit contention permits a conflict response. An uncertain
 /// commit/acknowledgement wrapper takes precedence over any retained SQLite cause.
 fn is_precommit_contention(error: &anyhow::Error) -> bool {
-    use nac_core::store::{PersistenceAdmissionError, TerminalSelectionAdmissionError};
-    if matches!(
-        error.downcast_ref::<TerminalSelectionAdmissionError>(),
-        Some(TerminalSelectionAdmissionError::CommitUncertain)
-    ) {
+    use nac_core::store::PersistenceAdmissionError;
+    if is_commit_uncertain(error) {
         return false;
     }
     match error.downcast_ref::<PersistenceAdmissionError>() {
@@ -257,18 +267,16 @@ impl From<anyhow::Error> for ApiError {
         {
             // Context outside the shell wrapper can itself identify an unknown
             // commit/acknowledgement. Do not turn its retained BUSY into a retry.
-            if matches!(
-                error.downcast_ref::<nac_core::store::TerminalSelectionAdmissionError>(),
-                Some(nac_core::store::TerminalSelectionAdmissionError::CommitUncertain)
-            ) || error
-                .downcast_ref::<nac_core::store::PersistenceAdmissionError>()
-                .is_some_and(|cause| {
-                    !matches!(
-                        cause,
-                        nac_core::store::PersistenceAdmissionError::Overloaded
-                            | nac_core::store::PersistenceAdmissionError::CallerOverloaded
-                    )
-                })
+            if is_commit_uncertain(&error)
+                || error
+                    .downcast_ref::<nac_core::store::PersistenceAdmissionError>()
+                    .is_some_and(|cause| {
+                        !matches!(
+                            cause,
+                            nac_core::store::PersistenceAdmissionError::Overloaded
+                                | nac_core::store::PersistenceAdmissionError::CallerOverloaded
+                        )
+                    })
             {
                 return Self::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
             }
@@ -279,10 +287,7 @@ impl From<anyhow::Error> for ApiError {
         let message = error.to_string();
         // A typed uncertain admission remains a reconciliation failure even when
         // its retained SQLite cause is BUSY/LOCKED. Only precommit contention is 409.
-        let status = if matches!(
-            error.downcast_ref::<nac_core::store::TerminalSelectionAdmissionError>(),
-            Some(nac_core::store::TerminalSelectionAdmissionError::CommitUncertain)
-        ) {
+        let status = if is_commit_uncertain(&error) {
             StatusCode::INTERNAL_SERVER_ERROR
         } else if let Some(error) = error.downcast_ref::<sessions::SessionConfigUpdateError>() {
             match error {

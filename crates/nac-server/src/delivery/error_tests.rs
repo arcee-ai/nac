@@ -132,6 +132,51 @@ fn uncertain_human_command_commit_and_ack_wrappers_supersede_retained_sqlite_con
 }
 
 #[test]
+fn actual_human_transcript_commit_uncertainty_supersedes_busy_and_locked_in_all_wrappers() {
+    // finish_shell_command uses TranscriptLogWriter::commit_append; failed
+    // postcommit reconciliation retains this actual semantic writer context.
+    for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+        let sqlite = || {
+            anyhow::Error::new(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                None,
+            ))
+        };
+        let uncertain =
+            || sqlite().context(nac_core::store::TranscriptAppendError::CommitUncertain);
+        let command = human_store_error(uncertain().context("reconcile human shell result"));
+        assert_eq!(
+            ApiError::from(command.clone()).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let wrapped = anyhow::Error::new(command).context("human command HTTP delivery");
+        assert!(nac_core::store::is_sqlite_busy(&wrapped));
+        assert_eq!(
+            ApiError::from(wrapped).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let outer = anyhow::Error::new(human_store_error(sqlite()))
+            .context(nac_core::store::TranscriptAppendError::CommitUncertain)
+            .context("human command HTTP delivery");
+        assert!(nac_core::store::is_sqlite_busy(&outer));
+        assert_eq!(
+            ApiError::from(outer).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        // Canonical human-command lookup/recovery can propagate the writer's
+        // anyhow error directly without going through ShellCommandError.
+        let lookup = uncertain().context("read back human command recovery");
+        assert!(nac_core::store::is_sqlite_busy(&lookup));
+        assert_eq!(
+            ApiError::from(lookup).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+}
+
+#[test]
 fn terminal_owner_fence_maps_to_conflict_through_error_context() {
     let owner = application::session_terminals::TerminalOwnerMismatch;
     let error = anyhow::Error::new(owner).context("terminal completion fence");
