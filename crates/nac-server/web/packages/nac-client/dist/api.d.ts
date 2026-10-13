@@ -627,7 +627,7 @@ export declare function createNacApi(nacClient: NacClient): {
         lineage?: null | import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"];
         message_cycle?: null | import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"];
         message_page?: null | import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
-        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionReference"][];
+        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
     }>;
     createSession: (payload: CreateSessionRequest) => Promise<{
         active_compaction?: null | import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"];
@@ -656,7 +656,7 @@ export declare function createNacApi(nacClient: NacClient): {
         lineage?: null | import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"];
         message_cycle?: null | import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"];
         message_page?: null | import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
-        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionReference"][];
+        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
     }>;
     deleteSession: (id: string) => Promise<void>;
     launchDefaults: (payload: LaunchModelDefaultsRequest, signal?: AbortSignal) => Promise<{
@@ -784,6 +784,7 @@ export declare function createNacApi(nacClient: NacClient): {
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
         target_run_id?: string | null;
+        terminal_selection?: null | import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
         updated_at: string;
         version: number;
     }[]>;
@@ -799,6 +800,7 @@ export declare function createNacApi(nacClient: NacClient): {
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
         target_run_id?: string | null;
+        terminal_selection?: null | import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
         updated_at: string;
         version: number;
     }>;
@@ -814,6 +816,7 @@ export declare function createNacApi(nacClient: NacClient): {
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
         target_run_id?: string | null;
+        terminal_selection?: null | import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
         updated_at: string;
         version: number;
     }>;
@@ -829,6 +832,7 @@ export declare function createNacApi(nacClient: NacClient): {
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
         target_run_id?: string | null;
+        terminal_selection?: null | import("./openapi.generated.js").components["schemas"]["TerminalSelectionEvidence"];
         updated_at: string;
         version: number;
     }>;
@@ -981,7 +985,7 @@ export declare function createNacApi(nacClient: NacClient): {
         created_at: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
         page: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
-        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionReference"][];
+        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
     }>;
     getThreadEvents: (id: string, threadName: string, options?: ThreadEventsOptions) => Promise<{
         diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];

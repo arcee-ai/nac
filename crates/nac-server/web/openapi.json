@@ -11690,6 +11690,16 @@
               "null"
             ]
           },
+          "terminal_selection": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TerminalSelectionEvidence"
+              }
+            ]
+          },
           "updated_at": {
             "type": "string"
           },
@@ -13373,7 +13383,7 @@
           "terminal_selection_attributions": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TerminalSelectionReference"
+              "$ref": "#/components/schemas/TerminalSelectionMessageReference"
             }
           }
         }
@@ -16131,7 +16141,7 @@
               "terminal_selection_attributions": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/TerminalSelectionReference"
+                  "$ref": "#/components/schemas/TerminalSelectionMessageReference"
                 }
               }
             }
@@ -16785,6 +16795,17 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "terminal_selection": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TerminalSelectionEvidence",
+                "description": "Read-only projection carried by the identified inbox admission, before\ncanonical transcript hydration catches up. Legacy/ordinary input omits it."
+              }
+            ]
           }
         }
       },
@@ -16859,6 +16880,28 @@
           "steer"
         ]
       },
+      "TerminalSelectionEvidence": {
+        "type": "object",
+        "description": "Read-only projection of reviewed canonical evidence; no live capability.",
+        "required": [
+          "attribution",
+          "text"
+        ],
+        "properties": {
+          "attribution": {
+            "$ref": "#/components/schemas/TerminalSelectionAttribution"
+          },
+          "text": {
+            "type": "string"
+          },
+          "user_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "TerminalSelectionIntent": {
         "type": "object",
         "required": [
@@ -16922,6 +16965,34 @@
           }
         },
         "additionalProperties": false
+      },
+      "TerminalSelectionMessageReference": {
+        "type": "object",
+        "description": "Presentation projection alongside the unchanged canonical attribution.",
+        "required": [
+          "message_index",
+          "attribution"
+        ],
+        "properties": {
+          "attribution": {
+            "$ref": "#/components/schemas/TerminalSelectionAttribution"
+          },
+          "evidence": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TerminalSelectionEvidence"
+              }
+            ]
+          },
+          "message_index": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "TerminalSelectionPreviewRequest": {
         "type": "object",
@@ -17067,25 +17138,6 @@
             ]
           }
         }
-      },
-      "TerminalSelectionReference": {
-        "type": "object",
-        "required": [
-          "message_index",
-          "attribution"
-        ],
-        "properties": {
-          "attribution": {
-            "$ref": "#/components/schemas/TerminalSelectionAttribution"
-          },
-          "message_index": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Absolute canonical transcript index, including any system head.",
-            "minimum": 0
-          }
-        },
-        "additionalProperties": false
       },
       "TerminalSelectionSourceKind": {
         "type": "string",

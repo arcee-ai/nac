@@ -421,6 +421,7 @@ export interface components {
       session_id: string;
       status: components["schemas"]["InboxStatus"];
       target_run_id?: string | null;
+      terminal_selection?: null | components["schemas"]["TerminalSelectionEvidence"];
       updated_at: string;
       version: number;
     };
@@ -720,7 +721,7 @@ export interface components {
       created_at: (string | null)[];
       messages: components["schemas"]["Message"][];
       page: components["schemas"]["MessagePageMetadata"];
-      terminal_selection_attributions?: components["schemas"]["TerminalSelectionReference"][];
+      terminal_selection_attributions?: components["schemas"]["TerminalSelectionMessageReference"][];
     };
     ModelConfigFromFileRequest: { path: string };
     ModelConfigurationList: { configurations: components["schemas"]["ModelConfigurationRecord"][] };
@@ -1151,7 +1152,7 @@ export interface components {
       lineage?: null | components["schemas"]["SessionLineageSnapshot"];
       message_cycle?: null | components["schemas"]["MessageCycleMetadata"];
       message_page?: null | components["schemas"]["MessagePageMetadata"];
-      terminal_selection_attributions?: components["schemas"]["TerminalSelectionReference"][];
+      terminal_selection_attributions?: components["schemas"]["TerminalSelectionMessageReference"][];
     };
     SessionSummarySnapshot: {
       backend: string;
@@ -1269,6 +1270,7 @@ export interface components {
       content: string;
       run_id: components["schemas"]["SessionRunId"];
       submitted_at_epoch_ms: number;
+      terminal_selection?: null | components["schemas"]["TerminalSelectionEvidence"];
     };
     SwitchBranchRequest: { create?: boolean; name: string };
     TerminalSelectionAttribution: {
@@ -1283,6 +1285,11 @@ export interface components {
       terminal_id: string;
     };
     TerminalSelectionDelivery: "send" | "queue" | "steer";
+    TerminalSelectionEvidence: {
+      attribution: components["schemas"]["TerminalSelectionAttribution"];
+      text: string;
+      user_text?: string | null;
+    };
     TerminalSelectionIntent: {
       admission_id: string;
       capture_id: string;
@@ -1296,6 +1303,11 @@ export interface components {
       terminal_id: string;
       text: string;
       user_text?: string | null;
+    };
+    TerminalSelectionMessageReference: {
+      attribution: components["schemas"]["TerminalSelectionAttribution"];
+      evidence?: null | components["schemas"]["TerminalSelectionEvidence"];
+      message_index: number;
     };
     TerminalSelectionPreviewRequest: {
       capture_id: string;
@@ -1324,10 +1336,6 @@ export interface components {
       text_utf8_bytes: number;
       truncated: boolean;
       user_text?: string | null;
-    };
-    TerminalSelectionReference: {
-      attribution: components["schemas"]["TerminalSelectionAttribution"];
-      message_index: number;
     };
     TerminalSelectionSourceKind: "user_supplied_rendered_selection";
     TerminalSelectionSubmissionRequest: {

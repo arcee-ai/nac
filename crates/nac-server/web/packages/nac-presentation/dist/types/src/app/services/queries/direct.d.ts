@@ -218,6 +218,7 @@ export declare function useSessionInbox(sessionId: string, enabled: boolean): im
     session_id: string;
     status: import("../../types/openapi.generated").components["schemas"]["InboxStatus"];
     target_run_id?: string | null;
+    terminal_selection?: null | import("../../types/openapi.generated").components["schemas"]["TerminalSelectionEvidence"];
     updated_at: string;
     version: number;
 }[]>, Error>;
@@ -233,6 +234,7 @@ export declare function useCreateInboxItem(): import("@tanstack/react-query").Us
     session_id: string;
     status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxStatus"];
     target_run_id?: string | null;
+    terminal_selection?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionEvidence"];
     updated_at: string;
     version: number;
 }, Error, {
@@ -252,6 +254,7 @@ export declare function useUpdateInboxItem(): import("@tanstack/react-query").Us
     session_id: string;
     status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxStatus"];
     target_run_id?: string | null;
+    terminal_selection?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionEvidence"];
     updated_at: string;
     version: number;
 }, Error, {
@@ -272,6 +275,7 @@ export declare function useCancelInboxItem(): import("@tanstack/react-query").Us
     session_id: string;
     status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxStatus"];
     target_run_id?: string | null;
+    terminal_selection?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionEvidence"];
     updated_at: string;
     version: number;
 }, Error, {

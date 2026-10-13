@@ -323,7 +323,7 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     lineage?: null | import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
     message_cycle?: null | import("../../types/openapi.generated").components["schemas"]["MessageCycleMetadata"];
     message_page?: null | import("../../types/openapi.generated").components["schemas"]["MessagePageMetadata"];
-    terminal_selection_attributions?: import("../../types/openapi.generated").components["schemas"]["TerminalSelectionReference"][];
+    terminal_selection_attributions?: import("../../types/openapi.generated").components["schemas"]["TerminalSelectionMessageReference"][];
 }>, Error>;
 export declare function useLoadOlderMessages(id: string): import("@tanstack/react-query").UseMutationResult<boolean, Error, void, unknown>;
 export declare function useThreadEventPages(id: string | null, threadName: string | null): import("@tanstack/react-query").UseInfiniteQueryResult<InfiniteData<{
@@ -374,7 +374,7 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     lineage?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionLineageSnapshot"];
     message_cycle?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["MessageCycleMetadata"];
     message_page?: null | import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["MessagePageMetadata"];
-    terminal_selection_attributions?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionReference"][];
+    terminal_selection_attributions?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionMessageReference"][];
 }, Error, {
     allow_insecure_http?: import("../../types/openapi.generated").components["schemas"]["RequestField_bool_bool"];
     api_key_env?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];

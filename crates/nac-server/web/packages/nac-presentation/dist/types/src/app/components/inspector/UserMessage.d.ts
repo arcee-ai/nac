@@ -1,5 +1,8 @@
+import type { TerminalSelectionEvidence } from "../../types/api";
 interface UserMessageProps {
     text: string;
+    terminalSelection?: TerminalSelectionEvidence;
+    sessionId?: string;
     pending?: boolean;
     /**
      * Skills the stored message had expanded into the agent-facing prompt,
@@ -33,5 +36,5 @@ interface UserMessageProps {
     readOnly?: boolean;
 }
 /** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
-export declare const UserMessage: import("react").MemoExoticComponent<({ text, pending, invokedSkills, timestamp, messageIndex, onRefresh, onRevert, actionsDisabled, readOnly, }: UserMessageProps) => import("react").JSX.Element>;
+export declare const UserMessage: import("react").MemoExoticComponent<({ text, terminalSelection, sessionId, pending, invokedSkills, timestamp, messageIndex, onRefresh, onRevert, actionsDisabled, readOnly, }: UserMessageProps) => import("react").JSX.Element>;
 export {};
