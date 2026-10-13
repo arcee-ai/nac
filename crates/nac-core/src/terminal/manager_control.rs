@@ -67,13 +67,19 @@ impl TerminalManager {
             && session.accepts_user_input()
     }
 
+    #[cfg(test)]
+    pub(crate) async fn control_snapshot_for_test(&self, name: &str) -> (InputControlStatus, u64) {
+        let sessions = self.sessions.lock().await;
+        let session = &sessions[name];
+        (session.input_control().status(), session.preview_cursor())
+    }
+
     pub(crate) async fn input_control_status(&self, name: &str) -> Result<InputControlStatus> {
-        let mut sessions = self.sessions.lock().await;
+        let sessions = self.sessions.lock().await;
         let session = sessions
-            .get_mut(name)
+            .get(name)
             .ok_or_else(|| self.missing_session_error(name))?;
-        session.refresh_status();
-        if !self.shared_input_eligible(session) {
+        if !self.shared_input_eligible(session) || !session.input_control().root_alive() {
             return Err(anyhow!("execution is read-only"));
         }
         Ok(session.input_control().status())
@@ -84,12 +90,11 @@ impl TerminalManager {
         name: &str,
         expected: u64,
     ) -> Result<PreparedControlChange> {
-        let mut sessions = self.sessions.lock().await;
+        let sessions = self.sessions.lock().await;
         let session = sessions
-            .get_mut(name)
+            .get(name)
             .ok_or_else(|| self.missing_session_error(name))?;
-        session.refresh_status();
-        if !self.shared_input_eligible(session) {
+        if !self.shared_input_eligible(session) || !session.input_control().root_alive() {
             return Err(anyhow!("execution is read-only"));
         }
         if session.input_control().status().revision != expected.to_string() {
@@ -123,12 +128,14 @@ impl TerminalManager {
         target: InputController,
         acknowledge: bool,
     ) -> Result<InputControlStatus> {
-        let mut sessions = self.sessions.lock().await;
+        let sessions = self.sessions.lock().await;
         let session = sessions
-            .get_mut(&prepared.id)
+            .get(&prepared.id)
             .ok_or_else(|| self.missing_session_error(&prepared.id))?;
-        session.refresh_status();
-        if !self.shared_input_eligible(session) || session.output_id() != prepared.incarnation {
+        if !self.shared_input_eligible(session)
+            || !session.input_control().root_alive()
+            || session.output_id() != prepared.incarnation
+        {
             return Err(anyhow!(
                 "terminal process incarnation changed or is read-only"
             ));
@@ -187,8 +194,12 @@ impl TerminalManager {
         let session = sessions
             .get_mut(name)
             .ok_or_else(|| self.missing_session_error(name))?;
-        session.refresh_status();
-        if !self.shared_input_eligible(session) {
+        if !freeze_on_unconfirmed {
+            session.refresh_status();
+        }
+        if !self.shared_input_eligible(session)
+            || (freeze_on_unconfirmed && !session.input_control().root_alive())
+        {
             return Err(anyhow!("execution is read-only"));
         }
         let ticket = session

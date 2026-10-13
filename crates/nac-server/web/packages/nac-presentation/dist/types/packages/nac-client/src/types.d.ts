@@ -135,3 +135,7 @@ export type ExecutionListResponse = ApiSchema<"ExecutionListResponse">;
 export type ExecutionHistoryResponse = ApiSchema<"ExecutionHistoryResponse">;
 export type ExecutionHistoryEntry = ApiSchema<"ExecutionHistoryEntry">;
 export type ExecutionFrameResponse = ApiSchema<"ExecutionFrameResponse">;
+export type InputControlStatus = ApiSchema<"InputControlStatus">;
+export type InputDeliveryReceipt = ApiSchema<"InputDeliveryReceipt">;
+export type TransferTerminalControlRequest = ApiSchema<"TransferTerminalControlRequest">;
+export type ControlledTerminalInputRequest = ApiSchema<"ControlledTerminalInputRequest">;

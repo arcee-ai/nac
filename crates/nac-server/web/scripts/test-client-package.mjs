@@ -101,11 +101,16 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 143);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 146);
 for (const owner of Object.values(NAC_API_SURFACE)) {
   if (owner.startsWith("api.")) assert.equal(typeof api[owner.slice(4)], "function", owner);
   if (owner.startsWith("client.")) assert.equal(typeof client[owner.slice(7)], "function", owner);
 }
+for (const [method, owner] of [
+  ["GET /sessions/{session_id}/executions/{execution_id}/input-control", "api.getTerminalInputControl"],
+  ["POST /sessions/{session_id}/executions/{execution_id}/input-control", "api.transferTerminalInputControl"],
+  ["POST /sessions/{session_id}/executions/{execution_id}/input", "api.inputControlledTerminal"],
+]) assert.equal(NAC_API_SURFACE[method], owner);
 assert.equal("getManagedUpgrade" in api, false);
 const context = await client.transport.streamContext();
 assert.deepEqual(context, {
@@ -140,6 +145,8 @@ assert.deepEqual(context, {
   type TerminalSelectionPreviewResponse,
   type TerminalSelectionSubmissionResponse,
   type ShellCommandSnapshot,
+  type InputControlStatus,
+  type InputDeliveryReceipt,
   type ExecutionHistoryResponse,
 } from ${JSON.stringify(packageName)};
 
@@ -159,6 +166,14 @@ const observer = new UserTerminalConnection(api, "session", "terminal", renderer
 const input: Promise<void> = new UserTerminalInputPump(observer).send(Uint8Array.of(3));
 const preview: Promise<TerminalSelectionPreviewResponse> = api.previewUserTerminalSelection("session", "terminal", { protocol_version: 1, capture_id: "capture", selected_text: "selected" });
 const selection: Promise<TerminalSelectionSubmissionResponse> = api.submitUserTerminalSelection("session", "terminal", {protocol_version: 1, admission_id: "admission", capture_id: "capture", expected_owner_instance_id: "owner", original_selected_text: "original", expected_selection_text: "canonical", delivery: "queue"});
+const control: Promise<InputControlStatus> = api.getTerminalInputControl("session", "execution");
+const transfer: Promise<InputControlStatus> = api.transferTerminalInputControl("session", "execution", { protocol_version: 1, expected_revision: "9007199254740993", controller: "human", acknowledge_uncertainty: false });
+const delivery: Promise<InputDeliveryReceipt> = api.inputControlledTerminal("session", "execution", { protocol_version: 1, expected_revision: "9007199254740994", bytes: [60,82,69,84,62] });
+void control; void transfer; void delivery;
+// @ts-expect-error controller revisions remain decimal strings
+void api.inputControlledTerminal("session", "execution", { protocol_version: 1, expected_revision: 9007199254740993, bytes: [13] });
+// @ts-expect-error input ownership is a closed public vocabulary
+void api.transferTerminalInputControl("session", "execution", { protocol_version: 1, expected_revision: "1", controller: "worker" });
 void observer; void terminal; void input; void preview; void selection;
 // @ts-expect-error byte cursors remain decimal strings
 void api.pullUserTerminal("session", "terminal", "observer", { protocol_version: 1, acknowledge_offset: 9007199254740993, acknowledge_reset: false, wait_ms: 1000 });

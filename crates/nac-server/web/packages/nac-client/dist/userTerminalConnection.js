@@ -8,6 +8,14 @@ export class TerminalProtocolError extends Error {
         this.name = "TerminalProtocolError";
     }
 }
+export class TerminalInputRejectedError extends Error {
+    cause;
+    constructor(message, cause) {
+        super(message);
+        this.name = "TerminalInputRejectedError";
+        this.cause = cause;
+    }
+}
 export class TerminalInputUncertainError extends Error {
     cause;
     constructor(cause) {
@@ -75,11 +83,13 @@ export class UserTerminalConnection {
     needsReset = false;
     sendingInput = false;
     inputUncertain = false;
+    inputSender;
     constructor(api, sessionId, terminalId, renderer, options = {}) {
         this.api = api;
         this.sessionId = sessionId;
         this.terminalId = terminalId;
         this.renderer = renderer;
+        this.inputSender = api.inputUserTerminal;
         this.pageLimit = options.pageLimit ?? MAX_PAGE;
         this.waitMs = options.waitMs ?? 1000;
         bounded(this.pageLimit, 1, MAX_PAGE, "terminal page limit");
@@ -244,6 +254,10 @@ export class UserTerminalConnection {
             this.cleanupReceipts.delete(observer);
         }
     }
+    /** Replace only fresh input; observation and delivery uncertainty persist. */
+    replaceInputTransport(sender) {
+        this.inputSender = sender;
+    }
     async input(bytes, signal) {
         bounded(bytes.length, 1, MAX_INPUT, "terminal input length");
         if (this.inputUncertain)
@@ -254,12 +268,14 @@ export class UserTerminalConnection {
         cancelled(active);
         this.sendingInput = true;
         try {
-            await this.api.inputUserTerminal(this.sessionId, this.terminalId, {
+            await this.inputSender(this.sessionId, this.terminalId, {
                 protocol_version: NAC_TERMINAL_PROTOCOL_VERSION,
                 bytes: Array.from(bytes),
             }, active);
         }
         catch (error) {
+            if (error instanceof TerminalInputRejectedError)
+                throw error;
             this.inputUncertain = true;
             throw new TerminalInputUncertainError(error);
         }
@@ -269,6 +285,8 @@ export class UserTerminalConnection {
     }
     /** Explicit consumer acknowledgement enables fresh input; previously sent bytes are never replayed. */
     acknowledgeInputUncertainty() {
+        if (this.sendingInput)
+            throw new TerminalProtocolError("Wait for the active input receipt before acknowledging");
         this.inputUncertain = false;
     }
     async resize(cols, rows, signal) {

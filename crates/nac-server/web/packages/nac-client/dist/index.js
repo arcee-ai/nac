@@ -7,3 +7,4 @@ export * from "./userTerminalApi.js";
 export * from "./userTerminalConnection.js";
 export * from "./userTerminalInputPump.js";
 export * from "./executionApi.js";
+export * from "./terminalControlApi.js";

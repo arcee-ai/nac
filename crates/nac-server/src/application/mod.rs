@@ -31,3 +31,5 @@ pub(crate) enum Field<T> {
 
 pub(crate) mod execution_history;
 pub(crate) mod execution_observation;
+
+pub(crate) mod terminal_control;

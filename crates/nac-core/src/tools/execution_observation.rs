@@ -3,9 +3,7 @@
 use serde_json::{json, Value};
 
 use super::{kernel, ToolResult, ToolRuntime};
-use crate::terminal::{
-    ExecutionOrigin, ExecutionRepresentation, ExecutionStatus, OutputBytePage, OutputStream,
-};
+use crate::terminal::{ExecutionStatus, InputController, OutputBytePage, OutputStream};
 use crate::types::{FunctionDef, ToolDefinition};
 
 const MAX_CATALOG_ENTRIES: usize = 32;
@@ -118,9 +116,20 @@ impl kernel::NativeTool for ListExecutionsTool {
             let next_after = more
                 .then(|| entries.last().map(|entry| entry.id.clone()))
                 .flatten();
-            result(
-                json!({"executions":entries.iter().map(inventory_entry).collect::<Vec<_>>(),"next_after":next_after}),
-            )
+            let executions = entries
+                .iter()
+                .map(|entry| {
+                    let input = services
+                        .runtime
+                        .terminal_manager
+                        .execution_model_input_state(&entry.id)
+                        .is_some_and(|state| {
+                            state.controller == InputController::Agent && !state.frozen
+                        });
+                    inventory_entry(entry, input)
+                })
+                .collect::<Vec<_>>();
+            result(json!({"executions":executions,"next_after":next_after}))
         })
     }
 }
@@ -153,13 +162,13 @@ async fn validate_current_owner(runtime: &ToolRuntime) -> Result<(), ToolResult>
         .map_err(|_| unavailable())
 }
 
-fn inventory_entry(entry: &ExecutionStatus) -> Value {
+fn inventory_entry(entry: &ExecutionStatus, input: bool) -> Value {
     json!({
         "id":entry.id,"origin":entry.origin,"representation":entry.representation,
         "cwd":entry.cwd,"backend":entry.backend,"process_state":entry.process_state,
         "exit_code":entry.exit_code,"output_complete":entry.output_complete,"output_error":entry.output_error,
         "retained":entry.retained,"read":true,
-        "input":entry.origin == ExecutionOrigin::Agent && entry.representation == ExecutionRepresentation::Pty && entry.alive
+        "input":input
     })
 }
 

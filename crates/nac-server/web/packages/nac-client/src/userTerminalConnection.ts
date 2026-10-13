@@ -13,6 +13,15 @@ export class TerminalProtocolError extends Error {
   }
 }
 
+export class TerminalInputRejectedError extends Error {
+  override readonly cause: unknown;
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "TerminalInputRejectedError";
+    this.cause = cause;
+  }
+}
+
 export class TerminalInputUncertainError extends Error {
   override readonly cause: unknown;
   constructor(cause: unknown) {
@@ -87,6 +96,7 @@ export class UserTerminalConnection {
   private needsReset = false;
   private sendingInput = false;
   private inputUncertain = false;
+  private inputSender: UserTerminalApi["inputUserTerminal"];
 
   constructor(
     private readonly api: Pick<
@@ -102,6 +112,7 @@ export class UserTerminalConnection {
     private readonly renderer: UserTerminalRenderer,
     options: UserTerminalConnectionOptions = {},
   ) {
+    this.inputSender = api.inputUserTerminal;
     this.pageLimit = options.pageLimit ?? MAX_PAGE;
     this.waitMs = options.waitMs ?? 1000;
     bounded(this.pageLimit, 1, MAX_PAGE, "terminal page limit");
@@ -285,6 +296,11 @@ export class UserTerminalConnection {
     }
   }
 
+  /** Replace only fresh input; observation and delivery uncertainty persist. */
+  replaceInputTransport(sender: UserTerminalApi["inputUserTerminal"]) {
+    this.inputSender = sender;
+  }
+
   async input(bytes: Uint8Array, signal?: AbortSignal) {
     bounded(bytes.length, 1, MAX_INPUT, "terminal input length");
     if (this.inputUncertain) throw new TerminalInputUncertainError(undefined);
@@ -294,7 +310,7 @@ export class UserTerminalConnection {
     cancelled(active);
     this.sendingInput = true;
     try {
-      await this.api.inputUserTerminal(
+      await this.inputSender(
         this.sessionId,
         this.terminalId,
         {
@@ -304,6 +320,7 @@ export class UserTerminalConnection {
         active,
       );
     } catch (error) {
+      if (error instanceof TerminalInputRejectedError) throw error;
       this.inputUncertain = true;
       throw new TerminalInputUncertainError(error);
     } finally {
@@ -313,6 +330,8 @@ export class UserTerminalConnection {
 
   /** Explicit consumer acknowledgement enables fresh input; previously sent bytes are never replayed. */
   acknowledgeInputUncertainty() {
+    if (this.sendingInput)
+      throw new TerminalProtocolError("Wait for the active input receipt before acknowledging");
     this.inputUncertain = false;
   }
 

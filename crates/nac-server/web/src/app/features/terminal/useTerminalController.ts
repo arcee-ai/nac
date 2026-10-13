@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import type { ExecutionStatus } from "../../../../packages/nac-client/src/index";
+import type {
+  ExecutionStatus,
+  InputControlStatus,
+} from "../../../../packages/nac-client/src/index";
 import { openTerminalObservation, type TerminalControls } from "./browserRuntime";
 import { recoveryForRuntime, type TerminalInputRecoveryLease } from "./inputRecovery";
 
@@ -9,6 +12,11 @@ export function useTerminalController(
   terminalId: string,
   element: RefObject<HTMLDivElement | null>,
   source?: ExecutionStatus,
+  options: {
+    readonly?: boolean;
+    inputControl?: InputControlStatus | null;
+    inputPaused?: boolean;
+  } = {},
 ) {
   const runtime = useNativeRuntime();
   const { api } = runtime;
@@ -18,6 +26,33 @@ export function useTerminalController(
   const [notice, setNotice] = useState("");
   const [inputFailure, setInputFailure] = useState(false);
   const recovery = useRef<TerminalInputRecoveryLease | null>(null);
+
+  const control = options.inputControl;
+  const controller = control?.controller;
+  const revision = control?.revision;
+  const frozen = control?.frozen;
+  const missing = control === undefined;
+  const unavailable = control === null;
+  // In-flight changes are informational, not a reason to interrupt a write.
+  const inputBinding = useMemo(
+    () =>
+      missing
+        ? undefined
+        : unavailable
+          ? null
+          : {
+              controller: controller!,
+              revision: revision!,
+              frozen: frozen!,
+            },
+    [missing, unavailable, controller, revision, frozen],
+  );
+
+  const latestInput = useRef({ binding: inputBinding, paused: options.inputPaused ?? false });
+  useLayoutEffect(() => {
+    latestInput.current = { binding: inputBinding, paused: options.inputPaused ?? false };
+    current.current?.updateInput(inputBinding, options.inputPaused ?? false);
+  }, [inputBinding, options.inputPaused]);
 
   useEffect(() => {
     const host = element.current;
@@ -29,6 +64,9 @@ export function useTerminalController(
     const close = openTerminalObservation({
       api,
       source,
+      readonly: options.readonly,
+      inputControl: latestInput.current.binding,
+      inputPaused: latestInput.current.paused,
       sessionId,
       terminalId,
       host,
@@ -36,6 +74,7 @@ export function useTerminalController(
       previousFailure: lease,
       controls: (value) => {
         current.current = value;
+        value?.updateInput(latestInput.current.binding, latestInput.current.paused);
       },
       phase: setPhase,
       notice: setNotice,
@@ -48,7 +87,7 @@ export function useTerminalController(
       lease.release();
       if (recovery.current === lease) recovery.current = null;
     };
-  }, [runtime, api, sessionId, terminalId, attempt, element, source]);
+  }, [runtime, api, sessionId, terminalId, attempt, element, source, options.readonly]);
 
   return {
     phase,
@@ -61,9 +100,10 @@ export function useTerminalController(
       return text;
     },
     focus: () => current.current?.adapter.terminal.focus(),
+    hasActiveInput: () => current.current?.hasActiveInput() === true,
     acknowledgeInput: () => {
       const value = current.current;
-      if (!value || value.pump.hasActiveInput || !recovery.current?.available) return;
+      if (!value || value.hasActiveInput() || !recovery.current?.available) return false;
       value.pump.acknowledgeFailure();
       recovery.current.acknowledge();
       const enabled = value.restoreFreshInput();
@@ -74,6 +114,7 @@ export function useTerminalController(
           : "Previous input will not be retried. This source has no connected live input.",
       );
       if (enabled) value.adapter.terminal.focus();
+      return true;
     },
   };
 }

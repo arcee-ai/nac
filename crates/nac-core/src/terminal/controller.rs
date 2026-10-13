@@ -87,6 +87,22 @@ impl InputControl {
             .liveness = Some(alive);
     }
 
+    /// Observe the same construction-bound, non-reaping root check used at
+    /// physical admission. No ticket, cleanup, controller or delivery mutation.
+    pub(super) fn root_alive(&self) -> bool {
+        let observe = {
+            let state = self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state.stopped {
+                return false;
+            }
+            state.liveness.as_ref().map(Arc::clone)
+        };
+        observe.is_some_and(|alive| alive())
+    }
+
     pub(super) fn status(&self) -> InputControlStatus {
         let state = self
             .0

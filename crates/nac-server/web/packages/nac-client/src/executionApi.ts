@@ -7,14 +7,16 @@ import type {
   ExecutionListResponse,
   ExecutionHistoryResponse,
   ExecutionStatus,
+  InputControlStatus,
 } from "./types.js";
 import {
   UserTerminalConnection,
-  TerminalProtocolError,
+  TerminalInputRejectedError,
   type UserTerminalRenderer,
   type UserTerminalConnectionOptions,
 } from "./userTerminalConnection.js";
 import type { UserTerminalApi } from "./userTerminalApi.js";
+import { controlledTerminalInput, type TerminalControlApi } from "./terminalControlApi.js";
 
 export function createExecutionApi(client: NacClient) {
   const request = client.transport.request.bind(client.transport);
@@ -57,29 +59,72 @@ export function createExecutionApi(client: NacClient) {
 
 export type ExecutionApi = ReturnType<typeof createExecutionApi>;
 
-/** One ACK/reset/cancellation owner for every source. Pipes and agent PTYs have
- * no human input route; only a real human shell uses its existing input API. */
+/** One ACK/reset/cancellation owner for every source. A shared input activation
+ * binds one immutable controller revision; replacing it discards pending bytes.
+ * Explicit readonly history mode suppresses input and resize even for a live ID. */
 export function createExecutionConnection(
-  api: ExecutionApi & Pick<UserTerminalApi, "inputUserTerminal" | "resizeUserTerminal">,
+  api: ExecutionApi &
+    Pick<UserTerminalApi, "inputUserTerminal" | "resizeUserTerminal"> &
+    Partial<Pick<TerminalControlApi, "inputControlledTerminal">>,
   session: string,
   source: ExecutionStatus,
   renderer: UserTerminalRenderer,
-  options: UserTerminalConnectionOptions = {},
+  options: UserTerminalConnectionOptions & { readonly?: boolean } = {},
+  control?: Pick<InputControlStatus, "controller" | "revision" | "frozen"> | null,
 ) {
-  const rejected = () => Promise.reject(new TerminalProtocolError("This execution is read-only"));
+  const rejected = () =>
+    Promise.reject(new TerminalInputRejectedError("This execution is read-only"));
+  const input = bindExecutionInput(api, source, control, options.readonly);
   return new UserTerminalConnection(
     {
       attachUserTerminal: api.attachExecution,
       pullUserTerminal: api.pullExecution,
       detachUserTerminal: api.detachExecution,
-      inputUserTerminal:
-        source.origin === "human" && source.input ? api.inputUserTerminal : rejected,
+      inputUserTerminal: input,
       resizeUserTerminal:
-        source.origin === "human" && source.resize ? api.resizeUserTerminal : rejected,
+        !options.readonly && source.origin === "human" && source.resize
+          ? api.resizeUserTerminal
+          : rejected,
     },
     session,
     source.id,
     renderer,
     options,
   );
+}
+
+/** Each sender captures one revision. Rebinding never replays earlier bytes. */
+export function bindExecutionInput(
+  api: Pick<UserTerminalApi, "inputUserTerminal"> &
+    Partial<Pick<TerminalControlApi, "inputControlledTerminal">>,
+  source: ExecutionStatus,
+  control?: Pick<InputControlStatus, "controller" | "revision" | "frozen"> | null,
+  readonly = false,
+): UserTerminalApi["inputUserTerminal"] {
+  const rejected = () =>
+    Promise.reject(new TerminalInputRejectedError("This execution is read-only"));
+  let input =
+    !readonly && source.origin === "human" && source.input ? api.inputUserTerminal : rejected;
+  if (control !== undefined && !readonly) {
+    input = rejected;
+    const eligibleKind =
+      source.representation === "pty" &&
+      source.backend === "local" &&
+      (source.origin === "human" || (source.origin === "agent" && source.retained));
+    // Current controller authority comes from the separate scoped control
+    // operation, never from a pending output frame's immutable alive field.
+    if (
+      eligibleKind &&
+      control &&
+      control.controller === "human" &&
+      !control.frozen &&
+      api.inputControlledTerminal
+    ) {
+      input = controlledTerminalInput(
+        { inputControlledTerminal: api.inputControlledTerminal },
+        control.revision,
+      );
+    }
+  }
+  return input;
 }

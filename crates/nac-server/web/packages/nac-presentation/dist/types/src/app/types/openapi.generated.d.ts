@@ -224,6 +224,11 @@ export interface components {
             registration?: null | components["schemas"]["McpOAuthRegistrationRequest"];
             scopes?: string[];
         };
+        ControlledTerminalInputRequest: {
+            bytes: number[];
+            expected_revision: string;
+            protocol_version: number;
+        };
         CostTier: {
             cache_read: number;
             cache_write: number;
@@ -503,6 +508,18 @@ export interface components {
             version: number;
         };
         InboxStatus: "pending" | "delivered" | "cancelled";
+        InputController: "human" | "agent";
+        InputControlStatus: {
+            controller: components["schemas"]["InputController"];
+            frozen: boolean;
+            in_flight: boolean;
+            revision: string;
+        };
+        InputDeliveryOutcome: "written" | "rejected" | "unconfirmed";
+        InputDeliveryReceipt: {
+            error?: string | null;
+            outcome: components["schemas"]["InputDeliveryOutcome"];
+        };
         LaggedEvent: {
             missed: number;
         };
@@ -1652,6 +1669,12 @@ export interface components {
             version: number;
         };
         TraditionalChildStatus: "idle" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+        TransferTerminalControlRequest: {
+            acknowledge_uncertainty: boolean;
+            controller: components["schemas"]["InputController"];
+            expected_revision: string;
+            protocol_version: number;
+        };
         UiConfiguration: {
             diagnostic?: string | null;
             orchestration_enabled: boolean;

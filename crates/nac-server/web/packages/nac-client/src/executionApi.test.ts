@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createNacApi } from "./api.js";
 import { createNacClient } from "./nacClient.js";
-import { createExecutionConnection } from "./executionApi.js";
+import { bindExecutionInput, createExecutionConnection } from "./executionApi.js";
 import type { ExecutionFrameResponse, ExecutionStatus } from "./types.js";
 
 const source: ExecutionStatus = {
@@ -131,5 +131,53 @@ describe("existing execution observation", () => {
       "https://example.test/prefix/sessions/session%2Fid/executions/execution%2Finstance/stop",
     );
     expect(calls.at(-1)?.method).toBe("POST");
+  });
+  it("binds literal human input to current retained-agent ownership despite stale frame liveness", async () => {
+    const api = {
+      inputUserTerminal: vi.fn(async () => {}),
+      inputControlledTerminal: vi.fn(async () => ({ outcome: "written" as const, error: null })),
+    };
+    const retained = {
+      ...source,
+      origin: "agent" as const,
+      representation: "pty" as const,
+      retained: true,
+      alive: false,
+    };
+    const human = bindExecutionInput(api, retained, {
+      controller: "human",
+      revision: "9007199254740993",
+      frozen: false,
+    });
+    const bytes = Array.from(new TextEncoder().encode("π<RET>\r"));
+    await human("session/id", retained.id, { protocol_version: 1, bytes });
+    expect(api.inputControlledTerminal).toHaveBeenCalledWith(
+      "session/id",
+      retained.id,
+      { protocol_version: 1, expected_revision: "9007199254740993", bytes },
+      undefined,
+    );
+    expect(api.inputUserTerminal).not.toHaveBeenCalled();
+    for (const control of [
+      null,
+      { controller: "agent" as const, revision: "2", frozen: false },
+      { controller: "human" as const, revision: "3", frozen: true },
+    ]) {
+      await expect(
+        bindExecutionInput(api, retained, control)("session", retained.id, {
+          protocol_version: 1,
+          bytes,
+        }),
+      ).rejects.toThrow("read-only");
+    }
+    await expect(
+      bindExecutionInput(
+        api,
+        retained,
+        { controller: "human", revision: "4", frozen: false },
+        true,
+      )("session", retained.id, { protocol_version: 1, bytes }),
+    ).rejects.toThrow("read-only");
+    expect(api.inputControlledTerminal).toHaveBeenCalledOnce();
   });
 });

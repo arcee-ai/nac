@@ -2,10 +2,15 @@ import { Cause, Data, Effect, Exit, Option, Scope } from "effect";
 import {
   UserTerminalConnection,
   UserTerminalInputPump,
+  TerminalInputNotSentError,
+  TerminalInputRejectedError,
   type UserTerminalApi,
   type ExecutionApi,
   type ExecutionStatus,
+  type InputControlStatus,
+  type TerminalControlApi,
   createExecutionConnection,
+  bindExecutionInput,
 } from "../../../../packages/nac-client/src/index";
 import { createTerminalRenderer } from "./xtermAdapter";
 import { observeHumanTerminalInput } from "./humanInput";
@@ -15,10 +20,15 @@ export interface TerminalControls {
   adapter: Adapter;
   pump: UserTerminalInputPump;
   restoreFreshInput: () => boolean;
+  hasActiveInput: () => boolean;
+  updateInput: (control: TerminalPorts["inputControl"], paused: boolean) => void;
 }
 interface TerminalPorts {
-  api: UserTerminalApi & Partial<ExecutionApi>;
+  api: UserTerminalApi & Partial<ExecutionApi & TerminalControlApi>;
   source?: ExecutionStatus;
+  readonly?: boolean;
+  inputControl?: Pick<InputControlStatus, "controller" | "revision" | "frozen"> | null;
+  inputPaused?: boolean;
   sessionId: string;
   terminalId: string;
   host: HTMLDivElement;
@@ -62,6 +72,8 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
   let adapter: Adapter | undefined;
   let connected = false;
   let processAlive = false;
+  let inputControl = ports.inputControl;
+  let inputPaused = ports.inputPaused ?? false;
   const disconnected = (cause: unknown) => {
     if (!active()) return;
     connected = false;
@@ -98,11 +110,12 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
       ports.api.stopExecution &&
       ports.api.listExecutions
         ? createExecutionConnection(
-            ports.api as UserTerminalApi & ExecutionApi,
+            ports.api as UserTerminalApi & ExecutionApi & Partial<TerminalControlApi>,
             ports.sessionId,
             ports.source,
             view.renderer,
-            { pageLimit: 32_768 },
+            { pageLimit: 32_768, readonly: ports.readonly },
+            ports.inputControl,
           )
         : new UserTerminalConnection(ports.api, ports.sessionId, ports.terminalId, view.renderer, {
             pageLimit: 32_768,
@@ -111,9 +124,12 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
       // Detach is SDK observer cleanup, never shell/agent cancellation.
       void connection.detach().catch(() => {});
     });
-    const pump = new UserTerminalInputPump(connection, abort.signal);
+    let pump = new UserTerminalInputPump(connection, abort.signal);
+    const retired = new Set<UserTerminalInputPump>();
+    const hasActiveInput = () =>
+      pump.hasActiveInput || [...retired].some((old) => old.hasActiveInput);
     own(() => {
-      if (pump.hasActiveInput || pump.needsAcknowledgement) ports.previousFailure.current = true;
+      if (hasActiveInput() || pump.needsAcknowledgement) ports.previousFailure.current = true;
       pump.dispose();
       ports.controls(null);
     });
@@ -121,15 +137,53 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
       const enabled =
         active() &&
         connected &&
-        processAlive &&
-        ports.source?.input !== false &&
+        !ports.readonly &&
+        !inputPaused &&
+        (inputControl === undefined
+          ? processAlive && ports.source?.input !== false
+          : !!inputControl && inputControl.controller === "human" && !inputControl.frozen) &&
         !ports.previousFailure.current &&
         ports.previousFailure.available !== false &&
         !pump.needsAcknowledgement;
       view.terminal.options.disableStdin = !enabled;
       return enabled;
     };
-    ports.controls({ adapter: view, pump, restoreFreshInput });
+    let rebindInput: (() => void) | undefined;
+    const updateInput: TerminalControls["updateInput"] = (next, paused) => {
+      const changed =
+        inputControl?.controller !== next?.controller ||
+        inputControl?.revision !== next?.revision ||
+        inputControl?.frozen !== next?.frozen ||
+        (inputControl === undefined) !== (next === undefined) ||
+        (inputControl === null) !== (next === null) ||
+        inputPaused !== paused;
+      if (!changed) return;
+      // Drop native composition snapshots/timers along with old queued bytes.
+      rebindInput?.();
+      view.terminal.options.disableStdin = true;
+      if (pump.hasActiveInput || pump.needsAcknowledgement) ports.previousFailure.current = true;
+      if (pump.hasActiveInput) retired.add(pump);
+      pump.dispose(); // Discard pending old-revision bytes before a fresh binding exists.
+      inputControl = next;
+      inputPaused = paused;
+      if (ports.source)
+        connection.replaceInputTransport(
+          bindExecutionInput(ports.api, ports.source, next, ports.readonly),
+        );
+      pump = new UserTerminalInputPump(connection, abort.signal);
+      for (const old of retired) if (!old.hasActiveInput) retired.delete(old);
+      ports.inputFailure(ports.previousFailure.current);
+      restoreFreshInput();
+    };
+    ports.controls({
+      adapter: view,
+      get pump() {
+        return pump;
+      },
+      restoreFreshInput,
+      hasActiveInput,
+      updateInput,
+    });
     own(
       ports.previousFailure.subscribe?.(() => {
         if (!active()) return;
@@ -145,8 +199,11 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
     let resizeRunning = false;
     let latestGeometry: { cols: number; rows: number } | null = null;
     const resize = Effect.suspend(() => {
-      if (ports.source && ports.source.origin !== "human" && ports.source.resize === false) {
-        view.terminal.resize(ports.source.cols, ports.source.rows);
+      if (
+        ports.readonly ||
+        (ports.source && ports.source.origin !== "human" && ports.source.resize === false)
+      ) {
+        if (ports.source) view.terminal.resize(ports.source.cols, ports.source.rows);
         return Effect.void;
       }
       const geometry = view.fit();
@@ -182,7 +239,8 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
       if (
         !active() ||
         !connected ||
-        ports.source?.input === false ||
+        ports.readonly ||
+        inputPaused ||
         view.terminal.options.disableStdin ||
         ports.previousFailure.current ||
         ports.previousFailure.available === false ||
@@ -190,13 +248,22 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
         textarea.ownerDocument.activeElement !== textarea
       )
         return;
+      const sender = pump;
       run(
-        operation("input", () => pump.send(bytes)).pipe(
+        operation("input", () => sender.send(bytes)).pipe(
           Effect.catchAll((failure) =>
             Effect.sync(() => {
               if (!active()) return;
               ports.notice(message(failure.cause, "Terminal input failed"));
-              if (pump.needsAcknowledgement) {
+              if (
+                failure.cause instanceof TerminalInputNotSentError &&
+                failure.cause.cause instanceof TerminalInputRejectedError
+              ) {
+                // A definite rejection discarded its queue and wrote no bytes.
+                // Permit only fresh events; existing uncertainty remains sealed.
+                sender.acknowledgeFailure();
+                restoreFreshInput();
+              } else if (sender.needsAcknowledgement) {
                 ports.previousFailure.current = true;
                 view.terminal.options.disableStdin = true;
                 ports.inputFailure(true);
@@ -206,7 +273,15 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
         ),
       );
     };
-    own(observeHumanTerminalInput(view.terminal, send));
+    let releaseInput = observeHumanTerminalInput(view.terminal, send);
+    rebindInput = () => {
+      releaseInput();
+      releaseInput = observeHumanTerminalInput(view.terminal, send);
+    };
+    own(() => {
+      releaseInput();
+      rebindInput = undefined;
+    });
     const observer = new ResizeObserver(() => run(resize));
     own(() => observer.disconnect());
     observer.observe(ports.host);
@@ -249,8 +324,10 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
       }),
     );
     if (active()) {
-      connected = false;
-      view.terminal.options.disableStdin = true;
+      // A completed collector is not input authority. Shared input remains
+      // bound to separately queried current control; legacy behavior is kept.
+      if (inputControl === undefined) connected = false;
+      restoreFreshInput();
       ports.phase("Output complete");
     }
   });

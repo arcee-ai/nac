@@ -1,4 +1,7 @@
 export declare const NAC_API_SURFACE: {
+    readonly "GET /sessions/{session_id}/executions/{execution_id}/input-control": "api.getTerminalInputControl";
+    readonly "POST /sessions/{session_id}/executions/{execution_id}/input-control": "api.transferTerminalInputControl";
+    readonly "POST /sessions/{session_id}/executions/{execution_id}/input": "api.inputControlledTerminal";
     readonly "GET /sessions/{session_id}/executions": "api.listExecutions";
     readonly "GET /sessions/{session_id}/executions/history": "api.listExecutionHistory";
     readonly "POST /sessions/{session_id}/executions/{execution_id}/observers": "api.attachExecution";

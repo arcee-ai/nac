@@ -1036,3 +1036,6 @@ mod session_creation_overload;
 mod shell_commands;
 #[path = "tests/terminal_selection.rs"]
 mod terminal_selection;
+
+#[path = "tests/terminal_control.rs"]
+mod terminal_control;

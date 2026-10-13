@@ -1,3 +1,4 @@
+import { createTerminalControlApi } from "./terminalControlApi.js";
 import { createExecutionApi } from "./executionApi.js";
 import { createUserTerminalApi } from "./userTerminalApi.js";
 import { ApiError, type NacClient } from "./nacClient.js";
@@ -168,6 +169,7 @@ export function createNacApi(nacClient: NacClient) {
   return {
     ...createUserTerminalApi(nacClient),
     ...createExecutionApi(nacClient),
+    ...createTerminalControlApi(nacClient),
     submitShellCommand: (id: string, body: ShellCommandRequest, signal?: AbortSignal) =>
       nacClient.submitShellCommand(id, body, signal),
     getShellCommand: (id: string, requestId: string, signal?: AbortSignal) =>

@@ -59,8 +59,11 @@ current retained end was fully searched, rather than promising future output.
 Discovery, reads and searches use ordinary `command_output` agent permissions,
 including configured Deny, Ask and canonical capability revalidation after
 approval. They do not write stdin, stop, retain, launch, recover or wake work.
-A human shell keeps its default input protection. Browser observation and
-model reads do not advance one another's cursors or alter process lifetime.
+Human shells initially advertise `input: false`. An explicit handoff can
+advertise `input: true` while the controller is the agent and input is unfrozen;
+this availability hint grants no policy or retention authority. Reclaim and
+frozen delivery remove the hint. Browser observation and model reads do not
+advance one another's cursors or alter process lifetime.
 Explicit selection preview/send/queue/steer remains a separate evidence
 admission with its existing immutable provenance.
 

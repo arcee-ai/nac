@@ -4,6 +4,7 @@ import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useOpenUserTerminal, useExecutions, useStopExecution } from "./queries";
 import type { ExecutionStatus } from "../../../../packages/nac-client/src/index";
 import { ExecutionLog } from "./ExecutionLog";
+import { useInputOwnership } from "./useInputOwnership";
 import { useTerminalController } from "./useTerminalController";
 
 export interface TerminalSelectionCapture {
@@ -37,7 +38,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection, history }: TerminalPa
   const id = selected ?? terminals[0]?.id;
   const source = historical?.id === id ? historical : terminals.find((item) => item.id === id);
   const observeHistory = (source: ExecutionStatus) => {
-    setHistorical({ ...source, input: false, resize: false, stop: false, retained: false });
+    setHistorical(source);
     setSelected(source.id);
   };
   if (selected == null && source) setSelected(source.id);
@@ -178,7 +179,11 @@ function ExecutionDisplay({
         {` · ${source.backend} · ${source.cwd} · ${source.process_state.replaceAll("_", " ")}`}
         {source.exit_code == null ? "" : ` (${source.exit_code})`}
         {source.output_complete ? " · collection complete" : " · collecting output"}
-        {historical || source.origin !== "human" ? " · Read-only" : ""}
+        {historical ||
+        source.representation === "log" ||
+        (source.origin === "agent" && !source.retained)
+          ? " · Read-only"
+          : ""}
       </p>
       {!historical ? (
         <div>
@@ -225,9 +230,22 @@ function TerminalDisplay({
 }: TerminalPaneProps & { source: ExecutionStatus; historical?: boolean }) {
   const terminalId = source.id;
   const status = { data: source };
-  const [binding] = useState(() => source);
+  const binding = source;
+  const ownership = useInputOwnership(sessionId, source, historical);
   const element = useRef<HTMLDivElement>(null);
-  const controller = useTerminalController(sessionId, terminalId, element, binding);
+  const controller = useTerminalController(sessionId, terminalId, element, binding, {
+    readonly: historical,
+    inputControl: ownership.state ?? null,
+    inputPaused: ownership.pending,
+  });
+  const change = (target: "human" | "agent", acknowledge = false) => {
+    void ownership
+      .change({ controller: target, acknowledge })
+      .then(() => {
+        if (acknowledge) controller.acknowledgeInput();
+      })
+      .catch(() => {});
+  };
   const review = () => {
     const text = controller.selection();
     if (!text || !onReviewSelection) return;
@@ -279,15 +297,76 @@ function TerminalDisplay({
         ) : null}
       </div>
       {controller.notice ? <p role="alert">{controller.notice}</p> : null}
-      {!historical && source.origin === "human" && controller.inputFailure ? (
-        <Button
-          size={ButtonSize.Small}
-          type="button"
-          variant={ButtonVariant.Secondary}
-          onClick={controller.acknowledgeInput}
-        >
-          Acknowledge failure and enable fresh input
-        </Button>
+      {!historical && ownership.offered ? (
+        <div className="flex flex-wrap items-center gap-2" aria-label="Terminal input ownership">
+          <span role="status" aria-label="Input controller">
+            {ownership.loading
+              ? "Checking input control…"
+              : ownership.state
+                ? `Input: ${ownership.state.controller === "human" ? "Human" : "Agent"}${ownership.state.frozen ? " · Frozen" : ""}`
+                : "Input unavailable"}
+          </span>
+          {ownership.state?.controller === "agent" ? (
+            <Button
+              size={ButtonSize.Small}
+              type="button"
+              variant={ButtonVariant.Secondary}
+              disabled={ownership.pending}
+              onClick={() => change("human")}
+            >
+              {source.origin === "human" ? "Reclaim input" : "Take control"}
+            </Button>
+          ) : ownership.state?.controller === "human" ? (
+            <Button
+              size={ButtonSize.Small}
+              type="button"
+              variant={ButtonVariant.Ghost}
+              disabled={
+                ownership.pending ||
+                ownership.state.frozen ||
+                controller.inputFailure ||
+                controller.hasActiveInput()
+              }
+              onClick={() => change("agent")}
+            >
+              Give agent control
+            </Button>
+          ) : null}
+          {(ownership.state?.controller === "human" && ownership.state.frozen) ||
+          controller.inputFailure ? (
+            <Button
+              size={ButtonSize.Small}
+              type="button"
+              variant={ButtonVariant.Secondary}
+              disabled={
+                ownership.pending || ownership.state?.in_flight || controller.hasActiveInput()
+              }
+              onClick={() => {
+                if (ownership.state) change("human", true);
+                else controller.acknowledgeInput();
+              }}
+            >
+              Acknowledge failure and enable fresh input
+            </Button>
+          ) : null}
+          {ownership.unavailable ? (
+            <Button
+              type="button"
+              size={ButtonSize.Small}
+              onClick={() => {
+                void ownership.refresh();
+              }}
+            >
+              Refresh input control
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {!historical && ownership.error ? (
+        <p role="alert">
+          {ownership.error.message} Input ownership was not confirmed; refresh before another
+          action.
+        </p>
       ) : null}
       <div
         ref={element}

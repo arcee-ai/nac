@@ -4474,6 +4474,218 @@
         }
       }
     },
+    "/sessions/{session_id}/executions/{execution_id}/input": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_executions_execution_id_input",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlledTerminalInputRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Explicit written, rejected-before-write or accepted-unconfirmed receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputDeliveryReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or over-limit input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale controller, read-only source or uncertain delivery; never replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/executions/{execution_id}/input-control": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_executions_execution_id_input_control",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current input owner and exact decimal revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputControlStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Read-only or unavailable incarnation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_executions_execution_id_input_control",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferTerminalControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Controller revision advanced; an in-flight write may require acknowledgement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputControlStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid version or revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Controller changed or execution read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/executions/{execution_id}/observers": {
       "post": {
         "tags": [
@@ -10463,6 +10675,33 @@
           }
         }
       },
+      "ControlledTerminalInputRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "expected_revision",
+          "bytes"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          "expected_revision": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "CostTier": {
         "type": "object",
         "description": "One context-priced rate step (models.dev `cost.tiers[]` with\n`tier.type == \"context\"`): applies when the response's prompt tokens\n(input + cache read + cache write) exceed `input_tokens_above`. Rates\nare complete — mappers fill buckets a tier omits from the base rates, so\nselection is a wholesale swap.",
@@ -11892,6 +12131,62 @@
           "delivered",
           "cancelled"
         ]
+      },
+      "InputControlStatus": {
+        "type": "object",
+        "required": [
+          "controller",
+          "revision",
+          "in_flight",
+          "frozen"
+        ],
+        "properties": {
+          "controller": {
+            "$ref": "#/components/schemas/InputController"
+          },
+          "frozen": {
+            "type": "boolean"
+          },
+          "in_flight": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "string",
+            "description": "Decimal on the wire, without JavaScript integer rounding."
+          }
+        }
+      },
+      "InputController": {
+        "type": "string",
+        "enum": [
+          "human",
+          "agent"
+        ]
+      },
+      "InputDeliveryOutcome": {
+        "type": "string",
+        "enum": [
+          "written",
+          "rejected",
+          "unconfirmed"
+        ]
+      },
+      "InputDeliveryReceipt": {
+        "type": "object",
+        "required": [
+          "outcome"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/InputDeliveryOutcome"
+          }
+        }
       },
       "LaggedEvent": {
         "type": "object",
@@ -18149,6 +18444,32 @@
           "cancelled",
           "interrupted"
         ]
+      },
+      "TransferTerminalControlRequest": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "expected_revision",
+          "controller",
+          "acknowledge_uncertainty"
+        ],
+        "properties": {
+          "acknowledge_uncertainty": {
+            "type": "boolean"
+          },
+          "controller": {
+            "$ref": "#/components/schemas/InputController"
+          },
+          "expected_revision": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "UiConfiguration": {
         "type": "object",

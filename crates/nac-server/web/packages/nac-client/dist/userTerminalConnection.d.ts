@@ -4,6 +4,10 @@ export declare const NAC_TERMINAL_PROTOCOL_VERSION: 1;
 export declare class TerminalProtocolError extends Error {
     constructor(message: string);
 }
+export declare class TerminalInputRejectedError extends Error {
+    readonly cause: unknown;
+    constructor(message: string, cause?: unknown);
+}
 export declare class TerminalInputUncertainError extends Error {
     readonly cause: unknown;
     constructor(cause: unknown);
@@ -36,6 +40,7 @@ export declare class UserTerminalConnection {
     private needsReset;
     private sendingInput;
     private inputUncertain;
+    private inputSender;
     constructor(api: Pick<UserTerminalApi, "attachUserTerminal" | "pullUserTerminal" | "detachUserTerminal" | "inputUserTerminal" | "resizeUserTerminal">, sessionId: string, terminalId: string, renderer: UserTerminalRenderer, options?: UserTerminalConnectionOptions);
     get observerId(): string | undefined;
     get isInputUncertain(): boolean;
@@ -81,6 +86,8 @@ export declare class UserTerminalConnection {
     /** Detaches observation only. Closing the process uses the separate terminateTerminal API. */
     detach(signal?: AbortSignal): Promise<void>;
     private cleanupObservers;
+    /** Replace only fresh input; observation and delivery uncertainty persist. */
+    replaceInputTransport(sender: UserTerminalApi["inputUserTerminal"]): void;
     input(bytes: Uint8Array, signal?: AbortSignal): Promise<void>;
     /** Explicit consumer acknowledgement enables fresh input; previously sent bytes are never replayed. */
     acknowledgeInputUncertainty(): void;

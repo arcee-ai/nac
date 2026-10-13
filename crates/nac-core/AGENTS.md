@@ -63,6 +63,11 @@ listed responsibility closed; a new concern requires a real submodule/port:
 - `mcp/file_config.rs` keeps revision-checked TOML editing, publication journal,
   locking, recovery, validation, and probe-facing records together. MCP
   transport invocation belongs elsewhere.
+- `terminal/session.rs` keeps one PTY adapter's construction, child/slave/master
+  ownership, collector lifetime, input-root binding, geometry and explicit cleanup
+  together. These fields share the same incarnation and reaping gate. Controller
+  algorithms, cached process observation, output policy and tests live in focused
+  sibling owners; do not add provider, transport or durable-session policy here.
 - `view.rs` is the typed read-projection facade over session/thread/workset and
   workspace owners; `terminal/output.rs` is the bounded output registry,
   paging/UTF-8 boundary, preview, eviction, and lease owner. Neither may acquire

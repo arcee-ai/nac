@@ -101,3 +101,97 @@ async fn human_activity_then_native_discovery_does_not_admit_context_or_wake_a_m
     drop(agent);
     let _ = std::fs::remove_dir_all(directory);
 }
+
+#[tokio::test]
+async fn human_give_and_reclaim_change_inventory_without_read_acquiring_control() {
+    use crate::terminal::InputController;
+    let (parts, directory) = fixture();
+    let service = &parts.service;
+    let agent = service.agent.lock().await;
+    let runtime = agent.user_terminal_runtime().unwrap();
+    let before_messages = serde_json::to_value(&agent.messages).unwrap();
+    let terminal = service
+        .open_user_terminal(Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    service
+        .write_user_terminal_input(&terminal.id, b"printf 'CONTROL-INVENTORY-READY\\n'\r")
+        .await
+        .unwrap();
+    wait_for(service, &terminal.id, b"CONTROL-INVENTORY-READY").await;
+    let human = service.terminal_input_control(&terminal.id).await.unwrap();
+    assert_eq!(human.controller, InputController::Human);
+    assert!(!human.frozen);
+    let inventory = native(&runtime, "list_executions", json!({})).await;
+    assert_eq!(inventory["executions"][0]["id"], terminal.id);
+    assert_eq!(inventory["executions"][0]["input"], false);
+    assert_eq!(
+        service.terminal_input_control(&terminal.id).await.unwrap(),
+        human
+    );
+
+    let given = service
+        .transfer_terminal_input_control(
+            &terminal.id,
+            human.revision.parse().unwrap(),
+            InputController::Agent,
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(given.controller, InputController::Agent);
+    assert!(!given.frozen);
+    let inventory = native(&runtime, "list_executions", json!({})).await;
+    assert_eq!(inventory["executions"][0]["id"], terminal.id);
+    assert_eq!(inventory["executions"][0]["input"], true);
+    assert_eq!(
+        service.terminal_input_control(&terminal.id).await.unwrap(),
+        given
+    );
+
+    let reclaimed = service
+        .transfer_terminal_input_control(
+            &terminal.id,
+            given.revision.parse().unwrap(),
+            InputController::Human,
+            false,
+        )
+        .await
+        .unwrap();
+    let inventory = native(&runtime, "list_executions", json!({})).await;
+    assert_eq!(inventory["executions"][0]["id"], terminal.id);
+    assert_eq!(inventory["executions"][0]["input"], false);
+    assert_eq!(
+        service.terminal_input_control(&terminal.id).await.unwrap(),
+        reclaimed
+    );
+    assert!(
+        service
+            .user_terminal_status(&terminal.id)
+            .await
+            .unwrap()
+            .alive
+    );
+    assert_eq!(
+        serde_json::to_value(&agent.messages).unwrap(),
+        before_messages
+    );
+    assert!(service.list_direct_inbox().unwrap().is_empty());
+    assert!(service
+        .permission_broker
+        .as_ref()
+        .unwrap()
+        .pending()
+        .is_empty());
+    assert!(service
+        .permission_broker
+        .as_ref()
+        .unwrap()
+        .grants()
+        .unwrap()
+        .is_empty());
+    println!("ALL299 inventory control receipt: id={}; human={human:?}; given={given:?}; reclaimed={reclaimed:?}; input false/true/false; native inventory left control and lifetime unchanged", terminal.id);
+    service.terminate_user_terminal(&terminal.id).await.unwrap();
+    drop(agent);
+    let _ = std::fs::remove_dir_all(directory);
+}

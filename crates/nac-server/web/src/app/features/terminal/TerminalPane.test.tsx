@@ -105,6 +105,31 @@ function fixture(
         },
       ],
     })),
+    inputControlledTerminal: vi.fn<typeof standaloneRuntime.api.inputControlledTerminal>(),
+    getTerminalInputControl: vi.fn(async (_session: string, id: string) => {
+      const found = sources?.find((source) => source.id === id);
+      if (!(found?.alive ?? status.alive))
+        throw new Error("Control unavailable for settled source");
+      return {
+        controller:
+          (found?.origin ?? "human") === "human" ? ("human" as const) : ("agent" as const),
+        revision: "1",
+        in_flight: false,
+        frozen: false,
+      };
+    }),
+    transferTerminalInputControl: vi.fn(
+      async (
+        _session: string,
+        _id: string,
+        body: { controller: "human" | "agent"; expected_revision: string },
+      ) => ({
+        controller: body.controller,
+        revision: String(BigInt(body.expected_revision) + 1n),
+        in_flight: false,
+        frozen: false,
+      }),
+    ),
     getUserTerminal: vi.fn(async () => status),
     openUserTerminal: vi.fn(async () => status),
     attachUserTerminal: vi.fn(async (_session: string, id: string) => ({
@@ -121,6 +146,22 @@ function fixture(
     resizeUserTerminal: vi.fn(async () => {}),
     terminateTerminal: vi.fn(async () => {}),
   };
+  api.inputControlledTerminal = vi.fn(
+    async (
+      session: string,
+      id: string,
+      body: { protocol_version: number; bytes: number[]; expected_revision: string },
+      signal?: AbortSignal,
+    ) => {
+      await api.inputUserTerminal(
+        session,
+        id,
+        { protocol_version: body.protocol_version, bytes: body.bytes },
+        signal,
+      );
+      return { outcome: "written" as const, error: null };
+    },
+  );
   const executionApi = {
     ...api,
     attachExecution: api.attachUserTerminal,
@@ -328,6 +369,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Acknowledge failure and enable fresh input" }),
     );
+    await waitFor(() => expect(renderer.options.disableStdin).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
     await act(async () => {
       renderer.keyboard?.("new\r");
@@ -363,6 +405,7 @@ describe("terminal pane lifetime and explicit user actions", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Acknowledge failure and enable fresh input" }),
     );
+    await waitFor(() => expect(renderer.options.disableStdin).toBe(false));
     await act(async () => renderer.keyboard?.("fresh\r"));
     expect(f.api.inputUserTerminal).toHaveBeenCalledTimes(2);
     expect(f.api.inputUserTerminal.mock.calls[1][2].bytes).toEqual([102, 114, 101, 115, 104, 13]);
@@ -468,7 +511,8 @@ describe("terminal pane lifetime and explicit user actions", () => {
     const f = fixture(terminal, [readOnlySource]);
     await screen.findByText("Connected");
     expect(screen.getByRole("option", { name: /Agent PTY/ })).toBeTruthy();
-    expect(screen.getByText(/Agent execution.*Read-only/)).toBeTruthy();
+    expect(screen.getByLabelText("Input controller").textContent).toBe("Input: Agent");
+    expect(screen.getByRole("button", { name: "Take control" })).toBeTruthy();
     await act(async () => {
       renderer.keyboard?.("must not send\r");
     });
@@ -554,6 +598,8 @@ describe("terminal pane lifetime and explicit user actions", () => {
     expect(renderer.options.disableStdin).toBe(true);
     expect(screen.queryByRole("button", { name: "Close shell" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Review selected text" })).toBeNull();
+    expect(screen.queryByLabelText("Terminal input ownership")).toBeNull();
+    expect(f.api.transferTerminalInputControl).not.toHaveBeenCalled();
     await act(async () => {
       renderer.keyboard?.("historical input forbidden\r");
     });
@@ -563,5 +609,85 @@ describe("terminal pane lifetime and explicit user actions", () => {
     await waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(3));
     await screen.findByText("Connected");
     expect(renderer.options.disableStdin).toBe(false);
+  });
+  it("takes and returns retained agent input without reattaching or replaying literal keys", async () => {
+    const f = fixture(terminal, [readOnlySource]);
+    await screen.findByText("Connected");
+    expect(renderer.options.disableStdin).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Take control" }));
+    await waitFor(() => expect(renderer.options.disableStdin).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    await act(async () => renderer.keyboard?.("π<RET>\r"));
+    expect(f.api.inputControlledTerminal).toHaveBeenCalledOnce();
+    expect(f.api.inputControlledTerminal.mock.calls[0][2]).toEqual({
+      protocol_version: 1,
+      expected_revision: "2",
+      bytes: Array.from(new TextEncoder().encode("π<RET>\r")),
+    });
+    expect(f.api.attachUserTerminal).toHaveBeenCalledOnce();
+    expect(f.api.transferTerminalInputControl.mock.calls[0][2]).toMatchObject({
+      expected_revision: "1",
+      controller: "human",
+      acknowledge_uncertainty: false,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Give agent control" }));
+    await screen.findByRole("button", { name: "Take control" });
+    await act(async () => renderer.keyboard?.("stale\r"));
+    expect(renderer.options.disableStdin).toBe(true);
+    expect(f.api.inputControlledTerminal).toHaveBeenCalledOnce();
+    expect(f.api.attachUserTerminal).toHaveBeenCalledOnce();
+    expect(f.api.openUserTerminal).not.toHaveBeenCalled();
+  });
+  it("reclaims a human shell and ignores late older control data", async () => {
+    const f = fixture();
+    await screen.findByText("Connected");
+    fireEvent.click(screen.getByRole("button", { name: "Give agent control" }));
+    await screen.findByRole("button", { name: "Reclaim input" });
+    expect(renderer.options.disableStdin).toBe(true);
+    // GET still returns revision 1/Human after POST revision 2/Agent.
+    await act(async () => {
+      await f.client.invalidateQueries({
+        queryKey: ["session", "session", "execution", terminal.terminal_id, "input-control"],
+      });
+    });
+    expect(screen.getByLabelText("Input controller").textContent).toBe("Input: Agent");
+    fireEvent.click(screen.getByRole("button", { name: "Reclaim input" }));
+    await waitFor(() => expect(renderer.options.disableStdin).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    await act(async () => renderer.keyboard?.("fresh\r"));
+    expect(f.api.inputControlledTerminal.mock.calls[0][2].expected_revision).toBe("3");
+    expect(f.api.attachUserTerminal).toHaveBeenCalledOnce();
+  });
+  it("reconciles an unknown control transfer without retrying the action", async () => {
+    const f = fixture(terminal, [readOnlySource]);
+    await screen.findByText("Connected");
+    f.api.transferTerminalInputControl.mockRejectedValueOnce(new Error("control reply lost"));
+    fireEvent.click(screen.getByRole("button", { name: "Take control" }));
+    await screen.findByText(/control reply lost/);
+    await waitFor(() => expect(f.api.getTerminalInputControl).toHaveBeenCalledTimes(2));
+    expect(f.api.transferTerminalInputControl).toHaveBeenCalledOnce();
+    expect(renderer.options.disableStdin).toBe(true);
+    expect(f.api.inputControlledTerminal).not.toHaveBeenCalled();
+    expect(f.api.attachUserTerminal).toHaveBeenCalledOnce();
+  });
+  it("keeps definite rejection distinct from unknown delivery and never retries its bytes", async () => {
+    const f = fixture();
+    await screen.findByText("Connected");
+    f.api.inputControlledTerminal.mockResolvedValueOnce({
+      outcome: "rejected",
+      error: "controller changed",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Focus terminal" }));
+    await act(async () => renderer.keyboard?.("rejected\r"));
+    expect(f.api.inputControlledTerminal).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole("button", { name: "Acknowledge failure and enable fresh input" }),
+    ).toBeNull();
+    expect(renderer.options.disableStdin).toBe(false);
+    await act(async () => renderer.keyboard?.("fresh\r"));
+    expect(f.api.inputControlledTerminal).toHaveBeenCalledTimes(2);
+    expect(f.api.inputControlledTerminal.mock.calls[1][2].bytes).toEqual(
+      Array.from(new TextEncoder().encode("fresh\r")),
+    );
   });
 });

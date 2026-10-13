@@ -4,7 +4,7 @@ import { cleanup, render } from "@testing-library/react";
 import { createElement, StrictMode, useRef } from "react";
 import { RuntimeContext } from "@/app/runtime/RuntimeContext";
 import { standaloneRuntime } from "@/app/runtime/nativeRuntime";
-import { openTerminalObservation } from "./browserRuntime";
+import { openTerminalObservation, type TerminalControls } from "./browserRuntime";
 import { useTerminalController } from "./useTerminalController";
 
 const factory = vi.hoisted(() => ({ create: vi.fn() }));
@@ -243,5 +243,153 @@ describe("scoped terminal observation", () => {
       rows: 40,
     });
     await vi.waitFor(() => expect(f.api.pullUserTerminal).toHaveBeenCalledOnce());
+  });
+  it("discards queued input on revision change while preserving observer and unresolved active delivery", async () => {
+    const f = fixture();
+    const active = deferred<{ outcome: "written"; error: null }>();
+    const input = vi.fn<typeof standaloneRuntime.api.inputControlledTerminal>(async () => ({
+      outcome: "written" as const,
+      error: null,
+    }));
+    input.mockReturnValueOnce(active.promise);
+    const source = {
+      id: "terminal",
+      origin: "human" as const,
+      representation: "pty" as const,
+      backend: "local",
+      cwd: "/workspace",
+      alive: true,
+      process_state: "running" as const,
+      input: true,
+      resize: true,
+      stop: true,
+      retained: true,
+      output_complete: false,
+      cols: 80,
+      rows: 24,
+    };
+    const close = openTerminalObservation({
+      ...f.ports,
+      source,
+      inputControl: { controller: "human", revision: "1", frozen: false },
+      api: {
+        ...f.api,
+        inputControlledTerminal: input,
+        attachExecution: f.api.attachUserTerminal,
+        pullExecution: async (...args: Parameters<typeof f.api.pullUserTerminal>) => ({
+          ...(await f.api.pullUserTerminal(...args)),
+          execution: source,
+          segments: [],
+        }),
+        detachExecution: f.api.detachUserTerminal,
+      },
+    });
+    closers.push(close);
+    await vi.waitFor(() => expect(f.api.pullUserTerminal).toHaveBeenCalledOnce());
+    const controls = f.ports.controls.mock.calls.at(-1)![0] as TerminalControls;
+    const first = controls.pump.send(Uint8Array.of(65));
+    const queued = controls.pump.send(Uint8Array.of(66));
+    const rejected = expect(queued).rejects.toThrow("consumer closed");
+    controls.updateInput({ controller: "agent", revision: "2", frozen: false }, false);
+    await rejected;
+    expect(f.ports.previousFailure.current).toBe(true);
+    expect(controls.hasActiveInput()).toBe(true);
+    expect(f.view.terminal.options.disableStdin).toBe(true);
+    controls.updateInput({ controller: "human", revision: "3", frozen: false }, false);
+    expect(controls.restoreFreshInput()).toBe(false);
+    expect(input).toHaveBeenCalledOnce();
+    active.resolve({ outcome: "written", error: null });
+    await first;
+    expect(controls.hasActiveInput()).toBe(false);
+    controls.pump.acknowledgeFailure();
+    f.ports.previousFailure.current = false;
+    expect(controls.restoreFreshInput()).toBe(true);
+    await controls.pump.send(Uint8Array.of(67));
+    expect(input.mock.calls.map((call) => call[2])).toEqual([
+      { protocol_version: 1, expected_revision: "1", bytes: [65] },
+      { protocol_version: 1, expected_revision: "3", bytes: [67] },
+    ]);
+    expect(f.api.attachUserTerminal).toHaveBeenCalledOnce();
+    expect(f.api.detachUserTerminal).not.toHaveBeenCalled();
+  });
+  it("discards a trusted pending composition at controller change while keeping output observation", async () => {
+    const f = fixture();
+    const textarea = f.view.terminal.textarea;
+    document.body.append(textarea);
+    textarea.focus();
+    const listeners = new Map<string, EventListener>();
+    const add = textarea.addEventListener.bind(textarea);
+    const remove = textarea.removeEventListener.bind(textarea);
+    vi.spyOn(textarea, "addEventListener").mockImplementation((name, listener, options) => {
+      listeners.set(name, listener as EventListener);
+      add(name, listener, options);
+    });
+    vi.spyOn(textarea, "removeEventListener").mockImplementation((name, listener, options) => {
+      if (listeners.get(name) === listener) listeners.delete(name);
+      remove(name, listener, options);
+    });
+    const source = {
+      id: "terminal",
+      origin: "human" as const,
+      representation: "pty" as const,
+      backend: "local",
+      cwd: "/workspace",
+      alive: true,
+      process_state: "running" as const,
+      input: true,
+      resize: true,
+      stop: true,
+      retained: true,
+      output_complete: false,
+      cols: 80,
+      rows: 24,
+    };
+    const input = vi.fn<typeof standaloneRuntime.api.inputControlledTerminal>(async () => ({
+      outcome: "written",
+      error: null,
+    }));
+    const close = openTerminalObservation({
+      ...f.ports,
+      source,
+      inputControl: { controller: "human", revision: "1", frozen: false },
+      api: {
+        ...f.api,
+        inputControlledTerminal: input,
+        attachExecution: f.api.attachUserTerminal,
+        pullExecution: async (...args: Parameters<typeof f.api.pullUserTerminal>) => ({
+          ...(await f.api.pullUserTerminal(...args)),
+          execution: source,
+          segments: [],
+        }),
+        detachExecution: f.api.detachUserTerminal,
+      },
+    });
+    closers.push(close);
+    await vi.waitFor(() => expect(f.api.pullUserTerminal).toHaveBeenCalledOnce());
+    const controls = f.ports.controls.mock.calls.at(-1)![0] as TerminalControls;
+    const trusted = (name: string) => listeners.get(name)?.({ isTrusted: true } as Event);
+    trusted("compositionstart");
+    textarea.value = "old composition";
+    trusted("input");
+    trusted("compositionend"); // Its scheduled commit has not run yet.
+    controls.updateInput({ controller: "agent", revision: "2", frozen: false }, false);
+    controls.updateInput({ controller: "human", revision: "3", frozen: false }, false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(input).not.toHaveBeenCalled();
+    trusted("compositionstart");
+    textarea.value = "old compositionfresh π";
+    trusted("input");
+    trusted("compositionend");
+    await vi.waitFor(() => expect(input).toHaveBeenCalledOnce());
+    expect(input.mock.calls[0][2]).toEqual({
+      protocol_version: 1,
+      expected_revision: "3",
+      bytes: Array.from(new TextEncoder().encode("fresh π")),
+    });
+    expect(f.api.attachUserTerminal).toHaveBeenCalledOnce();
+    expect(f.api.detachUserTerminal).not.toHaveBeenCalled();
+    close();
+    expect(listeners.has("compositionstart")).toBe(false);
+    textarea.remove();
   });
 });

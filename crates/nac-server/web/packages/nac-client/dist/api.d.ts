@@ -1103,6 +1103,22 @@ export declare function createNacApi(nacClient: NacClient): {
         boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         events: import("./openapi.generated.js").components["schemas"]["SessionEventEnvelope"][];
     }>;
+    getTerminalInputControl: (session: string, id: string, signal?: AbortSignal) => Promise<{
+        controller: import("./openapi.generated.js").components["schemas"]["InputController"];
+        frozen: boolean;
+        in_flight: boolean;
+        revision: string;
+    }>;
+    transferTerminalInputControl: (session: string, id: string, body: import("./types.js").TransferTerminalControlRequest, signal?: AbortSignal) => Promise<{
+        controller: import("./openapi.generated.js").components["schemas"]["InputController"];
+        frozen: boolean;
+        in_flight: boolean;
+        revision: string;
+    }>;
+    inputControlledTerminal: (session: string, id: string, body: import("./types.js").ControlledTerminalInputRequest, signal?: AbortSignal) => Promise<{
+        error?: string | null;
+        outcome: import("./openapi.generated.js").components["schemas"]["InputDeliveryOutcome"];
+    }>;
     listExecutions: (session: string, signal?: AbortSignal) => Promise<{
         executions: import("./openapi.generated.js").components["schemas"]["ExecutionStatus"][];
         protocol_version: number;

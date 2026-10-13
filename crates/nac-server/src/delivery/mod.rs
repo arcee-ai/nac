@@ -21,3 +21,5 @@ pub(crate) mod workspace;
 
 pub(crate) mod execution_history;
 pub(crate) mod executions;
+
+pub(crate) mod terminal_control;

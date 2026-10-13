@@ -1,11 +1,16 @@
 import { type RefObject } from "react";
-import type { ExecutionStatus } from "../../../../packages/nac-client/src/index";
-export declare function useTerminalController(sessionId: string, terminalId: string, element: RefObject<HTMLDivElement | null>, source?: ExecutionStatus): {
+import type { ExecutionStatus, InputControlStatus } from "../../../../packages/nac-client/src/index";
+export declare function useTerminalController(sessionId: string, terminalId: string, element: RefObject<HTMLDivElement | null>, source?: ExecutionStatus, options?: {
+    readonly?: boolean;
+    inputControl?: InputControlStatus | null;
+    inputPaused?: boolean;
+}): {
     phase: string;
     notice: string;
     inputFailure: boolean;
     reconnect: () => void;
     selection: () => string;
     focus: () => void | undefined;
-    acknowledgeInput: () => void;
+    hasActiveInput: () => boolean;
+    acknowledgeInput: () => boolean;
 };

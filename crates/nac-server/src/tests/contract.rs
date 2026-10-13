@@ -55,6 +55,18 @@ async fn route_health_and_readiness_latency_use_bounded_content_free_labels() {
 }
 
 const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
+    (
+        "GET",
+        "/sessions/{session_id}/executions/{execution_id}/input-control",
+    ),
+    (
+        "POST",
+        "/sessions/{session_id}/executions/{execution_id}/input-control",
+    ),
+    (
+        "POST",
+        "/sessions/{session_id}/executions/{execution_id}/input",
+    ),
     ("DELETE", "/auth/{provider}"),
     ("DELETE", "/auth/{provider}/login/{login_id}"),
     ("DELETE", "/credentials/{name}"),
