@@ -131,6 +131,39 @@ async fn controller_ticket_binds_replacement_and_session_owner() {
     manager.remove_all().await.unwrap();
 }
 
+#[tokio::test]
+async fn prepared_human_control_change_rejects_same_name_process_replacement() {
+    let manager = TerminalManager::for_direct();
+    let backend = backend();
+    let name = manager.next_session_name();
+    manager
+        .create(name.clone(), "sleep 60", None, 80, 24, &backend)
+        .await
+        .unwrap();
+    manager.retain_with_cancellation(&name, None).await.unwrap();
+    let prepared = manager.prepare_control_change(&name, 1).await.unwrap();
+    manager
+        .create(name.clone(), "sleep 60", None, 80, 24, &backend)
+        .await
+        .unwrap();
+    manager.retain_with_cancellation(&name, None).await.unwrap();
+    assert!(manager
+        .transfer_prepared_input_control(&prepared, InputController::Human, false)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("incarnation changed"));
+    assert_eq!(
+        manager
+            .input_control_status(&name)
+            .await
+            .unwrap()
+            .controller,
+        InputController::Agent
+    );
+    manager.remove_all().await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn initial_protocol_keeps_browser_recovery_but_shared_protocol_freezes_server_admission() {
     use std::sync::{mpsc::sync_channel, Mutex};
@@ -254,4 +287,91 @@ async fn initial_protocol_keeps_browser_recovery_but_shared_protocol_freezes_ser
         assert_eq!(*bytes.lock().unwrap(), b"oncefresh");
         manager.remove_all().await.unwrap();
     }
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actual_retained_agent_root_exit_fences_queued_writer_without_manager_refresh() {
+    use std::sync::{mpsc::sync_channel, Mutex};
+    struct Writer {
+        started: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+        bytes: Arc<Mutex<Vec<u8>>>,
+        first: bool,
+    }
+    impl std::io::Write for Writer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.first {
+                self.first = false;
+                self.started.send(()).unwrap();
+                self.release.recv().unwrap();
+            }
+            self.bytes.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let manager = TerminalManager::for_direct();
+    let backend = backend();
+    let name = manager.next_session_name();
+    let info = manager
+        .create(name.clone(), "/bin/sh", None, 80, 24, &backend)
+        .await
+        .unwrap();
+    manager.retain_with_cancellation(&name, None).await.unwrap();
+    let pid = info.pid.unwrap() as libc::pid_t;
+    let (started, started_rx) = sync_channel(1);
+    let (release, release_rx) = sync_channel(1);
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let (first, queued, _native_writer) = {
+        let mut sessions = manager.sessions.lock().await;
+        let session = sessions.get_mut(&name).unwrap();
+        let native = session
+            .replace_input_writer_for_test(Box::new(Writer {
+                started,
+                release: release_rx,
+                bytes: bytes.clone(),
+                first: true,
+            }))
+            .unwrap();
+        let ticket = session
+            .input_control()
+            .ticket(session.output_id(), InputController::Agent)
+            .unwrap();
+        let first = session
+            .enqueue_input(b"in-flight", ticket.clone(), &ThreadCancellation::default())
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let queued = session
+            .enqueue_input(b"after-root-exit", ticket, &ThreadCancellation::default())
+            .unwrap();
+        (first, queued, native)
+    };
+    // The child remains unreaped and its pid pinned. No manager refresh or
+    // synthetic liveness callback is allowed to make the writer test pass.
+    // SAFETY: pid is the exclusive unreaped child spawned by this fixture.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGKILL) }, 0);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while super::super::super::session::root_exit_observation(pid) != Some(true) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    release.send(()).unwrap();
+    assert_eq!(
+        super::super::super::input::await_delivery(first)
+            .await
+            .outcome,
+        super::super::super::InputDeliveryOutcome::Written
+    );
+    let future = super::super::super::input::await_delivery(queued).await;
+    assert_eq!(
+        future.outcome,
+        super::super::super::InputDeliveryOutcome::Rejected
+    );
+    assert_eq!(*bytes.lock().unwrap(), b"in-flight");
+    manager.remove_all().await.unwrap();
 }

@@ -1,6 +1,7 @@
 //! Native, session-bound operations for independently retained human terminals.
-//! Authorization belongs to the session service; these handles never enter the
-//! model tool registry or its textual input/preview path.
+//! Authorization belongs to the session service. Explicitly handed-off model
+//! input uses its separate prepared controller/policy adapter; human bytes stay
+//! literal, and raw human output remains outside model preview authority.
 
 use super::*;
 

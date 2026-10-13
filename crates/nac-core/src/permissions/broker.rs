@@ -49,6 +49,24 @@ impl PermissionBroker {
         .await?
     }
 
+    /// Metadata handoff grants no model authorization. A new human input
+    /// capability must still honor deterministic target Deny; Ask is skipped
+    /// only for this private service-issued, invocation-only capability.
+    pub(crate) fn authorize_submitted_terminal_control(
+        &self,
+        submission: &crate::session_service::SubmittedTerminalControl,
+    ) -> anyhow::Result<()> {
+        let decision = self
+            .policy
+            .evaluate(&submission.permission_resources(), &[]);
+        if decision.effect == PermissionEffect::Deny {
+            return Err(anyhow::anyhow!(decision.hard_denial.unwrap_or_else(|| {
+                "configured permission rules deny human terminal input control".into()
+            })));
+        }
+        Ok(())
+    }
+
     pub(crate) fn session_config_version(&self) -> i64 {
         self.session_config_version
     }

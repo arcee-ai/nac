@@ -2,6 +2,12 @@
 use super::super::{InputControlStatus, InputController, InputTicket};
 use super::*;
 
+pub(crate) struct PreparedControlChange {
+    pub(crate) id: String,
+    incarnation: String,
+    revision: u64,
+}
+
 impl TerminalManager {
     /// Synchronous native preparation fails before policy if the process map
     /// is busy. No approval can later capture a newer controller implicitly.
@@ -53,8 +59,10 @@ impl TerminalManager {
     }
 
     fn shared_input_eligible(&self, session: &TerminalSession) -> bool {
-        self.preserve_retained_on_settlement
+        cfg!(unix)
+            && self.preserve_retained_on_settlement
             && session.backend_label == "local"
+            && session.shared_input_qualified()
             && (session.is_user_owned() || session.is_retained())
             && session.accepts_user_input()
     }
@@ -71,13 +79,11 @@ impl TerminalManager {
         Ok(session.input_control().status())
     }
 
-    pub(crate) async fn transfer_input_control(
+    pub(crate) async fn prepare_control_change(
         &self,
         name: &str,
         expected: u64,
-        target: InputController,
-        acknowledge: bool,
-    ) -> Result<InputControlStatus> {
+    ) -> Result<PreparedControlChange> {
         let mut sessions = self.sessions.lock().await;
         let session = sessions
             .get_mut(name)
@@ -86,9 +92,50 @@ impl TerminalManager {
         if !self.shared_input_eligible(session) {
             return Err(anyhow!("execution is read-only"));
         }
+        if session.input_control().status().revision != expected.to_string() {
+            return Err(anyhow!(
+                "terminal controller revision changed; refresh before handoff"
+            ));
+        }
+        Ok(PreparedControlChange {
+            id: name.into(),
+            incarnation: session.output_id().into(),
+            revision: expected,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn transfer_input_control(
+        &self,
+        name: &str,
+        expected: u64,
+        target: InputController,
+        acknowledge: bool,
+    ) -> Result<InputControlStatus> {
+        let prepared = self.prepare_control_change(name, expected).await?;
+        self.transfer_prepared_input_control(&prepared, target, acknowledge)
+            .await
+    }
+
+    pub(crate) async fn transfer_prepared_input_control(
+        &self,
+        prepared: &PreparedControlChange,
+        target: InputController,
+        acknowledge: bool,
+    ) -> Result<InputControlStatus> {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .get_mut(&prepared.id)
+            .ok_or_else(|| self.missing_session_error(&prepared.id))?;
+        session.refresh_status();
+        if !self.shared_input_eligible(session) || session.output_id() != prepared.incarnation {
+            return Err(anyhow!(
+                "terminal process incarnation changed or is read-only"
+            ));
+        }
         session
             .input_control()
-            .transfer(expected, target, acknowledge)
+            .transfer(prepared.revision, target, acknowledge)
     }
 
     pub(crate) async fn write_controlled_human_input(

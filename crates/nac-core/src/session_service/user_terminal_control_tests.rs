@@ -121,14 +121,24 @@ async fn explicit_handoff_preserves_configured_input_deny() {
         .retain_with_cancellation(&name, None)
         .await
         .unwrap();
-    service
+    assert!(service
         .transfer_terminal_input_control(&name, 1, InputController::Human, false)
         .await
-        .unwrap();
-    service
-        .transfer_terminal_input_control(&name, 2, InputController::Agent, false)
+        .unwrap_err()
+        .to_string()
+        .contains("deny human terminal input control"));
+    assert_eq!(
+        service
+            .terminal_input_control(&name)
+            .await
+            .unwrap()
+            .revision,
+        "1"
+    );
+    assert!(service
+        .write_controlled_terminal_input(&name, 1, b"human-bypass")
         .await
-        .unwrap();
+        .is_err());
     let result = crate::tools::execute_tool(
         "write_stdin",
         serde_json::json!({"session_id": name, "chars": "printf DENIED<RET>"}),
@@ -256,5 +266,33 @@ async fn retained_agent_human_takeover_and_native_handback_keep_same_pid() {
     assert!(current.retained);
     assert!(service.list_permission_grants().unwrap().is_empty());
     service.terminate_terminal(&name).await.unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn configured_control_deny_preserves_initial_human_ownership_without_ask_or_grants() {
+    let (parts, directory) = fixture_with_policy(
+        None,
+        vec![PermissionRule::new(
+            "terminal_control",
+            "*",
+            PermissionEffect::Deny,
+        )],
+    );
+    let service = &parts.service;
+    let terminal = service
+        .open_user_terminal(Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    assert!(service
+        .transfer_terminal_input_control(&terminal.id, 1, InputController::Agent, false)
+        .await
+        .is_err());
+    let state = service.terminal_input_control(&terminal.id).await.unwrap();
+    assert_eq!(state.controller, InputController::Human);
+    assert_eq!(state.revision, "1");
+    assert!(service.list_permission_requests().unwrap().is_empty());
+    assert!(service.list_permission_grants().unwrap().is_empty());
+    service.terminate_user_terminal(&terminal.id).await.unwrap();
     std::fs::remove_dir_all(directory).unwrap();
 }

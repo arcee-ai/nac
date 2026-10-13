@@ -11,7 +11,9 @@ mod native_owner;
 mod output;
 mod process_observation;
 mod session;
-pub(crate) use manager::{validate_user_geometry, ResolvedUserTerminalLaunch};
+pub(crate) use manager::{
+    validate_user_geometry, PreparedControlChange, ResolvedUserTerminalLaunch,
+};
 pub use manager::{
     ExecutionOrigin, ExecutionProcessState, ExecutionRepresentation, ExecutionStatus,
     TerminalManager, TerminalSelectionError, UserTerminalSelectionPreview,

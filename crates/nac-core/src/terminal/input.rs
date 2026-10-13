@@ -20,6 +20,7 @@ pub(super) enum InputWriteError {
 struct InputPacket {
     bytes: Vec<u8>,
     ticket: InputTicket,
+    agent_cancellation: Option<ThreadCancellation>,
     receipt: oneshot::Sender<Result<(), InputWriteError>>,
 }
 
@@ -40,6 +41,13 @@ impl PtyInput {
         } else {
             InputController::Agent
         });
+        Self::with_control(writer, control)
+    }
+
+    pub(super) fn with_control(
+        writer: Box<dyn Write + Send>,
+        control: InputControl,
+    ) -> Result<Self> {
         let worker_control = control.clone();
         // One active write plus one queued packet (human packets <=16 KiB). No
         // caller waits for queue capacity or holds the process map during I/O.
@@ -49,7 +57,15 @@ impl PtyInput {
             .spawn(move || {
                 let mut writer = writer;
                 while let Ok(packet) = receiver.recv() {
-                    if worker_control.begin(&packet.ticket).is_err() {
+                    let admission = match packet.agent_cancellation.as_ref() {
+                        Some(cancellation) => cancellation
+                            .run_if_active(|| worker_control.begin(&packet.ticket))
+                            .unwrap_or_else(|| {
+                                Err(anyhow!("model input cancelled before writer admission"))
+                            }),
+                        None => worker_control.begin(&packet.ticket),
+                    };
+                    if admission.is_err() {
                         let _ = packet.receipt.send(Err(InputWriteError::Rejected(
                             "terminal input admission was revoked; queued input was not written",
                         )));
@@ -107,6 +123,8 @@ impl PtyInput {
             .run_if_active(|| {
                 input.sender.try_send(InputPacket {
                     bytes: bytes.to_vec(),
+                    agent_cancellation: (ticket.controller == InputController::Agent)
+                        .then(|| cancellation.clone()),
                     ticket,
                     receipt: sender,
                 })

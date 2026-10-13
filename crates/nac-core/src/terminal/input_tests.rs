@@ -244,3 +244,45 @@ async fn queued_packet_rechecks_root_liveness_at_the_writer_boundary() {
     );
     assert_eq!(*bytes.lock().unwrap(), b"in-flight");
 }
+
+#[tokio::test]
+async fn cancelled_model_generation_cannot_commit_queued_future_input() {
+    let (started, started_receiver) = sync_channel(1);
+    let (release, release_receiver) = sync_channel(1);
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let input = PtyInput::new(
+        Box::new(BlockedWriter {
+            started,
+            release: release_receiver,
+            bytes: bytes.clone(),
+            blocked: false,
+        }),
+        false,
+    )
+    .unwrap();
+    let ticket = input
+        .control
+        .ticket("root", InputController::Agent)
+        .unwrap();
+    let cancellation = ThreadCancellation::default();
+    let first = input
+        .enqueue(b"in-flight", ticket.clone(), &cancellation)
+        .unwrap();
+    started_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
+    let queued = input
+        .enqueue(b"cancelled-future", ticket, &cancellation)
+        .unwrap();
+    cancellation.cancel();
+    release.send(()).unwrap();
+    assert_eq!(
+        await_delivery(first).await.outcome,
+        super::super::InputDeliveryOutcome::Written
+    );
+    assert_eq!(
+        await_delivery(queued).await.outcome,
+        super::super::InputDeliveryOutcome::Rejected
+    );
+    assert_eq!(*bytes.lock().unwrap(), b"in-flight");
+}

@@ -28,6 +28,29 @@ impl SubmittedUserTerminal {
     }
 }
 
+/// Invocation-only trusted human control intent. No wire/model constructor.
+pub(crate) struct SubmittedTerminalControl {
+    prepared: crate::terminal::PreparedControlChange,
+    target: crate::terminal::InputController,
+    acknowledge: bool,
+}
+
+impl SubmittedTerminalControl {
+    pub(crate) fn permission_resources(&self) -> Vec<crate::tools::kernel::PermissionResource> {
+        let mut resources = vec![crate::tools::kernel::PermissionResource::new(
+            "terminal_control",
+            &self.prepared.id,
+        )];
+        if self.target == crate::terminal::InputController::Human {
+            resources.push(crate::tools::kernel::PermissionResource::new(
+                "terminal_input",
+                &self.prepared.id,
+            ));
+        }
+        resources
+    }
+}
+
 pub(super) struct UserTerminalContext {
     runtime: crate::tools::ToolRuntime,
     client: crate::model::ModelClient,
@@ -222,8 +245,25 @@ impl SessionService {
         let _host_admission = self.user_terminal_host_admission(false).await?;
         self.require_user_terminal_context()?;
         self.require_current_input_owner().await?;
+        let submission = SubmittedTerminalControl {
+            prepared: self
+                .terminal_manager
+                .prepare_control_change(id, expected)
+                .await?,
+            target,
+            acknowledge,
+        };
+        let broker = self
+            .permission_broker
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("direct permission broker is unavailable"))?;
+        broker.authorize_submitted_terminal_control(&submission)?;
         self.terminal_manager
-            .transfer_input_control(id, expected, target, acknowledge)
+            .transfer_prepared_input_control(
+                &submission.prepared,
+                submission.target,
+                submission.acknowledge,
+            )
             .await
     }
 

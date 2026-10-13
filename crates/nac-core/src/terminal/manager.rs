@@ -34,6 +34,7 @@ mod model_observation;
 
 #[path = "manager_control.rs"]
 mod control;
+pub(crate) use control::PreparedControlChange;
 #[path = "manager_interactive.rs"]
 mod interactive;
 #[path = "manager_one_shot.rs"]
