@@ -68,7 +68,7 @@ dropping it.
 Direct-tool approval authorizes one prepared operation on the session's already
 selected execution backend; it is not a sandbox and never changes that backend.
 Nested shell command bodies, unbindable redirections, and executable wrappers
-are rejected when their paths cannot be authorized independently. Opaque
+are rejected when their paths cannot be authorized independently. Agent opaque
 commands and broad shells or interpreters require explicit approval. Empty
 `write_stdin` input only observes an exact process-local terminal handle;
 nonempty input is a separate one-time approval because the running process may
@@ -90,3 +90,11 @@ path: mutable build scripts, hooks, helpers, and recipes can execute arbitrary
 code. Broad and opaque approvals are invocation-only and never produce partial
 remembered grants. This conservative restriction applies on every backend and
 avoids presenting pathname revalidation as object-level confinement.
+
+Human product actions retain a separate trusted intent. In a supported direct
+primary session, **New shell** and exact human `!` commands skip agent approval
+requests even in Manual mode. Hard/configured Deny, authentication/ownership,
+configuration and selected-backend admission still apply; agent mode and grants
+remain unchanged. Ordinary shell reattach accepts fresh focused typing without
+another enable step. Actual unconfirmed input freezes until explicit recovery
+acknowledgement and is never replayed automatically. See [permissions](permissions.md).

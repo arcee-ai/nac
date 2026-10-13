@@ -1,6 +1,8 @@
 use super::*;
 use crate::agent::{AgentConfig, AgentMode};
-use crate::permissions::{PermissionApprovalMode, PermissionReply};
+use crate::permissions::{
+    PermissionApprovalMode, PermissionEffect, PermissionReply, PermissionRule,
+};
 use nac_contracts::{
     CommandEnvironmentFuture, CommandEnvironmentProvider, CommandEnvironmentSnapshot,
     WorkerEnvironment,
@@ -26,12 +28,42 @@ impl CommandEnvironmentProvider for Environment {
     }
 }
 
+// Pause the real environment snapshot after prepared authorization and before
+// native admission/spawn. No approval lifecycle or timing-only race hook.
+struct PausedEnvironment {
+    barrier: Arc<tokio::sync::Barrier>,
+    fail: bool,
+}
+impl CommandEnvironmentProvider for PausedEnvironment {
+    fn snapshot(&self) -> CommandEnvironmentFuture<'_> {
+        Box::pin(async {
+            self.barrier.wait().await;
+            self.barrier.wait().await;
+            anyhow::ensure!(!self.fail, "test environment unavailable");
+            Ok(CommandEnvironmentSnapshot::empty())
+        })
+    }
+    fn redaction_snapshot(&self) -> Result<CommandEnvironmentSnapshot> {
+        Ok(CommandEnvironmentSnapshot::empty())
+    }
+    fn worker_environment(&self) -> WorkerEnvironment {
+        WorkerEnvironment::default()
+    }
+}
+
 fn fixture() -> (SessionServiceParts, PathBuf) {
     fixture_with_provider(None)
 }
 
 fn fixture_with_provider(
     provider: Option<Arc<dyn CommandEnvironmentProvider>>,
+) -> (SessionServiceParts, PathBuf) {
+    fixture_with_policy(provider, Vec::new())
+}
+
+fn fixture_with_policy(
+    provider: Option<Arc<dyn CommandEnvironmentProvider>>,
+    permission_rules: Vec<PermissionRule>,
 ) -> (SessionServiceParts, PathBuf) {
     let directory = std::env::temp_dir().join(format!("nac-user-terminal-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&directory).unwrap();
@@ -62,7 +94,7 @@ fn fixture_with_provider(
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             light_client: None,
-            permission_rules: Vec::new(),
+            permission_rules,
         },
     )
     .unwrap();
@@ -133,10 +165,6 @@ async fn wait_for(service: &SessionService, id: &str, needle: &[u8]) -> Vec<u8> 
 async fn active_agent_mutex_and_workspace_gate_do_not_block_human_terminal_operations() {
     let (parts, directory) = fixture();
     let service = &parts.service;
-    service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let launch_id = Uuid::new_v4();
     // Simulate the same mutex held across a running model request. Opening,
     // observing and typing must not queue behind it.
@@ -215,58 +243,190 @@ async fn active_agent_mutex_and_workspace_gate_do_not_block_human_terminal_opera
 }
 
 #[tokio::test]
-async fn launch_approval_is_once_only_and_denial_spawns_nothing() {
+async fn human_launch_without_approver_never_asks_saves_or_changes_manual_mode() {
     let (parts, directory) = fixture();
-    let _interactive = parts.service.event_bus.subscribe_assistant_deltas();
-    let launch = parts.service.open_user_terminal(Uuid::new_v4(), 80, 24);
-    let deny = async {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(request) = parts.service.list_permission_requests().unwrap().pop() {
-                    assert!(request
-                        .resources
-                        .iter()
-                        .any(|resource| resource.action == "execute_broad"));
-                    assert!(request
-                        .resources
-                        .iter()
-                        .any(|resource| resource.action == "terminal_input"));
-                    assert!(request
-                        .resources
-                        .iter()
-                        .all(|resource| resource.save_resource.is_none()));
-                    parts
-                        .service
-                        .reply_permission_request(&request.id, PermissionReply::Reject)
-                        .unwrap();
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
+    let service = &parts.service;
+    let mut events = service.event_bus.subscribe();
+    assert!(!service.event_bus.has_interactive_subscribers());
+    let launch_id = Uuid::new_v4();
+    let terminal = tokio::time::timeout(
+        Duration::from_secs(3),
+        service.open_user_terminal(launch_id, 80, 24),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        service
+            .open_user_terminal(launch_id, 80, 24)
+            .await
+            .unwrap()
+            .id,
+        terminal.id
+    );
+    service
+        .write_user_terminal_input(&terminal.id, b"printf HUMAN-FRESH\r")
         .await
         .unwrap();
-    };
-    let (result, ()) = tokio::join!(launch, deny);
-    assert!(result.is_err());
+    wait_for(service, &terminal.id, b"HUMAN-FRESH").await;
+    service
+        .resize_user_terminal(&terminal.id, 91, 31)
+        .await
+        .unwrap();
+    service.terminate_user_terminal(&terminal.id).await.unwrap();
+    assert!(service.list_permission_requests().unwrap().is_empty());
+    assert!(service.list_permission_grants().unwrap().is_empty());
+    assert_eq!(
+        service.permission_approval_mode().await.unwrap(),
+        PermissionApprovalMode::Manual
+    );
+    while let Ok(envelope) = events.try_recv() {
+        assert!(!matches!(
+            envelope.event,
+            crate::events::SessionEvent::PermissionAsked { .. }
+        ));
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn configured_denial_still_rejects_human_launch_without_spawn_or_ask() {
+    for action in ["execute", "execute_broad", "terminal_input", "execute_cwd"] {
+        let (parts, directory) = fixture_with_policy(
+            None,
+            vec![PermissionRule::new(action, "*", PermissionEffect::Deny)],
+        );
+        let result = parts
+            .service
+            .open_user_terminal(Uuid::new_v4(), 80, 24)
+            .await;
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("permission denied"),
+            "{action}"
+        );
+        assert!(parts
+            .service
+            .list_user_terminals()
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(parts.service.list_permission_requests().unwrap().is_empty());
+        assert!(parts.service.list_permission_grants().unwrap().is_empty());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn selected_unsupported_backend_rejects_human_launch_without_local_fallback() {
+    let (mut parts, directory) = fixture();
+    let context = Arc::get_mut(parts.service.user_terminal_context.as_mut().unwrap()).unwrap();
+    context.runtime.backend = Arc::new(crate::sandbox::ExecutionBackend::Ssh(
+        crate::sandbox::SshBackend::new(
+            "unreachable-terminal-host.invalid".into(),
+            directory.clone(),
+        ),
+    ));
+    let error = parts
+        .service
+        .open_user_terminal(Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("selected Local backend"));
     assert!(parts
         .service
         .list_user_terminals()
         .await
         .unwrap()
         .is_empty());
-    assert!(parts.service.list_permission_grants().unwrap().is_empty());
+    assert!(parts.service.list_permission_requests().unwrap().is_empty());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn human_launch_does_not_change_agent_exec_or_nonempty_stdin_authority() {
+    let (parts, directory) = fixture();
+    let service = &parts.service;
+    let terminal = service
+        .open_user_terminal(Uuid::new_v4(), 80, 24)
+        .await
+        .unwrap();
+    let context = service.require_user_terminal_context().unwrap();
+    let _interactive = service.event_bus.subscribe_assistant_deltas();
+    for (tool, input, action) in [
+        (
+            "exec_command",
+            serde_json::json!({"cmd": "echo $HOME"}),
+            "execute_opaque",
+        ),
+        (
+            "write_stdin",
+            serde_json::json!({"session_id": terminal.id, "chars": "printf AGENT-MUST-NOT-RUN\r"}),
+            "terminal_input",
+        ),
+    ] {
+        let invoke = crate::tools::execute_tool(tool, input, &context.runtime, &context.client);
+        tokio::pin!(invoke);
+        let reject = async {
+            loop {
+                if let Some(request) = service.list_permission_requests().unwrap().pop() {
+                    assert_eq!(request.tool, tool);
+                    assert!(request
+                        .resources
+                        .iter()
+                        .any(|resource| resource.action == action));
+                    assert!(request
+                        .resources
+                        .iter()
+                        .all(|resource| resource.save_resource.is_none()));
+                    service
+                        .reply_permission_request(&request.id, PermissionReply::Reject)
+                        .unwrap();
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(3), async {
+            tokio::select! {
+                result = &mut invoke => panic!("{tool} finished without an Ask: {}", result.content.as_text().unwrap()),
+                () = reject => {}
+            }
+            (invoke.await, ())
+        })
+        .await
+        .unwrap();
+        assert!(result.is_error);
+    }
+    for flag in ["human", "origin", "submission"] {
+        for (tool, mut input) in [
+            ("exec_command", serde_json::json!({"cmd": "echo $HOME"})),
+            (
+                "write_stdin",
+                serde_json::json!({"session_id": terminal.id, "chars": "x"}),
+            ),
+        ] {
+            input[flag] = serde_json::json!("human");
+            let result =
+                crate::tools::execute_tool(tool, input, &context.runtime, &context.client).await;
+            assert!(result.is_error);
+            assert!(service.list_permission_requests().unwrap().is_empty());
+        }
+    }
+    assert!(service.list_permission_grants().unwrap().is_empty());
+    assert_eq!(
+        service.permission_approval_mode().await.unwrap(),
+        PermissionApprovalMode::Manual
+    );
+    service.terminate_user_terminal(&terminal.id).await.unwrap();
     std::fs::remove_dir_all(directory).unwrap();
 }
 
 #[tokio::test]
 async fn shutdown_fences_launch_input_resize_and_foreign_handles_remain_opaque() {
     let (parts, directory) = fixture();
-    parts
-        .service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let terminal = parts
         .service
         .open_user_terminal(Uuid::new_v4(), 80, 24)
@@ -322,32 +482,32 @@ async fn shutdown_fences_launch_input_resize_and_foreign_handles_remain_opaque()
 }
 
 #[tokio::test]
-async fn configuration_replacement_during_approval_rejects_the_stale_launch() {
-    let (parts, directory) = fixture();
-    let _interactive = parts.service.event_bus.subscribe_assistant_deltas();
+async fn configuration_replacement_after_authorization_rejects_the_stale_launch() {
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let (parts, directory) = fixture_with_provider(Some(Arc::new(PausedEnvironment {
+        barrier: barrier.clone(),
+        fail: false,
+    })));
     let launch = parts.service.open_user_terminal(Uuid::new_v4(), 80, 24);
     let replace = async {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(request) = parts.service.list_permission_requests().unwrap().pop() {
-                    let snapshot =
-                        sessions::load_session(&directory.join("store.db"), "direct-terminal")
-                            .unwrap();
-                    sessions::update_session_config(&directory.join("store.db"), &snapshot)
-                        .unwrap();
-                    parts
-                        .service
-                        .reply_permission_request(&request.id, PermissionReply::Once)
-                        .unwrap();
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
+        barrier.wait().await;
+        assert!(parts.service.list_permission_requests().unwrap().is_empty());
+        assert!(parts
+            .service
+            .list_user_terminals()
+            .await
+            .unwrap()
+            .is_empty());
+        let snapshot =
+            sessions::load_session(&directory.join("store.db"), "direct-terminal").unwrap();
+        sessions::update_session_config(&directory.join("store.db"), &snapshot).unwrap();
+        barrier.wait().await;
     };
-    let (result, ()) = tokio::join!(launch, replace);
+    let (result, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(launch, replace)
+    })
+    .await
+    .unwrap();
     assert!(result
         .unwrap_err()
         .to_string()
@@ -369,13 +529,36 @@ async fn configuration_replacement_during_approval_rejects_the_stale_launch() {
 }
 
 #[tokio::test]
+async fn shutdown_after_authorization_before_spawn_leaves_no_process() {
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let (parts, directory) = fixture_with_provider(Some(Arc::new(PausedEnvironment {
+        barrier: barrier.clone(),
+        fail: false,
+    })));
+    let launch = parts.service.open_user_terminal(Uuid::new_v4(), 80, 24);
+    let stop = async {
+        barrier.wait().await;
+        parts.service.stop_run_admission().await.unwrap();
+        barrier.wait().await;
+    };
+    let (result, ()) =
+        tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(launch, stop) })
+            .await
+            .unwrap();
+    assert!(result.unwrap_err().to_string().contains("cancelled"));
+    assert!(parts
+        .service
+        .list_user_terminals()
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(parts.service.list_permission_requests().unwrap().is_empty());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
 async fn natural_exit_archives_output_and_releases_lifetime_leases() {
     let (parts, directory) = fixture();
-    parts
-        .service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let terminal = parts
         .service
         .open_user_terminal(Uuid::new_v4(), 80, 24)
@@ -430,10 +613,6 @@ async fn natural_exit_archives_output_and_releases_lifetime_leases() {
 async fn terminal_output_wait_wakes_multiple_observers_and_checks_output_before_waiting() {
     let (parts, directory) = fixture();
     let service = &parts.service;
-    service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let terminal = service
         .open_user_terminal(Uuid::new_v4(), 80, 24)
         .await
@@ -495,10 +674,6 @@ async fn terminal_output_wait_wakes_multiple_observers_and_checks_output_before_
 async fn terminal_output_wait_observes_eof_without_more_bytes_and_remains_owner_scoped() {
     let (parts, directory) = fixture();
     let service = &parts.service;
-    service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let terminal = service
         .open_user_terminal(Uuid::new_v4(), 80, 24)
         .await
@@ -583,10 +758,6 @@ async fn wait_for_settled_user_history(service: &SessionService, id: &str) {
 async fn eviction_after_existing_launch_resolution_never_reanimates_its_handle() {
     let (parts, directory) = fixture();
     let service = &parts.service;
-    service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let launch_id = Uuid::new_v4();
     let old = service.open_user_terminal(launch_id, 80, 24).await.unwrap();
     service.terminate_user_terminal(&old.id).await.unwrap();
@@ -648,10 +819,6 @@ async fn eviction_after_existing_launch_resolution_never_reanimates_its_handle()
 async fn listing_archives_settled_live_terminal_without_invalidating_its_snapshot() {
     let (parts, directory) = fixture();
     let service = &parts.service;
-    service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let mut handles = Vec::new();
     for _ in 0..16 {
         handles.push(
@@ -714,10 +881,6 @@ async fn listing_archives_settled_live_terminal_without_invalidating_its_snapsho
 async fn rendered_selection_preview_remains_independent_of_active_agent_and_workspace_mutation() {
     let (parts, directory) = fixture();
     let service = &parts.service;
-    service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let agent = service.agent.lock().await;
     let shell = service
         .open_user_terminal(Uuid::new_v4(), 80, 24)

@@ -12,6 +12,11 @@ and rich results. Individual families own their native operation and tests.
   share the same prepared behavior.
 - Decode and project resources before policy. Bind/revalidate canonical targets
   after approval and before execution. Visibility is not authorization.
+- Authenticated human product operations use narrow service-issued invocation
+  capabilities through the same prepared kernel. Human launch is absent from
+  model registries; no JSON origin/human flag can select that path. Preserve
+  hard/configured Deny, canonical binding and post-policy revalidation without
+  entering agent approval requests or changing agent-tool authorization.
 - Imported MCP tools may remain dynamic adapters, but `mcp_adapter.rs` must put
   each call through an explicit capability snapshot and permission pipeline.
 - Execution uses the backend and runtime context selected during construction.
@@ -43,6 +48,11 @@ and rich results. Individual families own their native operation and tests.
   capabilities; keep worker and child semantics distinct.
 
 ## Cohesive size exceptions
+
+- `kernel.rs` keeps the registry, prepared invocation, narrow service-issued
+  intent routing, hard/configured policy ordering, canonical revalidation and
+  bounded execution together as one auditable invocation owner. Native tool
+  families and lifecycle capability issuance stay in their respective modules.
 
 - `mutation.rs` is intentionally large because one auditable local owner keeps
   byte/text projection, revision checks, directory-descriptor traversal,

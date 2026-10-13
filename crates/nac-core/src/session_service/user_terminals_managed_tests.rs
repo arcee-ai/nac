@@ -62,10 +62,6 @@ async fn legacy_managed_live_terminal_blocks_prepare_and_retained_completion_rem
     let (mut parts, directory) = fixture();
     parts.service.enable_managed_admission(None);
     let service = &parts.service;
-    service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let terminal = service
         .open_user_terminal(Uuid::new_v4(), 80, 24)
         .await
@@ -168,46 +164,45 @@ async fn legacy_managed_live_terminal_blocks_prepare_and_retained_completion_rem
 }
 
 #[tokio::test]
-async fn managed_approval_retains_host_admission_until_denial() {
-    let (mut parts, directory) = fixture();
+async fn managed_pre_spawn_retains_host_admission_until_launch_rejection() {
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let (mut parts, directory) = fixture_with_provider(Some(Arc::new(PausedEnvironment {
+        barrier: barrier.clone(),
+        fail: true,
+    })));
     parts.service.enable_managed_admission(None);
     let service = &parts.service;
-    let _interactive = service.event_bus.subscribe_assistant_deltas();
     let launch = service.open_user_terminal(Uuid::new_v4(), 80, 24);
-    let reject = async {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(request) = service.list_permission_requests().unwrap().pop() {
-                    let path = directory.join("store.db");
-                    let result = tokio::task::spawn_blocking(move || {
-                        sessions::HostMaintenanceLease::try_acquire(&path)
-                    })
-                    .await
-                    .unwrap();
-                    assert!(
-                        result.is_err(),
-                        "exclusive prepare cannot cross an admitted approval/spawn window"
-                    );
-                    assert!(service.list_user_terminals().await.unwrap().is_empty());
-                    service
-                        .reply_permission_request(&request.id, PermissionReply::Reject)
-                        .unwrap();
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
+    let prepare_during_spawn = async {
+        barrier.wait().await;
+        let path = directory.join("store.db");
+        let result =
+            tokio::task::spawn_blocking(move || sessions::HostMaintenanceLease::try_acquire(&path))
+                .await
+                .unwrap();
+        assert!(
+            result.is_err(),
+            "exclusive prepare cannot cross an admitted pre-spawn window"
+        );
+        assert!(service.list_user_terminals().await.unwrap().is_empty());
+        assert!(service.list_permission_requests().unwrap().is_empty());
+        barrier.wait().await;
     };
-    let (launch, ()) = tokio::join!(launch, reject);
-    assert!(launch.is_err());
+    let (launch, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(launch, prepare_during_spawn)
+    })
+    .await
+    .unwrap();
+    assert!(launch
+        .unwrap_err()
+        .to_string()
+        .contains("environment snapshot"));
     assert!(service.list_user_terminals().await.unwrap().is_empty());
-    // No leaked shared host lease after rejection; prepare now closes admission.
+    // Failed pre-spawn admission releases the host lease; prepare can now close admission.
     assert!(matches!(
         prepare(
             &directory.join("store.db"),
-            &binding("after-denial", 'b'),
+            &binding("after-rejection", 'b'),
             Vec::new()
         ),
         ManagedPrepareOutcome::SafeToStop { .. }
@@ -234,10 +229,6 @@ async fn accepted_replacement_fences_all_old_terminal_service_operations() {
         .service
         .enable_managed_admission(Some(identity(&original)));
     let service = &parts.service;
-    service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let terminal = service
         .open_user_terminal(Uuid::new_v4(), 80, 24)
         .await

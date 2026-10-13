@@ -77,6 +77,11 @@ and [generated API contract](docs/architecture/0002-generated-api-contract.md).
 - Permission ordering, hard denials, canonical resource binding, remembered
   grant scope, and headless fail-closed behavior are safety contracts. Tool
   visibility is never authorization.
+- Authenticated human-initiated product operations never enter the agent
+  approval-request lifecycle. Human intent is invocation-only and service-issued;
+  it never changes agent approval mode or creates remembered grants. Hard and
+  configured Deny, authentication/ownership, canonical resource binding,
+  configuration/readiness, and backend admission remain effective.
 - Local, SSH, and optional Podman are construction-time backend choices.
   Authorization cannot select a different backend or grant sandbox escape.
 - Managed credentials and Exa credentials retain exact-value redaction and

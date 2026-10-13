@@ -292,7 +292,9 @@ test("pane disposal releases observer seats and connected OSC52/OSC8 stays withi
       pane = page.getByRole("region", { name: "Session terminal", exact: true });
       await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     }
-    await pane.getByRole("button", { name: "Enable terminal input", exact: true }).click();
+    await expect(
+      pane.getByRole("button", { name: "Enable terminal input", exact: true }),
+    ).toHaveCount(0);
     await focus(pane);
     const output =
       "\x1b[2J\x1b[H\x1b]52;c;Q0xJUEJPQVJELVNZTlRIRVRJQw==\x07" +

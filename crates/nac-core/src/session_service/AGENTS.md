@@ -20,6 +20,11 @@ durable records; runtime/tool modules own execution internals.
   ownership. Do not present in-memory task tracking as restart-safe.
 - Orchestrator, direct, traditional-child, and managed-orchestrator paths retain
   their distinct topology invariants even when sharing lifecycle helpers.
+- Human product intent is issued here after admission through private,
+  non-deserializable capabilities. Exact shell submission and human terminal
+  launch share prepared policy/binding/revalidation but never create agent Ask
+  requests, change approval mode, or save grants. Preserve denial, stable launch
+  identity, configuration/host leases, native preflight and shutdown fencing.
 - This layer depends inward on sessions/store/runtime contracts, not HTTP DTOs
   or React needs. Delivery-specific mapping belongs in `nac-server`.
 

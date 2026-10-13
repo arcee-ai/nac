@@ -24,6 +24,11 @@ server remains the source of business truth and wire schemas.
   are a distinct durable topology.
 - Preserve navigation, abort signals, polling settlement, optimistic state,
   query invalidation, accessibility labels, and behavior-selection defaults.
+- Human product operations never invoke agent approval. A focused fresh terminal
+  keystroke is intentional input on ordinary attach/reconnect; attaching sends
+  no bytes. Accepted-but-uncertain delivery freezes input until explicit recovery
+  acknowledgement and never auto-replays old input. Recovery is delivery state,
+  not permission; the server retains denial/authentication/backend gates.
 - Generic providers are for genuinely cross-feature browser state. Do not use
   them as a home for one feature's workflow.
 - `src/app/runtime/` owns one immutable consumer binding, private query cache,

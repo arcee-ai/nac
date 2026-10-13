@@ -53,6 +53,7 @@ pub use shell_command_types::{
     DEFAULT_SHELL_TIMEOUT_MS, MAX_SHELL_TIMEOUT_MS,
 };
 pub use shell_output::ShellOutputPage;
+pub(crate) use user_terminals::SubmittedUserTerminal;
 mod transcript_projection;
 mod user_terminals;
 pub use crate::terminal::{

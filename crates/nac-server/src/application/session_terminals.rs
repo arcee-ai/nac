@@ -131,8 +131,8 @@ impl<'a> SessionTerminalApplication<'a> {
                 "terminal geometry is out of bounds",
             ));
         }
-        // Release the attachment gate before a potentially interactive approval
-        // wait. Core revalidates configuration under pre-spawn resource leases.
+        // Core retains Deny and canonical binding without an agent approval
+        // wait, and revalidates configuration under pre-spawn resource leases.
         self.user_service(session_id)
             .await?
             .open_user_terminal(launch_id, cols, rows)

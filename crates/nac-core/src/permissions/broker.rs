@@ -228,6 +228,23 @@ impl PermissionBroker {
             .await
     }
 
+    pub(crate) async fn authorize_submitted_user_terminal(
+        self: &Arc<Self>,
+        resources: &[PermissionResource],
+        context: &crate::tools::kernel::ToolCallContext,
+        cancellation: &crate::tools::ThreadCancellation,
+        _submission: &crate::session_service::SubmittedUserTerminal,
+    ) -> AuthorizationOutcome {
+        self.authorize_invocation(
+            crate::tools::user_terminal::OPEN_USER_TERMINAL,
+            resources,
+            context,
+            cancellation,
+            true,
+        )
+        .await
+    }
+
     async fn authorize_invocation(
         self: &Arc<Self>,
         tool: &str,
@@ -304,7 +321,7 @@ impl PermissionBroker {
             return AuthorizationOutcome::Denied("run was cancelled before approval".to_string());
         }
 
-        // Exact human intent supplies invocation-only approval after policy.
+        // Service-issued human intent supplies invocation-only authority after policy.
         // This path neither reads approval mode nor creates a remembered grant.
         if human_submitted {
             return AuthorizationOutcome::Allowed;

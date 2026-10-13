@@ -14,7 +14,6 @@ for (const mobile of [false, true]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     const session = await createDirectSession(request, harness);
     const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
-    await api.setPermissionApprovalMode(session, "auto_approve");
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
     if (mobile) await page.getByRole("button", { name: "Open panel", exact: true }).click();
     else {
@@ -26,6 +25,10 @@ for (const mobile of [false, true]) {
     await pane.getByRole("button", { name: "New shell", exact: true }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     const shell = (await api.listUserTerminals(session)).terminals[0];
+    const permissions = await api.getPermissions(session);
+    expect(permissions.approval_mode).toBe("manual");
+    expect(permissions.requests).toHaveLength(0);
+    expect(permissions.grants).toHaveLength(0);
     const input = pane.locator(".xterm-helper-textarea");
     await pane.getByRole("button", { name: "Focus terminal" }).click();
     await expect(input).toBeFocused();
@@ -66,7 +69,10 @@ for (const mobile of [false, true]) {
     expect(
       (await api.listUserTerminals(session)).terminals.map((item) => item.terminal_id),
     ).toEqual([shell.terminal_id]);
-    await pane.getByRole("button", { name: "Enable terminal input", exact: true }).click();
+    await expect(
+      pane.getByRole("button", { name: "Enable terminal input", exact: true }),
+    ).toHaveCount(0);
+    await pane.getByRole("button", { name: "Focus terminal", exact: true }).click();
     await page.keyboard.type("printf '\\122\\105\\101\\124\\124\\101\\103\\110\\055\\117\\113\\n'");
     await page.keyboard.press("Enter");
     await expect(accessible).toContainText("REATTACH-OK");
@@ -106,7 +112,6 @@ test("embedded pane resets and replays an actual retention gap", async ({
 }) => {
   const session = await createDirectSession(request, harness);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
-  await api.setPermissionApprovalMode(session, "auto_approve");
   const terminal = await api.openUserTerminal(session, {
     protocol_version: 1,
     launch_id: randomUUID(),
@@ -175,7 +180,6 @@ test.describe("full-screen terminal at browser scale 1.25", () => {
     const file = path.join(harness.runRoot, "workspace/fullscreen.txt");
     await fs.writeFile(file, "SCREEN-ONLY-FIRST\n" + "screen body\n".repeat(40));
     const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
-    await api.setPermissionApprovalMode(session, "auto_approve");
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
     const show = page.getByRole("button", { name: "Show panel", exact: true });
     if (await show.isVisible()) await show.click();

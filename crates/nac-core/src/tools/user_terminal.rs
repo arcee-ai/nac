@@ -159,8 +159,21 @@ fn error(message: impl Into<String>) -> ToolResult {
 mod tests {
     use super::*;
 
+    #[test]
+    fn launch_arguments_cannot_construct_human_intent_or_override_canonical_cwd() {
+        let tool = UserTerminalLaunchTool {
+            expected_config_version: 0,
+        };
+        for field in ["human", "origin", "submission", "cwd"] {
+            let mut input = json!({"terminal_id": "shell", "cols": 80, "rows": 24});
+            input[field] = json!("human");
+            assert!(tool.decode(input).is_err(), "{field}");
+        }
+    }
+
     #[tokio::test]
-    async fn human_launch_is_headless_fail_closed_and_absent_from_model_registry() {
+    async fn launch_without_service_authority_is_headless_fail_closed_and_absent_from_model_registry(
+    ) {
         let model_registry = super::super::worker_tool_registry(true).unwrap();
         assert!(model_registry.snapshot([OPEN_USER_TERMINAL]).is_err());
         let runtime = crate::tools::test_runtime();

@@ -36,10 +36,6 @@ async fn user_terminal_http_protocol_rejects_invalid_requests_and_cross_origin_a
     seed_direct_session(&root, "session");
     let manager = test_manager(&root);
     let service = manager.attach_session("session").await.unwrap();
-    service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let app = router(manager);
     let launch_id = uuid::Uuid::new_v4().to_string();
     let open = serde_json::json!({"protocol_version":1,"launch_id":launch_id,"cols":80,"rows":24});
@@ -51,6 +47,8 @@ async fn user_terminal_http_protocol_rejects_invalid_requests_and_cross_origin_a
         ("rows", serde_json::json!(0)),
         ("rows", serde_json::json!(301)),
         ("extra", serde_json::json!(true)),
+        ("human", serde_json::json!(true)),
+        ("origin", serde_json::json!("human")),
     ] {
         let mut invalid = open.clone();
         invalid[field] = value;
@@ -76,6 +74,12 @@ async fn user_terminal_http_protocol_rejects_invalid_requests_and_cross_origin_a
     )
     .await;
     let retry = terminal_json(&app, "POST", "/sessions/session/user-terminals", open).await;
+    assert!(service.list_permission_requests().unwrap().is_empty());
+    assert!(service.list_permission_grants().unwrap().is_empty());
+    assert_eq!(
+        service.permission_approval_mode().await.unwrap(),
+        PermissionApprovalMode::Manual
+    );
     assert_eq!(terminal["terminal_id"], retry["terminal_id"]);
     let id = terminal["terminal_id"].as_str().unwrap();
     let base = format!("/sessions/session/user-terminals/{id}");
@@ -270,10 +274,6 @@ async fn user_terminal_http_handles_are_session_scoped_and_restart_opaque() {
     seed_direct_session(&root, "foreign");
     let manager = test_manager(&root);
     let service = manager.attach_session("owner").await.unwrap();
-    service
-        .set_permission_approval_mode(PermissionApprovalMode::AutoApprove)
-        .await
-        .unwrap();
     let app = router(manager);
     let terminal = terminal_json(&app, "POST", "/sessions/owner/user-terminals", serde_json::json!({"protocol_version":1,"launch_id":uuid::Uuid::new_v4().to_string(),"cols":80,"rows":24})).await;
     let id = terminal["terminal_id"].as_str().unwrap();

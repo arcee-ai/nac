@@ -12,7 +12,11 @@ separate owners.
   overridden by approval or remembered grants.
 - Canonical resource binding must match the operation that eventually executes;
   reject resources that cannot be independently projected or revalidated.
-- Headless execution fails closed when approval is required.
+- Agent execution fails closed when approval is required without an approver.
+  Authenticated human-initiated product operations never enter that agent
+  approval lifecycle: private service-issued intent skips Ask only after hard
+  and configured Deny. It creates no grants and does not read/change answer mode.
+  Broker evaluation retains canonical targets and the selected backend.
 - Remembered grants are scoped to the exact supported resource/operation class.
   Broad/opaque shell authority and nonempty terminal input remain invocation-
   only where the current policy requires it.

@@ -10,6 +10,15 @@ into a human terminal. Human launch runs through the existing tool kernel,
 canonical workspace binding, permission broker and configuration revalidation.
 Approval does not change the selected backend.
 
+Authenticated human-initiated product operations never enter the agent approval-
+request lifecycle. Exact human shell submission and terminal launch use separate
+non-deserializable service-issued intent capabilities through the prepared
+kernel. Hard/configured Deny, canonical binding and post-policy revalidation,
+session/configuration/host ownership, native preflight and selected-backend
+admission remain effective. Human intent skips Ask only after policy, without
+changing approval mode or saving grants. Agent opaque execution and nonempty
+stdin keep ordinary authorization.
+
 Use a versioned HTTP pull protocol for browser observation, through the native
 typed client. Each observer holds at most one sanitized frame until the renderer
 acknowledges processing it. This supplies explicit backpressure using the
@@ -38,6 +47,11 @@ text or interprets key names. The input capability accepts literal bytes with a
 accepted delivery whose completion could not be confirmed. Neither outcome
 authorizes automatically replaying input. Launch authorizes continuing human
 interaction, rather than treating Enter as a per-command permission decision.
+
+Normal attach/reconnect accepts only fresh focused input and sends no automatic
+bytes. Actual accepted-but-unconfirmed delivery freezes input until explicit
+recovery acknowledgement; old bytes are never replayed. This is delivery
+recovery, not agent permission.
 
 Human artifacts share the session's bounded output budget, but are excluded
 from model text paging and previews at artifact creation. That exclusion

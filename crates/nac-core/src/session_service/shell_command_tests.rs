@@ -146,6 +146,8 @@ async fn settled(service: &SessionService, id: &str) -> ShellCommandSnapshot {
 async fn human_shell_executes_once_without_model_or_approval_and_appends_once() {
     let (parts, _) =
         test_direct_active_service("human_shell_once", "session", ModelClient::new_for_test());
+    let mut events = parts.service.event_bus.subscribe();
+    assert!(!parts.service.event_bus.has_interactive_subscribers());
     let command = "  printf 'human-result'; exit 7\n";
     let (accepted, replay) = parts
         .service
@@ -201,6 +203,16 @@ async fn human_shell_executes_once_without_model_or_approval_and_appends_once() 
     assert!(
         matches!(&page.messages[0], Message::User { content } if content.contains("<human_shell_result>"))
     );
+    assert_eq!(
+        parts.service.permission_approval_mode().await.unwrap(),
+        crate::permissions::PermissionApprovalMode::Manual
+    );
+    while let Ok(envelope) = events.try_recv() {
+        assert!(!matches!(
+            envelope.event,
+            crate::events::SessionEvent::PermissionAsked { .. }
+        ));
+    }
     assert!(parts.service.active_run().is_none());
 }
 

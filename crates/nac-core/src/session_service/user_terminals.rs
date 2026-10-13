@@ -5,6 +5,29 @@ use super::*;
 use crate::tools::kernel::{ToolCallContext, ToolRegistry, ToolServices};
 use crate::tools::user_terminal::{UserTerminalLaunchTool, OPEN_USER_TERMINAL};
 
+/// Invocation-only human intent, issued after session and launch admission.
+/// Fields and construction belong to the lifecycle owner; model/client JSON
+/// cannot manufacture this capability or choose another tool to invoke.
+pub(crate) struct SubmittedUserTerminal {
+    terminal_id: String,
+    cols: u16,
+    rows: u16,
+}
+
+impl SubmittedUserTerminal {
+    fn admitted(terminal_id: String, cols: u16, rows: u16) -> Self {
+        Self {
+            terminal_id,
+            cols,
+            rows,
+        }
+    }
+
+    pub(crate) fn tool_input(&self) -> serde_json::Value {
+        serde_json::json!({"terminal_id": self.terminal_id, "cols": self.cols, "rows": self.rows})
+    }
+}
+
 pub(super) struct UserTerminalContext {
     runtime: crate::tools::ToolRuntime,
     client: crate::model::ModelClient,
@@ -81,9 +104,8 @@ impl SessionService {
             .finish()?;
         let snapshot = registry.snapshot([OPEN_USER_TERMINAL])?;
         let result = snapshot
-            .invoke(
-                OPEN_USER_TERMINAL,
-                serde_json::json!({"terminal_id": name, "cols": cols, "rows": rows}),
+            .invoke_submitted_user_terminal(
+                &SubmittedUserTerminal::admitted(name.clone(), cols, rows),
                 ToolServices {
                     runtime: &context.runtime,
                     client: &context.client,

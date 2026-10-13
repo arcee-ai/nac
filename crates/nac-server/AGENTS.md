@@ -20,6 +20,11 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
 - `SessionManager` remains composition/lifecycle state, not a destination for
   unrelated use cases. Add a focused facade and preserve shared gates and exact
   transaction ordering.
+- Authenticated human-initiated product operations never request agent approval.
+  Delivery authenticates and scopes requests; core services issue narrow human
+  capabilities. Preserve Origin/Fetch Metadata checks, session/host ownership,
+  readiness/configuration, hard/configured Deny, and backend admission. Client
+  fields cannot declare trusted origin or human authority.
 - Managed routes are adapters over `nac-managed`; ordinary unmanaged startup
   remains valid.
 - The production bundle is embedded from committed assets and must match web

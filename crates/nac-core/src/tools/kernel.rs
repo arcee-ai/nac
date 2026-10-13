@@ -645,6 +645,13 @@ pub struct ToolSnapshot {
     entries: Vec<Arc<dyn ErasedTool>>,
 }
 
+// Private routing for the two service-issued human capabilities. Ordinary
+// model/native JSON invocation cannot select either authority.
+enum HumanSubmission<'a> {
+    Shell(&'a crate::session_service::SubmittedShell),
+    UserTerminal(&'a crate::session_service::SubmittedUserTerminal),
+}
+
 impl ToolSnapshot {
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         self.entries
@@ -725,7 +732,23 @@ impl ToolSnapshot {
             submission.tool_input(),
             services,
             context,
-            Some(submission),
+            Some(HumanSubmission::Shell(submission)),
+        )
+        .await
+    }
+
+    pub(crate) async fn invoke_submitted_user_terminal(
+        &self,
+        submission: &crate::session_service::SubmittedUserTerminal,
+        services: ToolServices<'_>,
+        context: &ToolCallContext,
+    ) -> ToolResult {
+        self.invoke_with_submission(
+            super::user_terminal::OPEN_USER_TERMINAL,
+            submission.tool_input(),
+            services,
+            context,
+            Some(HumanSubmission::UserTerminal(submission)),
         )
         .await
     }
@@ -736,7 +759,7 @@ impl ToolSnapshot {
         input: Value,
         services: ToolServices<'_>,
         context: &ToolCallContext,
-        submission: Option<&crate::session_service::SubmittedShell>,
+        submission: Option<HumanSubmission<'_>>,
     ) -> ToolResult {
         match self.prepare(name, input, services) {
             Ok(mut prepared) => {
@@ -779,9 +802,19 @@ impl ToolSnapshot {
                 }
                 if let Some(broker) = &services.runtime.permission_broker {
                     let outcome = match submission {
-                        Some(submission) => {
+                        Some(HumanSubmission::Shell(submission)) => {
                             broker
                                 .authorize_submitted_shell(
+                                    &resources,
+                                    context,
+                                    context.cancellation(services.runtime),
+                                    submission,
+                                )
+                                .await
+                        }
+                        Some(HumanSubmission::UserTerminal(submission)) => {
+                            broker
+                                .authorize_submitted_user_terminal(
                                     &resources,
                                     context,
                                     context.cancellation(services.runtime),
