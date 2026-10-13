@@ -2,10 +2,14 @@ import type { UserTerminalRenderer } from "../../../../packages/nac-client/src/i
 const MAX_TEXT = 65_536;
 
 /** Safe bounded text, without VT interpretation, clickable links or HTML. */
-export function createLogRenderer(host: HTMLElement) {
+export function createLogRenderer(
+  host: HTMLElement,
+  onDisplayTruncation?: (truncated: boolean) => void,
+) {
   let decoder = new TextDecoder();
   let text = "";
   let disposed = false;
+  let displayTruncated = false;
   const append = (value: string) => {
     let literal = "";
     for (const character of value) {
@@ -15,9 +19,14 @@ export function createLogRenderer(host: HTMLElement) {
           ? `\\x${code.toString(16).padStart(2, "0")}`
           : character;
     }
-    text = (text + literal).slice(-MAX_TEXT);
+    const combined = text + literal;
+    text = combined.slice(-MAX_TEXT);
     host.textContent = text;
     host.scrollTop = host.scrollHeight;
+    if (combined.length > MAX_TEXT && !displayTruncated) {
+      displayTruncated = true;
+      onDisplayTruncation?.(true);
+    }
   };
   const check = (signal: AbortSignal) => {
     signal.throwIfAborted();
@@ -33,10 +42,16 @@ export function createLogRenderer(host: HTMLElement) {
       decoder = new TextDecoder();
       text = "";
       host.textContent = "";
+      displayTruncated = false;
+      // A new connection resets the prior view's notice even before any bytes.
+      onDisplayTruncation?.(false);
     },
   };
   return {
     renderer,
+    get displayTruncated() {
+      return displayTruncated;
+    },
     finish: () => {
       if (!disposed) append(decoder.decode());
     },

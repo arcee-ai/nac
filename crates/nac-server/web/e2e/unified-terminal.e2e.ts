@@ -148,7 +148,8 @@ for (const mobile of [false, true]) {
     const commandId = randomUUID();
     await api.submitShellCommand(session, {
       request_id: commandId,
-      command: "printf 'BANG-READY\\n'; sleep 60",
+      command:
+        'python3 -c \'import sys; sys.stdout.write("x" * 65536 + "\\nBANG-READY\\n"); sys.stdout.flush()\'; sleep 60',
       timeout_ms: 60_000,
     });
     await expect
@@ -170,8 +171,30 @@ for (const mobile of [false, true]) {
     expect(bang.resize).toBe(false);
     await pane.getByRole("combobox", { name: "Shell" }).selectOption(bang.id);
     await expect(pane.getByRole("region", { name: "Execution log" })).toContainText("BANG-READY");
+    await expect(
+      pane.getByText(
+        "Display limit reached. Showing the latest output; earlier text is hidden in this view.",
+      ),
+    ).toBeVisible();
+    expect((await pane.getByRole("region", { name: "Execution log" }).textContent())?.length).toBe(
+      65_536,
+    );
+    await expect(
+      pane.getByText("Earlier output was discarded. The log was reset before replay."),
+    ).toHaveCount(0);
     await pane.getByRole("button", { name: "Reconnect", exact: true }).click();
     await expect(pane.getByRole("region", { name: "Execution log" })).toContainText("BANG-READY");
+    await expect(
+      pane.getByText(
+        "Display limit reached. Showing the latest output; earlier text is hidden in this view.",
+      ),
+    ).toBeVisible();
+    expect((await pane.getByRole("region", { name: "Execution log" }).textContent())?.length).toBe(
+      65_536,
+    );
+    await expect(
+      pane.getByText("Earlier output was discarded. The log was reset before replay."),
+    ).toHaveCount(0);
     expect(
       (await api.listExecutions(session)).executions
         .filter((entry) => entry.alive)

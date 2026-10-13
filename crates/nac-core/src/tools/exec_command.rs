@@ -37,13 +37,13 @@ pub fn write_stdin_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "write_stdin".to_string(),
-            description: "Continue a foreground terminal from exec_command tty=true. Empty chars only observe; nonempty chars are a separately approved mutation of the exact process-local terminal handle and may be interpreted by that process as commands. Such approval is once-only and cannot create a reusable grant. Set retain=true with empty chars to transition a live terminal into a session-owned background handle that survives the end of a direct run. The returned preview cursor advances without deleting retained output; call read_command_output with its output_id and an older cursor to recover omitted text."
+            description: "Send input to a live PTY on its exact process-local handle. Set session_id to session_name from exec_command tty=true, or to the id of a supported current-chat PTY from list_executions. In a direct primary, a human PTY accepts model input only after the user explicitly hands the same process to the agent; write_stdin cannot take control. The inventory input hint reports availability, not authorization. Nonempty chars follow ordinary prepared terminal_input policy, including Deny/Ask, and controller/configuration/incarnation revalidation before writing; any approval is invocation-only and cannot create a reusable grant. Pipes and read-only executions cannot receive input. Empty chars only poll agent PTYs; use read_command_output with execution_id for human PTY output. Set retain=true with empty chars to retain a live exec_command PTY across direct run boundaries; handoff itself does not change lifetime. Agent preview cursors advance without deleting retained output; recover omitted text with read_command_output output_id."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string", "description": "Session ID returned by exec_command" },
-                    "chars": { "type": "string", "description": "Empty polls output without mutation. Nonempty input is sent only after a separate once-only approval bound to this exact terminal handle; key tokens such as <RET> are supported." },
+                    "session_id": { "type": "string", "description": "Exact PTY handle: session_name returned by exec_command, or id of a supported current-chat PTY from list_executions. Human PTYs require explicit user handoff to the agent." },
+                    "chars": { "type": "string", "description": "Nonempty input follows ordinary prepared terminal_input policy and controller revalidation; approval, when required, is invocation-only. Key tokens such as <RET> are supported. Empty polls agent PTY output; retrieve human PTY output with read_command_output execution_id." },
                     "retain": { "type": "boolean", "description": "Explicitly retain this live terminal across direct run boundaries (default: false)" },
                     "yield_time_ms": { "type": "number", "description": "Maximum poll duration in milliseconds (default: 500, max: 3600000)" },
                     "max_output_chars": { "type": "number", "description": "Concise preview budget (default: 8000)" }

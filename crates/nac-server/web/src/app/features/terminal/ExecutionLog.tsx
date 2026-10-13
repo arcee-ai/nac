@@ -21,11 +21,12 @@ export function ExecutionLog({
   const [attempt, setAttempt] = useState(0);
   const [phase, setPhase] = useState("Connecting");
   const [notice, setNotice] = useState("");
+  const [displayTruncated, setDisplayTruncated] = useState(false);
   useEffect(() => {
     if (!host.current) return;
     const scope = Effect.runSync(Scope.make());
     const abort = new AbortController();
-    const view = createLogRenderer(host.current);
+    const view = createLogRenderer(host.current, setDisplayTruncated);
     const connection = createExecutionConnection(api, sessionId, binding, view.renderer, {
       pageLimit: 32_768,
     });
@@ -82,6 +83,11 @@ export function ExecutionLog({
         </Button>
       </div>
       {notice ? <p role="alert">{notice}</p> : null}
+      {displayTruncated ? (
+        <p role="status">
+          Display limit reached. Showing the latest output; earlier text is hidden in this view.
+        </p>
+      ) : null}
       <pre
         ref={host}
         tabIndex={0}

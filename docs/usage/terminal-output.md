@@ -62,7 +62,30 @@ approval. They do not write stdin, stop, retain, launch, recover or wake work.
 Human shells initially advertise `input: false`. An explicit handoff can
 advertise `input: true` while the controller is the agent and input is unfrozen;
 this availability hint grants no policy or retention authority. Reclaim and
-frozen delivery remove the hint. Browser observation and model reads do not
+frozen delivery remove the hint.
+
+After the user explicitly chooses **Give agent** for a supported live human
+PTY, pass its existing inventory `id` as `write_stdin.session_id`:
+
+```json
+{"session_id":"<PTY id from list_executions>","chars":"printf 'ready\\n'<RET>","yield_time_ms":50}
+```
+
+For an agent PTY, `session_id` can also be the `session_name` returned by
+`exec_command` with `tty: true`. The handoff keeps the same process and ID;
+it grants no new input permission. Nonempty `chars` use ordinary prepared
+`terminal_input` policy, including Deny and Ask, with controller, configuration
+and process-incarnation revalidation before writing. Approval, when required,
+is invocation-only and creates no reusable grant. `write_stdin` cannot take
+control of a human terminal or send input to a pipe/log or read-only execution.
+Reclaim and frozen delivery stop model input; uncertain bytes are never replayed.
+
+Empty `write_stdin.chars` polls agent PTYs only. Read human PTY output with
+`read_command_output.execution_id`; its raw `output_id` is not a supported
+human-output read capability. Discovery and handoff do not change process
+lifetime, retention or backend.
+
+Browser observation and model reads do not
 advance one another's cursors or alter process lifetime.
 Explicit selection preview/send/queue/steer remains a separate evidence
 admission with its existing immutable provenance.
