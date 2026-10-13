@@ -30,8 +30,8 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
       " tty.setraw(0); os.write(1,b'\\x1b[?1049h\\x1b[2J\\x1b[HLEFT|'+value[:12])",
       " open('screen_prefix_ready','w').write('ready'); end=time.monotonic()+5",
       " while not os.path.isfile('screen_release') and time.monotonic()<end: time.sleep(0.02)",
-      " os.write(1,value[12:]+b'|RIGHT\\x1b[6n'); data=b''; end=time.monotonic()+5",
-      " while not data.endswith(b'R') and time.monotonic()<end:",
+      " os.write(1,value[12:]+b'|RIGHT\\x1b[6n'); data=b''; end=time.monotonic()+8",
+      " while not os.path.isfile('screen_measure_done') and time.monotonic()<end:",
       "  if select.select([0],[],[],0.05)[0]: data+=os.read(0,256)",
       " open('screen_cursor.json','w').write(json.dumps(list(data))); os.write(1,b'\\r\\nAPP-SCREEN-DONE'); geometry()",
       " end=time.monotonic()+8",
@@ -51,6 +51,14 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
   await pane.getByRole("button", { name: "New shell", exact: true }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
+  const inputs: number[][] = [];
+  page.on("request", (sent) => {
+    if (
+      sent.url() === `${harness.baseUrl}/sessions/${session}/user-terminals/${terminal}/input` &&
+      sent.method() === "POST"
+    )
+      inputs.push(sent.postDataJSON().bytes);
+  });
   const started = performance.now();
   const observations: Record<string, unknown> = {};
   try {
@@ -68,18 +76,30 @@ test("managed full-screen APP masking holds a split prefix and exposes its real 
     expect(prefix).not.toContain(canary.slice(0, 12));
     expect(prefix).not.toContain("RIGHT");
     observations.prefixSafeAtMs = performance.now() - started;
+    const beforeQuery = inputs.length;
     await fs.writeFile(path.join(workspace, "screen_release"), "release");
     await expect(accessible).toContainText("LEFT|[REDACTED]|RIGHT");
     observations.completeMaskAtMs = performance.now() - started;
-    // Actual DSR travels renderer→PTY; replacement width deliberately differs
-    // from the original value and may alter arbitrary full-screen layout.
+    // Measure the actual rendered cursor through DOM geometry. Mask replacement
+    // changes its column, but a parsed DSR must never supply human stdin intent.
+    const cursor = pane.locator(".xterm-rows .xterm-cursor");
+    await expect
+      .poll(async () => {
+        const cell = await cursor.boundingBox();
+        const row = await cursor.locator("..").boundingBox();
+        return cell && row && cell.width > 0 ? Math.round((cell.x - row.x) / cell.width) + 1 : null;
+      })
+      .toBe(22);
+    expect(inputs).toHaveLength(beforeQuery);
+    await fs.writeFile(path.join(workspace, "screen_measure_done"), "measured");
     await expect
       .poll(async () =>
         JSON.parse(
           await fs.readFile(path.join(workspace, "screen_cursor.json"), "utf8").catch(() => "null"),
         ),
       )
-      .toEqual(Array.from(new TextEncoder().encode("\x1b[1;22R")));
+      .toEqual([]);
+    expect(inputs).toHaveLength(beforeQuery);
     observations.originalWidth = canary.length;
     observations.maskWidth = "[REDACTED]".length;
     observations.actualCursorColumn = 22;

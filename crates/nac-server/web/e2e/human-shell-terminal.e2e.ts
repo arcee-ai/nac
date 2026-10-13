@@ -286,12 +286,24 @@ test("reattach observation sends no retained terminal-query replies before focus
   await page
     .context()
     .grantPermissions(["clipboard-read", "clipboard-write"], { origin: harness.baseUrl });
-  await page.evaluate(async () =>
-    (
-      navigator as unknown as { clipboard: { writeText(text: string): Promise<void> } }
-    ).clipboard.writeText("printf 'paste Ω中' > query-paste"),
+  const pasteCommand = "printf 'paste Ω中' > query-paste";
+  await page.evaluate(
+    async (text) =>
+      (
+        navigator as unknown as { clipboard: { writeText(text: string): Promise<void> } }
+      ).clipboard.writeText(text),
+    pasteCommand,
   );
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+  const beforePaste = inputs.length;
+  // Ctrl+V is literal terminal SYN on Linux. Its browser paste shortcut adds
+  // Shift; Mac uses Command. Require actual clipboard bytes before Enter.
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+Shift+V");
+  await expect
+    .poll(() => {
+      const sent = new TextDecoder().decode(Uint8Array.from(inputs.slice(beforePaste).flat()));
+      return sent === pasteCommand || sent === `\x1b[200~${pasteCommand}\x1b[201~`;
+    })
+    .toBe(true);
   await page.keyboard.press("Enter");
   await expect
     .poll(() =>
