@@ -51,7 +51,7 @@ impl PtyInput {
                 while let Ok(packet) = receiver.recv() {
                     if worker_control.begin(&packet.ticket).is_err() {
                         let _ = packet.receipt.send(Err(InputWriteError::Rejected(
-                            "terminal controller changed; queued input was not written",
+                            "terminal input admission was revoked; queued input was not written",
                         )));
                         continue;
                     }

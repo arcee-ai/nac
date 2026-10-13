@@ -322,7 +322,7 @@ impl TerminalManager {
         self.check_user_name(name)?;
         // Legacy input has no revision. It is valid only for untouched initial
         // human ownership; all shared-input clients must carry an exact fence.
-        self.write_controlled_human_input(name, 1, bytes, cancellation)
+        self.write_initial_human_input(name, bytes, cancellation)
             .await
     }
 

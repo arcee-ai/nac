@@ -322,6 +322,17 @@ impl TerminalSession {
         })
     }
 
+    #[cfg(test)]
+    pub(super) fn replace_input_writer_for_test(
+        &mut self,
+        writer: Box<dyn std::io::Write + Send>,
+    ) -> Result<PtyInput> {
+        Ok(std::mem::replace(
+            &mut self.writer,
+            PtyInput::new(writer, self.user_owned)?,
+        ))
+    }
+
     pub(super) fn input_control(&self) -> &super::controller::InputControl {
         &self.writer.control
     }

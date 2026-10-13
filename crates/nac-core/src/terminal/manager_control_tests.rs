@@ -64,11 +64,17 @@ async fn retained_agent_and_human_handoff_keep_exact_process_and_literal_adapter
         )
         .await
         .unwrap();
+    let state = manager.execution_model_input_state(&human).unwrap();
+    assert_eq!(state.controller, InputController::Human);
+    assert_eq!(state.revision, "1");
     assert!(manager.prepare_model_input(&human).is_err());
     manager
         .transfer_input_control(&human, 1, InputController::Agent, false)
         .await
         .unwrap();
+    let state = manager.execution_model_input_state(&human).unwrap();
+    assert_eq!(state.controller, InputController::Agent);
+    assert_eq!(state.revision, "2");
     let ticket = manager.prepare_model_input(&human).unwrap();
     let human_pid = manager.sessions.lock().await[&human].pid();
     manager
@@ -123,4 +129,129 @@ async fn controller_ticket_binds_replacement_and_session_owner() {
         .await
         .is_err());
     manager.remove_all().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn initial_protocol_keeps_browser_recovery_but_shared_protocol_freezes_server_admission() {
+    use std::sync::{mpsc::sync_channel, Mutex};
+    struct Writer {
+        started: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+        bytes: Arc<Mutex<Vec<u8>>>,
+        first: bool,
+    }
+    impl std::io::Write for Writer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.first {
+                self.first = false;
+                self.started.send(()).unwrap();
+                self.release.recv().unwrap();
+            }
+            self.bytes.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    for legacy in [true, false] {
+        let manager = TerminalManager::for_direct();
+        let backend = backend();
+        let name = manager.user_terminal_name(uuid::Uuid::new_v4());
+        let cancellation = ThreadCancellation::default();
+        manager
+            .create_user_terminal(
+                name.clone(),
+                "/bin/sh",
+                backend.default_terminal_cwd(),
+                80,
+                24,
+                &backend,
+                nac_contracts::CommandEnvironmentSnapshot::empty(),
+                None,
+                &cancellation,
+            )
+            .await
+            .unwrap();
+        let (started, started_rx) = sync_channel(1);
+        let (release, release_rx) = sync_channel(1);
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let _native_writer = manager
+            .sessions
+            .lock()
+            .await
+            .get_mut(&name)
+            .unwrap()
+            .replace_input_writer_for_test(Box::new(Writer {
+                started,
+                release: release_rx,
+                bytes: bytes.clone(),
+                first: true,
+            }))
+            .unwrap();
+        let owner = manager.clone();
+        let handle = name.clone();
+        let write = tokio::spawn(async move {
+            if legacy {
+                owner
+                    .write_user_input(&handle, b"once", &ThreadCancellation::default())
+                    .await
+            } else {
+                owner
+                    .write_controlled_human_input(
+                        &handle,
+                        1,
+                        b"once",
+                        &ThreadCancellation::default(),
+                    )
+                    .await
+            }
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(write
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("unconfirmed"));
+        assert_eq!(
+            manager.input_control_status(&name).await.unwrap().frozen,
+            !legacy
+        );
+        release.send(()).unwrap();
+        if legacy {
+            // Browser acknowledgement enables a new batch; it never resends
+            // the original. The legacy server contract needs no new endpoint.
+            manager
+                .write_user_input(&name, b"fresh", &cancellation)
+                .await
+                .unwrap();
+        } else {
+            assert!(manager
+                .write_controlled_human_input(&name, 1, b"rejected", &cancellation)
+                .await
+                .is_err());
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while manager.input_control_status(&name).await.unwrap().in_flight {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            manager
+                .transfer_input_control(&name, 1, InputController::Human, true)
+                .await
+                .unwrap();
+            manager
+                .write_controlled_human_input(&name, 2, b"fresh", &cancellation)
+                .await
+                .unwrap();
+            assert!(manager
+                .write_user_input(&name, b"legacy-stale", &cancellation)
+                .await
+                .is_err());
+        }
+        assert_eq!(*bytes.lock().unwrap(), b"oncefresh");
+        manager.remove_all().await.unwrap();
+    }
 }
