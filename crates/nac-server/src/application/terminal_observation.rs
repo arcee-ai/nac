@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
-use nac_core::session_service::{SessionService, UserTerminalOutputPage, UserTerminalStatus};
+use nac_core::session_service::{
+    ExecutionStatus, SessionService, UserTerminalOutputPage, UserTerminalStatus,
+};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -37,6 +39,7 @@ pub(crate) struct TerminalFrame {
     pub page: UserTerminalOutputPage,
     pub terminal: UserTerminalStatus,
     pub requires_ack: bool,
+    pub execution: Option<ExecutionStatus>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -56,6 +59,7 @@ struct Observer {
     terminal_id: String,
     service: Arc<SessionService>,
     page_limit: usize,
+    execution: bool,
     state: Mutex<CursorState>,
 }
 
@@ -76,6 +80,27 @@ impl TerminalObservationHub {
         terminal_id: &str,
         service: Arc<SessionService>,
         page_limit: usize,
+    ) -> Result<Uuid, TerminalApplicationError> {
+        self.attach_source(session_id, terminal_id, service, page_limit, false)
+    }
+
+    pub(crate) fn attach_execution(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        service: Arc<SessionService>,
+        page_limit: usize,
+    ) -> Result<Uuid, TerminalApplicationError> {
+        self.attach_source(session_id, terminal_id, service, page_limit, true)
+    }
+
+    fn attach_source(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        service: Arc<SessionService>,
+        page_limit: usize,
+        execution: bool,
     ) -> Result<Uuid, TerminalApplicationError> {
         if !(1..=64 * 1024).contains(&page_limit) {
             return Err(TerminalApplicationError::Invalid(
@@ -109,6 +134,7 @@ impl TerminalObservationHub {
                     terminal_id: terminal_id.to_owned(),
                     service,
                     page_limit,
+                    execution,
                     state: Mutex::new(CursorState {
                         cursor: 0,
                         pending: None,
@@ -213,6 +239,13 @@ impl TerminalObservationHub {
                 state.pending = None;
             }
         }
+        if observer.execution {
+            observer
+                .service
+                .execution_status(&observer.terminal_id)
+                .await
+                .map_err(|_| TerminalApplicationError::Unavailable)?;
+        }
         if let Some(frame) = &state.pending {
             return Ok(frame.clone());
         }
@@ -220,16 +253,50 @@ impl TerminalObservationHub {
         loop {
             // Completion is observed before paging. If EOF is true, its
             // sanitized final append has committed before this page is read.
-            let terminal = observer
-                .service
-                .user_terminal_status(&observer.terminal_id)
-                .await
-                .map_err(|_| TerminalApplicationError::Unavailable)?;
-            let page = observer
-                .service
-                .read_user_terminal_output(&observer.terminal_id, state.cursor, observer.page_limit)
-                .await
-                .map_err(|_| TerminalApplicationError::Unavailable)?;
+            let execution = if observer.execution {
+                Some(
+                    observer
+                        .service
+                        .execution_status(&observer.terminal_id)
+                        .await
+                        .map_err(|_| TerminalApplicationError::Unavailable)?,
+                )
+            } else {
+                None
+            };
+            let terminal = if let Some(execution) = &execution {
+                UserTerminalStatus {
+                    id: execution.id.clone(),
+                    cols: execution.cols,
+                    rows: execution.rows,
+                    alive: execution.alive,
+                    exit_code: execution.exit_code,
+                    output_complete: execution.output_complete,
+                    output_error: execution.output_error.clone(),
+                }
+            } else {
+                observer
+                    .service
+                    .user_terminal_status(&observer.terminal_id)
+                    .await
+                    .map_err(|_| TerminalApplicationError::Unavailable)?
+            };
+            let page = if observer.execution {
+                observer
+                    .service
+                    .read_execution_output(&observer.terminal_id, state.cursor, observer.page_limit)
+                    .await
+            } else {
+                observer
+                    .service
+                    .read_user_terminal_output(
+                        &observer.terminal_id,
+                        state.cursor,
+                        observer.page_limit,
+                    )
+                    .await
+            }
+            .map_err(|_| TerminalApplicationError::Unavailable)?;
             if page.gap
                 || !page.bytes.is_empty()
                 || terminal.output_complete
@@ -239,6 +306,7 @@ impl TerminalObservationHub {
                     requires_ack: page.gap || !page.bytes.is_empty(),
                     page,
                     terminal,
+                    execution,
                 };
                 if frame.requires_ack {
                     state.pending = Some(frame.clone());
@@ -249,11 +317,22 @@ impl TerminalObservationHub {
                 .saturating_duration_since(Instant::now())
                 .as_millis()
                 .min(1000) as u16;
-            observer
-                .service
-                .wait_for_user_terminal_output(&observer.terminal_id, page.retained_end, remaining)
-                .await
-                .map_err(|_| TerminalApplicationError::Unavailable)?;
+            let waited = if observer.execution {
+                observer
+                    .service
+                    .wait_for_execution_output(&observer.terminal_id, page.retained_end, remaining)
+                    .await
+            } else {
+                observer
+                    .service
+                    .wait_for_user_terminal_output(
+                        &observer.terminal_id,
+                        page.retained_end,
+                        remaining,
+                    )
+                    .await
+            };
+            waited.map_err(|_| TerminalApplicationError::Unavailable)?;
         }
     }
 }

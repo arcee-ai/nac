@@ -5,14 +5,14 @@ use std::ops::Range;
 
 const REDACTED: &[u8] = b"[REDACTED]";
 
-struct Pattern {
-    bytes: Vec<u8>,
+pub(super) struct Pattern {
+    pub(super) bytes: Vec<u8>,
     failure: Vec<usize>,
-    prefix: usize,
+    pub(super) prefix: usize,
 }
 
 impl Pattern {
-    fn new(value: &str) -> Self {
+    pub(super) fn new(value: &str) -> Self {
         let bytes = value.as_bytes().to_vec();
         let mut failure = vec![0; bytes.len()];
         let mut prefix = 0;
@@ -32,7 +32,7 @@ impl Pattern {
         }
     }
 
-    fn advance(&mut self, byte: u8) -> bool {
+    pub(super) fn advance(&mut self, byte: u8) -> bool {
         while self.prefix > 0 && byte != self.bytes[self.prefix] {
             self.prefix = self.failure[self.prefix - 1];
         }

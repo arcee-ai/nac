@@ -51,6 +51,8 @@ pub struct TerminalSession {
     /// `terminal_pty_command` get a backend-side kill on session teardown.
     backend_cleanup: Option<(Arc<ExecutionBackend>, String)>,
     durable_cleanup: Option<(PathBuf, String, String)>,
+    pub(super) backend_label: String,
+    pub(super) observation_cwd: String,
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
@@ -61,6 +63,7 @@ impl TerminalSession {
         clippy::too_many_arguments,
         reason = "PTY creation keeps command, geometry, backend, output lease, and environment authority explicit"
     )]
+    #[cfg(test)]
     pub fn spawn(
         name: String,
         command: &str,
@@ -84,6 +87,7 @@ impl TerminalSession {
             cleanup_authority,
             None,
             None,
+            nac_contracts::CommandEnvironmentSnapshot::empty().stream_redactor(),
         )
     }
 
@@ -103,6 +107,7 @@ impl TerminalSession {
         cleanup_authority: Option<(PathBuf, String)>,
         user_output: Option<nac_contracts::CommandOutputRedactor>,
         native_lifetime: Option<super::native_owner::NativeLifetime>,
+        agent_output: nac_contracts::CommandOutputRedactor,
     ) -> Result<Self> {
         let user_owned = user_output.is_some();
         let native_local = user_owned && matches!(backend.as_ref(), ExecutionBackend::Local { .. });
@@ -125,6 +130,7 @@ impl TerminalSession {
             output_registry.create(ArtifactKind::Pty)?
         };
         let output_id = output_lease.output_id().to_string();
+        output_registry.mark_sanitized(&output_id);
 
         let mut envs = if user_owned {
             user_terminal_env()
@@ -146,6 +152,10 @@ impl TerminalSession {
         // backend's terminal_pty_command: explicit cwd if provided, otherwise
         // the backend's default terminal directory. Keep these in sync.
         let resolved_cwd = cwd.unwrap_or_else(|| backend.default_terminal_cwd());
+        let mut cwd_redactor = user_output.as_ref().unwrap_or(&agent_output).fresh();
+        let mut masked_cwd = cwd_redactor.push(resolved_cwd.to_string_lossy().as_bytes());
+        masked_cwd.extend(cwd_redactor.finish());
+        let observation_cwd = String::from_utf8_lossy(&masked_cwd).into_owned();
         let backend_cleanup = pidfile.map(|pidfile| (Arc::clone(backend), pidfile));
         // Prepare every fallible PTY I/O handle before a child or durable
         // cleanup obligation can exist.
@@ -165,7 +175,7 @@ impl TerminalSession {
         let collector = PtyCollector {
             registry: output_registry,
             output_id: output_id.clone(),
-            redactor: user_output,
+            redactor: Some(user_output.unwrap_or(agent_output)),
             alive: Arc::clone(&alive),
             notify: Arc::clone(&notify),
             state: collector_state.clone(),
@@ -285,6 +295,8 @@ impl TerminalSession {
             _telemetry_child: None,
             backend_cleanup,
             durable_cleanup,
+            backend_label: super::manager::observation::backend_label(backend).to_owned(),
+            observation_cwd,
             cwd: resolved_cwd,
             cols,
             rows,

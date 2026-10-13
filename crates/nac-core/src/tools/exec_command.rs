@@ -129,7 +129,7 @@ async fn execute_exec_command_inner(
 
     if !tty {
         let output = manager
-            .exec_one_shot_with_environment(
+            .exec_one_shot_sanitized(
                 &cmd,
                 cwd,
                 120,
@@ -139,21 +139,19 @@ async fn execute_exec_command_inner(
                 &runtime.backend,
                 Some(cancellation),
                 &extra_envs,
+                command_environment.clone(),
             )
             .await;
         if let Some(output_id) = output.output_id.as_deref() {
             runtime.remember_output_environment(output_id, command_environment.clone());
         }
         let is_error = output.status == CommandStatus::SpawnError;
-        return Ok((
-            command_environment.redact(&serde_json::to_string_pretty(&output)?),
-            is_error,
-        ));
+        return Ok((serde_json::to_string_pretty(&output)?, is_error));
     }
 
     let session_name = manager.next_session_name();
     manager
-        .create_with_environment(
+        .create_sanitized(
             session_name.clone(),
             &cmd,
             cwd,
@@ -162,16 +160,14 @@ async fn execute_exec_command_inner(
             &runtime.backend,
             Some(cancellation),
             &extra_envs,
+            command_environment.clone(),
         )
         .await?;
     let output = manager
         .write_stdin(&session_name, "", yield_ms, max_output, Some(cancellation))
         .await?;
     runtime.remember_output_environment(&output.output_id, command_environment.clone());
-    Ok((
-        command_environment.redact(&serde_json::to_string_pretty(&output)?),
-        false,
-    ))
+    Ok((serde_json::to_string_pretty(&output)?, false))
 }
 
 #[cfg(test)]
@@ -209,7 +205,7 @@ pub(crate) async fn execute_write_stdin_with_cancellation(
             output.retained = true;
         }
         let rendered = serde_json::to_string_pretty(&output)?;
-        let redacted = runtime.redact_output(&output.output_id, &rendered)?;
+        let redacted = rendered;
         Ok(redacted)
     }
     .await;
@@ -239,7 +235,7 @@ pub fn execute_read_command_output(args: &Value, runtime: &ToolRuntime) -> ToolR
             .terminal_manager
             .read_output(&output_id, stream, offset, limit)?;
         let rendered = serde_json::to_string_pretty(&page)?;
-        runtime.redact_output(&output_id, &rendered)
+        Ok(rendered)
     })();
 
     match result {

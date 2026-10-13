@@ -1,6 +1,13 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "GET /sessions/{session_id}/executions": "api.listExecutions",
+  "POST /sessions/{session_id}/executions/{execution_id}/observers": "api.attachExecution",
+  "POST /sessions/{session_id}/executions/{execution_id}/observers/{observer_id}/read":
+    "api.pullExecution",
+  "DELETE /sessions/{session_id}/executions/{execution_id}/observers/{observer_id}":
+    "api.detachExecution",
+  "POST /sessions/{session_id}/executions/{execution_id}/stop": "api.stopExecution",
   "POST /sessions/{session_id}/user-commands": "api.submitShellCommand",
   "GET /sessions/{session_id}/user-commands/{request_id}": "api.getShellCommand",
   "POST /sessions/{session_id}/user-commands/{request_id}/cancel": "api.cancelShellCommand",

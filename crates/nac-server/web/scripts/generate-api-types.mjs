@@ -134,6 +134,8 @@ const clientSchemaRoots = [
   "ShellCommandRequest",
   "ShellCommandSnapshot",
   "ShellOutputPage",
+  "ExecutionListResponse",
+  "ExecutionFrameResponse",
 ];
 
 const document = JSON.parse(await readFile(inputPath, "utf8"));

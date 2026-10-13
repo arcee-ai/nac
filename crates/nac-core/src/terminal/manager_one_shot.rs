@@ -38,10 +38,6 @@ impl TerminalManager {
         clippy::too_many_arguments,
         reason = "one-shot execution keeps backend, bounds, cancellation, and environment explicit"
     )]
-    #[expect(
-        clippy::expect_used,
-        reason = "the child command configures piped stdout and stderr immediately before spawn"
-    )]
     pub async fn exec_one_shot_with_environment(
         &self,
         cmd: &str,
@@ -53,6 +49,39 @@ impl TerminalManager {
         backend: &Arc<ExecutionBackend>,
         cancellation: Option<&ThreadCancellation>,
         extra_envs: &[(String, String)],
+    ) -> CommandOutput {
+        self.exec_one_shot_sanitized(
+            cmd,
+            cwd,
+            _cols,
+            _rows,
+            yield_ms,
+            max_output,
+            backend,
+            cancellation,
+            extra_envs,
+            nac_contracts::CommandEnvironmentSnapshot::empty(),
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pipe launch binds immutable output policy"
+    )]
+    #[expect(clippy::expect_used, reason = "spawn configured both output pipes")]
+    pub(crate) async fn exec_one_shot_sanitized(
+        &self,
+        cmd: &str,
+        cwd: Option<PathBuf>,
+        _cols: u16,
+        _rows: u16,
+        yield_ms: u64,
+        max_output: usize,
+        backend: &Arc<ExecutionBackend>,
+        cancellation: Option<&ThreadCancellation>,
+        extra_envs: &[(String, String)],
+        environment: nac_contracts::CommandEnvironmentSnapshot,
     ) -> CommandOutput {
         let start = Instant::now();
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
@@ -104,6 +133,47 @@ impl TerminalManager {
             }
         };
         let output_id = output_lease.output_id().to_string();
+        self.output_registry.mark_sanitized(&output_id);
+        let execution = match self.register_pipe(
+            &output_id,
+            environment.redact(
+                &cwd.clone()
+                    .unwrap_or_else(|| backend.default_terminal_cwd())
+                    .to_string_lossy(),
+            ),
+            backend,
+        ) {
+            Ok(execution) => execution,
+            Err(_) => {
+                return CommandOutput {
+                    status: CommandStatus::SpawnError,
+                    exit_code: None,
+                    wall_time_ms: 0,
+                    stdout_preview: String::new(),
+                    stderr_preview: "execution capacity reached".into(),
+                    output_id: None,
+                    stdout_bytes: 0,
+                    stderr_bytes: 0,
+                    truncated: false,
+                    overflowed: false,
+                }
+            }
+        };
+        let mut sanitizer = environment.pipe_redactor();
+        let append = |chunks: Vec<(bool, Vec<u8>)>| -> Result<()> {
+            for (stderr, bytes) in chunks {
+                self.output_registry.append(
+                    &output_id,
+                    if stderr {
+                        OutputStream::Stderr
+                    } else {
+                        OutputStream::Stdout
+                    },
+                    bytes,
+                )?;
+            }
+            Ok(())
+        };
 
         #[cfg(test)]
         let _one_shot_spawn = self.one_shot_spawn_gate.lock().await;
@@ -160,7 +230,8 @@ impl TerminalManager {
                     exit_code: None,
                     wall_time_ms: start.elapsed().as_millis() as u64,
                     stdout_preview: String::new(),
-                    stderr_preview: format!("failed to spawn command: {error}"),
+                    stderr_preview: environment
+                        .redact(&format!("failed to spawn command: {error}")),
                     output_id: None,
                     stdout_bytes: 0,
                     stderr_bytes: 0,
@@ -169,6 +240,7 @@ impl TerminalManager {
                 };
             }
         };
+        execution.started();
         let telemetry_session = self
             .session_resource_authority
             .lock()
@@ -201,6 +273,7 @@ impl TerminalManager {
         let mut exit_code = None;
         let mut runtime_error = None;
         let mut process_exited = false;
+        let mut cleanup_pending = false;
         let mut readers_open = true;
 
         while !process_exited {
@@ -218,7 +291,7 @@ impl TerminalManager {
                 }
             }
 
-            if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+            if execution.cancelled() || cancellation.is_some_and(ThreadCancellation::is_cancelled) {
                 status = CommandStatus::Cancelled;
                 break;
             }
@@ -231,7 +304,7 @@ impl TerminalManager {
                 chunk = receiver.recv(), if readers_open => {
                     match chunk {
                         Some(chunk) => {
-                            if let Err(error) = self.output_registry.append(&output_id, chunk.stream, chunk.bytes) {
+                            if let Err(error) = append(sanitizer.push(chunk.stream == OutputStream::Stderr, &chunk.bytes)) {
                                 status = CommandStatus::SpawnError;
                                 runtime_error = Some(error.to_string());
                                 break;
@@ -266,6 +339,7 @@ impl TerminalManager {
                 }
                 Err(error) => {
                     reader_shutdown.cancel();
+                    cleanup_pending = true;
                     let cleanup_error = format!("command cleanup incomplete: {error}");
                     runtime_error = Some(match runtime_error.take() {
                         Some(existing) => format!("{existing}\n{cleanup_error}"),
@@ -282,6 +356,7 @@ impl TerminalManager {
             if transport_stopped {
                 if let Some(pidfile) = pidfile.as_deref() {
                     if let Err(error) = self.retry_remote_cleanup(pidfile).await {
+                        cleanup_pending = true;
                         runtime_error = Some(match runtime_error.take() {
                             Some(existing) => {
                                 format!("{existing}\nremote command cleanup incomplete: {error}")
@@ -298,6 +373,7 @@ impl TerminalManager {
             }
             if let Some(pidfile) = pidfile.as_deref() {
                 if let Err(error) = self.retry_remote_cleanup(pidfile).await {
+                    cleanup_pending = true;
                     status = CommandStatus::SpawnError;
                     runtime_error = Some(format!(
                         "remote command completion cleanup incomplete: {error}"
@@ -316,6 +392,14 @@ impl TerminalManager {
             process_tree.disarm();
         }
 
+        execution.settle_process(
+            if status == CommandStatus::Completed {
+                exit_code
+            } else {
+                None
+            },
+            cleanup_pending,
+        );
         let preserve_status = !process_exited;
         let record_output_error =
             |message: String, status: &mut CommandStatus, runtime_error: &mut Option<String>| {
@@ -354,11 +438,7 @@ impl TerminalManager {
                     if append_failed {
                         continue;
                     }
-                    if let Err(error) = self.output_registry.append(
-                        &output_id,
-                        chunk.stream,
-                        chunk.bytes,
-                    ) {
+                    if let Err(error) = append(sanitizer.push(chunk.stream == OutputStream::Stderr, &chunk.bytes)) {
                         record_output_error(error.to_string(), &mut status, &mut runtime_error);
                         append_failed = true;
                     }
@@ -366,17 +446,30 @@ impl TerminalManager {
             }
         }
 
+        let mut confirmed_eof = !append_failed;
         for reader in [stdout_reader, stderr_reader] {
             let message = match reader.await {
-                Ok(Ok(())) => None,
+                Ok(Ok(true)) => None,
+                Ok(Ok(false)) => {
+                    confirmed_eof = false;
+                    None
+                }
                 Ok(Err(error)) => Some(format!("failed to read command output: {error}")),
                 Err(error) => Some(format!("command output reader failed: {error}")),
             };
             if let Some(message) = message {
+                confirmed_eof = false;
                 record_output_error(message, &mut status, &mut runtime_error);
             }
         }
 
+        if confirmed_eof {
+            if let Err(error) = append(sanitizer.finish()) {
+                confirmed_eof = false;
+                record_output_error(error.to_string(), &mut status, &mut runtime_error);
+            }
+        }
+        execution.finish((!confirmed_eof).then(|| "command output collection interrupted".into()));
         let stats = self.output_registry.stats(&output_id).unwrap_or(
             crate::terminal::output::ArtifactStats {
                 stdout_bytes: 0,
@@ -394,7 +487,7 @@ impl TerminalManager {
             if !stderr_preview.is_empty() {
                 stderr_preview.push('\n');
             }
-            stderr_preview.push_str(&error);
+            stderr_preview.push_str(&environment.redact(&error));
         }
 
         CommandOutput {

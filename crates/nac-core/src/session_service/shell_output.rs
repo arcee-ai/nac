@@ -30,7 +30,12 @@ impl SessionService {
         let output_id = command.output_id.as_deref().unwrap_or("");
         let mut preview_unavailable = false;
         for preview in [&mut command.stdout, &mut command.stderr] {
-            match runtime.redact_output(output_id, preview) {
+            let masked = if runtime.terminal_manager.output_is_sanitized(output_id) {
+                Ok(preview.clone())
+            } else {
+                runtime.redact_output(output_id, preview)
+            };
+            match masked {
                 Ok(text) => *preview = text.chars().take(4_000).collect(),
                 Err(_) => {
                     preview.clear();
@@ -213,7 +218,11 @@ pub(super) fn redacted_artifact(
         cursor = page.next_offset;
     }
     Ok(Some((
-        runtime.redact_output(output_id, &retained)?,
+        if runtime.terminal_manager.output_is_sanitized(output_id) {
+            retained
+        } else {
+            runtime.redact_output(output_id, &retained)?
+        },
         overflowed,
     )))
 }

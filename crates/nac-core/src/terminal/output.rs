@@ -124,6 +124,7 @@ pub struct OutputBytePage {
     pub gap: bool,
     /// Caught up to the current retained end, not proof that the process exited.
     pub caught_up: bool,
+    pub segments: Vec<OutputSegment>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,6 +184,7 @@ struct Artifact {
     active: bool,
     kind: ArtifactKind,
     model_visible: bool,
+    sanitized: bool,
     chunks: VecDeque<OutputChunk>,
     stdout_bytes: u64,
     stderr_bytes: u64,
@@ -262,6 +264,19 @@ impl OutputRegistry {
         self.create_artifact(kind, true)
     }
 
+    pub(super) fn mark_sanitized(&self, output_id: &str) {
+        if let Some(artifact) = self.lock_inner().artifacts.get_mut(output_id) {
+            artifact.sanitized = true;
+        }
+    }
+
+    pub(super) fn is_sanitized(&self, output_id: &str) -> bool {
+        self.lock_inner()
+            .artifacts
+            .get(output_id)
+            .is_some_and(|artifact| artifact.sanitized)
+    }
+
     /// Human output shares the same bounded retention budget, but its artifact
     /// never grants the model's text-paging or preview capability.
     pub(super) fn create_user_pty(&self) -> Result<OutputArtifactLease> {
@@ -304,6 +319,7 @@ impl OutputRegistry {
             active: true,
             kind,
             model_visible,
+            sanitized: false,
             chunks: VecDeque::new(),
             stdout_bytes: 0,
             stderr_bytes: 0,
@@ -529,13 +545,14 @@ impl OutputRegistry {
         }
         let gap = offset < retained_start;
         let actual_offset = offset.max(retained_start);
-        let bytes = if gap {
-            Vec::new()
+        let (bytes, segments) = if gap {
+            (Vec::new(), Vec::new())
         } else {
-            artifact.bytes_from(stream, actual_offset, limit).0
+            artifact.bytes_from(stream, actual_offset, limit)
         };
         let next_offset = actual_offset + bytes.len() as u64;
         Ok(OutputBytePage {
+            segments,
             bytes,
             offset: actual_offset,
             next_offset,

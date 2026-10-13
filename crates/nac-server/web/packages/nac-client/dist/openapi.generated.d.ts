@@ -348,6 +348,55 @@ export interface components {
             thread_name: string;
         };
         EpisodeStatus: "ok" | "error" | "timed_out" | "cancelled";
+        ExecutionFrameResponse: {
+            bytes: number[];
+            caught_up: boolean;
+            execution: components["schemas"]["ExecutionStatus"];
+            gap: boolean;
+            next_offset: string;
+            observer_id: string;
+            offset: string;
+            protocol_version: number;
+            requires_ack: boolean;
+            retained_end: string;
+            retained_start: string;
+            segments: components["schemas"]["ExecutionOutputSegment"][];
+            terminal: components["schemas"]["UserTerminalResponse"];
+        };
+        ExecutionListResponse: {
+            executions: components["schemas"]["ExecutionStatus"][];
+            protocol_version: number;
+        };
+        ExecutionOrigin: "human" | "agent" | "human_command";
+        ExecutionOutputSegment: {
+            combined_end: string;
+            combined_start: string;
+            sequence: string;
+            stream: string;
+            stream_end: string;
+            stream_start: string;
+        };
+        ExecutionProcessState: "running" | "cleanup_pending" | "settled";
+        ExecutionRepresentation: "pty" | "log";
+        ExecutionStatus: {
+            alive: boolean;
+            backend: string;
+            cols: number;
+            cwd: string;
+            exit_code?: number | null;
+            id: string;
+            input: boolean;
+            origin: components["schemas"]["ExecutionOrigin"];
+            output_complete: boolean;
+            output_error?: string | null;
+            process_state: components["schemas"]["ExecutionProcessState"];
+            representation: components["schemas"]["ExecutionRepresentation"];
+            request_id?: string | null;
+            resize: boolean;
+            retained: boolean;
+            rows: number;
+            stop: boolean;
+        };
         ForkSessionRequest: {
             message_idx: number;
         };

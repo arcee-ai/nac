@@ -679,3 +679,39 @@ fn invalid_stream_is_a_tool_error() {
     assert!(result.is_error);
     assert!(result.content.contains("invalid stream"));
 }
+
+#[tokio::test]
+async fn sanitized_markers_are_not_masked_again_by_tool_results_or_byte_pages() {
+    struct Environment;
+    impl nac_contracts::CommandEnvironmentProvider for Environment {
+        fn snapshot(&self) -> nac_contracts::CommandEnvironmentFuture<'_> {
+            Box::pin(async {
+                Ok(nac_contracts::CommandEnvironmentSnapshot::from_parts(
+                    Default::default(),
+                    vec!["REDACTED".into()],
+                ))
+            })
+        }
+        fn redaction_snapshot(&self) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
+            Ok(nac_contracts::CommandEnvironmentSnapshot::from_parts(
+                Default::default(),
+                vec!["REDACTED".into()],
+            ))
+        }
+        fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
+            Default::default()
+        }
+    }
+    let mut runtime = test_runtime();
+    runtime.command_environment = Some(Arc::new(Environment));
+    let output = execute_exec_command(&json!({"cmd":"printf REDACTED"}), &runtime).await;
+    let value: Value = serde_json::from_str(output.content.as_text().unwrap()).unwrap();
+    assert_eq!(value["stdout_preview"], "[REDACTED]");
+    let page = execute_read_command_output(
+        &json!({"output_id":value["output_id"],"stream":"stdout"}),
+        &runtime,
+    );
+    let value: Value = serde_json::from_str(page.content.as_text().unwrap()).unwrap();
+    assert_eq!(value["content"], "[REDACTED]");
+    runtime.terminal_manager.remove_all().await.unwrap();
+}

@@ -1099,6 +1099,33 @@ export declare function createNacApi(nacClient: NacClient): {
         boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         events: import("./openapi.generated.js").components["schemas"]["SessionEventEnvelope"][];
     }>;
+    listExecutions: (session: string, signal?: AbortSignal) => Promise<{
+        executions: import("./openapi.generated.js").components["schemas"]["ExecutionStatus"][];
+        protocol_version: number;
+    }>;
+    attachExecution: (session: string, id: string, body: import("./types.js").AttachUserTerminalRequest, signal?: AbortSignal) => Promise<{
+        idle_expiry_ms: number;
+        observer_id: string;
+        protocol_version: number;
+        terminal: import("./openapi.generated.js").components["schemas"]["UserTerminalResponse"];
+    }>;
+    pullExecution: (session: string, id: string, observer: string, body: import("./types.js").PullUserTerminalRequest, signal?: AbortSignal) => Promise<{
+        bytes: number[];
+        caught_up: boolean;
+        execution: import("./openapi.generated.js").components["schemas"]["ExecutionStatus"];
+        gap: boolean;
+        next_offset: string;
+        observer_id: string;
+        offset: string;
+        protocol_version: number;
+        requires_ack: boolean;
+        retained_end: string;
+        retained_start: string;
+        segments: import("./openapi.generated.js").components["schemas"]["ExecutionOutputSegment"][];
+        terminal: import("./openapi.generated.js").components["schemas"]["UserTerminalResponse"];
+    }>;
+    detachExecution: (session: string, id: string, observer: string, signal?: AbortSignal) => Promise<void>;
+    stopExecution: (session: string, id: string) => Promise<void>;
     submitUserTerminalSelection: (session: string, terminal: string, body: import("./types.js").TerminalSelectionSubmissionRequest, signal?: AbortSignal) => Promise<{
         accepted_intent: import("./openapi.generated.js").components["schemas"]["TerminalSelectionIntent"];
         admission_id: string;

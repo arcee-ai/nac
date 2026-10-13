@@ -191,6 +191,7 @@ impl TerminalManager {
                     self.remote_cleanup_persistence(),
                     Some(environment.stream_redactor()),
                     Some(lifetime),
+                    nac_contracts::CommandEnvironmentSnapshot::empty().stream_redactor(),
                 )?;
                 session.retain(None, None);
                 session.attach_child_telemetry(self.telemetry_correlation());

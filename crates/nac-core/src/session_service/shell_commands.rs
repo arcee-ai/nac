@@ -295,6 +295,10 @@ impl SessionService {
             thread_name: None,
             cancellation: Some(runtime.command_cancellation.clone()),
         };
+        let mut runtime = runtime;
+        runtime.terminal_manager = runtime
+            .terminal_manager
+            .for_human_command(snapshot.request_id.clone());
         let result =
             crate::tools::execute_submitted_shell(&submission, &runtime, &client, &context).await;
         let text = result

@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 mod command_output_redaction;
+mod command_pipe_redaction;
 pub use command_output_redaction::{CommandOutputRedactor, RedactedCommandPlainText};
+pub use command_pipe_redaction::CommandPipeRedactor;
 
 /// Canonical public NAC product version sourced from the repository root.
 ///
@@ -277,6 +279,11 @@ impl CommandEnvironmentSnapshot {
     /// Sanitize before retaining or publishing any bytes to observers.
     pub fn stream_redactor(&self) -> CommandOutputRedactor {
         CommandOutputRedactor::new(&self.redactions)
+    }
+
+    /// Masks both stream-local and observed combined pipe bytes exactly once.
+    pub fn pipe_redactor(&self) -> CommandPipeRedactor {
+        CommandPipeRedactor::new(&self.redactions)
     }
 }
 

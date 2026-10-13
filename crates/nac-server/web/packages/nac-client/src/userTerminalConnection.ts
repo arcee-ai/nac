@@ -89,7 +89,14 @@ export class UserTerminalConnection {
   private inputUncertain = false;
 
   constructor(
-    private readonly api: UserTerminalApi,
+    private readonly api: Pick<
+      UserTerminalApi,
+      | "attachUserTerminal"
+      | "pullUserTerminal"
+      | "detachUserTerminal"
+      | "inputUserTerminal"
+      | "resizeUserTerminal"
+    >,
     readonly sessionId: string,
     readonly terminalId: string,
     private readonly renderer: UserTerminalRenderer,

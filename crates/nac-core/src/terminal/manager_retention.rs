@@ -494,6 +494,8 @@ impl TerminalManager {
             user_owned: session.is_user_owned(),
             cols: session.cols,
             rows: session.rows,
+            cwd: session.observation_cwd.clone(),
+            backend: session.backend_label.clone(),
             collector_state: session.collector_state(),
             selection_redactor: session.selection_redactor.clone(),
         };

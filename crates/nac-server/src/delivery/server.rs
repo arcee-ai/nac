@@ -869,6 +869,11 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             routes!(delivery::terminal_selection_submission::submit)
                 .layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
         )
+        .routes(routes!(delivery::executions::list))
+        .routes(routes!(delivery::executions::attach))
+        .routes(routes!(delivery::executions::pull))
+        .routes(routes!(delivery::executions::detach))
+        .routes(routes!(delivery::executions::stop))
         .routes(routes!(delivery::user_terminals::status))
         .routes(routes!(delivery::user_terminals::attach))
         .routes(routes!(delivery::user_terminals::pull))

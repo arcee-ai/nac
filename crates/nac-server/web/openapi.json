@@ -4374,6 +4374,340 @@
         }
       }
     },
+    "/sessions/{session_id}/executions": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_executions",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing current-chat executions without attachment or recovery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Owner unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/executions/{execution_id}/observers": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_executions_execution_id_observers",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachUserTerminalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Attach observer to same existing execution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserTerminalObserverResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid protocol/bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Execution unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Observer capacity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/executions/{execution_id}/observers/{observer_id}": {
+      "delete": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "delete_sessions_session_id_executions_execution_id_observers_observer_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "observer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Detach observation only"
+          },
+          "400": {
+            "description": "Invalid observer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/executions/{execution_id}/observers/{observer_id}/read": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_executions_execution_id_observers_observer_id_read",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "observer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullUserTerminalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Immutable sanitized frame until render ACK; gap needs reset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionFrameResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid acknowledgement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Observer unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Concurrent read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/executions/{execution_id}/stop": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_executions_execution_id_stop",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Stop only the selected owned execution"
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Execution unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/fork": {
       "post": {
         "tags": [
@@ -10754,6 +11088,236 @@
           "timed_out",
           "cancelled"
         ]
+      },
+      "ExecutionFrameResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "observer_id",
+          "terminal",
+          "execution",
+          "bytes",
+          "offset",
+          "next_offset",
+          "retained_start",
+          "retained_end",
+          "gap",
+          "caught_up",
+          "requires_ack",
+          "segments"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          "caught_up": {
+            "type": "boolean"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/ExecutionStatus"
+          },
+          "gap": {
+            "type": "boolean"
+          },
+          "next_offset": {
+            "type": "string"
+          },
+          "observer_id": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "requires_ack": {
+            "type": "boolean"
+          },
+          "retained_end": {
+            "type": "string"
+          },
+          "retained_start": {
+            "type": "string"
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionOutputSegment"
+            }
+          },
+          "terminal": {
+            "$ref": "#/components/schemas/UserTerminalResponse"
+          }
+        }
+      },
+      "ExecutionListResponse": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "executions"
+        ],
+        "properties": {
+          "executions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionStatus"
+            }
+          },
+          "protocol_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "ExecutionOrigin": {
+        "type": "string",
+        "enum": [
+          "human",
+          "agent",
+          "human_command"
+        ]
+      },
+      "ExecutionOutputSegment": {
+        "type": "object",
+        "required": [
+          "stream",
+          "sequence",
+          "combined_start",
+          "combined_end",
+          "stream_start",
+          "stream_end"
+        ],
+        "properties": {
+          "combined_end": {
+            "type": "string"
+          },
+          "combined_start": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "string"
+          },
+          "stream": {
+            "type": "string"
+          },
+          "stream_end": {
+            "type": "string"
+          },
+          "stream_start": {
+            "type": "string"
+          }
+        }
+      },
+      "ExecutionProcessState": {
+        "type": "string",
+        "enum": [
+          "running",
+          "cleanup_pending",
+          "settled"
+        ]
+      },
+      "ExecutionRepresentation": {
+        "type": "string",
+        "enum": [
+          "pty",
+          "log"
+        ]
+      },
+      "ExecutionStatus": {
+        "type": "object",
+        "description": "Process settlement and collector completion are independent facts. IDs bind\nthis manager instance; artifact IDs are private implementation details.",
+        "required": [
+          "id",
+          "origin",
+          "representation",
+          "cwd",
+          "backend",
+          "alive",
+          "process_state",
+          "output_complete",
+          "input",
+          "resize",
+          "stop",
+          "retained",
+          "cols",
+          "rows"
+        ],
+        "properties": {
+          "alive": {
+            "type": "boolean"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "cols": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input": {
+            "type": "boolean"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ExecutionOrigin"
+          },
+          "output_complete": {
+            "type": "boolean"
+          },
+          "output_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "process_state": {
+            "$ref": "#/components/schemas/ExecutionProcessState"
+          },
+          "representation": {
+            "$ref": "#/components/schemas/ExecutionRepresentation"
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resize": {
+            "type": "boolean"
+          },
+          "retained": {
+            "type": "boolean"
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "stop": {
+            "type": "boolean"
+          }
+        }
       },
       "ForkSessionRequest": {
         "type": "object",

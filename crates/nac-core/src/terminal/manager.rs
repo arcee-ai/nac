@@ -21,6 +21,12 @@ use super::{
     OutputRegistry, OutputStream, TerminalInfo, TerminalOutput,
 };
 
+#[path = "manager_observation.rs"]
+pub(super) mod observation;
+pub use observation::{
+    ExecutionOrigin, ExecutionProcessState, ExecutionRepresentation, ExecutionStatus,
+};
+
 #[path = "manager_interactive.rs"]
 mod interactive;
 #[path = "manager_one_shot.rs"]
@@ -54,6 +60,8 @@ const NONINTERACTIVE_PROMPT_ENV: &[(&str, &str)] = &[
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+    pipe_executions: Arc<StdMutex<VecDeque<Arc<observation::PipeExecution>>>>,
+    human_command: Option<String>,
     pending_remote_cleanups: Arc<StdMutex<HashMap<String, Arc<PendingRemoteCleanup>>>>,
     create_gate: Arc<Mutex<()>>,
     #[cfg(test)]
@@ -78,6 +86,8 @@ struct CompletedTerminal {
     user_owned: bool,
     cols: u16,
     rows: u16,
+    cwd: String,
+    backend: String,
     collector_state: super::collector::CollectorState,
     selection_redactor: Option<Arc<nac_contracts::CommandOutputRedactor>>,
 }
@@ -91,6 +101,8 @@ impl CompletedTerminal {
             user_owned: session.is_user_owned(),
             cols: session.cols,
             rows: session.rows,
+            cwd: session.observation_cwd.clone(),
+            backend: session.backend_label.clone(),
             collector_state: session.collector_state(),
             selection_redactor: session.selection_redactor.clone(),
         }
@@ -156,6 +168,8 @@ impl TerminalManager {
     ) -> Result<Self> {
         Ok(Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            pipe_executions: Arc::new(StdMutex::new(VecDeque::new())),
+            human_command: None,
             pending_remote_cleanups: Arc::new(StdMutex::new(HashMap::new())),
             create_gate: Arc::new(Mutex::new(())),
             #[cfg(test)]
@@ -288,26 +302,26 @@ async fn read_chunks<R>(
     stream: OutputStream,
     sender: mpsc::Sender<StreamChunk>,
     shutdown: ThreadCancellation,
-) -> std::io::Result<()>
+) -> std::io::Result<bool>
 where
     R: AsyncRead + Unpin,
 {
     loop {
         let mut bytes = vec![0u8; PIPE_CHUNK_BYTES];
         let read = tokio::select! {
-            _ = shutdown.cancelled() => return Ok(()),
+            _ = shutdown.cancelled() => return Ok(false),
             read = reader.read(&mut bytes) => read?,
         };
         if read == 0 {
-            return Ok(());
+            return Ok(true);
         }
         bytes.truncate(read);
         let sent = tokio::select! {
-            _ = shutdown.cancelled() => return Ok(()),
+            _ = shutdown.cancelled() => return Ok(false),
             sent = sender.send(StreamChunk { stream, bytes }) => sent,
         };
         if sent.is_err() {
-            return Ok(());
+            return Ok(false);
         }
     }
 }

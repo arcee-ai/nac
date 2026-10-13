@@ -73,6 +73,36 @@ impl TerminalManager {
         cancellation: Option<&ThreadCancellation>,
         extra_envs: &[(String, String)],
     ) -> Result<TerminalInfo> {
+        self.create_sanitized(
+            name,
+            command,
+            cwd,
+            cols,
+            rows,
+            backend,
+            cancellation,
+            extra_envs,
+            nac_contracts::CommandEnvironmentSnapshot::empty(),
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "PTY launch binds immutable output policy"
+    )]
+    pub(crate) async fn create_sanitized(
+        &self,
+        name: String,
+        command: &str,
+        cwd: Option<PathBuf>,
+        cols: u16,
+        rows: u16,
+        backend: &Arc<ExecutionBackend>,
+        cancellation: Option<&ThreadCancellation>,
+        extra_envs: &[(String, String)],
+        environment: nac_contracts::CommandEnvironmentSnapshot,
+    ) -> Result<TerminalInfo> {
         // Capacity accounting, replacement, and insertion form one admission
         // transaction. Cleanup may await a remote backend, so a dedicated
         // gate keeps parallel creates from both consuming the same slot.
@@ -154,7 +184,7 @@ impl TerminalManager {
         let info = match cancellation {
             Some(cancellation) => cancellation
                 .run_if_active(|| {
-                    let mut session = TerminalSession::spawn(
+                    let mut session = TerminalSession::spawn_with_output(
                         name.clone(),
                         command,
                         cwd,
@@ -164,6 +194,9 @@ impl TerminalManager {
                         self.output_registry.clone(),
                         extra_envs,
                         self.remote_cleanup_persistence(),
+                        None,
+                        None,
+                        environment.stream_redactor(),
                     )?;
                     session.attach_child_telemetry(self.telemetry_correlation());
                     let info = self.session_info(&name, &session);
@@ -172,7 +205,7 @@ impl TerminalManager {
                 })
                 .ok_or_else(|| anyhow!("terminal command cancelled before PTY spawn"))??,
             None => {
-                let mut session = TerminalSession::spawn(
+                let mut session = TerminalSession::spawn_with_output(
                     name.clone(),
                     command,
                     cwd,
@@ -182,6 +215,9 @@ impl TerminalManager {
                     self.output_registry.clone(),
                     extra_envs,
                     self.remote_cleanup_persistence(),
+                    None,
+                    None,
+                    environment.stream_redactor(),
                 )?;
                 session.attach_child_telemetry(self.telemetry_correlation());
                 let info = self.session_info(&name, &session);

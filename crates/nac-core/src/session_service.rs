@@ -54,9 +54,11 @@ pub use shell_command_types::{
 };
 pub use shell_output::ShellOutputPage;
 pub(crate) use user_terminals::SubmittedUserTerminal;
+mod execution_observation;
 mod transcript_projection;
 mod user_terminals;
 pub use crate::terminal::{
+    ExecutionOrigin, ExecutionProcessState, ExecutionRepresentation, ExecutionStatus,
     OutputBytePage as UserTerminalOutputPage, TerminalSelectionError, UserTerminalSelectionPreview,
     UserTerminalStatus, MAX_TERMINAL_SELECTION_SCALARS, MAX_TERMINAL_SELECTION_UTF8_BYTES,
 };

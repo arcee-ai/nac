@@ -36,7 +36,7 @@ export declare class UserTerminalConnection {
     private needsReset;
     private sendingInput;
     private inputUncertain;
-    constructor(api: UserTerminalApi, sessionId: string, terminalId: string, renderer: UserTerminalRenderer, options?: UserTerminalConnectionOptions);
+    constructor(api: Pick<UserTerminalApi, "attachUserTerminal" | "pullUserTerminal" | "detachUserTerminal" | "inputUserTerminal" | "resizeUserTerminal">, sessionId: string, terminalId: string, renderer: UserTerminalRenderer, options?: UserTerminalConnectionOptions);
     get observerId(): string | undefined;
     get isInputUncertain(): boolean;
     private signal;

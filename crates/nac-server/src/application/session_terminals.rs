@@ -26,7 +26,7 @@ impl std::error::Error for TerminalOwnerMismatch {}
 /// lifecycle gate still orders attachment against deletion and configuration
 /// replacement.
 pub(crate) struct SessionTerminalApplication<'a> {
-    manager: &'a SessionManager,
+    pub(super) manager: &'a SessionManager,
 }
 
 impl<'a> SessionTerminalApplication<'a> {
@@ -57,7 +57,7 @@ impl<'a> SessionTerminalApplication<'a> {
 
     /// Completion can only use a live cached owner. It must never reconstruct
     /// an agent/backend during maintenance merely to inspect a terminal.
-    async fn cached_user_service(
+    pub(super) async fn cached_user_service(
         &self,
         session_id: &str,
     ) -> Result<Option<Arc<SessionService>>, TerminalApplicationError> {

@@ -78,9 +78,13 @@ async fn human_shell_artifact_failures_preserve_known_result_and_replay_after_re
         assert_eq!(result.stderr, "trusted stderr");
         assert_eq!(
             result.diagnostic.as_deref(),
-            Some(
+            if matches!(fault, EnrichmentFault::Redaction) {
+                None
+            } else {
+                Some(
                 "Full retained output is unavailable; only safely redacted previews are recorded.",
             )
+            }
         );
         assert!(result.finished_at_epoch_ms.is_some());
         assert!(result.transcript_index.is_some());

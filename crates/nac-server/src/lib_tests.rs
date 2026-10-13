@@ -1017,6 +1017,8 @@ mod recovery;
 #[path = "tests/terminals.rs"]
 mod terminals;
 
+#[path = "tests/executions.rs"]
+mod executions;
 #[path = "tests/user_terminal_shutdown.rs"]
 mod user_terminal_shutdown;
 #[path = "tests/user_terminals.rs"]

@@ -107,7 +107,7 @@ pub(crate) struct UserTerminalFrameResponse {
 }
 
 impl UserTerminalFrameResponse {
-    fn from_frame(observer_id: Uuid, frame: TerminalFrame) -> Self {
+    pub(super) fn from_frame(observer_id: Uuid, frame: TerminalFrame) -> Self {
         Self {
             protocol_version: VERSION,
             observer_id: observer_id.to_string(),
@@ -139,7 +139,7 @@ pub(crate) struct ResizeUserTerminalRequest {
     pub rows: u16,
 }
 
-fn version(version: u8) -> Result<(), ApiError> {
+pub(super) fn version(version: u8) -> Result<(), ApiError> {
     if version == VERSION {
         Ok(())
     } else {
@@ -148,12 +148,12 @@ fn version(version: u8) -> Result<(), ApiError> {
         ))
     }
 }
-fn identifier(id: &str) -> Result<Uuid, ApiError> {
+pub(super) fn identifier(id: &str) -> Result<Uuid, ApiError> {
     Uuid::parse_str(id)
         .map_err(|_| ApiError::bad_request("invalid terminal launch/observer identity".into()))
 }
 
-fn cursor(value: &str) -> Result<u64, ApiError> {
+pub(super) fn cursor(value: &str) -> Result<u64, ApiError> {
     if value.is_empty()
         || value.len() > 20
         || !value.bytes().all(|byte| byte.is_ascii_digit())

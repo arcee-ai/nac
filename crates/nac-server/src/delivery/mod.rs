@@ -18,3 +18,5 @@ mod terminal_selection_submission;
 pub(crate) mod ui_configuration;
 pub(crate) mod user_terminals;
 pub(crate) mod workspace;
+
+pub(crate) mod executions;

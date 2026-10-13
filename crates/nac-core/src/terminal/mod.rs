@@ -7,6 +7,7 @@ mod output;
 mod session;
 pub(crate) use manager::{validate_user_geometry, ResolvedUserTerminalLaunch};
 pub use manager::{
+    ExecutionOrigin, ExecutionProcessState, ExecutionRepresentation, ExecutionStatus,
     TerminalManager, TerminalSelectionError, UserTerminalSelectionPreview,
     MAX_TERMINAL_SELECTION_SCALARS, MAX_TERMINAL_SELECTION_UTF8_BYTES,
 };

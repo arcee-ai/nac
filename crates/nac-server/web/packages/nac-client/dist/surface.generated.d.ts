@@ -1,4 +1,9 @@
 export declare const NAC_API_SURFACE: {
+    readonly "GET /sessions/{session_id}/executions": "api.listExecutions";
+    readonly "POST /sessions/{session_id}/executions/{execution_id}/observers": "api.attachExecution";
+    readonly "POST /sessions/{session_id}/executions/{execution_id}/observers/{observer_id}/read": "api.pullExecution";
+    readonly "DELETE /sessions/{session_id}/executions/{execution_id}/observers/{observer_id}": "api.detachExecution";
+    readonly "POST /sessions/{session_id}/executions/{execution_id}/stop": "api.stopExecution";
     readonly "POST /sessions/{session_id}/user-commands": "api.submitShellCommand";
     readonly "GET /sessions/{session_id}/user-commands/{request_id}": "api.getShellCommand";
     readonly "POST /sessions/{session_id}/user-commands/{request_id}/cancel": "api.cancelShellCommand";

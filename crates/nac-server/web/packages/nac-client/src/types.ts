@@ -137,3 +137,7 @@ export type TerminalSelectionReference = ApiSchema<"TerminalSelectionReference">
 export type ShellCommandRequest = ApiSchema<"ShellCommandRequest">;
 export type ShellCommandSnapshot = ApiSchema<"ShellCommandSnapshot">;
 export type ShellOutputPage = ApiSchema<"ShellOutputPage">;
+
+export type ExecutionStatus = ApiSchema<"ExecutionStatus">;
+export type ExecutionListResponse = ApiSchema<"ExecutionListResponse">;
+export type ExecutionFrameResponse = ApiSchema<"ExecutionFrameResponse">;
