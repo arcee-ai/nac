@@ -2,6 +2,7 @@ import type {
   MessagePageMetadata,
   MessagesPageResponse,
   SessionSnapshotResponse,
+  TerminalSelectionMessageReference,
 } from "@/app/types/api";
 
 export const SNAPSHOT_MESSAGE_LIMIT = 24;
@@ -28,13 +29,45 @@ function validRange(
   );
 }
 
+/** References always address absolute canonical User indices, including the system head. */
+function validReferences(
+  references: TerminalSelectionMessageReference[] | undefined,
+  messages: SessionSnapshotResponse["messages"],
+  start: number,
+): boolean {
+  const seen = new Set<number>();
+  return (references ?? []).every(({ message_index: index }) => {
+    if (!Number.isSafeInteger(index) || seen.has(index) || messages[index - start]?.role !== "user")
+      return false;
+    seen.add(index);
+    return true;
+  });
+}
+
+function referencesInRange(
+  references: TerminalSelectionMessageReference[] | undefined,
+  start: number,
+  end: number,
+): TerminalSelectionMessageReference[] {
+  return (references ?? []).filter(
+    ({ message_index }) => message_index >= start && message_index < end,
+  );
+}
+
 export function validMessagesPage(page: MessagesPageResponse): boolean {
-  return validRange(page.page, page.messages.length, page.created_at.length);
+  return (
+    validRange(page.page, page.messages.length, page.created_at.length) &&
+    validReferences(page.terminal_selection_attributions, page.messages, page.page.start)
+  );
 }
 export function validSnapshotWindow(snapshot: SessionSnapshotResponse): boolean {
   const page = snapshot.message_page;
   const createdAt = snapshot.message_created_at ?? [];
-  return Boolean(page && validRange(page, snapshot.messages.length, createdAt.length));
+  return Boolean(
+    page &&
+    validRange(page, snapshot.messages.length, createdAt.length) &&
+    validReferences(snapshot.terminal_selection_attributions, snapshot.messages, page.start),
+  );
 }
 
 function snapshotRange(snapshot: SessionSnapshotResponse): MessagePageMetadata {
@@ -79,6 +112,23 @@ export function mergeMessageTail(
     return { kind: "snapshot-required" };
   }
 
+  // A replaced/reverted transcript can grow back to the same length. Do not
+  // keep a loaded prefix when the joining canonical rows have changed.
+  for (
+    let index = Math.max(currentPage.start, incoming.page.start);
+    index < Math.min(currentPage.end, incoming.page.end);
+    index += 1
+  ) {
+    if (
+      JSON.stringify(current.messages[index - currentPage.start]) !==
+        JSON.stringify(incoming.messages[index - incoming.page.start]) ||
+      currentCreatedAt[index - currentPage.start] !==
+        incoming.created_at[index - incoming.page.start]
+    ) {
+      return { kind: "snapshot-required" };
+    }
+  }
+
   if (incoming.page.start <= currentPage.start) {
     return {
       kind: "accepted",
@@ -87,6 +137,7 @@ export function mergeMessageTail(
         messages: incoming.messages,
         message_created_at: incoming.created_at,
         message_page: incoming.page,
+        terminal_selection_attributions: incoming.terminal_selection_attributions ?? [],
       },
     };
   }
@@ -102,6 +153,14 @@ export function mergeMessageTail(
       ...current,
       messages: [...current.messages.slice(0, prefixLength), ...incoming.messages],
       message_created_at: [...currentCreatedAt.slice(0, prefixLength), ...incoming.created_at],
+      terminal_selection_attributions: [
+        ...referencesInRange(
+          current.terminal_selection_attributions,
+          currentPage.start,
+          incoming.page.start,
+        ),
+        ...(incoming.terminal_selection_attributions ?? []),
+      ],
       message_page: {
         ...incoming.page,
         start: currentPage.start,
@@ -133,6 +192,14 @@ export function prependMessagePage(
     ...current,
     messages: [...incoming.messages, ...current.messages],
     message_created_at: [...incoming.created_at, ...currentCreatedAt],
+    terminal_selection_attributions: [
+      ...(incoming.terminal_selection_attributions ?? []),
+      ...referencesInRange(
+        current.terminal_selection_attributions,
+        currentPage.start,
+        currentPage.end,
+      ),
+    ],
     message_page: {
       start: incoming.page.start,
       end: currentPage.end,
@@ -155,6 +222,7 @@ export function mergeFocusedSnapshot(
     messages: incoming.messages,
     created_at: createdAt,
     page: incoming.message_page,
+    terminal_selection_attributions: incoming.terminal_selection_attributions,
   });
   return merged.kind === "accepted"
     ? {
@@ -162,6 +230,7 @@ export function mergeFocusedSnapshot(
         messages: merged.snapshot.messages,
         message_created_at: merged.snapshot.message_created_at,
         message_page: merged.snapshot.message_page,
+        terminal_selection_attributions: merged.snapshot.terminal_selection_attributions,
       }
     : incoming;
 }

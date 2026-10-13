@@ -64,6 +64,11 @@ impl std::str::FromStr for InboxStatus {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionInboxRecord {
+    /// Derived from identified admission metadata; never inferred from prompt text.
+    /// Keep the established serialized durable record shape unchanged.
+    #[serde(skip)]
+    #[cfg_attr(feature = "openapi", schema(ignore))]
+    pub terminal_selection: Option<TerminalSelectionEvidence>,
     pub id: i64,
     pub session_id: String,
     pub delivery: InboxDelivery,
@@ -81,21 +86,35 @@ pub struct SessionInboxRecord {
 
 pub(crate) const INBOX_RECORD_COLUMNS: &str =
     "id, session_id, delivery, status, content, target_run_id, client_id, \
-     delivered_run_id, created_at, updated_at, delivered_at, cancelled_at, version";
+     delivered_run_id, created_at, updated_at, delivered_at, cancelled_at, version, admission_id, admission_digest";
 
 pub(crate) fn row_to_inbox_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionInboxRecord> {
     let delivery: String = row.get(2)?;
     let status: String = row.get(3)?;
+    let session: String = row.get(1)?;
+    let content: String = row.get(4)?;
+    let identity: Option<String> = row.get(13)?;
+    let digest: Option<String> = row.get(14)?;
+    let terminal_selection = super::transcript_selection::identified_inbox_evidence(
+        &session,
+        &content,
+        identity.as_deref(),
+        digest.as_deref(),
+    )
+    .map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, error.into())
+    })?;
     Ok(SessionInboxRecord {
+        terminal_selection,
         id: row.get(0)?,
-        session_id: row.get(1)?,
+        session_id: session,
         delivery: delivery.parse().map_err(|error: anyhow::Error| {
             rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, error.into())
         })?,
         status: status.parse().map_err(|error: anyhow::Error| {
             rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, error.into())
         })?,
-        content: row.get(4)?,
+        content,
         target_run_id: row.get(5)?,
         client_id: row.get(6)?,
         delivered_run_id: row.get(7)?,

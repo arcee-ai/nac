@@ -133,7 +133,7 @@ export type TerminalSelectionPreviewRequest = ApiSchema<"TerminalSelectionPrevie
 export type TerminalSelectionPreviewResponse = ApiSchema<"TerminalSelectionPreviewResponse">;
 
 export type TerminalSelectionAttribution = ApiSchema<"TerminalSelectionAttribution">;
-export type TerminalSelectionReference = ApiSchema<"TerminalSelectionReference">;
+export type TerminalSelectionReference = ApiSchema<"TerminalSelectionMessageReference">;
 export type ShellCommandRequest = ApiSchema<"ShellCommandRequest">;
 export type ShellCommandSnapshot = ApiSchema<"ShellCommandSnapshot">;
 export type ShellOutputPage = ApiSchema<"ShellOutputPage">;

@@ -33,6 +33,20 @@ impl TerminalSelectionAttribution {
             client_capture_time_ms: intent.client_capture_time_ms.clone(),
         })
     }
+    /// Project literal evidence only after checking an existing typed annotation
+    /// against the exact canonical message and immutable intent digest.
+    pub fn evidence_for_message(&self, message: &Message) -> Result<TerminalSelectionEvidence> {
+        self.validate_message(message)?;
+        let Message::User { content } = message else {
+            unreachable!()
+        };
+        let intent = decode_intent(content)?;
+        Ok(TerminalSelectionEvidence {
+            attribution: self.clone(),
+            text: intent.text,
+            user_text: intent.user_text,
+        })
+    }
     // Called only for an existing typed annotation. A lookalike User body
     // without that row annotation never enters this validation/classification.
     pub(crate) fn validate_message(&self, message: &Message) -> Result<()> {
@@ -57,6 +71,41 @@ fn decode_intent(content: &str) -> Result<TerminalSelectionIntent> {
         anyhow::bail!("selection canonical encoding differs");
     }
     Ok(intent)
+}
+
+/// Read-only projection of reviewed canonical evidence; no live capability.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TerminalSelectionEvidence {
+    pub attribution: TerminalSelectionAttribution,
+    pub text: String,
+    pub user_text: Option<String>,
+}
+
+pub(super) fn identified_inbox_evidence(
+    session: &str,
+    content: &str,
+    identity: Option<&str>,
+    digest: Option<&str>,
+) -> Result<Option<TerminalSelectionEvidence>> {
+    let Some(identity) = identity else {
+        if digest.is_some() {
+            anyhow::bail!("invalid inbox attribution identity");
+        }
+        return Ok(None);
+    };
+    let intent = decode_intent(content)?;
+    if intent.source_session_id != session
+        || intent.admission_id != identity
+        || Some(intent.digest()?.as_str()) != digest
+    {
+        anyhow::bail!("inbox attribution identity/content mismatch");
+    }
+    Ok(Some(TerminalSelectionEvidence {
+        attribution: TerminalSelectionAttribution::from_intent(&intent)?,
+        text: intent.text,
+        user_text: intent.user_text,
+    }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -123,21 +172,15 @@ pub(super) fn stamp_inbox_attribution(
     let (identity,digest,stored): (Option<String>,Option<String>,String) = tx.query_row(
         "SELECT admission_id,admission_digest,content FROM session_inbox WHERE session_id=?1 AND id=?2",
         params![session,item], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
-    let Some(identity) = identity else {
-        if digest.is_some() {
-            anyhow::bail!("invalid inbox attribution identity");
-        }
+    let Some(evidence) =
+        identified_inbox_evidence(session, &stored, identity.as_deref(), digest.as_deref())?
+    else {
         return Ok(());
     };
-    let intent = decode_intent(&stored)?;
-    if stored != content
-        || intent.source_session_id != session
-        || intent.admission_id != identity
-        || Some(intent.digest()?) != digest
-    {
+    if stored != content {
         anyhow::bail!("inbox attribution identity/content mismatch");
     }
-    let attribution = TerminalSelectionAttribution::from_intent(&intent)?;
+    let attribution = evidence.attribution;
     stamp(tx, session, index, &attribution)
 }
 fn stamp(

@@ -75,6 +75,63 @@ fn selection_provenance_atomic_delivery_replay_and_copied_lookalike() {
     assert!(!json.contains("terminal_selection_attribution"));
 }
 #[test]
+fn evidence_projection_requires_identified_admission_and_matching_annotation() {
+    let path = fixture();
+    let original = intent();
+    let receipt = create_terminal_selection_intent(&path, &original).unwrap();
+    let evidence = receipt.record.terminal_selection.as_ref().unwrap();
+    assert_eq!(evidence.text, original.text);
+    assert_eq!(evidence.user_text, original.user_text);
+    assert!(!serde_json::to_value(&receipt.record)
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .contains_key("terminal_selection"));
+    let copied = create_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Queue,
+        &receipt.record.content,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(copied.terminal_selection.is_none());
+    let ordinary = create_session_inbox_item(
+        &path,
+        "session",
+        InboxDelivery::Queue,
+        r#"{"text":"ordinary JSON"}"#,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(ordinary.terminal_selection.is_none());
+    let message = Message::User {
+        content: receipt.record.content.clone(),
+    };
+    assert_eq!(
+        evidence.attribution.evidence_for_message(&message).unwrap(),
+        *evidence
+    );
+    let mut changed = original.clone();
+    changed.text.push('x');
+    assert!(evidence
+        .attribution
+        .evidence_for_message(&Message::User {
+            content: changed.envelope().unwrap()
+        })
+        .is_err());
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute(
+        "UPDATE session_inbox SET admission_digest=?2 WHERE id=?1",
+        params![receipt.record.id, "0".repeat(64)],
+    )
+    .unwrap();
+    assert!(list_session_inbox(&path, "session").is_err());
+}
+
+#[test]
 fn selection_provenance_delivery_rollback_and_immutable_digest_validation() {
     let path = fixture();
     let original = intent();

@@ -48,7 +48,14 @@ pub(crate) async fn session_snapshot(
     let loaded = manager.snapshot_with_options(&session_id, options).await?;
     let lineage = manager.session_lineage(&session_id)?;
     Ok(Json(SessionSnapshotResponse {
-        terminal_selection_attributions: loaded.terminal_selection_attributions,
+        terminal_selection_attributions: super::contracts::selection_message_references(
+            loaded.terminal_selection_attributions,
+            &loaded.snapshot.messages,
+            loaded
+                .message_page
+                .as_ref()
+                .map_or(0, |page| page.start as u64),
+        ),
         snapshot: loaded.snapshot,
         lineage,
         message_page: loaded.message_page.map(Into::into),

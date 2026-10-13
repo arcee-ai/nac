@@ -263,3 +263,82 @@ describe("bounded transcript projection", () => {
     expect(buildTranscript(snapshot(messages, 0, messages.length), {})).toHaveLength(100);
   });
 });
+
+describe("verified selection references", () => {
+  function reference(index: number) {
+    return {
+      message_index: index,
+      attribution: {
+        protocol_version: 1,
+        source_kind: "user_supplied_rendered_selection" as const,
+        admission_id: `admission-${index}`,
+        capture_id: `capture-${index}`,
+        source_session_id: "original-source",
+        terminal_id: "expired-terminal",
+        owner_instance_id: "original-owner",
+        intent_sha256: "digest",
+      },
+    };
+  }
+
+  it("retains absolute identities through tail, prepend, focused refresh and repeated hydration", () => {
+    const current = snapshot([user("selection-4"), assistant("a-5"), user("selection-6")], 4, 7);
+    current.terminal_selection_attributions = [reference(4), reference(6)];
+    const tail = page([user("selection-6"), assistant("a-7"), user("selection-8")], 6, 9);
+    tail.terminal_selection_attributions = [reference(6), reference(8)];
+    const merged = mergeMessageTail(current, tail);
+    expect(merged.kind).toBe("accepted");
+    if (merged.kind !== "accepted") return;
+    const older = page([user("selection-2"), assistant("a-3")], 2, 9);
+    older.terminal_selection_attributions = [reference(2)];
+    const prepended = prependMessagePage(merged.snapshot, older, 4)!;
+    const focused = snapshot(tail.messages, 6, 9);
+    focused.terminal_selection_attributions = tail.terminal_selection_attributions;
+    const refreshed = mergeFocusedSnapshot(prepended, focused, false);
+    const twice = mergeFocusedSnapshot(refreshed, focused, false);
+    expect(twice.terminal_selection_attributions).toEqual([2, 4, 6, 8].map(reference));
+    expect(
+      twice.terminal_selection_attributions?.map((ref) => ref.attribution.source_session_id),
+    ).toEqual(Array(4).fill("original-source"));
+  });
+
+  it("replaces overlap references with server truth, including legacy absent arrays", () => {
+    const current = snapshot([user("selection-4"), assistant("a-5"), user("ordinary-6")], 4, 7);
+    current.terminal_selection_attributions = [reference(4), reference(6)];
+    const incoming = page([user("ordinary-6"), assistant("a-7")], 6, 8);
+    const merged = mergeMessageTail(current, incoming);
+    expect(merged.kind).toBe("accepted");
+    if (merged.kind === "accepted")
+      expect(merged.snapshot.terminal_selection_attributions).toEqual([reference(4)]);
+    const replacement = page(current.messages, 4, 7);
+    const full = mergeMessageTail(current, replacement);
+    if (full.kind === "accepted") expect(full.snapshot.terminal_selection_attributions).toEqual([]);
+  });
+
+  it("drops pruned/reverted attribution and refuses a rewritten join even at equal length", () => {
+    const current = snapshot([user("selection-4"), assistant("a-5"), user("selection-6")], 4, 7);
+    current.terminal_selection_attributions = [reference(4), reference(6)];
+    const pruned = snapshot([user("replacement-4")], 4, 5);
+    expect(
+      mergeFocusedSnapshot(current, pruned, false).terminal_selection_attributions,
+    ).toBeUndefined();
+    const rewritten = snapshot([user("replacement-6")], 6, 7);
+    expect(mergeFocusedSnapshot(current, rewritten, false)).toBe(rewritten);
+    expect(mergeFocusedSnapshot(current, rewritten, true)).toBe(rewritten);
+  });
+
+  it("rejects out-of-window, duplicate, unsafe and non-user references", () => {
+    for (const refs of [
+      [reference(3)],
+      [reference(4), reference(4)],
+      [reference(5)],
+      [reference(Number.MAX_SAFE_INTEGER + 1)],
+    ]) {
+      const incoming = page([user("u-4"), assistant("a-5")], 4, 6);
+      incoming.terminal_selection_attributions = refs;
+      expect(mergeMessageTail(snapshot(incoming.messages, 4, 6), incoming).kind).toBe(
+        "snapshot-required",
+      );
+    }
+  });
+});

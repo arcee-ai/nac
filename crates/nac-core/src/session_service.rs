@@ -710,6 +710,7 @@ struct ActiveRunState {
 
 #[derive(Default)]
 struct RunAdmissionKind {
+    terminal_selection: Option<crate::store::TerminalSelectionEvidence>,
     inbox_item_id: Option<i64>,
     goal_continuation: bool,
     child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,

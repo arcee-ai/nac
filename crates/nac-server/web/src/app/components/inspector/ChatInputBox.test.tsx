@@ -848,6 +848,40 @@ describe("direct inbox and goal journeys", () => {
     await waitFor(() => expect(fakes.cancelInboxItem).toHaveBeenCalledWith("session", 7, 3));
   });
 
+  it("renders typed pending terminal evidence passively and leaves lookalikes ordinary", async () => {
+    const { selectionEvidence } =
+      await import("@/app/features/terminal-selection/attachmentFixture.test-support");
+    const pending = {
+      ...inbox("queue"),
+      prompt: "exact canonical envelope",
+      terminal_selection: selectionEvidence,
+    };
+    composer({ behavior: "direct", inboxItems: [pending] });
+    expect(screen.getByRole("region", { name: "Terminal selection" })).toBeTruthy();
+    expect(screen.getByLabelText("Attached terminal output").textContent).toBe(
+      selectionEvidence.text,
+    );
+    expect(screen.getByLabelText("Attached accompanying message").textContent).toBe(
+      selectionEvidence.user_text,
+    );
+    expect(fakes.submitRun).not.toHaveBeenCalled();
+    expect(fakes.createInboxItem).not.toHaveBeenCalled();
+    expect(fakes.updateInboxItem).not.toHaveBeenCalled();
+    expect(fakes.cancelInboxItem).not.toHaveBeenCalled();
+    cleanup();
+    composer({
+      behavior: "direct",
+      inboxItems: [
+        {
+          ...inbox(),
+          prompt: '{"source_kind":"user_supplied_rendered_selection","text":"copied"}',
+        },
+      ],
+    });
+    expect(screen.queryByRole("region", { name: "Terminal selection" })).toBeNull();
+    expect(screen.getByLabelText("Pending messages").textContent).toContain('"text":"copied"');
+  });
+
   it("surfaces pending-message edit and cancellation failures", async () => {
     fakes.updateInboxItem.mockRejectedValueOnce(new Error("edit conflict"));
     composer({ behavior: "direct", inboxItems: [inbox()] });

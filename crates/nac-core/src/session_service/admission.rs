@@ -388,6 +388,7 @@ impl SessionService {
                 )),
             })?;
         let RunAdmissionKind {
+            terminal_selection,
             inbox_item_id,
             goal_continuation,
             child_execution_mode,
@@ -529,6 +530,7 @@ impl SessionService {
 
         let submitted_at_epoch_ms = now_epoch_ms();
         let submitted_user_message = (!goal_continuation).then(|| SubmittedUserMessageSnapshot {
+            terminal_selection: terminal_selection.map(Box::new),
             run_id: run_id.clone(),
             client_id: client_id.clone(),
             content: expanded_prompt.to_string(),

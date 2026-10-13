@@ -97,6 +97,25 @@ terminal capabilities. Plain or copied lookalike evidence text grants no typed
 attribution. The message bytes and old unannotated records keep their existing
 shape.
 
+Verified selections appear in chat and pending input as **Terminal selection**
+attachments. The bounded output and accompanying message preserve their exact
+reviewed whitespace. **Source and capture details** shows the original chat,
+terminal incarnation, process owner, capture and submission identities, and the
+client-supplied capture time when available. The attachment is a frozen capture;
+its presentation does not check source liveness, read output, execute input or
+wake an agent. Evidence remains readable after the source exits or expires.
+Forks keep the original provenance and gain no live source access.
+
+The server projects attachment text only after matching typed canonical
+attribution or identified inbox admission metadata against the immutable intent.
+Copied envelopes, ordinary JSON, and legacy messages without this projection
+remain ordinary text. Paging and refresh retain references at absolute canonical
+indices, including the system head; replaced or reverted history discards stale
+references. **Canonical message** exposes the unchanged evidence envelope, and
+**Copy canonical message** copies those exact bytes. Revert and regenerate still
+address the original canonical message and index. The readable card never
+rewrites transcript/provider content or resubmits an admission.
+
 Compaction keeps a metadata-only manifest with at most four exact recent source
 references, a streaming count/digest and an explicit omitted-reference notice.
 The digest cannot reconstruct older identities. Canonical history retains them;

@@ -1,3 +1,4 @@
+import { TerminalSelectionAttachment } from "@/app/features/terminal-selection/TerminalSelectionAttachment";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { shellInput } from "@/app/features/human-shell/input";
 import { useShellPresentation } from "@/app/features/human-shell/presentationLifetime";
@@ -1318,9 +1319,17 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               className="flex flex-wrap items-center gap-2 rounded-[4px] border border-border-primary px-3 py-2"
             >
               <span className="tag-label text-accent-primary">{item.delivery}</span>
-              <span className="min-w-0 flex-1 truncate text-small text-basic-primary">
-                {item.prompt}
-              </span>
+              {item.terminal_selection ? (
+                <TerminalSelectionAttachment
+                  evidence={item.terminal_selection}
+                  canonicalText={item.prompt}
+                  sessionId={sessionId}
+                />
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-small text-basic-primary">
+                  {item.prompt}
+                </span>
+              )}
               <Button
                 type="button"
                 size={ButtonSize.Small}

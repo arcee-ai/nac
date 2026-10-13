@@ -1,4 +1,6 @@
 import { memo } from "react";
+import { TerminalSelectionAttachment } from "@/app/features/terminal-selection/TerminalSelectionAttachment";
+import type { TerminalSelectionEvidence } from "@/app/types/api";
 
 import {
   Button,
@@ -17,6 +19,8 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
 interface UserMessageProps {
   text: string;
+  terminalSelection?: TerminalSelectionEvidence;
+  sessionId?: string;
   pending?: boolean;
   /**
    * Skills the stored message had expanded into the agent-facing prompt,
@@ -53,6 +57,8 @@ interface UserMessageProps {
 /** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
 export const UserMessage = memo(function UserMessage({
   text,
+  terminalSelection,
+  sessionId,
   pending = false,
   invokedSkills = null,
   timestamp = null,
@@ -70,12 +76,20 @@ export const UserMessage = memo(function UserMessage({
     <div className="group/user-msg flex flex-col items-end w-full max-w-full pt-4 pb-8">
       <div
         className={cn(
-          "py-3 px-5 rounded-[12px] bg-elevation-sublevel-variant-B shadow-convex",
+          "min-w-0 max-w-full py-3 px-5 rounded-[12px] bg-elevation-sublevel-variant-B shadow-convex",
           "label-small text-basic-primary whitespace-pre-wrap break-words",
           pending && "opacity-60",
         )}
       >
-        {text}
+        {terminalSelection ? (
+          <TerminalSelectionAttachment
+            evidence={terminalSelection}
+            canonicalText={text}
+            sessionId={sessionId}
+          />
+        ) : (
+          text
+        )}
       </div>
 
       {invokedSkills && invokedSkills.length > 0 ? (
@@ -166,7 +180,7 @@ export const UserMessage = memo(function UserMessage({
             value={text}
             size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
             variant={isMobile ? ButtonVariant.Ghost : ButtonVariant.Tertiary}
-            title="Copy message"
+            title={terminalSelection ? "Copy canonical message" : "Copy message"}
             position={TooltipPosition.BottomLeft}
             className="md:!h-4 md:!min-h-4 md:!p-0"
           />

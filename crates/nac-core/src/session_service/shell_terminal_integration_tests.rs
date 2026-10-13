@@ -156,3 +156,61 @@ async fn human_shell_settlement_hands_explicit_queued_selection_to_the_existing_
             .contains(&serde_json::to_string(&envelope).unwrap()));
     }
 }
+
+#[tokio::test]
+async fn identified_selection_active_projection_precedes_canonical_append_without_model_effect() {
+    for genuine in [true, false] {
+        let (parts, path) = test_direct_active_service(
+            "selection_before_append",
+            "session",
+            ModelClient::new_for_test(),
+        );
+        let intent = selection(TerminalSelectionDelivery::Queue);
+        let receipt = crate::store::create_terminal_selection_intent(&path, &intent).unwrap();
+        let item = if genuine {
+            receipt.record
+        } else {
+            crate::store::create_session_inbox_item(
+                &path,
+                "session",
+                crate::store::InboxDelivery::Queue,
+                &receipt.record.content,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        let before = parts.service.messages_snapshot().await.unwrap();
+        let active = parts
+            .service
+            .try_begin_run_inner(
+                None,
+                &item.content,
+                None,
+                true,
+                crate::session_service::RunAdmissionKind {
+                    inbox_item_id: Some(item.id),
+                    terminal_selection: item.terminal_selection.clone(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let submitted = active.submitted_user_message.as_ref().unwrap();
+        assert_eq!(submitted.content, intent.envelope().unwrap());
+        assert_eq!(submitted.terminal_selection.is_some(), genuine);
+        if let Some(evidence) = &submitted.terminal_selection {
+            assert_eq!(evidence.text, intent.text);
+            assert_eq!(evidence.user_text, intent.user_text);
+            assert_eq!(evidence.attribution.admission_id, intent.admission_id);
+        }
+        // Admission emits active state before the agent task commits its User
+        // row; this is the real pre-hydration timeline the presentation consumes.
+        assert_eq!(
+            serde_json::to_value(parts.service.messages_snapshot().await.unwrap()).unwrap(),
+            serde_json::to_value(before).unwrap()
+        );
+        // No task or process was dispatched. Drop this isolated admission
+        // fixture rather than synthesize delivery or wake queued input.
+        drop(parts);
+    }
+}

@@ -98,3 +98,9 @@ configuration and selected-backend admission still apply; agent mode and grants
 remain unchanged. Ordinary shell reattach accepts fresh focused typing without
 another enable step. Actual unconfirmed input freezes until explicit recovery
 acknowledgement and is never replayed automatically. See [permissions](permissions.md).
+
+Explicitly reviewed terminal selections appear as frozen **Terminal selection**
+attachments in direct chat history and pending input. Expand source/capture details
+to inspect provenance, or **Canonical message** to inspect the exact stored evidence.
+Copied text receives no verified attachment. Forked evidence retains the original
+source and grants no live terminal access. See [reviewed selections](../terminal-selection-preview.md).

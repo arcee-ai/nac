@@ -134,10 +134,98 @@ for (const mobile of [false, true]) {
     expect(delivered).toContain("user_supplied_rendered_selection");
     expect(delivered).not.toContain("\\u0001");
     await dialog.getByRole("button", { name: "Dismiss review", exact: true }).click();
+    // The canonical/model evidence remains byte exact while normal chat uses a
+    // passive attachment. Navigation/reload do not submit or observe a source.
+    await page.goto(`${harness.baseUrl}/#/session/${session}`);
+    if (mobile)
+      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    const card = page.getByRole("region", { name: "Terminal selection", exact: true });
+    await expect(card).toHaveCount(1);
+    await expect(card.getByLabel("Attached terminal output")).toHaveText(evidence);
+    expect(await card.getByLabel("Attached accompanying message").textContent()).toBe(
+      accompanyingCanonical,
+    );
+    await card.getByText("Canonical message", { exact: true }).click();
+    expect(await card.getByLabel("Canonical terminal evidence message").textContent()).toBe(
+      content,
+    );
+    const snapshot = await api.getSession(session);
+    const reference = snapshot.terminal_selection_attributions![0];
+    expect(snapshot.messages[reference.message_index].content).toBe(content);
+    expect(reference.attribution.admission_id).toBe(submissions[0].admission_id);
+    await page.reload();
+    await expect(card).toHaveCount(1);
+    await card.getByText("Source and capture details", { exact: true }).click();
+    await expect(card).toContainText(shell.terminal_id);
+    await card.getByText("Source and capture details", { exact: true }).click();
+    await card
+      .getByRole("heading", { name: "Terminal selection", exact: true })
+      .scrollIntoViewIfNeeded();
+    await card.screenshot({
+      path: testInfo.outputPath(`selection-attachment-${mobile ? "mobile" : "desktop"}.png`),
+    });
+    expect(harness.provider.requests).toHaveLength(1);
+    expect(await api.listInbox(session)).toHaveLength(1);
     if (mobile)
       expect(await page.locator("html").evaluate((node) => node.scrollWidth)).toBeLessThanOrEqual(
         390,
       );
+    if (!mobile) {
+      const fork = await api.forkSession(session, reference.message_index + 1);
+      await page.goto(`${harness.baseUrl}/#/session/${fork.session_id}`);
+      await expect(card).toHaveCount(1);
+      await expect(card).toContainText("Original source from another chat");
+      await card.getByText("Source and capture details", { exact: true }).click();
+      await expect(card).toContainText(session);
+      // Pasted canonical evidence remains ordinary input, even byte identical.
+      harness.provider.enqueue(
+        "copied-evidence",
+        { afterStep: "selected-send", token: evidence },
+        { kind: "text", text: "copied literal observed", stream: true },
+      );
+      await api.submitRun(fork.session_id, content);
+      await harness.provider.waitForRequestCount(2);
+      await expect
+        .poll(async () => (await api.getSession(fork.session_id)).active_run == null)
+        .toBe(true);
+      await page.reload();
+      await expect(card).toHaveCount(1);
+      const forkSnapshot = await api.getSession(fork.session_id);
+      expect(forkSnapshot.terminal_selection_attributions).toHaveLength(1);
+      expect(forkSnapshot.terminal_selection_attributions![0].attribution.source_session_id).toBe(
+        session,
+      );
+      expect((await api.listUserTerminals(fork.session_id)).terminals).toHaveLength(0);
+      // Exercise real bounded pages rather than synthetic cache fixtures.
+      for (let index = 0; index < 13; index += 1) {
+        const prompt = `attachment paging ${index}`;
+        harness.provider.enqueue(
+          `paging-${index}`,
+          { token: prompt },
+          { kind: "text", text: `paging answer ${index}`, stream: true },
+        );
+        await api.submitRun(fork.session_id, prompt);
+        await expect
+          .poll(async () => (await api.getSession(fork.session_id)).active_run == null)
+          .toBe(true);
+      }
+      await page.reload();
+      await expect(page.getByRole("button", { name: "Load older", exact: true })).toBeVisible();
+      await expect(card).toHaveCount(0);
+      await page.getByRole("button", { name: "Load older", exact: true }).click();
+      await expect(card).toHaveCount(1);
+      harness.provider.enqueue(
+        "tail-refresh",
+        { token: "attachment focused refresh" },
+        { kind: "text", text: "focused refresh answer", stream: true },
+      );
+      await api.submitRun(fork.session_id, "attachment focused refresh");
+      await expect(page.getByText("focused refresh answer", { exact: true })).toBeVisible();
+      await expect(card).toHaveCount(1);
+      expect((await api.getSession(fork.session_id)).terminal_selection_attributions).toHaveLength(
+        1,
+      );
+    }
     harness.provider.assertConsumed();
   });
 }
@@ -194,6 +282,12 @@ test("real selection offers explicit busy queue and exact displayed-run steer wi
   await dialog.getByRole("button", { name: "Queue selection", exact: true }).click();
   await expect(dialog).toContainText("Selection admission accepted.");
   await dialog.getByRole("button", { name: "Dismiss review", exact: true }).click();
+  const pending = page.getByLabel("Pending messages");
+  await expect(
+    pending.getByRole("region", { name: "Terminal selection", exact: true }),
+  ).toHaveCount(1);
+  await expect(pending.getByLabel("Attached terminal output")).toHaveText(evidence);
+  expect((await api.listInbox(session))[0].terminal_selection?.text).toBe(evidence);
   dialog = await selectRenderedLine(page, pane, geometry.cols, geometry.rows);
   await dialog.getByRole("radio", { name: /Steer the displayed active run/ }).check();
   await dialog.getByRole("button", { name: "Steer selected run", exact: true }).click();
@@ -203,6 +297,15 @@ test("real selection offers explicit busy queue and exact displayed-run steer wi
   expect(inbox[0].delivery).toBe("queue");
   expect(inbox[1].delivery).toBe("steer");
   expect(inbox[1].target_run_id).toBe(active.run_id);
+  expect(harness.provider.requests).toHaveLength(1);
+  await dialog.getByRole("button", { name: "Dismiss review", exact: true }).click();
+  await expect(
+    pending.getByRole("region", { name: "Terminal selection", exact: true }),
+  ).toHaveCount(2);
+  await page.reload();
+  await expect(
+    pending.getByRole("region", { name: "Terminal selection", exact: true }),
+  ).toHaveCount(2);
   expect(harness.provider.requests).toHaveLength(1);
   boundary.release();
   await harness.provider.waitForRequestCount(3);
@@ -214,6 +317,74 @@ test("real selection offers explicit busy queue and exact displayed-run steer wi
     expect(body).toContain(evidence);
     expect(body).toContain("user_supplied_rendered_selection");
   }
+  await page.goto(`${harness.baseUrl}/#/session/${session}`);
+  await expect(page.getByLabel("Pending messages")).toHaveCount(0);
+  const cards = page.getByRole("region", { name: "Terminal selection", exact: true });
+  await expect(cards).toHaveCount(2);
+  await api.terminateTerminal(session, shell.terminal_id);
+  harness.provider.assertConsumed();
+});
+
+test("queued attachment waits for an exact human command outcome and follows its canonical card once", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const session = await createDirectSession(request, harness);
+  const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
+  await api.setPermissionApprovalMode(session, "auto_approve");
+  await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
+  const show = page.getByRole("button", { name: "Show panel", exact: true });
+  if (await show.isVisible()) await show.click();
+  const pane = page.getByRole("region", { name: "Session terminal", exact: true });
+  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+  await pane.getByRole("button", { name: "Focus terminal" }).click();
+  await page.keyboard.type(`printf '${octal(evidence + "\n")}'`);
+  await page.keyboard.press("Enter");
+  await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);
+  const shell = (await api.listUserTerminals(session)).terminals[0];
+  const geometry = await api.getUserTerminal(session, shell.terminal_id);
+  const command = await api.submitShellCommand(session, {
+    request_id: "selection-command",
+    command: `python3 -c "from pathlib import Path; import time; Path('selection-command-started').write_text('ready')\nwhile not Path('selection-command-release').exists(): time.sleep(0.01)\nprint('COMMAND_DONE')"`,
+  });
+  await expect
+    .poll(async () =>
+      fs
+        .readFile(path.join(harness.runRoot, "workspace/selection-command-started"), "utf8")
+        .catch(() => ""),
+    )
+    .toBe("ready");
+  const dialog = await selectRenderedLine(page, pane, geometry.cols, geometry.rows);
+  await expect(dialog.getByRole("radio", { name: /Send as a new turn/ })).toBeDisabled();
+  await dialog.getByRole("radio", { name: /Queue after/ }).check();
+  harness.provider.enqueue(
+    "after-command",
+    { token: evidence },
+    { kind: "text", text: "queued command selection observed", stream: true },
+  );
+  await dialog.getByRole("button", { name: "Queue selection", exact: true }).click();
+  await expect(dialog).toContainText("Selection admission accepted.");
+  await dialog.getByRole("button", { name: "Dismiss review", exact: true }).click();
+  await expect(
+    page.getByLabel("Pending messages").getByRole("region", { name: "Terminal selection" }),
+  ).toHaveCount(1);
+  expect(harness.provider.requests).toHaveLength(0);
+  await fs.writeFile(path.join(harness.runRoot, "workspace/selection-command-release"), "release");
+  await expect(page.getByText("queued command selection observed", { exact: true })).toBeVisible();
+  const snapshot = await api.getSession(session);
+  const commandIndex = snapshot.shell_commands!.find(
+    (item) => item.operation_id === command.operation_id,
+  )!.transcript_index!;
+  expect(snapshot.terminal_selection_attributions![0].message_index).toBeGreaterThan(commandIndex);
+  await expect(page.getByRole("article", { name: "User command" })).toContainText("COMMAND_DONE");
+  await expect(page.getByRole("region", { name: "Terminal selection", exact: true })).toHaveCount(
+    1,
+  );
+  await expect(page.getByLabel("Pending messages")).toHaveCount(0);
+  expect(harness.provider.requests).toHaveLength(1);
+  expect((await api.listInbox(session))[0].status).toBe("delivered");
   await api.terminateTerminal(session, shell.terminal_id);
   harness.provider.assertConsumed();
 });

@@ -479,6 +479,26 @@ async fn terminal_selection_canonical_history_fork_keeps_source_without_copying_
     let admitted =
         nac_core::store::create_terminal_selection_intent(&manager.inner.store_path, &intent)
             .unwrap();
+    let projected: crate::InboxItemResponse = admitted.record.clone().into();
+    assert_eq!(
+        projected.terminal_selection.as_ref().unwrap().text,
+        intent.text
+    );
+    let lookalike = nac_core::store::create_session_inbox_item(
+        &manager.inner.store_path,
+        "source",
+        nac_core::store::InboxDelivery::Queue,
+        &admitted.record.content,
+        None,
+        None,
+    )
+    .unwrap();
+    let ordinary: crate::InboxItemResponse = lookalike.into();
+    assert!(ordinary.terminal_selection.is_none());
+    assert!(serde_json::to_value(&ordinary)
+        .unwrap()
+        .get("terminal_selection")
+        .is_none());
     let writer = nac_core::store::TranscriptLogWriter::new(&manager.inner.store_path).unwrap();
     let assistant = || nac_core::types::Message::Assistant {
         content: Some("observed evidence".into()),
@@ -587,6 +607,19 @@ async fn terminal_selection_canonical_history_fork_keeps_source_without_copying_
         );
         assert_eq!(
             page["terminal_selection_attributions"][0]["attribution"]["source_session_id"],
+            "source"
+        );
+        assert_eq!(
+            page["terminal_selection_attributions"][0]["evidence"]["text"],
+            intent.text
+        );
+        assert_eq!(
+            page["terminal_selection_attributions"][0]["evidence"]["user_text"],
+            intent.user_text.as_ref().unwrap().as_str()
+        );
+        assert_eq!(
+            page["terminal_selection_attributions"][0]["evidence"]["attribution"]
+                ["source_session_id"],
             "source"
         );
         let earlier = decode(

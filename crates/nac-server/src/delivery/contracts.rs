@@ -511,6 +511,8 @@ pub struct PermissionStateResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct InboxItemResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_selection: Option<nac_core::store::TerminalSelectionEvidence>,
     pub id: i64,
     pub session_id: String,
     pub delivery: InboxDelivery,
@@ -529,6 +531,7 @@ pub struct InboxItemResponse {
 impl From<SessionInboxRecord> for InboxItemResponse {
     fn from(record: SessionInboxRecord) -> Self {
         Self {
+            terminal_selection: record.terminal_selection,
             id: record.id,
             session_id: record.session_id,
             delivery: record.delivery,
@@ -620,10 +623,42 @@ pub struct MessagePageMetadata {
     pub has_older: bool,
 }
 
+/// Presentation projection alongside the unchanged canonical attribution.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct TerminalSelectionMessageReference {
+    pub message_index: u64,
+    pub attribution: nac_core::store::TerminalSelectionAttribution,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<nac_core::store::TerminalSelectionEvidence>,
+}
+
+pub(crate) fn selection_message_references(
+    references: Vec<nac_core::store::TerminalSelectionReference>,
+    messages: &[Message],
+    start: u64,
+) -> Vec<TerminalSelectionMessageReference> {
+    references
+        .into_iter()
+        .map(|reference| {
+            let evidence = reference
+                .message_index
+                .checked_sub(start)
+                .and_then(|index| usize::try_from(index).ok())
+                .and_then(|index| messages.get(index))
+                .and_then(|message| reference.attribution.evidence_for_message(message).ok());
+            TerminalSelectionMessageReference {
+                message_index: reference.message_index,
+                attribution: reference.attribution,
+                evidence,
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct MessagesPageResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub terminal_selection_attributions: Vec<nac_core::store::TerminalSelectionReference>,
+    pub terminal_selection_attributions: Vec<TerminalSelectionMessageReference>,
     pub messages: Vec<Message>,
     pub created_at: Vec<Option<String>>,
     pub page: MessagePageMetadata,
@@ -638,7 +673,7 @@ pub struct MessageCycleMetadata {
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct SessionSnapshotResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub terminal_selection_attributions: Vec<nac_core::store::TerminalSelectionReference>,
+    pub terminal_selection_attributions: Vec<TerminalSelectionMessageReference>,
     #[serde(flatten)]
     pub snapshot: SessionFrontendSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -687,7 +722,11 @@ impl From<nac_core::session_service::MessageCycleMetadata> for MessageCycleMetad
 impl From<MessagesPageSnapshot> for MessagesPageResponse {
     fn from(page: MessagesPageSnapshot) -> Self {
         Self {
-            terminal_selection_attributions: page.terminal_selection_attributions,
+            terminal_selection_attributions: selection_message_references(
+                page.terminal_selection_attributions,
+                &page.messages,
+                page.page.start as u64,
+            ),
             messages: page.messages,
             created_at: page.created_at,
             page: page.page.into(),

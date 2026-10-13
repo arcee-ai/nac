@@ -687,6 +687,12 @@ export function Transcript({
                   <UserMessage
                     key={turn.key}
                     text={turn.text}
+                    sessionId={sessionId}
+                    terminalSelection={
+                      snapshot?.terminal_selection_attributions?.find(
+                        (reference) => reference.message_index === turn.messageIndex,
+                      )?.evidence ?? undefined
+                    }
                     invokedSkills={turn.invokedSkills}
                     timestamp={turn.createdAt ? formatStoreTime(turn.createdAt) : null}
                     messageIndex={turn.messageIndex}
@@ -763,7 +769,13 @@ export function Transcript({
               // above the answer to it rather than after it.
               return streamingTurn && turn.key === STREAMING_TURN_KEY ? (
                 <Fragment key={turn.key}>
-                  <UserMessage text={pendingText} invokedSkills={pendingSkills} pending />
+                  <UserMessage
+                    text={pendingText}
+                    invokedSkills={pendingSkills}
+                    pending
+                    sessionId={sessionId}
+                    terminalSelection={submitted?.terminal_selection ?? undefined}
+                  />
                   {row}
                 </Fragment>
               ) : (
@@ -773,7 +785,13 @@ export function Transcript({
           </PerfProfiler>
 
           {showPending && !streamingTurn ? (
-            <UserMessage text={pendingText} invokedSkills={pendingSkills} pending />
+            <UserMessage
+              text={pendingText}
+              invokedSkills={pendingSkills}
+              pending
+              sessionId={sessionId}
+              terminalSelection={submitted?.terminal_selection ?? undefined}
+            />
           ) : null}
 
           {/* Before the first assistant message or stream delta lands, keep the

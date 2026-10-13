@@ -509,6 +509,10 @@ pub struct SessionReplayGap {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SubmittedUserMessageSnapshot {
+    /// Read-only projection carried by the identified inbox admission, before
+    /// canonical transcript hydration catches up. Legacy/ordinary input omits it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_selection: Option<Box<crate::store::TerminalSelectionEvidence>>,
     pub run_id: SessionRunId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<SessionClientId>,
