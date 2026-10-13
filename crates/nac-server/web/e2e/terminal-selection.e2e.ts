@@ -3,7 +3,10 @@ import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
-import type { TerminalSelectionSubmissionRequest } from "../packages/nac-client/dist/types.js";
+import type {
+  MessagesPageResponse,
+  TerminalSelectionSubmissionRequest,
+} from "../packages/nac-client/dist/types.js";
 import { createDirectSession, expect, test } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
@@ -37,6 +40,35 @@ async function selectRenderedLine(page: Page, pane: Locator, cols: number, rows:
   const dialog = page.getByRole("dialog", { name: "Review terminal selection" });
   await expect(dialog.getByLabel("Reviewed selected text")).toHaveText(evidence);
   return dialog;
+}
+
+/** Canonical refresh may cancel an older read before it returns a page. Only
+ * that definite read cancellation permits another explicit Load older click.
+ * A successful response must render correctly; never retry around lost cards.
+ */
+async function loadOlderAfterRefresh(page: Page): Promise<MessagesPageResponse> {
+  const button = page.getByRole("button", { name: "Load older", exact: true });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await expect(button).toBeEnabled();
+    const requested = page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return (
+        request.method() === "GET" &&
+        url.pathname.endsWith("/messages") &&
+        url.searchParams.has("before")
+      );
+    });
+    await button.click();
+    const request = await requested;
+    const response = await request.response();
+    const failure = response ? await response.finished() : null;
+    if (response && !failure) {
+      expect(response.ok()).toBe(true);
+      return (await response.json()) as MessagesPageResponse;
+    }
+    expect(request.failure()?.errorText).toBe("net::ERR_ABORTED");
+  }
+  throw new Error("Older message read was superseded by three canonical refreshes");
 }
 
 for (const mobile of [false, true]) {
@@ -212,7 +244,18 @@ for (const mobile of [false, true]) {
       await page.reload();
       await expect(page.getByRole("button", { name: "Load older", exact: true })).toBeVisible();
       await expect(card).toHaveCount(0);
-      await page.getByRole("button", { name: "Load older", exact: true }).click();
+      // Exercise the observed cancellation recovery on every runner. This
+      // cancels a read, never an admission or model operation.
+      let olderReads = 0;
+      await page.route("**/messages?before=*", async (route) => {
+        olderReads += 1;
+        if (olderReads === 1) await route.abort("aborted");
+        else await route.continue();
+      });
+      const older = await loadOlderAfterRefresh(page);
+      expect(olderReads).toBeGreaterThanOrEqual(2);
+      expect(older.terminal_selection_attributions).toHaveLength(1);
+      expect(older.terminal_selection_attributions![0].attribution.source_session_id).toBe(session);
       await expect(card).toHaveCount(1);
       harness.provider.enqueue(
         "tail-refresh",
