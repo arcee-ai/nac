@@ -726,3 +726,55 @@ async fn durable_child_and_copied_fork_provenance_never_supply_a_terminal_read_c
     drop(conn);
     cleanup(&runtime).await;
 }
+
+#[tokio::test]
+async fn legacy_worker_read_accepts_schema_valid_decimal_offsets_without_changing_page_shape() {
+    let mut runtime = crate::tools::test_runtime();
+    runtime.allowed_tools = Some(Arc::new(
+        crate::tools::WORKER_TOOL_NAMES
+            .iter()
+            .map(|name| (*name).into())
+            .collect(),
+    ));
+    let output = value(&runtime, "exec_command", json!({"cmd":"printf abcdefghij"})).await;
+    let integer = value(
+        &runtime,
+        "read_command_output",
+        json!({"output_id":output["output_id"],"stream":"stdout","offset":3,"limit":4}),
+    )
+    .await;
+    let decimal = value(
+        &runtime,
+        "read_command_output",
+        json!({"output_id":output["output_id"],"stream":"stdout","offset":"3","limit":4}),
+    )
+    .await;
+    assert_eq!(integer, decimal);
+    assert_eq!(decimal["content"], "defg");
+    assert_eq!(decimal["offset"], 3);
+    assert_eq!(decimal["next_offset"], 7);
+    let native = crate::tools::exec_command::execute_read_command_output(
+        &json!({"output_id":output["output_id"],"stream":"stdout","offset":"3","limit":4}),
+        &runtime,
+    );
+    assert!(!native.is_error, "{}", native.content);
+    assert_eq!(
+        serde_json::from_str::<Value>(native.content.as_text().unwrap()).unwrap(),
+        integer
+    );
+    for offset in ["", "01", "-1", "3.5", "18446744073709551616"] {
+        let malformed = call(
+            &runtime,
+            "read_command_output",
+            json!({"output_id":output["output_id"],"offset":offset}),
+        )
+        .await;
+        assert!(malformed.is_error && !malformed.content.as_text().unwrap().contains("abcdefghij"));
+        let native = crate::tools::exec_command::execute_read_command_output(
+            &json!({"output_id":output["output_id"],"offset":offset}),
+            &runtime,
+        );
+        assert!(native.is_error);
+    }
+    runtime.terminal_manager.remove_all().await.unwrap();
+}

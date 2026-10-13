@@ -68,7 +68,7 @@ pub fn read_command_output_definition() -> ToolDefinition {
                     "execution_id": { "type": "string", "description": "Current-chat incarnation-bound ID from list_executions; expired/restarted/copied handles are unavailable" },
                     "query": { "type": "string", "minLength": 1, "maxLength": 256, "description": "Literal UTF-8 search in a bounded execution page; at most 16 matches with 64 bytes of surrounding context. Requires execution_id and limit greater than query's byte length." },
                     "stream": { "type": "string", "enum": ["combined", "stdout", "stderr"], "default": "combined" },
-                    "offset": { "oneOf": [{"type":"integer","minimum":0},{"type":"string","pattern":"^(0|[1-9][0-9]*)$"}], "default": 0, "description": "Absolute byte offset; prefer exact decimal strings for execution pages" },
+                    "offset": { "oneOf": [{"type":"integer","minimum":0},{"type":"string","pattern":"^(0|[1-9][0-9]*)$"}], "default": 0, "description": "Absolute byte offset; either ID form accepts integers or exact canonical decimal strings" },
                     "limit": { "type": "integer", "minimum": 1, "maximum": MAX_OUTPUT_PAGE_BYTES, "default": DEFAULT_OUTPUT_PAGE_BYTES }
                 },
                 "oneOf": [{"required":["output_id"]},{"required":["execution_id"]}]
@@ -225,10 +225,13 @@ pub(crate) async fn execute_write_stdin_with_cancellation(
 }
 
 pub fn execute_read_command_output(args: &Value, runtime: &ToolRuntime) -> ToolResult {
+    let offset = match super::execution_observation::offset(args) {
+        Ok(offset) => offset,
+        Err(error) => return error,
+    };
     let result = (|| -> Result<String> {
         let output_id = require_str(args, "output_id")?;
         let stream = OutputStream::parse(args.get("stream").and_then(Value::as_str))?;
-        let offset = args.get("offset").and_then(Value::as_u64).unwrap_or(0);
         let limit = args
             .get("limit")
             .and_then(Value::as_u64)

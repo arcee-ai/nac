@@ -24,7 +24,9 @@ Use `read_command_output` with exactly one ID:
 
 The existing `output_id` form from `exec_command` and `write_stdin` keeps its
 paging semantics and cannot read a human output artifact. `execution_id` binds
-the current chat and process incarnation. Knowing an old ID, sharing a project
+the current chat and process incarnation. Both ID forms accept integer or
+canonical decimal-string offsets; legacy output-ID responses retain numeric
+cursors. Knowing an old ID, sharing a project
 or cwd, or copying a parent/child/fork attribution does not grant a live read.
 Restart, capability expiry and eviction make the handle unavailable.
 

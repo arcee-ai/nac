@@ -386,20 +386,19 @@ fn validate_read_command_output(input: &Value) -> Result<(), ToolResult> {
             "stream",
         ],
     )?;
+    super::execution_observation::offset(input)?;
     match (
         object.contains_key("output_id"),
         object.contains_key("execution_id"),
     ) {
         (true, false) => {
             required_string(input, "output_id")?;
-            optional_u64(object, "offset", 0, u64::MAX)?;
             if object.contains_key("query") {
                 return Err(invalid("query requires execution_id"));
             }
         }
         (false, true) => {
             required_string(input, "execution_id")?;
-            super::execution_observation::offset(input)?;
             super::execution_observation::validate_query(input)?;
         }
         _ => return Err(invalid("specify exactly one output_id or execution_id")),
