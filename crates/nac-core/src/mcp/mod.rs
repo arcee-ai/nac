@@ -588,7 +588,6 @@ pub(crate) mod test_support {
         let observed = Arc::clone(&arguments);
         let handle = thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(10);
-            let mut hung_once = false;
             while Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
@@ -678,8 +677,9 @@ pub(crate) mod test_support {
                                         .cloned()
                                         .unwrap_or(Value::Null),
                                 );
-                                if !hung_once {
-                                    hung_once = true;
+                                // A timed-out request may never reach the wire. Hang the
+                                // designated invocation, never the first request observed.
+                                if body["params"]["arguments"]["message"] == "first" {
                                     thread::sleep(Duration::from_millis(250));
                                     continue;
                                 }

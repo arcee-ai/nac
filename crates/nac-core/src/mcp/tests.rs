@@ -787,6 +787,27 @@ args = ["-c", {}]
 }
 
 #[tokio::test]
+async fn deadline_fixture_accepts_recovery_when_timed_out_delivery_never_arrived() {
+    let (url, server, observed) = start_deadline_http_mcp_server();
+    let response = reqwest::Client::new()
+        .post(url)
+        .json(&json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": { "name": "echo", "arguments": { "message": "second" } }
+        }))
+        .send()
+        .await;
+    assert!(response.is_ok(), "recovery must not be mistaken for the omitted timed-out delivery: {response:?}; observed={:?}", observed.lock().unwrap());
+    let response: Value = response.unwrap().json().await.unwrap();
+    assert_eq!(response["result"]["content"][0]["text"], "echoed");
+    server.join().unwrap();
+    assert_eq!(
+        observed.lock().unwrap().as_slice(),
+        &[json!({ "message": "second" })]
+    );
+}
+
+#[tokio::test]
 async fn per_call_deadline_strips_envelope_and_leaves_http_mcp_usable() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let original_nac_home = env::var_os("NAC_HOME");
