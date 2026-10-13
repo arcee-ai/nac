@@ -1,6 +1,54 @@
 use super::*;
 
 impl PermissionBroker {
+    /// Read-only fencing for the additive execution observation capability.
+    /// This neither authorizes an operation nor changes ordinary broker policy.
+    pub(crate) async fn validate_execution_observation_binding(
+        self: &Arc<Self>,
+        store_path: &std::path::Path,
+        session_id: Option<&str>,
+        backend: &ExecutionBackend,
+    ) -> anyhow::Result<()> {
+        let backend = match PermissionBackend::from_execution_backend(backend) {
+            PermissionBackend::Local => "local",
+            PermissionBackend::Podman => "podman",
+            PermissionBackend::Ssh => "ssh",
+        };
+        anyhow::ensure!(
+            store_path == self.store_path
+                && session_id == Some(self.session_id.as_str())
+                && backend == self.backend,
+            "execution unavailable"
+        );
+        let broker = Arc::clone(self);
+        crate::store::call_legacy_store(store_path, move || {
+            anyhow::ensure!(
+                crate::store::observe_probe_migration_status(&broker.store_path).state
+                    == crate::store::StoreMigrationState::Current,
+                "execution unavailable"
+            );
+            let config =
+                crate::sessions::load_session_config(&broker.store_path, &broker.session_id)?;
+            anyhow::ensure!(
+                config.config_version == broker.session_config_version
+                    && config.diagnostics.is_empty(),
+                "execution unavailable"
+            );
+            anyhow::ensure!(
+                crate::sessions::load_session_behavior(&broker.store_path, &broker.session_id)?
+                    != crate::sessions::SessionBehavior::Orchestrator
+                    && crate::store::load_traditional_child(
+                        &broker.store_path,
+                        &broker.session_id
+                    )?
+                    .is_none(),
+                "execution unavailable"
+            );
+            Ok(())
+        })
+        .await?
+    }
+
     pub(crate) fn new(
         store_path: PathBuf,
         session_id: String,

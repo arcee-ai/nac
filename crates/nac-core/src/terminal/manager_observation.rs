@@ -289,24 +289,35 @@ impl TerminalManager {
         offset: u64,
         limit: usize,
     ) -> Result<OutputBytePage> {
+        self.read_execution_stream_output(id, OutputStream::Combined, offset, limit)
+            .await
+    }
+
+    /// Shared read-only resolution for browser and model observers. Resolve
+    /// ownership before touching the artifact, and require source-sanitized
+    /// retained bytes rather than guessing a current-provider masking policy.
+    pub(crate) async fn read_execution_stream_output(
+        &self,
+        id: &str,
+        stream: OutputStream,
+        offset: u64,
+        limit: usize,
+    ) -> Result<OutputBytePage> {
+        let read = |output_id: &str| {
+            if !self.output_registry.is_sanitized(output_id) {
+                return Err(anyhow!("execution unavailable"));
+            }
+            self.read_output_bytes(output_id, stream, offset, limit)
+                .map_err(|_| anyhow!("execution unavailable"))
+        };
         let sessions = self.sessions.lock().await;
         if let Some(session) = sessions.get(id) {
-            return self.read_output_bytes(
-                session.output_id(),
-                OutputStream::Combined,
-                offset,
-                limit,
-            );
+            return read(session.output_id());
         }
         drop(sessions);
         let completed = self.completed_sessions.lock().await;
         if let Some((_, terminal)) = completed.iter().find(|(name, _)| name == id) {
-            return self.read_output_bytes(
-                &terminal.output_id,
-                OutputStream::Combined,
-                offset,
-                limit,
-            );
+            return read(&terminal.output_id);
         }
         drop(completed);
         let pipes = self
@@ -324,7 +335,10 @@ impl TerminalManager {
                     == id
             })
             .ok_or_else(|| anyhow!("execution unavailable"))?;
-        self.read_output_bytes(&execution.output_id, OutputStream::Combined, offset, limit)
+        if !execution.started.load(Ordering::Acquire) {
+            return Err(anyhow!("execution unavailable"));
+        }
+        read(&execution.output_id)
     }
 
     pub async fn stop_execution(&self, id: &str) -> Result<()> {

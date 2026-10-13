@@ -185,7 +185,7 @@ fn direct_registries_preserve_exact_topology_capabilities() {
     assert_eq!(worker, super::WORKER_TOOL_NAMES);
     assert_eq!(direct, super::DIRECT_TOOL_NAMES);
     assert_eq!(delegating, super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES);
-    assert_eq!(&delegating[14..], super::ORCHESTRATOR_CONTROL_TOOL_NAMES);
+    assert_eq!(&delegating[15..], super::ORCHESTRATOR_CONTROL_TOOL_NAMES);
     assert_eq!(&direct_web[..super::DIRECT_TOOL_NAMES.len()], &direct);
     assert_eq!(
         &direct_web[super::DIRECT_TOOL_NAMES.len()..],

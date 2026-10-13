@@ -22,6 +22,7 @@ mod deadline;
 mod discovery;
 pub mod edit;
 pub mod exec_command;
+mod execution_observation;
 pub mod glob;
 pub(crate) mod goal;
 pub mod grep;
@@ -144,7 +145,7 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
 ];
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 14] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 15] = [
     "read",
     "write",
     "edit",
@@ -153,6 +154,7 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 14] = [
     "exec_command",
     "write_stdin",
     "read_command_output",
+    "list_executions",
     "create_goal",
     "get_goal",
     "update_goal",
@@ -169,7 +171,7 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 20] = [
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 21] = [
     "read",
     "write",
     "edit",
@@ -178,6 +180,7 @@ pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 20] = [
     "exec_command",
     "write_stdin",
     "read_command_output",
+    "list_executions",
     "create_goal",
     "get_goal",
     "update_goal",
@@ -204,6 +207,7 @@ fn worker_tool_registry(
         .register(terminal_tools::ExecCommandTool)
         .register(terminal_tools::WriteStdinTool)
         .register(terminal_tools::ReadCommandOutputTool)
+        .register(execution_observation::ListExecutionsTool)
         .register(goal::CreateGoalTool)
         .register(goal::GetGoalTool)
         .register(goal::UpdateGoalTool)

@@ -11,6 +11,9 @@ use nac_contracts::{
 #[path = "user_terminals_managed_tests.rs"]
 mod managed;
 
+#[path = "terminal_model_observation_tests.rs"]
+mod model_observation;
+
 #[cfg(unix)]
 #[path = "user_terminals_native_redaction_tests.rs"]
 mod native_redaction;

@@ -49,7 +49,7 @@ async fn wait_for(manager: &TerminalManager, name: &str, needle: &[u8]) -> Vec<u
 }
 
 #[tokio::test]
-async fn model_output_tool_cannot_read_live_completed_or_pruned_human_artifacts() {
+async fn legacy_output_id_tool_cannot_read_live_completed_or_pruned_human_artifacts() {
     use crate::tools::exec_command::{execute_exec_command, execute_read_command_output};
     use serde_json::json;
 

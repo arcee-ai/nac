@@ -59,17 +59,19 @@ pub fn read_command_output_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "read_command_output".to_string(),
-            description: "Read retained command or PTY output without rerunning the command. Offsets and limits are raw bytes. Page combined (observed emission order), stdout, or stderr; PTYs support combined only. Continue with next_offset until eof. If overflowed=true, offset may advance to the earliest retained byte. Output remains available for the producing worker dispatch."
+            description: "Read bounded retained output without rerunning work. Use output_id for existing exec_command/write_stdin paging, or execution_id from list_executions for this direct chat's human/agent output. Specify exactly one ID. Execution pages use exact decimal byte cursors, report gaps, process and collector status separately, and escape controls without re-masking canonical sanitized bytes. Optional query searches literal UTF-8 bytes in one bounded execution page and returns limited context; continue with next_offset. A read/search grants no input or lifetime authority. PTYs support combined only. Legacy output_id paging retains its established semantics."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "output_id": { "type": "string", "description": "Output ID returned by exec_command or write_stdin" },
+                    "execution_id": { "type": "string", "description": "Current-chat incarnation-bound ID from list_executions; expired/restarted/copied handles are unavailable" },
+                    "query": { "type": "string", "minLength": 1, "maxLength": 256, "description": "Literal UTF-8 search in a bounded execution page; at most 16 matches with 64 bytes of surrounding context. Requires execution_id and limit greater than query's byte length." },
                     "stream": { "type": "string", "enum": ["combined", "stdout", "stderr"], "default": "combined" },
-                    "offset": { "type": "integer", "minimum": 0, "default": 0, "description": "Absolute byte offset" },
+                    "offset": { "oneOf": [{"type":"integer","minimum":0},{"type":"string","pattern":"^(0|[1-9][0-9]*)$"}], "default": 0, "description": "Absolute byte offset; prefer exact decimal strings for execution pages" },
                     "limit": { "type": "integer", "minimum": 1, "maximum": MAX_OUTPUT_PAGE_BYTES, "default": DEFAULT_OUTPUT_PAGE_BYTES }
                 },
-                "required": ["output_id"]
+                "oneOf": [{"required":["output_id"]},{"required":["execution_id"]}]
             }),
         },
     }

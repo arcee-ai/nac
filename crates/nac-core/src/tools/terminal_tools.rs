@@ -213,12 +213,31 @@ impl kernel::NativeTool for ReadCommandOutputTool {
     fn permission_resources(
         &self,
         input: &Self::Input,
-        _services: kernel::ToolServices<'_>,
+        services: kernel::ToolServices<'_>,
     ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
+        if let Some(id) = input.get("execution_id").and_then(Value::as_str) {
+            super::execution_observation::authorize_owner(services.runtime)?;
+            return Ok(vec![kernel::PermissionResource::new("command_output", id)]);
+        }
         Ok(vec![kernel::PermissionResource::new(
             "command_output",
             required_string(input, "output_id")?,
         )])
+    }
+
+    fn bind_authorized_resources(
+        &self,
+        input: &mut Self::Input,
+        resources: &[kernel::PermissionResource],
+        services: kernel::ToolServices<'_>,
+    ) -> Result<(), ToolResult> {
+        if let Some(id) = input.get("execution_id").and_then(Value::as_str) {
+            super::execution_observation::authorize_owner(services.runtime)?;
+            if resources != [kernel::PermissionResource::new("command_output", id)] {
+                return Err(invalid("execution authorization changed"));
+            }
+        }
+        Ok(())
     }
 
     fn execute<'a>(
@@ -227,7 +246,13 @@ impl kernel::NativeTool for ReadCommandOutputTool {
         services: kernel::ToolServices<'a>,
         _context: &'a kernel::ToolCallContext,
     ) -> futures_util::future::BoxFuture<'a, ToolResult> {
-        Box::pin(async move { exec_command::execute_read_command_output(&input, services.runtime) })
+        Box::pin(async move {
+            if input.get("execution_id").is_some() {
+                super::execution_observation::read(&input, services.runtime).await
+            } else {
+                exec_command::execute_read_command_output(&input, services.runtime)
+            }
+        })
     }
 }
 
@@ -350,9 +375,35 @@ fn validate_write_stdin(input: &Value) -> Result<(), ToolResult> {
 
 fn validate_read_command_output(input: &Value) -> Result<(), ToolResult> {
     let object = object(input)?;
-    reject_unknown(object, &["output_id", "offset", "limit", "stream"])?;
-    required_string(input, "output_id")?;
-    optional_u64(object, "offset", 0, u64::MAX)?;
+    reject_unknown(
+        object,
+        &[
+            "output_id",
+            "execution_id",
+            "query",
+            "offset",
+            "limit",
+            "stream",
+        ],
+    )?;
+    match (
+        object.contains_key("output_id"),
+        object.contains_key("execution_id"),
+    ) {
+        (true, false) => {
+            required_string(input, "output_id")?;
+            optional_u64(object, "offset", 0, u64::MAX)?;
+            if object.contains_key("query") {
+                return Err(invalid("query requires execution_id"));
+            }
+        }
+        (false, true) => {
+            required_string(input, "execution_id")?;
+            super::execution_observation::offset(input)?;
+            super::execution_observation::validate_query(input)?;
+        }
+        _ => return Err(invalid("specify exactly one output_id or execution_id")),
+    }
     optional_u64(
         object,
         "limit",
