@@ -113,6 +113,15 @@ impl PipeExecutionGuard {
 
 impl Drop for PipeExecutionGuard {
     fn drop(&mut self) {
+        if !self.execution.started.load(Ordering::Acquire) {
+            // Cancellation before spawn and spawn failure created no process
+            // or collector owner. Remove only this unpublished observation row.
+            self.executions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain(|execution| !Arc::ptr_eq(execution, &self.execution));
+            return;
+        }
         let mut status = self
             .execution
             .status

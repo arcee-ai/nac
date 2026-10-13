@@ -14,6 +14,91 @@ async fn command(manager: &TerminalManager, text: &str) -> super::super::super::
 }
 
 #[tokio::test]
+async fn failed_pipe_spawns_leave_no_observation_owners_or_history() {
+    let manager = TerminalManager::for_direct();
+    let missing =
+        std::env::temp_dir().join(format!("nac-history-missing-{}", uuid::Uuid::new_v4()));
+    for _ in 0..32 {
+        let output = manager
+            .exec_one_shot(
+                "printf unreachable",
+                Some(missing.clone()),
+                80,
+                24,
+                100,
+                100,
+                &backend(),
+                None,
+            )
+            .await;
+        assert_eq!(output.status, CommandStatus::SpawnError);
+        assert_eq!(output.output_id, None);
+        assert!(manager.pipe_executions.lock().unwrap().is_empty());
+        assert!(manager.recent_execution_catalog().await.is_empty());
+        assert_eq!(manager.pending_remote_cleanup_count(), 0);
+    }
+    let output = command(&manager, "printf admitted").await;
+    assert_eq!(output.status, CommandStatus::Completed);
+    assert_eq!(output.stdout_preview, "admitted");
+    assert_eq!(manager.recent_execution_catalog().await.len(), 1);
+}
+
+#[tokio::test]
+async fn cancellation_after_registration_before_spawn_removes_only_the_unstarted_owner() {
+    let manager = TerminalManager::for_direct();
+    let artifact = manager
+        .output_registry
+        .create(ArtifactKind::Command)
+        .unwrap();
+    let pending = manager
+        .register_pipe(artifact.output_id(), "masked cwd".into(), &backend())
+        .unwrap();
+    pending.started();
+    let pending_id = manager.execution_catalog().await[0].id.clone();
+    let held_spawn = manager.one_shot_spawn_gate.lock().await;
+    let cancellation = ThreadCancellation::default();
+    let task_manager = manager.clone();
+    let task_cancellation = cancellation.clone();
+    let task = tokio::spawn(async move {
+        task_manager
+            .exec_one_shot(
+                "printf unreachable",
+                None,
+                80,
+                24,
+                100,
+                100,
+                &backend(),
+                Some(&task_cancellation),
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while manager.pipe_executions.lock().unwrap().len() != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    cancellation.cancel();
+    drop(held_spawn);
+    let output = task.await.unwrap();
+    assert_eq!(output.status, CommandStatus::Cancelled);
+    assert_eq!(output.output_id, None);
+    assert_eq!(manager.pipe_executions.lock().unwrap().len(), 1);
+    drop(pending);
+    let history = manager.recent_execution_catalog().await;
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].0.id, pending_id);
+    assert_eq!(
+        history[0].0.process_state,
+        ExecutionProcessState::CleanupPending
+    );
+    assert!(!history[0].0.output_complete);
+    assert_eq!(manager.pending_remote_cleanup_count(), 0);
+}
+
+#[tokio::test]
 async fn recent_pipe_metadata_has_stable_identity_bounded_cardinality_and_honest_byte_gap() {
     let mut manager = TerminalManager::with_limits(CommandOutputLimits {
         per_command_bytes: 4,
