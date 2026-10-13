@@ -24,17 +24,29 @@ function octal(text: string) {
  * No renderer object, synthetic capture callback or protocol byte sink is exposed.
  */
 async function selectRenderedLine(page: Page, pane: Locator, cols: number, rows: number) {
+  const screen = pane.locator(".xterm-screen");
+  await expect(screen).toBeVisible();
+  // Dismissing a mobile review leaves the underlying panel returning from its
+  // stacked offset. Playwright waits for stable geometry before scrolling.
+  await screen.scrollIntoViewIfNeeded();
   const lines = pane.locator(".xterm-accessibility-tree > div");
   const content = await lines.allTextContents();
   const row = content.findIndex((line) => line.trimEnd() === evidence);
   expect(row, `rendered output rows: ${JSON.stringify(content)}`).toBeGreaterThanOrEqual(0);
-  const grid = await pane.locator(".xterm-screen").boundingBox();
+  const grid = await screen.boundingBox();
   expect(grid).not.toBeNull();
   const cell = grid!.width / cols;
   const y = grid!.y + (row + 0.5) * (grid!.height / rows);
-  await page.mouse.move(grid!.x + 0.25 * cell, y);
+  const startX = grid!.x + 0.25 * cell;
+  const endX = grid!.x + (evidence.length + 0.25) * cell;
+  const viewport = page.viewportSize()!;
+  expect(
+    startX >= 0 && endX < viewport.width && y >= 0 && y < viewport.height,
+    `selection drag must be inside the viewport: ${JSON.stringify({ startX, endX, y })}`,
+  ).toBe(true);
+  await page.mouse.move(startX, y);
   await page.mouse.down();
-  await page.mouse.move(grid!.x + (evidence.length + 0.25) * cell, y, { steps: 10 });
+  await page.mouse.move(endX, y, { steps: 10 });
   await page.mouse.up();
   await pane.getByRole("button", { name: "Review selected text", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Review terminal selection" });
